@@ -49,8 +49,7 @@ export { rateLimitByIp as loginRateLimiter } from './rate-limit.middleware';
 
 // Alias for admin role check
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  const user = (req as any).user;
-  if (!user || user.role !== 'admin') {
+  if (!req.user || req.user.role !== 'admin') {
     res.status(403).json({ error: 'Forbidden: Admin access required' });
     return;
   }

@@ -3,17 +3,51 @@
  * All TypeScript interfaces and types are defined here
  */
 
+// ============================================================================
+// Express Request Extension Types
+// ============================================================================
+
+export interface RequestUser {
+  id: string;
+  email: string;
+  role: string;
+  tenantId: string;
+  type: 'agent' | 'widget';
+}
+
+export interface RequestTenant {
+  id: string;
+  name: string;
+  slug: string;
+  apiKey: string;
+  tier: TenantTier;
+  status: TenantStatus;
+  settings: ITenantSettings;
+}
+
+export interface RequestWidget {
+  tenantId: string;
+  sessionId?: string;
+  visitorId?: string;
+}
+
+export interface RequestSession {
+  id: string;
+  tenantId: string;
+  status: string;
+}
+
 declare global {
   namespace Express {
     interface Request {
       tenantId?: string;
       userId?: string;
       requestId?: string;
-      user?: any;
-      tenant?: any;
-      widget?: any;
+      user?: RequestUser;
+      tenant?: RequestTenant;
+      widget?: RequestWidget;
       agentId?: string;
-      session?: any;
+      session?: RequestSession;
     }
   }
 }

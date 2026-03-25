@@ -6,14 +6,14 @@
  * POST /chat/:sessionId/close - Close session
  */
 import { Router, Request, Response } from 'express';
-import { IsNull } from 'typeorm';
+import { IsNull, DeepPartial } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
-import { Message } from '../database/entities/Message';
+import { Message, MessageStatus } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
 import { Participant } from '../database/entities/Participant';
 import { logger } from '../utils/logger';
-import { authenticateWidget, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
@@ -123,7 +123,7 @@ router.post(
     try {
       const { sessionId } = req.params;
       const tenantId = req.tenant?.id;
-      const user = (req as any).user;
+      const user = req.user;
       const { content, type = 'text', metadata } = req.body as SendMessageRequest;
 
       if (!content || content.trim().length === 0) {
@@ -154,10 +154,10 @@ router.post(
         type,
         content: content.trim(),
         metadata: metadata || undefined,
-      } as any);
+      } as DeepPartial<Message>);
 
       const savedMessage = await AppDataSource.transaction(async (manager) => {
-        const msg = await manager.save(message) as unknown as Message;
+        const msg = await manager.save(message);
         session.updateActivity();
         await manager.save(session);
         return msg;
@@ -287,7 +287,7 @@ router.post(
         participantId: 'system',
         type: 'system',
         content: `Session closed: ${reason || 'User closed the chat'}`,
-      } as any);
+      } as DeepPartial<Message>);
       await messageRepository.save(systemMessage);
 
       // Notify via WebSocket
@@ -375,7 +375,6 @@ router.post(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
       const { agentId: targetAgentId } = req.body;
 
@@ -385,7 +384,7 @@ router.post(
       }
 
       const session = await sessionRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
+        where: { id, tenantId: req.user?.tenantId },
       });
 
       if (!session) {
@@ -434,11 +433,10 @@ router.post(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
 
       const session = await sessionRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
+        where: { id, tenantId: req.user?.tenantId },
       });
 
       if (!session) {
@@ -477,13 +475,12 @@ router.get(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
       const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
       const offset = parseInt(req.query.offset as string) || 0;
 
       const session = await sessionRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
+        where: { id, tenantId: req.user?.tenantId },
       });
 
       if (!session) {
@@ -532,11 +529,10 @@ router.post(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
 
       const session = await sessionRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
+        where: { id, tenantId: req.user?.tenantId },
       });
 
       if (!session) {
@@ -547,7 +543,7 @@ router.post(
       // Mark all unread messages in the session as read
       await messageRepository.update(
         { sessionId: id, readAt: IsNull() },
-        { readAt: new Date(), status: 'read' as any }
+        { readAt: new Date(), status: 'read' as MessageStatus }
       );
 
       logger.info(`Messages marked as read for session ${id}`);
@@ -569,8 +565,7 @@ router.delete(
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { sessionId, participantId } = req.params;
-      const authReq = req as AuthenticatedRequest;
-      const tenantId = authReq.user?.tenantId;
+      const tenantId = req.user?.tenantId;
       const participantRepo = AppDataSource.getRepository(Participant);
 
       const session = await sessionRepository.findOne({

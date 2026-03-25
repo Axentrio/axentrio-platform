@@ -9,28 +9,15 @@ import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { Agent } from '../database/entities/Agent';
+import type { RequestUser } from '../types';
 
-// Extended Request interface with user info
 export interface AuthenticatedRequest extends Request {
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-    tenantId: string;
-    type: 'agent' | 'widget';
-  };
+  user?: RequestUser;
 }
 
-// Extended Socket interface with user info
 export interface AuthenticatedSocket extends Socket {
   data: {
-    user?: {
-      id: string;
-      email: string;
-      role: string;
-      tenantId: string;
-      type: 'agent' | 'widget';
-    };
+    user?: RequestUser;
     tenantId?: string;
     sessionId?: string;
   };

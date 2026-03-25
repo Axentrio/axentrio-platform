@@ -12,8 +12,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { logger } from '../utils/logger';
-
-// --- Types ---
+import type { RequestUser } from '../types';
 
 export interface ProvisionedRequest extends Request {
   clerkUserId?: string;
@@ -23,13 +22,7 @@ export interface ProvisionedRequest extends Request {
   agentId?: string;
   userRole?: string;
   tenantName?: string;
-  user?: {
-    id: string;
-    email: string;
-    role: string;
-    tenantId: string;
-    type: 'agent' | 'widget';
-  };
+  user?: RequestUser;
 }
 
 // --- In-memory cache ---

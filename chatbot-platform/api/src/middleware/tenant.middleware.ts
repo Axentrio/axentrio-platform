@@ -6,19 +6,18 @@ import { Request, Response, NextFunction } from 'express';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import type { RequestTenant } from '../types';
 import { AuthenticatedRequest, AuthenticatedSocket } from './auth.middleware';
 
 const tenantRepository = AppDataSource.getRepository(Tenant);
 
-// Extended Request with tenant info
 export interface TenantRequest extends AuthenticatedRequest {
-  tenant?: Tenant;
+  tenant?: RequestTenant;
 }
 
-// Extended Socket with tenant info
 export interface TenantSocket extends AuthenticatedSocket {
   data: AuthenticatedSocket['data'] & {
-    tenant?: Tenant;
+    tenant?: RequestTenant;
   };
 }
 
@@ -40,9 +39,8 @@ function extractTenantId(req: Request): string | null {
   }
 
   // Check authenticated user context
-  const authReq = req as AuthenticatedRequest;
-  if (authReq.user?.tenantId) {
-    return authReq.user.tenantId;
+  if (req.user?.tenantId) {
+    return req.user.tenantId;
   }
 
   return null;

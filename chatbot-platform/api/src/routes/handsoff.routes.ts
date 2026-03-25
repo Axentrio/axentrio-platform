@@ -13,7 +13,7 @@ import { Message } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { logger } from '../utils/logger';
-import { authenticateWidget, AuthenticatedRequest } from '../middleware/auth.middleware';
+import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
@@ -69,7 +69,7 @@ router.post(
       // Update session status to handoff
       session.requestHandoff();
       if (session.metadata) {
-        (session.metadata as any).handoffReason = reason || 'User requested';
+        (session.metadata as Record<string, unknown>).handoffReason = reason || 'User requested';
       }
       await sessionRepository.save(session);
 
@@ -80,7 +80,7 @@ router.post(
         participantId: 'system',
         type: 'system',
         content: `Handoff requested: ${reason || 'User requested human assistance'}`,
-      } as any);
+      } as Partial<Message>);
       await messageRepository.save(systemMessage);
 
       // Notify agents via WebSocket
@@ -128,11 +128,16 @@ router.post(
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
       const tenantId = req.tenant?.id;
-      const agent = (req as any).user;
+      const agent = req.user;
       const { sessionId } = req.body;
 
       if (!sessionId) {
         res.status(400).json({ error: 'Session ID is required' });
+        return;
+      }
+
+      if (!agent) {
+        res.status(401).json({ error: 'Not authenticated' });
         return;
       }
 
@@ -177,7 +182,7 @@ router.post(
         participantId: agent.id,
         type: 'system',
         content: `An agent has joined the conversation`,
-      } as any);
+      } as Partial<Message>);
       await messageRepository.save(systemMessage);
 
       // Notify session
@@ -228,11 +233,16 @@ router.post(
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
       const tenantId = req.tenant?.id;
-      const agent = (req as any).user;
+      const agent = req.user;
       const { sessionId } = req.body;
 
       if (!sessionId) {
         res.status(400).json({ error: 'Session ID is required' });
+        return;
+      }
+
+      if (!agent) {
+        res.status(401).json({ error: 'Not authenticated' });
         return;
       }
 
@@ -269,11 +279,16 @@ router.post(
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
       const tenantId = req.tenant?.id;
-      const agent = (req as any).user;
+      const agent = req.user;
       const { sessionId, reason } = req.body;
 
       if (!sessionId) {
         res.status(400).json({ error: 'Session ID is required' });
+        return;
+      }
+
+      if (!agent) {
+        res.status(401).json({ error: 'Not authenticated' });
         return;
       }
 
@@ -310,7 +325,7 @@ router.post(
         participantId: agent.id,
         type: 'system',
         content: `Agent has left the conversation. ${reason || ''}`,
-      } as any);
+      } as Partial<Message>);
       await messageRepository.save(systemMessage);
 
       // Notify session
@@ -407,9 +422,8 @@ router.post(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
-      const agentId = authReq.user?.id;
+      const agentId = req.user?.id;
 
       if (!agentId) {
         res.status(401).json({ error: 'Not authenticated' });
@@ -470,7 +484,6 @@ router.post(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
       const { id } = req.params;
       const { reason } = req.body;
 
@@ -492,7 +505,7 @@ router.post(
       handoff.rejectionReason = reason || 'Declined by agent';
       await handoffRepository.save(handoff);
 
-      logger.info(`Handoff ${id} declined by agent ${authReq.user?.id}`);
+      logger.info(`Handoff ${id} declined by agent ${req.user?.id}`);
 
       res.json({
         success: true,
@@ -518,8 +531,7 @@ router.get(
   requireClerkAuth, autoProvision,
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
-      const tenantId = authReq.user?.tenantId;
+      const tenantId = req.user?.tenantId;
 
       if (!tenantId) {
         res.status(401).json({ error: 'Not authenticated' });

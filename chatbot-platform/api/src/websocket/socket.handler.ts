@@ -10,7 +10,7 @@ import { Server as HttpServer } from 'http';
 import { logger } from '../utils/logger';
 import { getPubClient, getSubClient, isRedisAvailable } from '../config/redis';
 import { validateSocketTenant, TenantSocket } from '../middleware/tenant.middleware';
-import { checkSocketRateLimit } from '../middleware/rate-limit.middleware';
+import { checkEventRateLimit } from './socket-rate-limit';
 import { verifyToken } from '@clerk/backend';
 import { config } from '../config/environment';
 import { resolveClerkIds } from '../middleware/clerk.middleware';
@@ -228,36 +228,45 @@ function handleAgentConnection(socket: TenantSocket): void {
   });
 }
 
+function withRateLimit(
+  socket: TenantSocket,
+  eventName: string,
+  handler: (...args: unknown[]) => Promise<void> | void
+) {
+  socket.on(eventName, async (...args: unknown[]) => {
+    const tenantId = socket.data.tenantId;
+    if (!tenantId) return;
+
+    const { allowed, retryAfter } = await checkEventRateLimit(
+      socket.id,
+      tenantId,
+      eventName
+    );
+    if (!allowed) {
+      socket.emit('error', { code: 'RATE_LIMITED', event: eventName, retryAfter });
+      return;
+    }
+    await handler(...args);
+  });
+}
+
 /**
  * Setup socket event handlers
  */
 function setupEventHandlers(socket: TenantSocket): void {
-  // Message events
-  socket.on('message:send', (data: MessageSendData) => handleMessageSend(socket, data));
-  socket.on('message:read', (data: { messageId: string }) => handleMessageRead(socket, data));
-
-  // Typing indicator
-  socket.on('typing:indicator', (data: TypingIndicatorData) =>
-    handleTypingIndicator(socket, data)
-  );
-
-  // Handoff events
-  socket.on('handoff:request', (data: HandoffRequestData) => handleHandoffRequest(socket, data));
-  socket.on('handoff:accept', (data: HandoffResponseData) => handleHandoffAccept(socket, data));
-  socket.on('handoff:reject', (data: HandoffResponseData) => handleHandoffReject(socket, data));
-
-  // Session events
-  socket.on('session:join', (data: { sessionId: string }) => handleSessionJoin(socket, data));
-  socket.on('session:leave', (data: { sessionId: string }) => handleSessionLeave(socket, data));
-
-  // Presence events
-  socket.on('presence:update', (data: { status: string }) => handlePresenceUpdate(socket, data));
-
-  // Portal agent events
-  socket.on('agent:join', (data: { sessionId: string }) => handleAgentJoin(socket, data));
-  socket.on('agent:leave', (data: { sessionId: string }) => handleAgentLeave(socket, data));
-  socket.on('agent:status', (data: { status: string }) => handlePresenceUpdate(socket, data));
-  socket.on('handoff:decline', (data: HandoffResponseData) => handleHandoffReject(socket, data));
+  withRateLimit(socket, 'message:send', (data) => handleMessageSend(socket, data as MessageSendData));
+  withRateLimit(socket, 'message:read', (data) => handleMessageRead(socket, data as { messageId: string }));
+  withRateLimit(socket, 'typing:indicator', (data) => handleTypingIndicator(socket, data as TypingIndicatorData));
+  withRateLimit(socket, 'handoff:request', (data) => handleHandoffRequest(socket, data as HandoffRequestData));
+  withRateLimit(socket, 'handoff:accept', (data) => handleHandoffAccept(socket, data as HandoffResponseData));
+  withRateLimit(socket, 'handoff:reject', (data) => handleHandoffReject(socket, data as HandoffResponseData));
+  withRateLimit(socket, 'session:join', (data) => handleSessionJoin(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'session:leave', (data) => handleSessionLeave(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'presence:update', (data) => handlePresenceUpdate(socket, data as { status: string }));
+  withRateLimit(socket, 'agent:join', (data) => handleAgentJoin(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'agent:leave', (data) => handleAgentLeave(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'agent:status', (data) => handlePresenceUpdate(socket, data as { status: string }));
+  withRateLimit(socket, 'handoff:decline', (data) => handleHandoffReject(socket, data as HandoffResponseData));
 }
 
 /**
@@ -303,13 +312,6 @@ function handleAgentLeave(socket: TenantSocket, data: { sessionId: string }): vo
  */
 async function handleMessageSend(socket: TenantSocket, data: MessageSendData): Promise<void> {
   try {
-    // Rate limiting check
-    const allowed = await checkSocketRateLimit(socket.id, socket.data.tenantId);
-    if (!allowed) {
-      socket.emit('error', { message: 'Rate limit exceeded' });
-      return;
-    }
-
     const { sessionId, content, type = 'text', metadata } = data;
     const user = socket.data.user;
     const tenantId = socket.data.tenantId;

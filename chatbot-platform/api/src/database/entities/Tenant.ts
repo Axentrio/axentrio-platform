@@ -41,6 +41,9 @@ export class Tenant {
   @Column({ type: 'varchar', length: 500, nullable: true, name: 'webhook_url' })
   webhookUrl?: string;
 
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'webhook_secret' })
+  webhookSecret?: string;
+
   @Column({
     type: 'enum',
     enum: ['free', 'pro', 'enterprise'],

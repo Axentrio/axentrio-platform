@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import {
   MessageSquare,
   Users,
@@ -17,60 +18,129 @@ import {
 import { useHandoffs } from '@hooks/useHandoffs';
 import { useChats } from '@hooks/useChats';
 import { ChatStatusBadge } from '@components/StatusBadge';
+import { api } from '@services/apiClient';
 import type { DashboardMetrics } from '@app-types/index';
 
-// Mock metrics - replace with actual data
-const mockMetrics: DashboardMetrics = {
-  activeChats: 24,
-  pendingHandoffs: 5,
-  avgWaitTime: 45,
-  avgResponseTime: 32,
-  onlineAgents: 8,
-  totalAgents: 12,
-  csatScore: 4.6,
-  botResolutionRate: 68,
-};
+interface DashboardApiResponse {
+  success: boolean;
+  dashboard: {
+    sessions: { total: number; active: number; waiting: number; handoff: number; bot: number };
+    agents: { total: number; online: number };
+    avgResponseTimeSeconds: number;
+    csatScore: number | null;
+    botResolutionRate: number | null;
+  };
+}
+
+function mapApiToMetrics(data: DashboardApiResponse): DashboardMetrics {
+  const { dashboard } = data;
+  return {
+    activeChats: dashboard.sessions.active + dashboard.sessions.bot,
+    pendingHandoffs: dashboard.sessions.handoff,
+    avgWaitTime: 0, // not returned by API yet
+    avgResponseTime: dashboard.avgResponseTimeSeconds,
+    onlineAgents: dashboard.agents.online,
+    totalAgents: dashboard.agents.total,
+    csatScore: dashboard.csatScore ?? 0,
+    botResolutionRate: dashboard.botResolutionRate ?? 0,
+  };
+}
+
+/** Skeleton placeholder for a metric card */
+const MetricCardSkeleton: React.FC<{ index: number }> = ({ index }) => (
+  <div className={`card p-6 animate-fade-in-up stagger-${index + 1}`}>
+    <div className="flex items-start justify-between">
+      <div className="space-y-2">
+        <div className="h-4 w-24 bg-surface-3 rounded animate-pulse" />
+        <div className="h-8 w-16 bg-surface-3 rounded animate-pulse" />
+      </div>
+      <div className="p-3 rounded-xl bg-surface-3 animate-pulse">
+        <div className="w-6 h-6" />
+      </div>
+    </div>
+  </div>
+);
+
+/** Skeleton placeholder for the performance sidebar */
+const PerformanceSkeleton: React.FC = () => (
+  <div className="p-6 space-y-6">
+    {[0, 1, 2].map((i) => (
+      <div key={i}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="h-4 w-20 bg-surface-3 rounded animate-pulse" />
+          <div className="h-5 w-12 bg-surface-3 rounded animate-pulse" />
+        </div>
+        <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+          <div className="h-full w-0" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { handoffs, pendingCount } = useHandoffs({ status: 'pending' });
   const { chats } = useChats({ filters: { status: 'handsoff' }, autoRefresh: true });
 
-  const stats = [
-    {
-      label: 'Active Chats',
-      value: mockMetrics.activeChats,
-      icon: MessageSquare,
-      color: 'text-primary-400',
-      bgColor: 'bg-primary-600/10',
-      trend: '+12%',
-      trendUp: true,
-    },
-    {
-      label: 'Pending Handoffs',
-      value: pendingCount,
-      icon: Headphones,
-      color: 'text-accent-400',
-      bgColor: 'bg-accent-500/10',
-      alert: pendingCount > 3,
-    },
-    {
-      label: 'Online Agents',
-      value: `${mockMetrics.onlineAgents}/${mockMetrics.totalAgents}`,
-      icon: Users,
-      color: 'text-status-online',
-      bgColor: 'bg-status-online/10',
-    },
-    {
-      label: 'Avg Response Time',
-      value: `${mockMetrics.avgResponseTime}s`,
-      icon: Clock,
-      color: 'text-chat-bot',
-      bgColor: 'bg-chat-bot/10',
-      trend: '-8%',
-      trendUp: true,
-    },
-  ];
+  const {
+    data: rawDashboard,
+    isLoading,
+    isError,
+    error,
+  } = useQuery<DashboardApiResponse>({
+    queryKey: ['dashboard-metrics'],
+    queryFn: () => api.get<DashboardApiResponse>('/v1/analytics/dashboard'),
+    refetchInterval: 30000,
+  });
+
+  const metrics = rawDashboard ? mapApiToMetrics(rawDashboard) : undefined;
+
+  // Nullable fields for display — show "--" when API returned null
+  const csatDisplay = rawDashboard?.dashboard.csatScore != null
+    ? rawDashboard.dashboard.csatScore
+    : '--';
+  const botResolutionDisplay = rawDashboard?.dashboard.botResolutionRate != null
+    ? rawDashboard.dashboard.botResolutionRate
+    : '--';
+
+  const stats = metrics
+    ? [
+        {
+          label: 'Active Chats',
+          value: metrics.activeChats,
+          icon: MessageSquare,
+          color: 'text-primary-400',
+          bgColor: 'bg-primary-600/10',
+          trend: '+12%',
+          trendUp: true,
+        },
+        {
+          label: 'Pending Handoffs',
+          value: pendingCount,
+          icon: Headphones,
+          color: 'text-accent-400',
+          bgColor: 'bg-accent-500/10',
+          alert: pendingCount > 3,
+        },
+        {
+          label: 'Online Agents',
+          value: `${metrics.onlineAgents}/${metrics.totalAgents}`,
+          icon: Users,
+          color: 'text-status-online',
+          bgColor: 'bg-status-online/10',
+        },
+        {
+          label: 'Avg Response Time',
+          value: `${metrics.avgResponseTime}s`,
+          icon: Clock,
+          color: 'text-chat-bot',
+          bgColor: 'bg-chat-bot/10',
+          trend: '-8%',
+          trendUp: true,
+        },
+      ]
+    : [];
 
   return (
     <div className="p-6 space-y-6">
@@ -87,36 +157,51 @@ const Dashboard: React.FC = () => {
         </div>
       </div>
 
+      {/* Error Banner */}
+      {isError && (
+        <div className="flex items-center gap-3 p-4 bg-accent-500/10 border border-accent-500/30 rounded-xl text-accent-400">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <div>
+            <p className="font-medium">Failed to load dashboard metrics</p>
+            <p className="text-sm text-text-secondary">
+              {error instanceof Error ? error.message : 'An unexpected error occurred. Retrying...'}
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {stats.map((stat, index) => (
-          <div
-            key={index}
-            className={`card p-6 hover:shadow-card-hover transition-all animate-fade-in-up stagger-${index + 1}`}
-          >
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-sm font-medium text-text-secondary">{stat.label}</p>
-                <p className="text-2xl font-bold font-mono text-text-primary mt-1">{stat.value}</p>
-                {stat.trend && (
-                  <div className={`flex items-center gap-1 mt-2 text-sm ${stat.trendUp ? 'text-status-online' : 'text-status-busy'}`}>
-                    <TrendingUp className="w-4 h-4" />
-                    <span>{stat.trend}</span>
+        {isLoading
+          ? [0, 1, 2, 3].map((i) => <MetricCardSkeleton key={i} index={i} />)
+          : stats.map((stat, index) => (
+              <div
+                key={index}
+                className={`card p-6 hover:shadow-card-hover transition-all animate-fade-in-up stagger-${index + 1}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-text-secondary">{stat.label}</p>
+                    <p className="text-2xl font-bold font-mono text-text-primary mt-1">{stat.value}</p>
+                    {stat.trend && (
+                      <div className={`flex items-center gap-1 mt-2 text-sm ${stat.trendUp ? 'text-status-online' : 'text-status-busy'}`}>
+                        <TrendingUp className="w-4 h-4" />
+                        <span>{stat.trend}</span>
+                      </div>
+                    )}
+                    {stat.alert && (
+                      <div className="flex items-center gap-1 mt-2 text-sm text-accent-400">
+                        <AlertCircle className="w-4 h-4" />
+                        <span>Needs attention</span>
+                      </div>
+                    )}
                   </div>
-                )}
-                {stat.alert && (
-                  <div className="flex items-center gap-1 mt-2 text-sm text-accent-400">
-                    <AlertCircle className="w-4 h-4" />
-                    <span>Needs attention</span>
+                  <div className={`p-3 rounded-xl ${stat.bgColor}`}>
+                    <stat.icon className={`w-6 h-6 ${stat.color}`} />
                   </div>
-                )}
+                </div>
               </div>
-              <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                <stat.icon className={`w-6 h-6 ${stat.color}`} />
-              </div>
-            </div>
-          </div>
-        ))}
+            ))}
       </div>
 
       {/* Main Content Grid */}
@@ -179,49 +264,65 @@ const Dashboard: React.FC = () => {
           <div className="px-6 py-4 border-b border-edge">
             <h2 className="text-lg font-semibold text-text-primary">Performance</h2>
           </div>
-          <div className="p-6 space-y-6">
-            {/* CSAT Score */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-text-secondary">CSAT Score</span>
-                <span className="text-lg font-bold font-mono text-text-primary">{mockMetrics.csatScore}/5</span>
+          {isLoading ? (
+            <PerformanceSkeleton />
+          ) : (
+            <div className="p-6 space-y-6">
+              {/* CSAT Score */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-text-secondary">CSAT Score</span>
+                  <span className="text-lg font-bold font-mono text-text-primary">
+                    {csatDisplay === '--' ? '--' : `${csatDisplay}/5`}
+                  </span>
+                </div>
+                <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-status-online rounded-full"
+                    style={{
+                      width: csatDisplay === '--' ? '0%' : `${(Number(csatDisplay) / 5) * 100}%`,
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-status-online rounded-full"
-                  style={{ width: `${(mockMetrics.csatScore / 5) * 100}%` }}
-                />
-              </div>
-            </div>
 
-            {/* Bot Resolution Rate */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-text-secondary">Bot Resolution</span>
-                <span className="text-lg font-bold font-mono text-text-primary">{mockMetrics.botResolutionRate}%</span>
+              {/* Bot Resolution Rate */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-text-secondary">Bot Resolution</span>
+                  <span className="text-lg font-bold font-mono text-text-primary">
+                    {botResolutionDisplay === '--' ? '--' : `${botResolutionDisplay}%`}
+                  </span>
+                </div>
+                <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary-500 rounded-full"
+                    style={{
+                      width: botResolutionDisplay === '--' ? '0%' : `${botResolutionDisplay}%`,
+                    }}
+                  />
+                </div>
               </div>
-              <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-primary-500 rounded-full"
-                  style={{ width: `${mockMetrics.botResolutionRate}%` }}
-                />
-              </div>
-            </div>
 
-            {/* Avg Wait Time */}
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-text-secondary">Avg Wait Time</span>
-                <span className="text-lg font-bold font-mono text-text-primary">{mockMetrics.avgWaitTime}s</span>
-              </div>
-              <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${mockMetrics.avgWaitTime < 60 ? 'bg-status-online' : 'bg-accent-500'}`}
-                  style={{ width: `${Math.min((mockMetrics.avgWaitTime / 120) * 100, 100)}%` }}
-                />
+              {/* Avg Wait Time */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-text-secondary">Avg Wait Time</span>
+                  <span className="text-lg font-bold font-mono text-text-primary">
+                    {metrics ? `${metrics.avgWaitTime}s` : '--'}
+                  </span>
+                </div>
+                <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full ${(metrics?.avgWaitTime ?? 0) < 60 ? 'bg-status-online' : 'bg-accent-500'}`}
+                    style={{
+                      width: `${Math.min(((metrics?.avgWaitTime ?? 0) / 120) * 100, 100)}%`,
+                    }}
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 

@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: handsoff-pg
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: chatbot_platform
+      POSTGRES_USER: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - handsoff_pgdata:/var/lib/postgresql/data
+
+volumes:
+  handsoff_pgdata:

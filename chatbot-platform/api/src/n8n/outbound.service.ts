@@ -30,6 +30,7 @@ export interface OutboundServiceConfig {
   retryService: RetryService;
   fallbackService: FallbackService;
   metricsService?: MetricsService;
+  messageRepository?: any;
   defaultTimeout?: number;
   maxRetries?: number;
   userAgent?: string;
@@ -204,17 +205,17 @@ export class OutboundService {
   /**
    * Build complete outbound message with context enrichment
    */
-  public buildOutboundMessage(
+  public async buildOutboundMessage(
     context: PayloadBuilderContext,
     event: string = 'message.received'
-  ): OutboundMessage {
+  ): Promise<OutboundMessage> {
     const { sessionId, tenantId, userId, message, req, customContext } = context;
 
     // Build user context
     const userContext = this.buildUserContext(userId, req);
 
     // Build chat context with previous messages
-    const chatContext = this.buildChatContext(sessionId, customContext, req);
+    const chatContext = await this.buildChatContext(sessionId, customContext, req);
 
     // Create the outbound message
     const outboundMessage: OutboundMessage = {
@@ -264,11 +265,11 @@ export class OutboundService {
   /**
    * Build chat context with previous messages and page info
    */
-  private buildChatContext(
+  private async buildChatContext(
     sessionId: string,
     customContext?: Record<string, unknown>,
     req?: any
-  ): ChatContext {
+  ): Promise<ChatContext> {
     const context: ChatContext = {
       previousMessages: [],
       customContext,
@@ -287,20 +288,36 @@ export class OutboundService {
     }
 
     // Fetch previous messages (last 10)
-    // This would typically come from a message repository
-    context.previousMessages = this.getPreviousMessages(sessionId);
+    context.previousMessages = await this.getPreviousMessages(sessionId);
 
     return context;
   }
 
   /**
-   * Get previous messages for context
-   * In production, this would query the database
+   * Get previous messages for context (last 10 from DB)
    */
-  private getPreviousMessages(_sessionId: string): PreviousMessage[] {
-    // Placeholder - would fetch from message repository
-    // Return empty array for now
-    return [];
+  private async getPreviousMessages(sessionId: string): Promise<PreviousMessage[]> {
+    if (!this.config.messageRepository) {
+      return [];
+    }
+
+    try {
+      const messages = await this.config.messageRepository.find({
+        where: { sessionId },
+        order: { createdAt: 'DESC' },
+        take: 10,
+      });
+
+      return messages.reverse().map((m: any) => ({
+        role: m.participantId === 'system' ? 'system' as const
+          : (m.type === 'system' ? 'system' as const : 'user' as const),
+        content: m.content || '',
+        timestamp: m.createdAt?.toISOString?.() || new Date().toISOString(),
+      }));
+    } catch (error) {
+      logger.error('Failed to fetch previous messages', error);
+      return [];
+    }
   }
 
   /**

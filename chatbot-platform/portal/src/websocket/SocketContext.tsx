@@ -60,7 +60,7 @@ const generateHandlerId = () => `handler_${Date.now()}_${Math.random().toString(
 export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const socketRef = useRef<Socket | null>(null);
   const handlersRef = useRef<Map<string, SocketEventHandlers>>(new Map());
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn, orgId } = useAuth();
   const { user, isAuthenticated } = useAppAuth();
   const tokenRef = useRef<string | null>(null);
   
@@ -70,13 +70,13 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Initialize socket connection
   const connectSocket = useCallback(async () => {
-    if (!isSignedIn || !isAuthenticated) return;
+    if (!isSignedIn || !isAuthenticated || !orgId) return;
 
     setIsConnecting(true);
     setConnectionError(null);
 
-    // Get fresh Clerk token for socket auth
-    const token = await getToken();
+    // Get fresh Clerk token with org claim for socket auth
+    const token = await getToken({ template: undefined });
     tokenRef.current = token;
 
     const socket = io(WS_CONFIG.url, {
@@ -186,7 +186,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       });
     });
 
-  }, [isSignedIn, isAuthenticated, getToken, user?.id]);
+  }, [isSignedIn, isAuthenticated, orgId, getToken, user?.id]);
 
   // Disconnect socket
   const disconnectSocket = useCallback(() => {
@@ -202,7 +202,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   // Connect on mount and when auth changes
   useEffect(() => {
-    if (isAuthenticated && isSignedIn) {
+    if (isAuthenticated && isSignedIn && orgId) {
       connectSocket();
     } else {
       disconnectSocket();
@@ -211,7 +211,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return () => {
       disconnectSocket();
     };
-  }, [isAuthenticated, isSignedIn, connectSocket, disconnectSocket]);
+  }, [isAuthenticated, isSignedIn, orgId, connectSocket, disconnectSocket]);
 
   // Register event handlers
   const registerHandlers = useCallback((handlers: SocketEventHandlers): string => {

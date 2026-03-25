@@ -72,7 +72,7 @@ export function useAppAuth() {
         setIsLoading(true);
         setError(null);
         const token = await getToken();
-        const res = await fetch(`${API_CONFIG.baseURL}${ENDPOINTS.auth.me}`, {
+        const res = await fetch(`${API_CONFIG.baseURL}/v1${ENDPOINTS.auth.me}`, {
           headers: {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',

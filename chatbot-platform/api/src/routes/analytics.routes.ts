@@ -47,6 +47,11 @@ router.get(
         where: { tenantId, status: 'handoff' as const },
       });
 
+      // Bot sessions (active AI conversations)
+      const botSessions = await sessionRepository.count({
+        where: { tenantId, status: 'bot' as const },
+      });
+
       // Total agents
       const totalAgents = await agentRepository.count({
         where: { tenantId },
@@ -67,6 +72,36 @@ router.get(
         ? Math.round(agents.reduce((sum, a) => sum + a.avgResponseTimeSeconds, 0) / agents.length)
         : 0;
 
+      // CSAT score (average satisfaction rating)
+      const csatResult = await sessionRepository
+        .createQueryBuilder('session')
+        .select('AVG(session.satisfaction_rating)', 'avgCsat')
+        .where('session.tenant_id = :tenantId', { tenantId })
+        .andWhere('session.satisfaction_rating IS NOT NULL')
+        .getRawOne();
+
+      const csatScore = csatResult?.avgCsat
+        ? parseFloat(parseFloat(csatResult.avgCsat).toFixed(1))
+        : null;
+
+      // Bot resolution rate (sessions that closed without ever reaching handoff/active)
+      const closedSessions = await sessionRepository.count({
+        where: { tenantId, status: 'closed' as const },
+      });
+
+      // Sessions that were closed and had an agent assigned = human-resolved
+      const humanResolved = await sessionRepository
+        .createQueryBuilder('session')
+        .where('session.tenant_id = :tenantId', { tenantId })
+        .andWhere('session.status = :status', { status: 'closed' })
+        .andWhere('session.assigned_agent_id IS NOT NULL')
+        .getCount();
+
+      const botResolved = closedSessions - humanResolved;
+      const botResolutionRate = closedSessions > 0
+        ? Math.round((botResolved / closedSessions) * 100)
+        : null;
+
       res.json({
         success: true,
         dashboard: {
@@ -75,12 +110,15 @@ router.get(
             active: activeSessions,
             waiting: waitingSessions,
             handoff: handoffSessions,
+            bot: botSessions,
           },
           agents: {
             total: totalAgents,
             online: onlineAgents,
           },
           avgResponseTimeSeconds: avgResponseTime,
+          csatScore,
+          botResolutionRate,
         },
       });
     } catch (error) {
@@ -172,6 +210,54 @@ router.get(
       });
     } catch (error) {
       logger.error('Error fetching agent metrics:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+/**
+ * GET /analytics/chats/timeseries
+ * Daily chat volume grouped by status category
+ */
+router.get(
+  '/chats/timeseries',
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const authReq = req as ProvisionedRequest;
+      const tenantId = authReq.user?.tenantId;
+      const startDate = req.query.startDate as string;
+      const endDate = req.query.endDate as string;
+
+      // Default to last 7 days
+      const end = endDate ? new Date(endDate) : new Date();
+      const start = startDate ? new Date(startDate) : new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const rawData = await sessionRepository
+        .createQueryBuilder('session')
+        .select("DATE(session.created_at)", 'date')
+        .addSelect("COUNT(CASE WHEN session.assigned_agent_id IS NULL AND session.status = 'closed' THEN 1 END)", 'bot')
+        .addSelect("COUNT(CASE WHEN session.assigned_agent_id IS NOT NULL THEN 1 END)", 'human')
+        .addSelect("COUNT(CASE WHEN session.status IN ('handoff') THEN 1 END)", 'handoff')
+        .where('session.tenant_id = :tenantId', { tenantId })
+        .andWhere('session.created_at >= :start', { start })
+        .andWhere('session.created_at <= :end', { end })
+        .groupBy("DATE(session.created_at)")
+        .orderBy("DATE(session.created_at)", 'ASC')
+        .getRawMany();
+
+      const timeseries = rawData.map((row: any) => ({
+        date: row.date,
+        bot: parseInt(row.bot, 10) || 0,
+        human: parseInt(row.human, 10) || 0,
+        handoff: parseInt(row.handoff, 10) || 0,
+      }));
+
+      res.json({
+        success: true,
+        timeseries,
+      });
+    } catch (error) {
+      logger.error('Error fetching chat timeseries:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   }

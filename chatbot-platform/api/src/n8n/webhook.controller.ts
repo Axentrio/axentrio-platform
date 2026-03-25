@@ -5,6 +5,8 @@
 
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
+import { AppDataSource } from '../database/data-source';
+import { Tenant } from '../database/entities/Tenant';
 import { WebhookService } from './webhook.service';
 import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
@@ -48,17 +50,6 @@ export class WebhookController {
     });
 
     try {
-      // Verify webhook secret if configured
-      if (!this.verifyWebhookSecret(req)) {
-        logger.warn(`[${requestId}] Webhook secret verification failed`);
-        this.config.metricsService?.incrementCounter('n8n_webhook_auth_failures');
-        res.status(401).json({
-          success: false,
-          error: 'Unauthorized: Invalid or missing webhook secret',
-        });
-        return;
-      }
-
       // Validate request body exists
       if (!req.body || Object.keys(req.body).length === 0) {
         logger.warn(`[${requestId}] Empty request body`);
@@ -83,6 +74,18 @@ export class WebhookController {
       }
 
       const message = req.body as InboundMessage;
+
+      // Per-tenant webhook secret verification
+      // Parse body first to get tenantId, then verify against tenant's secret
+      if (!(await this.verifyPerTenantSecret(req, message.tenantId))) {
+        logger.warn(`[${requestId}] Webhook secret verification failed`);
+        this.config.metricsService?.incrementCounter('n8n_webhook_auth_failures');
+        res.status(401).json({
+          success: false,
+          error: 'Unauthorized: Invalid or missing webhook secret',
+        });
+        return;
+      }
 
       // Log received action
       logger.info(`[${requestId}] Processing inbound action: ${message.action}`, {
@@ -336,19 +339,41 @@ export class WebhookController {
   }
 
   /**
-   * Verify webhook secret from request
+   * Verify webhook secret against per-tenant secret
+   * Looks up the tenant by tenantId and verifies the request signature
+   * If no webhookSecret is set on the tenant, skip verification (easy initial setup)
    */
-  private verifyWebhookSecret(req: Request): boolean {
-    if (!this.config.secret) {
-      return true; // No secret configured, allow all
+  private async verifyPerTenantSecret(req: Request, tenantId?: string): Promise<boolean> {
+    if (!tenantId) {
+      // No tenantId in request — fall back to global secret check
+      if (!this.config.secret) return true;
+      const providedSecret = req.headers['x-webhook-secret'] as string ||
+                            req.headers['authorization']?.replace('Bearer ', '');
+      return this.timingSafeCompare(providedSecret || '', this.config.secret);
     }
 
-    const providedSecret = req.headers['x-webhook-secret'] as string ||
-                          req.headers['authorization']?.replace('Bearer ', '') ||
-                          req.body?.secret;
+    try {
+      const tenantRepo = AppDataSource.getRepository(Tenant);
+      const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
 
-    // Use timing-safe comparison to prevent timing attacks
-    return this.timingSafeCompare(providedSecret || '', this.config.secret);
+      if (!tenant) {
+        logger.warn(`Tenant not found for webhook verification: ${tenantId}`);
+        return false;
+      }
+
+      // If no webhookSecret set on tenant, skip verification (easy initial setup)
+      if (!tenant.webhookSecret) {
+        return true;
+      }
+
+      const providedSecret = req.headers['x-webhook-secret'] as string ||
+                            req.headers['authorization']?.replace('Bearer ', '');
+
+      return this.timingSafeCompare(providedSecret || '', tenant.webhookSecret);
+    } catch (error) {
+      logger.error('Error during per-tenant secret verification', error);
+      return false;
+    }
   }
 
   /**

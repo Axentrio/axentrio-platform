@@ -27,7 +27,7 @@ export const useFilePreview = (): UseFilePreviewReturn => {
     
     try {
       // Fetch file metadata and preview URL
-      const response = await fetch(`/api/files/${fileId}/preview`);
+      const response = await fetch(`/api/v1/files/${fileId}/preview`);
       if (!response.ok) throw new Error('Failed to load file preview');
       
       const data = await response.json();

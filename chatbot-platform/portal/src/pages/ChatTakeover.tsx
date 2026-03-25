@@ -6,43 +6,56 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, UserCheck, X, MoreVertical, Users } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge } from '@components/StatusBadge';
 import { Modal } from '@components/Modal';
 import { useChats } from '@hooks/useChats';
+import { api } from '@services/apiClient';
 import type { Chat, Agent } from '@app-types/index';
 
-// Mock agents - replace with actual data
-const mockAgents: Agent[] = [
-  {
-    id: '1',
-    userId: '1',
-    email: 'agent1@example.com',
-    firstName: 'John',
-    lastName: 'Doe',
-    role: 'agent',
-    status: 'online',
-    maxConcurrentChats: 5,
-    currentChats: 2,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    skills: ['support', 'sales'],
-  },
-  {
-    id: '2',
-    userId: '2',
-    email: 'agent2@example.com',
-    firstName: 'Jane',
-    lastName: 'Smith',
-    role: 'agent',
-    status: 'online',
-    maxConcurrentChats: 5,
-    currentChats: 3,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    skills: ['support', 'technical'],
-  },
-];
+interface AgentApiResponse {
+  success: boolean;
+  data?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    currentChatCount: number;
+    maxConcurrentChats: number;
+    skills?: string[];
+  }>;
+  agents?: Array<{
+    id: string;
+    name: string;
+    status: string;
+    currentChatCount: number;
+    maxConcurrentChats: number;
+    skills?: string[];
+  }>;
+}
+
+function mapApiAgents(response: AgentApiResponse): Agent[] {
+  const rawAgents = response.data || response.agents || [];
+  return rawAgents.map((agent) => {
+    const nameParts = agent.name?.split(' ') || ['Unknown'];
+    const firstName = nameParts[0];
+    const lastName = nameParts.slice(1).join(' ') || '';
+    return {
+      id: agent.id,
+      userId: agent.id,
+      email: '',
+      firstName,
+      lastName,
+      role: 'agent' as const,
+      status: (agent.status || 'online') as Agent['status'],
+      maxConcurrentChats: agent.maxConcurrentChats ?? 5,
+      currentChats: agent.currentChatCount ?? 0,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+      skills: agent.skills || [],
+    };
+  });
+}
 
 const ChatTakeover: React.FC = () => {
   const { chatId } = useParams<{ chatId: string }>();
@@ -51,6 +64,15 @@ const ChatTakeover: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const { takeoverChat, closeChat } = useChats();
+
+  const { data: agents = [], isLoading: isLoadingAgents } = useQuery<Agent[]>({
+    queryKey: ['agents', 'online'],
+    queryFn: async () => {
+      const response = await api.get<AgentApiResponse>('/v1/agents?status=online');
+      return mapApiAgents(response);
+    },
+    enabled: isTransferModalOpen,
+  });
 
   // Fetch chat data
   useEffect(() => {
@@ -215,8 +237,17 @@ const ChatTakeover: React.FC = () => {
           <p className="text-text-secondary">
             Select an agent to transfer this chat to:
           </p>
+          {isLoadingAgents ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600" />
+            </div>
+          ) : agents.length === 0 ? (
+            <p className="text-center text-text-secondary py-8">
+              No online agents available.
+            </p>
+          ) : (
           <div className="space-y-2">
-            {mockAgents.map((agent) => (
+            {agents.map((agent) => (
               <button
                 key={agent.id}
                 onClick={() => handleTransfer(agent.id)}
@@ -248,6 +279,7 @@ const ChatTakeover: React.FC = () => {
               </button>
             ))}
           </div>
+          )}
         </div>
       </Modal>
     </div>

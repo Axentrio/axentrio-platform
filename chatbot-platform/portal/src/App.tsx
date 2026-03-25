@@ -29,6 +29,7 @@ import Analytics from '@pages/Analytics';
 import Tenants from '@pages/Tenants';
 import Team from '@pages/Team';
 import Settings from '@pages/Settings';
+import WidgetTest from '@pages/WidgetTest';
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -75,23 +76,101 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// Widget test page — renders outside Clerk auth entirely
+const WidgetTestRouter: React.FC = () => {
+  if (window.location.pathname !== '/widget-test') return null;
+  return <WidgetTest />;
+};
+
 const App: React.FC = () => {
+  // If on widget-test path, render only the widget test page (no Clerk)
+  if (window.location.pathname === '/widget-test') {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <WidgetTestRouter />
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            duration: 5000,
+            style: {
+              background: '#1e2030',
+              color: '#f1f3f9',
+              border: '1px solid #2a2d3e',
+            },
+          }}
+        />
+      </QueryClientProvider>
+    );
+  }
+
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+    <ClerkProvider
+      publishableKey={CLERK_PUBLISHABLE_KEY}
+      appearance={{
+        variables: {
+          colorBackground: '#161821',
+          colorInputBackground: '#1e2030',
+          colorText: '#f1f3f9',
+          colorTextSecondary: '#9ca3bf',
+          colorPrimary: '#6366f1',
+          colorInputText: '#f1f3f9',
+          colorDanger: '#f87171',
+          colorSuccess: '#34d399',
+          colorNeutral: '#9ca3bf',
+          borderRadius: '0.75rem',
+          fontFamily: "'Plus Jakarta Sans', sans-serif",
+        },
+        elements: {
+          card: {
+            backgroundColor: '#161821',
+            border: '1px solid #2a2d3e',
+            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+          },
+          headerTitle: { color: '#f1f3f9' },
+          headerSubtitle: { color: '#9ca3bf' },
+          socialButtonsBlockButton: {
+            backgroundColor: '#1e2030',
+            border: '1px solid #2a2d3e',
+            color: '#f1f3f9',
+            '&:hover': { backgroundColor: '#262940' },
+          },
+          dividerLine: { backgroundColor: '#2a2d3e' },
+          dividerText: { color: '#9ca3bf' },
+          formFieldLabel: { color: '#9ca3bf' },
+          formFieldInput: {
+            backgroundColor: '#1e2030',
+            border: '1px solid #2a2d3e',
+            color: '#f1f3f9',
+            '&:focus': {
+              borderColor: '#6366f1',
+              boxShadow: '0 0 0 3px rgba(99,102,241,0.15)',
+            },
+          },
+          formButtonPrimary: {
+            backgroundColor: '#6366f1',
+            '&:hover': { backgroundColor: '#818cf8' },
+          },
+          footerActionLink: { color: '#818cf8' },
+          footerActionText: { color: '#9ca3bf' },
+          identityPreviewEditButton: { color: '#818cf8' },
+          formFieldAction: { color: '#818cf8' },
+          otpCodeFieldInput: {
+            backgroundColor: '#1e2030',
+            border: '1px solid #2a2d3e',
+            color: '#f1f3f9',
+          },
+          footer: {
+            '& + div': { color: '#9ca3bf' },
+          },
+        },
+      }}
+    >
       <QueryClientProvider client={queryClient}>
         <SignedOut>
           <div className="flex items-center justify-center h-screen bg-surface-1">
             <SignIn
-              appearance={{
-                elements: {
-                  rootBox: 'mx-auto',
-                  card: 'bg-surface-2 border border-edge shadow-card',
-                  headerTitle: 'text-text-primary',
-                  headerSubtitle: 'text-text-secondary',
-                  formButtonPrimary: 'bg-primary-600 hover:bg-primary-700',
-                  footerActionLink: 'text-primary-400 hover:text-primary-300',
-                },
-              }}
+              forceRedirectUrl="/"
+              signUpForceRedirectUrl="/"
             />
           </div>
         </SignedOut>

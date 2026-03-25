@@ -49,7 +49,7 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
     
     try {
       // Replace with actual API call
-      const response = await fetch(`/api/chats/${chatId}`);
+      const response = await fetch(`/api/v1/chats/${chatId}`);
       if (!response.ok) throw new Error('Failed to fetch chat');
       
       const data = await response.json();

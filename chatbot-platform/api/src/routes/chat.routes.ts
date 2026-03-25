@@ -17,6 +17,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
+import { forwardMessageToN8n } from '../services/message-forwarding.service';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -119,7 +120,7 @@ router.post(
         return;
       }
 
-      if (!session.isActive()) {
+      if (session.isClosed()) {
         res.status(400).json({ error: 'Session is closed' });
         return;
       }
@@ -151,6 +152,11 @@ router.post(
       };
 
       emitToSession(tenantId!, sessionId, 'message:receive', messageData);
+
+      // Forward visitor messages to n8n if applicable
+      forwardMessageToN8n(session, savedMessage).catch((err) => {
+        logger.error('Error in n8n message forwarding:', err);
+      });
 
       logger.debug(`Message sent via HTTP for session ${sessionId}`);
 

@@ -15,16 +15,52 @@ import {
   Lock,
   Mail,
   Save,
-  Check
+  Check,
+  Copy,
+  RotateCw,
+  CheckCircle,
+  XCircle,
+  Minus,
+  ExternalLink,
+  Key,
+  Webhook,
+  Shield,
 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { useNotificationSound } from '@websocket/notificationSound';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@services/apiClient';
+import toast from 'react-hot-toast';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+
+interface TenantData {
+  apiKey?: string;
+  webhookUrl?: string;
+  webhookSecret?: string;
+  [key: string]: unknown;
+}
+
+function maskSecret(value: string | undefined): string {
+  if (!value) return '---';
+  if (value.length <= 12) return value;
+  return `${value.slice(0, 8)}...${value.slice(-4)}`;
+}
+
+async function copyToClipboard(text: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    toast.success(`${label} copied to clipboard`);
+  } catch {
+    toast.error('Failed to copy to clipboard');
+  }
+}
 
 const Settings: React.FC = () => {
   const { user } = useAppAuth();
   const { isMuted, toggleMute, volume, setVolume } = useNotificationSound();
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'notifications' | 'appearance'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'notifications' | 'appearance' | 'integration'>('profile');
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -51,6 +87,90 @@ const Settings: React.FC = () => {
 
   // Appearance preferences
   const [theme, setTheme] = useState(user?.preferences?.theme || 'system');
+
+  // Integration state
+  const { data: tenantData, refetch: refetchTenant } = useQuery<TenantData>({
+    queryKey: ['tenant-me'],
+    queryFn: () => api.get<TenantData>('/v1/tenants/me'),
+    enabled: activeTab === 'integration',
+  });
+
+  const [webhookUrlInput, setWebhookUrlInput] = useState('');
+  const [webhookUrlInitialized, setWebhookUrlInitialized] = useState(false);
+  const [isRotatingKey, setIsRotatingKey] = useState(false);
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [isRegeneratingSecret, setIsRegeneratingSecret] = useState(false);
+  const [showRotateConfirm, setShowRotateConfirm] = useState(false);
+  const [showRegenerateConfirm, setShowRegenerateConfirm] = useState(false);
+  const [webhookTestStatus, setWebhookTestStatus] = useState<'idle' | 'success' | 'failed'>('idle');
+  const [webhookResponseTime, setWebhookResponseTime] = useState<number | null>(null);
+
+  // Sync webhook URL input from tenant data
+  if (tenantData?.webhookUrl && !webhookUrlInitialized) {
+    setWebhookUrlInput(tenantData.webhookUrl);
+    setWebhookUrlInitialized(true);
+  }
+
+  const handleRotateApiKey = async () => {
+    setIsRotatingKey(true);
+    try {
+      await api.post('/v1/tenants/me/api-key/rotate');
+      await refetchTenant();
+      toast.success('API key rotated successfully');
+    } catch {
+      toast.error('Failed to rotate API key');
+    } finally {
+      setIsRotatingKey(false);
+      setShowRotateConfirm(false);
+    }
+  };
+
+  const handleSaveWebhookUrl = async () => {
+    setIsSavingWebhook(true);
+    try {
+      await api.patch('/v1/tenants/me', { webhookUrl: webhookUrlInput });
+      await refetchTenant();
+      toast.success('Webhook URL saved');
+    } catch {
+      toast.error('Failed to save webhook URL');
+    } finally {
+      setIsSavingWebhook(false);
+    }
+  };
+
+  const handleTestWebhook = async () => {
+    setIsTestingWebhook(true);
+    setWebhookTestStatus('idle');
+    setWebhookResponseTime(null);
+    const start = Date.now();
+    try {
+      await api.post('/v1/tenants/me/webhook-test');
+      const elapsed = Date.now() - start;
+      setWebhookTestStatus('success');
+      setWebhookResponseTime(elapsed);
+      toast.success(`Webhook connected (${elapsed}ms)`);
+    } catch {
+      setWebhookTestStatus('failed');
+      toast.error('Webhook test failed');
+    } finally {
+      setIsTestingWebhook(false);
+    }
+  };
+
+  const handleRegenerateSecret = async () => {
+    setIsRegeneratingSecret(true);
+    try {
+      await api.post('/v1/tenants/me/webhook-secret/regenerate');
+      await refetchTenant();
+      toast.success('Webhook secret regenerated');
+    } catch {
+      toast.error('Failed to regenerate webhook secret');
+    } finally {
+      setIsRegeneratingSecret(false);
+      setShowRegenerateConfirm(false);
+    }
+  };
 
   const handleSaveProfile = async () => {
     setIsSaving(true);
@@ -92,6 +212,21 @@ const Settings: React.FC = () => {
     setTimeout(() => setSaveSuccess(false), 3000);
   };
 
+  const inboundWebhookUrl = `${API_URL}/v1/n8n/webhook/inbound`;
+
+  const webhookStatusIcon = () => {
+    if (!tenantData?.webhookUrl) {
+      return <Minus className="w-5 h-5 text-text-muted" />;
+    }
+    if (webhookTestStatus === 'success') {
+      return <CheckCircle className="w-5 h-5 text-status-online" />;
+    }
+    if (webhookTestStatus === 'failed') {
+      return <XCircle className="w-5 h-5 text-red-500" />;
+    }
+    return <Minus className="w-5 h-5 text-text-muted" />;
+  };
+
   return (
     <div className="p-6 max-w-4xl mx-auto">
       {/* Header */}
@@ -102,7 +237,7 @@ const Settings: React.FC = () => {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-surface-3 rounded-xl mb-6 w-fit">
-        {(['profile', 'notifications', 'appearance'] as const).map((tab) => (
+        {(['profile', 'notifications', 'appearance', 'integration'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -424,6 +559,229 @@ const Settings: React.FC = () => {
                   <Save className="w-4 h-4" />
                 )}
                 Save Theme
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Integration Tab */}
+      {activeTab === 'integration' && (
+        <div className="space-y-6">
+          {/* API Key */}
+          <div className="bg-surface-0 border border-edge rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+              <Key className="w-5 h-5" />
+              API Key
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-text-secondary mb-1">Your API Key</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
+                    {maskSecret(tenantData?.apiKey)}
+                  </code>
+                  <button
+                    onClick={() => tenantData?.apiKey && copyToClipboard(tenantData.apiKey, 'API key')}
+                    disabled={!tenantData?.apiKey}
+                    className="flex items-center gap-2 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary disabled:opacity-50 transition-all"
+                    title="Copy API key"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setShowRotateConfirm(true)}
+                    disabled={isRotatingKey}
+                    className="flex items-center gap-2 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary disabled:opacity-50 transition-all"
+                    title="Rotate API key"
+                  >
+                    <RotateCw className={`w-4 h-4 ${isRotatingKey ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* n8n Webhook URL */}
+          <div className="bg-surface-0 border border-edge rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+              <Webhook className="w-5 h-5" />
+              n8n Webhook URL
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-text-secondary mb-1">Webhook URL</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={webhookUrlInput}
+                    onChange={(e) => setWebhookUrlInput(e.target.value)}
+                    placeholder="https://your-n8n-instance.com/webhook/..."
+                    className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                  />
+                  <span title={
+                    webhookTestStatus === 'success' ? 'Connected' :
+                    webhookTestStatus === 'failed' ? 'Connection failed' :
+                    'Not tested'
+                  }>
+                    {webhookStatusIcon()}
+                  </span>
+                </div>
+                {webhookTestStatus === 'success' && webhookResponseTime !== null && (
+                  <p className="text-xs text-status-online mt-1">Response time: {webhookResponseTime}ms</p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 justify-end">
+                <button
+                  onClick={handleTestWebhook}
+                  disabled={isTestingWebhook || !webhookUrlInput}
+                  className="flex items-center gap-2 px-4 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary disabled:opacity-50 transition-all"
+                >
+                  {isTestingWebhook ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+                  ) : (
+                    <ExternalLink className="w-4 h-4" />
+                  )}
+                  Test Connection
+                </button>
+                <button
+                  onClick={handleSaveWebhookUrl}
+                  disabled={isSavingWebhook}
+                  className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 transition-all"
+                >
+                  {isSavingWebhook ? (
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                  ) : (
+                    <Save className="w-4 h-4" />
+                  )}
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Inbound Webhook Endpoint */}
+          <div className="bg-surface-0 border border-edge rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+              <ExternalLink className="w-5 h-5" />
+              Inbound Webhook Endpoint
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-text-secondary mb-1">Endpoint URL (read-only)</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
+                    {inboundWebhookUrl}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(inboundWebhookUrl, 'Inbound webhook URL')}
+                    className="flex items-center gap-2 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary transition-all"
+                    title="Copy URL"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                </div>
+                <p className="text-xs text-text-muted mt-2">
+                  Configure your n8n workflow to send responses to this URL. Include your tenant ID in the request body.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Webhook Secret */}
+          <div className="bg-surface-0 border border-edge rounded-xl p-6">
+            <h2 className="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
+              <Shield className="w-5 h-5" />
+              Webhook Secret
+            </h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-text-secondary mb-1">Secret Key</label>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
+                    {maskSecret(tenantData?.webhookSecret)}
+                  </code>
+                  <button
+                    onClick={() => tenantData?.webhookSecret && copyToClipboard(tenantData.webhookSecret, 'Webhook secret')}
+                    disabled={!tenantData?.webhookSecret}
+                    className="flex items-center gap-2 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary disabled:opacity-50 transition-all"
+                    title="Copy webhook secret"
+                  >
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setShowRegenerateConfirm(true)}
+                    disabled={isRegeneratingSecret}
+                    className="flex items-center gap-2 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary disabled:opacity-50 transition-all"
+                    title="Regenerate webhook secret"
+                  >
+                    <RotateCw className={`w-4 h-4 ${isRegeneratingSecret ? 'animate-spin' : ''}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Rotate API Key Confirmation Modal */}
+      {showRotateConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-surface-0 border border-edge rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-text-primary mb-2">Rotate API Key?</h3>
+            <p className="text-sm text-text-secondary mb-6">
+              This will invalidate your current API key immediately. Any integrations using the old key will stop working. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowRotateConfirm(false)}
+                className="px-4 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRotateApiKey}
+                disabled={isRotatingKey}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-500 disabled:opacity-50 transition-all"
+              >
+                {isRotatingKey ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                ) : (
+                  <RotateCw className="w-4 h-4" />
+                )}
+                Rotate Key
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Regenerate Webhook Secret Confirmation Modal */}
+      {showRegenerateConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="bg-surface-0 border border-edge rounded-xl p-6 max-w-md w-full mx-4 shadow-xl">
+            <h3 className="text-lg font-semibold text-text-primary mb-2">Regenerate Webhook Secret?</h3>
+            <p className="text-sm text-text-secondary mb-6">
+              This will invalidate your current webhook secret immediately. You will need to update the secret in your n8n workflows. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setShowRegenerateConfirm(false)}
+                className="px-4 py-2 bg-surface-3 border border-edge rounded-xl text-text-secondary hover:text-text-primary transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRegenerateSecret}
+                disabled={isRegeneratingSecret}
+                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-xl hover:bg-red-500 disabled:opacity-50 transition-all"
+              >
+                {isRegeneratingSecret ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                ) : (
+                  <RotateCw className="w-4 h-4" />
+                )}
+                Regenerate Secret
               </button>
             </div>
           </div>

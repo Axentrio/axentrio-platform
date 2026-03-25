@@ -92,10 +92,6 @@ export interface N8nModuleConfig {
   
   // Service dependencies
   services: {
-    chatSessionService: any;
-    messageService: any;
-    handoffService: any;
-    userService: any;
     eventEmitter: any;
     metricsService?: any;
   };
@@ -156,12 +152,8 @@ export function createN8nModule(config: N8nModuleConfig): N8nModule {
   // Set retry service in outbound service (circular dependency)
   (outboundService as any).config.retryService = retryService;
 
-  // Create webhook service
+  // Create webhook service (uses repositories directly)
   const webhookService = new WebhookService({
-    chatSessionService: config.services.chatSessionService,
-    messageService: config.services.messageService,
-    handoffService: config.services.handoffService,
-    userService: config.services.userService,
     eventEmitter: config.services.eventEmitter,
   });
 

@@ -17,6 +17,8 @@ import { resolveClerkIds } from '../middleware/clerk.middleware';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
+import { Tenant } from '../database/entities/Tenant';
+import { forwardMessageToN8n } from '../services/message-forwarding.service';
 
 // Socket event types
 interface MessageSendData {
@@ -86,22 +88,44 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
           const clerkUserId = verified.sub;
           const clerkOrgId = verified.org_id;
 
-          if (!clerkOrgId) {
-            return next(new Error('Authentication error: Organization required'));
+          // Try resolving with org_id first, fall back to DB lookup by clerkUserId
+          if (clerkOrgId) {
+            const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
+            if (dbIds) {
+              socket.data.user = {
+                id: dbIds.agentId,
+                tenantId: dbIds.tenantId,
+                role: dbIds.userRole,
+                type: 'agent',
+              };
+              socket.data.tenantId = dbIds.tenantId;
+              return next();
+            }
           }
 
-          const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
-          if (!dbIds) {
+          // Fallback: look up user by clerkUserId directly
+          const { User } = await import('../database/entities/User');
+          const { Agent } = await import('../database/entities/Agent');
+          const userRepo = AppDataSource.getRepository(User);
+          const agentRepo = AppDataSource.getRepository(Agent);
+
+          const user = await userRepo.findOne({ where: { clerkUserId } });
+          if (!user) {
             return next(new Error('Authentication error: User not provisioned'));
           }
 
+          const agent = await agentRepo.findOne({ where: { userId: user.id } });
+          if (!agent) {
+            return next(new Error('Authentication error: Agent not provisioned'));
+          }
+
           socket.data.user = {
-            id: dbIds.agentId,
-            tenantId: dbIds.tenantId,
-            role: dbIds.userRole,
+            id: agent.id,
+            tenantId: user.tenantId,
+            role: user.role,
             type: 'agent',
           };
-          socket.data.tenantId = dbIds.tenantId;
+          socket.data.tenantId = user.tenantId;
           return next();
         } catch {
           return next(new Error('Authentication error: Invalid token'));
@@ -109,15 +133,22 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
       }
       // Mode 2: Widget (API key in query)
       if (socket.handshake.query?.apiKey) {
-        // Attach minimal widget session info
+        const tenantRepo = AppDataSource.getRepository(Tenant);
+        const tenant = await tenantRepo.findOne({
+          where: { apiKey: socket.handshake.query.apiKey as string },
+        });
+        if (!tenant) {
+          return next(new Error('Authentication error: Invalid API key'));
+        }
+
         socket.data.user = {
           id: (socket.handshake.query.visitorId as string) || socket.id,
           email: '',
           role: 'visitor',
-          tenantId: socket.handshake.query.tenantId as string || '',
+          tenantId: tenant.id,  // Use verified tenant ID, not client-supplied
           type: 'widget' as const,
         };
-        socket.data.tenantId = socket.handshake.query.tenantId as string || '';
+        socket.data.tenantId = tenant.id;
         return next();
       }
       return next(new Error('Authentication required'));
@@ -343,6 +374,13 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
       messageId: savedMessage.id,
       senderType,
     });
+
+    // Forward visitor messages to n8n if applicable
+    if (senderType === 'user') {
+      forwardMessageToN8n(session, savedMessage).catch((err) => {
+        logger.error('Error in n8n message forwarding:', err);
+      });
+    }
   } catch (error) {
     logger.error('Error handling message:send:', error);
     socket.emit('error', { message: 'Failed to send message' });

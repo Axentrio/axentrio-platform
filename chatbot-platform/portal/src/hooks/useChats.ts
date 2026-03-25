@@ -60,7 +60,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
       if (currentFilters.dateTo) params.append('dateTo', currentFilters.dateTo);
       
       // Replace with actual API call
-      const response = await fetch(`/api/chats?${params.toString()}`);
+      const response = await fetch(`/api/v1/chats/sessions?${params.toString()}`);
       if (!response.ok) throw new Error('Failed to fetch chats');
       
       const data = await response.json();
@@ -154,7 +154,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   // Takeover chat
   const takeoverChat = useCallback(async (chatId: string) => {
     try {
-      const response = await fetch(`/api/chats/${chatId}/takeover`, {
+      const response = await fetch(`/api/v1/chats/${chatId}/takeover`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
@@ -172,7 +172,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   // Close chat
   const closeChat = useCallback(async (chatId: string) => {
     try {
-      const response = await fetch(`/api/chats/${chatId}/close`, {
+      const response = await fetch(`/api/v1/chats/${chatId}/close`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });

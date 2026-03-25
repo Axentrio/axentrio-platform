@@ -56,7 +56,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredMenuItems = menuItems.filter((item) => hasAccess(item.roles));
 
   return (
-    <aside className={`flex flex-col h-full bg-surface-0 border-r border-edge ${className}`}>
+    <aside className={`flex flex-col w-full h-full bg-surface-0 border-r border-edge ${className}`}>
       {/* Gradient overlay at top */}
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
 

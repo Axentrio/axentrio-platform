@@ -4,6 +4,7 @@
  */
 
 import crypto from 'crypto';
+import axios from 'axios';
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
@@ -43,12 +44,14 @@ router.get(
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        apiKey: tenant.apiKey,
         tier: tenant.tier,
         status: tenant.status,
         settings: tenant.settings,
         maxSessions: tenant.maxSessions,
         currentSessions: tenant.currentSessions,
         webhookUrl: tenant.webhookUrl,
+        webhookSecret: tenant.webhookSecret,
         customDomain: tenant.customDomain,
         createdAt: tenant.createdAt,
       },
@@ -79,7 +82,13 @@ router.patch(
 
     // Update fields
     if (name) tenant.name = name;
-    if (webhookUrl !== undefined) tenant.webhookUrl = webhookUrl;
+    if (webhookUrl !== undefined) {
+      tenant.webhookUrl = webhookUrl;
+      // Auto-generate webhook secret on first webhookUrl save
+      if (webhookUrl && !tenant.webhookSecret) {
+        tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+      }
+    }
 
     // Merge settings
     if (settings) {
@@ -114,6 +123,7 @@ router.patch(
         name: tenant.name,
         settings: tenant.settings,
         webhookUrl: tenant.webhookUrl,
+        webhookSecret: tenant.webhookSecret,
         updatedAt: tenant.updatedAt,
       },
     });
@@ -318,6 +328,130 @@ router.get(
           images: parseInt(messageStats[0].image_messages, 10),
           files: parseInt(messageStats[0].file_messages, 10),
         },
+      },
+    });
+  })
+);
+
+/**
+ * Test webhook connection
+ * POST /api/v1/tenants/me/webhook-test
+ */
+router.post(
+  '/me/webhook-test',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+
+    const tenantRepository = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepository.findOne({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundError('Tenant not found');
+    }
+
+    if (!tenant.webhookUrl) {
+      res.json({
+        success: false,
+        error: 'No webhook URL configured',
+      });
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(tenant.webhookUrl);
+    } catch {
+      res.json({
+        success: false,
+        error: 'Invalid webhook URL format',
+      });
+      return;
+    }
+
+    const startTime = Date.now();
+    try {
+      const response = await axios.post(
+        tenant.webhookUrl,
+        {
+          event: 'webhook.test',
+          tenantId: tenant.id,
+          timestamp: new Date().toISOString(),
+          payload: { type: 'test', content: 'Webhook connectivity test' },
+        },
+        {
+          timeout: 5000,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Tenant-ID': tenant.id,
+            ...(tenant.webhookSecret ? {
+              'X-Webhook-Secret': tenant.webhookSecret,
+            } : {}),
+          },
+          validateStatus: () => true,
+        }
+      );
+
+      const responseTimeMs = Date.now() - startTime;
+
+      if (response.status >= 200 && response.status < 300) {
+        res.json({
+          success: true,
+          responseTimeMs,
+        });
+      } else {
+        res.json({
+          success: false,
+          error: `Webhook returned status ${response.status}`,
+          responseTimeMs,
+        });
+      }
+    } catch (error: any) {
+      const responseTimeMs = Date.now() - startTime;
+      res.json({
+        success: false,
+        error: error.code === 'ECONNABORTED'
+          ? 'Webhook timed out (5s limit)'
+          : error.message || 'Connection failed',
+        responseTimeMs,
+      });
+    }
+  })
+);
+
+/**
+ * Regenerate webhook secret
+ * POST /api/v1/tenants/me/webhook-secret/regenerate
+ */
+router.post(
+  '/me/webhook-secret/regenerate',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+
+    const tenantRepository = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepository.findOne({
+      where: { id: tenantId },
+    });
+
+    if (!tenant) {
+      throw new NotFoundError('Tenant not found');
+    }
+
+    tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+    await tenantRepository.save(tenant);
+
+    logger.info('Webhook secret regenerated', { tenantId });
+
+    res.json({
+      success: true,
+      data: {
+        webhookSecret: tenant.webhookSecret,
+        message: 'Webhook secret regenerated. Update your n8n workflow with the new secret.',
       },
     });
   })

@@ -1,14 +1,16 @@
 /**
  * Webhook Service
  * Processes n8n responses and manages chat session interactions
+ * Uses TypeORM repositories directly (no stub services)
  */
 
+import { Repository } from 'typeorm';
 import { logger } from '../utils/logger';
-import { emitToSession } from '../websocket/socket.handler';
-import { ChatSessionService } from '../services/chat-session.service';
-import { MessageService } from '../services/message.service';
-import { HandoffService } from '../services/handoff.service';
-import { UserService } from '../services/user.service';
+import { AppDataSource } from '../database/data-source';
+import { ChatSession } from '../database/entities/ChatSession';
+import { Message } from '../database/entities/Message';
+import { HandoffRequest } from '../database/entities/HandoffRequest';
+import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { EventEmitter } from '../utils/event-emitter';
 import {
   ResponsePayload,
@@ -19,10 +21,6 @@ import {
 } from './types';
 
 export interface WebhookServiceConfig {
-  chatSessionService: ChatSessionService;
-  messageService: MessageService;
-  handoffService: HandoffService;
-  userService: UserService;
   eventEmitter: EventEmitter;
   defaultDelay?: number;
   maxDelay?: number;
@@ -30,9 +28,15 @@ export interface WebhookServiceConfig {
 
 export class WebhookService {
   private config: WebhookServiceConfig;
+  private sessionRepo: Repository<ChatSession>;
+  private messageRepo: Repository<Message>;
+  private handoffRepo: Repository<HandoffRequest>;
 
   constructor(config: WebhookServiceConfig) {
     this.config = config;
+    this.sessionRepo = AppDataSource.getRepository(ChatSession);
+    this.messageRepo = AppDataSource.getRepository(Message);
+    this.handoffRepo = AppDataSource.getRepository(HandoffRequest);
     logger.info('WebhookService initialized');
   }
 
@@ -52,8 +56,7 @@ export class WebhookService {
         };
       }
 
-      // Validate session exists
-      const session = await this.config.chatSessionService.getSession(sessionId);
+      const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
       if (!session) {
         logger.warn(`Session not found: ${sessionId}`);
         return {
@@ -74,40 +77,30 @@ export class WebhookService {
 
       switch (payload.type) {
         case 'text':
-          messageId = await this.sendTextMessage(sessionId, payload);
+          messageId = await this.sendTextMessage(sessionId, session.tenantId, payload);
           break;
 
         case 'quick_reply':
-          messageId = await this.sendQuickReplyMessage(sessionId, payload);
+          messageId = await this.sendQuickReplyMessage(sessionId, session.tenantId, payload);
           break;
 
         case 'image':
-          messageId = await this.sendMediaMessage(sessionId, payload, 'image');
-          break;
-
         case 'video':
-          messageId = await this.sendMediaMessage(sessionId, payload, 'video');
-          break;
-
         case 'audio':
-          messageId = await this.sendMediaMessage(sessionId, payload, 'audio');
-          break;
-
         case 'file':
-          messageId = await this.sendMediaMessage(sessionId, payload, 'file');
+          messageId = await this.sendMediaMessage(sessionId, session.tenantId, payload, payload.type);
           break;
 
         case 'carousel':
-          messageId = await this.sendCarouselMessage(sessionId, payload);
+          messageId = await this.sendCarouselMessage(sessionId, session.tenantId, payload);
           break;
 
         case 'template':
-          messageId = await this.sendTemplateMessage(sessionId, payload);
+          messageId = await this.sendTemplateMessage(sessionId, session.tenantId, payload);
           break;
 
         default:
-          // Default to text message
-          messageId = await this.sendTextMessage(sessionId, payload);
+          messageId = await this.sendTextMessage(sessionId, session.tenantId, payload);
       }
 
       // Emit event for real-time delivery
@@ -119,16 +112,13 @@ export class WebhookService {
       });
 
       // Emit via WebSocket to the session room
-      const tenantId = session.tenantId;
-      if (tenantId) {
-        emitToSession(tenantId, sessionId, 'message:receive', {
-          id: messageId,
-          type: payload.type || 'text',
-          content: payload.content,
-          senderType: 'bot',
-          timestamp: new Date().toISOString(),
-        });
-      }
+      emitToSession(session.tenantId, sessionId, 'message:receive', {
+        id: messageId,
+        type: payload.type || 'text',
+        content: payload.content,
+        senderType: 'bot',
+        timestamp: new Date().toISOString(),
+      });
 
       logger.info(`Message sent to session ${sessionId}`, { messageId, type: payload.type });
 
@@ -162,11 +152,10 @@ export class WebhookService {
       }
 
       const messageId = payload.metadata.messageId as string;
-      
-      await this.config.messageService.editMessage(messageId, {
+
+      await this.messageRepo.update(messageId, {
         content: payload.content as string,
-        updatedAt: new Date().toISOString(),
-      });
+      } as any);
 
       this.config.eventEmitter.emit('message:edited', {
         sessionId,
@@ -204,8 +193,8 @@ export class WebhookService {
       }
 
       const messageId = payload.metadata.messageId as string;
-      
-      await this.config.messageService.deleteMessage(messageId);
+
+      await this.messageRepo.update(messageId, { isDeleted: true, deletedAt: new Date() } as any);
 
       this.config.eventEmitter.emit('message:deleted', {
         sessionId,
@@ -261,7 +250,7 @@ export class WebhookService {
     payload: HandoffPayload | undefined
   ): Promise<WebhookResponse> {
     try {
-      const session = await this.config.chatSessionService.getSession(sessionId);
+      const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
       if (!session) {
         return {
           success: false,
@@ -269,30 +258,40 @@ export class WebhookService {
         };
       }
 
-      const handoffResult = await this.config.handoffService.requestHandoff({
+      // Update session status to handoff
+      session.requestHandoff();
+      await this.sessionRepo.save(session);
+
+      // Create handoff request record
+      const handoff = this.handoffRepo.create({
         sessionId,
         tenantId: session.tenantId,
-        userId: session.userId,
+        requestedBy: 'bot',
+        reason: (payload?.reason || 'Bot escalation') as any,
+        priority: (payload?.priority || 'normal') as any,
+        notes: payload?.summary,
+      } as any);
+      const savedHandoff = await this.handoffRepo.save(handoff);
+
+      // Notify agents
+      emitToTenantAgents(session.tenantId, 'handoff:requested', {
+        sessionId,
+        handoffId: savedHandoff.id,
         reason: payload?.reason || 'Bot escalation',
-        queue: payload?.queue || 'default',
-        priority: payload?.priority || 'normal',
-        agentId: payload?.agentId,
-        department: payload?.department,
-        tags: payload?.tags,
-        summary: payload?.summary,
+        requestedAt: new Date().toISOString(),
       });
 
       this.config.eventEmitter.emit('handoff:triggered', {
         sessionId,
-        handoffId: handoffResult.id,
+        handoffId: savedHandoff.id,
         reason: payload?.reason,
       });
 
-      logger.info(`Handoff triggered for session ${sessionId}`, { handoffId: handoffResult.id });
+      logger.info(`Handoff triggered for session ${sessionId}`, { handoffId: savedHandoff.id });
 
       return {
         success: true,
-        messageId: handoffResult.id,
+        messageId: savedHandoff.id,
       };
 
     } catch (error) {
@@ -305,11 +304,11 @@ export class WebhookService {
   }
 
   /**
-   * Release human handoff for a session
+   * Release human handoff for a session (return to bot)
    */
   public async releaseHandoff(sessionId: string): Promise<WebhookResponse> {
     try {
-      await this.config.handoffService.releaseHandoff(sessionId);
+      await this.sessionRepo.update(sessionId, { status: 'bot' as any, assignedAgentId: undefined as any });
 
       this.config.eventEmitter.emit('handoff:released', {
         sessionId,
@@ -369,12 +368,10 @@ export class WebhookService {
   }
 
   /**
-   * Clear session context and history
+   * Clear session context (no-op for now — context is in n8n)
    */
   public async clearSession(sessionId: string): Promise<WebhookResponse> {
     try {
-      await this.config.chatSessionService.clearSessionContext(sessionId);
-
       this.config.eventEmitter.emit('session:cleared', {
         sessionId,
         timestamp: new Date().toISOString(),
@@ -396,7 +393,7 @@ export class WebhookService {
   }
 
   /**
-   * Transfer session to another queue/department
+   * Transfer session to another agent/queue
    */
   public async transferSession(
     sessionId: string,
@@ -410,9 +407,9 @@ export class WebhookService {
         };
       }
 
-      await this.config.chatSessionService.transferSession(sessionId, {
-        target: payload.target as string,
-        reason: payload.reason as string,
+      // target can be an agentId
+      await this.sessionRepo.update(sessionId, {
+        assignedAgentId: payload.target as string,
       });
 
       this.config.eventEmitter.emit('session:transferred', {
@@ -437,7 +434,7 @@ export class WebhookService {
   }
 
   /**
-   * Update user context
+   * Update user context (stored in session metadata)
    */
   public async updateUserContext(
     sessionId: string,
@@ -451,7 +448,7 @@ export class WebhookService {
         };
       }
 
-      const session = await this.config.chatSessionService.getSession(sessionId);
+      const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
       if (!session) {
         return {
           success: false,
@@ -459,11 +456,18 @@ export class WebhookService {
         };
       }
 
-      await this.config.userService.updateUserContext(session.userId, payload);
+      // Store user context in session metadata
+      session.metadata = {
+        ...session.metadata,
+        customData: {
+          ...(session.metadata?.customData || {}),
+          ...payload,
+        },
+      };
+      await this.sessionRepo.save(session);
 
       this.config.eventEmitter.emit('user:updated', {
         sessionId,
-        userId: session.userId,
         updates: payload,
       });
 
@@ -484,85 +488,68 @@ export class WebhookService {
   // Private Helper Methods
   // ============================================================================
 
-  private async sendTextMessage(sessionId: string, payload: ResponsePayload): Promise<string> {
-    const content = typeof payload.content === 'string' 
-      ? payload.content 
-      : JSON.stringify(payload.content);
-
-    const message = await this.config.messageService.createMessage({
+  private async saveMessage(
+    sessionId: string,
+    tenantId: string,
+    type: string,
+    content: string,
+    metadata?: Record<string, unknown>
+  ): Promise<string> {
+    const message = this.messageRepo.create({
       sessionId,
-      type: 'text',
+      tenantId,
+      participantId: 'bot',
+      type,
       content,
-      metadata: payload.metadata,
-      quickReplies: this.normalizeQuickReplies(payload.quickReplies),
-    });
-
-    return message.id;
+      metadata: metadata || undefined,
+    } as any);
+    const saved = await this.messageRepo.save(message) as unknown as Message;
+    return saved.id;
   }
 
-  private async sendQuickReplyMessage(sessionId: string, payload: ResponsePayload): Promise<string> {
-    const content = typeof payload.content === 'string' 
-      ? payload.content 
+  private async sendTextMessage(sessionId: string, tenantId: string, payload: ResponsePayload): Promise<string> {
+    const content = typeof payload.content === 'string'
+      ? payload.content
+      : JSON.stringify(payload.content);
+
+    return this.saveMessage(sessionId, tenantId, 'text', content, payload.metadata);
+  }
+
+  private async sendQuickReplyMessage(sessionId: string, tenantId: string, payload: ResponsePayload): Promise<string> {
+    const content = typeof payload.content === 'string'
+      ? payload.content
       : 'Please select an option:';
 
-    const message = await this.config.messageService.createMessage({
-      sessionId,
-      type: 'quick_reply',
-      content,
+    return this.saveMessage(sessionId, tenantId, 'text', content, {
+      ...payload.metadata,
       quickReplies: this.normalizeQuickReplies(payload.quickReplies),
-      metadata: payload.metadata,
     });
-
-    return message.id;
   }
 
   private async sendMediaMessage(
-    sessionId: string, 
-    payload: ResponsePayload, 
+    sessionId: string,
+    tenantId: string,
+    payload: ResponsePayload,
     mediaType: string
   ): Promise<string> {
-    const attachments = payload.attachments || [];
-    
-    if (attachments.length === 0 && payload.content) {
-      attachments.push({
-        url: payload.content as string,
-        type: mediaType,
-      });
-    }
-
-    const message = await this.config.messageService.createMessage({
-      sessionId,
-      type: mediaType as any,
-      content: payload.content as string || '',
-      attachments,
-      metadata: payload.metadata,
+    return this.saveMessage(sessionId, tenantId, mediaType, payload.content as string || '', {
+      ...payload.metadata,
+      attachments: payload.attachments,
     });
-
-    return message.id;
   }
 
-  private async sendCarouselMessage(sessionId: string, payload: ResponsePayload): Promise<string> {
-    const message = await this.config.messageService.createMessage({
-      sessionId,
-      type: 'carousel',
-      content: '',
-      cards: payload.content as any,
-      metadata: payload.metadata,
+  private async sendCarouselMessage(sessionId: string, tenantId: string, payload: ResponsePayload): Promise<string> {
+    return this.saveMessage(sessionId, tenantId, 'text', '', {
+      ...payload.metadata,
+      cards: payload.content,
     });
-
-    return message.id;
   }
 
-  private async sendTemplateMessage(sessionId: string, payload: ResponsePayload): Promise<string> {
-    const message = await this.config.messageService.createMessage({
-      sessionId,
-      type: 'template',
-      content: '',
-      template: payload.content as any,
-      metadata: payload.metadata,
+  private async sendTemplateMessage(sessionId: string, tenantId: string, payload: ResponsePayload): Promise<string> {
+    return this.saveMessage(sessionId, tenantId, 'text', '', {
+      ...payload.metadata,
+      template: payload.content,
     });
-
-    return message.id;
   }
 
   private normalizeQuickReplies(quickReplies: (string | QuickReply)[] | undefined): QuickReply[] {
@@ -576,7 +563,7 @@ export class WebhookService {
           id: `qr_${index}`,
           title: qr,
           value: qr,
-          action: 'send',
+          action: 'send' as const,
         };
       }
       return {

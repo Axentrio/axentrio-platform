@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
+import { useOrganization } from '@clerk/clerk-react';
 import { Modal } from '@components/Modal';
 import type { Agent, AgentShift, UserStatus } from '@app-types/index';
 
@@ -95,7 +96,7 @@ const Team: React.FC = () => {
   const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [, setSelectedAgentForShifts] = useState<Agent | null>(null);
-  const [activeTab, setActiveTab] = useState<'agents' | 'shifts' | 'performance'>('agents');
+  const [activeTab, setActiveTab] = useState<'members' | 'agents' | 'shifts' | 'performance'>('members');
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -195,7 +196,7 @@ const Team: React.FC = () => {
       {/* Tabs */}
       <div className="border-b border-edge">
         <nav className="flex gap-6">
-          {(['agents', 'shifts', 'performance'] as const).map((tab) => (
+          {(['members', 'agents', 'shifts', 'performance'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -214,6 +215,10 @@ const Team: React.FC = () => {
       </div>
 
       {/* Tab Content */}
+      {activeTab === 'members' && (
+        <OrgMembersPanel />
+      )}
+
       {activeTab === 'agents' && (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
@@ -386,6 +391,211 @@ const Team: React.FC = () => {
         agent={editingAgent}
         onSave={handleSaveAgent}
       />
+    </div>
+  );
+};
+
+// Organization Members Panel
+const OrgMembersPanel: React.FC = () => {
+  const { organization, memberships, isLoaded } = useOrganization({
+    memberships: { infinite: true },
+  });
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'org:admin' | 'org:member'>('org:member');
+  const [isInviting, setIsInviting] = useState(false);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState(false);
+
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!organization || !inviteEmail.trim()) return;
+
+    setIsInviting(true);
+    setInviteError(null);
+    try {
+      await organization.inviteMember({
+        emailAddress: inviteEmail.trim(),
+        role: inviteRole,
+      });
+      setInviteEmail('');
+      setInviteSuccess(true);
+      setTimeout(() => setInviteSuccess(false), 3000);
+      setShowInviteForm(false);
+    } catch (err: any) {
+      setInviteError(err?.errors?.[0]?.message || err?.message || 'Failed to send invite');
+    } finally {
+      setIsInviting(false);
+    }
+  };
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!organization || !confirm('Remove this member from the organization?')) return;
+    try {
+      await organization.removeMember(userId);
+    } catch (err: any) {
+      alert(err?.errors?.[0]?.message || 'Failed to remove member');
+    }
+  };
+
+  const handleUpdateRole = async (userId: string, role: string) => {
+    if (!organization) return;
+    try {
+      await organization.updateMember({ userId, role });
+    } catch (err: any) {
+      alert(err?.errors?.[0]?.message || 'Failed to update role');
+    }
+  };
+
+  if (!isLoaded) {
+    return (
+      <div className="card p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-surface-3 rounded w-1/4" />
+          <div className="h-12 bg-surface-3 rounded" />
+          <div className="h-12 bg-surface-3 rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  const members = memberships?.data || [];
+
+  return (
+    <div className="space-y-4">
+      {/* Invite success */}
+      {inviteSuccess && (
+        <div className="p-4 bg-status-online/10 border border-status-online/20 rounded-xl flex items-center gap-2 text-status-online text-sm">
+          Invitation sent successfully!
+        </div>
+      )}
+
+      {/* Invite form */}
+      {showInviteForm && (
+        <div className="card p-6">
+          <h3 className="text-lg font-semibold text-text-primary mb-4">Invite Member</h3>
+          <form onSubmit={handleInvite} className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="colleague@company.com"
+                className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-text-secondary mb-1">Role</label>
+              <select
+                value={inviteRole}
+                onChange={(e) => setInviteRole(e.target.value as 'org:admin' | 'org:member')}
+                className="px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500"
+              >
+                <option value="org:member">Member</option>
+                <option value="org:admin">Admin</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              disabled={isInviting}
+              className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 transition-all"
+            >
+              {isInviting ? 'Sending...' : 'Send Invite'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInviteForm(false)}
+              className="px-4 py-2 border border-edge text-text-secondary rounded-xl hover:bg-surface-3"
+            >
+              Cancel
+            </button>
+          </form>
+          {inviteError && (
+            <p className="mt-2 text-sm text-red-400">{inviteError}</p>
+          )}
+        </div>
+      )}
+
+      {/* Members table */}
+      <div className="card overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
+          <h3 className="font-semibold text-text-primary">
+            Members <span className="text-text-muted font-normal">({members.length})</span>
+          </h3>
+          {!showInviteForm && (
+            <button
+              onClick={() => setShowInviteForm(true)}
+              className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white text-sm rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              Invite
+            </button>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead className="bg-surface-3">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">User</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Joined</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Role</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-edge">
+              {members.map((membership: any) => {
+                const user = membership.publicUserData;
+                const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || user?.identifier?.[0] || '?'}`;
+                const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.identifier || 'Unknown';
+                const email = user?.identifier || '';
+                const joinedDate = new Date(membership.createdAt).toLocaleDateString();
+
+                return (
+                  <tr key={membership.id} className="hover:bg-surface-3">
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        {user?.imageUrl ? (
+                          <img src={user.imageUrl} alt="" className="w-10 h-10 rounded-full" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
+                            <span className="text-sm font-medium text-primary-400">{initials}</span>
+                          </div>
+                        )}
+                        <div>
+                          <p className="font-medium text-text-primary">{name}</p>
+                          <p className="text-sm text-text-muted">{email}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-6 py-4 text-text-secondary text-sm">{joinedDate}</td>
+                    <td className="px-6 py-4">
+                      <select
+                        value={membership.role}
+                        onChange={(e) => handleUpdateRole(user?.userId, e.target.value)}
+                        className="text-sm bg-surface-3 border border-edge rounded-xl px-2 py-1 text-text-primary focus:outline-none focus:border-primary-500"
+                      >
+                        <option value="org:admin">Admin</option>
+                        <option value="org:member">Member</option>
+                      </select>
+                    </td>
+                    <td className="px-6 py-4">
+                      <button
+                        onClick={() => handleRemoveMember(user?.userId)}
+                        className="p-2 text-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-xl"
+                        title="Remove member"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };

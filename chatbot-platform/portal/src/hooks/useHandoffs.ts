@@ -45,10 +45,7 @@ export const useHandoffs = (options: UseHandoffsOptions = {}): UseHandoffsReturn
     setError(null);
     
     try {
-      const params = new URLSearchParams();
-      params.append('status', status);
-      
-      const response = await fetch(`/api/handoffs?${params.toString()}`);
+      const response = await fetch(`/api/v1/handoffs/pending`);
       if (!response.ok) throw new Error('Failed to fetch handoffs');
       
       const data = await response.json();

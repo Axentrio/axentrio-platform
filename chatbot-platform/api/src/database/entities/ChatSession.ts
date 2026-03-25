@@ -20,7 +20,7 @@ import { Participant } from './Participant';
 import { Message } from './Message';
 import { HandoffRequest } from './HandoffRequest';
 
-export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff';
+export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff' | 'bot';
 
 @Entity('chat_sessions')
 @Index(['tenantId', 'status'])
@@ -38,7 +38,7 @@ export class ChatSession {
 
   @Column({
     type: 'enum',
-    enum: ['active', 'closed', 'waiting', 'handoff'],
+    enum: ['active', 'closed', 'waiting', 'handoff', 'bot'],
     default: 'waiting',
   })
   status!: SessionStatus;

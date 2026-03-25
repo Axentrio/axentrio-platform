@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
 import type { Chat, Message, TypingIndicator } from '@app-types/index';
+import { api } from '@services/apiClient';
 
 interface UseChatOptions {
   chatId?: string;
@@ -48,11 +49,7 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
     setError(null);
     
     try {
-      // Replace with actual API call
-      const response = await fetch(`/api/v1/chats/${chatId}`);
-      if (!response.ok) throw new Error('Failed to fetch chat');
-      
-      const data = await response.json();
+      const data = await api.get<any>(`/v1/chats/${chatId}`);
       setChat(data);
       setMessages(data.messages || []);
     } catch (err: any) {

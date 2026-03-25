@@ -8,6 +8,7 @@ import { useSocket } from '@websocket/SocketContext';
 import { useNotificationSound } from '@websocket/notificationSound';
 import type { HandoffRequest } from '@app-types/index';
 import { REFRESH_INTERVALS } from '@config/constants';
+import { api } from '@services/apiClient';
 
 interface UseHandoffsOptions {
   autoRefresh?: boolean;
@@ -45,10 +46,7 @@ export const useHandoffs = (options: UseHandoffsOptions = {}): UseHandoffsReturn
     setError(null);
     
     try {
-      const response = await fetch(`/api/v1/handoffs/pending`);
-      if (!response.ok) throw new Error('Failed to fetch handoffs');
-      
-      const data = await response.json();
+      const data = await api.get<any>('/v1/handoffs/pending');
       setHandoffs(data.data || []);
     } catch (err: any) {
       setError(err.message || 'Failed to load handoffs');

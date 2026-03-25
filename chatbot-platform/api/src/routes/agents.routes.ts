@@ -9,6 +9,7 @@ import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { cached, invalidate } from '../utils/cache';
+import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
 const router = Router();
 const agentRepository = AppDataSource.getRepository(Agent);
@@ -27,30 +28,29 @@ router.get(
     try {
       const authReq = req as ProvisionedRequest;
       const tenantId = authReq.user?.tenantId;
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-      const offset = parseInt(req.query.offset as string) || 0;
+      const params = parsePaginationParams(req.query as Record<string, unknown>);
       const status = req.query.status as string;
 
-      const where: any = { tenantId };
-      if (status && ['online', 'away', 'busy', 'offline'].includes(status)) {
-        where.status = status;
-      }
-
-      // Only cache the default (unfiltered, first page) request
-      const isDefaultRequest = !status && offset === 0 && limit === 20;
+      const isDefaultRequest = !status && params.page === 1 && params.limit === 20;
       const cacheKey = isDefaultRequest ? `agents:${tenantId}` : null;
 
       const getData = async () => {
-        const [agents, total] = await agentRepository.findAndCount({
-          where,
-          relations: ['user'],
-          order: { createdAt: 'DESC' },
-          take: limit,
-          skip: offset,
-        });
+        const qb = agentRepository.createQueryBuilder('agent')
+          .leftJoinAndSelect('agent.user', 'user')
+          .where('agent.tenantId = :tenantId', { tenantId });
+
+        if (status && ['online', 'away', 'busy', 'offline'].includes(status)) {
+          qb.andWhere('agent.status = :status', { status });
+        }
+
+        if (!params.sortBy) {
+          qb.orderBy('agent.createdAt', 'DESC');
+        }
+
+        const result = await applyPagination(qb, params);
 
         return {
-          agents: agents.map((a) => ({
+          agents: result.data.map((a) => ({
             id: a.id,
             name: a.user?.name,
             email: a.user?.email,
@@ -63,12 +63,7 @@ router.get(
             lastActiveAt: a.lastActiveAt,
             createdAt: a.createdAt,
           })),
-          pagination: {
-            total,
-            limit,
-            offset,
-            hasMore: offset + limit < total,
-          },
+          meta: result.meta,
         };
       };
 

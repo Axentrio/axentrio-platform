@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { parsePaginationParams } from '../utils/pagination';
 
 const router = Router();
 
@@ -49,8 +50,7 @@ router.get(
         return;
       }
 
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-      const offset = parseInt(req.query.offset as string) || 0;
+      const params = parsePaginationParams(req.query as Record<string, unknown>);
       const unreadOnly = req.query.unread === 'true';
 
       let notifications = getUserNotifications(userId);
@@ -59,20 +59,22 @@ router.get(
         notifications = notifications.filter((n) => !n.read);
       }
 
-      // Sort by newest first
       notifications.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
       const total = notifications.length;
-      const paginated = notifications.slice(offset, offset + limit);
+      const offset = (params.page - 1) * params.limit;
+      const paginated = notifications.slice(offset, offset + params.limit);
+      const totalPages = Math.ceil(total / params.limit);
 
       res.json({
         success: true,
         notifications: paginated,
-        pagination: {
+        meta: {
+          page: params.page,
+          limit: params.limit,
           total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
+          totalPages,
+          hasMore: params.page < totalPages,
         },
         unreadCount: getUserNotifications(userId).filter((n) => !n.read).length,
       });

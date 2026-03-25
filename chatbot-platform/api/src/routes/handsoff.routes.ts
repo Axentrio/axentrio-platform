@@ -18,6 +18,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -350,17 +351,20 @@ router.get(
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
       const tenantId = req.tenant?.id;
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
+      const params = parsePaginationParams(req.query as Record<string, unknown>);
 
-      const pendingSessions = await sessionRepository.find({
-        where: { tenantId, status: 'handoff' as const },
-        order: { createdAt: 'ASC' },
-        take: limit,
-      });
+      const qb = sessionRepository.createQueryBuilder('session')
+        .where('session.tenantId = :tenantId', { tenantId })
+        .andWhere('session.status = :status', { status: 'handoff' });
 
-      // Get last message for each session
+      if (!params.sortBy) {
+        qb.orderBy('session.createdAt', 'ASC');
+      }
+
+      const result = await applyPagination(qb, params);
+
       const sessionsWithPreview = await Promise.all(
-        pendingSessions.map(async (session) => {
+        result.data.map(async (session) => {
           const lastMessage = await messageRepository.findOne({
             where: { sessionId: session.id },
             order: { createdAt: 'DESC' },
@@ -385,7 +389,7 @@ router.get(
       res.json({
         success: true,
         pendingRequests: sessionsWithPreview,
-        count: sessionsWithPreview.length,
+        meta: result.meta,
       });
     } catch (error) {
       logger.error('Error fetching pending handoffs:', error);
@@ -522,19 +526,21 @@ router.get(
         return;
       }
 
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-      const offset = parseInt(req.query.offset as string) || 0;
+      const params = parsePaginationParams(req.query as Record<string, unknown>);
 
-      const [requests, total] = await handoffRepository.findAndCount({
-        where: { tenantId, status: 'requested' as const },
-        order: { requestedAt: 'ASC' },
-        take: limit,
-        skip: offset,
-      });
+      const qb = handoffRepository.createQueryBuilder('handoff')
+        .where('handoff.tenantId = :tenantId', { tenantId })
+        .andWhere('handoff.status = :status', { status: 'requested' });
+
+      if (!params.sortBy) {
+        qb.orderBy('handoff.requestedAt', 'ASC');
+      }
+
+      const result = await applyPagination(qb, params);
 
       res.json({
         success: true,
-        queue: requests.map((r) => ({
+        queue: result.data.map((r) => ({
           id: r.id,
           sessionId: r.sessionId,
           status: r.status,
@@ -543,12 +549,7 @@ router.get(
           requestedAt: r.requestedAt,
           waitTimeSeconds: r.getWaitTime(),
         })),
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
-        },
+        meta: result.meta,
       });
     } catch (error) {
       logger.error('Error fetching handoff queue:', error);

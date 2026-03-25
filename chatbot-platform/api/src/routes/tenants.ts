@@ -12,6 +12,7 @@ import { User } from '../database/entities/User';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { logger } from '../utils/logger';
+import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -140,27 +141,24 @@ router.get(
   requireAdmin,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
-    const { page = 1, limit = 20 } = req.query;
+    const params = parsePaginationParams(req.query as Record<string, unknown>);
 
     const userRepository = AppDataSource.getRepository(User);
 
-    const [users, total] = await userRepository.findAndCount({
-      where: { tenantId },
-      select: ['id', 'email', 'name', 'role', 'isActive', 'avatarUrl', 'lastLoginAt', 'createdAt'],
-      order: { createdAt: 'DESC' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
-    });
+    const qb = userRepository.createQueryBuilder('user')
+      .select(['user.id', 'user.email', 'user.name', 'user.role', 'user.isActive', 'user.avatarUrl', 'user.lastLoginAt', 'user.createdAt'])
+      .where('user.tenantId = :tenantId', { tenantId });
+
+    if (!params.sortBy) {
+      qb.orderBy('user.createdAt', 'DESC');
+    }
+
+    const result = await applyPagination(qb, params);
 
     res.json({
       success: true,
-      data: users,
-      meta: {
-        page: Number(page),
-        limit: Number(limit),
-        total,
-        totalPages: Math.ceil(total / Number(limit)),
-      },
+      data: result.data,
+      meta: result.meta,
     });
   })
 );

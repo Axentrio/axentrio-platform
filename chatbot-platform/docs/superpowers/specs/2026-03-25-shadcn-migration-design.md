@@ -77,12 +77,22 @@ These remain as custom Tailwind tokens (not part of shadcn's variable system):
 
 ### Glassmorphism Card Strategy
 
-The current `.card` class applies `bg-surface-2/80 backdrop-blur-sm border border-edge rounded-2xl shadow-card` with hover effects. shadcn's Card only provides `bg-card text-card-foreground rounded-lg border`. To preserve the glassmorphism look:
+The current `.card` CSS class applies `bg-surface-2/80 backdrop-blur-sm border border-edge rounded-2xl shadow-card` with hover effects. shadcn's Card only provides `bg-card text-card-foreground rounded-lg border`. To preserve the glassmorphism look:
 
 - Create a custom `card` variant in the shadcn Card component that adds `backdrop-blur-sm bg-surface-2/80 rounded-2xl shadow-card` via `cn()`.
 - Override shadcn Card's default `rounded-lg` to `rounded-2xl` globally in the component file.
 - Add a hover variant class for cards that need `border-edge-light shadow-card-hover` on hover.
 - This is a one-time customization in `src/components/ui/card.tsx` after installation.
+
+**Migration scope:** The `.card` CSS class is used in ~25 instances across 6 page files (Dashboard ~4, Analytics ~7, Settings ~4, Team ~8, Tenants ~1, Queue). Each `className="card ..."` div must be converted to a `<Card>` component import. This is mechanical but high-volume — handle per-page during Phase 3.
+
+### CSS Variable Cleanup
+
+The existing `--color-primary: #6366f1` in `index.css` will be superseded by shadcn's `--primary` variable. Remove or remap it during the CSS variable setup to avoid conflicts.
+
+### Clerk Appearance Theming
+
+`App.tsx` contains hardcoded hex values in the Clerk `appearance` config (e.g., `colorBackground: '#161821'`). Update these to reference the shadcn CSS variables (e.g., `hsl(var(--card))`) so the Clerk sign-in page stays in sync if tokens are later adjusted.
 
 ### Sidebar Active State
 
@@ -135,7 +145,8 @@ Ordered simplest to most complex:
 - Toggles → `Switch`
 - Volume control → `Slider`
 - API key display → `Card` + copy `Button`
-- Inline confirmation modals (Rotate API Key, Regenerate Webhook Secret) → `AlertDialog`
+- Inline confirmation modals (Rotate API Key, Regenerate Webhook Secret) → `AlertDialog` (these are raw div implementations, NOT using shared Modal.tsx)
+- `alert('Passwords do not match')` → `AlertDialog` or inline form validation
 
 ### Dashboard.tsx
 - Metric cards → `Card` (CardHeader, CardContent)
@@ -158,6 +169,7 @@ Ordered simplest to most complex:
 - Create/edit modal → `Dialog` + form
 - API key → `Input` + copy `Button`
 - Color pickers stay native
+- Delete tenant `confirm()` dialog → `AlertDialog`
 
 ### Analytics.tsx
 - Time range → `Select` or `ToggleGroup`
@@ -178,6 +190,7 @@ Ordered simplest to most complex:
 - Connection status → `Badge`
 - Message input → `Input` + `Button`
 - Message bubbles stay custom
+- Note: This page uses hardcoded hex colors (e.g., `bg-[#161821]`) instead of design tokens. Convert to token classes during migration.
 
 ### Additional shadcn Components to Install (Phase 3)
 
@@ -193,7 +206,7 @@ Ordered simplest to most complex:
 - `@heroicons/react` — already unused in code, pure package.json cleanup
 
 ### Keep Dependencies
-- `lucide-react` — shadcn's default icon library
+- `lucide-react` — shadcn's default icon library (already installed at ^1.0.1)
 - `recharts` — unchanged
 - `@clerk/clerk-react`, `@tanstack/react-query`, `zustand`, `socket.io-client`, `axios`, `date-fns`, `react-router-dom` — untouched
 
@@ -216,9 +229,10 @@ Ordered simplest to most complex:
 - Remove `.status-dot-*` classes (defined but unused in components)
 
 ### Toast Migration
-- Replace `<Toaster>` from react-hot-toast with Sonner's `<Toaster>` in App.tsx
+- Replace BOTH `<Toaster>` instances from react-hot-toast in App.tsx (one in widget-test branch, one in main Clerk branch)
 - Replace all `toast()` / `toast.success()` / `toast.error()` calls with Sonner's API
-- Files with direct toast imports: `App.tsx`, `Settings.tsx`, and any hooks/services using toast (grep all `react-hot-toast` imports)
+- Files with direct toast imports: `App.tsx` (Toaster component), `Settings.tsx` (8 toast calls). No hooks/services import toast.
+- Sonner config mapping: react-hot-toast's `toastOptions.style` + `iconTheme` → Sonner's `theme="dark"` + `richColors` + `toastOptions`. Port custom styling (surface-2 background, edge border, success/error icon colors) to Sonner's prop equivalents.
 
 ### Tailwind Config
 - Keep custom tokens not covered by shadcn CSS variables
@@ -236,7 +250,7 @@ textarea tooltip toggle-group sonner tabs label switch slider skeleton
 select table radio-group separator
 ```
 
-Total: 21 shadcn components
+Total: 22 shadcn components
 
 ## Files Affected
 
@@ -251,4 +265,4 @@ Total: 21 shadcn components
 ### Created
 - `components.json` — shadcn config
 - `src/lib/utils.ts` — cn() helper
-- `src/components/ui/` — 21 shadcn component files
+- `src/components/ui/` — 22 shadcn component files

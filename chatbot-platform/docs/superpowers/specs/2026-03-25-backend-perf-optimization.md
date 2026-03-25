@@ -24,8 +24,8 @@ The backend is slow across all endpoints despite near-zero data (0 sessions, 0 m
 `GET /analytics/dashboard` runs these sequentially:
 1. `COUNT(*) FROM chat_sessions` (total)
 2. `COUNT(*) FROM chat_sessions WHERE status = 'active'` (active)
-3. `COUNT(*) FROM chat_sessions WHERE status = 'handsoff'` (waiting)
-4. `COUNT(*) FROM chat_sessions WHERE status = 'handsoff'` (handoff — duplicate of waiting)
+3. `COUNT(*) FROM chat_sessions WHERE status = 'waiting'` (waiting)
+4. `COUNT(*) FROM chat_sessions WHERE status = 'handoff'` (handoff)
 5. `COUNT(*) FROM chat_sessions WHERE status = 'bot'` (bot)
 6. `COUNT(*) FROM agents` (total)
 7. `COUNT(*) FROM agents WHERE status = 'online'` (online)
@@ -38,8 +38,8 @@ The backend is slow across all endpoints despite near-zero data (0 sessions, 0 m
 SELECT
   COUNT(*) as total,
   COUNT(*) FILTER (WHERE status = 'active') as active,
-  COUNT(*) FILTER (WHERE status = 'handsoff') as waiting,
-  COUNT(*) FILTER (WHERE status = 'handsoff') as handoff,
+  COUNT(*) FILTER (WHERE status = 'waiting') as waiting,
+  COUNT(*) FILTER (WHERE status = 'handoff') as handoff,
   COUNT(*) FILTER (WHERE status = 'bot') as bot,
   COUNT(*) FILTER (WHERE status = 'closed') as closed,
   COUNT(*) FILTER (WHERE status = 'closed' AND assigned_agent_id IS NOT NULL) as human_resolved,

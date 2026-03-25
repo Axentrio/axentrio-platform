@@ -88,6 +88,12 @@ export class Participant {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
+  @Column({ type: 'boolean', default: false, name: 'is_deleted' })
+  isDeleted!: boolean;
+
+  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  deletedAt?: Date;
+
   // Relationships
   @ManyToOne(() => ChatSession, (session) => session.participants, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'session_id' })
@@ -98,7 +104,23 @@ export class Participant {
 
   // Helper methods
   isActive(): boolean {
-    return !this.leftAt;
+    return !this.leftAt && !this.isDeleted;
+  }
+
+  softDelete(): void {
+    this.isDeleted = true;
+    this.deletedAt = new Date();
+    this.email = undefined;
+    if (this.metadata) {
+      const cleaned = { ...this.metadata };
+      delete cleaned.ipAddress;
+      delete cleaned.userAgent;
+      delete cleaned.browser;
+      delete cleaned.os;
+      delete cleaned.device;
+      delete cleaned.location;
+      this.metadata = cleaned;
+    }
   }
 
   leave(): void {

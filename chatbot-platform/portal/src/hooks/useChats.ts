@@ -14,6 +14,8 @@ interface UseChatsOptions {
   filters?: ChatFilters;
   autoRefresh?: boolean;
   refreshInterval?: number;
+  page?: number;
+  limit?: number;
 }
 
 interface UseChatsReturn {
@@ -25,13 +27,20 @@ interface UseChatsReturn {
   updateFilters: (filters: Partial<ChatFilters>) => void;
   takeoverChat: (chatId: string) => Promise<void>;
   closeChat: (chatId: string) => Promise<void>;
+  pagination: {
+    page: number;
+    totalPages: number;
+    hasMore: boolean;
+  };
 }
 
 export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   const { 
     filters = {}, 
     autoRefresh = true, 
-    refreshInterval = REFRESH_INTERVALS.CHAT_LIST 
+    refreshInterval = REFRESH_INTERVALS.CHAT_LIST,
+    page: requestedPage = 1,
+    limit = 20,
   } = options;
   
   const { registerHandlers, unregisterHandlers } = useSocket();
@@ -43,6 +52,8 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   const [error, setError] = useState<string | null>(null);
   const [currentFilters, setCurrentFilters] = useState<ChatFilters>(filters);
   
+  const [currentPage, setCurrentPage] = useState(requestedPage);
+  const [totalPages, setTotalPages] = useState(1);
   const refreshIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Fetch chats
@@ -59,16 +70,25 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
       if (currentFilters.search) params.append('search', currentFilters.search);
       if (currentFilters.dateFrom) params.append('dateFrom', currentFilters.dateFrom);
       if (currentFilters.dateTo) params.append('dateTo', currentFilters.dateTo);
+      if (currentPage) params.append('page', String(currentPage));
+      if (limit) params.append('limit', String(limit));
       
       const data = await api.get<any>(`/chats/sessions?${params.toString()}`);
       setChats(data.data || []);
-      setTotalCount(data.meta?.total || 0);
+      const total = data.meta?.total || data.pagination?.total || 0;
+      setTotalCount(total);
+      setTotalPages(data.meta?.totalPages || data.pagination?.totalPages || Math.ceil(total / limit) || 1);
     } catch (err: any) {
       setError(err.message || 'Failed to load chats');
     } finally {
       setIsLoading(false);
     }
-  }, [currentFilters]);
+  }, [currentFilters, currentPage, limit]);
+
+  // Sync page from caller
+  useEffect(() => {
+    setCurrentPage(requestedPage);
+  }, [requestedPage]);
 
   // Initial fetch and auto-refresh
   useEffect(() => {
@@ -184,6 +204,11 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
     updateFilters,
     takeoverChat,
     closeChat,
+    pagination: {
+      page: currentPage,
+      totalPages,
+      hasMore: currentPage < totalPages,
+    },
   };
 };
 

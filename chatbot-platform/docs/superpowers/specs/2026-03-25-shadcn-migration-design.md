@@ -7,7 +7,7 @@
 ## Decisions
 
 - **Preserve current design** — Map existing dark theme tokens (glassmorphism, glows, status colors) into shadcn's CSS variable system
-- **Remove @headlessui/react** — Fully replaced by Radix primitives via shadcn
+- **Remove @headlessui/react** — Already unused in code, remove from package.json
 - **Remove react-hot-toast** — Replaced by Sonner (shadcn's toast)
 - **Keep recharts as-is** — Only restyle chart containers with shadcn Card
 - **Full migration** — Both `src/components/` and all page files
@@ -49,7 +49,7 @@ Map existing design tokens into shadcn's CSS variable system in the global CSS:
 | `--card-foreground` | text-primary | `#f1f3f9` |
 | `--popover` | surface-3 | `#1e2030` |
 | `--popover-foreground` | text-primary | `#f1f3f9` |
-| `--primary` | primary-600 | `#4f46e5` |
+| `--primary` | primary-600 | `#4f46e5` (button backgrounds, main CTA) |
 | `--primary-foreground` | white | `#ffffff` |
 | `--secondary` | surface-3 | `#1e2030` |
 | `--secondary-foreground` | text-secondary | `#9ca3bf` |
@@ -60,7 +60,7 @@ Map existing design tokens into shadcn's CSS variable system in the global CSS:
 | `--destructive` | — | `#f87171` |
 | `--border` | edge | `#2a2d3e` |
 | `--input` | edge | `#2a2d3e` |
-| `--ring` | primary-600 | `#4f46e5` |
+| `--ring` | primary-500 | `#6366f1` (focus rings use the lighter 500 shade) |
 | `--radius` | — | `0.75rem` |
 
 ### Tokens kept outside shadcn
@@ -74,6 +74,27 @@ These remain as custom Tailwind tokens (not part of shadcn's variable system):
 - Glow shadows (`glow-sm`, `glow`, `glow-lg`, `card`, `card-hover`)
 - Animations (`pulse-slow`, `bounce-slight`, `slide-in`, `fade-in`, `fade-in-up`, `glow-pulse`)
 - Noise background image
+
+### Glassmorphism Card Strategy
+
+The current `.card` class applies `bg-surface-2/80 backdrop-blur-sm border border-edge rounded-2xl shadow-card` with hover effects. shadcn's Card only provides `bg-card text-card-foreground rounded-lg border`. To preserve the glassmorphism look:
+
+- Create a custom `card` variant in the shadcn Card component that adds `backdrop-blur-sm bg-surface-2/80 rounded-2xl shadow-card` via `cn()`.
+- Override shadcn Card's default `rounded-lg` to `rounded-2xl` globally in the component file.
+- Add a hover variant class for cards that need `border-edge-light shadow-card-hover` on hover.
+- This is a one-time customization in `src/components/ui/card.tsx` after installation.
+
+### Sidebar Active State
+
+The Sidebar uses react-router-dom `NavLink` with a left-border active indicator (`bg-primary-600/10 text-primary-400 border-l-2 border-primary-500`). This pattern doesn't map to shadcn Button. Strategy: use shadcn Button ghost variant as the base, apply active styles via `NavLink`'s `className` callback with `cn()`.
+
+### Tailwind v3 Compatibility
+
+The project uses Tailwind 3.3.5. Use `npx shadcn@latest init` which supports Tailwind v3. Do not upgrade to Tailwind v4 as part of this migration — that's a separate effort.
+
+### Rollback Strategy
+
+All work happens on a feature branch. Old component files are replaced in-place (not deleted then recreated). If the migration needs to be rolled back, `git revert` the branch merge.
 
 ---
 
@@ -95,7 +116,7 @@ These remain as custom Tailwind tokens (not part of shadcn's variable system):
 |---|---|
 | `Sidebar.tsx` | Nav items → `Button` (ghost variant) + `Tooltip`. Dropdowns → `DropdownMenu`. |
 | `ChatWindow.tsx` | Inline buttons → `Button`, text input → `Textarea`, rest stays custom. |
-| `ChatStream.tsx` | Search → `Input`, status filters → `ToggleGroup`, chat items → `Card`. |
+| `ChatStream.tsx` | Search → `Input`, status filter dropdown → `Select`, chat items → `Card`. |
 | `TypingIndicator.tsx` | No change — pure animation, no shadcn equivalent. |
 
 ### shadcn Components to Install (Phase 2)
@@ -114,6 +135,7 @@ Ordered simplest to most complex:
 - Toggles → `Switch`
 - Volume control → `Slider`
 - API key display → `Card` + copy `Button`
+- Inline confirmation modals (Rotate API Key, Regenerate Webhook Secret) → `AlertDialog`
 
 ### Dashboard.tsx
 - Metric cards → `Card` (CardHeader, CardContent)
@@ -129,6 +151,7 @@ Ordered simplest to most complex:
 - Agent list → `Table` (TableHeader, TableBody, TableRow, TableCell)
 - Add/edit modal → `Dialog` + form with `Input`, `Label`, `Select`
 - Skills → `Badge` list
+- Browser `confirm()` dialogs → `AlertDialog`
 
 ### Tenants.tsx
 - Tenant list → `Card` or `Table`
@@ -158,16 +181,16 @@ Ordered simplest to most complex:
 
 ### Additional shadcn Components to Install (Phase 3)
 
-`tabs`, `label`, `switch`, `slider`, `skeleton`, `select`, `table`, `radio-group`, `separator`
+`tabs`, `label`, `switch`, `slider`, `skeleton`, `select`, `table`, `radio-group`, `separator`, `alert-dialog`
 
 ---
 
 ## Phase 4: Cleanup
 
 ### Remove Dependencies
-- `@headlessui/react` — fully replaced by Radix via shadcn
+- `@headlessui/react` — already unused in code, pure package.json cleanup
 - `react-hot-toast` — replaced by Sonner
-- `@heroicons/react` — remove if zero imports remain (lucide-react is primary)
+- `@heroicons/react` — already unused in code, pure package.json cleanup
 
 ### Keep Dependencies
 - `lucide-react` — shadcn's default icon library
@@ -187,12 +210,15 @@ Ordered simplest to most complex:
 - Text selection color
 - Animation keyframes
 - `.glass` utility (if still used)
+- `.text-gradient`, `.focus-ring` utility classes
 - Stagger delay classes
 - Print styles
+- Remove `.status-dot-*` classes (defined but unused in components)
 
 ### Toast Migration
 - Replace `<Toaster>` from react-hot-toast with Sonner's `<Toaster>` in App.tsx
 - Replace all `toast()` / `toast.success()` / `toast.error()` calls with Sonner's API
+- Files with direct toast imports: `App.tsx`, `Settings.tsx`, and any hooks/services using toast (grep all `react-hot-toast` imports)
 
 ### Tailwind Config
 - Keep custom tokens not covered by shadcn CSS variables
@@ -205,12 +231,12 @@ Ordered simplest to most complex:
 All components to install:
 
 ```
-dialog badge button dropdown-menu popover command card input textarea
-tooltip toggle-group sonner tabs label switch slider skeleton select
-table radio-group separator
+dialog alert-dialog badge button dropdown-menu popover command card input
+textarea tooltip toggle-group sonner tabs label switch slider skeleton
+select table radio-group separator
 ```
 
-Total: 20 shadcn components
+Total: 21 shadcn components
 
 ## Files Affected
 
@@ -219,10 +245,10 @@ Total: 20 shadcn components
 - `tailwind.config.js` — shadcn integration
 - `src/styles/index.css` — CSS variables + class removal
 - `src/App.tsx` — Toaster swap
-- All 10 files in `src/components/`
-- All 9 files in `src/pages/`
+- All 9 component files in `src/components/` + barrel `index.ts`
+- All 9 page files in `src/pages/` + barrel `index.ts`
 
 ### Created
 - `components.json` — shadcn config
 - `src/lib/utils.ts` — cn() helper
-- `src/components/ui/` — 20 shadcn component files
+- `src/components/ui/` — 21 shadcn component files

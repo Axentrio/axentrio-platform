@@ -26,6 +26,7 @@
       "@services/*": ["src/services/*"],
       "@config/*": ["src/config/*"],
       "@utils/*": ["src/utils/*"],
+      "@/lib/*": ["src/lib/*"],
       "@auth/*": ["src/auth/*"],
       "@websocket/*": ["src/websocket/*"]
     }

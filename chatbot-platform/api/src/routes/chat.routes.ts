@@ -11,6 +11,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
+import { Participant } from '../database/entities/Participant';
 import { logger } from '../utils/logger';
 import { authenticateWidget, AuthenticatedRequest } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
@@ -19,6 +20,7 @@ import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { DecryptionError } from '../utils/encryption';
+import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
 /** Safely serialise a message for API responses, handling decryption failures. */
 function serialiseMessage(m: Message) {
@@ -325,40 +327,36 @@ router.get(
     try {
       const tenantId = req.tenant?.id;
       const status = req.query.status as string;
-      const limit = Math.min(parseInt(req.query.limit as string) || 20, 50);
-      const offset = parseInt(req.query.offset as string) || 0;
+      const params = parsePaginationParams(req.query as Record<string, unknown>);
 
-      const where: any = { tenantId };
+      const qb = sessionRepository
+        .createQueryBuilder('session')
+        .leftJoinAndSelect('session.assignedAgent', 'agent')
+        .where('session.tenantId = :tenantId', { tenantId });
+
       if (status && ['active', 'closed', 'waiting', 'handoff'].includes(status)) {
-        where.status = status;
+        qb.andWhere('session.status = :status', { status });
       }
 
-      const [sessions, total] = await sessionRepository.findAndCount({
-        where,
-        relations: ['assignedAgent'],
-        order: { lastActivityAt: 'DESC' },
-        take: limit,
-        skip: offset,
-      });
+      if (!params.sortBy) {
+        qb.orderBy('session.lastActivityAt', 'DESC');
+      }
+
+      const result = await applyPagination(qb, params);
 
       res.json({
         success: true,
-        sessions: sessions.map((s) => ({
+        sessions: result.data.map((s) => ({
           id: s.id,
           status: s.status,
-          assignedAgent: s.assignedAgent
-            ? {
-                id: s.assignedAgent.id,
-              }
-            : null,
+          assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
           lastActivityAt: s.lastActivityAt,
           createdAt: s.createdAt,
         })),
+        meta: result.meta,
         pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
+          ...result.meta,
+          offset: (result.meta.page - 1) * result.meta.limit,
         },
       });
     } catch (error) {
@@ -560,6 +558,45 @@ router.post(
       });
     } catch (error) {
       logger.error('Error marking messages as read:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  }
+);
+
+router.delete(
+  '/:sessionId/participants/:participantId',
+  requireClerkAuth, autoProvision,
+  async (req: Request, res: Response): Promise<void> => {
+    try {
+      const { sessionId, participantId } = req.params;
+      const authReq = req as AuthenticatedRequest;
+      const tenantId = authReq.user?.tenantId;
+      const participantRepo = AppDataSource.getRepository(Participant);
+
+      const session = await sessionRepository.findOne({
+        where: { id: sessionId, tenantId },
+      });
+
+      if (!session) {
+        res.status(404).json({ error: 'Session not found' });
+        return;
+      }
+
+      const participant = await participantRepo.findOne({
+        where: { id: participantId, sessionId, isDeleted: false },
+      });
+
+      if (!participant) {
+        res.status(404).json({ error: 'Participant not found' });
+        return;
+      }
+
+      participant.softDelete();
+      await participantRepo.save(participant);
+
+      res.status(200).json({ success: true, message: 'Participant deleted' });
+    } catch (error) {
+      logger.error('Failed to soft-delete participant', { error, sessionId: req.params.sessionId });
       res.status(500).json({ error: 'Internal server error' });
     }
   }

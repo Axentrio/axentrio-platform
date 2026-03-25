@@ -282,7 +282,7 @@ router.post(
 
     // Get or create participant
     let participant = await participantRepository.findOne({
-      where: { sessionId, type: 'user' },
+      where: { sessionId, type: 'user', isDeleted: false },
     });
 
     if (!participant) {

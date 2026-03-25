@@ -14,6 +14,7 @@ import { checkEventRateLimit } from './socket-rate-limit';
 import { verifyToken } from '@clerk/backend';
 import { config } from '../config/environment';
 import { resolveClerkIds } from '../middleware/clerk.middleware';
+import { DeepPartial } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
@@ -158,7 +159,7 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   });
 
   // Tenant middleware
-  io.use(validateSocketTenant as any);
+  io.use((socket, next) => validateSocketTenant(socket as TenantSocket, next));
 
   // Handle connections
   io.on('connection', handleConnection);
@@ -343,9 +344,9 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
       type,
       content,
       metadata: metadata || undefined,
-    } as any);
+    } as DeepPartial<Message>);
 
-    const savedMessage = await messageRepository.save(message) as unknown as Message;
+    const savedMessage = await messageRepository.save(message);
 
     // Update session last activity
     session.updateActivity();
@@ -473,9 +474,13 @@ async function handleHandoffRequest(
 
     // Update session status
     session.requestHandoff();
-    if (session.metadata) {
-      (session.metadata as any).handoffReason = reason || 'User requested';
-    }
+    session.metadata = {
+      ...session.metadata,
+      customData: {
+        ...session.metadata?.customData,
+        handoffReason: reason || 'User requested',
+      },
+    };
     await sessionRepository.save(session);
 
     // Notify agents about handoff request

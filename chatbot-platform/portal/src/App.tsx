@@ -6,7 +6,7 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { Toaster } from 'react-hot-toast';
+import { Toaster } from '@/components/ui/sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn, useAuth } from '@clerk/clerk-react';
 
 // Context Providers
@@ -88,17 +88,7 @@ const App: React.FC = () => {
     return (
       <QueryClientProvider client={queryClient}>
         <WidgetTestRouter />
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 5000,
-            style: {
-              background: '#1e2030',
-              color: '#f1f3f9',
-              border: '1px solid #2a2d3e',
-            },
-          }}
-        />
+        <Toaster />
       </QueryClientProvider>
     );
   }
@@ -272,31 +262,7 @@ const App: React.FC = () => {
           </TokenProviderSetup>
         </SignedIn>
 
-        <Toaster
-          position="top-right"
-          toastOptions={{
-            duration: 5000,
-            style: {
-              background: '#1e2030',
-              color: '#f1f3f9',
-              border: '1px solid #2a2d3e',
-            },
-            success: {
-              duration: 3000,
-              iconTheme: {
-                primary: '#34d399',
-                secondary: '#f1f3f9',
-              },
-            },
-            error: {
-              duration: 5000,
-              iconTheme: {
-                primary: '#f87171',
-                secondary: '#f1f3f9',
-              },
-            },
-          }}
-        />
+        <Toaster />
       </QueryClientProvider>
     </ClerkProvider>
   );

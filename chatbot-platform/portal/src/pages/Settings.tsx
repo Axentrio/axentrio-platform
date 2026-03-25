@@ -30,7 +30,7 @@ import { useAppAuth } from '@auth/useAppAuth';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
-import toast from 'react-hot-toast';
+import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';

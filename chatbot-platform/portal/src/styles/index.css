@@ -69,63 +69,6 @@
 }
 
 @layer components {
-  /* Glass Card */
-  .card {
-    @apply bg-surface-2/80 backdrop-blur-sm border border-edge rounded-2xl shadow-card;
-  }
-  .card:hover {
-    @apply border-edge-light shadow-card-hover;
-  }
-
-  /* Buttons */
-  .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200;
-  }
-  .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-500 hover:shadow-glow active:scale-[0.98];
-  }
-  .btn-secondary {
-    @apply bg-surface-3 text-text-primary border border-edge hover:bg-surface-4 hover:border-edge-light;
-  }
-  .btn-ghost {
-    @apply text-text-secondary hover:text-text-primary hover:bg-surface-3;
-  }
-  .btn-danger {
-    @apply bg-red-600/20 text-red-400 border border-red-500/20 hover:bg-red-600/30;
-  }
-
-  /* Inputs */
-  .input {
-    @apply w-full px-4 py-2.5 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 transition-all duration-200;
-  }
-
-  /* Badge */
-  .badge {
-    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold;
-  }
-
-  /* Status dot with glow */
-  .status-dot {
-    @apply w-2.5 h-2.5 rounded-full;
-  }
-  .status-dot-online {
-    @apply bg-status-online shadow-[0_0_8px_rgba(52,211,153,0.5)];
-  }
-  .status-dot-away {
-    @apply bg-status-away shadow-[0_0_8px_rgba(251,191,36,0.5)];
-  }
-  .status-dot-offline {
-    @apply bg-status-offline;
-  }
-  .status-dot-busy {
-    @apply bg-status-busy shadow-[0_0_8px_rgba(248,113,113,0.5)];
-  }
-
-  /* Metric card */
-  .metric-card {
-    @apply card p-6 flex flex-col gap-2 animate-fade-in-up;
-  }
-
   /* Staggered animation delays */
   .stagger-1 { animation-delay: 0.05s; animation-fill-mode: backwards; }
   .stagger-2 { animation-delay: 0.1s; animation-fill-mode: backwards; }

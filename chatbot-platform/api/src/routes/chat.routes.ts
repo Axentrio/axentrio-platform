@@ -125,7 +125,7 @@ router.post(
         return;
       }
 
-      // Save message
+      // Save message + update session in a single transaction
       const message = messageRepository.create({
         sessionId,
         tenantId: tenantId!,
@@ -135,13 +135,14 @@ router.post(
         metadata: metadata || undefined,
       } as any);
 
-      const savedMessage = await messageRepository.save(message) as unknown as Message;
+      const savedMessage = await AppDataSource.transaction(async (manager) => {
+        const msg = await manager.save(message) as unknown as Message;
+        session.updateActivity();
+        await manager.save(session);
+        return msg;
+      });
 
-      // Update session last activity
-      session.updateActivity();
-      await sessionRepository.save(session);
-
-      // Emit via WebSocket to notify connected clients
+      // Emit and forward AFTER transaction commits
       const messageData = {
         id: savedMessage.id,
         type: savedMessage.type,
@@ -153,7 +154,6 @@ router.post(
 
       emitToSession(tenantId!, sessionId, 'message:receive', messageData);
 
-      // Forward visitor messages to n8n if applicable
       forwardMessageToN8n(session, savedMessage).catch((err) => {
         logger.error('Error in n8n message forwarding:', err);
       });

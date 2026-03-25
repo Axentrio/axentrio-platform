@@ -382,11 +382,18 @@ export const strictCspMiddleware = createCSPMiddleware({
 
 /**
  * Widget CSP middleware for embeddable chat widget
+ *
+ * Security trade-off: 'unsafe-inline' is used for style-src because the widget
+ * injects dynamic inline styles for theming and positioning that vary per tenant.
+ * Nonces are not practical here since the widget HTML is served as a static embed
+ * snippet. script-src uses nonces instead of 'unsafe-inline' for stronger protection.
+ *
+ * 'unsafe-inline' is intentionally NOT allowed for script-src.
  */
 export const widgetCspMiddleware = createCSPMiddleware({
   customConfig: {
     defaultSrc: ["'none'"],
-    scriptSrc: ["'self'", "'unsafe-inline'"],
+    scriptSrc: ["'self'"],
     styleSrc: ["'self'", "'unsafe-inline'"],
     imgSrc: ['data:', 'blob:', 'https:'],
     fontSrc: ["'none'"],
@@ -400,7 +407,7 @@ export const widgetCspMiddleware = createCSPMiddleware({
     manifestSrc: ["'none'"],
     workerSrc: ['blob:'],
   },
-  allowInlineScripts: true,
+  useNonce: true,
   allowInlineStyles: true,
 });
 

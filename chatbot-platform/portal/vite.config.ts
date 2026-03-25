@@ -17,7 +17,9 @@ export default defineConfig({
       '@utils': path.resolve(__dirname, './src/utils'),
       '@auth': path.resolve(__dirname, './src/auth'),
       '@websocket': path.resolve(__dirname, './src/websocket'),
+      '@clerk/shared': path.resolve(__dirname, 'node_modules/@clerk/shared'),
     },
+    dedupe: ['@clerk/shared', '@clerk/clerk-react', 'react', 'react-dom'],
   },
   server: {
     port: 4080,

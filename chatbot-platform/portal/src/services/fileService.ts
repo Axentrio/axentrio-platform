@@ -3,7 +3,7 @@
  * API methods for file operations
  */
 
-import { api } from './apiClient';
+import apiClient, { api } from './apiClient';
 import { ENDPOINTS } from '@config/api.config';
 import type { ApiResponse } from '@app-types/index';
 
@@ -48,17 +48,11 @@ export const fileService = {
 
   // Download file
   downloadFile: async (fileId: string, fileName?: string): Promise<void> => {
-    const response = await fetch(`${ENDPOINTS.files.download(fileId)}`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('handsoff_access_token')}`,
-      },
+    const response = await apiClient.get(ENDPOINTS.files.download(fileId), {
+      responseType: 'blob',
     });
 
-    if (!response.ok) {
-      throw new Error('Failed to download file');
-    }
-
-    const blob = await response.blob();
+    const blob = response.data as Blob;
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;

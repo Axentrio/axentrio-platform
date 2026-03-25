@@ -14,6 +14,28 @@ import { TenantRequest } from './tenant.middleware';
 const RATE_LIMIT_WINDOW_MS = config.rateLimit.windowMs;
 const RATE_LIMIT_MAX_REQUESTS = config.rateLimit.maxRequests;
 
+// In-memory fallback counter for when Redis rate limiter encounters errors.
+// This prevents completely failing open when the primary limiter breaks.
+const fallbackCounters = new Map<string, { count: number; resetAt: number }>();
+const FALLBACK_CLEANUP_INTERVAL = 60_000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of fallbackCounters) {
+    if (entry.resetAt <= now) fallbackCounters.delete(key);
+  }
+}, FALLBACK_CLEANUP_INTERVAL);
+
+function fallbackConsume(key: string, maxRequests: number, windowMs: number): boolean {
+  const now = Date.now();
+  let entry = fallbackCounters.get(key);
+  if (!entry || entry.resetAt <= now) {
+    entry = { count: 0, resetAt: now + windowMs };
+    fallbackCounters.set(key, entry);
+  }
+  entry.count++;
+  return entry.count <= maxRequests;
+}
+
 // Lazy-initialised limiters (created on first use after Redis is ready)
 let ipLimiter: RateLimiterAbstract | null = null;
 let tenantLimiter: RateLimiterAbstract | null = null;
@@ -86,9 +108,15 @@ export function rateLimitByIp(
     })
     .catch((rateLimiterRes: RateLimiterRes | Error) => {
       if (rateLimiterRes instanceof Error) {
-        logger.error('Rate limiter error:', rateLimiterRes);
-        // Fail open - allow request if rate limiter fails
-        return next();
+        logger.error('Rate limiter error, using in-memory fallback:', rateLimiterRes);
+        if (fallbackConsume(`ip:${clientIp}`, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS)) {
+          return next();
+        }
+        res.status(429).json({
+          error: 'Too Many Requests',
+          message: 'Rate limit exceeded (fallback). Please try again later.',
+        });
+        return;
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
@@ -124,8 +152,15 @@ export function rateLimitByTenant(
     })
     .catch((rateLimiterRes: RateLimiterRes | Error) => {
       if (rateLimiterRes instanceof Error) {
-        logger.error('Tenant rate limiter error:', rateLimiterRes);
-        return next();
+        logger.error('Tenant rate limiter error, using in-memory fallback:', rateLimiterRes);
+        if (fallbackConsume(`tenant:${tenantId}`, RATE_LIMIT_MAX_REQUESTS * 2, RATE_LIMIT_WINDOW_MS)) {
+          return next();
+        }
+        res.status(429).json({
+          error: 'Too Many Requests',
+          message: 'Tenant rate limit exceeded (fallback). Please try again later.',
+        });
+        return;
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
@@ -158,8 +193,15 @@ export function rateLimitWidget(
     })
     .catch((rateLimiterRes: RateLimiterRes | Error) => {
       if (rateLimiterRes instanceof Error) {
-        logger.error('Widget rate limiter error:', rateLimiterRes);
-        return next();
+        logger.error('Widget rate limiter error, using in-memory fallback:', rateLimiterRes);
+        if (fallbackConsume(`widget:${key}`, 50, RATE_LIMIT_WINDOW_MS)) {
+          return next();
+        }
+        res.status(429).json({
+          error: 'Too Many Requests',
+          message: 'Widget rate limit exceeded (fallback). Please try again later.',
+        });
+        return;
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
@@ -203,8 +245,16 @@ export function rateLimit(
       })
       .catch((error: RateLimiterRes | Error) => {
         if (error instanceof Error) {
-          logger.error('Rate limiter error:', error);
-          return next();
+          logger.error('Combined rate limiter error, using in-memory fallback:', error);
+          const fallbackKey = `combined:${clientIp}:${tenantId || 'none'}`;
+          if (fallbackConsume(fallbackKey, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS)) {
+            return next();
+          }
+          res.status(429).json({
+            error: 'Too Many Requests',
+            message: 'Rate limit exceeded (fallback). Please try again later.',
+          });
+          return;
         }
 
         const retryAfter = Math.ceil(error.msBeforeNext / 1000);
@@ -232,8 +282,8 @@ export async function checkSocketRateLimit(
     return true;
   } catch (error) {
     if (error instanceof Error) {
-      logger.error('Socket rate limiter error:', error);
-      return true; // Fail open
+      logger.error('Socket rate limiter error, using in-memory fallback:', error);
+      return fallbackConsume(`socket:${key}`, 100, RATE_LIMIT_WINDOW_MS);
     }
     return false; // Rate limit exceeded
   }

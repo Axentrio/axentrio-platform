@@ -3,19 +3,19 @@
  * Main application with Clerk auth and routing
  */
 
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from '@/components/ui/sonner';
-import { ClerkProvider, SignedIn, SignedOut, SignIn, useAuth } from '@clerk/clerk-react';
+import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 
 // Context Providers
 import { SocketProvider } from '@websocket/SocketContext';
 
 // Auth
 import { OrganizationRequired } from '@auth/OrganizationRequired';
+import { AppAuthProvider } from '@auth/AppAuthProvider';
 import { ProtectedRoute, AdminRoute, SupervisorRoute } from '@auth/ProtectedRoute';
-import { setTokenProvider } from '@services/apiClient';
 
 // Layout
 import { Sidebar } from '@components/Sidebar';
@@ -42,13 +42,6 @@ const queryClient = new QueryClient({
     },
   },
 });
-
-// Wire Clerk token to API client
-const TokenProviderSetup: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { getToken } = useAuth();
-  useEffect(() => { setTokenProvider(getToken); }, [getToken]);
-  return <>{children}</>;
-};
 
 // Layout wrapper for authenticated pages
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -166,100 +159,66 @@ const App: React.FC = () => {
         </SignedOut>
 
         <SignedIn>
-          <TokenProviderSetup>
+          <AppAuthProvider>
             <OrganizationRequired>
               <BrowserRouter>
-                <Routes>
-                  {/* Protected routes */}
-                  <Route element={<ProtectedRoute />}>
-                    <Route
-                      path="/"
-                      element={
-                        <SocketProvider>
-                          <AuthenticatedLayout>
+                <AuthenticatedLayout>
+                  <Routes>
+                    {/* Protected routes */}
+                    <Route element={<ProtectedRoute />}>
+                      <Route
+                        path="/"
+                        element={
+                          <SocketProvider>
                             <Dashboard />
-                          </AuthenticatedLayout>
-                        </SocketProvider>
-                      }
-                    />
-                    <Route
-                      path="/monitor"
-                      element={
-                        <SocketProvider>
-                          <AuthenticatedLayout>
+                          </SocketProvider>
+                        }
+                      />
+                      <Route
+                        path="/monitor"
+                        element={
+                          <SocketProvider>
                             <LiveMonitor />
-                          </AuthenticatedLayout>
-                        </SocketProvider>
-                      }
-                    />
-                    <Route
-                      path="/takeover/:chatId"
-                      element={
-                        <SocketProvider>
-                          <AuthenticatedLayout>
+                          </SocketProvider>
+                        }
+                      />
+                      <Route
+                        path="/takeover/:chatId"
+                        element={
+                          <SocketProvider>
                             <ChatTakeover />
-                          </AuthenticatedLayout>
-                        </SocketProvider>
-                      }
-                    />
-                    <Route
-                      path="/queue"
-                      element={
-                        <SocketProvider>
-                          <AuthenticatedLayout>
+                          </SocketProvider>
+                        }
+                      />
+                      <Route
+                        path="/queue"
+                        element={
+                          <SocketProvider>
                             <Queue />
-                          </AuthenticatedLayout>
-                        </SocketProvider>
-                      }
-                    />
-                    <Route
-                      path="/settings"
-                      element={
-                        <AuthenticatedLayout>
-                          <Settings />
-                        </AuthenticatedLayout>
-                      }
-                    />
-                  </Route>
+                          </SocketProvider>
+                        }
+                      />
+                      <Route path="/settings" element={<Settings />} />
+                    </Route>
 
-                  {/* Supervisor/Admin routes */}
-                  <Route element={<SupervisorRoute />}>
-                    <Route
-                      path="/analytics"
-                      element={
-                        <AuthenticatedLayout>
-                          <Analytics />
-                        </AuthenticatedLayout>
-                      }
-                    />
-                    <Route
-                      path="/team"
-                      element={
-                        <AuthenticatedLayout>
-                          <Team />
-                        </AuthenticatedLayout>
-                      }
-                    />
-                  </Route>
+                    {/* Supervisor/Admin routes */}
+                    <Route element={<SupervisorRoute />}>
+                      <Route path="/analytics" element={<Analytics />} />
+                      <Route path="/team" element={<Team />} />
+                    </Route>
 
-                  {/* Admin only routes */}
-                  <Route element={<AdminRoute />}>
-                    <Route
-                      path="/tenants"
-                      element={
-                        <AuthenticatedLayout>
-                          <Tenants />
-                        </AuthenticatedLayout>
-                      }
-                    />
-                  </Route>
+                    {/* Admin only routes */}
+                    <Route element={<AdminRoute />}>
+                      <Route path="/tenants" element={<Tenants />} />
+                    </Route>
 
-                  {/* Catch all */}
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
+                    {/* Catch all */}
+                    <Route path="*" element={<Navigate to="/" replace />} />
+                  </Routes>
+                </AuthenticatedLayout>
               </BrowserRouter>
             </OrganizationRequired>
-          </TokenProviderSetup>
+          </AppAuthProvider>
         </SignedIn>
 
         <Toaster />

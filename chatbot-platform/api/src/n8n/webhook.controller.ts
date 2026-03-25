@@ -5,6 +5,7 @@
 
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
+import { config } from '../config/environment';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { WebhookService } from './webhook.service';
@@ -361,8 +362,13 @@ export class WebhookController {
         return false;
       }
 
-      // If no webhookSecret set on tenant, skip verification (easy initial setup)
+      // If no webhookSecret set on tenant, reject in production, warn in dev
       if (!tenant.webhookSecret) {
+        if (config.server.isProduction) {
+          logger.warn(`Tenant ${tenantId} has no webhookSecret configured — rejecting webhook in production`);
+          return false;
+        }
+        logger.warn(`Tenant ${tenantId} has no webhookSecret configured — allowing in development only`);
         return true;
       }
 

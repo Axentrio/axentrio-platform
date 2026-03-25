@@ -82,11 +82,8 @@ const ChatTakeover: React.FC = () => {
 
     const fetchChat = async () => {
       try {
-        const response = await fetch(`/api/chats/${chatId}`);
-        if (response.ok) {
-          const data = await response.json();
-          setChat(data.data);
-        }
+        const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
+        setChat(data.data);
       } catch (error) {
         console.error('Failed to fetch chat:', error);
       }
@@ -100,11 +97,8 @@ const ChatTakeover: React.FC = () => {
 
     try {
       await takeoverChat(chatId);
-      const response = await fetch(`/api/chats/${chatId}`);
-      if (response.ok) {
-        const data = await response.json();
-        setChat(data.data);
-      }
+      const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
+      setChat(data.data);
     } catch (error) {
       console.error('Failed to takeover chat:', error);
     }
@@ -114,11 +108,7 @@ const ChatTakeover: React.FC = () => {
     if (!chatId) return;
 
     try {
-      await fetch(`/api/chats/${chatId}/transfer`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agentId }),
-      });
+      await api.post(`/chats/${chatId}/transfer`, { agentId });
       setIsTransferModalOpen(false);
       navigate('/monitor');
     } catch (error) {

@@ -3,7 +3,7 @@
  * API methods for analytics operations
  */
 
-import { api } from './apiClient';
+import apiClient, { api } from './apiClient';
 import { ENDPOINTS } from '@config/api.config';
 import type { 
   DashboardMetrics, 
@@ -79,8 +79,5 @@ export const analyticsService = {
     return response.data;
   },
 };
-
-// Need to import apiClient for export
-import apiClient from './apiClient';
 
 export default analyticsService;

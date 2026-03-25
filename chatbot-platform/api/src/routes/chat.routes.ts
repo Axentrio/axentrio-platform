@@ -18,6 +18,32 @@ import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { DecryptionError } from '../utils/encryption';
+
+/** Safely serialise a message for API responses, handling decryption failures. */
+function serialiseMessage(m: Message) {
+  let content: string;
+  let decryptionFailed = false;
+  try {
+    content = m.content;
+  } catch (error) {
+    if (error instanceof DecryptionError) {
+      content = '';
+      decryptionFailed = true;
+    } else {
+      throw error;
+    }
+  }
+  return {
+    id: m.id,
+    type: m.type,
+    content,
+    status: m.status,
+    createdAt: m.createdAt,
+    metadata: m.metadata,
+    ...(decryptionFailed ? { decryptionFailed: true } : {}),
+  };
+}
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -67,14 +93,7 @@ router.get(
       res.json({
         success: true,
         sessionId,
-        messages: messages.reverse().map((m) => ({
-          id: m.id,
-          type: m.type,
-          content: m.content,
-          status: m.status,
-          createdAt: m.createdAt,
-          metadata: m.metadata,
-        })),
+        messages: messages.reverse().map(serialiseMessage),
         pagination: {
           total,
           limit,

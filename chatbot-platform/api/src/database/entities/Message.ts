@@ -17,7 +17,8 @@ import {
 } from 'typeorm';
 import { ChatSession } from './ChatSession';
 import { Participant } from './Participant';
-import { encrypt, decrypt } from '../../utils/encryption';
+import { encrypt, decrypt, DecryptionError } from '../../utils/encryption';
+import { logger } from '../../utils/logger';
 
 export type MessageType = 'text' | 'image' | 'file' | 'system' | 'typing';
 export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
@@ -111,16 +112,27 @@ export class Message {
 
   private _decryptedCache: string | null = null;
 
+  /** True when the last decryption attempt failed. */
+  public decryptionFailed: boolean = false;
+
   // Getter for content (with automatic decryption, cached per instance)
   get content(): string {
     if (this.contentEncrypted && this._content) {
       if (this._decryptedCache !== null) return this._decryptedCache;
       try {
-        this._decryptedCache = decrypt(this._content);
+        this._decryptedCache = decrypt(this._content, this.id);
+        this.decryptionFailed = false;
         return this._decryptedCache;
       } catch (error) {
-        console.error('Failed to decrypt message content:', error);
-        return '[Encrypted Message]';
+        this.decryptionFailed = true;
+        logger.error('Failed to decrypt message content', {
+          messageId: this.id,
+          error: error instanceof Error ? error.message : 'Unknown error',
+        });
+        throw new DecryptionError(
+          `Failed to decrypt message ${this.id}`,
+          this.id,
+        );
       }
     }
     return this._content;

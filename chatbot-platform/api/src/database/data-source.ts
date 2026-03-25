@@ -55,8 +55,8 @@ export const AppDataSource = new DataSource({
   logging: config.server.isDevelopment ? ['query', 'error'] : ['error'],
   logger: 'advanced-console',
 
-  // Synchronization — controlled by DB_SYNC env var, defaults to dev-only
-  synchronize: process.env.DB_SYNC === 'true' || (config.server.isDevelopment && !config.database.url),
+  // Synchronization disabled — always use migrations instead
+  synchronize: false,
 });
 
 // Initialize database connection

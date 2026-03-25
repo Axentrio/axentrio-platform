@@ -89,13 +89,6 @@ const Settings: React.FC = () => {
     email: user?.email || '',
   });
 
-  // Password form state
-  const [passwordData, setPasswordData] = useState({
-    currentPassword: '',
-    newPassword: '',
-    confirmPassword: '',
-  });
-
   // Notification preferences
   const [notificationPrefs, setNotificationPrefs] = useState({
     sound: user?.preferences?.notifications?.sound ?? true,
@@ -195,19 +188,6 @@ const Settings: React.FC = () => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     // Profile is managed by Clerk — update via Clerk dashboard
     setIsSaving(false);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 3000);
-  };
-
-  const handleSavePassword = async () => {
-    if (passwordData.newPassword !== passwordData.confirmPassword) {
-      toast.error('Passwords do not match');
-      return;
-    }
-    setIsSaving(true);
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-    setIsSaving(false);
-    setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
     setSaveSuccess(true);
     setTimeout(() => setSaveSuccess(false), 3000);
   };
@@ -338,57 +318,18 @@ const Settings: React.FC = () => {
               </CardContent>
             </Card>
 
-            {/* Change Password */}
+            {/* Password managed by Clerk */}
             <Card variant="glass">
               <CardHeader>
                 <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
                   <Lock className="w-5 h-5" />
-                  Change Password
+                  Password
                 </h2>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <Label htmlFor="currentPassword" className="text-text-secondary">Current Password</Label>
-                    <Input
-                      id="currentPassword"
-                      type="password"
-                      value={passwordData.currentPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, currentPassword: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="newPassword" className="text-text-secondary">New Password</Label>
-                    <Input
-                      id="newPassword"
-                      type="password"
-                      value={passwordData.newPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, newPassword: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label htmlFor="confirmPassword" className="text-text-secondary">Confirm New Password</Label>
-                    <Input
-                      id="confirmPassword"
-                      type="password"
-                      value={passwordData.confirmPassword}
-                      onChange={(e) => setPasswordData({ ...passwordData, confirmPassword: e.target.value })}
-                    />
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      onClick={handleSavePassword}
-                      disabled={isSaving || !passwordData.currentPassword || !passwordData.newPassword}
-                    >
-                      {isSaving ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
-                      ) : (
-                        <Save className="w-4 h-4" />
-                      )}
-                      Update Password
-                    </Button>
-                  </div>
-                </div>
+                <p className="text-sm text-text-secondary">
+                  Your password is managed by Clerk. To change your password, use the Clerk user menu or visit your Clerk account settings.
+                </p>
               </CardContent>
             </Card>
           </div>

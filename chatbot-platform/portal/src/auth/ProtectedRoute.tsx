@@ -26,10 +26,10 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
   // Show loading state
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="h-full flex items-center justify-center">
         <div className="flex flex-col items-center space-y-4">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600"></div>
-          <p className="text-gray-600">Loading...</p>
+          <p className="text-text-secondary">Loading...</p>
         </div>
       </div>
     );
@@ -47,7 +47,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
       return fallback ? (
         <>{fallback}</>
       ) : (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="h-full flex items-center justify-center">
           <div className="text-center">
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
             <p className="text-gray-600 mb-4">
@@ -70,7 +70,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return fallback ? (
       <>{fallback}</>
     ) : (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+      <div className="h-full flex items-center justify-center">
         <div className="text-center">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Access Denied</h1>
           <p className="text-gray-600 mb-4">

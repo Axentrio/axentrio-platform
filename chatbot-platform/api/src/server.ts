@@ -55,14 +55,32 @@ if (config.server.isProduction) {
 }
 app.use(cors({
   origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+
     const allowed = [
       ...(Array.isArray(config.cors.origin) ? config.cors.origin : [config.cors.origin]),
     ].filter(Boolean);
-    // Allow requests with no origin (mobile, curl) and Clerk domains
-    if (!origin || allowed.includes('*') || allowed.includes(origin) || origin?.includes('.clerk.accounts.dev')) {
+
+    // In development, also allow common localhost origins
+    const devOrigins = config.server.isDevelopment
+      ? ['http://localhost:4080', 'http://localhost:3000', 'http://localhost:5173']
+      : [];
+
+    const allAllowed = [...allowed, ...devOrigins];
+
+    if (
+      allAllowed.includes('*') ||
+      allAllowed.includes(origin) ||
+      origin.endsWith('.clerk.accounts.dev')
+    ) {
       callback(null, true);
     } else {
-      callback(null, true); // Allow all for now, lock down later
+      logger.warn(`CORS request blocked from origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: config.cors.credentials,

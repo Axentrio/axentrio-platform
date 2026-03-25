@@ -1,6 +1,12 @@
 /**
  * Encryption Utilities
  * AES-256 encryption for sensitive data
+ *
+ * Version 1 (legacy): key derived via SHA-256
+ * Version 2 (current): key derived via PBKDF2
+ *
+ * Encrypted payloads are prefixed with a single version byte so decrypt
+ * can pick the correct key derivation automatically.
  */
 
 import crypto from 'crypto';
@@ -11,22 +17,79 @@ import { logger } from '../utils/logger';
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = config.encryption.ivLength;
 const AUTH_TAG_LENGTH = 16;
-// Key length: 32 bytes for AES-256
 
-// Derive key from config (memoized — key never changes at runtime)
-let _cachedKey: Buffer | null = null;
+// PBKDF2 parameters for v2 key derivation
+const PBKDF2_ITERATIONS = 100_000;
+const PBKDF2_KEY_LENGTH = 32;
+const PBKDF2_DIGEST = 'sha256';
 
-const getKey = (): Buffer => {
-  if (_cachedKey) return _cachedKey;
+// Version bytes written as the first byte of the encrypted payload
+const VERSION_LEGACY = 0x01;
+const VERSION_PBKDF2 = 0x02;
+
+// ---------------------------------------------------------------------------
+// Key derivation (memoised — keys never change at runtime)
+// ---------------------------------------------------------------------------
+
+let _cachedLegacyKey: Buffer | null = null;
+let _cachedPbkdf2Key: Buffer | null = null;
+
+/** Legacy (v1) key: SHA-256 of the raw config string. */
+const getLegacyKey = (): Buffer => {
+  if (_cachedLegacyKey) return _cachedLegacyKey;
   const keyString = config.encryption.key;
-  _cachedKey = crypto.createHash('sha256').update(keyString).digest();
-  return _cachedKey;
+  _cachedLegacyKey = crypto.createHash('sha256').update(keyString).digest();
+  return _cachedLegacyKey;
 };
 
 /**
- * Encrypt text using AES-256-GCM
- * @param text - Plain text to encrypt
- * @returns Encrypted string (base64 encoded: iv:authTag:ciphertext)
+ * Deterministic salt derived from the encryption key config value.
+ * Using a key-specific salt keeps derivation deterministic (same key config
+ * always produces the same derived key) while still adding cost via PBKDF2.
+ */
+const getPbkdf2Salt = (): Buffer => {
+  return crypto
+    .createHash('sha256')
+    .update(`pbkdf2-salt:${config.encryption.key}`)
+    .digest();
+};
+
+/** v2 key: PBKDF2 of the raw config string with a deterministic salt. */
+const getPbkdf2Key = (): Buffer => {
+  if (_cachedPbkdf2Key) return _cachedPbkdf2Key;
+  const keyString = config.encryption.key;
+  _cachedPbkdf2Key = crypto.pbkdf2Sync(
+    keyString,
+    getPbkdf2Salt(),
+    PBKDF2_ITERATIONS,
+    PBKDF2_KEY_LENGTH,
+    PBKDF2_DIGEST,
+  );
+  return _cachedPbkdf2Key;
+};
+
+// ---------------------------------------------------------------------------
+// Custom error for decryption failures
+// ---------------------------------------------------------------------------
+
+export class DecryptionError extends Error {
+  /** Optional message entity ID for debugging — never contains content. */
+  public readonly messageId?: string;
+
+  constructor(reason: string, messageId?: string) {
+    super(reason);
+    this.name = 'DecryptionError';
+    this.messageId = messageId;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Encrypt / Decrypt
+// ---------------------------------------------------------------------------
+
+/**
+ * Encrypt text using AES-256-GCM (v2 — PBKDF2-derived key).
+ * The output is base64-encoded: versionByte + iv + authTag + ciphertext.
  */
 export const encrypt = (text: string): string => {
   try {
@@ -34,7 +97,7 @@ export const encrypt = (text: string): string => {
       return text;
     }
 
-    const key = getKey();
+    const key = getPbkdf2Key();
     const iv = crypto.randomBytes(IV_LENGTH);
     const cipher = crypto.createCipheriv(ALGORITHM, key, iv);
 
@@ -43,8 +106,13 @@ export const encrypt = (text: string): string => {
 
     const authTag = cipher.getAuthTag();
 
-    // Combine iv + authTag + encrypted data
-    const result = Buffer.concat([iv, authTag, Buffer.from(encrypted, 'hex')]);
+    // version byte + iv + authTag + ciphertext
+    const result = Buffer.concat([
+      Buffer.from([VERSION_PBKDF2]),
+      iv,
+      authTag,
+      Buffer.from(encrypted, 'hex'),
+    ]);
     return result.toString('base64');
   } catch (error) {
     logger.error('Encryption failed', {
@@ -55,23 +123,48 @@ export const encrypt = (text: string): string => {
 };
 
 /**
- * Decrypt text using AES-256-GCM
- * @param encryptedData - Encrypted string (base64 encoded: iv:authTag:ciphertext)
- * @returns Decrypted plain text
+ * Decrypt text using AES-256-GCM.
+ *
+ * Automatically detects the version byte to choose key derivation:
+ *   0x02 → PBKDF2 (current)
+ *   anything else → legacy SHA-256 (backward-compatible)
+ *
+ * @param encryptedData - base64-encoded ciphertext
+ * @param messageId - optional message ID for error context (never logged content)
  */
-export const decrypt = (encryptedData: string): string => {
+export const decrypt = (encryptedData: string, messageId?: string): string => {
   try {
     if (!encryptedData) {
       return encryptedData;
     }
 
-    const key = getKey();
     const data = Buffer.from(encryptedData, 'base64');
 
-    // Extract iv, authTag, and encrypted content
-    const iv = data.subarray(0, IV_LENGTH);
-    const authTag = data.subarray(IV_LENGTH, IV_LENGTH + AUTH_TAG_LENGTH);
-    const encrypted = data.subarray(IV_LENGTH + AUTH_TAG_LENGTH);
+    let key: Buffer;
+    let payloadOffset: number;
+
+    const versionByte = data[0];
+
+    if (versionByte === VERSION_PBKDF2) {
+      // v2: first byte is version, then iv + authTag + ciphertext
+      key = getPbkdf2Key();
+      payloadOffset = 1;
+    } else if (versionByte === VERSION_LEGACY) {
+      // Explicitly tagged v1
+      key = getLegacyKey();
+      payloadOffset = 1;
+    } else {
+      // Untagged legacy payload (written before versioning was added)
+      key = getLegacyKey();
+      payloadOffset = 0;
+    }
+
+    const iv = data.subarray(payloadOffset, payloadOffset + IV_LENGTH);
+    const authTag = data.subarray(
+      payloadOffset + IV_LENGTH,
+      payloadOffset + IV_LENGTH + AUTH_TAG_LENGTH,
+    );
+    const encrypted = data.subarray(payloadOffset + IV_LENGTH + AUTH_TAG_LENGTH);
 
     const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
@@ -81,10 +174,12 @@ export const decrypt = (encryptedData: string): string => {
 
     return decrypted;
   } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Unknown error';
     logger.error('Decryption failed', {
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: reason,
+      ...(messageId ? { messageId } : {}),
     });
-    throw new Error('Failed to decrypt data');
+    throw new DecryptionError(`Failed to decrypt data: ${reason}`, messageId);
   }
 };
 
@@ -200,6 +295,7 @@ export const isEncrypted = (data: string): boolean => {
 export default {
   encrypt,
   decrypt,
+  DecryptionError,
   hash,
   generateToken,
   generateApiKey,

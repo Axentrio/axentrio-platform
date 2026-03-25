@@ -3,7 +3,7 @@
  * Handles audio notifications for handoff requests and messages
  */
 
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef, useEffect, useState } from 'react';
 
 // Sound file URLs - these should be placed in the public folder
 const SOUND_URLS = {
@@ -133,6 +133,8 @@ export const notificationSound = new NotificationSound();
 // React hook for notification sounds
 export const useNotificationSound = () => {
   const soundRef = useRef(notificationSound);
+  const [isMuted, setIsMutedState] = useState(() => soundRef.current.getMuted());
+  const [volume, setVolumeState] = useState(() => soundRef.current.getVolume());
 
   // Initialize on first user interaction
   useEffect(() => {
@@ -171,18 +173,19 @@ export const useNotificationSound = () => {
 
   const setMuted = useCallback((muted: boolean) => {
     soundRef.current.setMuted(muted);
+    setIsMutedState(muted);
   }, []);
 
   const toggleMute = useCallback(() => {
-    return soundRef.current.toggleMute();
+    const newMuted = soundRef.current.toggleMute();
+    setIsMutedState(newMuted);
+    return newMuted;
   }, []);
 
-  const setVolume = useCallback((volume: number) => {
-    soundRef.current.setVolume(volume);
+  const setVolume = useCallback((vol: number) => {
+    soundRef.current.setVolume(vol);
+    setVolumeState(soundRef.current.getVolume());
   }, []);
-
-  const isMuted = soundRef.current.getMuted();
-  const volume = soundRef.current.getVolume();
 
   return {
     playHandoff,

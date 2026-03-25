@@ -6,6 +6,9 @@
 import React, { useState } from 'react';
 import { X, FileText, Image, Video, Music, File } from 'lucide-react';
 import { fileService } from '@services/fileService';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 
 interface FilePreviewProps {
   fileUrl: string;
@@ -135,9 +138,8 @@ export const FilePreview: React.FC<FilePreviewProps> = ({
   };
 
   return (
-    <div className={`bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge ${className}`}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-edge">
+    <Card variant="glass" className={cn("overflow-hidden", className)}>
+      <CardHeader className="flex-row items-center justify-between gap-3 px-4 py-3 space-y-0 border-b border-edge">
         <div className="flex items-center gap-3 min-w-0">
           {getFileIcon()}
           <div className="min-w-0">
@@ -150,18 +152,18 @@ export const FilePreview: React.FC<FilePreviewProps> = ({
           </div>
         </div>
         {onClose && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon"
             onClick={onClose}
-            className="p-1.5 text-text-muted hover:text-text-secondary hover:bg-surface-3 rounded-xl transition-colors"
+            className="text-text-muted hover:text-text-secondary"
           >
             <X className="w-5 h-5" />
-          </button>
+          </Button>
         )}
-      </div>
+      </CardHeader>
 
-      {/* Preview content */}
-      <div className="p-4">
+      <CardContent className="p-4">
         {error ? (
           <div className="flex flex-col items-center justify-center p-8 text-text-secondary">
             <File className="w-16 h-16 text-text-muted mb-4" />
@@ -170,8 +172,8 @@ export const FilePreview: React.FC<FilePreviewProps> = ({
         ) : (
           renderPreview()
         )}
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -203,11 +205,10 @@ export const FileAttachment: React.FC<FileAttachmentProps> = ({
     <button
       type="button"
       onClick={onClick}
-      className={`
-        flex items-center gap-3 px-3 py-2 bg-surface-3 hover:bg-surface-4
-        rounded-xl transition-colors text-left
-        ${className}
-      `}
+      className={cn(
+        "flex items-center gap-3 px-3 py-2 bg-surface-3 hover:bg-surface-4 rounded-xl transition-colors text-left",
+        className
+      )}
     >
       <div className="flex-shrink-0 text-text-secondary">
         {getIcon()}

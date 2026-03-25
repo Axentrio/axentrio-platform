@@ -10,6 +10,9 @@ import { useNotificationSound } from '@websocket/notificationSound';
 import { ChatStatusBadge } from './StatusBadge';
 import { TypingIndicator, CompactTypingIndicator } from './TypingIndicator';
 import { FileAttachment } from './FilePreview';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 import type { Chat, Message } from '@app-types/index';
 
 interface ChatWindowProps {
@@ -88,13 +91,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       >
         <div className={`flex max-w-[80%] ${isAgent ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
           {/* Avatar */}
-          <div className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium ${
+          <div className={cn(
+            'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
             isAgent
               ? 'bg-primary-600/20 text-primary-400'
               : isBot
                 ? 'bg-chat-bot/20 text-chat-bot'
                 : 'bg-surface-3 text-text-secondary'
-          }`}>
+          )}>
             {isAgent ? 'A' : isBot ? 'B' : <User className="w-4 h-4" />}
           </div>
 
@@ -107,13 +111,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
             {/* Message bubble */}
             <div
-              className={`px-4 py-2 rounded-2xl ${
+              className={cn(
+                'px-4 py-2 rounded-2xl',
                 isAgent
                   ? 'bg-primary-600 text-white rounded-br-md'
                   : isBot
                     ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'
                     : 'bg-surface-3 text-text-primary rounded-bl-md'
-              }`}
+              )}
             >
               {message.type === 'text' ? (
                 <p className="text-sm whitespace-pre-wrap">{message.content}</p>
@@ -146,7 +151,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge ${className}`}>
+    <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-edge bg-surface-2">
         <div className="flex items-center gap-3">
@@ -168,29 +173,32 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
         <div className="flex items-center gap-2">
           {onTransfer && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => onTransfer(chat.id)}
-              className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors"
+              className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
               title="Transfer chat"
             >
               <Phone className="w-5 h-5" />
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
           >
             <MoreVertical className="w-5 h-5" />
-          </button>
+          </Button>
           {onClose && (
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={onClose}
-              className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors"
+              className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
             >
               ×
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -220,15 +228,16 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       {/* Input area */}
       <div className="px-4 py-3 border-t border-edge bg-surface-2">
         <div className="flex items-end gap-2">
-          <button
-            type="button"
-            className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors flex-shrink-0"
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl flex-shrink-0"
           >
             <Paperclip className="w-5 h-5" />
-          </button>
+          </Button>
 
           <div className="flex-1 relative">
-            <textarea
+            <Textarea
               ref={inputRef}
               value={messageInput}
               onChange={(e) => {
@@ -243,14 +252,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             />
           </div>
 
-          <button
-            type="button"
+          <Button
             onClick={handleSend}
             disabled={!messageInput.trim()}
             className="p-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
+            size="icon"
           >
             <Send className="w-5 h-5" />
-          </button>
+          </Button>
         </div>
 
         {/* Typing indicator text */}

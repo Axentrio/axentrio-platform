@@ -9,6 +9,16 @@ import { useChats } from '@hooks/useChats';
 import { ChatStatusBadge } from './StatusBadge';
 import { TenantSelector } from './TenantSelector';
 import { useDebounce } from '@hooks/useDebounce';
+import { Input } from '@/components/ui/input';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { Chat, ChatStatus, Tenant } from '@app-types/index';
 
 interface ChatStreamProps {
@@ -79,7 +89,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
   };
 
   return (
-    <div className={`flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge ${className}`}>
+    <div className={cn('flex flex-col h-full bg-surface-2 rounded-2xl shadow-card overflow-hidden border border-edge', className)}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-edge">
         <div className="flex items-center justify-between mb-3">
@@ -96,29 +106,33 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
         <div className="space-y-2">
           {/* Search */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
-            <input
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted z-10" />
+            <Input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search chats..."
-              className="w-full pl-9 pr-3 py-2 bg-surface-3 border border-edge rounded-xl text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              className="pl-9 bg-surface-3 border-edge rounded-xl text-text-primary placeholder:text-text-muted focus-visible:border-primary-500 focus-visible:ring-primary-500/30"
             />
           </div>
 
           {/* Status and Tenant filters */}
           <div className="flex gap-2">
-            <select
+            <Select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as ChatStatus | 'all')}
-              className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-sm text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              onValueChange={(value) => setStatusFilter(value as ChatStatus | 'all')}
             >
-              {statusFilters.map((filter) => (
-                <option key={filter.value} value={filter.value}>
-                  {filter.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
+                <SelectValue placeholder="All Status" />
+              </SelectTrigger>
+              <SelectContent>
+                {statusFilters.map((filter) => (
+                  <SelectItem key={filter.value} value={filter.value}>
+                    {filter.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
 
             <TenantSelector
               tenants={tenants}
@@ -158,11 +172,12 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
             <div
               key={chat.id}
               onClick={() => onChatSelect(chat)}
-              className={`
-                px-4 py-3 border-b border-edge/50 cursor-pointer transition-colors
-                hover:bg-surface-3
-                ${selectedChatId === chat.id ? 'bg-primary-600/10 border-l-4 border-l-primary-500' : 'border-l-4 border-l-transparent'}
-              `}
+              className={cn(
+                'px-4 py-3 border-b border-edge/50 cursor-pointer transition-colors hover:bg-surface-3',
+                selectedChatId === chat.id
+                  ? 'bg-primary-600/10 border-l-4 border-l-primary-500'
+                  : 'border-l-4 border-l-transparent'
+              )}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
@@ -199,16 +214,17 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
                 {/* Takeover button for handoff chats */}
                 {chat.status === 'handsoff' && (
-                  <button
+                  <Button
+                    size="sm"
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       onTakeover(chat.id);
                     }}
-                    className="px-3 py-1.5 bg-primary-600 text-white text-xs font-medium rounded-xl hover:bg-primary-500 hover:shadow-glow-sm transition-all flex-shrink-0"
+                    className="bg-primary-600 text-white text-xs font-medium rounded-xl hover:bg-primary-500 hover:shadow-glow-sm flex-shrink-0"
                   >
                     Takeover
-                  </button>
+                  </Button>
                 )}
               </div>
             </div>

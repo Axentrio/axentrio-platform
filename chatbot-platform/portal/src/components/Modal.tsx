@@ -1,10 +1,19 @@
 /**
  * Modal Component
- * Reusable modal dialog
+ * Reusable modal dialog — powered by shadcn Dialog (Radix)
  */
 
-import React, { useEffect, useRef } from 'react';
+import React from 'react';
 import { X } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogOverlay,
+  DialogPortal,
+} from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
 
 interface ModalProps {
   isOpen: boolean;
@@ -16,6 +25,14 @@ interface ModalProps {
   closeOnOverlayClick?: boolean;
 }
 
+const sizeClasses: Record<NonNullable<ModalProps['size']>, string> = {
+  sm: 'max-w-md',
+  md: 'max-w-lg',
+  lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
+  full: 'max-w-full mx-4',
+};
+
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
   onClose,
@@ -25,74 +42,40 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
   closeOnOverlayClick = true,
 }) => {
-  const modalRef = useRef<HTMLDivElement>(null);
-
-  // Handle escape key
-  useEffect(() => {
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleEscape);
-    return () => document.removeEventListener('keydown', handleEscape);
-  }, [isOpen, onClose]);
-
-  // Lock body scroll when modal is open
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
-    }
-    return () => {
-      document.body.style.overflow = '';
-    };
-  }, [isOpen]);
-
-  const getSizeClass = () => {
-    switch (size) {
-      case 'sm':
-        return 'max-w-md';
-      case 'md':
-        return 'max-w-lg';
-      case 'lg':
-        return 'max-w-2xl';
-      case 'xl':
-        return 'max-w-4xl';
-      case 'full':
-        return 'max-w-full mx-4';
-      default:
-        return 'max-w-lg';
-    }
-  };
-
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      {/* Overlay */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
-        onClick={closeOnOverlayClick ? onClose : undefined}
-      />
-
-      {/* Modal container */}
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div
-          ref={modalRef}
-          className={`
-            relative w-full ${getSizeClass()} bg-surface-2 rounded-2xl shadow-card border border-edge
-            transform transition-all animate-fade-in
-          `}
-          onClick={(e) => e.stopPropagation()}
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <DialogPortal>
+        <DialogOverlay className="bg-black/60 backdrop-blur-sm" />
+        <DialogContent
+          className={cn(
+            sizeClasses[size],
+            'bg-surface-2 rounded-2xl shadow-card border border-edge p-0 gap-0',
+            // Hide the default shadcn/radix close button — we render our own
+            '[&>button.absolute]:hidden',
+          )}
+          onInteractOutside={(e) => {
+            if (!closeOnOverlayClick) e.preventDefault();
+          }}
         >
+          {/* Visually-hidden title for accessibility when no visible title */}
+          {!title && (
+            <DialogTitle className="sr-only">Dialog</DialogTitle>
+          )}
+
           {/* Header */}
           {(title || showCloseButton) && (
-            <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
-              {title && (
-                <h3 className="text-lg font-semibold text-text-primary">{title}</h3>
+            <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b border-edge space-y-0">
+              {title ? (
+                <DialogTitle className="text-lg font-semibold text-text-primary">
+                  {title}
+                </DialogTitle>
+              ) : (
+                <div />
               )}
               {showCloseButton && (
                 <button
@@ -103,14 +86,14 @@ export const Modal: React.FC<ModalProps> = ({
                   <X className="w-5 h-5" />
                 </button>
               )}
-            </div>
+            </DialogHeader>
           )}
 
           {/* Content */}
           <div className="p-6">{children}</div>
-        </div>
-      </div>
-    </div>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
   );
 };
 

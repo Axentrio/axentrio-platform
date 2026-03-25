@@ -5,6 +5,8 @@
 
 import React from 'react';
 import { CHAT_STATUS_COLORS, USER_STATUS_COLORS, PRIORITY_COLORS } from '@config/api.config';
+import { Badge } from '@/components/ui/badge';
+import { cn } from '@/lib/utils';
 import type { ChatStatus, UserStatus, HandoffPriority } from '@app-types/index';
 
 interface StatusBadgeProps {
@@ -67,13 +69,26 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     }
   };
 
+  const getDotSizeClass = () => {
+    switch (size) {
+      case 'sm':
+        return 'w-2 h-2';
+      case 'md':
+        return 'w-2.5 h-2.5';
+      case 'lg':
+        return 'w-3 h-3';
+      default:
+        return 'w-2.5 h-2.5';
+    }
+  };
+
   const colorClass = getColorClass();
   const sizeClass = getSizeClass();
 
   if (!showLabel) {
     return (
       <span
-        className={`inline-block rounded-full ${colorClass} ${sizeClass} ${className}`}
+        className={cn('inline-block rounded-full', colorClass, sizeClass, className)}
         title={statusLabels[status] || status}
       />
     );
@@ -81,17 +96,17 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
 
   if (type === 'priority') {
     return (
-      <span
-        className={`inline-flex items-center rounded-full font-medium ${colorClass} ${sizeClass} ${className}`}
+      <Badge
+        className={cn('border-transparent font-medium', colorClass, sizeClass, className)}
       >
         {statusLabels[status] || status}
-      </span>
+      </Badge>
     );
   }
 
   return (
-    <span className={`inline-flex items-center gap-1.5 ${className}`}>
-      <span className={`inline-block rounded-full ${colorClass} ${sizeClass.replace(/px-.*\s/, '').replace(/py-.*\s/, '').replace(/text-.*\s/, '')}`} />
+    <span className={cn('inline-flex items-center gap-1.5', className)}>
+      <span className={cn('inline-block rounded-full', colorClass, getDotSizeClass())} />
       <span className="text-sm text-text-secondary">{statusLabels[status] || status}</span>
     </span>
   );

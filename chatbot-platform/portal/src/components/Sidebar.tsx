@@ -17,6 +17,14 @@ import {
 } from 'lucide-react';
 import { useClerk } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
+import { Button } from '@/components/ui/button';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
 import type { UserRole } from '@app-types/index';
 
 interface MenuItem {
@@ -56,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredMenuItems = menuItems.filter((item) => hasAccess(item.roles));
 
   return (
-    <aside className={`flex flex-col w-full h-full bg-surface-0 border-r border-edge ${className}`}>
+    <aside className={cn('flex flex-col w-full h-full bg-surface-0 border-r border-edge', className)}>
       {/* Gradient overlay at top */}
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
 
@@ -76,30 +84,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Navigation */}
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
-        <ul className="space-y-1">
-          {filteredMenuItems.map((item) => (
-            <li key={item.path}>
-              <NavLink
-                to={item.path}
-                className={({ isActive }) => `
-                  flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors
-                  ${isActive
-                    ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
-                    : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
+        <TooltipProvider>
+          <ul className="space-y-1">
+            {filteredMenuItems.map((item) => (
+              <li key={item.path}>
+                <NavLink
+                  to={item.path}
+                  className={({ isActive }) =>
+                    cn(
+                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+                      isActive
+                        ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
+                        : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
+                    )
                   }
-                `}
-              >
-                <item.icon className="w-5 h-5 flex-shrink-0" />
-                <span className="flex-1">{item.label}</span>
-                {item.path === '/queue' && pendingHandoffs > 0 && (
-                  <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full">
-                    {pendingHandoffs > 99 ? '99+' : pendingHandoffs}
-                  </span>
-                )}
-              </NavLink>
-            </li>
-          ))}
-        </ul>
+                >
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <item.icon className="w-5 h-5 flex-shrink-0" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right">
+                      {item.label}
+                    </TooltipContent>
+                  </Tooltip>
+                  <span className="flex-1">{item.label}</span>
+                  {item.path === '/queue' && pendingHandoffs > 0 && (
+                    <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full">
+                      {pendingHandoffs > 99 ? '99+' : pendingHandoffs}
+                    </span>
+                  )}
+                </NavLink>
+              </li>
+            ))}
+          </ul>
+        </TooltipProvider>
       </nav>
 
       {/* User section */}
@@ -121,14 +139,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
+        <Button
+          variant="ghost"
           onClick={() => signOut()}
-          className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors"
+          className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors justify-start"
         >
           <LogOut className="w-5 h-5" />
           Sign Out
-        </button>
+        </Button>
       </div>
     </aside>
   );

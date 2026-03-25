@@ -13,11 +13,14 @@ const IV_LENGTH = config.encryption.ivLength;
 const AUTH_TAG_LENGTH = 16;
 // Key length: 32 bytes for AES-256
 
-// Derive key from config
+// Derive key from config (memoized — key never changes at runtime)
+let _cachedKey: Buffer | null = null;
+
 const getKey = (): Buffer => {
+  if (_cachedKey) return _cachedKey;
   const keyString = config.encryption.key;
-  // Ensure key is exactly 32 bytes
-  return crypto.createHash('sha256').update(keyString).digest();
+  _cachedKey = crypto.createHash('sha256').update(keyString).digest();
+  return _cachedKey;
 };
 
 /**

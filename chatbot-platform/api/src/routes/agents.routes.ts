@@ -8,6 +8,7 @@ import { Agent } from '../database/entities/Agent';
 import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { cached, invalidate } from '../utils/cache';
 
 const router = Router();
 const agentRepository = AppDataSource.getRepository(Agent);
@@ -35,36 +36,47 @@ router.get(
         where.status = status;
       }
 
-      const [agents, total] = await agentRepository.findAndCount({
-        where,
-        relations: ['user'],
-        order: { createdAt: 'DESC' },
-        take: limit,
-        skip: offset,
-      });
+      // Only cache the default (unfiltered, first page) request
+      const isDefaultRequest = !status && offset === 0 && limit === 20;
+      const cacheKey = isDefaultRequest ? `agents:${tenantId}` : null;
 
-      res.json({
-        success: true,
-        agents: agents.map((a) => ({
-          id: a.id,
-          name: a.user?.name,
-          email: a.user?.email,
-          role: a.user?.role,
-          status: a.status,
-          maxConcurrentChats: a.maxConcurrentChats,
-          currentChatCount: a.currentChatCount,
-          skills: a.skills,
-          languages: a.languages,
-          lastActiveAt: a.lastActiveAt,
-          createdAt: a.createdAt,
-        })),
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
-        },
-      });
+      const getData = async () => {
+        const [agents, total] = await agentRepository.findAndCount({
+          where,
+          relations: ['user'],
+          order: { createdAt: 'DESC' },
+          take: limit,
+          skip: offset,
+        });
+
+        return {
+          agents: agents.map((a) => ({
+            id: a.id,
+            name: a.user?.name,
+            email: a.user?.email,
+            role: a.user?.role,
+            status: a.status,
+            maxConcurrentChats: a.maxConcurrentChats,
+            currentChatCount: a.currentChatCount,
+            skills: a.skills,
+            languages: a.languages,
+            lastActiveAt: a.lastActiveAt,
+            createdAt: a.createdAt,
+          })),
+          pagination: {
+            total,
+            limit,
+            offset,
+            hasMore: offset + limit < total,
+          },
+        };
+      };
+
+      const result = cacheKey
+        ? await cached(cacheKey, 60, getData)
+        : await getData();
+
+      res.json({ success: true, ...result });
     } catch (error) {
       logger.error('Error listing agents:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -165,6 +177,7 @@ router.post(
       });
 
       const saved = await agentRepository.save(agent);
+      await invalidate(`agents:${tenantId}`);
 
       logger.info('Agent created', { agentId: saved.id, userId });
 
@@ -257,6 +270,7 @@ router.patch(
 
       agent.updateStatus(status);
       await agentRepository.save(agent);
+      await invalidate(`agents:${authReq.user?.tenantId}`);
 
       res.json({
         success: true,

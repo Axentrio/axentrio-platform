@@ -115,6 +115,7 @@ git commit -m "feat: wire webhook module into server boot sequence"
 - Modify: `api/src/n8n/outbound.service.ts:44-53` (rename metric names)
 - Modify: `api/src/server.ts` (update import names from Task 1)
 - Modify: `portal/src/pages/Settings.tsx:213` (inbound URL display)
+- Rename: `docs/n8n-integration.md` → `docs/webhook-integration.md`
 
 - [ ] **Step 1: Rename exports in n8n/index.ts**
 
@@ -148,21 +149,29 @@ To:
 const inboundWebhookUrl = `${API_URL}/v1/webhooks/inbound`;
 ```
 
-- [ ] **Step 4: Update server.ts imports**
+- [ ] **Step 4: Rename docs file**
+
+```bash
+cd chatbot-platform && git mv docs/n8n-integration.md docs/webhook-integration.md
+```
+
+Update any internal references within the file from "n8n" to "Webhook Integration" where they refer to the generic system (keep n8n references that are specifically about n8n workflows).
+
+- [ ] **Step 5: Update server.ts imports**
 
 In `api/src/server.ts`, update the import to use the new name:
 ```typescript
 import { createWebhookModule } from './n8n';
 ```
 
-- [ ] **Step 5: Verify TypeScript compiles**
+- [ ] **Step 6: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add api/src/n8n/index.ts api/src/n8n/outbound.service.ts api/src/server.ts portal/src/pages/Settings.tsx
+git add api/src/n8n/index.ts api/src/n8n/outbound.service.ts api/src/server.ts portal/src/pages/Settings.tsx docs/webhook-integration.md
 git commit -m "refactor: rename n8n references to generic webhook naming"
 ```
 

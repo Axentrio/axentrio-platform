@@ -19,14 +19,14 @@ Add two columns to the Participant entity, matching the existing Message soft-de
 - `deletedAt: Date | null` — default `null`
 
 **Behavior:**
-- Add `softDelete()` method to Participant entity: sets `isDeleted = true`, `deletedAt = new Date()`, and anonymizes the JSONB `metadata` column (clears browser, OS, device, location fields) for GDPR compliance.
+- Add `softDelete()` method to Participant entity: sets `isDeleted = true`, `deletedAt = new Date()`, nulls the `email` column, and anonymizes the JSONB `metadata` column (clears `ipAddress`, `userAgent`, browser, OS, device, location fields) for GDPR compliance.
 - Update `isActive()` to return `!this.leftAt && !this.isDeleted`.
 - All existing queries that fetch participants must filter `WHERE is_deleted = false` — either via explicit conditions in each query or a TypeORM query subscriber.
 - Expose `DELETE /api/v1/chats/:sessionId/participants/:id` endpoint that calls `softDelete()` instead of hard-deleting.
 - Future work: scheduled job to hard-delete participants where `deletedAt < now - retention_period`.
 
 **Migration:**
-Single TypeORM migration adding two columns with defaults. Zero downtime — existing rows get `isDeleted = false` and `deletedAt = null`.
+Single TypeORM migration adding two columns with defaults. Zero downtime — existing rows get `isDeleted = false` and `deletedAt = null`. Add a partial index for efficient filtering: `CREATE INDEX idx_participants_active ON participants (session_id) WHERE is_deleted = false`.
 
 **Files affected:**
 - `api/src/database/entities/Participant.ts` — add columns, `softDelete()`, update `isActive()`
@@ -44,32 +44,19 @@ Single TypeORM migration adding two columns with defaults. Zero downtime — exi
 **Current state:**
 Backend has partial pagination in some routes (chat history uses `offset`/`limit`, agents and handoffs have it). Other list endpoints and the frontend `useChats` hook don't use it consistently.
 
-**Backend — shared pagination pattern:**
+**Backend — standardize on existing pagination types:**
 
-Create shared types and a helper:
+`api/src/types/index.ts` already defines `IPaginationParams` (with `page`, `limit`, `sortBy`, `sortOrder`) and `IApiMeta` (with `page`, `limit`, `total`, `totalPages`). Reuse and extend these rather than creating duplicates:
 
-```typescript
-// api/src/types/pagination.ts
-interface PaginationParams {
-  page: number;      // default 1
-  limit: number;     // default 20, max 100
-  sortBy?: string;
-  sortOrder?: 'ASC' | 'DESC';
-}
+- Add `hasMore: boolean` to `IApiMeta` if not present.
+- Create a generic `PaginatedResponse<T> = { data: T[], meta: IApiMeta }` wrapper type in the same file.
+- Create `applyPagination(queryBuilder, params: IPaginationParams)` helper in `api/src/utils/pagination.ts` that applies `skip((page - 1) * limit)` and `take(limit)` to any TypeORM `SelectQueryBuilder`, and returns `{ data, meta }` after running `getManyAndCount()`.
 
-interface PaginatedResponse<T> {
-  data: T[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasMore: boolean;
-  };
-}
-```
-
-Create `applyPagination(queryBuilder, params)` helper that applies `skip((page - 1) * limit)` and `take(limit)` to any TypeORM `SelectQueryBuilder`, and returns `{ data, meta }` after running `getManyAndCount()`.
+**Migration from offset-based endpoints:**
+Some existing routes (chat history, sessions list) currently accept `offset`/`limit` and return `{ total, limit, offset, hasMore }`. To avoid breaking the widget (which is embedded by third parties):
+- Backend accepts both `page`/`limit` and `offset`/`limit` query params. If `offset` is provided, convert to page: `page = Math.floor(offset / limit) + 1`.
+- Response always returns the new `meta` shape (`page`, `limit`, `total`, `totalPages`, `hasMore`) plus a deprecated `offset` field for backwards compatibility.
+- Widget consumers get a deprecation notice in docs; remove `offset` support in a future major version.
 
 Apply to all list endpoints:
 - `GET /api/v1/chats` — sessions list
@@ -92,7 +79,8 @@ Each endpoint accepts `?page=1&limit=20&sortBy=createdAt&sortOrder=DESC` query p
 Dataset sizes are moderate (sessions per tenant), several routes already use `offset`/`limit`, and page-based is simpler for the UI (page numbers, jump-to-page). Cursor-based would only matter at scale this project isn't at yet.
 
 **Files affected:**
-- New: `api/src/types/pagination.ts`, `api/src/utils/pagination.ts`
+- Update: `api/src/types/index.ts` — extend `IApiMeta`, add `PaginatedResponse<T>`
+- New: `api/src/utils/pagination.ts`
 - New: `portal/src/components/ui/Pagination.tsx`
 - Update: all list route handlers to use `applyPagination`
 - Update: `portal/src/hooks/useChats.ts` and similar hooks
@@ -100,7 +88,7 @@ Dataset sizes are moderate (sessions per tenant), several routes already use `of
 
 ---
 
-### #21 — TypeScript `any` Cleanup (163 instances)
+### #21 — TypeScript `any` Cleanup (~108 instances)
 
 **Priority:** 3 (Track 1)
 **Effort:** Medium — incremental, low risk per change
@@ -160,27 +148,29 @@ Replace remaining `any` in service functions, utility helpers, and config types.
 **Effort:** Small — wiring existing infrastructure
 
 **Current state:**
-`checkSocketRateLimit(socketId, tenantId?)` already exists in `rate-limit.middleware.ts` using Redis with in-memory fallback. But it's not called in any socket event handlers.
+`checkSocketRateLimit(socketId, tenantId?)` already exists in `rate-limit.middleware.ts` using Redis with in-memory fallback. It is already called in `handleMessageSend` (socket.handler.ts). However, only `message:send` is rate-limited — other events (typing, handoff, file upload, session join/leave, presence) are not.
 
 **Design:**
 
-Create a socket middleware wrapper that rate-limits per event type:
+Extend coverage to all event types with per-event rate limiters. Each event type needs its own `RateLimiterRedis` instance (not shared points on one limiter), because limits are independent:
 
 ```typescript
 // api/src/websocket/socket-rate-limit.ts
-const EVENT_LIMITS: Record<string, number> = {
-  'message:send': 30,       // 30 messages per window
-  'typing:indicator': 60,   // 60 typing events per window
-  'file:upload': 10,        // 10 uploads per window
-  'handoff:request': 5,     // 5 handoff requests per window
-  // default: 100 per window (existing default)
+// Each entry creates a separate RateLimiterRedis instance
+const EVENT_RATE_CONFIGS: Record<string, { points: number, windowSeconds: number }> = {
+  'message:send': { points: 30, windowSeconds: 60 },
+  'typing:indicator': { points: 60, windowSeconds: 60 },
+  'file:upload': { points: 10, windowSeconds: 60 },
+  'handoff:request': { points: 5, windowSeconds: 60 },
+  // default: { points: 100, windowSeconds: 60 }
 };
 ```
 
-Apply rate limiting in `socket.handler.ts` as a per-event middleware:
-- Before processing each event, call `checkSocketRateLimit(socketId, tenantId)` with the event-specific point cost.
+Create a `createEventRateLimiter(eventName)` factory that returns a `RateLimiterRedis` (with `RateLimiterMemory` fallback) for each event type. Apply rate limiting in `socket.handler.ts` per event:
+- Before processing each event, consume 1 point from that event's limiter keyed by `${socketId}:${eventName}`.
 - If rate limit exceeded, emit an error event back to the client: `socket.emit('error', { code: 'RATE_LIMITED', event, retryAfter })`.
 - Log rate limit violations for monitoring.
+- Refactor the existing `message:send` rate limit call to use the new per-event system.
 
 **What happens when limited:**
 - Client receives `error` event with `RATE_LIMITED` code and `retryAfter` seconds.
@@ -208,12 +198,13 @@ Apply rate limiting in `socket.handler.ts` as a per-event middleware:
 **Design:**
 
 **Option: Clerk webhook (recommended):**
-- Register a Clerk webhook for `user.updated` events.
+- Register a Clerk webhook for `user.created` and `user.updated` events (both needed — users who verify during signup trigger `user.created` with verified email, not a subsequent `user.updated`).
 - Add endpoint `POST /api/v1/webhooks/clerk` that:
   1. Verifies the Clerk webhook signature (using `svix` library).
-  2. On `user.updated` event, extracts `email_addresses[].verification.status`.
+  2. On `user.created` or `user.updated` event, extracts `email_addresses[].verification.status`.
   3. Updates local User entity: `emailVerified = true` if Clerk reports verified.
 - This keeps the local DB in sync automatically whenever a user verifies in Clerk.
+- **Important:** Register this route outside the normal auth/tenant middleware chain — it is not tenant-scoped and must be publicly accessible for Clerk's servers to reach it. Only `svix` signature verification protects it.
 
 **Fallback: sync on login:**
 - In the existing auth middleware, after resolving `clerkUserId` to a local User, check Clerk's API for current verification status and update the local User if stale.
@@ -255,8 +246,14 @@ Start with the most critical endpoints:
 3. **Agent routes** — CRUD, status updates, assignment
 4. **Handoff routes** — request, accept, reject flow
 
+**Auth strategy for tests:**
+Protected routes require Clerk JWT auth or widget API-key auth. For integration tests:
+- Create a test auth helper that mocks the Clerk middleware (`requireClerkAuth`) to inject a known test user without hitting Clerk's API.
+- For widget routes, seed a test tenant with a known API key.
+- This avoids needing a live Clerk instance while still exercising real route handlers and middleware.
+
 Each test:
-- Spins up Express app with real middleware
+- Spins up Express app with real middleware (auth middleware swapped for test helper)
 - Seeds test data via TypeORM
 - Makes HTTP requests via `supertest`
 - Asserts response status, body shape, and side effects (DB state)
@@ -291,12 +288,12 @@ Target high-value utilities:
 
 ### Track 2: Infrastructure
 ```
-#7 WebSocket rate limiting
-  → #22 Email verification (Clerk sync)
-    → #19 Test infrastructure (can test all the above)
+#7 WebSocket rate limiting ─┐
+#22 Email verification ─────┤ (independent, can be parallel)
+                            └→ #19 Test infrastructure (can test all the above)
 ```
 
-Tracks 1 and 2 are independent and can be worked in parallel. Within each track, issues are ordered by dependency and value.
+Tracks 1 and 2 are independent and can be worked in parallel. Within Track 2, #7 and #22 have no dependency on each other and can also be done in parallel. #19 comes last so it can test everything built before it.
 
 ---
 

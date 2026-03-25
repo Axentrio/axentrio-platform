@@ -8,6 +8,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Agent } from '../database/entities/Agent';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { cached } from '../utils/cache';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -27,100 +28,63 @@ router.get(
       const authReq = req as ProvisionedRequest;
       const tenantId = authReq.user?.tenantId;
 
-      // Total sessions
-      const totalSessions = await sessionRepository.count({
-        where: { tenantId },
-      });
+      const dashboard = await cached(
+        `dashboard:${tenantId}`,
+        30,
+        async () => {
+          // Two consolidated queries run in parallel
+          const [sessionStats, agentStats] = await Promise.all([
+            // Query 1: All session counts + CSAT in one pass
+            sessionRepository
+              .createQueryBuilder('s')
+              .select('COUNT(*)', 'total')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'active')", 'active')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'waiting')", 'waiting')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'handoff')", 'handoff')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'bot')", 'bot')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'closed')", 'closed')
+              .addSelect("COUNT(*) FILTER (WHERE s.status = 'closed' AND s.assigned_agent_id IS NOT NULL)", 'humanResolved')
+              .addSelect('AVG(s.satisfaction_rating) FILTER (WHERE s.satisfaction_rating IS NOT NULL)', 'csatAvg')
+              .addSelect('COUNT(s.satisfaction_rating)', 'csatCount')
+              .where('s.tenant_id = :tenantId', { tenantId })
+              .getRawOne(),
 
-      // Active sessions
-      const activeSessions = await sessionRepository.count({
-        where: { tenantId, status: 'active' as const },
-      });
+            // Query 2: Agent counts + avg response time in one pass
+            agentRepository
+              .createQueryBuilder('a')
+              .select('COUNT(*)', 'total')
+              .addSelect("COUNT(*) FILTER (WHERE a.status = 'online')", 'online')
+              .addSelect('AVG(a.avg_response_time_seconds)', 'avgResponseTime')
+              .where('a.tenant_id = :tenantId', { tenantId })
+              .getRawOne(),
+          ]);
 
-      // Waiting sessions
-      const waitingSessions = await sessionRepository.count({
-        where: { tenantId, status: 'waiting' as const },
-      });
+          const closed = parseInt(sessionStats?.closed || '0');
+          const humanResolved = parseInt(sessionStats?.humanResolved || '0');
+          const botResolved = closed - humanResolved;
+          const csatAvg = sessionStats?.csatAvg ? parseFloat(parseFloat(sessionStats.csatAvg).toFixed(1)) : null;
+          const botResolutionRate = closed > 0 ? Math.round((botResolved / closed) * 100) : null;
 
-      // Handoff sessions
-      const handoffSessions = await sessionRepository.count({
-        where: { tenantId, status: 'handoff' as const },
-      });
+          return {
+            sessions: {
+              total: parseInt(sessionStats?.total || '0'),
+              active: parseInt(sessionStats?.active || '0'),
+              waiting: parseInt(sessionStats?.waiting || '0'),
+              handoff: parseInt(sessionStats?.handoff || '0'),
+              bot: parseInt(sessionStats?.bot || '0'),
+            },
+            agents: {
+              total: parseInt(agentStats?.total || '0'),
+              online: parseInt(agentStats?.online || '0'),
+            },
+            avgResponseTimeSeconds: Math.round(parseFloat(agentStats?.avgResponseTime || '0')),
+            csatScore: csatAvg,
+            botResolutionRate,
+          };
+        }
+      );
 
-      // Bot sessions (active AI conversations)
-      const botSessions = await sessionRepository.count({
-        where: { tenantId, status: 'bot' as const },
-      });
-
-      // Total agents
-      const totalAgents = await agentRepository.count({
-        where: { tenantId },
-      });
-
-      // Online agents
-      const onlineAgents = await agentRepository.count({
-        where: { tenantId, status: 'online' as const },
-      });
-
-      // Average response time across agents
-      const agents = await agentRepository.find({
-        where: { tenantId },
-        select: ['avgResponseTimeSeconds'],
-      });
-
-      const avgResponseTime = agents.length > 0
-        ? Math.round(agents.reduce((sum, a) => sum + a.avgResponseTimeSeconds, 0) / agents.length)
-        : 0;
-
-      // CSAT score (average satisfaction rating)
-      const csatResult = await sessionRepository
-        .createQueryBuilder('session')
-        .select('AVG(session.satisfaction_rating)', 'avgCsat')
-        .where('session.tenant_id = :tenantId', { tenantId })
-        .andWhere('session.satisfaction_rating IS NOT NULL')
-        .getRawOne();
-
-      const csatScore = csatResult?.avgCsat
-        ? parseFloat(parseFloat(csatResult.avgCsat).toFixed(1))
-        : null;
-
-      // Bot resolution rate (sessions that closed without ever reaching handoff/active)
-      const closedSessions = await sessionRepository.count({
-        where: { tenantId, status: 'closed' as const },
-      });
-
-      // Sessions that were closed and had an agent assigned = human-resolved
-      const humanResolved = await sessionRepository
-        .createQueryBuilder('session')
-        .where('session.tenant_id = :tenantId', { tenantId })
-        .andWhere('session.status = :status', { status: 'closed' })
-        .andWhere('session.assigned_agent_id IS NOT NULL')
-        .getCount();
-
-      const botResolved = closedSessions - humanResolved;
-      const botResolutionRate = closedSessions > 0
-        ? Math.round((botResolved / closedSessions) * 100)
-        : null;
-
-      res.json({
-        success: true,
-        dashboard: {
-          sessions: {
-            total: totalSessions,
-            active: activeSessions,
-            waiting: waitingSessions,
-            handoff: handoffSessions,
-            bot: botSessions,
-          },
-          agents: {
-            total: totalAgents,
-            online: onlineAgents,
-          },
-          avgResponseTimeSeconds: avgResponseTime,
-          csatScore,
-          botResolutionRate,
-        },
-      });
+      res.json({ success: true, dashboard });
     } catch (error) {
       logger.error('Error fetching dashboard metrics:', error);
       res.status(500).json({ error: 'Internal server error' });

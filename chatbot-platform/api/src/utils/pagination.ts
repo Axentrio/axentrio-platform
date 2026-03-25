@@ -1,4 +1,4 @@
-import { SelectQueryBuilder } from 'typeorm';
+import { ObjectLiteral, SelectQueryBuilder } from 'typeorm';
 
 interface PaginationMeta {
   page: number;
@@ -38,7 +38,7 @@ export function parsePaginationParams(query: Record<string, unknown>): ParsedPag
   };
 }
 
-export async function applyPagination<T>(
+export async function applyPagination<T extends ObjectLiteral>(
   queryBuilder: SelectQueryBuilder<T>,
   params: ParsedPaginationParams
 ): Promise<PaginatedResult<T>> {

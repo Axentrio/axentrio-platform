@@ -275,9 +275,9 @@ export async function checkSocketRateLimit(
   socketId: string,
   tenantId?: string
 ): Promise<boolean> {
+  const key = tenantId ? `socket:${tenantId}:${socketId}` : `socket:${socketId}`;
   try {
     ensureLimiters();
-    const key = tenantId ? `socket:${tenantId}:${socketId}` : `socket:${socketId}`;
     await socketLimiter!.consume(key, 1);
     return true;
   } catch (error) {
@@ -285,7 +285,7 @@ export async function checkSocketRateLimit(
       logger.error('Socket rate limiter error, using in-memory fallback:', error);
       return fallbackConsume(`socket:${key}`, 100, RATE_LIMIT_WINDOW_MS);
     }
-    return false; // Rate limit exceeded
+    return false;
   }
 }
 

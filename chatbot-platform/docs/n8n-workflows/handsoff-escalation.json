@@ -1,0 +1,348 @@
+{
+  "name": "Human Handoff & Escalation",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "handoff-inbound",
+      "path": "handoff-webhook",
+      "responseMode": "responseNode",
+      "httpMethod": "POST"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract message and determine intent\nconst body = $input.first().json.body;\nconst message = body.payload?.content?.toLowerCase() || '';\n\n// Detect escalation triggers\nconst escalationTriggers = [\n  'human', 'agent', 'person', 'representative', 'support',\n  'supervisor', 'manager', 'speak to someone', 'talk to',\n  'frustrated', 'angry', 'complaint', 'refund', 'cancel'\n];\n\nconst shouldEscalate = escalationTriggers.some(trigger => message.includes(trigger));\n\n// Detect sentiment (simple keyword-based)\nconst negativeWords = ['bad', 'terrible', 'awful', 'hate', 'worst', 'angry', 'frustrated', 'upset'];\nconst sentiment = negativeWords.some(w => message.includes(w)) ? 'negative' : 'neutral';\n\nreturn {\n  json: {\n    sessionId: body.sessionId,\n    tenantId: body.tenantId,\n    userMessage: body.payload?.content,\n    messageType: body.payload?.type,\n    user: body.user,\n    previousMessages: body.context?.previousMessages || [],\n    shouldEscalate,\n    sentiment,\n    pageUrl: body.context?.pageUrl\n  }\n};"
+      },
+      "id": "analyze-intent",
+      "name": "Analyze Intent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.shouldEscalate }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-escalation",
+      "name": "Should Escalate?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate conversation summary for agent\nconst data = $input.first().json;\nconst previousMessages = data.previousMessages;\n\n// Create summary of conversation\nlet summary = '## Conversation Summary\\n\\n';\nsummary += `**Customer:** ${data.user?.name || 'Anonymous'}\\n`;\nsummary += `**Sentiment:** ${data.sentiment}\\n`;\nsummary += `**Page:** ${data.pageUrl || 'N/A'}\\n\\n`;\n\nif (previousMessages.length > 0) {\n  summary += '**Recent Messages:**\\n';\n  previousMessages.slice(-5).forEach(msg => {\n    summary += `- ${msg.role}: ${msg.content.substring(0, 100)}${msg.content.length > 100 ? '...' : ''}\\n`;\n  });\n} else {\n  summary += `**Message:** ${data.userMessage}\\n`;\n}\n\nreturn {\n  json: {\n    sessionId: data.sessionId,\n    tenantId: data.tenantId,\n    summary: summary,\n    sentiment: data.sentiment,\n    userMessage: data.userMessage,\n    priority: data.sentiment === 'negative' ? 'high' : 'normal'\n  }\n};"
+      },
+      "id": "create-summary",
+      "name": "Create Summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "table": {
+          "value": "handoff_requests",
+          "mode": "list"
+        },
+        "columns": {
+          "column": [
+            {
+              "name": "session_id",
+              "value": "={{ $json.sessionId }}"
+            },
+            {
+              "name": "tenant_id",
+              "value": "={{ $json.tenantId }}"
+            },
+            {
+              "name": "status",
+              "value": "pending"
+            },
+            {
+              "name": "priority",
+              "value": "={{ $json.priority }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.summary }}"
+            },
+            {
+              "name": "created_at",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "save-handoff",
+      "name": "Save to Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1050, 200],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send handoff trigger to chatbot platform\nconst data = $('Create Summary').first().json;\n\nreturn {\n  json: {\n    action: 'handsoff.trigger',\n    sessionId: data.sessionId,\n    payload: {\n      reason: 'Customer requested human agent',\n      priority: data.priority,\n      queue: data.priority === 'high' ? 'priority_support' : 'general_support',\n      summary: data.summary,\n      tags: ['escalated', data.sentiment]\n    }\n  }\n};"
+      },
+      "id": "trigger-handoff",
+      "name": "Trigger Handoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send acknowledgment to customer\nconst data = $('Analyze Intent').first().json;\n\nconst responses = {\n  high: \"I understand your frustration. I'm connecting you with a specialist who can help resolve this issue immediately.\\n\\nEstimated wait time: 2-3 minutes.\",\n  normal: \"I'll connect you with one of our support agents who can assist you further.\\n\\nEstimated wait time: 5-10 minutes.\"\n};\n\nconst priority = data.sentiment === 'negative' ? 'high' : 'normal';\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: data.sessionId,\n    payload: {\n      type: 'text',\n      content: responses[priority],\n      quickReplies: priority === 'high' ? ['Cancel request'] : ['Leave message', 'Cancel request']\n    }\n  }\n};"
+      },
+      "id": "send-ack",
+      "name": "Send Acknowledgment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle non-escalation messages\nconst data = $input.first().json;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: data.sessionId,\n    payload: {\n      type: 'text',\n      content: \"I can help you with that! What specific information are you looking for?\",\n      quickReplies: ['Product info', 'Pricing', 'Support', 'Talk to human']\n    }\n  }\n};"
+      },
+      "id": "normal-response",
+      "name": "Normal Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.webhookUrl }}",
+        "method": "POST",
+        "body": "={{ $json }}",
+        "options": {}
+      },
+      "id": "send-to-chatbot",
+      "name": "Send to Chatbot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, escalated: true }) }}",
+        "statusCode": 200
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "rules": [
+            {
+              "value": "={{ $json.sentiment }}",
+              "conditions": [
+                {
+                  "value": "negative",
+                  "operator": {
+                    "type": "string",
+                    "operation": "equals"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-priority",
+      "name": "Route by Priority",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [650, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send Slack notification for high priority\nconst data = $('Create Summary').first().json;\n\nreturn {\n  json: {\n    text: `🚨 *High Priority Handoff Request*\\n\\nSession: ${data.sessionId}\\nPriority: ${data.priority}\\nSentiment: ${data.sentiment}\\n\\n${data.summary}`\n  }\n};"
+      },
+      "id": "slack-notify",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [850, 600],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack Account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["chatbot", "handoff", "escalation"],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Analyze Intent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Intent": {
+      "main": [
+        [
+          {
+            "node": "Should Escalate?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Escalate?": {
+      "main": [
+        [
+          {
+            "node": "Create Summary",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Normal Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Summary": {
+      "main": [
+        [
+          {
+            "node": "Save to Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save to Database": {
+      "main": [
+        [
+          {
+            "node": "Trigger Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Handoff": {
+      "main": [
+        [
+          {
+            "node": "Send Acknowledgment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Acknowledgment": {
+      "main": [
+        [
+          {
+            "node": "Send to Chatbot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normal Response": {
+      "main": [
+        [
+          {
+            "node": "Send to Chatbot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Chatbot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Intent": {
+      "main": [
+        [
+          {
+            "node": "Route by Priority",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Priority": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "description": "Intelligent human handoff workflow with sentiment analysis, priority routing, and agent notification"
+}

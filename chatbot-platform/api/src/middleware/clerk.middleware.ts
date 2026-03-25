@@ -1,0 +1,304 @@
+/**
+ * Clerk Authentication & Auto-Provisioning Middleware
+ * Replaces custom JWT auth for portal-facing routes.
+ * Widget routes continue using API key auth (unchanged).
+ */
+import { Request, Response, NextFunction } from 'express';
+import { getAuth } from '@clerk/express';
+import { clerkClient } from '@clerk/express';
+import crypto from 'crypto';
+import { AppDataSource } from '../database/data-source';
+import { Tenant } from '../database/entities/Tenant';
+import { User } from '../database/entities/User';
+import { Agent } from '../database/entities/Agent';
+import { logger } from '../utils/logger';
+
+// --- Types ---
+
+export interface ProvisionedRequest extends Request {
+  clerkUserId?: string;
+  clerkOrgId?: string;
+  tenantId?: string;
+  userId?: string;
+  agentId?: string;
+  userRole?: string;
+  tenantName?: string;
+  user?: {
+    id: string;
+    email: string;
+    role: string;
+    tenantId: string;
+    type: 'agent' | 'widget';
+  };
+}
+
+// --- In-memory cache ---
+
+interface CachedIds {
+  tenantId: string;
+  userId: string;
+  agentId: string;
+  userRole: string;
+  tenantName: string;
+  email: string;
+  cachedAt: number;
+}
+
+const idCache = new Map<string, CachedIds>();
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+function getCached(orgId: string, userId: string): CachedIds | null {
+  const key = `${orgId}:${userId}`;
+  const cached = idCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) return cached;
+  if (cached) idCache.delete(key);
+  return null;
+}
+
+function setCache(orgId: string, userId: string, ids: Omit<CachedIds, 'cachedAt'>) {
+  idCache.set(`${orgId}:${userId}`, { ...ids, cachedAt: Date.now() });
+}
+
+// --- Middleware: requireClerkAuth ---
+
+export function requireClerkAuth(req: Request, res: Response, next: NextFunction): void {
+  const auth = getAuth(req);
+  if (!auth?.userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  if (!auth.orgId) {
+    res.status(403).json({ error: 'Organization required. Select an organization in the portal.' });
+    return;
+  }
+  next();
+}
+
+// --- Middleware: autoProvision ---
+
+export async function autoProvision(req: ProvisionedRequest, res: Response, next: NextFunction): Promise<void> {
+  try {
+    const auth = getAuth(req);
+    const clerkUserId = auth.userId!;
+    const clerkOrgId = auth.orgId!;
+
+    // Check cache first
+    const cached = getCached(clerkOrgId, clerkUserId);
+    if (cached) {
+      attachToRequest(req, clerkUserId, clerkOrgId, cached);
+      return next();
+    }
+
+    const tenantRepo = AppDataSource.getRepository(Tenant);
+    const userRepo = AppDataSource.getRepository(User);
+    const agentRepo = AppDataSource.getRepository(Agent);
+
+    // --- Resolve Tenant ---
+    let tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
+
+    if (!tenant) {
+      let orgName = 'Organization';
+      try {
+        const org = await clerkClient.organizations.getOrganization({ organizationId: clerkOrgId });
+        orgName = org.name;
+      } catch {
+        logger.warn('Could not fetch Clerk org name', { clerkOrgId });
+      }
+
+      const slug = await ensureUniqueSlug(orgName, tenantRepo);
+      const apiKey = crypto.randomBytes(32).toString('hex');
+
+      // Upsert to handle race conditions
+      await tenantRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Tenant)
+        .values({
+          name: orgName,
+          slug,
+          apiKey,
+          clerkOrgId,
+          tier: 'pro',
+          status: 'active',
+        })
+        .orIgnore() // ON CONFLICT DO NOTHING
+        .execute();
+
+      tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
+      if (!tenant) {
+        res.status(500).json({ error: 'Failed to provision tenant' });
+        return;
+      }
+      logger.info('Auto-provisioned tenant', { tenantId: tenant.id, orgName });
+    }
+
+    // --- Resolve User ---
+    let user = await userRepo.findOne({ where: { clerkUserId } });
+
+    if (!user) {
+      // Migration path: match by email
+      let email = 'unknown@user.local';
+      let name = 'User';
+      try {
+        const clerkUser = await clerkClient.users.getUser(clerkUserId);
+        email = clerkUser.emailAddresses?.[0]?.emailAddress || email;
+        name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
+      } catch {
+        logger.warn('Could not fetch Clerk user info', { clerkUserId });
+      }
+
+      // Check for existing user by email (migration)
+      const existingByEmail = await userRepo.findOne({ where: { email, tenantId: tenant.id } });
+      if (existingByEmail) {
+        existingByEmail.clerkUserId = clerkUserId;
+        await userRepo.save(existingByEmail);
+        user = existingByEmail;
+        logger.info('Linked existing user to Clerk', { userId: user.id, email });
+      } else {
+        // Determine role from Clerk org membership
+        let role: 'admin' | 'supervisor' | 'agent' = 'agent';
+        try {
+          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+            organizationId: clerkOrgId,
+          });
+          const membership = memberships.data?.find((m: any) => m.publicUserData?.userId === clerkUserId);
+          if (membership?.role === 'org:admin') role = 'admin';
+          else if (membership?.role === 'org:supervisor') role = 'supervisor';
+        } catch {
+          logger.warn('Could not fetch Clerk membership role', { clerkUserId, clerkOrgId });
+        }
+
+        // Upsert user
+        await userRepo
+          .createQueryBuilder()
+          .insert()
+          .into(User)
+          .values({
+            tenantId: tenant.id,
+            clerkUserId,
+            email,
+            name,
+            role,
+            isActive: true,
+          })
+          .orIgnore()
+          .execute();
+
+        user = await userRepo.findOne({ where: { clerkUserId } });
+        if (!user) {
+          res.status(500).json({ error: 'Failed to provision user' });
+          return;
+        }
+        logger.info('Auto-provisioned user', { userId: user.id, email, role });
+      }
+    }
+
+    // --- Resolve Agent ---
+    let agent = await agentRepo.findOne({ where: { userId: user.id } });
+
+    if (!agent) {
+      await agentRepo
+        .createQueryBuilder()
+        .insert()
+        .into(Agent)
+        .values({
+          tenantId: tenant.id,
+          userId: user.id,
+          status: 'online',
+          maxConcurrentChats: 5,
+          skills: [],
+          languages: ['en'],
+        })
+        .orIgnore()
+        .execute();
+
+      agent = await agentRepo.findOne({ where: { userId: user.id } });
+      if (!agent) {
+        res.status(500).json({ error: 'Failed to provision agent' });
+        return;
+      }
+      logger.info('Auto-provisioned agent', { agentId: agent.id, userId: user.id });
+    }
+
+    // Cache and attach
+    const ids = {
+      tenantId: tenant.id,
+      userId: user.id,
+      agentId: agent.id,
+      userRole: user.role,
+      tenantName: tenant.name,
+      email: user.email,
+    };
+    setCache(clerkOrgId, clerkUserId, ids);
+    attachToRequest(req, clerkUserId, clerkOrgId, ids);
+    next();
+  } catch (error) {
+    logger.error('Auto-provisioning error', { error });
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}
+
+// --- Helpers ---
+
+function attachToRequest(req: ProvisionedRequest, clerkUserId: string, clerkOrgId: string, ids: Omit<CachedIds, 'cachedAt'>) {
+  req.clerkUserId = clerkUserId;
+  req.clerkOrgId = clerkOrgId;
+  req.tenantId = ids.tenantId;
+  req.userId = ids.userId;
+  req.agentId = ids.agentId;
+  req.userRole = ids.userRole;
+  req.tenantName = ids.tenantName;
+
+  // Backward compat for existing route handlers
+  req.user = {
+    id: ids.agentId,
+    email: ids.email,
+    role: ids.userRole,
+    tenantId: ids.tenantId,
+    type: 'agent',
+  };
+}
+
+async function ensureUniqueSlug(name: string, tenantRepo: any): Promise<string> {
+  const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'org';
+  let slug = base;
+  let attempt = 0;
+  while (true) {
+    const existing = await tenantRepo.findOne({ where: { slug } });
+    if (!existing) return slug;
+    attempt++;
+    slug = `${base}-${crypto.randomBytes(3).toString('hex')}`;
+    if (attempt > 5) throw new Error('Failed to generate unique slug');
+  }
+}
+
+// --- Exported for WebSocket auth ---
+
+export async function resolveClerkIds(clerkUserId: string, clerkOrgId: string): Promise<CachedIds | null> {
+  const cached = getCached(clerkOrgId, clerkUserId);
+  if (cached) return cached;
+
+  const tenantRepo = AppDataSource.getRepository(Tenant);
+  const userRepo = AppDataSource.getRepository(User);
+  const agentRepo = AppDataSource.getRepository(Agent);
+
+  const tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
+  if (!tenant) return null;
+
+  const user = await userRepo.findOne({ where: { clerkUserId } });
+  if (!user) return null;
+
+  const agent = await agentRepo.findOne({ where: { userId: user.id } });
+  if (!agent) return null;
+
+  const ids = {
+    tenantId: tenant.id,
+    userId: user.id,
+    agentId: agent.id,
+    userRole: user.role,
+    tenantName: tenant.name,
+    email: user.email,
+  };
+  setCache(clerkOrgId, clerkUserId, ids);
+  return { ...ids, cachedAt: Date.now() };
+}

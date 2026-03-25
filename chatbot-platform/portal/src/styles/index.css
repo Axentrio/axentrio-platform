@@ -1,0 +1,157 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-surface-0: #0a0b0f;
+    --color-surface-1: #0f1117;
+    --color-surface-2: #161821;
+    --color-surface-3: #1e2030;
+    --color-surface-4: #262940;
+    --color-edge: #2a2d3e;
+    --color-primary: #6366f1;
+    --color-text-primary: #f1f3f9;
+    --color-text-secondary: #9ca3bf;
+  }
+
+  * {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-surface-1 text-text-primary font-sans;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+  }
+
+  ::selection {
+    @apply bg-primary-500/30 text-white;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    @apply w-1.5;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-edge rounded-full;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-edge-light;
+  }
+}
+
+@layer components {
+  /* Glass Card */
+  .card {
+    @apply bg-surface-2/80 backdrop-blur-sm border border-edge rounded-2xl shadow-card;
+  }
+  .card:hover {
+    @apply border-edge-light shadow-card-hover;
+  }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-sm transition-all duration-200;
+  }
+  .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-500 hover:shadow-glow active:scale-[0.98];
+  }
+  .btn-secondary {
+    @apply bg-surface-3 text-text-primary border border-edge hover:bg-surface-4 hover:border-edge-light;
+  }
+  .btn-ghost {
+    @apply text-text-secondary hover:text-text-primary hover:bg-surface-3;
+  }
+  .btn-danger {
+    @apply bg-red-600/20 text-red-400 border border-red-500/20 hover:bg-red-600/30;
+  }
+
+  /* Inputs */
+  .input {
+    @apply w-full px-4 py-2.5 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 transition-all duration-200;
+  }
+
+  /* Badge */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold;
+  }
+
+  /* Status dot with glow */
+  .status-dot {
+    @apply w-2.5 h-2.5 rounded-full;
+  }
+  .status-dot-online {
+    @apply bg-status-online shadow-[0_0_8px_rgba(52,211,153,0.5)];
+  }
+  .status-dot-away {
+    @apply bg-status-away shadow-[0_0_8px_rgba(251,191,36,0.5)];
+  }
+  .status-dot-offline {
+    @apply bg-status-offline;
+  }
+  .status-dot-busy {
+    @apply bg-status-busy shadow-[0_0_8px_rgba(248,113,113,0.5)];
+  }
+
+  /* Metric card */
+  .metric-card {
+    @apply card p-6 flex flex-col gap-2 animate-fade-in-up;
+  }
+
+  /* Staggered animation delays */
+  .stagger-1 { animation-delay: 0.05s; animation-fill-mode: backwards; }
+  .stagger-2 { animation-delay: 0.1s; animation-fill-mode: backwards; }
+  .stagger-3 { animation-delay: 0.15s; animation-fill-mode: backwards; }
+  .stagger-4 { animation-delay: 0.2s; animation-fill-mode: backwards; }
+  .stagger-5 { animation-delay: 0.25s; animation-fill-mode: backwards; }
+  .stagger-6 { animation-delay: 0.3s; animation-fill-mode: backwards; }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-primary-400 to-primary-200;
+  }
+  .glass {
+    @apply bg-surface-2/60 backdrop-blur-md border border-edge/50;
+  }
+
+  /* Line clamp utilities */
+  .line-clamp-1 {
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .line-clamp-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  /* Focus ring utilities */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 focus:ring-offset-surface-1;
+  }
+}
+
+/* Print styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}

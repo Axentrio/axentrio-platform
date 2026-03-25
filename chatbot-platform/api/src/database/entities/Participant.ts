@@ -1,0 +1,130 @@
+/**
+ * Participant Entity
+ * Represents a participant in a chat session (user, agent, bot, or system)
+ */
+
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  ManyToOne,
+  JoinColumn,
+  OneToMany,
+  Index,
+} from 'typeorm';
+import { ChatSession } from './ChatSession';
+import { Message } from './Message';
+
+export type ParticipantType = 'user' | 'agent' | 'bot' | 'system';
+
+@Entity('participants')
+@Index(['sessionId', 'type'])
+export class Participant {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ type: 'uuid', name: 'session_id' })
+  sessionId!: string;
+
+  @Column({
+    type: 'enum',
+    enum: ['user', 'agent', 'bot', 'system'],
+  })
+  type!: ParticipantType;
+
+  @Column({ type: 'uuid', nullable: true, name: 'user_id' })
+  userId?: string;
+
+  @Column({ type: 'varchar', length: 100 })
+  name!: string;
+
+  @Column({ type: 'varchar', length: 500, nullable: true, name: 'avatar_url' })
+  avatarUrl?: string;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'email' })
+  email?: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  metadata!: {
+    ipAddress?: string;
+    userAgent?: string;
+    location?: {
+      country?: string;
+      city?: string;
+      timezone?: string;
+    };
+    browser?: {
+      name?: string;
+      version?: string;
+    };
+    os?: {
+      name?: string;
+      version?: string;
+    };
+    device?: {
+      type?: string;
+      model?: string;
+    };
+    customData?: Record<string, unknown>;
+  };
+
+  @Column({ type: 'boolean', default: false, name: 'is_anonymous' })
+  isAnonymous!: boolean;
+
+  @Column({ type: 'timestamp', name: 'joined_at' })
+  joinedAt!: Date;
+
+  @Column({ type: 'timestamp', nullable: true, name: 'left_at' })
+  leftAt?: Date;
+
+  @Column({ type: 'timestamp', nullable: true, name: 'last_seen_at' })
+  lastSeenAt?: Date;
+
+  @CreateDateColumn({ name: 'created_at' })
+  createdAt!: Date;
+
+  @UpdateDateColumn({ name: 'updated_at' })
+  updatedAt!: Date;
+
+  // Relationships
+  @ManyToOne(() => ChatSession, (session) => session.participants, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'session_id' })
+  session!: ChatSession;
+
+  @OneToMany(() => Message, (message) => message.participant)
+  messages!: Message[];
+
+  // Helper methods
+  isActive(): boolean {
+    return !this.leftAt;
+  }
+
+  leave(): void {
+    this.leftAt = new Date();
+  }
+
+  updateLastSeen(): void {
+    this.lastSeenAt = new Date();
+  }
+
+  isAgent(): boolean {
+    return this.type === 'agent';
+  }
+
+  isBot(): boolean {
+    return this.type === 'bot';
+  }
+
+  isUser(): boolean {
+    return this.type === 'user';
+  }
+
+  getDisplayName(): string {
+    if (this.isAnonymous) {
+      return 'Anonymous';
+    }
+    return this.name || 'Unknown';
+  }
+}

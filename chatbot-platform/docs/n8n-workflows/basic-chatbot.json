@@ -1,0 +1,182 @@
+{
+  "name": "Basic Echo Chatbot",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "chatbot-inbound",
+      "path": "chatbot-webhook",
+      "responseMode": "responseNode",
+      "httpMethod": "POST"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract message data from webhook\nconst body = $input.first().json.body;\n\nreturn {\n  json: {\n    sessionId: body.sessionId,\n    tenantId: body.tenantId,\n    userMessage: body.payload?.content,\n    messageType: body.payload?.type,\n    user: body.user,\n    context: body.context\n  }\n};"
+      },
+      "id": "extract-data",
+      "name": "Extract Message Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.messageType }}",
+              "rightValue": "text",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-type",
+      "name": "Is Text Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Generate simple echo response\nconst userMessage = $input.first().json.userMessage;\nconst sessionId = $input.first().json.sessionId;\n\n// Simple greeting detection\nconst greetings = ['hello', 'hi', 'hey', 'greetings'];\nconst isGreeting = greetings.some(g => userMessage.toLowerCase().includes(g));\n\nlet responseText;\nif (isGreeting) {\n  responseText = \"Hello! Welcome to our chatbot. How can I help you today?\";\n} else if (userMessage.toLowerCase().includes('help')) {\n  responseText = \"I can help you with:\\n• General questions\\n• Product information\\n• Support requests\\nWhat do you need assistance with?\";\n} else if (userMessage.toLowerCase().includes('bye')) {\n  responseText = \"Goodbye! Have a great day!\";\n} else {\n  responseText = `You said: "${userMessage}"\\n\\nI'm a simple echo bot. Try saying 'hello', 'help', or 'bye'.`;\n}\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: sessionId,\n    payload: {\n      type: 'text',\n      content: responseText,\n      quickReplies: ['Hello', 'Help', 'Bye']\n    }\n  }\n};"
+      },
+      "id": "generate-response",
+      "name": "Generate Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle non-text messages\nconst sessionId = $input.first().json.sessionId;\nconst messageType = $input.first().json.messageType;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: sessionId,\n    payload: {\n      type: 'text',\n      content: `I received a ${messageType} message, but I can only process text right now. Please type your message.`,\n      quickReplies: ['Send text message']\n    }\n  }\n};"
+      },
+      "id": "handle-media",
+      "name": "Handle Media",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.webhookUrl }}",
+        "method": "POST",
+        "body": "={{ $json }}",
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send to Chatbot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Response sent' }) }}",
+        "statusCode": 200
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1250, 300]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["chatbot", "basic"],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Message Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Message Data": {
+      "main": [
+        [
+          {
+            "node": "Is Text Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Text Message?": {
+      "main": [
+        [
+          {
+            "node": "Generate Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Response": {
+      "main": [
+        [
+          {
+            "node": "Send to Chatbot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Media": {
+      "main": [
+        [
+          {
+            "node": "Send to Chatbot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send to Chatbot": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "description": "Simple echo chatbot that responds to text messages with predefined responses"
+}

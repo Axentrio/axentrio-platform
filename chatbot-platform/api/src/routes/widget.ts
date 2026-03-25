@@ -1,0 +1,446 @@
+/**
+ * Widget Routes
+ * Public endpoints for chat widget integration
+ */
+
+import { Router, Request, Response } from 'express';
+import { AppDataSource } from '../database/data-source';
+import { ChatSession } from '../database/entities/ChatSession';
+import { Participant } from '../database/entities/Participant';
+import { Message } from '../database/entities/Message';
+import { Tenant } from '../database/entities/Tenant';
+import { authenticateWidget, asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { widgetRateLimiter } from '../middleware/rate-limit';
+import { emitToSession } from '../websocket/socket.handler';
+import { generateWidgetToken } from '../middleware/auth.middleware';
+import { logger } from '../utils/logger';
+
+// Inline API key validation (looks up tenant by apiKey in DB)
+interface ApiKeyValidationResult {
+  valid: boolean;
+  tenant?: Tenant;
+  error?: string;
+}
+
+async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
+  if (!apiKey) {
+    return { valid: false, error: 'API key is required' };
+  }
+  try {
+    const tenantRepository = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepository.findOne({ where: { apiKey } });
+    if (!tenant) {
+      return { valid: false, error: 'Invalid API key' };
+    }
+    if (tenant.status === 'suspended' || tenant.status === 'cancelled') {
+      return { valid: false, error: `Tenant account is ${tenant.status}` };
+    }
+    return { valid: true, tenant };
+  } catch (error) {
+    return { valid: false, error: 'Internal error during validation' };
+  }
+}
+
+const router = Router();
+
+/**
+ * Get widget configuration
+ * GET /api/v1/widget/config
+ */
+router.get(
+  '/config',
+  widgetRateLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const apiKey = req.query.apiKey as string;
+
+    if (!apiKey) {
+      throw new ValidationError('API key is required');
+    }
+
+    const result = await validateApiKey(apiKey);
+
+    if (!result.valid || !result.tenant) {
+      throw new ValidationError(result.error || 'Invalid API key');
+    }
+
+    const tenant = result.tenant;
+
+    res.json({
+      success: true,
+      data: {
+        tenantId: tenant.id,
+        name: tenant.name,
+        theme: tenant.settings?.theme || {
+          primaryColor: '#007bff',
+          backgroundColor: '#ffffff',
+          textColor: '#333333',
+        },
+        features: tenant.settings?.features || {
+          fileUploadEnabled: false,
+          handoffEnabled: true,
+          aiEnabled: true,
+        },
+        businessHours: tenant.settings?.businessHours || {
+          enabled: false,
+          timezone: 'UTC',
+        },
+      },
+    });
+  })
+);
+
+/**
+ * Initialize widget session
+ * POST /api/v1/widget/init
+ */
+router.post(
+  '/init',
+  widgetRateLimiter,
+  asyncHandler(async (req: Request, res: Response): Promise<any> => {
+    const { apiKey, visitorId, metadata } = req.body;
+
+    if (!apiKey || !visitorId) {
+      throw new ValidationError('API key and visitor ID are required');
+    }
+
+    const result = await validateApiKey(apiKey);
+
+    if (!result.valid || !result.tenant) {
+      throw new ValidationError(result.error || 'Invalid API key');
+    }
+
+    const tenant = result.tenant;
+
+    // Check if visitor already has an active session
+    const sessionRepository = AppDataSource.getRepository(ChatSession);
+    const existingSession = await sessionRepository.findOne({
+      where: {
+        tenantId: tenant.id,
+        visitorId,
+        status: 'active',
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (existingSession) {
+      // Return existing session
+      const token = generateWidgetToken(tenant.id, visitorId, existingSession.id);
+
+      return res.json({
+        success: true,
+        data: {
+          session: {
+            id: existingSession.id,
+            status: existingSession.status,
+            startedAt: existingSession.startedAt,
+          },
+          token,
+          isNew: false,
+        },
+      });
+    }
+
+    // Create new session
+    const session = sessionRepository.create({
+      tenantId: tenant.id,
+      visitorId,
+      source: 'widget',
+      metadata: {
+        ...metadata,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        pageUrl: metadata?.pageUrl,
+        referrer: metadata?.referrer,
+      },
+      status: 'waiting',
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
+    });
+
+    await sessionRepository.save(session);
+
+    // Create participant
+    const participantRepository = AppDataSource.getRepository(Participant);
+    const participant = participantRepository.create({
+      sessionId: session.id,
+      type: 'user',
+      name: metadata?.name || 'Visitor',
+      isAnonymous: true,
+      joinedAt: new Date(),
+      metadata: {
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      },
+    });
+
+    await participantRepository.save(participant);
+
+    // Generate token
+    const token = generateWidgetToken(tenant.id, visitorId, session.id);
+
+    logger.info('Widget session initialized', {
+      sessionId: session.id,
+      tenantId: tenant.id,
+      visitorId,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        session: {
+          id: session.id,
+          status: session.status,
+          startedAt: session.startedAt,
+        },
+        token,
+        isNew: true,
+      },
+    });
+  })
+);
+
+/**
+ * Get session history
+ * GET /api/v1/widget/history
+ */
+router.get(
+  '/history',
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionId = req.widget!.sessionId;
+    const tenantId = req.widget!.tenantId;
+
+    if (!sessionId) {
+      throw new ValidationError('Session ID is required');
+    }
+
+    const messageRepository = AppDataSource.getRepository(Message);
+
+    const messages = await messageRepository.find({
+      where: { sessionId, tenantId, isDeleted: false },
+      relations: ['participant'],
+      order: { createdAt: 'ASC' },
+      take: 100,
+    });
+
+    res.json({
+      success: true,
+      data: messages.map((msg) => ({
+        id: msg.id,
+        type: msg.type,
+        content: msg.content,
+        sender: {
+          id: msg.participantId,
+          type: msg.participant?.type,
+          name: msg.participant?.name,
+        },
+        metadata: msg.metadata,
+        createdAt: msg.createdAt,
+      })),
+    });
+  })
+);
+
+/**
+ * Send message from widget
+ * POST /api/v1/widget/message
+ */
+router.post(
+  '/message',
+  widgetRateLimiter,
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { content, type = 'text', metadata } = req.body;
+    const sessionId = req.widget!.sessionId;
+    const tenantId = req.widget!.tenantId;
+    void req.widget!.visitorId; // visitorId available but not needed here
+
+    if (!sessionId) {
+      throw new ValidationError('Session not initialized');
+    }
+
+    if (!content) {
+      throw new ValidationError('Message content is required');
+    }
+
+    const sessionRepository = AppDataSource.getRepository(ChatSession);
+    const messageRepository = AppDataSource.getRepository(Message);
+    const participantRepository = AppDataSource.getRepository(Participant);
+
+    // Verify session
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
+
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    if (session.status === 'closed') {
+      throw new ValidationError('Session is closed');
+    }
+
+    // Get or create participant
+    let participant = await participantRepository.findOne({
+      where: { sessionId, type: 'user' },
+    });
+
+    if (!participant) {
+      participant = participantRepository.create({
+        sessionId,
+        type: 'user',
+        name: 'Visitor',
+        isAnonymous: true,
+        joinedAt: new Date(),
+      });
+      await participantRepository.save(participant);
+    }
+
+    // Create message
+    const message = messageRepository.create({
+      sessionId,
+      tenantId,
+      participantId: participant.id,
+      type,
+      content,
+      metadata: metadata || {},
+      status: 'sent',
+      sentAt: new Date(),
+    });
+
+    await messageRepository.save(message);
+
+    // Update session
+    session.incrementMessageCount();
+    await sessionRepository.save(session);
+
+    // Emit to WebSocket
+    emitToSession(tenantId, sessionId, 'message:receive', {
+      id: message.id,
+      sessionId: message.sessionId,
+      participantId: message.participantId,
+      participantType: 'user',
+      type: message.type,
+      content: message.content,
+      metadata: message.metadata,
+      timestamp: message.createdAt.toISOString(),
+    });
+
+    res.status(201).json({
+      success: true,
+      data: {
+        message: {
+          id: message.id,
+          content: message.content,
+          type: message.type,
+          createdAt: message.createdAt,
+        },
+      },
+    });
+  })
+);
+
+/**
+ * Request handoff to human agent
+ * POST /api/v1/widget/handoff
+ */
+router.post(
+  '/handoff',
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { reason = 'user_request', priority = 'medium' } = req.body;
+    const sessionId = req.widget!.sessionId;
+    const tenantId = req.widget!.tenantId;
+
+    if (!sessionId) {
+      throw new ValidationError('Session not initialized');
+    }
+
+    const sessionRepository = AppDataSource.getRepository(ChatSession);
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
+
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    // Update session status
+    session.status = 'handoff';
+    await sessionRepository.save(session);
+
+    // Emit handoff request to tenant
+    emitToSession(tenantId, sessionId, 'handoff:requested', {
+      sessionId,
+      reason,
+      priority,
+      timestamp: new Date().toISOString(),
+    });
+
+    logger.info('Handoff requested from widget', {
+      sessionId,
+      tenantId,
+      reason,
+      priority,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sessionId,
+        status: 'handoff_requested',
+        message: 'An agent will be with you shortly',
+      },
+    });
+  })
+);
+
+/**
+ * Rate conversation
+ * POST /api/v1/widget/rate
+ */
+router.post(
+  '/rate',
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { rating, feedback } = req.body;
+    const sessionId = req.widget!.sessionId;
+    const tenantId = req.widget!.tenantId;
+
+    if (!sessionId) {
+      throw new ValidationError('Session not initialized');
+    }
+
+    if (!rating || rating < 1 || rating > 5) {
+      throw new ValidationError('Rating must be between 1 and 5');
+    }
+
+    const sessionRepository = AppDataSource.getRepository(ChatSession);
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
+
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    session.satisfactionRating = rating;
+    session.satisfactionFeedback = feedback;
+    await sessionRepository.save(session);
+
+    logger.info('Session rated', {
+      sessionId,
+      tenantId,
+      rating,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Thank you for your feedback!',
+      },
+    });
+  })
+);
+
+export { router as widgetRouter };

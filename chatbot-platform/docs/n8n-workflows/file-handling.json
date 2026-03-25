@@ -1,0 +1,468 @@
+{
+  "name": "File Upload Processing",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "file-handler-inbound",
+      "path": "file-handler-webhook",
+      "responseMode": "responseNode",
+      "httpMethod": "POST"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract file data from webhook\nconst body = $input.first().json.body;\nconst event = body.event;\nconst payload = body.payload;\n\n// Check if this is a file upload event\nconst isFileUpload = event === 'file.uploaded' || payload?.type === 'file' || payload?.type === 'image';\n\nreturn {\n  json: {\n    sessionId: body.sessionId,\n    tenantId: body.tenantId,\n    event: event,\n    isFileUpload: isFileUpload,\n    fileType: payload?.type,\n    fileUrl: payload?.metadata?.url || payload?.content,\n    fileName: payload?.metadata?.filename,\n    fileSize: payload?.metadata?.size,\n    mimeType: payload?.metadata?.mimeType,\n    user: body.user\n  }\n};"
+      },
+      "id": "extract-file",
+      "name": "Extract File Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.isFileUpload }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-file",
+      "name": "Is File Upload?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "rules": [
+            {
+              "value": "={{ $json.fileType }}",
+              "conditions": [
+                {
+                  "value": "image",
+                  "operator": {
+                    "type": "string",
+                    "operation": "equals"
+                  }
+                }
+              ]
+            },
+            {
+              "value": "={{ $json.fileType }}",
+              "conditions": [
+                {
+                  "value": "file",
+                  "operator": {
+                    "type": "string",
+                    "operation": "equals"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "route-type",
+      "name": "Route by Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.fileUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "body": ""
+            }
+          }
+        }
+      },
+      "id": "download-image",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 100]
+    },
+    {
+      "parameters": {
+        "operation": "analyze",
+        "options": {}
+      },
+      "id": "vision-analyze",
+      "name": "Vision Analysis",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [1250, 100],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process image analysis results\nconst analysis = $input.first().json;\nconst fileData = $('Extract File Data').first().json;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: fileData.sessionId,\n    payload: {\n      type: 'text',\n      content: `I've analyzed your image. Here's what I found:\\n\\n${analysis.description || 'Unable to analyze image content'}`,\n      quickReplies: ['Upload another', 'I need help with this']\n    }\n  }\n};"
+      },
+      "id": "image-response",
+      "name": "Image Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.fileUrl }}",
+        "options": {
+          "response": {
+            "response": {
+              "body": ""
+            }
+          }
+        }
+      },
+      "id": "download-doc",
+      "name": "Download Document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "extract-text",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process document content\nconst extracted = $input.first().json;\nconst fileData = $('Extract File Data').first().json;\n\n// Store document info\nconst docInfo = {\n  filename: fileData.fileName,\n  size: fileData.fileSize,\n  extractedText: extracted.data?.substring(0, 500) + '...' // First 500 chars\n};\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: fileData.sessionId,\n    payload: {\n      type: 'text',\n      content: `I've received your document "${fileData.fileName}" (${(fileData.fileSize / 1024).toFixed(1)} KB).\\n\\nI've extracted the text and will process it. What would you like me to do with this document?`,\n      quickReplies: ['Summarize it', 'Find key info', 'Upload another']\n    },\n    documentInfo: docInfo\n  }\n};"
+      },
+      "id": "doc-response",
+      "name": "Document Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "bucketName": {
+          "value": "chatbot-uploads",
+          "mode": "list"
+        },
+        "fileName": "={{ $json.fileName }}",
+        "binaryData": true,
+        "options": {}
+      },
+      "id": "s3-upload",
+      "name": "Upload to S3",
+      "type": "n8n-nodes-base.awsS3",
+      "typeVersion": 2,
+      "position": [1050, 300],
+      "credentials": {
+        "aws": {
+          "id": "YOUR_AWS_CREDENTIAL_ID",
+          "name": "AWS Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "table": {
+          "value": "file_uploads",
+          "mode": "list"
+        },
+        "columns": {
+          "column": [
+            {
+              "name": "session_id",
+              "value": "={{ $('Extract File Data').first().json.sessionId }}"
+            },
+            {
+              "name": "tenant_id",
+              "value": "={{ $('Extract File Data').first().json.tenantId }}"
+            },
+            {
+              "name": "filename",
+              "value": "={{ $('Extract File Data').first().json.fileName }}"
+            },
+            {
+              "name": "file_size",
+              "value": "={{ $('Extract File Data').first().json.fileSize }}"
+            },
+            {
+              "name": "mime_type",
+              "value": "={{ $('Extract File Data').first().json.mimeType }}"
+            },
+            {
+              "name": "s3_url",
+              "value": "={{ $json.Location }}"
+            },
+            {
+              "name": "uploaded_at",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "save-metadata",
+      "name": "Save Metadata",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1250, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle non-file messages\nconst data = $input.first().json;\n\nreturn {\n  json: {\n    action: 'file.request',\n    sessionId: data.sessionId,\n    payload: {\n      types: ['image', 'document'],\n      maxSize: 10485760,\n      maxFiles: 1,\n      prompt: 'Please upload a file or image for me to process.'\n    }\n  }\n};"
+      },
+      "id": "request-file",
+      "name": "Request File",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.webhookUrl }}",
+        "method": "POST",
+        "body": "={{ $json }}",
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1650, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, processed: true }) }}",
+        "statusCode": 200
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1850, 200]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["chatbot", "files", "upload"],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract File Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract File Data": {
+      "main": [
+        [
+          {
+            "node": "Is File Upload?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is File Upload?": {
+      "main": [
+        [
+          {
+            "node": "Route by Type",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Request File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Type": {
+      "main": [
+        [
+          {
+            "node": "Download Image",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Download Document",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload to S3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Image": {
+      "main": [
+        [
+          {
+            "node": "Vision Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vision Analysis": {
+      "main": [
+        [
+          {
+            "node": "Image Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Image Response": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Document": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Document Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Response": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to S3": {
+      "main": [
+        [
+          {
+            "node": "Save Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Metadata": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request File": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "description": "Process uploaded files with image analysis, document text extraction, and secure cloud storage"
+}

@@ -1,0 +1,408 @@
+{
+  "name": "Lead Capture & CRM Integration",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "lead-capture-inbound",
+      "path": "lead-capture-webhook",
+      "responseMode": "responseNode",
+      "httpMethod": "POST"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and analyze message\nconst body = $input.first().json.body;\nconst message = body.payload?.content?.toLowerCase() || '';\n\n// Detect lead capture intent\nconst leadTriggers = [\n  'interested', 'pricing', 'quote', 'demo', 'trial', 'contact me',\n  'email me', 'call me', 'more info', 'learn more', 'sign up',\n  'subscribe', 'newsletter', 'download', 'whitepaper', 'ebook'\n];\n\nconst isLeadIntent = leadTriggers.some(trigger => message.includes(trigger));\n\n// Extract potential email\nconst emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/;\nconst foundEmail = message.match(emailRegex);\n\n// Extract potential phone\nconst phoneRegex = /[\\+]?[(]?[0-9]{3}[)]?[-\\s.]?[0-9]{3}[-\\s.]?[0-9]{4,6}/;\nconst foundPhone = message.match(phoneRegex);\n\n// Extract name (simple heuristic: words before/after 'name is' or 'I am')\nlet foundName = null;\nconst nameMatch = message.match(/(?:name is|i am|i'm|this is)\\s+([a-zA-Z\\s]+?)(?:\\.|,|and|@|$)/i);\nif (nameMatch) {\n  foundName = nameMatch[1].trim();\n}\n\nreturn {\n  json: {\n    sessionId: body.sessionId,\n    tenantId: body.tenantId,\n    userMessage: body.payload?.content,\n    messageType: body.payload?.type,\n    user: body.user,\n    pageUrl: body.context?.pageUrl,\n    utmParams: body.context?.utmParams,\n    previousMessages: body.context?.previousMessages || [],\n    isLeadIntent: isLeadIntent,\n    extractedData: {\n      email: foundEmail ? foundEmail[0] : null,\n      phone: foundPhone ? foundPhone[0] : null,\n      name: foundName\n    }\n  }\n};"
+      },
+      "id": "extract-data",
+      "name": "Extract & Analyze",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.isLeadIntent }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-lead",
+      "name": "Lead Intent?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Check what data we have\nconst data = $input.first().json;\nconst extracted = data.extractedData;\n\nconst hasEmail = !!extracted.email;\nconst hasPhone = !!extracted.phone;\nconst hasName = !!extracted.name;\n\n// Determine qualification status\nlet qualification = 'cold';\nif (hasEmail && hasName) qualification = 'warm';\nif (hasEmail && hasName && hasPhone) qualification = 'hot';\n\nreturn {\n  json: {\n    ...data,\n    dataCompleteness: {\n      hasEmail,\n      hasPhone,\n      hasName,\n      complete: hasEmail && hasName\n    },\n    qualification: qualification\n  }\n};"
+      },
+      "id": "check-data",
+      "name": "Check Data Completeness",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.dataCompleteness.complete }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-complete",
+      "name": "Data Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "table": {
+          "value": "leads",
+          "mode": "list"
+        },
+        "columns": {
+          "column": [
+            {
+              "name": "session_id",
+              "value": "={{ $json.sessionId }}"
+            },
+            {
+              "name": "tenant_id",
+              "value": "={{ $json.tenantId }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.extractedData.email }}"
+            },
+            {
+              "name": "phone",
+              "value": "={{ $json.extractedData.phone }}"
+            },
+            {
+              "name": "name",
+              "value": "={{ $json.extractedData.name }}"
+            },
+            {
+              "name": "source",
+              "value": "={{ $json.utmParams?.source || 'chatbot' }}"
+            },
+            {
+              "name": "campaign",
+              "value": "={{ $json.utmParams?.campaign }}"
+            },
+            {
+              "name": "page_url",
+              "value": "={{ $json.pageUrl }}"
+            },
+            {
+              "name": "qualification",
+              "value": "={{ $json.qualification }}"
+            },
+            {
+              "name": "status",
+              "value": "new"
+            },
+            {
+              "name": "created_at",
+              "value": "={{ $now }}"
+            }
+          ]
+        }
+      },
+      "id": "save-lead",
+      "name": "Save Lead to DB",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [1250, 100],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "contact",
+        "operation": "create",
+        "email": "={{ $('Extract & Analyze').first().json.extractedData.email }}",
+        "additionalFields": {
+          "firstname": "={{ $('Extract & Analyze').first().json.extractedData.name?.split(' ')[0] }}",
+          "lastname": "={{ $('Extract & Analyze').first().json.extractedData.name?.split(' ').slice(1).join(' ') }}",
+          "phone": "={{ $('Extract & Analyze').first().json.extractedData.phone }}",
+          "lifecyclestage": "lead",
+          "hs_lead_status": "NEW"
+        }
+      },
+      "id": "hubspot-create",
+      "name": "Create HubSpot Contact",
+      "type": "n8n-nodes-base.hubspot",
+      "typeVersion": 2,
+      "position": [1450, 100],
+      "credentials": {
+        "hubspotDeveloperApi": {
+          "id": "YOUR_HUBSPOT_CREDENTIAL_ID",
+          "name": "HubSpot Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send confirmation to user\nconst data = $('Check Data Completeness').first().json;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: data.sessionId,\n    payload: {\n      type: 'text',\n      content: `Thank you, ${data.extractedData.name}!\\n\\nI've received your information and someone from our team will contact you shortly at ${data.extractedData.email}.\\n\\nIs there anything else I can help you with in the meantime?`,\n      quickReplies: ['Schedule a demo', 'View pricing', 'No thanks']\n    }\n  }\n};"
+      },
+      "id": "confirm-response",
+      "name": "Confirmation Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Request missing information\nconst data = $input.first().json;\nconst extracted = data.extractedData;\n\nlet missingFields = [];\nif (!extracted.email) missingFields.push('email address');\nif (!extracted.name) missingFields.push('name');\n\nconst missingText = missingFields.join(' and ');\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: data.sessionId,\n    payload: {\n      type: 'text',\n      content: `I'd be happy to help! To get started, could you please provide your ${missingText}?`,\n      quickReplies: extracted.email ? [] : ['john@example.com'],\n      metadata: {\n        awaitingLeadInfo: true,\n        missingFields: missingFields\n      }\n    }\n  }\n};"
+      },
+      "id": "request-info",
+      "name": "Request Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle non-lead messages\nconst data = $input.first().json;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: data.sessionId,\n    payload: {\n      type: 'text',\n      content: \"I'd love to learn more about how I can help you! Are you interested in:\",\n      quickReplies: ['Pricing info', 'Schedule demo', 'Free trial', 'Product details', 'Talk to sales']\n    }\n  }\n};"
+      },
+      "id": "engage-response",
+      "name": "Engagement Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Send Slack notification for hot leads\nconst data = $('Check Data Completeness').first().json;\n\nif (data.qualification === 'hot') {\n  return {\n    json: {\n      text: `🔥 *Hot Lead Alert!*\\n\\n**Name:** ${data.extractedData.name}\\n**Email:** ${data.extractedData.email}\\n**Phone:** ${data.extractedData.phone}\\n**Source:** ${data.utmParams?.source || 'chatbot'}\\n**Page:** ${data.pageUrl}\\n**Session:** ${data.sessionId}`\n    }\n  };\n}\n\nreturn { json: { skip: true } };"
+      },
+      "id": "slack-notify",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1850, 100],
+      "credentials": {
+        "slackApi": {
+          "id": "YOUR_SLACK_CREDENTIAL_ID",
+          "name": "Slack Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.webhookUrl }}",
+        "method": "POST",
+        "body": "={{ $json }}",
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2050, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, leadCaptured: true }) }}",
+        "statusCode": 200
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2250, 200]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["chatbot", "leads", "crm"],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract & Analyze",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Analyze": {
+      "main": [
+        [
+          {
+            "node": "Lead Intent?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Intent?": {
+      "main": [
+        [
+          {
+            "node": "Check Data Completeness",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Engagement Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Data Completeness": {
+      "main": [
+        [
+          {
+            "node": "Data Complete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Data Complete?": {
+      "main": [
+        [
+          {
+            "node": "Save Lead to DB",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Request Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Lead to DB": {
+      "main": [
+        [
+          {
+            "node": "Create HubSpot Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create HubSpot Contact": {
+      "main": [
+        [
+          {
+            "node": "Confirmation Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Confirmation Response": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Request Info": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Engagement Response": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "description": "Intelligent lead capture with data extraction, qualification scoring, CRM integration, and team notifications"
+}

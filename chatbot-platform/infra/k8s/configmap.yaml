@@ -1,0 +1,74 @@
+# =============================================================================
+# ConfigMap - Non-sensitive Configuration
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: chatbot-config
+  namespace: chatbot-platform
+  labels:
+    app.kubernetes.io/name: chatbot-platform
+    app.kubernetes.io/component: config
+data:
+  # Application
+  NODE_ENV: "production"
+  PORT: "3000"
+  API_VERSION: "v1"
+  LOG_LEVEL: "info"
+  
+  # Database
+  POSTGRES_HOST: "postgres"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "chatbot"
+  
+  # Redis
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  
+  # AWS
+  AWS_REGION: "us-east-1"
+  
+  # ClamAV
+  CLAMAV_HOST: "clamav"
+  CLAMAV_PORT: "3310"
+  
+  # n8n
+  N8N_WEBHOOK_URL: "http://n8n:5678"
+  
+  # Security
+  CORS_ORIGIN: "*"
+  RATE_LIMIT_WINDOW_MS: "900000"
+  RATE_LIMIT_MAX: "100"
+  
+  # Upload
+  UPLOAD_MAX_FILE_SIZE: "26214400"
+  UPLOAD_RETENTION_DAYS: "30"
+  
+  # Feature flags
+  ENABLE_VIRUS_SCAN: "true"
+  ENABLE_THUMBNAILS: "true"
+  ENABLE_WEBSOCKET: "true"
+---
+# =============================================================================
+# n8n ConfigMap
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: n8n-config
+  namespace: chatbot-platform
+  labels:
+    app.kubernetes.io/name: n8n
+    app.kubernetes.io/component: config
+data:
+  DB_TYPE: "postgresdb"
+  DB_POSTGRESDB_HOST: "postgres"
+  DB_POSTGRESDB_PORT: "5432"
+  DB_POSTGRESDB_DATABASE: "chatbot"
+  N8N_BASIC_AUTH_ACTIVE: "true"
+  GENERIC_TIMEZONE: "UTC"
+  EXECUTIONS_MODE: "regular"
+  EXECUTIONS_TIMEOUT: "300"
+  EXECUTIONS_TIMEOUT_MAX: "3600"
+  QUEUE_BULL_REDIS_HOST: "redis"
+  QUEUE_BULL_REDIS_PORT: "6379"

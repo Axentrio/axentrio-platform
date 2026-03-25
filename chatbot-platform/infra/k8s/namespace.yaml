@@ -1,0 +1,11 @@
+# =============================================================================
+# Namespace
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: chatbot-platform
+  labels:
+    name: chatbot-platform
+    app.kubernetes.io/name: chatbot-platform
+    app.kubernetes.io/component: namespace

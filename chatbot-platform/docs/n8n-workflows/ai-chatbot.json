@@ -1,0 +1,318 @@
+{
+  "name": "AI-Powered Chatbot with OpenAI",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "chat-trigger",
+      "name": "Chat Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "webhookId": "ai-chatbot-inbound",
+      "path": "ai-chatbot-webhook",
+      "responseMode": "responseNode",
+      "httpMethod": "POST"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract and format message data\nconst body = $input.first().json.body;\n\n// Format previous messages for OpenAI context\nconst previousMessages = body.context?.previousMessages || [];\nconst formattedHistory = previousMessages.map(msg => ({\n  role: msg.role,\n  content: msg.content\n}));\n\nreturn {\n  json: {\n    sessionId: body.sessionId,\n    tenantId: body.tenantId,\n    userMessage: body.payload?.content,\n    messageType: body.payload?.type,\n    user: body.user,\n    history: formattedHistory,\n    pageUrl: body.context?.pageUrl,\n    intent: body.context?.intent\n  }\n};"
+      },
+      "id": "extract-data",
+      "name": "Extract & Format Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.messageType }}",
+              "rightValue": "text",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-text",
+      "name": "Is Text?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 500
+        },
+        "messages": {
+          "message": [
+            {
+              "content": "You are a helpful customer support assistant for a white-label chatbot platform. Be friendly, professional, and concise. Keep responses under 3 sentences when possible. If you don't know something, offer to connect the user with a human agent.",
+              "role": "system"
+            },
+            {
+              "content": "={{ JSON.stringify($json.history) }}",
+              "role": "assistant"
+            },
+            {
+              "content": "={{ $json.userMessage }}",
+              "role": "user"
+            }
+          ]
+        }
+      },
+      "id": "openai-chat",
+      "name": "OpenAI Chat",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [850, 200],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {},
+        "prompt": "={{ $json.userMessage }}"
+      },
+      "id": "agent",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [1050, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process AI response and format for chatbot\nconst aiResponse = $input.first().json.content || $input.first().json.output;\nconst sessionId = $('Extract & Format Data').first().json.sessionId;\n\n// Detect if we should offer handoff\nconst handoffKeywords = ['human', 'agent', 'speak to someone', 'talk to', 'representative', 'support team'];\nconst shouldOfferHandoff = handoffKeywords.some(kw => aiResponse.toLowerCase().includes(kw.toLowerCase()));\n\n// Generate quick replies based on response\nlet quickReplies = ['Thanks!', 'Tell me more', 'I have another question'];\nif (shouldOfferHandoff) {\n  quickReplies = ['Yes, connect me', 'No, continue'];\n}\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: sessionId,\n    payload: {\n      type: 'text',\n      content: aiResponse,\n      quickReplies: quickReplies\n    },\n    shouldOfferHandoff: shouldOfferHandoff\n  }\n};"
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Handle non-text messages\nconst sessionId = $('Extract & Format Data').first().json.sessionId;\nconst messageType = $('Extract & Format Data').first().json.messageType;\n\nreturn {\n  json: {\n    action: 'message.send',\n    sessionId: sessionId,\n    payload: {\n      type: 'text',\n      content: `I see you've shared a ${messageType}. I'm designed to work best with text messages. Could you describe what you'd like help with?`,\n      quickReplies: ['I need help with...', 'Connect me to support']\n    }\n  }\n};"
+      },
+      "id": "handle-media",
+      "name": "Handle Media",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-1",
+              "leftValue": "={{ $json.shouldOfferHandoff }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-handoff",
+      "name": "Offer Handoff?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Trigger human handoff\nconst sessionId = $('Extract & Format Data').first().json.sessionId;\n\nreturn {\n  json: {\n    action: 'handsoff.trigger',\n    sessionId: sessionId,\n    payload: {\n      reason: 'User requested human agent via AI conversation',\n      priority: 'normal',\n      summary: 'Customer requested to speak with a human agent'\n    }\n  }\n};"
+      },
+      "id": "trigger-handoff",
+      "name": "Trigger Handoff",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1650, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.webhookUrl }}",
+        "method": "POST",
+        "body": "={{ $json }}",
+        "options": {}
+      },
+      "id": "send-response",
+      "name": "Send Response",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'AI response processed' }) }}",
+        "statusCode": 200
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2050, 200]
+    }
+  ],
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": ["chatbot", "ai", "openai"],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract & Format Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Format Data": {
+      "main": [
+        [
+          {
+            "node": "Is Text?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Text?": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Media",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Offer Handoff?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Media": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Offer Handoff?": {
+      "main": [
+        [
+          {
+            "node": "Trigger Handoff",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Handoff": {
+      "main": [
+        [
+          {
+            "node": "Send Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "description": "AI-powered chatbot using OpenAI GPT-4 with conversation history and intelligent handoff detection"
+}

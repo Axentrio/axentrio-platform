@@ -109,11 +109,15 @@ export class Message {
   @JoinColumn({ name: 'participant_id' })
   participant!: Participant;
 
-  // Getter for content (with automatic decryption)
+  private _decryptedCache: string | null = null;
+
+  // Getter for content (with automatic decryption, cached per instance)
   get content(): string {
     if (this.contentEncrypted && this._content) {
+      if (this._decryptedCache !== null) return this._decryptedCache;
       try {
-        return decrypt(this._content);
+        this._decryptedCache = decrypt(this._content);
+        return this._decryptedCache;
       } catch (error) {
         console.error('Failed to decrypt message content:', error);
         return '[Encrypted Message]';
@@ -125,6 +129,7 @@ export class Message {
   // Setter for content (with optional encryption)
   set content(value: string) {
     this._content = value;
+    this._decryptedCache = null;
   }
 
   // Encrypt content before saving
@@ -163,6 +168,7 @@ export class Message {
 
   edit(newContent: string): void {
     this._content = newContent;
+    this._decryptedCache = null;
     this.contentEncrypted = false; // Will be re-encrypted by @BeforeUpdate
     this.metadata = {
       ...this.metadata,

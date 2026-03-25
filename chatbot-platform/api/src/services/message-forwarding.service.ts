@@ -20,7 +20,7 @@ const tenantRepository = AppDataSource.getRepository(Tenant);
 
 // Module-level service references, set via initialize()
 let outboundService: OutboundService | null = null;
-let fallbackService: FallbackService | null = null;
+let fallbackServiceRef: FallbackService | null = null;
 
 /**
  * Initialize with n8n service references
@@ -30,8 +30,12 @@ export function initializeForwarding(
   fallback: FallbackService
 ): void {
   outboundService = outbound;
-  fallbackService = fallback;
+  fallbackServiceRef = fallback;
   logger.info('Message forwarding service initialized');
+}
+
+export function getFallbackService(): FallbackService | null {
+  return fallbackServiceRef;
 }
 
 /**

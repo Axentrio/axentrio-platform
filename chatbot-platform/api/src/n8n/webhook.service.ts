@@ -271,7 +271,7 @@ export class WebhookService {
         priority: (payload?.priority || 'normal') as any,
         notes: payload?.summary,
       } as any);
-      const savedHandoff = await this.handoffRepo.save(handoff);
+      const savedHandoff: any = await this.handoffRepo.save(handoff as any);
 
       // Notify agents
       emitToTenantAgents(session.tenantId, 'handoff:requested', {

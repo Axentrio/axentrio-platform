@@ -6,7 +6,7 @@ export const OrganizationRequired: React.FC<{ children: React.ReactNode }> = ({ 
 
   if (!isLoaded) {
     return (
-      <div className="flex items-center justify-center h-screen bg-surface-1">
+      <div className="h-full flex items-center justify-center">
         <div className="text-text-secondary">Loading...</div>
       </div>
     );
@@ -14,7 +14,7 @@ export const OrganizationRequired: React.FC<{ children: React.ReactNode }> = ({ 
 
   if (!organization) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen bg-surface-1">
+      <div className="h-full flex flex-col items-center justify-center">
         <h2 className="text-xl font-semibold text-text-primary mb-6">Select an Organization</h2>
         <OrganizationList
           appearance={{

@@ -92,7 +92,7 @@ const Dashboard: React.FC = () => {
     error,
   } = useQuery<DashboardApiResponse>({
     queryKey: ['dashboard-metrics'],
-    queryFn: () => api.get<DashboardApiResponse>('/v1/analytics/dashboard'),
+    queryFn: () => api.get<DashboardApiResponse>('/analytics/dashboard'),
     refetchInterval: 30000,
   });
 

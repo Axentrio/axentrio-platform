@@ -153,7 +153,7 @@ const Analytics: React.FC = () => {
   } = useQuery<{ success: boolean; timeseries: TimeseriesPoint[] }>({
     queryKey: ['analytics-timeseries', startDate, endDate],
     queryFn: () =>
-      api.get('/v1/analytics/chats/timeseries', {
+      api.get('/analytics/chats/timeseries', {
         params: { startDate, endDate },
       }),
     enabled: activeTab === 'overview',
@@ -166,7 +166,7 @@ const Analytics: React.FC = () => {
   } = useQuery<{ success: boolean; metrics: ChatMetrics }>({
     queryKey: ['analytics-metrics', startDate, endDate],
     queryFn: () =>
-      api.get('/v1/analytics/chats', {
+      api.get('/analytics/chats', {
         params: { from: startDate, to: endDate },
       }),
     enabled: activeTab === 'overview' || activeTab === 'chats',
@@ -178,7 +178,7 @@ const Analytics: React.FC = () => {
     isLoading: isLoadingAgents,
   } = useQuery<{ success: boolean; agents: AgentRow[] }>({
     queryKey: ['analytics-agents'],
-    queryFn: () => api.get('/v1/analytics/agents'),
+    queryFn: () => api.get('/analytics/agents'),
     enabled: activeTab === 'agents' || activeTab === 'overview',
   });
 

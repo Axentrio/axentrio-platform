@@ -1,10 +1,12 @@
 /**
  * Tenants Page
  * White-label config (colors, logo, webhook)
+ * Displays the current tenant only (no multi-tenant listing API exists).
  */
 
-import React, { useState } from 'react';
-import { Plus, Edit2, Trash2, ExternalLink, Copy, Check, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Edit2, ExternalLink, Copy, Check, RefreshCw, Loader2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@components/Modal';
 import type { Tenant } from '@app-types/index';
 import { cn } from '@/lib/utils';
@@ -13,121 +15,102 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { api } from '@services/apiClient';
 
-// Mock tenants - replace with actual data
-const mockTenants: Tenant[] = [
-  {
-    id: '1',
-    name: 'Acme Corp',
-    slug: 'acme',
-    primaryColor: '#6366f1',
-    secondaryColor: '#4338ca',
-    webhookUrl: 'https://acme.com/webhook',
-    apiKey: 'ak_live_xxxxxxxxxxxx',
-    settings: {
-      businessHours: { timezone: 'America/New_York', schedule: [] },
+/** Shape returned by GET /tenants/me */
+interface TenantApiResponse {
+  success: boolean;
+  data: {
+    id: string;
+    name: string;
+    slug: string;
+    apiKey: string;
+    tier: string;
+    status: string;
+    settings: Tenant['settings'] | null;
+    maxSessions: number;
+    currentSessions: number;
+    webhookUrl: string | null;
+    webhookSecret: string | null;
+    customDomain: string | null;
+    createdAt: string;
+  };
+}
+
+/** Map the API response into the frontend Tenant shape */
+function mapApiToTenant(data: TenantApiResponse['data']): Tenant {
+  return {
+    id: data.id,
+    name: data.name,
+    slug: data.slug,
+    apiKey: data.apiKey,
+    primaryColor: '#6366f1',   // not returned by API; use default
+    secondaryColor: '#4338ca', // not returned by API; use default
+    webhookUrl: data.webhookUrl ?? undefined,
+    settings: data.settings ?? {
+      businessHours: { timezone: 'UTC', schedule: [] },
       autoHandoff: true,
       handoffTriggers: { sentimentThreshold: 0.3, consecutiveFailures: 3, explicitRequest: true, timeoutSeconds: 300 },
       responseTimeSLA: 2,
       csatEnabled: true,
     },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isActive: true,
-    maxAgents: 10,
-    currentAgents: 5,
-  },
-  {
-    id: '2',
-    name: 'TechStart Inc',
-    slug: 'techstart',
-    primaryColor: '#34d399',
-    secondaryColor: '#059669',
-    webhookUrl: 'https://techstart.io/webhook',
-    apiKey: 'ak_live_yyyyyyyyyyyy',
-    settings: {
-      businessHours: { timezone: 'America/Los_Angeles', schedule: [] },
-      autoHandoff: true,
-      handoffTriggers: { sentimentThreshold: 0.3, consecutiveFailures: 3, explicitRequest: true, timeoutSeconds: 300 },
-      responseTimeSLA: 2,
-      csatEnabled: true,
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isActive: true,
-    maxAgents: 5,
-    currentAgents: 2,
-  },
-];
+    createdAt: data.createdAt,
+    updatedAt: data.createdAt,
+    isActive: data.status === 'active',
+    maxAgents: data.maxSessions ?? 0,
+    currentAgents: data.currentSessions ?? 0,
+  };
+}
 
 const Tenants: React.FC = () => {
-  const [tenants, setTenants] = useState<Tenant[]>(mockTenants);
+  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [tenantToDelete, setTenantToDelete] = useState<string | null>(null);
 
-  const handleCreate = () => {
-    setEditingTenant(null);
+  // ---------- Fetch current tenant ----------
+  const {
+    data: tenant,
+    isLoading,
+    isError,
+    error,
+  } = useQuery<Tenant>({
+    queryKey: ['tenant', 'me'],
+    queryFn: async () => {
+      const res = await api.get<TenantApiResponse>('/tenants/me');
+      return mapApiToTenant(res.data);
+    },
+  });
+
+  // ---------- Update tenant ----------
+  const updateMutation = useMutation({
+    mutationFn: async (data: Partial<Tenant>) => {
+      const payload: Record<string, unknown> = {};
+      if (data.name) payload.name = data.name;
+      if (data.webhookUrl !== undefined) payload.webhookUrl = data.webhookUrl;
+      if (data.settings) payload.settings = data.settings;
+      return api.patch('/tenants/me', payload);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'me'] });
+    },
+  });
+
+  // ---------- Rotate API key ----------
+  const rotateMutation = useMutation({
+    mutationFn: async () => {
+      return api.post('/tenants/me/api-key/rotate');
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant', 'me'] });
+    },
+  });
+
+  const handleEdit = () => {
     setIsModalOpen(true);
-  };
-
-  const handleEdit = (tenant: Tenant) => {
-    setEditingTenant(tenant);
-    setIsModalOpen(true);
-  };
-
-  const handleDeleteClick = (tenantId: string) => {
-    setTenantToDelete(tenantId);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (tenantToDelete) {
-      setTenants((prev) => prev.filter((t) => t.id !== tenantToDelete));
-    }
-    setDeleteDialogOpen(false);
-    setTenantToDelete(null);
   };
 
   const handleSave = async (data: Partial<Tenant>) => {
-    if (editingTenant) {
-      setTenants((prev) =>
-        prev.map((t) => (t.id === editingTenant.id ? { ...t, ...data } as Tenant : t))
-      );
-    } else {
-      const newTenant: Tenant = {
-        id: Date.now().toString(),
-        name: data.name || '',
-        slug: data.slug || '',
-        primaryColor: data.primaryColor || '#6366f1',
-        secondaryColor: data.secondaryColor || '#4338ca',
-        settings: {
-          businessHours: { timezone: 'UTC', schedule: [] },
-          autoHandoff: true,
-          handoffTriggers: { sentimentThreshold: 0.3, consecutiveFailures: 3, explicitRequest: true, timeoutSeconds: 300 },
-          responseTimeSLA: 2,
-          csatEnabled: true,
-        },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isActive: true,
-        maxAgents: 10,
-        currentAgents: 0,
-      };
-      setTenants((prev) => [...prev, newTenant]);
-    }
+    await updateMutation.mutateAsync(data);
     setIsModalOpen(false);
   };
 
@@ -137,185 +120,172 @@ const Tenants: React.FC = () => {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const handleRegenerateKey = async (tenantId: string) => {
-    const newKey = `ak_live_${Math.random().toString(36).substring(7)}`;
-    setTenants((prev) =>
-      prev.map((t) => (t.id === tenantId ? { ...t, apiKey: newKey } : t))
-    );
+  const handleRegenerateKey = async () => {
+    await rotateMutation.mutateAsync();
   };
+
+  // ---------- Loading / Error states ----------
+  if (isLoading) {
+    return (
+      <div className="p-6 flex items-center justify-center h-64">
+        <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
+        <span className="ml-2 text-text-secondary">Loading tenant...</span>
+      </div>
+    );
+  }
+
+  if (isError || !tenant) {
+    return (
+      <div className="p-6 space-y-4">
+        <h1 className="text-2xl font-bold text-text-primary">Tenant</h1>
+        <Card variant="glass" className="p-6">
+          <p className="text-text-secondary">
+            {(error as Error)?.message || 'Failed to load tenant information.'}
+          </p>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Tenants</h1>
-          <p className="text-text-secondary">Manage white-label configurations</p>
+          <h1 className="text-2xl font-bold text-text-primary">Tenant</h1>
+          <p className="text-text-secondary">Manage your white-label configuration</p>
         </div>
-        <Button onClick={handleCreate}>
-          <Plus className="w-4 h-4 mr-2" />
-          Add Tenant
-        </Button>
       </div>
 
-      {/* Tenants Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {tenants.map((tenant) => (
-          <Card key={tenant.id} variant="glass" className="overflow-hidden">
-            {/* Header */}
-            <CardHeader
-              className="px-6 py-4"
-              style={{ backgroundColor: tenant.primaryColor + '15' }}
-            >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-3">
-                  <div
-                    className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg"
-                    style={{ backgroundColor: tenant.primaryColor }}
-                  >
-                    {tenant.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-text-primary">{tenant.name}</h3>
-                    <p className="text-sm text-text-muted">{tenant.slug}</p>
-                  </div>
+      {/* Tenant Card */}
+      <div className="max-w-2xl">
+        <Card variant="glass" className="overflow-hidden">
+          {/* Header */}
+          <CardHeader
+            className="px-6 py-4"
+            style={{ backgroundColor: tenant.primaryColor + '15' }}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg"
+                  style={{ backgroundColor: tenant.primaryColor }}
+                >
+                  {tenant.name.charAt(0).toUpperCase()}
                 </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleEdit(tenant)}
-                    className="text-text-secondary hover:text-text-primary"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleDeleteClick(tenant.id)}
-                    className="text-text-secondary hover:text-red-400 hover:bg-red-500/10"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                <div>
+                  <h3 className="font-semibold text-text-primary">{tenant.name}</h3>
+                  <p className="text-sm text-text-muted">{tenant.slug}</p>
                 </div>
               </div>
-            </CardHeader>
-
-            {/* Body */}
-            <CardContent className="px-6 py-4 space-y-4">
-              {/* Colors */}
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-text-muted">Primary:</span>
-                  <div
-                    className="w-6 h-6 rounded border border-edge"
-                    style={{ backgroundColor: tenant.primaryColor }}
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm text-text-muted">Secondary:</span>
-                  <div
-                    className="w-6 h-6 rounded border border-edge"
-                    style={{ backgroundColor: tenant.secondaryColor }}
-                  />
-                </div>
-              </div>
-
-              {/* Webhook */}
-              {tenant.webhookUrl && (
-                <div className="flex items-center gap-2">
-                  <ExternalLink className="w-4 h-4 text-text-muted" />
-                  <span className="text-sm text-text-secondary truncate">{tenant.webhookUrl}</span>
-                </div>
-              )}
-
-              {/* API Key */}
               <div className="flex items-center gap-2">
-                <span className="text-sm text-text-muted">API Key:</span>
-                <Input
-                  readOnly
-                  value={`${tenant.apiKey?.substring(0, 20)}...`}
-                  className="flex-1 font-mono text-sm h-8 bg-surface-3"
-                />
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => handleCopyKey(tenant.apiKey || '')}
-                  className={cn("h-8 w-8", copiedKey === tenant.apiKey && "text-status-online")}
-                  title="Copy API key"
+                  onClick={handleEdit}
+                  className="text-text-secondary hover:text-text-primary"
                 >
-                  {copiedKey === tenant.apiKey ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Copy className="w-4 h-4" />
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRegenerateKey(tenant.id)}
-                  className="h-8 w-8"
-                  title="Regenerate API key"
-                >
-                  <RefreshCw className="w-4 h-4" />
+                  <Edit2 className="w-4 h-4" />
                 </Button>
               </div>
+            </div>
+          </CardHeader>
 
-              {/* Stats */}
-              <div className="flex items-center gap-4 pt-4 border-t border-edge">
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-text-primary">{tenant.currentAgents}</p>
-                  <p className="text-xs text-text-muted">Agents</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-semibold text-text-primary">{tenant.maxAgents}</p>
-                  <p className="text-xs text-text-muted">Max</p>
-                </div>
-                <div className="flex-1 text-right">
-                  <Badge
-                    className={cn(
-                      tenant.isActive
-                        ? 'bg-status-online/10 text-status-online border-status-online/20'
-                        : 'bg-surface-3 text-text-muted border-edge'
-                    )}
-                  >
-                    {tenant.isActive ? 'Active' : 'Inactive'}
-                  </Badge>
-                </div>
+          {/* Body */}
+          <CardContent className="px-6 py-4 space-y-4">
+            {/* Colors */}
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-text-muted">Primary:</span>
+                <div
+                  className="w-6 h-6 rounded border border-edge"
+                  style={{ backgroundColor: tenant.primaryColor }}
+                />
               </div>
-            </CardContent>
-          </Card>
-        ))}
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-text-muted">Secondary:</span>
+                <div
+                  className="w-6 h-6 rounded border border-edge"
+                  style={{ backgroundColor: tenant.secondaryColor }}
+                />
+              </div>
+            </div>
+
+            {/* Webhook */}
+            {tenant.webhookUrl && (
+              <div className="flex items-center gap-2">
+                <ExternalLink className="w-4 h-4 text-text-muted" />
+                <span className="text-sm text-text-secondary truncate">{tenant.webhookUrl}</span>
+              </div>
+            )}
+
+            {/* API Key */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-text-muted">API Key:</span>
+              <Input
+                readOnly
+                value={`${tenant.apiKey?.substring(0, 20)}...`}
+                className="flex-1 font-mono text-sm h-8 bg-surface-3"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => handleCopyKey(tenant.apiKey || '')}
+                className={cn("h-8 w-8", copiedKey === tenant.apiKey && "text-status-online")}
+                title="Copy API key"
+              >
+                {copiedKey === tenant.apiKey ? (
+                  <Check className="w-4 h-4" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleRegenerateKey}
+                disabled={rotateMutation.isPending}
+                className="h-8 w-8"
+                title="Regenerate API key"
+              >
+                <RefreshCw className={cn("w-4 h-4", rotateMutation.isPending && "animate-spin")} />
+              </Button>
+            </div>
+
+            {/* Stats */}
+            <div className="flex items-center gap-4 pt-4 border-t border-edge">
+              <div className="text-center">
+                <p className="text-lg font-semibold text-text-primary">{tenant.currentAgents}</p>
+                <p className="text-xs text-text-muted">Sessions</p>
+              </div>
+              <div className="text-center">
+                <p className="text-lg font-semibold text-text-primary">{tenant.maxAgents}</p>
+                <p className="text-xs text-text-muted">Max</p>
+              </div>
+              <div className="flex-1 text-right">
+                <Badge
+                  className={cn(
+                    tenant.isActive
+                      ? 'bg-status-online/10 text-status-online border-status-online/20'
+                      : 'bg-surface-3 text-text-muted border-edge'
+                  )}
+                >
+                  {tenant.isActive ? 'Active' : 'Inactive'}
+                </Badge>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Create/Edit Modal */}
+      {/* Edit Modal */}
       <TenantModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        tenant={editingTenant}
+        tenant={tenant}
         onSave={handleSave}
+        isSaving={updateMutation.isPending}
       />
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Tenant</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this tenant? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setTenantToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };
@@ -326,9 +296,10 @@ interface TenantModalProps {
   onClose: () => void;
   tenant: Tenant | null;
   onSave: (data: Partial<Tenant>) => void;
+  isSaving?: boolean;
 }
 
-const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSave }) => {
+const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSave, isSaving }) => {
   const [formData, setFormData] = useState<Partial<Tenant>>({
     name: tenant?.name || '',
     slug: tenant?.slug || '',
@@ -338,13 +309,27 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
     maxAgents: tenant?.maxAgents || 10,
   });
 
+  // Sync form data when tenant prop changes (e.g. modal re-opens after refetch)
+  useEffect(() => {
+    if (tenant) {
+      setFormData({
+        name: tenant.name,
+        slug: tenant.slug,
+        primaryColor: tenant.primaryColor || '#6366f1',
+        secondaryColor: tenant.secondaryColor || '#4338ca',
+        webhookUrl: tenant.webhookUrl || '',
+        maxAgents: tenant.maxAgents || 10,
+      });
+    }
+  }, [tenant]);
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     onSave(formData);
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={tenant ? 'Edit Tenant' : 'Add Tenant'} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Tenant" size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
           <Label htmlFor="tenant-name">Name</Label>
@@ -363,9 +348,10 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
             id="tenant-slug"
             type="text"
             value={formData.slug}
-            onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-            required
+            disabled
+            className="opacity-60"
           />
+          <p className="text-xs text-text-muted">Slug cannot be changed after creation.</p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -417,24 +403,19 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
           />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="tenant-max-agents">Max Agents</Label>
-          <Input
-            id="tenant-max-agents"
-            type="number"
-            value={formData.maxAgents}
-            onChange={(e) => setFormData({ ...formData, maxAgents: parseInt(e.target.value) })}
-            min={1}
-            max={100}
-          />
-        </div>
-
         <div className="flex justify-end gap-3 pt-4">
           <Button type="button" variant="outline" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit">
-            {tenant ? 'Save Changes' : 'Create Tenant'}
+          <Button type="submit" disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              'Save Changes'
+            )}
           </Button>
         </div>
       </form>

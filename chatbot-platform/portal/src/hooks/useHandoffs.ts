@@ -46,7 +46,7 @@ export const useHandoffs = (options: UseHandoffsOptions = {}): UseHandoffsReturn
     setError(null);
     
     try {
-      const data = await api.get<any>(`/v1/handoffs?status=${status}`);
+      const data = await api.get<any>(`/handoffs/pending`);
       setHandoffs(data.data || []);
     } catch (err: any) {
       setError(err.message || 'Failed to load handoffs');

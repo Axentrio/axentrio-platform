@@ -102,7 +102,7 @@ const Settings: React.FC = () => {
   // Integration state
   const { data: tenantData, refetch: refetchTenant } = useQuery<TenantData>({
     queryKey: ['tenant-me'],
-    queryFn: () => api.get<TenantData>('/v1/tenants/me'),
+    queryFn: () => api.get<TenantData>('/tenants/me'),
     enabled: activeTab === 'integration',
   });
 
@@ -126,7 +126,7 @@ const Settings: React.FC = () => {
   const handleRotateApiKey = async () => {
     setIsRotatingKey(true);
     try {
-      await api.post('/v1/tenants/me/api-key/rotate');
+      await api.post('/tenants/me/api-key/rotate');
       await refetchTenant();
       toast.success('API key rotated successfully');
     } catch {
@@ -140,7 +140,7 @@ const Settings: React.FC = () => {
   const handleSaveWebhookUrl = async () => {
     setIsSavingWebhook(true);
     try {
-      await api.patch('/v1/tenants/me', { webhookUrl: webhookUrlInput });
+      await api.patch('/tenants/me', { webhookUrl: webhookUrlInput });
       await refetchTenant();
       toast.success('Webhook URL saved');
     } catch {
@@ -156,7 +156,7 @@ const Settings: React.FC = () => {
     setWebhookResponseTime(null);
     const start = Date.now();
     try {
-      await api.post('/v1/tenants/me/webhook-test');
+      await api.post('/tenants/me/webhook-test');
       const elapsed = Date.now() - start;
       setWebhookTestStatus('success');
       setWebhookResponseTime(elapsed);
@@ -172,7 +172,7 @@ const Settings: React.FC = () => {
   const handleRegenerateSecret = async () => {
     setIsRegeneratingSecret(true);
     try {
-      await api.post('/v1/tenants/me/webhook-secret/regenerate');
+      await api.post('/tenants/me/webhook-secret/regenerate');
       await refetchTenant();
       toast.success('Webhook secret regenerated');
     } catch {

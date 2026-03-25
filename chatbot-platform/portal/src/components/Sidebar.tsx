@@ -57,7 +57,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { user } = useAppAuth();
   const { signOut } = useClerk();
   const hasAccess = (roles: UserRole[]) => {
-    if (!user) return false;
+    // While user is loading, show all items — route guards handle actual access
+    if (!user) return true;
     return roles.includes(user.role);
   };
 

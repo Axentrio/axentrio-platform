@@ -5,60 +5,22 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 import { Modal } from '@components/Modal';
-import { useChats } from '@hooks/useChats';
+import { api } from '@services/apiClient';
 import type { Chat, Tenant } from '@app-types/index';
-
-// Mock tenants - replace with actual data
-const mockTenants: Tenant[] = [
-  {
-    id: '1',
-    name: 'Acme Corp',
-    slug: 'acme',
-    primaryColor: '#6366f1',
-    secondaryColor: '#4338ca',
-    settings: {
-      businessHours: { timezone: 'UTC', schedule: [] },
-      autoHandoff: true,
-      handoffTriggers: { sentimentThreshold: 0.3, consecutiveFailures: 3, explicitRequest: true, timeoutSeconds: 300 },
-      responseTimeSLA: 2,
-      csatEnabled: true,
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isActive: true,
-    maxAgents: 10,
-    currentAgents: 5,
-  },
-  {
-    id: '2',
-    name: 'TechStart Inc',
-    slug: 'techstart',
-    primaryColor: '#34d399',
-    secondaryColor: '#059669',
-    settings: {
-      businessHours: { timezone: 'UTC', schedule: [] },
-      autoHandoff: true,
-      handoffTriggers: { sentimentThreshold: 0.3, consecutiveFailures: 3, explicitRequest: true, timeoutSeconds: 300 },
-      responseTimeSLA: 2,
-      csatEnabled: true,
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    isActive: true,
-    maxAgents: 5,
-    currentAgents: 2,
-  },
-];
 
 const LiveMonitor: React.FC = () => {
   const navigate = useNavigate();
+  const { data: tenant } = useQuery<Tenant>({
+    queryKey: ['tenant', 'me'],
+    queryFn: () => api.get('/tenants/me').then((res) => res.data),
+  });
+  const tenants = tenant ? [tenant] : [];
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);
-  const { takeoverChat } = useChats();
-
   const handleChatSelect = (chat: Chat) => {
     setSelectedChat(chat);
     setIsChatModalOpen(true);
@@ -66,7 +28,7 @@ const LiveMonitor: React.FC = () => {
 
   const handleTakeover = async (chatId: string) => {
     try {
-      await takeoverChat(chatId);
+      await api.post(`/chats/${chatId}/takeover`);
       navigate(`/takeover/${chatId}`);
     } catch (error) {
       console.error('Failed to takeover chat:', error);
@@ -99,7 +61,7 @@ const LiveMonitor: React.FC = () => {
       {/* Content */}
       <div className="flex-1 p-6 overflow-hidden">
         <ChatStream
-          tenants={mockTenants}
+          tenants={tenants}
           onChatSelect={handleChatSelect}
           onTakeover={handleTakeover}
           selectedChatId={selectedChat?.id}

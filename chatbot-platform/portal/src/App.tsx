@@ -160,9 +160,9 @@ const App: React.FC = () => {
 
         <SignedIn>
           <AppAuthProvider>
-            <OrganizationRequired>
-              <BrowserRouter>
-                <AuthenticatedLayout>
+            <BrowserRouter>
+              <AuthenticatedLayout>
+                <OrganizationRequired>
                   <Routes>
                     {/* Protected routes */}
                     <Route element={<ProtectedRoute />}>
@@ -215,9 +215,9 @@ const App: React.FC = () => {
                     {/* Catch all */}
                     <Route path="*" element={<Navigate to="/" replace />} />
                   </Routes>
-                </AuthenticatedLayout>
-              </BrowserRouter>
-            </OrganizationRequired>
+                </OrganizationRequired>
+              </AuthenticatedLayout>
+            </BrowserRouter>
           </AppAuthProvider>
         </SignedIn>
 

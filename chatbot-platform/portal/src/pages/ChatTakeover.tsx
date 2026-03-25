@@ -12,7 +12,6 @@ import { ChatStatusBadge } from '@components/StatusBadge';
 import { Modal } from '@components/Modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useChats } from '@hooks/useChats';
 import { api } from '@services/apiClient';
 import type { Chat, Agent } from '@app-types/index';
 
@@ -65,12 +64,11 @@ const ChatTakeover: React.FC = () => {
   const [chat, setChat] = useState<Chat | null>(null);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const { takeoverChat, closeChat } = useChats();
 
   const { data: agents = [], isLoading: isLoadingAgents } = useQuery<Agent[]>({
     queryKey: ['agents', 'online'],
     queryFn: async () => {
-      const response = await api.get<AgentApiResponse>('/v1/agents?status=online');
+      const response = await api.get<AgentApiResponse>('/agents?status=online');
       return mapApiAgents(response);
     },
     enabled: isTransferModalOpen,
@@ -96,7 +94,7 @@ const ChatTakeover: React.FC = () => {
     if (!chatId) return;
 
     try {
-      await takeoverChat(chatId);
+      await api.post(`/chats/${chatId}/takeover`);
       const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
       setChat(data.data);
     } catch (error) {
@@ -121,7 +119,7 @@ const ChatTakeover: React.FC = () => {
 
     setIsClosing(true);
     try {
-      await closeChat(chatId);
+      await api.post(`/chats/${chatId}/close`);
       navigate('/monitor');
     } catch (error) {
       console.error('Failed to close chat:', error);

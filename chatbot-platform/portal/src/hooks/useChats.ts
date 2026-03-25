@@ -60,7 +60,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
       if (currentFilters.dateFrom) params.append('dateFrom', currentFilters.dateFrom);
       if (currentFilters.dateTo) params.append('dateTo', currentFilters.dateTo);
       
-      const data = await api.get<any>(`/v1/chats/sessions?${params.toString()}`);
+      const data = await api.get<any>(`/chats/sessions?${params.toString()}`);
       setChats(data.data || []);
       setTotalCount(data.meta?.total || 0);
     } catch (err: any) {
@@ -151,7 +151,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   // Takeover chat
   const takeoverChat = useCallback(async (chatId: string) => {
     try {
-      await api.post(`/v1/chats/${chatId}/takeover`);
+      await api.post(`/chats/${chatId}/takeover`);
       
       // Refresh chat list
       await fetchChats();
@@ -164,7 +164,7 @@ export const useChats = (options: UseChatsOptions = {}): UseChatsReturn => {
   // Close chat
   const closeChat = useCallback(async (chatId: string) => {
     try {
-      await api.post(`/v1/chats/${chatId}/close`);
+      await api.post(`/chats/${chatId}/close`);
       
       // Update local state
       setChats((prev) => prev.filter((c) => c.id !== chatId));

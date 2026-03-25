@@ -45,10 +45,10 @@ export const SOUND_URLS = {
 
 // Dashboard Refresh Intervals (in milliseconds)
 export const REFRESH_INTERVALS = {
-  METRICS: 30000, // 30 seconds
-  CHAT_LIST: 10000, // 10 seconds
-  QUEUE: 5000, // 5 seconds
-  AGENTS: 15000, // 15 seconds
+  METRICS: 60000, // 60s — WebSocket handles real-time, polling is fallback
+  CHAT_LIST: 30000, // 30s
+  QUEUE: 30000, // 30s
+  AGENTS: 30000, // 30s
 } as const;
 
 // SLA Thresholds (in minutes)

@@ -3,9 +3,11 @@
  * Agent management, shifts, SLA monitoring
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
 import { useOrganization } from '@clerk/clerk-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { api } from '@services/apiClient';
 import { Modal } from '@components/Modal';
 import type { Agent, AgentShift, UserStatus } from '@app-types/index';
 import { Card } from '@/components/ui/card';
@@ -40,96 +42,115 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-// Mock agents - replace with actual data
-const mockAgents: Agent[] = [
-  {
-    id: '1',
-    userId: '1',
-    email: 'john.doe@example.com',
-    firstName: 'John',
-    lastName: 'Doe',
-    role: 'agent',
-    status: 'online',
-    skills: ['support', 'sales'],
-    maxConcurrentChats: 5,
-    currentChats: 2,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    performance: {
-      totalChats: 145,
-      avgResponseTime: 28,
-      avgResolutionTime: 12,
-      csatScore: 4.8,
-      handoffAcceptanceRate: 95,
-      onlineHours: 160,
-    },
-  },
-  {
-    id: '2',
-    userId: '2',
-    email: 'jane.smith@example.com',
-    firstName: 'Jane',
-    lastName: 'Smith',
-    role: 'supervisor',
-    status: 'online',
-    skills: ['support', 'technical', 'escalations'],
-    maxConcurrentChats: 3,
-    currentChats: 1,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    performance: {
-      totalChats: 89,
-      avgResponseTime: 22,
-      avgResolutionTime: 15,
-      csatScore: 4.9,
-      handoffAcceptanceRate: 100,
-      onlineHours: 140,
-    },
-  },
-  {
-    id: '3',
-    userId: '3',
-    email: 'mike.rodriguez@example.com',
-    firstName: 'Mike',
-    lastName: 'Rodriguez',
-    role: 'agent',
-    status: 'away',
-    skills: ['technical', 'billing'],
-    maxConcurrentChats: 4,
-    currentChats: 0,
-    isActive: true,
-    createdAt: new Date().toISOString(),
-    performance: {
-      totalChats: 112,
-      avgResponseTime: 35,
-      avgResolutionTime: 18,
-      csatScore: 4.5,
-      handoffAcceptanceRate: 88,
-      onlineHours: 150,
-    },
-  },
-];
+// API response types
+interface ApiAgent {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: UserStatus;
+  maxConcurrentChats: number;
+  currentChatCount: number;
+  skills: string[];
+  languages: string[];
+  lastActiveAt: string;
+  createdAt: string;
+}
 
-const mockShifts: AgentShift[] = [
-  { id: '1', agentId: '1', dayOfWeek: 1, startTime: '09:00', endTime: '17:00', timezone: 'America/New_York' },
-  { id: '2', agentId: '1', dayOfWeek: 2, startTime: '09:00', endTime: '17:00', timezone: 'America/New_York' },
-  { id: '3', agentId: '1', dayOfWeek: 3, startTime: '09:00', endTime: '17:00', timezone: 'America/New_York' },
-  { id: '4', agentId: '1', dayOfWeek: 4, startTime: '09:00', endTime: '17:00', timezone: 'America/New_York' },
-  { id: '5', agentId: '1', dayOfWeek: 5, startTime: '09:00', endTime: '17:00', timezone: 'America/New_York' },
-];
+interface AgentsResponse {
+  success: boolean;
+  agents: ApiAgent[];
+  pagination: { total: number; limit: number; offset: number; hasMore: boolean };
+}
+
+interface PerformanceResponse {
+  totalChatsHandled: number;
+  avgResponseTimeSeconds: number;
+  satisfactionScore: number;
+  currentChatCount: number;
+}
+
+/** Map API agent shape to the local Agent interface */
+function mapApiAgent(a: ApiAgent): Agent {
+  const nameParts = a.name.trim().split(/\s+/);
+  const firstName = nameParts[0] || '';
+  const lastName = nameParts.slice(1).join(' ') || '';
+  return {
+    id: a.id,
+    userId: a.id,
+    email: a.email,
+    firstName,
+    lastName,
+    role: a.role as Agent['role'],
+    status: a.status,
+    skills: a.skills ?? [],
+    maxConcurrentChats: a.maxConcurrentChats,
+    currentChats: a.currentChatCount,
+    isActive: a.status !== 'offline',
+    createdAt: a.createdAt,
+  };
+}
 
 const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const Team: React.FC = () => {
-  const [agents, setAgents] = useState<Agent[]>(mockAgents);
-  const [shifts] = useState<AgentShift[]>(mockShifts);
+  const queryClient = useQueryClient();
+
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
   const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [, setSelectedAgentForShifts] = useState<Agent | null>(null);
 
-  // AlertDialog state for delete agent
-  const [deleteAgentId, setDeleteAgentId] = useState<string | null>(null);
+  // Fetch agents from API
+  const { data: agentsData, isLoading: agentsLoading } = useQuery({
+    queryKey: ['agents'],
+    queryFn: () => api.get<AgentsResponse>('/agents'),
+  });
+
+  const agents: Agent[] = (agentsData?.agents ?? []).map(mapApiAgent);
+
+  // Fetch shifts for all visible agents
+  const selectedShiftAgent = agents[0]; // shifts tab shows all; fetch per-agent if needed
+  const { data: shiftsData } = useQuery({
+    queryKey: ['agents', selectedShiftAgent?.id, 'shifts'],
+    queryFn: () => api.get<{ shifts: AgentShift[] }>(`/agents/${selectedShiftAgent?.id}/shifts`),
+    enabled: !!selectedShiftAgent,
+  });
+  const shifts: AgentShift[] = shiftsData?.shifts ?? [];
+
+  // Fetch performance for each agent (aggregated)
+  const { data: performanceMap } = useQuery({
+    queryKey: ['agents', 'performance', agents.map((a) => a.id).join(',')],
+    queryFn: async () => {
+      const results: Record<string, PerformanceResponse> = {};
+      await Promise.all(
+        agents.map(async (agent) => {
+          try {
+            const perf = await api.get<PerformanceResponse>(`/agents/${agent.id}/performance`);
+            results[agent.id] = perf;
+          } catch {
+            // Performance data unavailable for this agent
+          }
+        })
+      );
+      return results;
+    },
+    enabled: agents.length > 0,
+  });
+
+  // Mutation: update agent fields
+  const updateAgentMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
+      api.patch(`/agents/${id}`, data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents'] }),
+  });
+
+  // Mutation: update agent status
+  const updateStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      api.patch(`/agents/${id}/status`, { status }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents'] }),
+  });
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -141,39 +162,18 @@ const Team: React.FC = () => {
     setIsAgentModalOpen(true);
   };
 
-  const handleDeleteAgent = (agentId: string) => {
-    setDeleteAgentId(agentId);
-  };
-
-  const confirmDeleteAgent = () => {
-    if (deleteAgentId) {
-      setAgents((prev) => prev.filter((a) => a.id !== deleteAgentId));
-      setDeleteAgentId(null);
-    }
-  };
-
   const handleSaveAgent = (data: Partial<Agent>) => {
     if (editingAgent) {
-      setAgents((prev) =>
-        prev.map((a) => (a.id === editingAgent.id ? { ...a, ...data } as Agent : a))
-      );
-    } else {
-      const newAgent: Agent = {
-        id: Date.now().toString(),
-        userId: Date.now().toString(),
-        email: data.email || '',
-        firstName: data.firstName || '',
-        lastName: data.lastName || '',
-        role: data.role || 'agent',
-        status: 'offline',
-        skills: data.skills || [],
-        maxConcurrentChats: data.maxConcurrentChats || 5,
-        currentChats: 0,
-        isActive: true,
-        createdAt: new Date().toISOString(),
-      };
-      setAgents((prev) => [...prev, newAgent]);
+      updateAgentMutation.mutate({
+        id: editingAgent.id,
+        data: {
+          maxConcurrentChats: data.maxConcurrentChats,
+          skills: data.skills,
+          languages: [],
+        },
+      });
     }
+    // Note: no POST /agents endpoint available — new agent creation is handled via Clerk invite
     setIsAgentModalOpen(false);
   };
 
@@ -183,16 +183,32 @@ const Team: React.FC = () => {
   };
 
   const handleUpdateStatus = (agentId: string, status: UserStatus) => {
-    setAgents((prev) =>
-      prev.map((a) => (a.id === agentId ? { ...a, status } : a))
-    );
+    updateStatusMutation.mutate({ id: agentId, status });
   };
 
   const onlineAgents = agents.filter((a) => a.status === 'online').length;
-  const totalChats = agents.reduce((sum, a) => sum + (a.performance?.totalChats || 0), 0);
-  const avgCsat = agents.length > 0
-    ? agents.reduce((sum, a) => sum + (a.performance?.csatScore || 0), 0) / agents.length
+  const totalChats = performanceMap
+    ? Object.values(performanceMap).reduce((sum, p) => sum + (p.totalChatsHandled || 0), 0)
     : 0;
+  const avgCsat = performanceMap && Object.keys(performanceMap).length > 0
+    ? Object.values(performanceMap).reduce((sum, p) => sum + (p.satisfactionScore || 0), 0) / Object.keys(performanceMap).length
+    : 0;
+
+  if (agentsLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-8 bg-surface-3 rounded w-1/4" />
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 bg-surface-3 rounded-xl" />
+            ))}
+          </div>
+          <div className="h-64 bg-surface-3 rounded-xl" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -262,7 +278,7 @@ const Team: React.FC = () => {
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
                           <span className="text-sm font-medium text-primary-400">
-                            {agent.firstName[0]}{agent.lastName[0]}
+                            {agent.firstName?.[0] || ''}{agent.lastName?.[0] || ''}
                           </span>
                         </div>
                         <div>
@@ -321,14 +337,6 @@ const Team: React.FC = () => {
                         >
                           <Edit2 className="w-4 h-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleDeleteAgent(agent.id)}
-                          className="hover:text-red-400 hover:bg-red-500/10"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -382,30 +390,33 @@ const Team: React.FC = () => {
                     <Star className="w-4 h-4 inline mr-1" />
                     CSAT
                   </TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Acceptance Rate</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Online Hours</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Active Chats</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">-</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {agents.map((agent) => (
-                  <TableRow key={agent.id}>
-                    <TableCell>
-                      <p className="font-medium text-text-primary">{agent.firstName} {agent.lastName}</p>
-                    </TableCell>
-                    <TableCell className="text-text-secondary">{agent.performance?.totalChats || 0}</TableCell>
-                    <TableCell className="text-text-secondary">{agent.performance?.avgResponseTime || 0}s</TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
-                        <span className="text-text-primary">{agent.performance?.csatScore || 0}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-text-secondary">
-                      {agent.performance?.handoffAcceptanceRate || 0}%
-                    </TableCell>
-                    <TableCell className="text-text-secondary">{agent.performance?.onlineHours || 0}h</TableCell>
-                  </TableRow>
-                ))}
+                {agents.map((agent) => {
+                  const perf = performanceMap?.[agent.id];
+                  return (
+                    <TableRow key={agent.id}>
+                      <TableCell>
+                        <p className="font-medium text-text-primary">{agent.firstName} {agent.lastName}</p>
+                      </TableCell>
+                      <TableCell className="text-text-secondary">{perf?.totalChatsHandled ?? 0}</TableCell>
+                      <TableCell className="text-text-secondary">{perf?.avgResponseTimeSeconds ?? 0}s</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
+                          <span className="text-text-primary">{perf?.satisfactionScore?.toFixed(1) ?? '0.0'}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-text-secondary">
+                        {perf?.currentChatCount ?? 0}
+                      </TableCell>
+                      <TableCell className="text-text-secondary">-</TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           </Card>
@@ -420,21 +431,6 @@ const Team: React.FC = () => {
         onSave={handleSaveAgent}
       />
 
-      {/* Delete Agent AlertDialog */}
-      <AlertDialog open={!!deleteAgentId} onOpenChange={(open) => !open && setDeleteAgentId(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove Agent</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to remove this agent? This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmDeleteAgent}>Remove</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 };
@@ -687,6 +683,17 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
     maxConcurrentChats: agent?.maxConcurrentChats || 5,
     skills: agent?.skills || [],
   });
+
+  useEffect(() => {
+    setFormData({
+      firstName: agent?.firstName || '',
+      lastName: agent?.lastName || '',
+      email: agent?.email || '',
+      role: agent?.role || 'agent',
+      maxConcurrentChats: agent?.maxConcurrentChats || 5,
+      skills: agent?.skills || [],
+    });
+  }, [agent]);
 
   const [skillInput, setSkillInput] = useState('');
 

@@ -49,7 +49,7 @@ export const useChat = (options: UseChatOptions = {}): UseChatReturn => {
     setError(null);
     
     try {
-      const data = await api.get<any>(`/v1/chats/${chatId}`);
+      const data = await api.get<any>(`/chats/${chatId}`);
       setChat(data);
       setMessages(data.messages || []);
     } catch (err: any) {

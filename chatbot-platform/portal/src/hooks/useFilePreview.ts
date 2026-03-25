@@ -4,6 +4,7 @@
  */
 
 import { useState, useCallback } from 'react';
+import { api } from '@services/apiClient';
 import type { FilePreview } from '@app-types/index';
 
 interface UseFilePreviewReturn {
@@ -27,10 +28,7 @@ export const useFilePreview = (): UseFilePreviewReturn => {
     
     try {
       // Fetch file metadata and preview URL
-      const response = await fetch(`/api/v1/files/${fileId}/preview`);
-      if (!response.ok) throw new Error('Failed to load file preview');
-      
-      const data = await response.json();
+      const data = await api.get<{ url: string; size?: number }>(`/files/${fileId}/preview`);
       
       setPreviewFile({
         url: data.url,

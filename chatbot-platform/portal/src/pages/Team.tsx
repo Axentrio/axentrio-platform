@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { toast } from 'sonner';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
 import { useOrganization } from '@clerk/clerk-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -444,30 +445,26 @@ const OrgMembersPanel: React.FC = () => {
   const [inviteRole, setInviteRole] = useState<'org:admin' | 'org:member'>('org:member');
   const [isInviting, setIsInviting] = useState(false);
   const [showInviteForm, setShowInviteForm] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [inviteSuccess, setInviteSuccess] = useState(false);
 
   // AlertDialog state for remove member
   const [removeMemberUserId, setRemoveMemberUserId] = useState<string | null>(null);
-  const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!organization || !inviteEmail.trim()) return;
 
     setIsInviting(true);
-    setInviteError(null);
     try {
       await organization.inviteMember({
         emailAddress: inviteEmail.trim(),
         role: inviteRole,
       });
       setInviteEmail('');
-      setInviteSuccess(true);
-      setTimeout(() => setInviteSuccess(false), 3000);
       setShowInviteForm(false);
-    } catch (err: any) {
-      setInviteError(err?.errors?.[0]?.message || err?.message || 'Failed to send invite');
+      toast.success('Invitation sent successfully');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to send invite';
+      toast.error(message);
     } finally {
       setIsInviting(false);
     }
@@ -477,10 +474,12 @@ const OrgMembersPanel: React.FC = () => {
     if (!organization || !removeMemberUserId) return;
     try {
       await organization.removeMember(removeMemberUserId);
+      await memberships?.revalidate?.();
       setRemoveMemberUserId(null);
-      setRemoveMemberError(null);
-    } catch (err: any) {
-      setRemoveMemberError(err?.errors?.[0]?.message || 'Failed to remove member');
+      toast.success('Member removed');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to remove member';
+      toast.error(message);
     }
   };
 
@@ -488,9 +487,11 @@ const OrgMembersPanel: React.FC = () => {
     if (!organization) return;
     try {
       await organization.updateMember({ userId, role });
-    } catch (err: any) {
-      // Inline error handling — role update errors are non-critical
-      console.error('Failed to update role:', err?.errors?.[0]?.message || err?.message);
+      await memberships?.revalidate?.();
+      toast.success('Role updated successfully');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to update role';
+      toast.error(message);
     }
   };
 
@@ -510,13 +511,6 @@ const OrgMembersPanel: React.FC = () => {
 
   return (
     <div className="space-y-4">
-      {/* Invite success */}
-      {inviteSuccess && (
-        <div className="p-4 bg-status-online/10 border border-status-online/20 rounded-xl flex items-center gap-2 text-status-online text-sm">
-          Invitation sent successfully!
-        </div>
-      )}
-
       {/* Invite form */}
       {showInviteForm && (
         <Card variant="glass" className="p-6">
@@ -558,9 +552,6 @@ const OrgMembersPanel: React.FC = () => {
               Cancel
             </Button>
           </form>
-          {inviteError && (
-            <p className="mt-2 text-sm text-red-400">{inviteError}</p>
-          )}
         </Card>
       )}
 
@@ -587,7 +578,7 @@ const OrgMembersPanel: React.FC = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.map((membership: any) => {
+            {members.map((membership) => {
               const user = membership.publicUserData;
               const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || user?.identifier?.[0] || '?'}`;
               const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.identifier || 'Unknown';
@@ -615,7 +606,7 @@ const OrgMembersPanel: React.FC = () => {
                   <TableCell>
                     <Select
                       value={membership.role}
-                      onValueChange={(value) => handleUpdateRole(user?.userId, value)}
+                      onValueChange={(value) => user?.userId && handleUpdateRole(user.userId, value)}
                     >
                       <SelectTrigger className="w-[120px] h-8 text-sm">
                         <SelectValue />
@@ -630,7 +621,7 @@ const OrgMembersPanel: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setRemoveMemberUserId(user?.userId)}
+                      onClick={() => setRemoveMemberUserId(user?.userId ?? null)}
                       className="hover:text-red-400 hover:bg-red-500/10"
                       title="Remove member"
                     >
@@ -645,7 +636,7 @@ const OrgMembersPanel: React.FC = () => {
       </Card>
 
       {/* Remove Member AlertDialog */}
-      <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) { setRemoveMemberUserId(null); setRemoveMemberError(null); } }}>
+      <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) setRemoveMemberUserId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Remove Member</AlertDialogTitle>
@@ -653,9 +644,6 @@ const OrgMembersPanel: React.FC = () => {
               Remove this member from the organization? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {removeMemberError && (
-            <p className="text-sm text-red-400">{removeMemberError}</p>
-          )}
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={confirmRemoveMember}>Remove</AlertDialogAction>

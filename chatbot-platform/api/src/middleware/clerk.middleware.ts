@@ -200,6 +200,23 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       }
     }
 
+    // --- Sync email verification from Clerk if not yet verified ---
+    if (user && !user.emailVerified) {
+      try {
+        const clerkUser = await clerkClient.users.getUser(clerkUserId);
+        const isVerified = clerkUser.emailAddresses?.some(
+          (e: { verification?: { status: string } }) => e.verification?.status === 'verified'
+        );
+        if (isVerified) {
+          user.emailVerified = true;
+          await userRepo.save(user);
+          logger.info('Synced email verification from Clerk on login', { clerkUserId });
+        }
+      } catch (err) {
+        logger.warn('Failed to sync email verification from Clerk', { error: err });
+      }
+    }
+
     // --- Resolve Agent ---
     let agent = await agentRepo.findOne({ where: { userId: user.id } });
 

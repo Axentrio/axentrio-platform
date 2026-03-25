@@ -30,6 +30,7 @@ import fileRoutes from './routes/files.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import notificationRoutes from './routes/notifications.routes';
 import userRoutes from './routes/users.routes';
+import clerkWebhookRoutes from './routes/clerk-webhook.routes';
 
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
@@ -46,6 +47,9 @@ app.get('/health', (_req, res) => {
     env: config.server.env,
   });
 });
+
+// Clerk webhook — must use raw body parser, registered before express.json()
+app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
 
 // Security middleware stack
 app.use(helmet({ contentSecurityPolicy: config.server.isProduction }));
@@ -180,4 +184,5 @@ process.on('unhandledRejection', (reason) => {
 });
 
 startServer();
+export { app };
 export default httpServer;

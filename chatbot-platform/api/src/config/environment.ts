@@ -109,6 +109,7 @@ const envSchema = z.object({
 
   // Clerk
   CLERK_SECRET_KEY: z.string().min(1).default('clerk-dev-key-set-in-production'),
+  CLERK_WEBHOOK_SECRET: z.string().optional(),
 
   // ClamAV (optional)
   CLAMAV_HOST: z.string().optional(),
@@ -277,6 +278,7 @@ export const config = {
 
   clerk: {
     secretKey: env.CLERK_SECRET_KEY,
+    webhookSecret: env.CLERK_WEBHOOK_SECRET,
   },
 
   widget: {

@@ -321,6 +321,7 @@ export interface IApiMeta {
   limit?: number;
   total?: number;
   totalPages?: number;
+  hasMore?: boolean;
   timestamp: Date;
   requestId: string;
 }
@@ -330,6 +331,17 @@ export interface IPaginationParams {
   limit: number;
   sortBy?: string;
   sortOrder?: 'asc' | 'desc';
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasMore: boolean;
+  };
 }
 
 // ============================================================================

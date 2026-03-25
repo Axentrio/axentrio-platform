@@ -155,7 +155,7 @@ export class WebhookService {
 
       await this.messageRepo.update(messageId, {
         content: payload.content as string,
-      } as any);
+      });
 
       this.config.eventEmitter.emit('message:edited', {
         sessionId,
@@ -194,7 +194,7 @@ export class WebhookService {
 
       const messageId = payload.metadata.messageId as string;
 
-      await this.messageRepo.update(messageId, { isDeleted: true, deletedAt: new Date() } as any);
+      await this.messageRepo.update(messageId, { isDeleted: true, deletedAt: new Date() });
 
       this.config.eventEmitter.emit('message:deleted', {
         sessionId,
@@ -267,11 +267,11 @@ export class WebhookService {
         sessionId,
         tenantId: session.tenantId,
         requestedBy: 'bot',
-        reason: (payload?.reason || 'Bot escalation') as any,
-        priority: (payload?.priority || 'normal') as any,
+        reason: (payload?.reason || 'Bot escalation') as HandoffRequest['reason'],
+        priority: (payload?.priority || 'normal') as HandoffRequest['priority'],
         notes: payload?.summary,
-      } as any);
-      const savedHandoff: any = await this.handoffRepo.save(handoff as any);
+      } as Partial<HandoffRequest>);
+      const savedHandoff = await this.handoffRepo.save(handoff);
 
       // Notify agents
       emitToTenantAgents(session.tenantId, 'handoff:requested', {
@@ -308,7 +308,7 @@ export class WebhookService {
    */
   public async releaseHandoff(sessionId: string): Promise<WebhookResponse> {
     try {
-      await this.sessionRepo.update(sessionId, { status: 'bot' as any, assignedAgentId: undefined as any });
+      await this.sessionRepo.update(sessionId, { status: 'bot' as ChatSession['status'], assignedAgentId: undefined });
 
       this.config.eventEmitter.emit('handoff:released', {
         sessionId,
@@ -502,7 +502,7 @@ export class WebhookService {
       type,
       content,
       metadata: metadata || undefined,
-    } as any);
+    } as Partial<Message>);
     const saved = await this.messageRepo.save(message) as unknown as Message;
     return saved.id;
   }

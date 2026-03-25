@@ -11,6 +11,7 @@
  */
 
 import {
+  CipherGCMTypes,
   createCipheriv,
   createDecipheriv,
   createHash,
@@ -227,16 +228,16 @@ export class EncryptionService {
     const salt = randomBytes(this.config.saltLength);
 
     // Create cipher
-    const cipher = createCipheriv(this.config.algorithm, key, iv, {
+    const cipher = createCipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
     // Encrypt
     let encrypted = cipher.update(plaintext, 'utf8', 'base64');
     encrypted += cipher.final('base64');
 
     // Get authentication tag
-    const tag = (cipher as any).getAuthTag();
+    const tag = cipher.getAuthTag();
 
     return {
       encrypted,
@@ -263,12 +264,12 @@ export class EncryptionService {
     const tag = Buffer.from(encryptedData.tag, 'base64');
 
     // Create decipher
-    const decipher = createDecipheriv(this.config.algorithm, key, iv, {
+    const decipher = createDecipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
     // Set authentication tag
-    (decipher as any).setAuthTag(tag);
+    decipher.setAuthTag(tag);
 
     // Decrypt
     let decrypted = decipher.update(encryptedData.encrypted, 'base64', 'utf8');
@@ -288,12 +289,12 @@ export class EncryptionService {
     const iv = randomBytes(this.config.ivLength);
     const salt = randomBytes(this.config.saltLength);
 
-    const cipher = createCipheriv(this.config.algorithm, key, iv, {
+    const cipher = createCipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
     const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-    const tag = (cipher as any).getAuthTag();
+    const tag = cipher.getAuthTag();
 
     return {
       encrypted: encrypted.toString('base64'),
@@ -319,11 +320,11 @@ export class EncryptionService {
     const tag = Buffer.from(encryptedData.tag, 'base64');
     const encrypted = Buffer.from(encryptedData.encrypted, 'base64');
 
-    const decipher = createDecipheriv(this.config.algorithm, key, iv, {
+    const decipher = createDecipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
-    (decipher as any).setAuthTag(tag);
+    decipher.setAuthTag(tag);
 
     return Buffer.concat([decipher.update(encrypted), decipher.final()]);
   }
@@ -355,14 +356,14 @@ export class EncryptionService {
       iv = randomBytes(this.config.ivLength);
     }
 
-    const cipher = createCipheriv(this.config.algorithm, key, iv, {
+    const cipher = createCipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
     let ciphertext = cipher.update(value, 'utf8', 'base64');
     ciphertext += cipher.final('base64');
 
-    const tag = (cipher as any).getAuthTag();
+    const tag = cipher.getAuthTag();
 
     return {
       ciphertext,
@@ -386,11 +387,11 @@ export class EncryptionService {
     const iv = Buffer.from(encryptedField.iv, 'base64');
     const tag = Buffer.from(encryptedField.tag, 'base64');
 
-    const decipher = createDecipheriv(this.config.algorithm, key, iv, {
+    const decipher = createDecipheriv(this.config.algorithm as CipherGCMTypes, key, iv, {
       authTagLength: this.config.tagLength,
-    } as any);
+    });
 
-    (decipher as any).setAuthTag(tag);
+    decipher.setAuthTag(tag);
 
     let decrypted = decipher.update(encryptedField.ciphertext, 'base64', 'utf8');
     decrypted += decipher.final('utf8');
@@ -511,12 +512,12 @@ export class EncryptionService {
   /**
    * Encrypt an object for storage
    */
-  encryptObject<T extends Record<string, any>>(
+  encryptObject<T extends Record<string, unknown>>(
     obj: T,
     sensitiveFields: string[],
     keyId?: string
   ): T {
-    const encrypted: any = { ...obj };
+    const encrypted: Record<string, unknown> = { ...obj };
 
     for (const field of sensitiveFields) {
       if (encrypted[field] !== undefined && encrypted[field] !== null) {
@@ -526,19 +527,19 @@ export class EncryptionService {
       }
     }
 
-    return encrypted;
+    return encrypted as T;
   }
 
   /**
    * Decrypt an object from storage
    */
-  decryptObject<T extends Record<string, any>>(obj: T, encryptedFields: string[]): T {
-    const decrypted: any = { ...obj };
+  decryptObject<T extends Record<string, unknown>>(obj: T, encryptedFields: string[]): T {
+    const decrypted: Record<string, unknown> = { ...obj };
 
     for (const field of encryptedFields) {
       if (decrypted[field] !== undefined && decrypted[field] !== null) {
         try {
-          const encryptedField: EncryptedField = JSON.parse(decrypted[field]);
+          const encryptedField: EncryptedField = JSON.parse(decrypted[field] as string);
           decrypted[field] = this.decryptField(encryptedField);
         } catch {
           // Field might not be encrypted, leave as is
@@ -546,7 +547,7 @@ export class EncryptionService {
       }
     }
 
-    return decrypted;
+    return decrypted as T;
   }
 
   // ==========================================================================

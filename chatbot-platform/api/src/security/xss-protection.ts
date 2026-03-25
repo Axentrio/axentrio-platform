@@ -131,7 +131,7 @@ const PERMISSIVE_SANITIZATION_CONFIG: SanitizationConfig = {
 // ============================================================================
 
 const window = new JSDOM('').window;
-const DOMPurify = createDOMPurify(window as any);
+const DOMPurify = createDOMPurify(window as unknown as Window);
 
 // ============================================================================
 // XSS Protection Service
@@ -212,13 +212,13 @@ export class XSSProtectionService {
     }
 
     // Configure DOMPurify
-    const purifyConfig: any = {
+    const purifyConfig: DOMPurify.Config = {
       ALLOWED_TAGS: this.config.allowedTags,
       ALLOWED_ATTR: Object.entries(this.config.allowedAttributes).flatMap(
         ([tag, attrs]) => attrs.map((attr) => (tag === '*' ? attr : `${tag}.${attr}`))
       ),
       ALLOW_DATA_ATTR: this.config.allowDataAttributes,
-      ALLOW_COMMENTS: this.config.allowComments,
+      ALLOW_UNKNOWN_PROTOCOLS: false,
       KEEP_CONTENT: true,
       SANITIZE_DOM: true,
       WHOLE_DOCUMENT: false,
@@ -228,13 +228,13 @@ export class XSSProtectionService {
     };
 
     // Add hook to track removed elements
-    DOMPurify.addHook('uponSanitizeElement', (_node: any, data: any) => {
+    DOMPurify.addHook('uponSanitizeElement', (_node: Node, data: { tagName?: string }) => {
       if (data.tagName) {
         removedTags.push(data.tagName);
       }
     });
 
-    DOMPurify.addHook('uponSanitizeAttribute', (_node: any, data: any) => {
+    DOMPurify.addHook('uponSanitizeAttribute', (_node: Node, data: { attrName?: string }) => {
       if (data.attrName) {
         removedAttributes.push(data.attrName);
       }
@@ -353,7 +353,7 @@ export class XSSProtectionService {
   /**
    * Sanitize JSON input
    */
-  sanitizeJson<T = any>(input: T): T {
+  sanitizeJson<T = unknown>(input: T): T {
     if (input === null || input === undefined) {
       return input;
     }
@@ -371,13 +371,13 @@ export class XSSProtectionService {
     }
 
     if (typeof input === 'object') {
-      const sanitized: any = {};
-      for (const [key, value] of Object.entries(input)) {
+      const sanitized: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
         // Sanitize keys too
         const sanitizedKey = this.sanitizeText(key).replace(/[^a-zA-Z0-9_]/g, '_');
         sanitized[sanitizedKey] = this.sanitizeJson(value);
       }
-      return sanitized;
+      return sanitized as unknown as T;
     }
 
     return input;
@@ -615,17 +615,17 @@ export function createXSSMiddleware(options: XSSMiddlewareOptions = {}) {
 /**
  * Recursively sanitize object values
  */
-function sanitizeObject(
-  obj: any,
+function sanitizeObject<T>(
+  obj: T,
   xssService: XSSProtectionService,
   excludeFields: string[]
-): any {
+): T {
   if (obj === null || obj === undefined) {
     return obj;
   }
 
   if (typeof obj === 'string') {
-    return xssService.sanitizeHtml(obj).clean;
+    return xssService.sanitizeHtml(obj).clean as unknown as T;
   }
 
   if (typeof obj === 'number' || typeof obj === 'boolean') {
@@ -633,19 +633,19 @@ function sanitizeObject(
   }
 
   if (Array.isArray(obj)) {
-    return obj.map((item) => sanitizeObject(item, xssService, excludeFields));
+    return obj.map((item) => sanitizeObject(item, xssService, excludeFields)) as unknown as T;
   }
 
   if (typeof obj === 'object') {
-    const sanitized: any = {};
-    for (const [key, value] of Object.entries(obj)) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
       if (excludeFields.includes(key)) {
         sanitized[key] = value;
       } else {
         sanitized[key] = sanitizeObject(value, xssService, excludeFields);
       }
     }
-    return sanitized;
+    return sanitized as unknown as T;
   }
 
   return obj;

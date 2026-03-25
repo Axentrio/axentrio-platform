@@ -5,6 +5,7 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import { Request } from 'express';
 import { logger } from '../utils/logger';
 import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
@@ -25,12 +26,27 @@ import { outboundMessageSchema, outboundMessageValidationOptions } from './schem
 
 // logger imported from utils/logger
 
+interface MessageRecord {
+  participantId: string;
+  type: string;
+  content: string;
+  createdAt: Date;
+}
+
+interface MessageRepositoryLike {
+  find(options: {
+    where: Record<string, unknown>;
+    order: Record<string, string>;
+    take: number;
+  }): Promise<MessageRecord[]>;
+}
+
 export interface OutboundServiceConfig {
   circuitBreaker: CircuitBreaker;
   retryService: RetryService;
   fallbackService: FallbackService;
   metricsService?: MetricsService;
-  messageRepository?: any;
+  messageRepository?: MessageRepositoryLike;
   defaultTimeout?: number;
   maxRetries?: number;
   userAgent?: string;
@@ -47,7 +63,7 @@ export interface PayloadBuilderContext {
   tenantId: string;
   userId: string;
   message: MessagePayload;
-  req?: any; // Express request object for extracting context
+  req?: Request;
   customContext?: Record<string, unknown>;
 }
 
@@ -234,7 +250,7 @@ export class OutboundService {
   /**
    * Build user context from request and user data
    */
-  private buildUserContext(userId: string, req?: any): UserContext {
+  private buildUserContext(userId: string, req?: Request): UserContext {
     const userContext: UserContext = {
       anonymousId: userId,
     };
@@ -253,9 +269,10 @@ export class OutboundService {
         userContext.ip = this.hashIpAddress(ip);
       }
 
-      // Extract geo location if available
-      if (req.geo) {
-        userContext.geo = req.geo;
+      // Extract geo location if available (added by geo middleware)
+      const geo = (req as unknown as Record<string, unknown>).geo;
+      if (geo) {
+        userContext.geo = geo;
       }
     }
 
@@ -268,7 +285,7 @@ export class OutboundService {
   private async buildChatContext(
     sessionId: string,
     customContext?: Record<string, unknown>,
-    req?: any
+    req?: Request
   ): Promise<ChatContext> {
     const context: ChatContext = {
       previousMessages: [],
@@ -308,7 +325,7 @@ export class OutboundService {
         take: 10,
       });
 
-      return messages.reverse().map((m: any) => ({
+      return messages.reverse().map((m) => ({
         role: m.participantId === 'system' ? 'system' as const
           : (m.type === 'system' ? 'system' as const : 'user' as const),
         content: m.content || '',
@@ -442,16 +459,16 @@ export class OutboundService {
   /**
    * Extract UTM parameters from request
    */
-  private extractUtmParams(req: any): { source?: string; medium?: string; campaign?: string; term?: string; content?: string } {
+  private extractUtmParams(req: Request): { source?: string; medium?: string; campaign?: string; term?: string; content?: string } {
     const utmParams: { source?: string; medium?: string; campaign?: string; term?: string; content?: string } = {};
 
     const query = req.query || {};
 
-    if (query.utm_source) utmParams.source = query.utm_source;
-    if (query.utm_medium) utmParams.medium = query.utm_medium;
-    if (query.utm_campaign) utmParams.campaign = query.utm_campaign;
-    if (query.utm_term) utmParams.term = query.utm_term;
-    if (query.utm_content) utmParams.content = query.utm_content;
+    if (query.utm_source) utmParams.source = query.utm_source as string;
+    if (query.utm_medium) utmParams.medium = query.utm_medium as string;
+    if (query.utm_campaign) utmParams.campaign = query.utm_campaign as string;
+    if (query.utm_term) utmParams.term = query.utm_term as string;
+    if (query.utm_content) utmParams.content = query.utm_content as string;
 
     return utmParams;
   }

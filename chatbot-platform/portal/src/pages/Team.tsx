@@ -8,6 +8,37 @@ import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucid
 import { useOrganization } from '@clerk/clerk-react';
 import { Modal } from '@components/Modal';
 import type { Agent, AgentShift, UserStatus } from '@app-types/index';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from '@/components/ui/table';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // Mock agents - replace with actual data
 const mockAgents: Agent[] = [
@@ -96,7 +127,9 @@ const Team: React.FC = () => {
   const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [, setSelectedAgentForShifts] = useState<Agent | null>(null);
-  const [activeTab, setActiveTab] = useState<'members' | 'agents' | 'shifts' | 'performance'>('members');
+
+  // AlertDialog state for delete agent
+  const [deleteAgentId, setDeleteAgentId] = useState<string | null>(null);
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -108,9 +141,14 @@ const Team: React.FC = () => {
     setIsAgentModalOpen(true);
   };
 
-  const handleDeleteAgent = async (agentId: string) => {
-    if (confirm('Are you sure you want to remove this agent?')) {
-      setAgents((prev) => prev.filter((a) => a.id !== agentId));
+  const handleDeleteAgent = (agentId: string) => {
+    setDeleteAgentId(agentId);
+  };
+
+  const confirmDeleteAgent = () => {
+    if (deleteAgentId) {
+      setAgents((prev) => prev.filter((a) => a.id !== deleteAgentId));
+      setDeleteAgentId(null);
     }
   };
 
@@ -164,79 +202,63 @@ const Team: React.FC = () => {
           <h1 className="text-2xl font-bold text-text-primary">Team</h1>
           <p className="text-text-secondary">Manage agents and schedules</p>
         </div>
-        <button
-          onClick={handleCreateAgent}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
-        >
-          <Plus className="w-4 h-4" />
+        <Button onClick={handleCreateAgent}>
+          <Plus className="w-4 h-4 mr-2" />
           Add Agent
-        </button>
+        </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="card p-6">
+        <Card variant="glass" className="p-6">
           <p className="text-sm font-medium text-text-secondary">Total Agents</p>
           <p className="text-2xl font-bold font-mono text-text-primary">{agents.length}</p>
-        </div>
-        <div className="card p-6">
+        </Card>
+        <Card variant="glass" className="p-6">
           <p className="text-sm font-medium text-text-secondary">Online Now</p>
           <p className="text-2xl font-bold font-mono text-status-online">{onlineAgents}</p>
-        </div>
-        <div className="card p-6">
+        </Card>
+        <Card variant="glass" className="p-6">
           <p className="text-sm font-medium text-text-secondary">Total Chats (MTD)</p>
           <p className="text-2xl font-bold font-mono text-text-primary">{totalChats}</p>
-        </div>
-        <div className="card p-6">
+        </Card>
+        <Card variant="glass" className="p-6">
           <p className="text-sm font-medium text-text-secondary">Avg CSAT</p>
           <p className="text-2xl font-bold font-mono text-accent-400">{avgCsat.toFixed(1)}</p>
-        </div>
+        </Card>
       </div>
 
       {/* Tabs */}
-      <div className="border-b border-edge">
-        <nav className="flex gap-6">
-          {(['members', 'agents', 'shifts', 'performance'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`
-                py-3 text-sm font-medium border-b-2 transition-colors
-                ${activeTab === tab
-                  ? 'border-primary-500 text-primary-400'
-                  : 'border-transparent text-text-secondary hover:text-text-primary'
-                }
-              `}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <Tabs defaultValue="members">
+        <TabsList>
+          <TabsTrigger value="members">Members</TabsTrigger>
+          <TabsTrigger value="agents">Agents</TabsTrigger>
+          <TabsTrigger value="shifts">Shifts</TabsTrigger>
+          <TabsTrigger value="performance">Performance</TabsTrigger>
+        </TabsList>
 
-      {/* Tab Content */}
-      {activeTab === 'members' && (
-        <OrgMembersPanel />
-      )}
+        {/* Tab Content */}
+        <TabsContent value="members">
+          <OrgMembersPanel />
+        </TabsContent>
 
-      {activeTab === 'agents' && (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-surface-3">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Agent</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Role</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Skills</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Chats</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge">
+        <TabsContent value="agents">
+          <Card variant="glass" className="overflow-hidden">
+            <Table>
+              <TableHeader className="bg-surface-3">
+                <TableRow>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Agent</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Status</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Skills</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Chats</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {agents.map((agent) => (
-                  <tr key={agent.id} className="hover:bg-surface-3">
-                    <td className="px-6 py-4">
+                  <TableRow key={agent.id}>
+                    <TableCell>
                       <div className="flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
                           <span className="text-sm font-medium text-primary-400">
@@ -248,141 +270,147 @@ const Team: React.FC = () => {
                           <p className="text-sm text-text-muted">{agent.email}</p>
                         </div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <select
+                    </TableCell>
+                    <TableCell>
+                      <Select
                         value={agent.status}
-                        onChange={(e) => handleUpdateStatus(agent.id, e.target.value as UserStatus)}
-                        className="text-sm bg-surface-3 border border-edge rounded-xl px-2 py-1 text-text-primary focus:outline-none focus:border-primary-500"
+                        onValueChange={(value) => handleUpdateStatus(agent.id, value as UserStatus)}
                       >
-                        <option value="online">Online</option>
-                        <option value="away">Away</option>
-                        <option value="busy">Busy</option>
-                        <option value="offline">Offline</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4">
+                        <SelectTrigger className="w-[110px] h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="online">Online</SelectItem>
+                          <SelectItem value="away">Away</SelectItem>
+                          <SelectItem value="busy">Busy</SelectItem>
+                          <SelectItem value="offline">Offline</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
                       <span className="capitalize text-text-secondary">{agent.role}</span>
-                    </td>
-                    <td className="px-6 py-4">
+                    </TableCell>
+                    <TableCell>
                       <div className="flex gap-1 flex-wrap">
                         {agent.skills?.map((skill) => (
-                          <span key={skill} className="px-2 py-0.5 text-xs bg-surface-3 text-text-secondary rounded-full">
+                          <Badge key={skill} variant="secondary">
                             {skill}
-                          </span>
+                          </Badge>
                         ))}
                       </div>
-                    </td>
-                    <td className="px-6 py-4">
+                    </TableCell>
+                    <TableCell>
                       <span className="text-text-secondary">
                         {agent.currentChats}/{agent.maxConcurrentChats}
                       </span>
-                    </td>
-                    <td className="px-6 py-4">
+                    </TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-2">
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleManageShifts(agent)}
-                          className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
                           title="Manage shifts"
                         >
                           <Calendar className="w-4 h-4" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleEditAgent(agent)}
-                          className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
                         >
                           <Edit2 className="w-4 h-4" />
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           onClick={() => handleDeleteAgent(agent.id)}
-                          className="p-2 text-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-xl"
+                          className="hover:text-red-400 hover:bg-red-500/10"
                         >
                           <Trash2 className="w-4 h-4" />
-                        </button>
+                        </Button>
                       </div>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
 
-      {activeTab === 'shifts' && (
-        <div className="card p-6">
-          <h3 className="text-lg font-semibold text-text-primary mb-4">Weekly Schedule</h3>
-          <div className="grid grid-cols-7 gap-4">
-            {daysOfWeek.map((day, index) => (
-              <div key={day} className="border border-edge rounded-xl p-4">
-                <h4 className="font-medium text-text-primary mb-3">{day}</h4>
-                <div className="space-y-2">
-                  {shifts
-                    .filter((s: AgentShift) => s.dayOfWeek === index)
-                    .map((shift: AgentShift) => {
-                      const agent = agents.find((a) => a.id === shift.agentId);
-                      return (
-                        <div key={shift.id} className="text-sm bg-primary-600/10 p-2 rounded-lg">
-                          <p className="font-medium text-primary-400">{agent?.firstName}</p>
-                          <p className="text-primary-300">{shift.startTime} - {shift.endTime}</p>
-                        </div>
-                      );
-                    })}
+        <TabsContent value="shifts">
+          <Card variant="glass" className="p-6">
+            <h3 className="text-lg font-semibold text-text-primary mb-4">Weekly Schedule</h3>
+            <div className="grid grid-cols-7 gap-4">
+              {daysOfWeek.map((day, index) => (
+                <div key={day} className="border border-edge rounded-xl p-4">
+                  <h4 className="font-medium text-text-primary mb-3">{day}</h4>
+                  <div className="space-y-2">
+                    {shifts
+                      .filter((s: AgentShift) => s.dayOfWeek === index)
+                      .map((shift: AgentShift) => {
+                        const agent = agents.find((a) => a.id === shift.agentId);
+                        return (
+                          <div key={shift.id} className="text-sm bg-primary-600/10 p-2 rounded-lg">
+                            <p className="font-medium text-primary-400">{agent?.firstName}</p>
+                            <p className="text-primary-300">{shift.startTime} - {shift.endTime}</p>
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+              ))}
+            </div>
+          </Card>
+        </TabsContent>
 
-      {activeTab === 'performance' && (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead className="bg-surface-3">
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Agent</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">
+        <TabsContent value="performance">
+          <Card variant="glass" className="overflow-hidden">
+            <Table>
+              <TableHeader className="bg-surface-3">
+                <TableRow>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Agent</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
                     <MessageSquare className="w-4 h-4 inline mr-1" />
                     Total Chats
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">
+                  </TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
                     <Clock className="w-4 h-4 inline mr-1" />
                     Avg Response
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">
+                  </TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
                     <Star className="w-4 h-4 inline mr-1" />
                     CSAT
-                  </th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Acceptance Rate</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Online Hours</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-edge">
+                  </TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Acceptance Rate</TableHead>
+                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Online Hours</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {agents.map((agent) => (
-                  <tr key={agent.id} className="hover:bg-surface-3">
-                    <td className="px-6 py-4">
+                  <TableRow key={agent.id}>
+                    <TableCell>
                       <p className="font-medium text-text-primary">{agent.firstName} {agent.lastName}</p>
-                    </td>
-                    <td className="px-6 py-4 text-text-secondary">{agent.performance?.totalChats || 0}</td>
-                    <td className="px-6 py-4 text-text-secondary">{agent.performance?.avgResponseTime || 0}s</td>
-                    <td className="px-6 py-4">
+                    </TableCell>
+                    <TableCell className="text-text-secondary">{agent.performance?.totalChats || 0}</TableCell>
+                    <TableCell className="text-text-secondary">{agent.performance?.avgResponseTime || 0}s</TableCell>
+                    <TableCell>
                       <div className="flex items-center gap-1">
                         <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
                         <span className="text-text-primary">{agent.performance?.csatScore || 0}</span>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-text-secondary">
+                    </TableCell>
+                    <TableCell className="text-text-secondary">
                       {agent.performance?.handoffAcceptanceRate || 0}%
-                    </td>
-                    <td className="px-6 py-4 text-text-secondary">{agent.performance?.onlineHours || 0}h</td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="text-text-secondary">{agent.performance?.onlineHours || 0}h</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+              </TableBody>
+            </Table>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Agent Modal */}
       <AgentModal
@@ -391,6 +419,22 @@ const Team: React.FC = () => {
         agent={editingAgent}
         onSave={handleSaveAgent}
       />
+
+      {/* Delete Agent AlertDialog */}
+      <AlertDialog open={!!deleteAgentId} onOpenChange={(open) => !open && setDeleteAgentId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Agent</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to remove this agent? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDeleteAgent}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
@@ -406,6 +450,10 @@ const OrgMembersPanel: React.FC = () => {
   const [showInviteForm, setShowInviteForm] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState(false);
+
+  // AlertDialog state for remove member
+  const [removeMemberUserId, setRemoveMemberUserId] = useState<string | null>(null);
+  const [removeMemberError, setRemoveMemberError] = useState<string | null>(null);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -429,12 +477,14 @@ const OrgMembersPanel: React.FC = () => {
     }
   };
 
-  const handleRemoveMember = async (userId: string) => {
-    if (!organization || !confirm('Remove this member from the organization?')) return;
+  const confirmRemoveMember = async () => {
+    if (!organization || !removeMemberUserId) return;
     try {
-      await organization.removeMember(userId);
+      await organization.removeMember(removeMemberUserId);
+      setRemoveMemberUserId(null);
+      setRemoveMemberError(null);
     } catch (err: any) {
-      alert(err?.errors?.[0]?.message || 'Failed to remove member');
+      setRemoveMemberError(err?.errors?.[0]?.message || 'Failed to remove member');
     }
   };
 
@@ -443,19 +493,20 @@ const OrgMembersPanel: React.FC = () => {
     try {
       await organization.updateMember({ userId, role });
     } catch (err: any) {
-      alert(err?.errors?.[0]?.message || 'Failed to update role');
+      // Inline error handling — role update errors are non-critical
+      console.error('Failed to update role:', err?.errors?.[0]?.message || err?.message);
     }
   };
 
   if (!isLoaded) {
     return (
-      <div className="card p-6">
+      <Card variant="glass" className="p-6">
         <div className="animate-pulse space-y-4">
           <div className="h-4 bg-surface-3 rounded w-1/4" />
           <div className="h-12 bg-surface-3 rounded" />
           <div className="h-12 bg-surface-3 rounded" />
         </div>
-      </div>
+      </Card>
     );
   }
 
@@ -472,130 +523,149 @@ const OrgMembersPanel: React.FC = () => {
 
       {/* Invite form */}
       {showInviteForm && (
-        <div className="card p-6">
+        <Card variant="glass" className="p-6">
           <h3 className="text-lg font-semibold text-text-primary mb-4">Invite Member</h3>
           <form onSubmit={handleInvite} className="flex items-end gap-3">
             <div className="flex-1">
-              <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
-              <input
+              <Label className="mb-1 text-text-secondary">Email</Label>
+              <Input
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder="colleague@company.com"
-                className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-text-secondary mb-1">Role</label>
-              <select
+              <Label className="mb-1 text-text-secondary">Role</Label>
+              <Select
                 value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as 'org:admin' | 'org:member')}
-                className="px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500"
+                onValueChange={(value) => setInviteRole(value as 'org:admin' | 'org:member')}
               >
-                <option value="org:member">Member</option>
-                <option value="org:admin">Admin</option>
-              </select>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="org:member">Member</SelectItem>
+                  <SelectItem value="org:admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
-            <button
-              type="submit"
-              disabled={isInviting}
-              className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 transition-all"
-            >
+            <Button type="submit" disabled={isInviting}>
               {isInviting ? 'Sending...' : 'Send Invite'}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
+              variant="outline"
               onClick={() => setShowInviteForm(false)}
-              className="px-4 py-2 border border-edge text-text-secondary rounded-xl hover:bg-surface-3"
             >
               Cancel
-            </button>
+            </Button>
           </form>
           {inviteError && (
             <p className="mt-2 text-sm text-red-400">{inviteError}</p>
           )}
-        </div>
+        </Card>
       )}
 
       {/* Members table */}
-      <div className="card overflow-hidden">
+      <Card variant="glass" className="overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
           <h3 className="font-semibold text-text-primary">
             Members <span className="text-text-muted font-normal">({members.length})</span>
           </h3>
           {!showInviteForm && (
-            <button
-              onClick={() => setShowInviteForm(true)}
-              className="flex items-center gap-2 px-3 py-1.5 bg-primary-600 text-white text-sm rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
-            >
-              <Plus className="w-4 h-4" />
+            <Button size="sm" onClick={() => setShowInviteForm(true)}>
+              <Plus className="w-4 h-4 mr-2" />
               Invite
-            </button>
+            </Button>
           )}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-surface-3">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Joined</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Role</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-text-secondary uppercase">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-edge">
-              {members.map((membership: any) => {
-                const user = membership.publicUserData;
-                const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || user?.identifier?.[0] || '?'}`;
-                const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.identifier || 'Unknown';
-                const email = user?.identifier || '';
-                const joinedDate = new Date(membership.createdAt).toLocaleDateString();
+        <Table>
+          <TableHeader className="bg-surface-3">
+            <TableRow>
+              <TableHead className="text-xs font-medium text-text-secondary uppercase">User</TableHead>
+              <TableHead className="text-xs font-medium text-text-secondary uppercase">Joined</TableHead>
+              <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
+              <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {members.map((membership: any) => {
+              const user = membership.publicUserData;
+              const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || user?.identifier?.[0] || '?'}`;
+              const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.identifier || 'Unknown';
+              const email = user?.identifier || '';
+              const joinedDate = new Date(membership.createdAt).toLocaleDateString();
 
-                return (
-                  <tr key={membership.id} className="hover:bg-surface-3">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-3">
-                        {user?.imageUrl ? (
-                          <img src={user.imageUrl} alt="" className="w-10 h-10 rounded-full" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
-                            <span className="text-sm font-medium text-primary-400">{initials}</span>
-                          </div>
-                        )}
-                        <div>
-                          <p className="font-medium text-text-primary">{name}</p>
-                          <p className="text-sm text-text-muted">{email}</p>
+              return (
+                <TableRow key={membership.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-3">
+                      {user?.imageUrl ? (
+                        <img src={user.imageUrl} alt="" className="w-10 h-10 rounded-full" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
+                          <span className="text-sm font-medium text-primary-400">{initials}</span>
                         </div>
+                      )}
+                      <div>
+                        <p className="font-medium text-text-primary">{name}</p>
+                        <p className="text-sm text-text-muted">{email}</p>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 text-text-secondary text-sm">{joinedDate}</td>
-                    <td className="px-6 py-4">
-                      <select
-                        value={membership.role}
-                        onChange={(e) => handleUpdateRole(user?.userId, e.target.value)}
-                        className="text-sm bg-surface-3 border border-edge rounded-xl px-2 py-1 text-text-primary focus:outline-none focus:border-primary-500"
-                      >
-                        <option value="org:admin">Admin</option>
-                        <option value="org:member">Member</option>
-                      </select>
-                    </td>
-                    <td className="px-6 py-4">
-                      <button
-                        onClick={() => handleRemoveMember(user?.userId)}
-                        className="p-2 text-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-xl"
-                        title="Remove member"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-text-secondary text-sm">{joinedDate}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={membership.role}
+                      onValueChange={(value) => handleUpdateRole(user?.userId, value)}
+                    >
+                      <SelectTrigger className="w-[120px] h-8 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="org:admin">Admin</SelectItem>
+                        <SelectItem value="org:member">Member</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setRemoveMemberUserId(user?.userId)}
+                      className="hover:text-red-400 hover:bg-red-500/10"
+                      title="Remove member"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </Card>
+
+      {/* Remove Member AlertDialog */}
+      <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) { setRemoveMemberUserId(null); setRemoveMemberError(null); } }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove Member</AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove this member from the organization? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {removeMemberError && (
+            <p className="text-sm text-red-400">{removeMemberError}</p>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRemoveMember}>Remove</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
@@ -641,58 +711,58 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">First Name</label>
-            <input
+            <Label className="mb-1 text-text-secondary">First Name</Label>
+            <Input
               type="text"
               value={formData.firstName}
               onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-              className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
               required
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Last Name</label>
-            <input
+            <Label className="mb-1 text-text-secondary">Last Name</Label>
+            <Input
               type="text"
               value={formData.lastName}
               onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-              className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
               required
             />
           </div>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Email</label>
-          <input
+          <Label className="mb-1 text-text-secondary">Email</Label>
+          <Input
             type="email"
             value={formData.email}
             onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-            className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             required
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Role</label>
-            <select
+            <Label className="mb-1 text-text-secondary">Role</Label>
+            <Select
               value={formData.role}
-              onChange={(e) => setFormData({ ...formData, role: e.target.value as Agent['role'] })}
-              className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+              onValueChange={(value) => setFormData({ ...formData, role: value as Agent['role'] })}
             >
-              <option value="agent">Agent</option>
-              <option value="supervisor">Supervisor</option>
-              <option value="admin">Admin</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="agent">Agent</SelectItem>
+                <SelectItem value="supervisor">Supervisor</SelectItem>
+                <SelectItem value="admin">Admin</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Max Concurrent Chats</label>
-            <input
+            <Label className="mb-1 text-text-secondary">Max Concurrent Chats</Label>
+            <Input
               type="number"
               value={formData.maxConcurrentChats}
               onChange={(e) => setFormData({ ...formData, maxConcurrentChats: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
               min={1}
               max={10}
             />
@@ -700,50 +770,47 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Skills</label>
+          <Label className="mb-1 text-text-secondary">Skills</Label>
           <div className="flex gap-2 mb-2">
-            <input
+            <Input
               type="text"
               value={skillInput}
               onChange={(e) => setSkillInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSkill())}
-              className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
               placeholder="Add a skill..."
+              className="flex-1"
             />
-            <button
+            <Button
               type="button"
+              variant="outline"
               onClick={handleAddSkill}
-              className="px-4 py-2 bg-surface-3 text-text-secondary rounded-xl hover:bg-surface-4 border border-edge"
             >
               Add
-            </button>
+            </Button>
           </div>
           <div className="flex gap-2 flex-wrap">
             {formData.skills?.map((skill) => (
-              <span key={skill} className="inline-flex items-center gap-1 px-2 py-1 bg-primary-600/20 text-primary-400 rounded-full text-sm">
+              <Badge key={skill} variant="secondary" className="inline-flex items-center gap-1">
                 {skill}
                 <button type="button" onClick={() => handleRemoveSkill(skill)} className="hover:text-primary-300">
                   ×
                 </button>
-              </span>
+              </Badge>
             ))}
           </div>
         </div>
 
         <div className="flex justify-end gap-3 pt-4">
-          <button
+          <Button
             type="button"
+            variant="outline"
             onClick={onClose}
-            className="px-4 py-2 border border-edge text-text-secondary rounded-xl hover:bg-surface-3"
           >
             Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
-          >
+          </Button>
+          <Button type="submit">
             {agent ? 'Save Changes' : 'Create Agent'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

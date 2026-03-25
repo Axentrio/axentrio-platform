@@ -19,6 +19,16 @@ import { useHandoffs } from '@hooks/useHandoffs';
 import { PriorityBadge } from '@components/StatusBadge';
 import { useNotificationSound } from '@websocket/notificationSound';
 import type { HandoffRequest, HandoffPriority } from '@app-types/index';
+import { Card } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
+import { cn } from '@/lib/utils';
 
 const priorityOrder: HandoffPriority[] = ['urgent', 'high', 'medium', 'low'];
 
@@ -108,17 +118,21 @@ const Queue: React.FC = () => {
             {/* Priority filter */}
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-text-muted" />
-              <select
+              <Select
                 value={filterPriority}
-                onChange={(e) => setFilterPriority(e.target.value as HandoffPriority | 'all')}
-                className="px-3 py-2 bg-surface-3 border border-edge rounded-xl text-sm text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
+                onValueChange={(value) => setFilterPriority(value as HandoffPriority | 'all')}
               >
-                <option value="all">All Priorities</option>
-                <option value="urgent">Urgent</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
+                <SelectTrigger className="w-[160px]">
+                  <SelectValue placeholder="All Priorities" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Priorities</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
         </div>
@@ -139,34 +153,35 @@ const Queue: React.FC = () => {
         ) : (
           <div className="space-y-4 max-w-4xl mx-auto">
             {filteredHandoffs.map((handoff) => (
-              <div
+              <Card
                 key={handoff.id}
-                className={`
-                  card overflow-hidden border-2
-                  ${handoff.priority === 'urgent' ? 'border-red-500/30 bg-red-500/5' : ''}
-                  ${handoff.priority === 'high' ? 'border-accent-500/30 bg-accent-500/5' : ''}
-                  ${handoff.priority === 'medium' ? 'border-accent-300/20' : ''}
-                  ${handoff.priority === 'low' ? 'border-edge' : ''}
-                `}
+                variant="glass"
+                className={cn(
+                  'overflow-hidden border-2',
+                  handoff.priority === 'urgent' && 'border-red-500/30 bg-red-500/5',
+                  handoff.priority === 'high' && 'border-accent-500/30 bg-accent-500/5',
+                  handoff.priority === 'medium' && 'border-accent-300/20',
+                  handoff.priority === 'low' && 'border-edge',
+                )}
               >
                 <div className="p-6">
                   <div className="flex items-start justify-between gap-4">
                     {/* Left: User info */}
                     <div className="flex items-start gap-4">
-                      <div className={`
-                        w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0
-                        ${handoff.priority === 'urgent' ? 'bg-red-500/10' : ''}
-                        ${handoff.priority === 'high' ? 'bg-accent-500/10' : ''}
-                        ${handoff.priority === 'medium' ? 'bg-accent-300/10' : ''}
-                        ${handoff.priority === 'low' ? 'bg-surface-3' : ''}
-                      `}>
-                        <Headphones className={`
-                          w-6 h-6
-                          ${handoff.priority === 'urgent' ? 'text-red-400' : ''}
-                          ${handoff.priority === 'high' ? 'text-accent-400' : ''}
-                          ${handoff.priority === 'medium' ? 'text-accent-300' : ''}
-                          ${handoff.priority === 'low' ? 'text-text-secondary' : ''}
-                        `} />
+                      <div className={cn(
+                        'w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0',
+                        handoff.priority === 'urgent' && 'bg-red-500/10',
+                        handoff.priority === 'high' && 'bg-accent-500/10',
+                        handoff.priority === 'medium' && 'bg-accent-300/10',
+                        handoff.priority === 'low' && 'bg-surface-3',
+                      )}>
+                        <Headphones className={cn(
+                          'w-6 h-6',
+                          handoff.priority === 'urgent' && 'text-red-400',
+                          handoff.priority === 'high' && 'text-accent-400',
+                          handoff.priority === 'medium' && 'text-accent-300',
+                          handoff.priority === 'low' && 'text-text-secondary',
+                        )} />
                       </div>
 
                       <div>
@@ -201,33 +216,34 @@ const Queue: React.FC = () => {
 
                     {/* Right: Wait time and actions */}
                     <div className="text-right flex-shrink-0">
-                      <div className={`
-                        text-lg font-bold font-mono mb-3
-                        ${handoff.waitTime > 300 ? 'text-status-busy' : 'text-text-primary'}
-                      `}>
+                      <div className={cn(
+                        'text-lg font-bold font-mono mb-3',
+                        handoff.waitTime > 300 ? 'text-status-busy' : 'text-text-primary',
+                      )}>
                         {formatWaitTime(handoff.waitTime)}
                       </div>
                       <p className="text-xs text-text-muted mb-4">waiting time</p>
 
                       <div className="flex items-center gap-2">
-                        <button
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleDecline(handoff.id)}
-                          className="px-4 py-2 border border-edge text-text-secondary rounded-xl hover:bg-surface-3 hover:border-edge-light transition-colors text-sm font-medium"
                         >
                           Decline
-                        </button>
-                        <button
+                        </Button>
+                        <Button
+                          size="sm"
                           onClick={() => handleAccept(handoff)}
-                          className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all text-sm font-medium flex items-center gap-2"
                         >
                           Accept
-                          <ArrowRight className="w-4 h-4" />
-                        </button>
+                          <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}

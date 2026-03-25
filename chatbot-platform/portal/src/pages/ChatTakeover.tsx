@@ -10,6 +10,8 @@ import { useQuery } from '@tanstack/react-query';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge } from '@components/StatusBadge';
 import { Modal } from '@components/Modal';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useChats } from '@hooks/useChats';
 import { api } from '@services/apiClient';
 import type { Chat, Agent } from '@app-types/index';
@@ -155,12 +157,14 @@ const ChatTakeover: React.FC = () => {
       <div className="px-6 py-4 border-b border-edge bg-surface-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => navigate('/monitor')}
-              className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors"
+              className="text-text-secondary hover:text-text-primary rounded-xl"
             >
               <ArrowLeft className="w-5 h-5" />
-            </button>
+            </Button>
             <div>
               <h1 className="text-xl font-bold text-text-primary">
                 {chat.userName || 'Anonymous User'}
@@ -181,38 +185,44 @@ const ChatTakeover: React.FC = () => {
 
           <div className="flex items-center gap-2">
             {isHandoff && (
-              <button
+              <Button
                 onClick={handleTakeover}
-                className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
+                className="gap-2 rounded-xl"
               >
                 <UserCheck className="w-4 h-4" />
                 Takeover Chat
-              </button>
+              </Button>
             )}
 
             {isHuman && (
               <>
-                <button
+                <Button
+                  variant="outline"
                   onClick={() => setIsTransferModalOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-surface-3 border border-edge text-text-secondary rounded-xl hover:bg-surface-4 hover:border-edge-light transition-colors"
+                  className="gap-2 rounded-xl"
                 >
                   <Users className="w-4 h-4" />
                   Transfer
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="destructive"
                   onClick={handleClose}
                   disabled={isClosing}
-                  className="flex items-center gap-2 px-4 py-2 bg-red-600/20 text-red-400 border border-red-500/20 rounded-xl hover:bg-red-600/30 disabled:opacity-50 transition-colors"
+                  className="gap-2 rounded-xl"
                 >
                   <X className="w-4 h-4" />
                   {isClosing ? 'Closing...' : 'Close Chat'}
-                </button>
+                </Button>
               </>
             )}
 
-            <button className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl transition-colors">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="text-text-secondary hover:text-text-primary rounded-xl"
+            >
               <MoreVertical className="w-5 h-5" />
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -268,12 +278,12 @@ const ChatTakeover: React.FC = () => {
                 </div>
                 <div className="flex gap-1">
                   {agent.skills.map((skill) => (
-                    <span
+                    <Badge
                       key={skill}
-                      className="px-2 py-0.5 text-xs bg-surface-4 text-text-secondary rounded-full"
+                      variant="secondary"
                     >
                       {skill}
-                    </span>
+                    </Badge>
                   ))}
                 </div>
               </button>

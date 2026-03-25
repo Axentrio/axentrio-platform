@@ -7,6 +7,22 @@ import React, { useState } from 'react';
 import { Plus, Edit2, Trash2, ExternalLink, Copy, Check, RefreshCw } from 'lucide-react';
 import { Modal } from '@components/Modal';
 import type { Tenant } from '@app-types/index';
+import { cn } from '@/lib/utils';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 // Mock tenants - replace with actual data
 const mockTenants: Tenant[] = [
@@ -59,6 +75,8 @@ const Tenants: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTenant, setEditingTenant] = useState<Tenant | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [tenantToDelete, setTenantToDelete] = useState<string | null>(null);
 
   const handleCreate = () => {
     setEditingTenant(null);
@@ -70,10 +88,17 @@ const Tenants: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (tenantId: string) => {
-    if (confirm('Are you sure you want to delete this tenant?')) {
-      setTenants((prev) => prev.filter((t) => t.id !== tenantId));
+  const handleDeleteClick = (tenantId: string) => {
+    setTenantToDelete(tenantId);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = () => {
+    if (tenantToDelete) {
+      setTenants((prev) => prev.filter((t) => t.id !== tenantToDelete));
     }
+    setDeleteDialogOpen(false);
+    setTenantToDelete(null);
   };
 
   const handleSave = async (data: Partial<Tenant>) => {
@@ -127,24 +152,18 @@ const Tenants: React.FC = () => {
           <h1 className="text-2xl font-bold text-text-primary">Tenants</h1>
           <p className="text-text-secondary">Manage white-label configurations</p>
         </div>
-        <button
-          onClick={handleCreate}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
-        >
-          <Plus className="w-4 h-4" />
+        <Button onClick={handleCreate}>
+          <Plus className="w-4 h-4 mr-2" />
           Add Tenant
-        </button>
+        </Button>
       </div>
 
       {/* Tenants Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {tenants.map((tenant) => (
-          <div
-            key={tenant.id}
-            className="card overflow-hidden"
-          >
+          <Card key={tenant.id} variant="glass" className="overflow-hidden">
             {/* Header */}
-            <div
+            <CardHeader
               className="px-6 py-4"
               style={{ backgroundColor: tenant.primaryColor + '15' }}
             >
@@ -162,24 +181,28 @@ const Tenants: React.FC = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="icon"
                     onClick={() => handleEdit(tenant)}
-                    className="p-2 text-text-secondary hover:text-text-primary hover:bg-surface-3/50 rounded-xl transition-colors"
+                    className="text-text-secondary hover:text-text-primary"
                   >
                     <Edit2 className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(tenant.id)}
-                    className="p-2 text-text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleDeleteClick(tenant.id)}
+                    className="text-text-secondary hover:text-red-400 hover:bg-red-500/10"
                   >
                     <Trash2 className="w-4 h-4" />
-                  </button>
+                  </Button>
                 </div>
               </div>
-            </div>
+            </CardHeader>
 
             {/* Body */}
-            <div className="px-6 py-4 space-y-4">
+            <CardContent className="px-6 py-4 space-y-4">
               {/* Colors */}
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2">
@@ -209,27 +232,33 @@ const Tenants: React.FC = () => {
               {/* API Key */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-text-muted">API Key:</span>
-                <code className="flex-1 px-2 py-1 bg-surface-3 rounded text-sm font-mono text-text-secondary truncate">
-                  {tenant.apiKey?.substring(0, 20)}...
-                </code>
-                <button
+                <Input
+                  readOnly
+                  value={`${tenant.apiKey?.substring(0, 20)}...`}
+                  className="flex-1 font-mono text-sm h-8 bg-surface-3"
+                />
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => handleCopyKey(tenant.apiKey || '')}
-                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded transition-colors"
+                  className={cn("h-8 w-8", copiedKey === tenant.apiKey && "text-status-online")}
                   title="Copy API key"
                 >
                   {copiedKey === tenant.apiKey ? (
-                    <Check className="w-4 h-4 text-status-online" />
+                    <Check className="w-4 h-4" />
                   ) : (
                     <Copy className="w-4 h-4" />
                   )}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => handleRegenerateKey(tenant.id)}
-                  className="p-1.5 text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded transition-colors"
+                  className="h-8 w-8"
                   title="Regenerate API key"
                 >
                   <RefreshCw className="w-4 h-4" />
-                </button>
+                </Button>
               </div>
 
               {/* Stats */}
@@ -243,19 +272,19 @@ const Tenants: React.FC = () => {
                   <p className="text-xs text-text-muted">Max</p>
                 </div>
                 <div className="flex-1 text-right">
-                  <span
-                    className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
+                  <Badge
+                    className={cn(
                       tenant.isActive
-                        ? 'bg-status-online/10 text-status-online'
-                        : 'bg-surface-3 text-text-muted'
-                    }`}
+                        ? 'bg-status-online/10 text-status-online border-status-online/20'
+                        : 'bg-surface-3 text-text-muted border-edge'
+                    )}
                   >
                     {tenant.isActive ? 'Active' : 'Inactive'}
-                  </span>
+                  </Badge>
                 </div>
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
@@ -266,6 +295,27 @@ const Tenants: React.FC = () => {
         tenant={editingTenant}
         onSave={handleSave}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Tenant</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this tenant? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setTenantToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirm}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
@@ -296,31 +346,31 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={tenant ? 'Edit Tenant' : 'Add Tenant'} size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Name</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="tenant-name">Name</Label>
+          <Input
+            id="tenant-name"
             type="text"
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-            className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             required
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Slug</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="tenant-slug">Slug</Label>
+          <Input
+            id="tenant-slug"
             type="text"
             value={formData.slug}
             onChange={(e) => setFormData({ ...formData, slug: e.target.value })}
-            className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             required
           />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Primary Color</label>
+          <div className="space-y-2">
+            <Label>Primary Color</Label>
             <div className="flex items-center gap-2">
               <input
                 type="color"
@@ -328,17 +378,17 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
                 onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
                 className="w-10 h-10 rounded border border-edge bg-surface-3"
               />
-              <input
+              <Input
                 type="text"
                 value={formData.primaryColor}
                 onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-sm text-text-primary"
+                className="flex-1 text-sm"
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-text-secondary mb-1">Secondary Color</label>
+          <div className="space-y-2">
+            <Label>Secondary Color</Label>
             <div className="flex items-center gap-2">
               <input
                 type="color"
@@ -346,53 +396,46 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
                 onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
                 className="w-10 h-10 rounded border border-edge bg-surface-3"
               />
-              <input
+              <Input
                 type="text"
                 value={formData.secondaryColor}
                 onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-sm text-text-primary"
+                className="flex-1 text-sm"
               />
             </div>
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Webhook URL</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="tenant-webhook">Webhook URL</Label>
+          <Input
+            id="tenant-webhook"
             type="url"
             value={formData.webhookUrl}
             onChange={(e) => setFormData({ ...formData, webhookUrl: e.target.value })}
-            className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             placeholder="https://example.com/webhook"
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-text-secondary mb-1">Max Agents</label>
-          <input
+        <div className="space-y-2">
+          <Label htmlFor="tenant-max-agents">Max Agents</Label>
+          <Input
+            id="tenant-max-agents"
             type="number"
             value={formData.maxAgents}
             onChange={(e) => setFormData({ ...formData, maxAgents: parseInt(e.target.value) })}
-            className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30"
             min={1}
             max={100}
           />
         </div>
 
         <div className="flex justify-end gap-3 pt-4">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 border border-edge text-text-secondary rounded-xl hover:bg-surface-3"
-          >
+          <Button type="button" variant="outline" onClick={onClose}>
             Cancel
-          </button>
-          <button
-            type="submit"
-            className="px-4 py-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow transition-all"
-          >
+          </Button>
+          <Button type="submit">
             {tenant ? 'Save Changes' : 'Create Tenant'}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>

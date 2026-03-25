@@ -8,6 +8,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 import { Send, Wifi, WifiOff, Bot, User, MessageCircle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 
 // ---------------------------------------------------------------------------
 // Config
@@ -59,15 +63,15 @@ function statusLabel(status: SessionStatus): string {
 function statusColor(status: SessionStatus): string {
   switch (status) {
     case 'bot':
-      return 'text-indigo-400';
+      return 'text-primary-400';
     case 'waiting':
-      return 'text-yellow-400';
+      return 'text-status-away';
     case 'agent':
-      return 'text-emerald-400';
+      return 'text-status-online';
     case 'closed':
-      return 'text-red-400';
+      return 'text-status-busy';
     default:
-      return 'text-[#9ca3bf]';
+      return 'text-text-secondary';
   }
 }
 
@@ -270,16 +274,16 @@ const WidgetTest: React.FC = () => {
   // -----------------------------------------------------------------------
   if (!apiKey) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#0d0f17]">
-        <div className="bg-[#161821] border border-[#2a2d3e] rounded-2xl p-8 max-w-md text-center">
-          <MessageCircle className="mx-auto mb-4 text-indigo-400" size={40} />
-          <h2 className="text-xl font-semibold text-[#f1f3f9] mb-2">
+      <div className="flex items-center justify-center h-screen bg-surface-0">
+        <div className="bg-surface-2 border border-edge rounded-2xl p-8 max-w-md text-center">
+          <MessageCircle className="mx-auto mb-4 text-primary-400" size={40} />
+          <h2 className="text-xl font-semibold text-text-primary mb-2">
             API Key Required
           </h2>
-          <p className="text-[#9ca3bf] text-sm">
+          <p className="text-text-secondary text-sm">
             Please provide an API key via the URL query parameter:
           </p>
-          <code className="mt-3 block text-xs text-indigo-300 bg-[#1e2030] px-4 py-2 rounded-lg break-all">
+          <code className="mt-3 block text-xs text-primary-300 bg-surface-3 px-4 py-2 rounded-lg break-all">
             /widget-test?apiKey=YOUR_TENANT_API_KEY
           </code>
         </div>
@@ -289,10 +293,10 @@ const WidgetTest: React.FC = () => {
 
   if (initialising) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#0d0f17]">
+      <div className="flex items-center justify-center h-screen bg-surface-0">
         <div className="flex flex-col items-center gap-3">
-          <div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-[#9ca3bf] text-sm">Connecting...</span>
+          <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-text-secondary text-sm">Connecting...</span>
         </div>
       </div>
     );
@@ -300,13 +304,13 @@ const WidgetTest: React.FC = () => {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-screen bg-[#0d0f17]">
-        <div className="bg-[#161821] border border-[#2a2d3e] rounded-2xl p-8 max-w-md text-center">
-          <WifiOff className="mx-auto mb-4 text-red-400" size={40} />
-          <h2 className="text-xl font-semibold text-[#f1f3f9] mb-2">
+      <div className="flex items-center justify-center h-screen bg-surface-0">
+        <div className="bg-surface-2 border border-edge rounded-2xl p-8 max-w-md text-center">
+          <WifiOff className="mx-auto mb-4 text-status-busy" size={40} />
+          <h2 className="text-xl font-semibold text-text-primary mb-2">
             Connection Error
           </h2>
-          <p className="text-red-400 text-sm">{error}</p>
+          <p className="text-status-busy text-sm">{error}</p>
         </div>
       </div>
     );
@@ -314,34 +318,35 @@ const WidgetTest: React.FC = () => {
 
   // --- Main chat UI ---
   return (
-    <div className="flex flex-col h-screen bg-[#0d0f17]">
+    <div className="flex flex-col h-screen bg-surface-0">
       {/* Header */}
-      <header className="flex items-center justify-between px-4 py-3 bg-[#161821] border-b border-[#2a2d3e]">
+      <header className="flex items-center justify-between px-4 py-3 bg-surface-2 border-b border-edge">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-indigo-600 rounded-xl flex items-center justify-center">
+          <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
             <MessageCircle size={16} className="text-white" />
           </div>
-          <span className="font-semibold text-[#f1f3f9]">HandsOff Chat</span>
+          <span className="font-semibold text-text-primary">HandsOff Chat</span>
         </div>
         <div className="flex items-center gap-2">
           {connected ? (
-            <Wifi size={16} className="text-emerald-400" />
+            <Badge variant="outline" className="gap-1 text-status-online border-status-online/30">
+              <Wifi size={14} />
+              Connected
+            </Badge>
           ) : (
-            <WifiOff size={16} className="text-red-400" />
+            <Badge variant="outline" className="gap-1 text-status-busy border-status-busy/30">
+              <WifiOff size={14} />
+              Disconnected
+            </Badge>
           )}
-          <span
-            className={`w-2 h-2 rounded-full ${
-              connected ? 'bg-emerald-400' : 'bg-red-400'
-            }`}
-          />
         </div>
       </header>
 
       {/* Session status bar */}
-      <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-[#161821] border-b border-[#2a2d3e]">
-        {sessionStatus === 'bot' && <Bot size={14} className="text-indigo-400" />}
-        {sessionStatus === 'agent' && <User size={14} className="text-emerald-400" />}
-        <span className={`text-xs font-medium ${statusColor(sessionStatus)}`}>
+      <div className="flex items-center justify-center gap-2 px-4 py-1.5 bg-surface-2 border-b border-edge">
+        {sessionStatus === 'bot' && <Bot size={14} className="text-primary-400" />}
+        {sessionStatus === 'agent' && <User size={14} className="text-status-online" />}
+        <span className={cn('text-xs font-medium', statusColor(sessionStatus))}>
           {statusLabel(sessionStatus)}
         </span>
       </div>
@@ -358,27 +363,29 @@ const WidgetTest: React.FC = () => {
               >
                 {/* Avatar for bot/agent */}
                 {!isVisitor && (
-                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-[#1e2030] flex items-center justify-center mr-2 mt-1">
+                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-surface-3 flex items-center justify-center mr-2 mt-1">
                     {msg.sender === 'agent' ? (
-                      <User size={14} className="text-emerald-400" />
+                      <User size={14} className="text-status-online" />
                     ) : (
-                      <Bot size={14} className="text-indigo-400" />
+                      <Bot size={14} className="text-primary-400" />
                     )}
                   </div>
                 )}
 
                 <div
-                  className={`rounded-2xl px-4 py-2 max-w-[80%] break-words text-sm leading-relaxed ${
+                  className={cn(
+                    'rounded-2xl px-4 py-2 max-w-[80%] break-words text-sm leading-relaxed',
                     isVisitor
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-[#161821] text-[#f1f3f9]'
-                  }`}
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-surface-2 text-text-primary'
+                  )}
                 >
                   {msg.content}
                   <div
-                    className={`text-[10px] mt-1 ${
-                      isVisitor ? 'text-indigo-200' : 'text-[#9ca3bf]'
-                    }`}
+                    className={cn(
+                      'text-[10px] mt-1',
+                      isVisitor ? 'text-primary-200' : 'text-text-secondary'
+                    )}
                   >
                     {msg.timestamp.toLocaleTimeString([], {
                       hour: '2-digit',
@@ -389,8 +396,8 @@ const WidgetTest: React.FC = () => {
 
                 {/* Avatar for visitor */}
                 {isVisitor && (
-                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-indigo-600/20 flex items-center justify-center ml-2 mt-1">
-                    <User size={14} className="text-indigo-300" />
+                  <div className="flex-shrink-0 w-7 h-7 rounded-full bg-primary-600/20 flex items-center justify-center ml-2 mt-1">
+                    <User size={14} className="text-primary-300" />
                   </div>
                 )}
               </div>
@@ -400,13 +407,13 @@ const WidgetTest: React.FC = () => {
           {/* Typing indicator */}
           {isTyping && (
             <div className="flex justify-start">
-              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-[#1e2030] flex items-center justify-center mr-2 mt-1">
-                <Bot size={14} className="text-indigo-400" />
+              <div className="flex-shrink-0 w-7 h-7 rounded-full bg-surface-3 flex items-center justify-center mr-2 mt-1">
+                <Bot size={14} className="text-primary-400" />
               </div>
-              <div className="bg-[#161821] rounded-2xl px-4 py-3 flex items-center gap-1">
-                <span className="w-2 h-2 bg-[#9ca3bf] rounded-full animate-bounce [animation-delay:0ms]" />
-                <span className="w-2 h-2 bg-[#9ca3bf] rounded-full animate-bounce [animation-delay:150ms]" />
-                <span className="w-2 h-2 bg-[#9ca3bf] rounded-full animate-bounce [animation-delay:300ms]" />
+              <div className="bg-surface-2 rounded-2xl px-4 py-3 flex items-center gap-1">
+                <span className="w-2 h-2 bg-text-secondary rounded-full animate-bounce [animation-delay:0ms]" />
+                <span className="w-2 h-2 bg-text-secondary rounded-full animate-bounce [animation-delay:150ms]" />
+                <span className="w-2 h-2 bg-text-secondary rounded-full animate-bounce [animation-delay:300ms]" />
               </div>
             </div>
           )}
@@ -416,9 +423,9 @@ const WidgetTest: React.FC = () => {
       </div>
 
       {/* Input bar */}
-      <div className="px-4 py-3 bg-[#161821] border-t border-[#2a2d3e]">
+      <div className="px-4 py-3 bg-surface-2 border-t border-edge">
         <div className="max-w-lg mx-auto flex items-center gap-2">
-          <input
+          <Input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -429,15 +436,16 @@ const WidgetTest: React.FC = () => {
                 : 'Type a message...'
             }
             disabled={sessionStatus === 'closed'}
-            className="flex-1 bg-[#1e2030] border border-[#2a2d3e] text-[#f1f3f9] rounded-xl px-4 py-2.5 text-sm placeholder-[#9ca3bf] focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            className="flex-1 bg-surface-3 border-edge text-text-primary rounded-xl px-4 py-2.5 placeholder:text-text-secondary focus-visible:border-primary-500 focus-visible:ring-primary-500"
           />
-          <button
+          <Button
             onClick={handleSend}
             disabled={!input.trim() || sessionStatus === 'closed'}
-            className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl p-2.5 transition"
+            className="rounded-xl p-2.5"
+            size="icon"
           >
             <Send size={18} />
-          </button>
+          </Button>
         </div>
       </div>
     </div>

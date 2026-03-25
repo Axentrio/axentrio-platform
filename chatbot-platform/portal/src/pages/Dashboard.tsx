@@ -19,6 +19,10 @@ import { useHandoffs } from '@hooks/useHandoffs';
 import { useChats } from '@hooks/useChats';
 import { ChatStatusBadge } from '@components/StatusBadge';
 import { api } from '@services/apiClient';
+import { Card, CardHeader, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import type { DashboardMetrics } from '@app-types/index';
 
 interface DashboardApiResponse {
@@ -48,17 +52,17 @@ function mapApiToMetrics(data: DashboardApiResponse): DashboardMetrics {
 
 /** Skeleton placeholder for a metric card */
 const MetricCardSkeleton: React.FC<{ index: number }> = ({ index }) => (
-  <div className={`card p-6 animate-fade-in-up stagger-${index + 1}`}>
-    <div className="flex items-start justify-between">
-      <div className="space-y-2">
-        <div className="h-4 w-24 bg-surface-3 rounded animate-pulse" />
-        <div className="h-8 w-16 bg-surface-3 rounded animate-pulse" />
+  <Card variant="glass" className={cn(`animate-fade-in-up stagger-${index + 1}`)}>
+    <CardContent className="p-6">
+      <div className="flex items-start justify-between">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-8 w-16" />
+        </div>
+        <Skeleton className="p-3 rounded-xl w-12 h-12" />
       </div>
-      <div className="p-3 rounded-xl bg-surface-3 animate-pulse">
-        <div className="w-6 h-6" />
-      </div>
-    </div>
-  </div>
+    </CardContent>
+  </Card>
 );
 
 /** Skeleton placeholder for the performance sidebar */
@@ -67,12 +71,10 @@ const PerformanceSkeleton: React.FC = () => (
     {[0, 1, 2].map((i) => (
       <div key={i}>
         <div className="flex items-center justify-between mb-2">
-          <div className="h-4 w-20 bg-surface-3 rounded animate-pulse" />
-          <div className="h-5 w-12 bg-surface-3 rounded animate-pulse" />
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-5 w-12" />
         </div>
-        <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
-          <div className="h-full w-0" />
-        </div>
+        <Skeleton className="h-2 w-full rounded-full" />
       </div>
     ))}
   </div>
@@ -175,50 +177,55 @@ const Dashboard: React.FC = () => {
         {isLoading
           ? [0, 1, 2, 3].map((i) => <MetricCardSkeleton key={i} index={i} />)
           : stats.map((stat, index) => (
-              <div
+              <Card
                 key={index}
-                className={`card p-6 hover:shadow-card-hover transition-all animate-fade-in-up stagger-${index + 1}`}
+                variant="glass"
+                hover
+                className={cn(`animate-fade-in-up stagger-${index + 1}`)}
               >
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-sm font-medium text-text-secondary">{stat.label}</p>
-                    <p className="text-2xl font-bold font-mono text-text-primary mt-1">{stat.value}</p>
-                    {stat.trend && (
-                      <div className={`flex items-center gap-1 mt-2 text-sm ${stat.trendUp ? 'text-status-online' : 'text-status-busy'}`}>
-                        <TrendingUp className="w-4 h-4" />
-                        <span>{stat.trend}</span>
-                      </div>
-                    )}
-                    {stat.alert && (
-                      <div className="flex items-center gap-1 mt-2 text-sm text-accent-400">
-                        <AlertCircle className="w-4 h-4" />
-                        <span>Needs attention</span>
-                      </div>
-                    )}
+                <CardContent className="p-6">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-text-secondary">{stat.label}</p>
+                      <p className="text-2xl font-bold font-mono text-text-primary mt-1">{stat.value}</p>
+                      {stat.trend && (
+                        <div className={cn('flex items-center gap-1 mt-2 text-sm', stat.trendUp ? 'text-status-online' : 'text-status-busy')}>
+                          <TrendingUp className="w-4 h-4" />
+                          <span>{stat.trend}</span>
+                        </div>
+                      )}
+                      {stat.alert && (
+                        <div className="flex items-center gap-1 mt-2 text-sm text-accent-400">
+                          <AlertCircle className="w-4 h-4" />
+                          <span>Needs attention</span>
+                        </div>
+                      )}
+                    </div>
+                    <div className={cn('p-3 rounded-xl', stat.bgColor)}>
+                      <stat.icon className={cn('w-6 h-6', stat.color)} />
+                    </div>
                   </div>
-                  <div className={`p-3 rounded-xl ${stat.bgColor}`}>
-                    <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                  </div>
-                </div>
-              </div>
+                </CardContent>
+              </Card>
             ))}
       </div>
 
       {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Pending Handoffs */}
-        <div className="lg:col-span-2 card">
-          <div className="px-6 py-4 border-b border-edge flex items-center justify-between">
+        <Card variant="glass" className="lg:col-span-2">
+          <CardHeader className="px-6 py-4 flex-row items-center justify-between space-y-0 border-b border-edge">
             <h2 className="text-lg font-semibold text-text-primary">Pending Handoffs</h2>
-            <button
+            <Button
+              variant="link"
               onClick={() => navigate('/queue')}
-              className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
+              className="text-sm text-primary-400 hover:text-primary-300 gap-1 p-0 h-auto"
             >
               View All
               <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
-          <div className="p-6">
+            </Button>
+          </CardHeader>
+          <CardContent className="p-6">
             {handoffs.length > 0 ? (
               <div className="space-y-3">
                 {handoffs.slice(0, 5).map((handoff) => (
@@ -256,18 +263,18 @@ const Dashboard: React.FC = () => {
                 <p className="text-sm text-text-muted">Great job! The queue is clear.</p>
               </div>
             )}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         {/* Quick Stats */}
-        <div className="card">
-          <div className="px-6 py-4 border-b border-edge">
+        <Card variant="glass">
+          <CardHeader className="px-6 py-4 space-y-0 border-b border-edge">
             <h2 className="text-lg font-semibold text-text-primary">Performance</h2>
-          </div>
+          </CardHeader>
           {isLoading ? (
             <PerformanceSkeleton />
           ) : (
-            <div className="p-6 space-y-6">
+            <CardContent className="p-6 space-y-6">
               {/* CSAT Score */}
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -314,31 +321,32 @@ const Dashboard: React.FC = () => {
                 </div>
                 <div className="h-2 bg-surface-3 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full ${(metrics?.avgWaitTime ?? 0) < 60 ? 'bg-status-online' : 'bg-accent-500'}`}
+                    className={cn('h-full rounded-full', (metrics?.avgWaitTime ?? 0) < 60 ? 'bg-status-online' : 'bg-accent-500')}
                     style={{
                       width: `${Math.min(((metrics?.avgWaitTime ?? 0) / 120) * 100, 100)}%`,
                     }}
                   />
                 </div>
               </div>
-            </div>
+            </CardContent>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Active Chats Preview */}
-      <div className="card">
-        <div className="px-6 py-4 border-b border-edge flex items-center justify-between">
+      <Card variant="glass">
+        <CardHeader className="px-6 py-4 flex-row items-center justify-between space-y-0 border-b border-edge">
           <h2 className="text-lg font-semibold text-text-primary">Active Chats</h2>
-          <button
+          <Button
+            variant="link"
             onClick={() => navigate('/monitor')}
-            className="text-sm text-primary-400 hover:text-primary-300 flex items-center gap-1"
+            className="text-sm text-primary-400 hover:text-primary-300 gap-1 p-0 h-auto"
           >
             View All
             <ArrowRight className="w-4 h-4" />
-          </button>
-        </div>
-        <div className="p-6">
+          </Button>
+        </CardHeader>
+        <CardContent className="p-6">
           {chats.length > 0 ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {chats.slice(0, 6).map((chat) => (
@@ -369,8 +377,8 @@ const Dashboard: React.FC = () => {
               <p>No active handoff chats</p>
             </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };

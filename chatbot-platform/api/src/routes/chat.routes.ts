@@ -184,20 +184,28 @@ router.get(
       const { sessionId } = req.params;
       const tenantId = req.tenant?.id;
 
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId, tenantId },
-        relations: ['assignedAgent'],
-      });
+      // Single query: session + unread count via subquery
+      const result = await sessionRepository
+        .createQueryBuilder('s')
+        .leftJoinAndSelect('s.assignedAgent', 'agent')
+        .addSelect((qb) =>
+          qb.select('COUNT(*)')
+            .from(Message, 'm')
+            .where('m.session_id = s.id')
+            .andWhere("m.status = 'sent'"),
+          'unreadCount'
+        )
+        .where('s.id = :sessionId', { sessionId })
+        .andWhere('s.tenant_id = :tenantId', { tenantId })
+        .getRawAndEntities();
 
+      const session = result.entities[0];
       if (!session) {
         res.status(404).json({ error: 'Session not found' });
         return;
       }
 
-      // Get unread message count
-      const unreadCount = await messageRepository.count({
-        where: { sessionId, status: 'sent' as any },
-      });
+      const unreadCount = parseInt(result.raw[0]?.unreadCount || '0');
 
       res.json({
         success: true,
@@ -205,9 +213,7 @@ router.get(
           id: session.id,
           status: session.status,
           assignedAgent: session.assignedAgent
-            ? {
-                id: session.assignedAgent.id,
-              }
+            ? { id: session.assignedAgent.id }
             : null,
           lastActivityAt: session.lastActivityAt,
           createdAt: session.createdAt,

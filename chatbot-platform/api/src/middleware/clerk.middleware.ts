@@ -63,8 +63,15 @@ function setCache(orgId: string, userId: string, ids: Omit<CachedIds, 'cachedAt'
 
 export function requireClerkAuth(req: Request, res: Response, next: NextFunction): void {
   const auth = getAuth(req);
+  logger.debug('Clerk auth check', {
+    hasAuth: !!auth,
+    userId: auth?.userId || null,
+    orgId: auth?.orgId || null,
+    path: req.path,
+    hasAuthHeader: !!req.headers.authorization,
+  });
   if (!auth?.userId) {
-    res.status(401).json({ error: 'Unauthorized' });
+    res.status(401).json({ error: 'Clerk: Unauthorized - no userId in auth' });
     return;
   }
   if (!auth.orgId) {

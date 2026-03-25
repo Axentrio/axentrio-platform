@@ -57,7 +57,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 }
 
 // Async handler wrapper
-export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) {
+export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
   return (req: Request, res: Response, next: NextFunction) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };

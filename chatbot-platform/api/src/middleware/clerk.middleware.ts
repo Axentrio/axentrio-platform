@@ -161,7 +161,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
           const memberships = await clerkClient.organizations.getOrganizationMembershipList({
             organizationId: clerkOrgId,
           });
-          const membership = memberships.data?.find((m: any) => m.publicUserData?.userId === clerkUserId);
+          const membership = memberships.data?.find((m) => m.publicUserData?.userId === clerkUserId);
           if (membership?.role === 'org:admin') role = 'admin';
           else if (membership?.role === 'org:supervisor') role = 'supervisor';
         } catch {
@@ -198,7 +198,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       try {
         const clerkUser = await clerkClient.users.getUser(clerkUserId);
         const isVerified = clerkUser.emailAddresses?.some(
-          (e: { verification?: { status: string } }) => e.verification?.status === 'verified'
+          (e) => e.verification?.status === 'verified'
         );
         if (isVerified) {
           user.emailVerified = true;
@@ -276,7 +276,7 @@ function attachToRequest(req: ProvisionedRequest, clerkUserId: string, clerkOrgI
   };
 }
 
-async function ensureUniqueSlug(name: string, tenantRepo: any): Promise<string> {
+async function ensureUniqueSlug(name: string, tenantRepo: { findOne(options: { where: { slug: string } }): Promise<{ slug: string } | null> }): Promise<string> {
   const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'org';
   let slug = base;
   let attempt = 0;

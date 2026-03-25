@@ -96,7 +96,7 @@ router.get(
 router.post(
   '/init',
   widgetRateLimiter,
-  asyncHandler(async (req: Request, res: Response): Promise<any> => {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { apiKey, visitorId, metadata } = req.body;
 
     if (!apiKey || !visitorId) {
@@ -123,10 +123,9 @@ router.post(
     });
 
     if (existingSession) {
-      // Return existing session
       const token = generateWidgetToken(tenant.id, visitorId, existingSession.id);
 
-      return res.json({
+      res.json({
         success: true,
         data: {
           session: {
@@ -138,6 +137,7 @@ router.post(
           isNew: false,
         },
       });
+      return;
     }
 
     // Create new session

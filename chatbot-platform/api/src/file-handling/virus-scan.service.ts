@@ -225,7 +225,7 @@ export class VirusScanService {
 
       // Try ClamScan module first
       if (this.clamscan) {
-        const scanResult = await (this.clamscan as any).scanBuffer(buffer);
+        const scanResult = await (this.clamscan as unknown as { scanBuffer(buf: Buffer): Promise<{ isInfected: boolean; viruses: string[] }> }).scanBuffer(buffer);
         result = {
           clean: !scanResult.isInfected,
           threats: scanResult.isInfected ? [scanResult.viruses.join(', ')] : undefined,

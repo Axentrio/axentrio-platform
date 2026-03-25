@@ -343,7 +343,7 @@ export class RetryService {
    */
   private setupQueueEventHandlers(): void {
     // Job completed successfully
-    this.queue.on('completed', (job: Queue.Job<RetryJobData>, _result: any) => {
+    this.queue.on('completed', (job: Queue.Job<RetryJobData>, _result: unknown) => {
       logger.info(`Retry job completed`, {
         jobId: job.id,
         messageId: job.data.messageId,

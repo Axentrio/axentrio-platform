@@ -209,7 +209,7 @@ router.get(
         .orderBy("DATE(session.created_at)", 'ASC')
         .getRawMany();
 
-      const timeseries = rawData.map((row: any) => ({
+      const timeseries = rawData.map((row: Record<string, string>) => ({
         date: row.date,
         bot: parseInt(row.bot, 10) || 0,
         human: parseInt(row.human, 10) || 0,

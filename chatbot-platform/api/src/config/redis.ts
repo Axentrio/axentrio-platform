@@ -2,7 +2,7 @@
  * Redis Configuration
  * Lazy initialization with REDIS_URL support and graceful degradation
  */
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { config } from './environment';
 import { logger } from '../utils/logger';
 
@@ -17,20 +17,26 @@ let redisAvailable = false;
  */
 export async function initializeRedis(): Promise<void> {
   try {
-    const connectionArg = config.redis.url || {
-      host: config.redis.host,
-      port: config.redis.port,
-      password: config.redis.password,
-      db: config.redis.db,
-      keyPrefix: config.redis.keyPrefix,
-      retryStrategy: (times: number) => Math.min(times * 50, 2000),
-      maxRetriesPerRequest: 3,
-      enableReadyCheck: true,
-    };
+    if (config.redis.url) {
+      redisClient = new Redis(config.redis.url);
+      redisPubClient = new Redis(config.redis.url);
+      redisSubClient = new Redis(config.redis.url);
+    } else {
+      const redisOpts: RedisOptions = {
+        host: config.redis.host,
+        port: config.redis.port,
+        password: config.redis.password,
+        db: config.redis.db,
+        keyPrefix: config.redis.keyPrefix,
+        retryStrategy: (times: number) => Math.min(times * 50, 2000),
+        maxRetriesPerRequest: 3,
+        enableReadyCheck: true,
+      };
 
-    redisClient = new Redis(connectionArg as any);
-    redisPubClient = new Redis(connectionArg as any);
-    redisSubClient = new Redis(connectionArg as any);
+      redisClient = new Redis(redisOpts);
+      redisPubClient = new Redis(redisOpts);
+      redisSubClient = new Redis(redisOpts);
+    }
 
     // Attach error handlers so uncaught errors don't crash the process
     redisClient.on('error', (err) => {

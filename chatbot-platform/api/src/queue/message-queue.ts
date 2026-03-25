@@ -30,7 +30,7 @@ export function isQueueSyncFallback(): boolean {
  */
 const createQueueOptions = (_queueName: string): Bull.QueueOptions => {
   const redisOpts: Bull.QueueOptions['redis'] = config.redis.url
-    ? (config.redis.url as any)
+    ? config.redis.url
     : {
         host: config.redis.host,
         port: config.redis.port,
@@ -193,7 +193,7 @@ export const addMessageJob = async (
   return messageQueue.add(
     {
       ...data,
-      type: 'message_process' as any,
+      type: 'message_process' as const,
     },
     {
       priority: 1,

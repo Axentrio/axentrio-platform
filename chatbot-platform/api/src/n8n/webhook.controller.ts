@@ -13,7 +13,7 @@ import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
 import { FallbackService } from './fallback.service';
 import { inboundMessageSchema, inboundMessageValidationOptions } from './schemas';
-import { InboundMessage, WebhookResponse } from './types';
+import { InboundMessage, WebhookResponse, HandoffPayload, FileRequestPayload } from './types';
 import { validateJsonSchema } from '../utils/validation';
 import { MetricsService } from '../services/metrics.service';
 
@@ -284,7 +284,7 @@ export class WebhookController {
           break;
 
         case 'handsoff.trigger':
-          result = await this.config.webhookService.triggerHandoff(sessionId, message.payload as any);
+          result = await this.config.webhookService.triggerHandoff(sessionId, message.payload as HandoffPayload | undefined);
           this.config.circuitBreaker.recordSuccess();
           break;
 
@@ -294,7 +294,7 @@ export class WebhookController {
           break;
 
         case 'file.request':
-          result = await this.config.webhookService.requestFileUpload(sessionId, message.payload as any);
+          result = await this.config.webhookService.requestFileUpload(sessionId, message.payload as FileRequestPayload | undefined);
           this.config.circuitBreaker.recordSuccess();
           break;
 
@@ -304,12 +304,12 @@ export class WebhookController {
           break;
 
         case 'session.transfer':
-          result = await this.config.webhookService.transferSession(sessionId, message.payload as any);
+          result = await this.config.webhookService.transferSession(sessionId, message.payload as Record<string, unknown> | undefined);
           this.config.circuitBreaker.recordSuccess();
           break;
 
         case 'user.update':
-          result = await this.config.webhookService.updateUserContext(sessionId, message.payload as any);
+          result = await this.config.webhookService.updateUserContext(sessionId, message.payload as Record<string, unknown> | undefined);
           this.config.circuitBreaker.recordSuccess();
           break;
 

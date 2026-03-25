@@ -420,8 +420,9 @@ export class UploadService {
     try {
       await this.getFileMetadata(fileKey);
       return true;
-    } catch (error: any) {
-      if (error.name === 'NotFound' || error.name === 'NoSuchKey') {
+    } catch (error: unknown) {
+      const name = error instanceof Error ? error.name : '';
+      if (name === 'NotFound' || name === 'NoSuchKey') {
         return false;
       }
       throw error;

@@ -3,7 +3,7 @@
  * Handles JWT validation for HTTP requests and WebSocket connections
  */
 import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import { Socket } from 'socket.io';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
@@ -59,7 +59,7 @@ export function generateAgentToken(agent: Agent & { user?: { email?: string; rol
       type: 'agent',
     },
     config.jwt.secret,
-    { expiresIn: config.jwt.expiresIn as any, issuer: 'chatbot-platform', audience: 'chatbot-api' }
+    { expiresIn: config.jwt.expiresIn as SignOptions['expiresIn'], issuer: 'chatbot-platform', audience: 'chatbot-api' }
   );
 }
 
@@ -91,7 +91,7 @@ export function generateRefreshToken(agentId: string): string {
   return jwt.sign(
     { agentId, type: 'refresh' },
     config.jwt.refreshSecret,
-    { expiresIn: config.jwt.refreshExpiresIn as any, issuer: 'chatbot-platform' }
+    { expiresIn: config.jwt.refreshExpiresIn as SignOptions['expiresIn'], issuer: 'chatbot-platform' }
   );
 }
 

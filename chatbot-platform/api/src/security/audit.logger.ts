@@ -107,13 +107,13 @@ export interface AuditLogEntry {
   resourceId?: string;
   severity: Severity;
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
   ip?: string;
   userAgent?: string;
   sessionId?: string;
   requestId?: string;
   correlationId?: string;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AuditLoggerConfig {
@@ -266,7 +266,7 @@ export class AuditLogger {
   /**
    * Log debug message
    */
-  debug(message: string, details?: Record<string, any>): void {
+  debug(message: string, details?: Record<string, unknown>): void {
     this.log({
       level: 'debug',
       action: 'ERROR',
@@ -279,7 +279,7 @@ export class AuditLogger {
   /**
    * Log info message
    */
-  info(message: string, details?: Record<string, any>): void {
+  info(message: string, details?: Record<string, unknown>): void {
     this.log({
       level: 'info',
       action: 'ERROR',
@@ -292,7 +292,7 @@ export class AuditLogger {
   /**
    * Log warning
    */
-  warn(message: string, details?: Record<string, any>): void {
+  warn(message: string, details?: Record<string, unknown>): void {
     this.log({
       level: 'warn',
       action: 'ERROR',
@@ -305,7 +305,7 @@ export class AuditLogger {
   /**
    * Log error
    */
-  error(message: string, error?: Error, details?: Record<string, any>): void {
+  error(message: string, error?: Error, details?: Record<string, unknown>): void {
     this.log({
       level: 'error',
       action: 'ERROR',
@@ -322,7 +322,7 @@ export class AuditLogger {
   /**
    * Log critical security event
    */
-  critical(action: AuditAction, message: string, details?: Record<string, any>): void {
+  critical(action: AuditAction, message: string, details?: Record<string, unknown>): void {
     this.log({
       level: 'critical',
       action,
@@ -339,7 +339,7 @@ export class AuditLogger {
     action: 'LOGIN_SUCCESS' | 'LOGIN_FAILURE' | 'LOGOUT',
     tenantId: string,
     userId: string,
-    details?: Record<string, any>,
+    details?: Record<string, unknown>,
     ip?: string,
     userAgent?: string
   ): void {
@@ -411,7 +411,7 @@ export class AuditLogger {
   logSuspiciousActivity(
     tenantId: string,
     description: string,
-    details?: Record<string, any>,
+    details?: Record<string, unknown>,
     ip?: string,
     userAgent?: string
   ): void {
@@ -419,7 +419,7 @@ export class AuditLogger {
       level: 'warn',
       action: 'SUSPICIOUS_ACTIVITY',
       tenantId,
-      userId: details?.userId || 'unknown',
+      userId: (typeof details?.userId === 'string' ? details.userId : 'unknown'),
       resource: 'security',
       severity: 'HIGH',
       message: description,
@@ -459,16 +459,16 @@ export class AuditLogger {
     return LOG_LEVEL_PRIORITY[level] >= LOG_LEVEL_PRIORITY[this.config.logLevel];
   }
 
-  private sanitizeDetails(details?: Record<string, any>): Record<string, any> | undefined {
+  private sanitizeDetails(details?: Record<string, unknown>): Record<string, unknown> | undefined {
     if (!details) return undefined;
 
-    const sanitized: Record<string, any> = {};
+    const sanitized: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(details)) {
       if (this.config.sensitiveFields.includes(key.toLowerCase())) {
         sanitized[key] = '[REDACTED]';
       } else if (typeof value === 'object' && value !== null) {
-        sanitized[key] = this.sanitizeDetails(value);
+        sanitized[key] = this.sanitizeDetails(value as Record<string, unknown>);
       } else {
         sanitized[key] = value;
       }

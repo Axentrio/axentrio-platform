@@ -11,7 +11,7 @@ import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
-import { WebhookConfig, OutboundMessage } from '../n8n/types';
+import { WebhookConfig, OutboundMessage, MessagePayload } from '../n8n/types';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -92,7 +92,7 @@ export async function forwardMessageToN8n(
     sessionId: session.id,
     timestamp: new Date().toISOString(),
     payload: {
-      type: (savedMessage.type as any) || 'text',
+      type: (savedMessage.type as MessagePayload['type']) || 'text',
       content: savedMessage.content,
       metadata: savedMessage.metadata || undefined,
     },
@@ -122,10 +122,10 @@ export async function forwardMessageToN8n(
       sessionId: session.id,
       tenantId: session.tenantId,
       participantId: 'system',
-      type: 'system',
+      type: 'system' as Message['type'],
       content: fallbackContent,
-    } as any);
-    const savedFallback = await messageRepository.save(fallbackMsg) as unknown as Message;
+    });
+    const savedFallback = await messageRepository.save(fallbackMsg);
 
     // Broadcast fallback to visitor
     emitToSession(session.tenantId, session.id, 'message:receive', {
@@ -137,7 +137,7 @@ export async function forwardMessageToN8n(
     });
 
     // Transition session to handoff so agents can pick it up
-    await sessionRepository.update(session.id, { status: 'handoff' as any });
+    await sessionRepository.update(session.id, { status: 'handoff' as ChatSession['status'] });
 
     // Notify agents about the new handoff
     emitToTenantAgents(session.tenantId, 'handoff:requested', {

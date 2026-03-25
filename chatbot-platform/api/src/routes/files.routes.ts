@@ -62,8 +62,8 @@ router.post(
           expiresAt: uploadSession.expiresAt,
         },
       });
-    } catch (error: any) {
-      if (error.name === 'FileValidationError' || error.name === 'QuotaExceededError') {
+    } catch (error: unknown) {
+      if (error instanceof Error && (error.name === 'FileValidationError' || error.name === 'QuotaExceededError')) {
         res.status(400).json({ error: error.message });
         return;
       }

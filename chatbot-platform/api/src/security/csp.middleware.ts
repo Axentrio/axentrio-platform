@@ -548,7 +548,7 @@ declare global {
     interface Response {
       locals: {
         cspNonce?: string;
-        [key: string]: any;
+        [key: string]: unknown;
       };
     }
   }

@@ -68,13 +68,14 @@ const statusCheckLimiter = rateLimit({
 // Validation Middleware
 // ============================================================================
 
-const handleValidationErrors = (req: Request, res: Response, next: NextFunction): any => {
+const handleValidationErrors = (req: Request, res: Response, next: NextFunction): void => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'Validation failed',
       details: errors.array(),
     });
+    return;
   }
   next();
 };
@@ -118,7 +119,7 @@ router.post(
       .withMessage('chatSessionId must be a valid UUID'),
     handleValidationErrors,
   ],
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { fileName, fileSize, mimeType, chatSessionId, metadata } = req.body;
       const tenantId = req.tenantId!;
@@ -194,7 +195,7 @@ router.post(
       .withMessage('chunkSize must be between 1MB and 10MB'),
     handleValidationErrors,
   ],
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { fileName, fileSize, mimeType, chatSessionId, chunkSize, metadata } = req.body;
       const tenantId = req.tenantId!;
@@ -261,7 +262,7 @@ router.post(
       .withMessage('Each part must have a valid PartNumber'),
     handleValidationErrors,
   ],
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { sessionId, parts } = req.body;
       const tenantId = req.tenantId!;
@@ -310,22 +311,24 @@ router.get(
   authenticateJWT,
   statusCheckLimiter,
   [param('sessionId').notEmpty().withMessage('sessionId is required'), handleValidationErrors],
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { sessionId } = req.params;
       const session = uploadService.getSession(sessionId);
 
       if (!session) {
-        return res.status(404).json({
+        res.status(404).json({
           error: 'Upload session not found',
         });
+        return;
       }
 
       // Verify tenant access
       if (session.tenantId !== req.tenantId) {
-        return res.status(403).json({
+        res.status(403).json({
           error: 'Access denied',
         });
+        return;
       }
 
       res.status(200).json({
@@ -357,7 +360,7 @@ router.get(
   '/quota',
   authenticateJWT,
   requireTenantAccess,
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const tenantId = req.tenantId!;
       const quota = uploadService.getTenantQuota(tenantId);
@@ -391,14 +394,15 @@ router.get(
  */
 router.post(
   '/webhook/scan-complete',
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { sessionId, fileKey, clean, threats } = req.body;
 
       // Verify webhook secret
       const webhookSecret = req.headers['x-webhook-secret'];
       if (webhookSecret !== process.env.UPLOAD_WEBHOOK_SECRET) {
-        return res.status(401).json({ error: 'Invalid webhook secret' });
+        res.status(401).json({ error: 'Invalid webhook secret' });
+        return;
       }
 
       const scanResult = {
@@ -474,7 +478,7 @@ router.delete(
   authenticateJWT,
   requireTenantAccess,
   [param('fileKey').notEmpty().withMessage('fileKey is required'), handleValidationErrors],
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { fileKey } = req.params;
       const tenantId = req.tenantId!;
@@ -483,7 +487,8 @@ router.delete(
       // Verify file belongs to tenant
       const metadata = await uploadService.getFileMetadata(fileKey);
       if (!metadata || metadata['tenant-id'] !== tenantId) {
-        return res.status(403).json({ error: 'Access denied' });
+        res.status(403).json({ error: 'Access denied' });
+        return;
       }
 
       await uploadService.deleteFile(fileKey);
@@ -515,7 +520,7 @@ router.get(
   '/download/:fileKey',
   authenticateJWT,
   requireTenantAccess,
-  async (req: Request, res: Response, next: NextFunction): Promise<any> => {
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { fileKey } = req.params;
       const { filename } = req.query;
@@ -524,7 +529,8 @@ router.get(
       // Verify file belongs to tenant
       const metadata = await uploadService.getFileMetadata(fileKey);
       if (!metadata || metadata['tenant-id'] !== tenantId) {
-        return res.status(403).json({ error: 'Access denied' });
+        res.status(403).json({ error: 'Access denied' });
+        return;
       }
 
       const downloadUrl = await uploadService.generateDownloadUrl(
@@ -604,21 +610,23 @@ async function performVirusScan(sessionId: string, fileKey: string): Promise<voi
 // Error Handler
 // ============================================================================
 
-router.use((error: Error, req: Request, res: Response, _next: NextFunction): any => {
+router.use((error: Error, req: Request, res: Response, _next: NextFunction): void => {
   console.error('Upload controller error:', error);
 
   if (error instanceof FileValidationError) {
-    return res.status(400).json({
+    res.status(400).json({
       error: 'File validation failed',
       message: error.message,
     });
+    return;
   }
 
   if (error instanceof QuotaExceededError) {
-    return res.status(429).json({
+    res.status(429).json({
       error: 'Quota exceeded',
       message: error.message,
     });
+    return;
   }
 
   // Log unexpected errors

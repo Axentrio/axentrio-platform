@@ -3,7 +3,7 @@
  * Express routes for n8n webhook endpoints
  */
 
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { WebhookController } from './webhook.controller';
 import { rateLimit } from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
@@ -29,7 +29,7 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
     max: config.rateLimitMax || 100, // 100 requests per window
     standardHeaders: true,
     legacyHeaders: false,
-    handler: (req: any, res: any) => {
+    handler: (req: Request, res: Response) => {
       logger.warn(`Rate limit exceeded for IP: ${req.ip}`);
       res.status(429).json({
         success: false,
@@ -39,15 +39,15 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
     },
   });
 
-  // Request validation middleware
-  const validateRequest = (req: any, res: any, next: any) => {
+  const validateRequest = (req: Request, res: Response, next: NextFunction) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         error: 'Validation failed',
         details: errors.array(),
       });
+      return;
     }
     next();
   };
@@ -179,9 +179,8 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
         .withMessage('Secret must be at least 16 characters'),
       validateRequest,
     ],
-    async (_req: any, res: any) => {
+    async (_req: Request, res: Response) => {
       try {
-        // Implementation would register webhook in database
         res.status(201).json({
           success: true,
           message: 'Webhook registered successfully',
@@ -224,9 +223,8 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
    * @desc    List all registered webhooks
    * @access  Admin
    */
-  router.get('/registered', async (_req: any, res: any) => {
+  router.get('/registered', async (_req: Request, res: Response) => {
     try {
-      // Implementation would fetch webhooks from database
       res.status(200).json({
         success: true,
         webhooks: [],
@@ -249,7 +247,7 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
    * @desc    Get list of available webhook events
    * @access  Public
    */
-  router.get('/events', (_req: any, res: any) => {
+  router.get('/events', (_req: Request, res: Response) => {
     res.status(200).json({
       success: true,
       events: [

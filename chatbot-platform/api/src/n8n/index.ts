@@ -47,13 +47,16 @@ export {
 export * from './types';
 
 // Factory function for easy initialization
+import { Router } from 'express';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
-import { OutboundService } from './outbound.service';
+import { OutboundService, OutboundServiceConfig } from './outbound.service';
 import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
 import { FallbackService } from './fallback.service';
 import { createWebhookRouter } from './webhook.routes';
+import { EventEmitter } from '../utils/event-emitter';
+import { MetricsService } from '../services/metrics.service';
 
 export interface N8nModuleConfig {
   // Redis configuration for queue
@@ -92,8 +95,8 @@ export interface N8nModuleConfig {
   
   // Service dependencies
   services: {
-    eventEmitter: any;
-    metricsService?: any;
+    eventEmitter: EventEmitter;
+    metricsService?: MetricsService;
   };
 }
 
@@ -104,7 +107,7 @@ export interface N8nModule {
   circuitBreaker: CircuitBreaker;
   retryService: RetryService;
   fallbackService: FallbackService;
-  router: any;
+  router: Router;
 }
 
 /**
@@ -131,7 +134,7 @@ export function createN8nModule(config: N8nModuleConfig): N8nModule {
   // Create outbound service
   const outboundService = new OutboundService({
     circuitBreaker,
-    retryService: null as any, // Will be set after retry service is created
+    retryService: null as unknown as RetryService, // Will be set after retry service is created
     fallbackService,
     metricsService: config.services.metricsService,
     defaultTimeout: config.webhook?.timeout || 5000,
@@ -150,7 +153,7 @@ export function createN8nModule(config: N8nModuleConfig): N8nModule {
   });
 
   // Set retry service in outbound service (circular dependency)
-  (outboundService as any).config.retryService = retryService;
+  (outboundService as unknown as { config: OutboundServiceConfig }).config.retryService = retryService;
 
   // Create webhook service (uses repositories directly)
   const webhookService = new WebhookService({
@@ -163,7 +166,7 @@ export function createN8nModule(config: N8nModuleConfig): N8nModule {
     circuitBreaker,
     retryService,
     fallbackService,
-    metricsService: config.services.metricsService,
+    metricsService: config.services.metricsService!,
     secret: config.webhook?.secret,
   });
 

@@ -407,13 +407,14 @@ router.post(
           responseTimeMs,
         });
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       const responseTimeMs = Date.now() - startTime;
+      const err = error as { code?: string; message?: string };
       res.json({
         success: false,
-        error: error.code === 'ECONNABORTED'
+        error: err.code === 'ECONNABORTED'
           ? 'Webhook timed out (5s limit)'
-          : error.message || 'Connection failed',
+          : err.message || 'Connection failed',
         responseTimeMs,
       });
     }

@@ -11,6 +11,7 @@ import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
+import { AuditLog } from '../database/entities/AuditLog';
 import {
   createClerkOrganization,
   addMemberToClerkOrganization,
@@ -602,6 +603,118 @@ router.get('/analytics', async (_req: Request, res: Response) => {
     });
   } catch (error) {
     logger.error('Failed to get platform analytics', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// ==================
+// Audit Logs
+// ==================
+
+// GET /admin/audit-logs — list audit logs with filters
+router.get('/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const params = parsePaginationParams(req.query as Record<string, unknown>);
+    const qb = AppDataSource.getRepository(AuditLog)
+      .createQueryBuilder('log');
+
+    const tenantId = req.query.tenantId as string;
+    if (tenantId) {
+      qb.andWhere('log.tenantId = :tenantId', { tenantId });
+    }
+
+    const action = req.query.action as string;
+    if (action) {
+      qb.andWhere('log.action = :action', { action });
+    }
+
+    const from = req.query.from as string;
+    if (from) {
+      qb.andWhere('log.createdAt >= :from', { from: new Date(from) });
+    }
+
+    const to = req.query.to as string;
+    if (to) {
+      qb.andWhere('log.createdAt <= :to', { to: new Date(to) });
+    }
+
+    qb.orderBy('log.createdAt', 'DESC');
+
+    const result = await applyPagination(qb, params);
+
+    // Resolve actor names
+    const actorIds = [...new Set(result.data.map(l => l.actorId))];
+    const actors = actorIds.length > 0
+      ? await AppDataSource.getRepository(User)
+          .createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: actorIds })
+          .getMany()
+      : [];
+    const actorMap = new Map(actors.map(a => [a.id, { name: a.name, email: a.email }]));
+
+    const data = result.data.map(log => ({
+      id: log.id,
+      tenantId: log.tenantId,
+      actorId: log.actorId,
+      actorName: actorMap.get(log.actorId)?.name ?? 'Unknown',
+      actorEmail: actorMap.get(log.actorId)?.email ?? '',
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      metadata: log.metadata,
+      createdAt: log.createdAt,
+    }));
+
+    return res.json({ success: true, data, meta: result.meta });
+  } catch (error) {
+    logger.error('Failed to list audit logs', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /admin/audit-logs/export — CSV export
+router.get('/audit-logs/export', async (req: Request, res: Response) => {
+  try {
+    const qb = AppDataSource.getRepository(AuditLog)
+      .createQueryBuilder('log')
+      .orderBy('log.createdAt', 'DESC');
+
+    const tenantId = req.query.tenantId as string;
+    if (tenantId) qb.andWhere('log.tenantId = :tenantId', { tenantId });
+
+    const from = req.query.from as string;
+    if (from) qb.andWhere('log.createdAt >= :from', { from: new Date(from) });
+
+    const to = req.query.to as string;
+    if (to) qb.andWhere('log.createdAt <= :to', { to: new Date(to) });
+
+    const action = req.query.action as string;
+    if (action) qb.andWhere('log.action = :action', { action });
+
+    const logs = await qb.take(10000).getMany();
+
+    const actorIds = [...new Set(logs.map(l => l.actorId))];
+    const actors = actorIds.length > 0
+      ? await AppDataSource.getRepository(User).createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: actorIds })
+          .getMany()
+      : [];
+    const actorMap = new Map(actors.map(a => [a.id, a]));
+
+    const header = 'timestamp,actor_name,actor_email,action,entity_type,entity_id,metadata\n';
+    const rows = logs.map(l => {
+      const actor = actorMap.get(l.actorId);
+      const meta = l.metadata ? JSON.stringify(l.metadata).replace(/"/g, '""') : '';
+      return `${l.createdAt.toISOString()},"${actor?.name ?? 'Unknown'}","${actor?.email ?? ''}",${l.action},${l.entityType},${l.entityId},"${meta}"`;
+    }).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename=audit-logs-${new Date().toISOString().slice(0, 10)}.csv`);
+    return res.send(header + rows);
+  } catch (error) {
+    logger.error('Failed to export audit logs', { error });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

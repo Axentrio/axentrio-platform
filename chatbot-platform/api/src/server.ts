@@ -186,6 +186,23 @@ async function startServer(): Promise<void> {
 
     initializeSocketIO(httpServer);
 
+    // Audit log cleanup — runs once on startup, then daily
+    const cleanupAuditLogs = async () => {
+      try {
+        const result = await AppDataSource.query(
+          `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 || ' days')::INTERVAL`,
+          [config.audit.retentionDays]
+        );
+        logger.info('Audit log cleanup complete', { deletedCount: result?.[1] ?? 0 });
+      } catch (error) {
+        logger.error('Audit log cleanup failed', { error });
+      }
+    };
+
+    // Run cleanup after 10 seconds, then every 24 hours
+    setTimeout(cleanupAuditLogs, 10_000);
+    setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
+
     const PORT = config.server.port;
     httpServer.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);

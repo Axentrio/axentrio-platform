@@ -269,7 +269,7 @@ const Analytics: React.FC = () => {
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline">
-                <Download className="w-4 h-4 mr-2" />
+                <Download className="w-4 h-4" />
                 Export
               </Button>
             </DropdownMenuTrigger>

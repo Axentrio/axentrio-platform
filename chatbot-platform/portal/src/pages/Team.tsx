@@ -203,7 +203,7 @@ const Team: React.FC = () => {
           <p className="text-text-secondary">Manage agents and schedules</p>
         </div>
         <Button onClick={handleCreateAgent}>
-          <Plus className="w-4 h-4 mr-2" />
+          <Plus className="w-4 h-4" />
           Add Agent
         </Button>
       </div>
@@ -245,14 +245,14 @@ const Team: React.FC = () => {
         <TabsContent value="agents">
           <Card variant="glass" className="overflow-hidden">
             <Table>
-              <TableHeader className="bg-surface-3">
+              <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Agent</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Status</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Skills</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Chats</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+                  <TableHead>Agent</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Role</TableHead>
+                  <TableHead>Skills</TableHead>
+                  <TableHead>Chats</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -359,23 +359,23 @@ const Team: React.FC = () => {
         <TabsContent value="performance">
           <Card variant="glass" className="overflow-hidden">
             <Table>
-              <TableHeader className="bg-surface-3">
+              <TableHeader>
                 <TableRow>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Agent</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
-                    <MessageSquare className="w-4 h-4 inline mr-1" />
+                  <TableHead>Agent</TableHead>
+                  <TableHead>
+                    <MessageSquare className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
                     Total Chats
                   </TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
-                    <Clock className="w-4 h-4 inline mr-1" />
+                  <TableHead>
+                    <Clock className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
                     Avg Response
                   </TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">
-                    <Star className="w-4 h-4 inline mr-1" />
+                  <TableHead>
+                    <Star className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
                     CSAT
                   </TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">Active Chats</TableHead>
-                  <TableHead className="text-xs font-medium text-text-secondary uppercase">-</TableHead>
+                  <TableHead>Active Chats</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -577,18 +577,18 @@ const OrgMembersPanel: React.FC = () => {
           </h3>
           {!showInviteForm && (
             <Button size="sm" onClick={() => setShowInviteForm(true)}>
-              <Plus className="w-4 h-4 mr-2" />
+              <Plus className="w-4 h-4" />
               Invite
             </Button>
           )}
         </div>
         <Table>
-          <TableHeader className="bg-surface-3">
+          <TableHeader>
             <TableRow>
-              <TableHead className="text-xs font-medium text-text-secondary uppercase">User</TableHead>
-              <TableHead className="text-xs font-medium text-text-secondary uppercase">Joined</TableHead>
-              <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
-              <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+              <TableHead>User</TableHead>
+              <TableHead>Joined</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -696,13 +696,13 @@ const OrgMembersPanel: React.FC = () => {
             </h3>
           </div>
           <Table>
-            <TableHeader className="bg-surface-3">
+            <TableHeader>
               <TableRow>
-                <TableHead className="text-xs font-medium text-text-secondary uppercase">Email</TableHead>
-                <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
-                <TableHead className="text-xs font-medium text-text-secondary uppercase">Invited By</TableHead>
-                <TableHead className="text-xs font-medium text-text-secondary uppercase">Expires</TableHead>
-                <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead>Invited By</TableHead>
+                <TableHead>Expires</TableHead>
+                <TableHead>Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

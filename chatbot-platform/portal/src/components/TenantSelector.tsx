@@ -58,14 +58,14 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
           className={cn('w-full justify-between gap-2 text-left text-sm', className)}
         >
           <div className="flex items-center gap-2 min-w-0">
-            <Building2 className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            <Building2 className="w-4 h-4 text-text-muted flex-shrink-0" />
             <span className="truncate">
               {selectedTenant ? selectedTenant.name : placeholder}
             </span>
           </div>
           <ChevronDown
             className={cn(
-              'w-4 h-4 text-muted-foreground flex-shrink-0 transition-transform',
+              'w-4 h-4 text-text-muted flex-shrink-0 transition-transform',
               open && 'rotate-180'
             )}
           />

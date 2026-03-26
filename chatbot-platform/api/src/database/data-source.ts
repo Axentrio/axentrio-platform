@@ -16,6 +16,7 @@ import { Participant } from './entities/Participant';
 import { Message } from './entities/Message';
 import { FileUpload } from './entities/FileUpload';
 import { HandoffRequest } from './entities/HandoffRequest';
+import { WebhookDeliveryLog } from './entities/WebhookDeliveryLog';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -37,6 +38,7 @@ export const AppDataSource = new DataSource({
     Message,
     FileUpload,
     HandoffRequest,
+    WebhookDeliveryLog,
   ],
 
   // Migration configuration

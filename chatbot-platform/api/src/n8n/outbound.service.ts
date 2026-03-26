@@ -23,6 +23,8 @@ import {
 } from './types';
 import { validateJsonSchema } from '../utils/validation';
 import { outboundMessageSchema, outboundMessageValidationOptions } from './schemas';
+import { AppDataSource } from '../database/data-source';
+import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
 
 // logger imported from utils/logger
 
@@ -142,10 +144,12 @@ export class OutboundService {
     // Check circuit breaker
     if (this.config.circuitBreaker.isOpen()) {
       logger.warn(`[${requestId}] Circuit breaker is OPEN, queueing message`);
-      
+
       if (!options.skipQueue) {
         await this.queueMessage(webhookConfig, message);
       }
+
+      await this.logDelivery(message.tenantId, message.event, webhookConfig.url, 'dropped', 0, undefined, 'Circuit breaker open');
 
       return this.config.fallbackService.getFallbackResponse(message);
     }
@@ -174,13 +178,15 @@ export class OutboundService {
       if (response.status >= 200 && response.status < 300) {
         // Success
         this.config.circuitBreaker.recordSuccess();
-        this.config.metricsService?.incrementCounter('n8n_outbound_success');
-        this.config.metricsService?.recordHistogram('n8n_outbound_duration', duration);
+        this.config.metricsService?.incrementCounter('webhook_delivery_success');
+        this.config.metricsService?.recordHistogram('webhook_delivery_duration', duration);
 
         logger.info(`[${requestId}] Webhook request successful`, {
           status: response.status,
           duration,
         });
+
+        await this.logDelivery(message.tenantId, message.event, webhookConfig.url, 'success', duration, response.status, undefined, message as unknown as Record<string, unknown>);
 
         return {
           success: true,
@@ -193,8 +199,9 @@ export class OutboundService {
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      this.config.metricsService?.incrementCounter('n8n_outbound_errors');
-      this.config.metricsService?.recordHistogram('n8n_outbound_duration', duration);
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      this.config.metricsService?.incrementCounter('webhook_delivery_failure');
+      this.config.metricsService?.recordHistogram('webhook_delivery_duration', duration);
 
       logger.error(`[${requestId}] Webhook request failed`, error);
 
@@ -203,7 +210,10 @@ export class OutboundService {
 
       // Queue for retry if not skipping queue
       if (!options.skipQueue) {
-        await this.queueMessage(webhookConfig, message, error instanceof Error ? error.message : 'Unknown error');
+        await this.queueMessage(webhookConfig, message, errorMessage);
+        await this.logDelivery(message.tenantId, message.event, webhookConfig.url, 'retrying', duration, undefined, errorMessage, message as unknown as Record<string, unknown>);
+      } else {
+        await this.logDelivery(message.tenantId, message.event, webhookConfig.url, 'failed', duration, undefined, errorMessage, message as unknown as Record<string, unknown>);
       }
 
       // If circuit is now open, return fallback response
@@ -213,8 +223,64 @@ export class OutboundService {
 
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Unknown error',
+        error: errorMessage,
       };
+    }
+  }
+
+  /**
+   * Log a webhook delivery attempt
+   */
+  private async logDelivery(
+    tenantId: string,
+    event: string,
+    url: string,
+    status: 'success' | 'failed' | 'retrying' | 'dropped',
+    durationMs: number,
+    httpStatus?: number,
+    error?: string,
+    requestBody?: Record<string, unknown>
+  ): Promise<void> {
+    try {
+      const repo = AppDataSource.getRepository(WebhookDeliveryLog);
+
+      // Truncate request body to ~2KB for storage
+      let truncatedBody = requestBody;
+      if (requestBody) {
+        const bodyStr = JSON.stringify(requestBody);
+        if (bodyStr.length > 2048) {
+          truncatedBody = { _truncated: true, preview: bodyStr.slice(0, 2048) } as Record<string, unknown>;
+        }
+      }
+
+      await repo.save(repo.create({
+        tenantId,
+        event,
+        direction: 'outbound' as const,
+        url,
+        status,
+        httpStatus,
+        durationMs,
+        error,
+        requestBody: truncatedBody,
+      }));
+
+      // Rolling delete: cap at 500 entries per tenant
+      const count = await repo.count({ where: { tenantId } });
+      if (count > 500) {
+        const oldest = await repo.find({
+          where: { tenantId },
+          order: { createdAt: 'ASC' },
+          take: count - 500,
+          select: ['id'],
+        });
+        if (oldest.length > 0) {
+          await repo.delete(oldest.map(e => e.id));
+        }
+      }
+    } catch (err) {
+      // Non-blocking — don't fail the delivery because of log writes
+      logger.warn('Failed to write delivery log', { error: err });
     }
   }
 

@@ -16,6 +16,7 @@ import { inboundMessageSchema, inboundMessageValidationOptions } from './schemas
 import { InboundMessage, WebhookResponse, HandoffPayload, FileRequestPayload } from './types';
 import { validateJsonSchema } from '../utils/validation';
 import { MetricsService } from '../services/metrics.service';
+import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
 
 // logger imported from utils/logger
 
@@ -65,7 +66,7 @@ export class WebhookController {
       const validation = validateJsonSchema(req.body, inboundMessageSchema, inboundMessageValidationOptions);
       if (!validation.valid) {
         logger.warn(`[${requestId}] Message validation failed`, { errors: validation.errors });
-        this.config.metricsService?.incrementCounter('n8n_webhook_validation_failures');
+        this.config.metricsService?.incrementCounter('webhook_inbound_validation_failures');
         res.status(400).json({
           success: false,
           error: 'Bad Request: Invalid message format',
@@ -80,7 +81,7 @@ export class WebhookController {
       // Parse body first to get tenantId, then verify against tenant's secret
       if (!(await this.verifyPerTenantSecret(req, message.tenantId))) {
         logger.warn(`[${requestId}] Webhook secret verification failed`);
-        this.config.metricsService?.incrementCounter('n8n_webhook_auth_failures');
+        this.config.metricsService?.incrementCounter('webhook_inbound_auth_failures');
         res.status(401).json({
           success: false,
           error: 'Unauthorized: Invalid or missing webhook secret',
@@ -99,19 +100,43 @@ export class WebhookController {
 
       // Record metrics
       const duration = Date.now() - startTime;
-      this.config.metricsService?.recordHistogram('n8n_webhook_duration', duration);
-      this.config.metricsService?.incrementCounter('n8n_webhook_success');
+      this.config.metricsService?.recordHistogram('webhook_inbound_duration', duration);
+      this.config.metricsService?.incrementCounter('webhook_inbound_success');
+
+      // Log delivery
+      this.logInboundDelivery(
+        message.tenantId || 'unknown',
+        message.action,
+        req.originalUrl,
+        result.success ? 'success' : 'failed',
+        result.success ? 200 : 400,
+        duration,
+        result.success ? undefined : result.error,
+        req.body
+      );
 
       // Send response
       res.status(result.success ? 200 : 400).json(result);
 
     } catch (error) {
       const duration = Date.now() - startTime;
-      this.config.metricsService?.recordHistogram('n8n_webhook_duration', duration);
-      this.config.metricsService?.incrementCounter('n8n_webhook_errors');
+      this.config.metricsService?.recordHistogram('webhook_inbound_duration', duration);
+      this.config.metricsService?.incrementCounter('webhook_inbound_errors');
 
       logger.error(`[${requestId}] Error processing inbound webhook`, error);
-      
+
+      // Log delivery failure
+      this.logInboundDelivery(
+        req.body?.tenantId || 'unknown',
+        req.body?.action || 'unknown',
+        req.originalUrl,
+        'failed',
+        500,
+        duration,
+        error instanceof Error ? error.message : 'Internal server error',
+        req.body
+      );
+
       res.status(500).json({
         success: false,
         error: 'Internal Server Error: Failed to process webhook',
@@ -395,6 +420,48 @@ export class WebhookController {
       result |= a.charCodeAt(i) ^ b.charCodeAt(i);
     }
     return result === 0;
+  }
+
+  /**
+   * Log an inbound delivery attempt (non-blocking)
+   */
+  private logInboundDelivery(
+    tenantId: string,
+    event: string,
+    url: string,
+    status: 'success' | 'failed',
+    httpStatus: number,
+    durationMs: number,
+    error?: string,
+    body?: unknown
+  ): void {
+    try {
+      const repo = AppDataSource.getRepository(WebhookDeliveryLog);
+      let truncatedBody: Record<string, unknown> | undefined;
+      if (body) {
+        const str = JSON.stringify(body);
+        truncatedBody = str.length > 2048
+          ? { _truncated: true, preview: str.slice(0, 2048) }
+          : body as Record<string, unknown>;
+      }
+
+      // Fire-and-forget — don't await to avoid slowing the response
+      repo.save(repo.create({
+        tenantId,
+        event,
+        direction: 'inbound' as const,
+        url,
+        status,
+        httpStatus,
+        durationMs,
+        error,
+        requestBody: truncatedBody,
+      })).catch(err => {
+        logger.warn('Failed to write inbound delivery log', { error: err });
+      });
+    } catch (err) {
+      logger.warn('Failed to write inbound delivery log', { error: err });
+    }
   }
 
   /**

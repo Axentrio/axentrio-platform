@@ -21,7 +21,7 @@ interface ClerkUserEvent {
   };
 }
 
-router.post('/clerk', async (req: Request, res: Response): Promise<void> => {
+router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     const webhookSecret = config.clerk.webhookSecret;
     if (!webhookSecret) {

@@ -31,6 +31,13 @@ import analyticsRoutes from './routes/analytics.routes';
 import notificationRoutes from './routes/notifications.routes';
 import userRoutes from './routes/users.routes';
 import clerkWebhookRoutes from './routes/clerk-webhook.routes';
+import webhookAdminRoutes from './routes/webhook-admin.routes';
+import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
+
+// Webhook integration
+import { createWebhookModule } from './n8n';
+import { initializeForwarding } from './services/message-forwarding.service';
+import { EventEmitter } from './utils/event-emitter';
 
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
@@ -49,7 +56,8 @@ app.get('/health', (_req, res) => {
 });
 
 // Clerk webhook — must use raw body parser, registered before express.json()
-app.use('/api/v1/webhooks', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
+// Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
+app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
 
 // Security middleware stack
 app.use(helmet({ contentSecurityPolicy: config.server.isProduction }));
@@ -118,6 +126,7 @@ apiRouter.use('/widget', widgetRoutes);
 apiRouter.use('/files', fileRoutes);
 apiRouter.use('/analytics', analyticsRoutes);
 apiRouter.use('/notifications', notificationRoutes);
+apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
 
 app.use('/api/v1', apiRouter);
 
@@ -142,6 +151,35 @@ async function startServer(): Promise<void> {
       logger.info('Message queue initialized');
     } catch (err) {
       logger.warn('Queue initialization failed, falling back to synchronous processing', { error: err });
+    }
+
+    // Initialize webhook integration module
+    try {
+      const webhookModule = createWebhookModule({
+        redisUrl: config.redis.url || `redis://${config.redis.host}:${config.redis.port}`,
+        circuitBreaker: {
+          failureThreshold: 5,
+          successThreshold: 3,
+          timeout: 30000,
+        },
+        retry: {
+          maxRetries: config.queue.maxAttempts || 3,
+          initialDelay: config.queue.backoffDelay || 1000,
+          backoffMultiplier: 2,
+        },
+        services: {
+          eventEmitter: new EventEmitter(),
+        },
+      });
+
+      apiRouter.use('/webhooks', webhookModule.router);
+
+      // Wire outbound message forwarding
+      initializeForwarding(webhookModule.outboundService, webhookModule.fallbackService);
+
+      logger.info('Webhook integration module initialized');
+    } catch (err) {
+      logger.warn('Webhook module initialization failed — webhooks disabled', { error: err });
     }
 
     initializeSocketIO(httpServer);

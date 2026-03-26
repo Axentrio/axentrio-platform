@@ -94,7 +94,8 @@ const envSchema = z.object({
   // API base URL (for webhook callbacks)
   API_URL: z.string().default('http://localhost:3000'),
 
-  // N8N
+  // Webhook / N8N
+  WEBHOOK_URL: z.string().optional(),
   N8N_WEBHOOK_URL: z.string().optional(),
 
   // AWS S3
@@ -272,8 +273,8 @@ export const config = {
   },
 
   n8n: {
-    webhookUrl: env.N8N_WEBHOOK_URL,
-    enabled: !!env.N8N_WEBHOOK_URL,
+    webhookUrl: env.WEBHOOK_URL || env.N8N_WEBHOOK_URL,
+    enabled: !!(env.WEBHOOK_URL || env.N8N_WEBHOOK_URL),
   },
 
   clerk: {

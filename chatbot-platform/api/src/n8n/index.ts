@@ -58,7 +58,7 @@ import { createWebhookRouter } from './webhook.routes';
 import { EventEmitter } from '../utils/event-emitter';
 import { MetricsService } from '../services/metrics.service';
 
-export interface N8nModuleConfig {
+export interface WebhookModuleConfig {
   // Redis configuration for queue
   redisUrl: string;
   
@@ -100,7 +100,7 @@ export interface N8nModuleConfig {
   };
 }
 
-export interface N8nModule {
+export interface WebhookModule {
   controller: WebhookController;
   webhookService: WebhookService;
   outboundService: OutboundService;
@@ -113,7 +113,7 @@ export interface N8nModule {
 /**
  * Initialize the complete n8n integration module
  */
-export function createN8nModule(config: N8nModuleConfig): N8nModule {
+export function createWebhookModule(config: WebhookModuleConfig): WebhookModule {
   // Create circuit breaker
   const circuitBreaker = new CircuitBreaker({
     name: 'n8n-webhook',
@@ -188,4 +188,11 @@ export function createN8nModule(config: N8nModuleConfig): N8nModule {
   };
 }
 
-export default createN8nModule;
+/** @deprecated Use WebhookModuleConfig */
+export type N8nModuleConfig = WebhookModuleConfig;
+/** @deprecated Use WebhookModule */
+export type N8nModule = WebhookModule;
+/** @deprecated Use createWebhookModule */
+export const createN8nModule = createWebhookModule;
+
+export default createWebhookModule;

@@ -11,6 +11,7 @@ import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
+import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import type { RequestUser } from '../types';
 
@@ -208,6 +209,13 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       } catch (err) {
         logger.warn('Failed to sync email verification from Clerk', { error: err });
       }
+    }
+
+    // --- Super Admin Bootstrap ---
+    if (config.superAdmin.emails.includes(user.email.toLowerCase()) && user.role !== 'super_admin') {
+      user.role = 'super_admin';
+      await userRepo.save(user);
+      logger.info('Promoted user to super_admin via SUPER_ADMIN_EMAILS', { email: user.email });
     }
 
     // --- Resolve Agent ---

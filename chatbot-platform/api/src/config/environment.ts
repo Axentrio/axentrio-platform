@@ -108,6 +108,11 @@ const envSchema = z.object({
   S3_SIGNED_URL_EXPIRY: z.string().default('900').transform(Number),
   CDN_URL: z.string().optional(),
 
+  // Super Admin
+  SUPER_ADMIN_EMAILS: z.string().default('').transform(v =>
+    v.split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  ),
+
   // Clerk
   CLERK_SECRET_KEY: z.string().min(1).default('clerk-dev-key-set-in-production'),
   CLERK_WEBHOOK_SECRET: z.string().optional(),
@@ -275,6 +280,10 @@ export const config = {
   n8n: {
     webhookUrl: env.WEBHOOK_URL || env.N8N_WEBHOOK_URL,
     enabled: !!(env.WEBHOOK_URL || env.N8N_WEBHOOK_URL),
+  },
+
+  superAdmin: {
+    emails: env.SUPER_ADMIN_EMAILS,
   },
 
   clerk: {

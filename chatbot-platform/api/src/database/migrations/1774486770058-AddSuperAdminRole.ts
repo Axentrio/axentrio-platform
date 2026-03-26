@@ -9,7 +9,7 @@ export class AddSuperAdminRole1774486770058 implements MigrationInterface {
     `);
   }
 
-  public async down(queryRunner: QueryRunner): Promise<void> {
+  public async down(_queryRunner: QueryRunner): Promise<void> {
     // PostgreSQL doesn't support removing enum values directly.
     // To roll back, create a new type without super_admin and migrate the column.
     // For safety, this is a no-op. Demote super_admin users before rollback.

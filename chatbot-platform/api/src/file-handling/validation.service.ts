@@ -10,7 +10,7 @@
  * - Content-type detection
  */
 
-import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { extname } from 'path';
 
 // ============================================================================
@@ -517,7 +517,7 @@ export class ValidationService {
     tenantId?: string
   ): Promise<ValidationResult> {
     try {
-      const buffer = readFileSync(filePath);
+      const buffer = await readFile(filePath);
       return this.validateFileBuffer(buffer, filename, claimedMimeType, tenantId);
     } catch (error) {
       return {

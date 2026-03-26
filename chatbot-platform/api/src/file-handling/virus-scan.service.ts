@@ -145,9 +145,9 @@ export class VirusScanService {
         preference: 'clamdscan',
       });
 
-      console.log('ClamAV initialized successfully');
+      logger.info('ClamAV initialized successfully');
     } catch (error) {
-      console.error('Failed to initialize ClamAV:', error);
+      logger.error('Failed to initialize ClamAV', { error: error instanceof Error ? error.message : String(error) });
       // Service will fall back to TCP socket scanning
     }
   }
@@ -202,7 +202,7 @@ export class VirusScanService {
 
       return this.scanBuffer(buffer, fileKey, startTime);
     } catch (error) {
-      console.error(`Error scanning file ${fileKey}:`, error);
+      logger.error('Error scanning file', { fileKey, error: error instanceof Error ? error.message : String(error) });
       throw new VirusScanError(`Failed to scan file: ${(error as Error).message}`);
     }
   }
@@ -244,7 +244,7 @@ export class VirusScanService {
 
       return result;
     } catch (error) {
-      console.error('Buffer scan error:', error);
+      logger.error('Buffer scan error', { error: error instanceof Error ? error.message : String(error) });
       throw new VirusScanError(`Scan failed: ${(error as Error).message}`);
     }
   }
@@ -277,7 +277,7 @@ export class VirusScanService {
       const buffer = Buffer.concat(chunks);
       return this.scanBuffer(buffer, fileKey, startTime);
     } catch (error) {
-      console.error('Stream scan error:', error);
+      logger.error('Stream scan error', { error: error instanceof Error ? error.message : String(error) });
       throw new VirusScanError(`Stream scan failed: ${(error as Error).message}`);
     }
   }

@@ -1,6 +1,9 @@
 /**
  * Message Entity
  * Represents chat messages with optional encryption
+ *
+ * Encryption is handled at the service layer (chat routes, socket handler),
+ * NOT in entity hooks. The content column stores encrypted data directly.
  */
 
 import {
@@ -12,13 +15,9 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
-  BeforeInsert,
-  BeforeUpdate,
 } from 'typeorm';
 import { ChatSession } from './ChatSession';
 import { Participant } from './Participant';
-import { encrypt, decrypt, DecryptionError } from '../../utils/encryption';
-import { logger } from '../../utils/logger';
 
 export type MessageType = 'text' | 'image' | 'file' | 'system' | 'typing';
 export type MessageStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
@@ -48,7 +47,7 @@ export class Message {
   type!: MessageType;
 
   @Column({ type: 'text' })
-  private _content!: string;
+  content!: string;
 
   @Column({ type: 'boolean', default: false, name: 'content_encrypted' })
   contentEncrypted!: boolean;
@@ -110,54 +109,6 @@ export class Message {
   @JoinColumn({ name: 'participant_id' })
   participant!: Participant;
 
-  private _decryptedCache: string | null = null;
-
-  /** True when the last decryption attempt failed. */
-  public decryptionFailed: boolean = false;
-
-  // Getter for content (with automatic decryption, cached per instance)
-  get content(): string {
-    if (this.contentEncrypted && this._content) {
-      if (this._decryptedCache !== null) return this._decryptedCache;
-      try {
-        this._decryptedCache = decrypt(this._content, this.id);
-        this.decryptionFailed = false;
-        return this._decryptedCache;
-      } catch (error) {
-        this.decryptionFailed = true;
-        logger.error('Failed to decrypt message content', {
-          messageId: this.id,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
-        throw new DecryptionError(
-          `Failed to decrypt message ${this.id}`,
-          this.id,
-        );
-      }
-    }
-    return this._content;
-  }
-
-  // Setter for content (with optional encryption)
-  set content(value: string) {
-    this._content = value;
-    this._decryptedCache = null;
-  }
-
-  // Encrypt content before saving
-  @BeforeInsert()
-  @BeforeUpdate()
-  encryptContent(): void {
-    if (!this.contentEncrypted && this._content && this.type !== 'system') {
-      try {
-        this._content = encrypt(this._content);
-        this.contentEncrypted = true;
-      } catch (error) {
-        console.error('Failed to encrypt message content:', error);
-      }
-    }
-  }
-
   // Helper methods
   markAsSent(): void {
     this.status = 'sent';
@@ -179,9 +130,8 @@ export class Message {
   }
 
   edit(newContent: string): void {
-    this._content = newContent;
-    this._decryptedCache = null;
-    this.contentEncrypted = false; // Will be re-encrypted by @BeforeUpdate
+    this.content = newContent;
+    this.contentEncrypted = false;
     this.metadata = {
       ...this.metadata,
       edited: true,
@@ -193,7 +143,7 @@ export class Message {
   softDelete(): void {
     this.isDeleted = true;
     this.deletedAt = new Date();
-    this._content = '[Deleted]';
+    this.content = '[Deleted]';
     this.contentEncrypted = false;
   }
 
@@ -203,14 +153,5 @@ export class Message {
 
   hasAttachment(): boolean {
     return this.type === 'image' || this.type === 'file';
-  }
-
-  getPlainContent(): string {
-    return this._content;
-  }
-
-  setEncryptedContent(encryptedContent: string): void {
-    this._content = encryptedContent;
-    this.contentEncrypted = true;
   }
 }

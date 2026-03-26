@@ -12,7 +12,7 @@
 
 import { Request, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
-import { auditLogger } from './audit.logger';
+import { logger } from '../utils/logger';
 
 // ============================================================================
 // Types & Interfaces
@@ -435,21 +435,16 @@ export function handleCSPReport(req: Request, res: Response): void {
   const cspReport = report['csp-report'];
 
   // Log the violation
-  auditLogger.log({
-    action: 'CSP_VIOLATION',
+  logger.warn('CSP violation', {
     tenantId: req.tenantId || 'unknown',
     userId: req.userId || 'anonymous',
-    resource: 'csp',
-    severity: 'MEDIUM',
-    details: {
-      documentUri: cspReport['document-uri'],
-      violatedDirective: cspReport['violated-directive'],
-      effectiveDirective: cspReport['effective-directive'],
-      blockedUri: cspReport['blocked-uri'],
-      sourceFile: cspReport['source-file'],
-      lineNumber: cspReport['line-number'],
-      scriptSample: cspReport['script-sample'],
-    },
+    documentUri: cspReport['document-uri'],
+    violatedDirective: cspReport['violated-directive'],
+    effectiveDirective: cspReport['effective-directive'],
+    blockedUri: cspReport['blocked-uri'],
+    sourceFile: cspReport['source-file'],
+    lineNumber: cspReport['line-number'],
+    scriptSample: cspReport['script-sample'],
     ip: req.ip,
     userAgent: req.headers['user-agent'],
   });

@@ -20,6 +20,7 @@ import {
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import { createHash } from 'crypto';
+import { logger } from '../utils/logger';
 
 // ============================================================================
 // Types & Interfaces
@@ -605,13 +606,22 @@ export class UploadService {
 
   /**
    * Perform GDPR cleanup of expired files
+   * Processes files in batches of 50 with a cap of 5000 files per run.
    */
   async performGDPRCleanup(): Promise<{ deleted: number; errors: number }> {
     const now = new Date().toISOString();
     let deleted = 0;
     let errors = 0;
+    let processed = 0;
     let continuationToken: string | undefined;
+    const BATCH_SIZE = 50;
+    const MAX_FILES_PER_RUN = 5000;
+    const BATCH_DELAY_MS = 100;
+    const LOG_PROGRESS_EVERY = 500;
 
+    logger.info('GDPR cleanup started');
+
+    outer:
     do {
       const command = new ListObjectsV2Command({
         Bucket: this.config.bucketName,
@@ -620,26 +630,53 @@ export class UploadService {
       });
 
       const response = await this.s3Client.send(command);
+      const objects = response.Contents || [];
 
-      for (const object of response.Contents || []) {
-        try {
-          const metadata = await this.getFileMetadata(object.Key!);
-          const deleteAfter = metadata?.['gdpr-delete-after'];
+      // Process objects in batches
+      for (let i = 0; i < objects.length; i += BATCH_SIZE) {
+        if (processed >= MAX_FILES_PER_RUN) {
+          logger.info(`GDPR cleanup reached cap of ${MAX_FILES_PER_RUN} files, stopping`);
+          break outer;
+        }
 
-          if (deleteAfter && deleteAfter < now) {
-            await this.deleteFile(object.Key!);
-            deleted++;
+        const batch = objects.slice(i, i + BATCH_SIZE);
+        const results = await Promise.allSettled(
+          batch.map(async (object) => {
+            const metadata = await this.getFileMetadata(object.Key!);
+            const deleteAfter = metadata?.['gdpr-delete-after'];
+
+            if (deleteAfter && deleteAfter < now) {
+              await this.deleteFile(object.Key!);
+              return true; // deleted
+            }
+            return false; // skipped
+          })
+        );
+
+        for (const result of results) {
+          processed++;
+          if (result.status === 'fulfilled') {
+            if (result.value) deleted++;
+          } else {
+            errors++;
+            logger.error('GDPR cleanup error for file in batch', { error: result.reason });
           }
-        } catch (error) {
-          errors++;
-          console.error(`GDPR cleanup error for ${object.Key}:`, error);
+        }
+
+        if (processed % LOG_PROGRESS_EVERY < BATCH_SIZE) {
+          logger.info(`GDPR cleanup progress: ${processed} processed, ${deleted} deleted, ${errors} errors`);
+        }
+
+        // Delay between batches to avoid S3 throttling
+        if (i + BATCH_SIZE < objects.length) {
+          await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS));
         }
       }
 
       continuationToken = response.NextContinuationToken;
-    } while (continuationToken);
+    } while (continuationToken && processed < MAX_FILES_PER_RUN);
 
-    console.log(`GDPR cleanup completed: ${deleted} files deleted, ${errors} errors`);
+    logger.info(`GDPR cleanup completed: ${deleted} files deleted, ${errors} errors, ${processed} processed`);
     return { deleted, errors };
   }
 
@@ -657,7 +694,7 @@ export class UploadService {
 
     // Note: S3 doesn't allow metadata updates without re-upload
     // In production, you'd use S3 Object Lambda or copy the object
-    console.log(`Retention extended for ${fileKey} until ${currentDeleteDate.toISOString()}`);
+    logger.info(`Retention extended for ${fileKey} until ${currentDeleteDate.toISOString()}`);
   }
 
   // ==========================================================================

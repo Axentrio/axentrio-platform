@@ -195,6 +195,7 @@ router.get(
       .andWhere('session.created_at <= :end', { end })
       .groupBy("DATE(session.created_at)")
       .orderBy("DATE(session.created_at)", 'ASC')
+      .limit(366)
       .getRawMany();
 
     const timeseries = rawData.map((row: Record<string, string>) => ({

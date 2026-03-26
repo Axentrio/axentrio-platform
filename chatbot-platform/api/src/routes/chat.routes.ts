@@ -20,27 +20,33 @@ import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
-import { DecryptionError } from '../utils/encryption';
+import { encrypt, decrypt, DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
 import { sendMessageSchema, chatListQuerySchema } from '../schemas';
 
-/** Safely serialise a message for API responses, handling decryption failures. */
+/** Safely serialise a message for API responses, decrypting content if needed. */
 function serialiseMessage(m: Message) {
   let content: string;
   let decryptionFailed = false;
-  try {
-    content = m.content;
-  } catch (error) {
-    if (error instanceof DecryptionError) {
-      content = '';
-      decryptionFailed = true;
-    } else {
-      throw error;
+
+  if (m.contentEncrypted && m.content) {
+    try {
+      content = decrypt(m.content, m.id);
+    } catch (error) {
+      if (error instanceof DecryptionError) {
+        content = '';
+        decryptionFailed = true;
+      } else {
+        throw error;
+      }
     }
+  } else {
+    content = m.content;
   }
+
   return {
     id: m.id,
     type: m.type,
@@ -137,13 +143,18 @@ router.post(
       throw new BadRequestError('Session is closed');
     }
 
+    // Encrypt message content before saving
+    const plainContent = content.trim();
+    const messageContent = encrypt(plainContent);
+
     // Save message + update session in a single transaction
     const message = messageRepository.create({
       sessionId,
       tenantId: tenantId!,
       participantId: user?.id || 'anonymous',
       type,
-      content: content.trim(),
+      content: messageContent,
+      contentEncrypted: true,
       metadata: metadata || undefined,
     } as DeepPartial<Message>);
 
@@ -154,11 +165,11 @@ router.post(
       return msg;
     });
 
-    // Emit and forward AFTER transaction commits
+    // Emit and forward AFTER transaction commits — use original plain text
     const messageData = {
       id: savedMessage.id,
       type: savedMessage.type,
-      content: savedMessage.content,
+      content: plainContent,
       status: savedMessage.status,
       createdAt: savedMessage.createdAt,
       timestamp: new Date().toISOString(),
@@ -441,14 +452,7 @@ router.get(
 
     sendSuccess(res, {
       sessionId: id,
-      messages: messages.reverse().map((m) => ({
-        id: m.id,
-        type: m.type,
-        content: m.content,
-        status: m.status,
-        createdAt: m.createdAt,
-        metadata: m.metadata,
-      })),
+      messages: messages.reverse().map(serialiseMessage),
       pagination: {
         total,
         limit,

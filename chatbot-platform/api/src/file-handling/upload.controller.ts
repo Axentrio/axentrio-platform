@@ -15,7 +15,8 @@ import { body, param, validationResult } from 'express-validator';
 import rateLimit from 'express-rate-limit';
 import { authenticateAgent as authenticateJWT } from '../security/auth.middleware';
 const requireTenantAccess = authenticateJWT; // alias
-import { auditLogger } from '../security/audit.logger';
+import { logAudit } from '../utils/audit';
+import { logger } from '../utils/logger';
 import {
   getUploadService,
   UploadRequest,
@@ -126,15 +127,7 @@ router.post(
       const userId = req.userId!;
 
       // Log upload attempt
-      auditLogger.log({
-        action: 'UPLOAD_URL_REQUESTED',
-        tenantId,
-        userId,
-        resource: 'upload',
-        details: { fileName, fileSize, mimeType },
-        ip: req.ip,
-        userAgent: req.headers['user-agent'],
-      });
+      logAudit(userId, 'UPLOAD_URL_REQUESTED', 'upload', chatSessionId, tenantId, { fileName, fileSize, mimeType, ip: req.ip });
 
       const uploadRequest: UploadRequest = {
         fileName,
@@ -148,14 +141,24 @@ router.post(
 
       const session = await uploadService.generateUploadUrl(uploadRequest);
 
-      // Schedule virus scan after upload
-      setTimeout(async () => {
+      // Virus scan with timeout protection (fire-and-forget)
+      (async () => {
         try {
-          await performVirusScan(session.sessionId, session.fileKey);
+          const VIRUS_SCAN_TIMEOUT_MS = 60000;
+          await Promise.race([
+            performVirusScan(session.sessionId, session.fileKey),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Virus scan timeout')), VIRUS_SCAN_TIMEOUT_MS)
+            ),
+          ]);
         } catch (error) {
-          console.error('Virus scan scheduling error:', error);
+          logger.error('Virus scan failed', {
+            sessionId: session.sessionId,
+            fileKey: session.fileKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-      }, 5000); // Check after 5 seconds
+      })();
 
       res.status(200).json({
         success: true,
@@ -201,15 +204,7 @@ router.post(
       const tenantId = req.tenantId!;
       const userId = req.userId!;
 
-      auditLogger.log({
-        action: 'CHUNKED_UPLOAD_INITIATED',
-        tenantId,
-        userId,
-        resource: 'upload',
-        details: { fileName, fileSize, mimeType },
-        ip: req.ip,
-        userAgent: req.headers['user-agent'],
-      });
+      logAudit(userId, 'CHUNKED_UPLOAD_INITIATED', 'upload', chatSessionId, tenantId, { fileName, fileSize, mimeType, ip: req.ip });
 
       const uploadRequest: UploadRequest = {
         fileName,
@@ -270,23 +265,26 @@ router.post(
 
       const session = await uploadService.completeChunkedUpload(sessionId, parts);
 
-      // Trigger virus scan
-      setTimeout(async () => {
+      // Virus scan with timeout protection (fire-and-forget)
+      (async () => {
         try {
-          await performVirusScan(session.sessionId, session.fileKey);
+          const VIRUS_SCAN_TIMEOUT_MS = 60000;
+          await Promise.race([
+            performVirusScan(session.sessionId, session.fileKey),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('Virus scan timeout')), VIRUS_SCAN_TIMEOUT_MS)
+            ),
+          ]);
         } catch (error) {
-          console.error('Virus scan error:', error);
+          logger.error('Virus scan failed', {
+            sessionId: session.sessionId,
+            fileKey: session.fileKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-      }, 1000);
+      })();
 
-      auditLogger.log({
-        action: 'CHUNKED_UPLOAD_COMPLETED',
-        tenantId,
-        userId,
-        resource: 'upload',
-        details: { sessionId, fileKey: session.fileKey },
-        ip: req.ip,
-      });
+      logAudit(userId, 'CHUNKED_UPLOAD_COMPLETED', 'upload', sessionId, tenantId, { fileKey: session.fileKey, ip: req.ip });
 
       res.status(200).json({
         success: true,
@@ -427,36 +425,15 @@ router.post(
             );
             session.thumbnailUrl = thumbnailUrl;
           } catch (error) {
-            console.error('Thumbnail generation error:', error);
+            logger.error('Thumbnail generation error', { error, fileKey, sessionId });
           }
         }
 
         // Log successful scan
-        auditLogger.log({
-          action: 'FILE_SCAN_COMPLETED',
-          tenantId: session.tenantId,
-          userId: session.userId,
-          resource: 'upload',
-          details: {
-            sessionId,
-            fileKey,
-            clean: true,
-          },
-        });
+        logAudit(session.userId, 'FILE_SCAN_COMPLETED', 'upload', sessionId, session.tenantId, { fileKey, clean: true });
       } else if (session && !clean) {
         // Log quarantine
-        auditLogger.log({
-          action: 'FILE_QUARANTINED',
-          tenantId: session.tenantId,
-          userId: session.userId,
-          resource: 'upload',
-          severity: 'HIGH',
-          details: {
-            sessionId,
-            fileKey,
-            threats,
-          },
-        });
+        logAudit(session.userId, 'FILE_QUARANTINED', 'upload', sessionId, session.tenantId, { fileKey, threats, severity: 'HIGH' });
 
         // Delete infected file
         await uploadService.deleteFile(fileKey);
@@ -493,14 +470,7 @@ router.delete(
 
       await uploadService.deleteFile(fileKey);
 
-      auditLogger.log({
-        action: 'FILE_DELETED',
-        tenantId,
-        userId,
-        resource: 'upload',
-        details: { fileKey },
-        ip: req.ip,
-      });
+      logAudit(userId, 'FILE_DELETED', 'upload', fileKey, tenantId, { ip: req.ip });
 
       res.status(200).json({
         success: true,
@@ -539,14 +509,7 @@ router.get(
         300 // 5 minutes
       );
 
-      auditLogger.log({
-        action: 'FILE_DOWNLOAD_REQUESTED',
-        tenantId,
-        userId: req.userId!,
-        resource: 'upload',
-        details: { fileKey },
-        ip: req.ip,
-      });
+      logAudit(req.userId!, 'FILE_DOWNLOAD_REQUESTED', 'upload', fileKey, tenantId, { ip: req.ip });
 
       res.status(200).json({
         success: true,
@@ -593,7 +556,7 @@ async function performVirusScan(sessionId: string, fileKey: string): Promise<voi
           );
           session.thumbnailUrl = thumbnailUrl;
         } catch (error) {
-          console.error('Thumbnail generation error:', error);
+          logger.error('Thumbnail generation error', { error, fileKey, sessionId, mimeType: session.mimeType });
         }
       }
     } else {
@@ -601,7 +564,7 @@ async function performVirusScan(sessionId: string, fileKey: string): Promise<voi
       await uploadService.deleteFile(fileKey);
     }
   } catch (error) {
-    console.error('Virus scan error:', error);
+    logger.error('Virus scan error', { error, sessionId, fileKey });
     uploadService.updateSessionStatus(sessionId, 'failed');
   }
 }
@@ -611,7 +574,7 @@ async function performVirusScan(sessionId: string, fileKey: string): Promise<voi
 // ============================================================================
 
 router.use((error: Error, req: Request, res: Response, _next: NextFunction): void => {
-  console.error('Upload controller error:', error);
+  logger.error('Upload controller error', { error: error.message, stack: error.stack, ip: req.ip, tenantId: req.tenantId });
 
   if (error instanceof FileValidationError) {
     res.status(400).json({
@@ -630,16 +593,10 @@ router.use((error: Error, req: Request, res: Response, _next: NextFunction): voi
   }
 
   // Log unexpected errors
-  auditLogger.log({
-    action: 'UPLOAD_ERROR',
-    tenantId: req.tenantId || 'unknown',
-    userId: req.userId || 'unknown',
-    resource: 'upload',
+  logger.error('Unexpected upload error', { error: error.message, tenantId: req.tenantId, userId: req.userId, ip: req.ip });
+  logAudit(req.userId || 'unknown', 'UPLOAD_ERROR', 'upload', 'unknown', req.tenantId || 'unknown', {
+    error: error.message,
     severity: 'HIGH',
-    details: {
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
-    },
     ip: req.ip,
   });
 

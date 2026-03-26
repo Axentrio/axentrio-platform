@@ -1,21 +1,20 @@
 /**
  * Winston Logger Configuration
- * Provides structured logging for the application
+ * Structured JSON logging for Railway (stdout-only in production)
  */
 import winston from 'winston';
-import DailyRotateFile from 'winston-daily-rotate-file';
 import { config } from '../config/environment';
 
-// Define log format
-const logFormat = winston.format.combine(
+// JSON format for production (Railway log drain captures stdout)
+const prodFormat = winston.format.combine(
   winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
   winston.format.json()
 );
 
-// Console format for development
-const consoleFormat = winston.format.combine(
+// Colorized console format for development
+const devFormat = winston.format.combine(
   winston.format.colorize(),
   winston.format.timestamp({ format: 'HH:mm:ss' }),
   winston.format.printf(({ level, message, timestamp, ...metadata }) => {
@@ -27,51 +26,27 @@ const consoleFormat = winston.format.combine(
   })
 );
 
-// Create transports array
-const transports: winston.transport[] = [
-  // Console transport
-  new winston.transports.Console({
-    format: config.server.isProduction ? logFormat : consoleFormat,
-  }),
-];
+// Single console transport — Railway captures stdout automatically
+const transport = new winston.transports.Console({
+  format: config.server.isProduction ? prodFormat : devFormat,
+});
 
-// Add file transports in production
-if (config.server.isProduction) {
-  transports.push(
-    new winston.transports.File({
-      filename: `${config.logging.dir}/error.log`,
-      level: 'error',
-      format: logFormat,
-    }),
-    new winston.transports.File({
-      filename: `${config.logging.dir}/combined.log`,
-      format: logFormat,
-    })
-  );
-}
+transport.on('error', (err) => {
+  const message = err instanceof Error ? err.stack || err.message : String(err);
+  process.stderr.write(`Winston transport error: ${message}\n`);
+});
 
-// Create logger instance
 export const logger = winston.createLogger({
   level: config.logging.level,
   defaultMeta: {
     service: 'chatbot-platform-api',
     environment: config.server.env,
   },
-  transports,
+  transports: [transport],
   exitOnError: false,
 });
 
-// Add daily rotate file transport in production
-if (config.server.isProduction) {
-  logger.add(new DailyRotateFile({
-    filename: `${config.logging.dir}/app-%DATE%.log`,
-    datePattern: 'YYYY-MM-DD',
-    maxFiles: `${config.logging.maxFiles}d`,
-    format: logFormat,
-  }));
-}
-
-// Stream for Morgan HTTP logging
+// Keep the export for compatibility with utils/index.ts
 export const morganStream = {
   write: (message: string): void => {
     logger.info(message.trim());

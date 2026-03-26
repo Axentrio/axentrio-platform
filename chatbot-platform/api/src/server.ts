@@ -47,6 +47,7 @@ import { EventEmitter } from './utils/event-emitter';
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { timeoutMiddleware } from './middleware/timeout.middleware';
 
 const app = express();
 const httpServer = createServer(app);
@@ -124,6 +125,8 @@ if (config.server.isDevelopment) {
 
 // API routes under /api/v1
 const apiRouter = express.Router();
+apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
+apiRouter.use(timeoutMiddleware(30000));
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/chats', chatRoutes);
 apiRouter.use('/handoffs', handoffRoutes);
@@ -132,7 +135,6 @@ apiRouter.use('/users', userRoutes);
 apiRouter.use('/tenants', tenantRoutes);
 apiRouter.use('/widget', widgetRoutes);
 apiRouter.use('/files', fileRoutes);
-apiRouter.use('/analytics', analyticsRoutes);
 apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
 apiRouter.use('/admin', adminRoutes);
@@ -206,14 +208,30 @@ async function startServer(): Promise<void> {
 
     initializeSocketIO(httpServer);
 
-    // Audit log cleanup — runs once on startup, then daily
+    // Audit log cleanup — batched to avoid table locks
     const cleanupAuditLogs = async () => {
       try {
-        const result = await AppDataSource.query(
-          `DELETE FROM audit_logs WHERE created_at < NOW() - ($1 || ' days')::INTERVAL`,
-          [config.audit.retentionDays]
-        );
-        logger.info('Audit log cleanup complete', { deletedCount: result?.[1] ?? 0 });
+        let totalDeleted = 0;
+        let batchDeleted: number;
+
+        do {
+          const deletedRows: Array<{ id: string }> = await AppDataSource.query(
+            `DELETE FROM audit_logs WHERE id IN (
+              SELECT id FROM audit_logs
+              WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
+              ORDER BY created_at ASC
+              LIMIT 1000
+            )
+            RETURNING id`,
+            [config.audit.retentionDays]
+          );
+          batchDeleted = deletedRows.length;
+          totalDeleted += batchDeleted;
+        } while (batchDeleted === 1000);
+
+        if (totalDeleted > 0) {
+          logger.info('Audit log cleanup complete', { deletedCount: totalDeleted });
+        }
       } catch (error) {
         logger.error('Audit log cleanup failed', { error });
       }

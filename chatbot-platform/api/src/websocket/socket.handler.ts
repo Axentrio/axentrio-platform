@@ -20,6 +20,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { encrypt } from '../utils/encryption';
 
 // Socket event types
 interface MessageSendData {
@@ -53,6 +54,84 @@ const messageRepository = AppDataSource.getRepository(Message);
 let io: SocketIOServer | null = null;
 
 /**
+ * Authenticate a socket connection (extracted for timeout wrapping).
+ * Throws on failure instead of calling next() — the caller handles next().
+ */
+async function authenticateSocket(socket: TenantSocket): Promise<void> {
+  // Mode 1: Portal agent (Clerk token)
+  if (socket.handshake.auth?.token) {
+    let verified;
+    try {
+      verified = await verifyToken(socket.handshake.auth.token, {
+        secretKey: config.clerk.secretKey,
+      });
+    } catch {
+      throw new Error('Authentication error: Invalid token');
+    }
+
+    const clerkUserId = verified.sub;
+    const clerkOrgId = verified.org_id;
+
+    if (clerkOrgId) {
+      const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
+      if (dbIds) {
+        socket.data.user = {
+          id: dbIds.agentId,
+          email: '',
+          tenantId: dbIds.tenantId,
+          role: dbIds.userRole,
+          type: 'agent',
+        };
+        socket.data.tenantId = dbIds.tenantId;
+        return;
+      }
+    }
+
+    const { User } = await import('../database/entities/User');
+    const { Agent } = await import('../database/entities/Agent');
+    const userRepo = AppDataSource.getRepository(User);
+    const agentRepo = AppDataSource.getRepository(Agent);
+
+    const user = await userRepo.findOne({ where: { clerkUserId } });
+    if (!user) throw new Error('Authentication error: User not provisioned');
+
+    const agent = await agentRepo.findOne({ where: { userId: user.id } });
+    if (!agent) throw new Error('Authentication error: Agent not provisioned');
+
+    socket.data.user = {
+      id: agent.id,
+      email: user.email || '',
+      tenantId: user.tenantId,
+      role: user.role,
+      type: 'agent',
+    };
+    socket.data.tenantId = user.tenantId;
+    return;
+  }
+
+  // Mode 2: Widget (API key in query)
+  if (socket.handshake.query?.apiKey) {
+    const tenantRepo = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({
+      where: { apiKey: socket.handshake.query.apiKey as string },
+    });
+    if (!tenant) throw new Error('Authentication error: Invalid API key');
+
+    socket.data.user = {
+      id: (socket.handshake.query.visitorId as string) || socket.id,
+      email: '',
+      role: 'agent' as const,
+      tenantId: tenant.id,
+      type: 'widget' as const,
+    };
+    socket.data.tenantId = tenant.id;
+    return;
+  }
+
+  throw new Error('Authentication required');
+}
+
+/**
  * Initialize Socket.io server with optional Redis adapter
  */
 export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
@@ -77,84 +156,20 @@ export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
     logger.warn('Socket.io running without Redis adapter (single-server mode)');
   }
 
-  // ---- Dual-auth connection middleware ----
+  // ---- Dual-auth connection middleware (with 3s timeout) ----
+  const AUTH_TIMEOUT_MS = 3000;
+
   io.use(async (socket, next) => {
     try {
-      // Mode 1: Portal agent (Clerk token)
-      if (socket.handshake.auth?.token) {
-        try {
-          const verified = await verifyToken(socket.handshake.auth.token, {
-            secretKey: config.clerk.secretKey,
-          });
-          const clerkUserId = verified.sub;
-          const clerkOrgId = verified.org_id;
-
-          // Try resolving with org_id first, fall back to DB lookup by clerkUserId
-          if (clerkOrgId) {
-            const dbIds = await resolveClerkIds(clerkUserId, clerkOrgId);
-            if (dbIds) {
-              socket.data.user = {
-                id: dbIds.agentId,
-                tenantId: dbIds.tenantId,
-                role: dbIds.userRole,
-                type: 'agent',
-              };
-              socket.data.tenantId = dbIds.tenantId;
-              return next();
-            }
-          }
-
-          // Fallback: look up user by clerkUserId directly
-          const { User } = await import('../database/entities/User');
-          const { Agent } = await import('../database/entities/Agent');
-          const userRepo = AppDataSource.getRepository(User);
-          const agentRepo = AppDataSource.getRepository(Agent);
-
-          const user = await userRepo.findOne({ where: { clerkUserId } });
-          if (!user) {
-            return next(new Error('Authentication error: User not provisioned'));
-          }
-
-          const agent = await agentRepo.findOne({ where: { userId: user.id } });
-          if (!agent) {
-            return next(new Error('Authentication error: Agent not provisioned'));
-          }
-
-          socket.data.user = {
-            id: agent.id,
-            tenantId: user.tenantId,
-            role: user.role,
-            type: 'agent',
-          };
-          socket.data.tenantId = user.tenantId;
-          return next();
-        } catch {
-          return next(new Error('Authentication error: Invalid token'));
-        }
-      }
-      // Mode 2: Widget (API key in query)
-      if (socket.handshake.query?.apiKey) {
-        const tenantRepo = AppDataSource.getRepository(Tenant);
-        const tenant = await tenantRepo.findOne({
-          where: { apiKey: socket.handshake.query.apiKey as string },
-        });
-        if (!tenant) {
-          return next(new Error('Authentication error: Invalid API key'));
-        }
-
-        socket.data.user = {
-          id: (socket.handshake.query.visitorId as string) || socket.id,
-          email: '',
-          role: 'visitor',
-          tenantId: tenant.id,  // Use verified tenant ID, not client-supplied
-          type: 'widget' as const,
-        };
-        socket.data.tenantId = tenant.id;
-        return next();
-      }
-      return next(new Error('Authentication required'));
+      await Promise.race([
+        authenticateSocket(socket as TenantSocket),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Authentication timeout')), AUTH_TIMEOUT_MS)
+        ),
+      ]);
+      next();
     } catch (err) {
-      return next(err instanceof Error ? err : new Error('Authentication failed'));
+      next(err instanceof Error ? err : new Error('Authentication failed'));
     }
   });
 
@@ -336,13 +351,17 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
     const senderType = user?.type === 'agent' ? 'agent' : 'user';
     const senderId = user?.id || socket.id;
 
+    // Encrypt message content before saving
+    const encryptedContent = encrypt(content);
+
     // Save message to database
     const message = messageRepository.create({
       sessionId,
       tenantId: tenantId!,
       participantId: senderId,
       type,
-      content,
+      content: encryptedContent,
+      contentEncrypted: true,
       metadata: metadata || undefined,
     } as DeepPartial<Message>);
 
@@ -352,12 +371,12 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
     session.updateActivity();
     await sessionRepository.save(session);
 
-    // Broadcast message to room
+    // Broadcast message to room — use original plain text
     const roomName = `${tenantId}:${sessionId}`;
     const messageData = {
       id: savedMessage.id,
       type: savedMessage.type,
-      content: savedMessage.content,
+      content,
       status: savedMessage.status,
       createdAt: savedMessage.createdAt,
       senderType,

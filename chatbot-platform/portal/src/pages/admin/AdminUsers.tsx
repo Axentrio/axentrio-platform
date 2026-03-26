@@ -97,6 +97,37 @@ function formatDate(iso: string | null): string {
   });
 }
 
+const confirmDialogConfig: Record<
+  'promote' | 'demote' | 'deactivate' | 'reactivate' | 'delete',
+  { title: string; buttonLabel: string; buttonClass: string }
+> = {
+  promote: {
+    title: 'Promote to Super Admin',
+    buttonLabel: 'Promote',
+    buttonClass: 'bg-accent-500 hover:bg-accent-600',
+  },
+  demote: {
+    title: 'Demote from Super Admin',
+    buttonLabel: 'Demote',
+    buttonClass: 'bg-status-busy hover:bg-status-busy/90',
+  },
+  deactivate: {
+    title: 'Deactivate User',
+    buttonLabel: 'Deactivate',
+    buttonClass: 'bg-yellow-600 hover:bg-yellow-700',
+  },
+  reactivate: {
+    title: 'Reactivate User',
+    buttonLabel: 'Reactivate',
+    buttonClass: 'bg-green-600 hover:bg-green-700',
+  },
+  delete: {
+    title: 'Permanently Delete User',
+    buttonLabel: 'Delete Permanently',
+    buttonClass: 'bg-red-600 hover:bg-red-700',
+  },
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                           */
 /* ------------------------------------------------------------------ */
@@ -347,15 +378,7 @@ const AdminUsers: React.FC = () => {
             <LoadingOverlay isLoading={isMutating} />
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {confirmAction?.type === 'promote'
-                  ? 'Promote to Super Admin'
-                  : confirmAction?.type === 'demote'
-                  ? 'Demote from Super Admin'
-                  : confirmAction?.type === 'deactivate'
-                  ? 'Deactivate User'
-                  : confirmAction?.type === 'reactivate'
-                  ? 'Reactivate User'
-                  : 'Permanently Delete User'}
+                {confirmAction && confirmDialogConfig[confirmAction.type].title}
               </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAction?.type === 'promote' ? (
@@ -401,29 +424,11 @@ const AdminUsers: React.FC = () => {
             <AlertDialogAction
               onClick={(e) => { e.preventDefault(); handleConfirm(); }}
               disabled={isMutating}
-              className={
-                confirmAction?.type === 'promote'
-                  ? 'bg-accent-500 hover:bg-accent-600'
-                  : confirmAction?.type === 'demote'
-                  ? 'bg-status-busy hover:bg-status-busy/90'
-                  : confirmAction?.type === 'deactivate'
-                  ? 'bg-yellow-600 hover:bg-yellow-700'
-                  : confirmAction?.type === 'reactivate'
-                  ? 'bg-green-600 hover:bg-green-700'
-                  : 'bg-red-600 hover:bg-red-700'
-              }
+              className={confirmAction ? confirmDialogConfig[confirmAction.type].buttonClass : ''}
             >
               {isMutating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : confirmAction?.type === 'promote'
-                ? 'Promote'
-                : confirmAction?.type === 'demote'
-                ? 'Demote'
-                : confirmAction?.type === 'deactivate'
-                ? 'Deactivate'
-                : confirmAction?.type === 'reactivate'
-                ? 'Reactivate'
-                : 'Delete Permanently'}
+              ) : confirmAction ? confirmDialogConfig[confirmAction.type].buttonLabel : ''}
             </AlertDialogAction>
           </AlertDialogFooter>
           </div>

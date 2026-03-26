@@ -5,19 +5,16 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 import { Modal } from '@components/Modal';
 import { api } from '@services/apiClient';
-import type { Chat, Tenant } from '@app-types/index';
+import type { Chat } from '@app-types/index';
+import { useTenantSettings } from '../queries/useTenantQueries';
 
 const LiveMonitor: React.FC = () => {
   const navigate = useNavigate();
-  const { data: tenant } = useQuery<Tenant>({
-    queryKey: ['tenant', 'me'],
-    queryFn: () => api.get<Tenant>('/tenants/me'),
-  });
+  const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);

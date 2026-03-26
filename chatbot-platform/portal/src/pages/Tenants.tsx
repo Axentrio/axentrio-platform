@@ -6,7 +6,6 @@
 
 import React, { useState, useEffect } from 'react';
 import { Edit2, ExternalLink, Copy, Check, RefreshCw, Loader2 } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Modal } from '@components/Modal';
 import type { Tenant } from '@app-types/index';
 import { cn } from '@/lib/utils';
@@ -15,30 +14,27 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { api } from '@services/apiClient';
+import { useTenantSettings, useUpdateTenant, useRotateApiKey } from '../queries/useTenantQueries';
 
-/** Shape returned by GET /tenants/me */
-interface TenantApiResponse {
-  success: boolean;
-  data: {
-    id: string;
-    name: string;
-    slug: string;
-    apiKey: string;
-    tier: string;
-    status: string;
-    settings: Tenant['settings'] | null;
-    maxSessions: number;
-    currentSessions: number;
-    webhookUrl: string | null;
-    webhookSecret: string | null;
-    customDomain: string | null;
-    createdAt: string;
-  };
+/** Shape of the unwrapped GET /tenants/me response (envelope stripped by interceptor) */
+interface TenantApiData {
+  id: string;
+  name: string;
+  slug: string;
+  apiKey: string;
+  tier: string;
+  status: string;
+  settings: Tenant['settings'] | null;
+  maxSessions: number;
+  currentSessions: number;
+  webhookUrl: string | null;
+  webhookSecret: string | null;
+  customDomain: string | null;
+  createdAt: string;
 }
 
 /** Map the API response into the frontend Tenant shape */
-function mapApiToTenant(data: TenantApiResponse['data']): Tenant {
+function mapApiToTenant(data: TenantApiData): Tenant {
   return {
     id: data.id,
     name: data.name,
@@ -63,54 +59,35 @@ function mapApiToTenant(data: TenantApiResponse['data']): Tenant {
 }
 
 const Tenants: React.FC = () => {
-  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   // ---------- Fetch current tenant ----------
   const {
-    data: tenant,
+    data: rawTenant,
     isLoading,
     isError,
     error,
-  } = useQuery<Tenant>({
-    queryKey: ['tenant', 'me'],
-    queryFn: async () => {
-      const res = await api.get<TenantApiResponse>('/tenants/me');
-      return mapApiToTenant(res.data);
-    },
-  });
+  } = useTenantSettings();
+
+  const tenant = rawTenant ? mapApiToTenant(rawTenant as TenantApiData) : undefined;
 
   // ---------- Update tenant ----------
-  const updateMutation = useMutation({
-    mutationFn: async (data: Partial<Tenant>) => {
-      const payload: Record<string, unknown> = {};
-      if (data.name) payload.name = data.name;
-      if (data.webhookUrl !== undefined) payload.webhookUrl = data.webhookUrl;
-      if (data.settings) payload.settings = data.settings;
-      return api.patch('/tenants/me', payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tenant', 'me'] });
-    },
-  });
+  const updateMutation = useUpdateTenant();
 
   // ---------- Rotate API key ----------
-  const rotateMutation = useMutation({
-    mutationFn: async () => {
-      return api.post('/tenants/me/api-key/rotate');
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['tenant', 'me'] });
-    },
-  });
+  const rotateMutation = useRotateApiKey();
 
   const handleEdit = () => {
     setIsModalOpen(true);
   };
 
   const handleSave = async (data: Partial<Tenant>) => {
-    await updateMutation.mutateAsync(data);
+    const payload: Record<string, unknown> = {};
+    if (data.name) payload.name = data.name;
+    if (data.webhookUrl !== undefined) payload.webhookUrl = data.webhookUrl;
+    if (data.settings) payload.settings = data.settings;
+    await updateMutation.mutateAsync(payload);
     setIsModalOpen(false);
   };
 

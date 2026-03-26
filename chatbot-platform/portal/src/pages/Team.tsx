@@ -4,10 +4,25 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { toast } from 'sonner';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
+import {
+  useAgentList,
+  useAgentShifts,
+  useUpdateAgent,
+  useUpdateAgentStatus,
+} from '../queries/useAgentQueries';
+import {
+  useTenantMembers,
+  useTenantInvites,
+  useInviteMember,
+  useResendInvite,
+  useCancelInvite,
+  useUpdateMemberRole,
+  useDeactivateMember,
+  useReactivateMember,
+} from '../queries/useTenantQueries';
 import { Modal } from '@components/Modal';
 import type { Agent, AgentShift, UserStatus } from '@app-types/index';
 import { Card } from '@/components/ui/card';
@@ -57,12 +72,6 @@ interface ApiAgent {
   createdAt: string;
 }
 
-interface AgentsResponse {
-  success: boolean;
-  agents: ApiAgent[];
-  pagination: { total: number; limit: number; offset: number; hasMore: boolean };
-}
-
 interface PerformanceResponse {
   totalChatsHandled: number;
   avgResponseTimeSeconds: number;
@@ -94,28 +103,19 @@ function mapApiAgent(a: ApiAgent): Agent {
 const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 const Team: React.FC = () => {
-  const queryClient = useQueryClient();
-
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
   const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
   const [, setSelectedAgentForShifts] = useState<Agent | null>(null);
 
   // Fetch agents from API
-  const { data: agentsData, isLoading: agentsLoading } = useQuery({
-    queryKey: ['agents'],
-    queryFn: () => api.get<AgentsResponse>('/agents'),
-  });
+  const { data: agentsData, isLoading: agentsLoading } = useAgentList();
 
-  const agents: Agent[] = (agentsData?.agents ?? []).map(mapApiAgent);
+  const agents: Agent[] = (agentsData ?? []).map(mapApiAgent);
 
   // Fetch shifts for all visible agents
   const selectedShiftAgent = agents[0]; // shifts tab shows all; fetch per-agent if needed
-  const { data: shiftsData } = useQuery({
-    queryKey: ['agents', selectedShiftAgent?.id, 'shifts'],
-    queryFn: () => api.get<{ shifts: AgentShift[] }>(`/agents/${selectedShiftAgent?.id}/shifts`),
-    enabled: !!selectedShiftAgent,
-  });
+  const { data: shiftsData } = useAgentShifts(selectedShiftAgent?.id ?? '');
   const shifts: AgentShift[] = shiftsData?.shifts ?? [];
 
   // Fetch performance for each agent (aggregated)
@@ -139,18 +139,10 @@ const Team: React.FC = () => {
   });
 
   // Mutation: update agent fields
-  const updateAgentMutation = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: Record<string, unknown> }) =>
-      api.patch(`/agents/${id}`, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents'] }),
-  });
+  const updateAgentMutation = useUpdateAgent();
 
   // Mutation: update agent status
-  const updateStatusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch(`/agents/${id}/status`, { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['agents'] }),
-  });
+  const updateStatusMutation = useUpdateAgentStatus();
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -166,11 +158,9 @@ const Team: React.FC = () => {
     if (editingAgent) {
       updateAgentMutation.mutate({
         id: editingAgent.id,
-        data: {
-          maxConcurrentChats: data.maxConcurrentChats,
-          skills: data.skills,
-          languages: [],
-        },
+        maxConcurrentChats: data.maxConcurrentChats,
+        skills: data.skills,
+        languages: [],
       });
     }
     // Note: no POST /agents endpoint available — new agent creation is handled via Clerk invite
@@ -458,7 +448,6 @@ interface PendingInviteItem {
 }
 
 const OrgMembersPanel: React.FC = () => {
-  const queryClient = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('agent');
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -467,109 +456,47 @@ const OrgMembersPanel: React.FC = () => {
   const [removeMemberUserId, setRemoveMemberUserId] = useState<string | null>(null);
 
   // Fetch members from backend
-  const { data: membersData, isLoading } = useQuery({
-    queryKey: ['team-members'],
-    queryFn: () => api.get<{ data: TeamMember[]; meta: { total: number } }>('/tenants/me/users'),
-  });
+  const { data: membersData, isLoading } = useTenantMembers();
 
-  const members = membersData?.data || [];
+  const members: TeamMember[] = membersData ?? [];
 
   // Fetch pending invites
-  const { data: invitesData } = useQuery({
-    queryKey: ['pending-invites'],
-    queryFn: () => api.get<{ success: boolean; data: PendingInviteItem[] }>('/tenants/me/pending-invites'),
-  });
+  const { data: invitesData } = useTenantInvites();
 
-  const pendingInvites = invitesData?.data ?? [];
+  const pendingInvites: PendingInviteItem[] = invitesData ?? [];
 
-  const resendMutation = useMutation({
-    mutationFn: (inviteId: string) => api.post(`/tenants/me/pending-invites/${inviteId}/resend`),
-    onSuccess: () => {
-      toast.success('Invite resent');
-      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-    },
-    onError: () => toast.error('Failed to resend invite'),
-  });
+  const resendMutation = useResendInvite();
 
-  const cancelInviteMutation = useMutation({
-    mutationFn: (inviteId: string) => api.delete(`/tenants/me/pending-invites/${inviteId}`),
-    onSuccess: () => {
-      toast.success('Invite cancelled');
-      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-    },
-    onError: () => toast.error('Failed to cancel invite'),
-  });
+  const cancelInviteMutation = useCancelInvite();
 
   // Invite mutation — calls backend endpoint
-  const inviteMutation = useMutation({
-    mutationFn: async ({ email, role }: { email: string; role: string }) => {
-      return api.post('/tenants/me/invite', { email, role });
-    },
-    onSuccess: () => {
-      setInviteEmail('');
-      setShowInviteForm(false);
-      toast.success('Invitation sent successfully');
-      queryClient.invalidateQueries({ queryKey: ['team-members'] });
-      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
-    },
-    onError: (error: unknown) => {
-      const err = error as { response?: { data?: { error?: string } } };
-      toast.error(err.response?.data?.error || 'Failed to send invite');
-    },
-  });
+  const inviteMutation = useInviteMember();
 
   // Role change mutation — calls backend endpoint
-  const updateRoleMutation = useMutation({
-    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
-      return api.patch(`/tenants/me/users/${userId}`, { role });
-    },
-    onSuccess: () => {
-      toast.success('Role updated successfully');
-      queryClient.invalidateQueries({ queryKey: ['team-members'] });
-    },
-    onError: (error: unknown) => {
-      const err = error as { response?: { data?: { error?: string } } };
-      toast.error(err.response?.data?.error || 'Failed to update role');
-    },
-  });
+  const updateRoleMutation = useUpdateMemberRole();
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
-    inviteMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
+    inviteMutation.mutate({ email: inviteEmail.trim(), name: '', role: inviteRole }, {
+      onSuccess: () => {
+        setInviteEmail('');
+        setShowInviteForm(false);
+      },
+    });
   };
 
   // Deactivate mutation
-  const deactivateMutation = useMutation({
-    mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/deactivate`),
-    onSuccess: () => {
-      toast.success('Member deactivated');
-      queryClient.invalidateQueries({ queryKey: ['team-members'] });
-      setRemoveMemberUserId(null);
-    },
-    onError: (error: unknown) => {
-      const err = error as { response?: { data?: { error?: string } } };
-      toast.error(err.response?.data?.error || 'Failed to deactivate member');
-      setRemoveMemberUserId(null);
-    },
-  });
+  const deactivateMutation = useDeactivateMember();
 
   // Reactivate mutation
-  const reactivateMutation = useMutation({
-    mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/reactivate`),
-    onSuccess: () => {
-      toast.success('Member reactivated');
-      queryClient.invalidateQueries({ queryKey: ['team-members'] });
-    },
-    onError: (error: unknown) => {
-      const err = error as { response?: { data?: { error?: string } } };
-      toast.error(err.response?.data?.error || 'Failed to reactivate member');
-    },
-  });
+  const reactivateMutation = useReactivateMember();
 
   const confirmRemoveMember = () => {
     if (removeMemberUserId) {
-      deactivateMutation.mutate(removeMemberUserId);
+      deactivateMutation.mutate(removeMemberUserId, {
+        onSettled: () => setRemoveMemberUserId(null),
+      });
     }
   };
 

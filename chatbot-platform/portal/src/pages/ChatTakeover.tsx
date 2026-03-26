@@ -6,56 +6,43 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, UserCheck, X, MoreVertical, Users } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge } from '@components/StatusBadge';
 import { Modal } from '@components/Modal';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@services/apiClient';
+import { useQuery } from '@tanstack/react-query';
+import { agentOptions } from '../queries/useAgentQueries';
 import type { Chat, Agent } from '@app-types/index';
 
-interface AgentApiResponse {
-  success: boolean;
-  data?: Array<{
-    id: string;
-    name: string;
-    status: string;
-    currentChatCount: number;
-    maxConcurrentChats: number;
-    skills?: string[];
-  }>;
-  agents?: Array<{
-    id: string;
-    name: string;
-    status: string;
-    currentChatCount: number;
-    maxConcurrentChats: number;
-    skills?: string[];
-  }>;
+interface RawAgent {
+  id: string;
+  name: string;
+  status: string;
+  currentChatCount: number;
+  maxConcurrentChats: number;
+  skills?: string[];
 }
 
-function mapApiAgents(response: AgentApiResponse): Agent[] {
-  const rawAgents = response.data || response.agents || [];
-  return rawAgents.map((agent) => {
-    const nameParts = agent.name?.split(' ') || ['Unknown'];
-    const firstName = nameParts[0];
-    const lastName = nameParts.slice(1).join(' ') || '';
-    return {
-      id: agent.id,
-      userId: agent.id,
-      email: '',
-      firstName,
-      lastName,
-      role: 'agent' as const,
-      status: (agent.status || 'online') as Agent['status'],
-      maxConcurrentChats: agent.maxConcurrentChats ?? 5,
-      currentChats: agent.currentChatCount ?? 0,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-      skills: agent.skills || [],
-    };
-  });
+function mapRawAgent(agent: RawAgent): Agent {
+  const nameParts = agent.name?.split(' ') || ['Unknown'];
+  const firstName = nameParts[0];
+  const lastName = nameParts.slice(1).join(' ') || '';
+  return {
+    id: agent.id,
+    userId: agent.id,
+    email: '',
+    firstName,
+    lastName,
+    role: 'agent' as const,
+    status: (agent.status || 'online') as Agent['status'],
+    maxConcurrentChats: agent.maxConcurrentChats ?? 5,
+    currentChats: agent.currentChatCount ?? 0,
+    isActive: true,
+    createdAt: new Date().toISOString(),
+    skills: agent.skills || [],
+  };
 }
 
 const ChatTakeover: React.FC = () => {
@@ -65,14 +52,11 @@ const ChatTakeover: React.FC = () => {
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
-  const { data: agents = [], isLoading: isLoadingAgents } = useQuery<Agent[]>({
-    queryKey: ['agents', 'online'],
-    queryFn: async () => {
-      const response = await api.get<AgentApiResponse>('/agents?status=online');
-      return mapApiAgents(response);
-    },
+  const { data: rawAgents, isLoading: isLoadingAgents } = useQuery({
+    ...agentOptions.list({ status: 'online' }),
     enabled: isTransferModalOpen,
   });
+  const agents: Agent[] = ((rawAgents as RawAgent[] | undefined) ?? []).map(mapRawAgent);
 
   // Fetch chat data
   useEffect(() => {

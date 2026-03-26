@@ -18,9 +18,12 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
 import { toast } from 'sonner';
+import { useTenantSettings } from '../../queries/useTenantQueries';
+import { useWebhookStatus, useWebhookDeliveries, useSaveWebhookUrl, useTestWebhook } from '../../queries/useWebhookQueries';
+import { queryKeys } from '../../queries/queryKeys';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -48,25 +51,17 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-interface TenantData {
-  apiKey?: string;
-  webhookUrl?: string;
-  webhookSecret?: string;
-  [key: string]: unknown;
-}
+
 
 interface WebhookStatusData {
-  success: boolean;
-  data: {
-    health: 'green' | 'yellow' | 'red';
-    lastDelivery: {
-      status: string;
-      httpStatus: number;
-      createdAt: string;
-      durationMs: number;
-    } | null;
-    lastSuccessAt: string | null;
-  };
+  health: 'green' | 'yellow' | 'red';
+  lastDelivery: {
+    status: string;
+    httpStatus: number;
+    createdAt: string;
+    durationMs: number;
+  } | null;
+  lastSuccessAt: string | null;
 }
 
 interface DeliveryLogEntry {
@@ -79,18 +74,6 @@ interface DeliveryLogEntry {
   error?: string;
   url: string;
   createdAt: string;
-}
-
-interface DeliveryResponse {
-  success: boolean;
-  data: DeliveryLogEntry[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasMore: boolean;
-  };
 }
 
 function maskSecret(value: string | undefined): string {
@@ -124,24 +107,14 @@ export const IntegrationTab: React.FC = () => {
   const queryClient = useQueryClient();
 
   // Tenant data
-  const { data: tenantData, refetch: refetchTenant } = useQuery<TenantData>({
-    queryKey: ['tenant-me'],
-    queryFn: () => api.get<TenantData>('/tenants/me'),
-  });
+  const { data: tenantData, refetch: refetchTenant } = useTenantSettings();
 
   // Webhook status
-  const { data: statusData } = useQuery<WebhookStatusData>({
-    queryKey: ['webhook-status'],
-    queryFn: () => api.get<WebhookStatusData>('/tenants/me/webhooks/status'),
-    refetchInterval: 30000,
-  });
+  const { data: statusData } = useWebhookStatus();
 
   // Delivery log
   const [page, setPage] = useState(1);
-  const { data: deliveries } = useQuery<DeliveryResponse>({
-    queryKey: ['webhook-deliveries', page],
-    queryFn: () => api.get<DeliveryResponse>(`/tenants/me/webhooks/deliveries?page=${page}&limit=20`),
-  });
+  const { data: deliveries } = useWebhookDeliveries(page);
 
   // Form state
   const [webhookUrlInput, setWebhookUrlInput] = useState('');
@@ -152,34 +125,14 @@ export const IntegrationTab: React.FC = () => {
 
   // Sync webhook URL input from tenant data
   if (tenantData?.webhookUrl && !webhookUrlInitialized) {
-    setWebhookUrlInput(tenantData.webhookUrl);
+    setWebhookUrlInput(tenantData.webhookUrl as string);
     setWebhookUrlInitialized(true);
   }
 
   // Mutations
-  const saveWebhookUrl = useMutation({
-    mutationFn: () => api.patch('/tenants/me', { webhookUrl: webhookUrlInput }),
-    onSuccess: () => {
-      refetchTenant();
-      toast.success('Webhook URL saved');
-    },
-    onError: () => toast.error('Failed to save webhook URL'),
-  });
+  const saveWebhookUrl = useSaveWebhookUrl();
 
-  const testWebhook = useMutation({
-    mutationFn: () => api.post<{ success: boolean; data: { status: number; durationMs: number; error?: string } }>('/tenants/me/webhooks/test'),
-    onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['webhook-status'] });
-      queryClient.invalidateQueries({ queryKey: ['webhook-deliveries'] });
-      const data = result as { success: boolean; data: { status: number; durationMs: number; error?: string } };
-      if (data.success) {
-        toast.success(`Webhook connected (${data.data.durationMs}ms)`);
-      } else {
-        toast.error(`Webhook test failed: ${data.data.error || 'Unknown error'}`);
-      }
-    },
-    onError: () => toast.error('Webhook test failed'),
-  });
+  const testWebhook = useTestWebhook();
 
   const regenerateSecret = useMutation({
     mutationFn: () => api.post('/tenants/me/webhook-secret/regenerate'),
@@ -195,7 +148,7 @@ export const IntegrationTab: React.FC = () => {
     setIsRotatingKey(true);
     try {
       await api.post('/tenants/me/api-key/rotate');
-      await refetchTenant();
+      queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
       toast.success('API key rotated successfully');
     } catch {
       toast.error('Failed to rotate API key');
@@ -207,7 +160,8 @@ export const IntegrationTab: React.FC = () => {
 
   const inboundWebhookUrl = `${API_URL}/v1/webhooks/inbound`;
 
-  const healthDot = statusData?.data?.health;
+  const statusDataTyped = statusData as WebhookStatusData | undefined;
+  const healthDot = statusDataTyped?.health;
   const healthColor = healthDot === 'green'
     ? 'bg-status-online'
     : healthDot === 'red'
@@ -292,7 +246,7 @@ export const IntegrationTab: React.FC = () => {
                 Test Connection
               </Button>
               <Button
-                onClick={() => saveWebhookUrl.mutate()}
+                onClick={() => saveWebhookUrl.mutate(webhookUrlInput)}
                 disabled={saveWebhookUrl.isPending}
               >
                 {saveWebhookUrl.isPending ? (
@@ -323,15 +277,15 @@ export const IntegrationTab: React.FC = () => {
                 {healthDot === 'green' ? 'Healthy' : healthDot === 'red' ? 'Unhealthy' : 'Unknown'}
               </span>
             </div>
-            {statusData?.data?.lastDelivery && (
+            {statusDataTyped?.lastDelivery && (
               <div className="text-sm text-text-secondary">
-                Last delivery: {formatTimeAgo(statusData.data.lastDelivery.createdAt)}
-                {' '}({statusData.data.lastDelivery.durationMs}ms)
+                Last delivery: {formatTimeAgo(statusDataTyped.lastDelivery.createdAt)}
+                {' '}({statusDataTyped.lastDelivery.durationMs}ms)
               </div>
             )}
-            {statusData?.data?.lastSuccessAt && (
+            {statusDataTyped?.lastSuccessAt && (
               <div className="text-sm text-text-secondary">
-                Last success: {formatTimeAgo(statusData.data.lastSuccessAt)}
+                Last success: {formatTimeAgo(statusDataTyped.lastSuccessAt)}
               </div>
             )}
           </div>
@@ -420,7 +374,7 @@ export const IntegrationTab: React.FC = () => {
           </h2>
         </CardHeader>
         <CardContent>
-          {deliveries?.data && deliveries.data.length > 0 ? (
+          {Array.isArray(deliveries) && deliveries.length > 0 ? (
             <>
               <Table>
                 <TableHeader>
@@ -435,7 +389,7 @@ export const IntegrationTab: React.FC = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {deliveries.data.map((entry) => (
+                  {(deliveries as DeliveryLogEntry[]).map((entry) => (
                     <TableRow key={entry.id}>
                       <TableCell className="text-xs text-text-secondary whitespace-nowrap">
                         {formatTimeAgo(entry.createdAt)}
@@ -476,10 +430,10 @@ export const IntegrationTab: React.FC = () => {
               </Table>
 
               {/* Pagination */}
-              {deliveries.meta && deliveries.meta.totalPages > 1 && (
+              {(page > 1 || (Array.isArray(deliveries) && deliveries.length === 20)) && (
                 <div className="flex items-center justify-between mt-4">
                   <span className="text-sm text-text-secondary">
-                    Page {deliveries.meta.page} of {deliveries.meta.totalPages} ({deliveries.meta.total} entries)
+                    Page {page}
                   </span>
                   <div className="flex items-center gap-2">
                     <Button
@@ -495,7 +449,7 @@ export const IntegrationTab: React.FC = () => {
                       variant="outline"
                       size="sm"
                       onClick={() => setPage(p => p + 1)}
-                      disabled={!deliveries.meta.hasMore}
+                      disabled={!Array.isArray(deliveries) || deliveries.length < 20}
                     >
                       Next
                       <ChevronRight className="w-4 h-4" />

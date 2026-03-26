@@ -4,10 +4,12 @@
  */
 
 import React, { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { Loader2, Search, ShieldCheck, ShieldOff } from 'lucide-react';
-import { api } from '@services/apiClient';
+import {
+  useAdminUsers,
+  usePromoteUser,
+  useDemoteUser,
+} from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -56,18 +58,6 @@ interface AdminUser {
   createdAt: string;
 }
 
-interface UsersApiResponse {
-  success: boolean;
-  data: AdminUser[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasMore: boolean;
-  };
-}
-
 type ConfirmAction = { type: 'promote' | 'demote'; user: AdminUser } | null;
 
 /* ------------------------------------------------------------------ */
@@ -105,35 +95,16 @@ function formatDate(iso: string | null): string {
 /* ------------------------------------------------------------------ */
 
 const AdminUsers: React.FC = () => {
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
 
   /* ---- Data ---- */
-  const { data, isLoading, isError } = useQuery<UsersApiResponse>({
-    queryKey: ['admin', 'users'],
-    queryFn: () => api.get('/admin/users'),
-  });
+  const { data, isLoading, isError } = useAdminUsers();
 
   /* ---- Mutations ---- */
-  const promoteMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/promote`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
-      toast.success('User promoted to Super Admin.');
-    },
-    onError: () => toast.error('Failed to promote user.'),
-  });
-
-  const demoteMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/demote`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'users'] });
-      toast.success('User demoted from Super Admin.');
-    },
-    onError: () => toast.error('Failed to demote user.'),
-  });
+  const promoteMutation = usePromoteUser();
+  const demoteMutation = useDemoteUser();
 
   /* ---- Confirm handler ---- */
   const handleConfirm = () => {
@@ -147,7 +118,7 @@ const AdminUsers: React.FC = () => {
   };
 
   /* ---- Derived list ---- */
-  const users = data?.data ?? [];
+  const users = (data as AdminUser[] | undefined) ?? [];
   const filtered = users.filter((u) => {
     const matchesSearch =
       search.trim() === '' ||

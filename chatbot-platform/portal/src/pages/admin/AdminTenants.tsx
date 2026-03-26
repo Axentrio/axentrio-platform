@@ -5,10 +5,13 @@
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { Loader2, Search, Plus } from 'lucide-react';
-import { api } from '@services/apiClient';
+import {
+  useAdminTenants,
+  useSuspendTenant,
+  useActivateTenant,
+  useCreateTenant,
+} from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -55,18 +58,6 @@ interface AdminTenant {
   createdAt: string;
 }
 
-interface TenantsApiResponse {
-  success: boolean;
-  data: AdminTenant[];
-  meta: {
-    page: number;
-    limit: number;
-    total: number;
-    totalPages: number;
-    hasMore: boolean;
-  };
-}
-
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -106,7 +97,6 @@ function formatDate(iso: string): string {
 /* ------------------------------------------------------------------ */
 
 const AdminTenants: React.FC = () => {
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<TenantTier | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<TenantStatus | 'all'>('all');
@@ -114,47 +104,15 @@ const AdminTenants: React.FC = () => {
   const [newTenant, setNewTenant] = useState({ name: '', tier: 'free' as TenantTier, adminEmail: '' });
 
   /* ---- Data ---- */
-  const { data, isLoading, isError } = useQuery<TenantsApiResponse>({
-    queryKey: ['admin', 'tenants'],
-    queryFn: () => api.get('/admin/tenants'),
-  });
+  const { data, isLoading, isError } = useAdminTenants();
 
   /* ---- Mutations ---- */
-  const suspendMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/suspend`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
-      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
-      toast.success('Tenant suspended.');
-    },
-    onError: () => toast.error('Failed to suspend tenant.'),
-  });
-
-  const activateMutation = useMutation({
-    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/activate`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
-      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
-      toast.success('Tenant activated.');
-    },
-    onError: () => toast.error('Failed to activate tenant.'),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (payload: { name: string; tier: string; adminEmail?: string }) =>
-      api.post('/admin/tenants', payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
-      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
-      toast.success('Tenant created.');
-      setShowCreate(false);
-      setNewTenant({ name: '', tier: 'free', adminEmail: '' });
-    },
-    onError: () => toast.error('Failed to create tenant.'),
-  });
+  const suspendMutation = useSuspendTenant();
+  const activateMutation = useActivateTenant();
+  const createMutation = useCreateTenant();
 
   /* ---- Derived list ---- */
-  const tenants = data?.data ?? [];
+  const tenants = (data as AdminTenant[] | undefined) ?? [];
   const filtered = tenants.filter((t) => {
     const matchesSearch =
       search.trim() === '' ||
@@ -374,11 +332,19 @@ const AdminTenants: React.FC = () => {
             <AlertDialogAction
               disabled={!newTenant.name.trim() || createMutation.isPending}
               onClick={() =>
-                createMutation.mutate({
-                  name: newTenant.name.trim(),
-                  tier: newTenant.tier,
-                  ...(newTenant.adminEmail.trim() && { adminEmail: newTenant.adminEmail.trim() }),
-                })
+                createMutation.mutate(
+                  {
+                    name: newTenant.name.trim(),
+                    tier: newTenant.tier,
+                    ...(newTenant.adminEmail.trim() && { adminEmail: newTenant.adminEmail.trim() }),
+                  } as Parameters<typeof createMutation.mutate>[0],
+                  {
+                    onSuccess: () => {
+                      setShowCreate(false);
+                      setNewTenant({ name: '', tier: 'free', adminEmail: '' });
+                    },
+                  }
+                )
               }
             >
               {createMutation.isPending ? (

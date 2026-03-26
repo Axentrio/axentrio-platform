@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   Loader2,
@@ -19,6 +19,12 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { api } from '@services/apiClient';
+import {
+  useAdminTenantDetail,
+  useAdminTenantAudit,
+  useSuspendTenant,
+  useActivateTenant,
+} from '../../queries/useAdminQueries';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,43 +124,16 @@ const AdminTenantDetail: React.FC = () => {
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
 
-  const { data, isLoading, isError } = useQuery<{ success: boolean; data: TenantDetailData }>({
-    queryKey: ['admin', 'tenant-detail', id],
-    queryFn: () => api.get(`/admin/tenants/${id}`),
-    enabled: !!id,
-  });
+  const { data, isLoading, isError } = useAdminTenantDetail(id ?? '');
+  const { data: auditData } = useAdminTenantAudit(id ?? '');
 
-  const { data: auditData } = useQuery({
-    queryKey: ['admin', 'tenant-audit', id],
-    queryFn: () => api.get<{ success: boolean; data: TenantDetailData['recentAuditLogs']; meta: unknown }>(`/admin/tenants/${id}/audit-logs?limit=20`),
-    enabled: !!id,
-    refetchInterval: 30_000,
-  });
-
-  const suspendMutation = useMutation({
-    mutationFn: () => api.post(`/admin/tenants/${id}/suspend`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant-detail', id] });
-      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
-      toast.success('Tenant suspended');
-    },
-    onError: () => toast.error('Failed to suspend tenant'),
-  });
-
-  const activateMutation = useMutation({
-    mutationFn: () => api.post(`/admin/tenants/${id}/activate`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant-detail', id] });
-      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
-      toast.success('Tenant activated');
-    },
-    onError: () => toast.error('Failed to activate tenant'),
-  });
+  const suspendMutation = useSuspendTenant();
+  const activateMutation = useActivateTenant();
 
   const rotateMutation = useMutation({
-    mutationFn: () => api.post<{ success: boolean; data: { apiKey: string } }>(`/admin/tenants/${id}/api-key/rotate`),
+    mutationFn: () => api.post<{ apiKey: string }>(`/admin/tenants/${id}/api-key/rotate`),
     onSuccess: (result) => {
-      setRevealedApiKey(result.data.apiKey);
+      setRevealedApiKey(result.apiKey);
       setShowApiKey(true);
       queryClient.invalidateQueries({ queryKey: ['admin', 'tenant-detail', id] });
       toast.success('API key rotated');
@@ -163,8 +142,8 @@ const AdminTenantDetail: React.FC = () => {
     onError: () => toast.error('Failed to rotate API key'),
   });
 
-  const tenant = data?.data;
-  const auditLogs = auditData?.data ?? tenant?.recentAuditLogs ?? [];
+  const tenant = data as TenantDetailData | undefined;
+  const auditLogs = (auditData as TenantDetailData['recentAuditLogs'] | undefined) ?? tenant?.recentAuditLogs ?? [];
 
   if (isLoading) {
     return (
@@ -208,7 +187,7 @@ const AdminTenantDetail: React.FC = () => {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => suspendMutation.mutate()}
+                onClick={() => suspendMutation.mutate(id ?? '')}
                 disabled={suspendMutation.isPending}
                 className="text-status-busy border-status-busy/30 hover:bg-status-busy/10"
               >
@@ -218,7 +197,7 @@ const AdminTenantDetail: React.FC = () => {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => activateMutation.mutate()}
+                onClick={() => activateMutation.mutate(id ?? '')}
                 disabled={activateMutation.isPending}
                 className="text-status-online border-status-online/30 hover:bg-status-online/10"
               >

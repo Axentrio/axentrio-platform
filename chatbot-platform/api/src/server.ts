@@ -43,6 +43,7 @@ import { EventEmitter } from './utils/event-emitter';
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
+import { requestIdMiddleware } from './middleware/request-id.middleware';
 
 const app = express();
 const httpServer = createServer(app);
@@ -59,6 +60,9 @@ app.get('/health', (_req, res) => {
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
 app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
+
+// Request ID — must come before all other middleware
+app.use(requestIdMiddleware);
 
 // Security middleware stack
 app.use(helmet({ contentSecurityPolicy: config.server.isProduction }));

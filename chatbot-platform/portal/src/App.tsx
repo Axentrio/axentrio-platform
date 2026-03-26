@@ -15,7 +15,7 @@ import { SocketProvider } from '@websocket/SocketContext';
 // Auth
 import { OrganizationRequired } from '@auth/OrganizationRequired';
 import { AppAuthProvider } from '@auth/AppAuthProvider';
-import { ProtectedRoute, AdminRoute, SupervisorRoute } from '@auth/ProtectedRoute';
+import { ProtectedRoute, AdminRoute, SupervisorRoute, SuperAdminRoute } from '@auth/ProtectedRoute';
 
 // Layout
 import { Sidebar } from '@components/Sidebar';
@@ -31,6 +31,9 @@ import Tenants from '@pages/Tenants';
 import Team from '@pages/Team';
 import Settings from '@pages/Settings';
 import WidgetTest from '@pages/WidgetTest';
+import AdminTenants from '@pages/admin/AdminTenants';
+import AdminUsers from '@pages/admin/AdminUsers';
+import AdminAnalytics from '@pages/admin/AdminAnalytics';
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -211,6 +214,13 @@ const App: React.FC = () => {
                     {/* Admin only routes */}
                     <Route element={<AdminRoute />}>
                       <Route path="/tenants" element={<Tenants />} />
+                    </Route>
+
+                    {/* Super Admin routes */}
+                    <Route element={<SuperAdminRoute />}>
+                      <Route path="/admin/tenants" element={<AdminTenants />} />
+                      <Route path="/admin/users" element={<AdminUsers />} />
+                      <Route path="/admin/analytics" element={<AdminAnalytics />} />
                     </Route>
 
                     {/* Catch all */}

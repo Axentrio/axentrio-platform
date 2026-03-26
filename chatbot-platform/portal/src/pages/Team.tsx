@@ -447,6 +447,16 @@ interface TeamMember {
   createdAt: string;
 }
 
+interface PendingInviteItem {
+  id: string;
+  email: string;
+  role: string;
+  invitedBy: { name: string; email: string } | null;
+  createdAt: string;
+  expiresAt: string;
+  isExpired: boolean;
+}
+
 const OrgMembersPanel: React.FC = () => {
   const queryClient = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState('');
@@ -464,6 +474,32 @@ const OrgMembersPanel: React.FC = () => {
 
   const members = membersData?.data || [];
 
+  // Fetch pending invites
+  const { data: invitesData } = useQuery({
+    queryKey: ['pending-invites'],
+    queryFn: () => api.get<{ success: boolean; data: PendingInviteItem[] }>('/tenants/me/pending-invites'),
+  });
+
+  const pendingInvites = invitesData?.data ?? [];
+
+  const resendMutation = useMutation({
+    mutationFn: (inviteId: string) => api.post(`/tenants/me/pending-invites/${inviteId}/resend`),
+    onSuccess: () => {
+      toast.success('Invite resent');
+      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+    },
+    onError: () => toast.error('Failed to resend invite'),
+  });
+
+  const cancelInviteMutation = useMutation({
+    mutationFn: (inviteId: string) => api.delete(`/tenants/me/pending-invites/${inviteId}`),
+    onSuccess: () => {
+      toast.success('Invite cancelled');
+      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
+    },
+    onError: () => toast.error('Failed to cancel invite'),
+  });
+
   // Invite mutation — calls backend endpoint
   const inviteMutation = useMutation({
     mutationFn: async ({ email, role }: { email: string; role: string }) => {
@@ -474,6 +510,7 @@ const OrgMembersPanel: React.FC = () => {
       setShowInviteForm(false);
       toast.success('Invitation sent successfully');
       queryClient.invalidateQueries({ queryKey: ['team-members'] });
+      queryClient.invalidateQueries({ queryKey: ['pending-invites'] });
     },
     onError: (error: unknown) => {
       const err = error as { response?: { data?: { error?: string } } };
@@ -502,10 +539,38 @@ const OrgMembersPanel: React.FC = () => {
     inviteMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
   };
 
-  const confirmRemoveMember = async () => {
-    // Remove member would need a backend endpoint — for now, just close dialog
-    setRemoveMemberUserId(null);
-    toast.info('Member removal is handled through the admin panel');
+  // Deactivate mutation
+  const deactivateMutation = useMutation({
+    mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/deactivate`),
+    onSuccess: () => {
+      toast.success('Member deactivated');
+      queryClient.invalidateQueries({ queryKey: ['team-members'] });
+      setRemoveMemberUserId(null);
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Failed to deactivate member');
+      setRemoveMemberUserId(null);
+    },
+  });
+
+  // Reactivate mutation
+  const reactivateMutation = useMutation({
+    mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/reactivate`),
+    onSuccess: () => {
+      toast.success('Member reactivated');
+      queryClient.invalidateQueries({ queryKey: ['team-members'] });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Failed to reactivate member');
+    },
+  });
+
+  const confirmRemoveMember = () => {
+    if (removeMemberUserId) {
+      deactivateMutation.mutate(removeMemberUserId);
+    }
   };
 
   if (isLoading) {
@@ -607,7 +672,12 @@ const OrgMembersPanel: React.FC = () => {
                         </div>
                       )}
                       <div>
-                        <p className="font-medium text-text-primary">{member.name || 'Unknown'}</p>
+                        <p className="font-medium text-text-primary">
+                          {member.name || 'Unknown'}
+                          {!member.isActive && (
+                            <Badge className="ml-2 bg-surface-3 text-text-muted border-edge text-xs">Inactive</Badge>
+                          )}
+                        </p>
                         <p className="text-sm text-text-muted">{member.email}</p>
                       </div>
                     </div>
@@ -629,15 +699,29 @@ const OrgMembersPanel: React.FC = () => {
                     </Select>
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setRemoveMemberUserId(member.id)}
-                      className="hover:text-red-400 hover:bg-red-500/10"
-                      title="Remove member"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      {!member.isActive ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => reactivateMutation.mutate(member.id)}
+                          disabled={reactivateMutation.isPending}
+                          className="text-status-online border-status-online/30 hover:bg-status-online/10"
+                        >
+                          Reactivate
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setRemoveMemberUserId(member.id)}
+                          className="hover:text-red-400 hover:bg-red-500/10"
+                          title="Deactivate member"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               );
@@ -645,6 +729,75 @@ const OrgMembersPanel: React.FC = () => {
           </TableBody>
         </Table>
       </Card>
+
+      {/* Pending Invites */}
+      {pendingInvites.length > 0 && (
+        <Card variant="glass" className="overflow-hidden">
+          <div className="px-6 py-4 border-b border-edge">
+            <h3 className="font-semibold text-text-primary">
+              Pending Invites <span className="text-text-muted font-normal">({pendingInvites.length})</span>
+            </h3>
+          </div>
+          <Table>
+            <TableHeader className="bg-surface-3">
+              <TableRow>
+                <TableHead className="text-xs font-medium text-text-secondary uppercase">Email</TableHead>
+                <TableHead className="text-xs font-medium text-text-secondary uppercase">Role</TableHead>
+                <TableHead className="text-xs font-medium text-text-secondary uppercase">Invited By</TableHead>
+                <TableHead className="text-xs font-medium text-text-secondary uppercase">Expires</TableHead>
+                <TableHead className="text-xs font-medium text-text-secondary uppercase">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pendingInvites.map((invite) => {
+                const expiresDate = new Date(invite.expiresAt);
+                const daysLeft = Math.ceil((expiresDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+
+                return (
+                  <TableRow key={invite.id}>
+                    <TableCell className="text-text-primary">{invite.email}</TableCell>
+                    <TableCell>
+                      <span className="capitalize text-text-secondary">{invite.role}</span>
+                    </TableCell>
+                    <TableCell className="text-text-secondary text-sm">
+                      {invite.invitedBy?.name ?? '\u2014'}
+                    </TableCell>
+                    <TableCell>
+                      {invite.isExpired ? (
+                        <Badge className="bg-status-busy/10 text-status-busy border-status-busy/20">Expired</Badge>
+                      ) : (
+                        <span className="text-text-secondary text-sm">{daysLeft}d left</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => resendMutation.mutate(invite.id)}
+                          disabled={resendMutation.isPending}
+                          className="text-xs"
+                        >
+                          Resend
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => cancelInviteMutation.mutate(invite.id)}
+                          disabled={cancelInviteMutation.isPending}
+                          className="text-xs hover:text-red-400 hover:bg-red-500/10"
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Card>
+      )}
 
       {/* Remove Member AlertDialog */}
       <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) setRemoveMemberUserId(null); }}>

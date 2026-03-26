@@ -5,7 +5,8 @@
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from './queries/queryConfig';
 import { Toaster } from '@/components/ui/sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 
@@ -39,14 +40,7 @@ import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // Create Query Client
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 5 * 60 * 1000,
-      retry: 2,
-    },
-  },
-});
+const queryClient = createQueryClient();
 
 // Layout wrapper for authenticated pages
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {

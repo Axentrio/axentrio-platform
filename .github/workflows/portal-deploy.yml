@@ -4,11 +4,15 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'portal/**'
+      - 'chatbot-platform/portal/**'
   pull_request:
     branches: [main, master]
     paths:
-      - 'portal/**'
+      - 'chatbot-platform/portal/**'
+
+defaults:
+  run:
+    working-directory: ./chatbot-platform
 
 jobs:
   test:
@@ -22,18 +26,18 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: portal/package-lock.json
+          cache-dependency-path: chatbot-platform/portal/package-lock.json
 
       - name: Install dependencies
-        working-directory: ./portal
+        working-directory: ./chatbot-platform/portal
         run: npm ci
 
       - name: Run linter
-        working-directory: ./portal
+        working-directory: ./chatbot-platform/portal
         run: npm run lint || true
 
       - name: Build
-        working-directory: ./portal
+        working-directory: ./chatbot-platform/portal
         run: npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
@@ -50,6 +54,7 @@ jobs:
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+        working-directory: .
 
       - name: Deploy to Railway
         run: railway up --service chatbot-portal --detach

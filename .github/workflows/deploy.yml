@@ -4,13 +4,17 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'api/**'
-      - 'infra/Dockerfile'
-      - 'railway.toml'
+      - 'chatbot-platform/api/**'
+      - 'chatbot-platform/infra/Dockerfile'
+      - 'chatbot-platform/railway.toml'
   pull_request:
     branches: [main, master]
     paths:
-      - 'api/**'
+      - 'chatbot-platform/api/**'
+
+defaults:
+  run:
+    working-directory: ./chatbot-platform
 
 jobs:
   test:
@@ -24,24 +28,24 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: api/package-lock.json
+          cache-dependency-path: chatbot-platform/api/package-lock.json
 
       - name: Install dependencies
-        working-directory: ./api
+        working-directory: ./chatbot-platform/api
         run: npm ci
 
       - name: Run linter
-        working-directory: ./api
+        working-directory: ./chatbot-platform/api
         run: npm run lint || true
 
       - name: Run tests
-        working-directory: ./api
+        working-directory: ./chatbot-platform/api
         run: npm test || true
         env:
           NODE_ENV: test
 
       - name: Build TypeScript
-        working-directory: ./api
+        working-directory: ./chatbot-platform/api
         run: npm run build
 
   deploy:
@@ -54,6 +58,7 @@ jobs:
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli
+        working-directory: .
 
       - name: Deploy to Railway
         run: railway up --service chatbot-api --detach

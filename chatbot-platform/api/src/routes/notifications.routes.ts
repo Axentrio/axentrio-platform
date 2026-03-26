@@ -5,6 +5,7 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { parsePaginationParams } from '../utils/pagination';
 
 const router = Router();
@@ -32,7 +33,7 @@ function getUserNotifications(userId: string): Notification[] {
 }
 
 // All routes require agent authentication
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * GET /notifications

@@ -15,6 +15,7 @@ import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
@@ -123,7 +124,7 @@ router.post(
  */
 router.post(
   '/accept',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
@@ -228,7 +229,7 @@ router.post(
  */
 router.post(
   '/reject',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
@@ -274,7 +275,7 @@ router.post(
  */
 router.post(
   '/return',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
@@ -361,7 +362,7 @@ router.post(
  */
 router.get(
   '/pending',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
@@ -419,7 +420,7 @@ router.get(
  */
 router.post(
   '/:id/accept',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -481,7 +482,7 @@ router.post(
  */
 router.post(
   '/:id/decline',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -528,7 +529,7 @@ router.post(
  */
 router.get(
   '/queue',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const tenantId = req.user?.tenantId;

@@ -8,6 +8,7 @@ import { Agent } from '../database/entities/Agent';
 import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached, invalidate } from '../utils/cache';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
@@ -16,7 +17,7 @@ const agentRepository = AppDataSource.getRepository(Agent);
 const userRepository = AppDataSource.getRepository(User);
 
 // All routes require agent authentication
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * GET /agents

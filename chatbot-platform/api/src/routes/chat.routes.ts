@@ -15,6 +15,7 @@ import { Participant } from '../database/entities/Participant';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
@@ -321,7 +322,7 @@ router.post(
  */
 router.get(
   '/sessions',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
   async (req: TenantRequest, res: Response): Promise<void> => {
     try {
@@ -372,7 +373,7 @@ router.get(
  */
 router.post(
   '/:id/transfer',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -430,7 +431,7 @@ router.post(
  */
 router.post(
   '/:id/close',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -472,7 +473,7 @@ router.post(
  */
 router.get(
   '/:id/history',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -526,7 +527,7 @@ router.get(
  */
 router.post(
   '/:id/read',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { id } = req.params;
@@ -561,7 +562,7 @@ router.post(
 
 router.delete(
   '/:sessionId/participants/:participantId',
-  requireClerkAuth, autoProvision,
+  requireClerkAuth, autoProvision, resolveTenantContext,
   async (req: Request, res: Response): Promise<void> => {
     try {
       const { sessionId, participantId } = req.params;

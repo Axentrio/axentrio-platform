@@ -8,6 +8,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Agent } from '../database/entities/Agent';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
 
 const router = Router();
@@ -15,7 +16,7 @@ const sessionRepository = AppDataSource.getRepository(ChatSession);
 const agentRepository = AppDataSource.getRepository(Agent);
 
 // All routes require agent authentication
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * GET /analytics/dashboard

@@ -9,13 +9,14 @@ import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 
 const router = Router();
 const userRepository = AppDataSource.getRepository(User);
 const agentRepository = AppDataSource.getRepository(Agent);
 
 // All routes require agent authentication
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * GET /users/profile

@@ -5,11 +5,12 @@
 import { Router, Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 
 const router = Router();
 
 // All routes require agent authentication
-router.use(requireClerkAuth, autoProvision);
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * Check if S3/upload service is configured

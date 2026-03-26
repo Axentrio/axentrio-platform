@@ -49,12 +49,14 @@ export { rateLimitByIp as loginRateLimiter } from './rate-limit.middleware';
 
 // Alias for admin role check
 export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
-  if (!req.user || req.user.role !== 'admin') {
+  if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'super_admin')) {
     res.status(403).json({ error: 'Forbidden: Admin access required' });
     return;
   }
   next();
 }
+
+export { requireSuperAdmin, resolveTenantContext } from './super-admin.middleware';
 
 // Async handler wrapper
 export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {

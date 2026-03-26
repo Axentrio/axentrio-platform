@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     container: {
@@ -70,26 +71,26 @@ module.exports = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // Dark theme base (kept for existing usage)
+        // Theme-aware surface colors (via CSS variables)
         surface: {
-          0: '#0a0b0f',
-          1: '#0f1117',
-          2: '#161821',
-          3: '#1e2030',
-          4: '#262940',
+          0: 'var(--color-surface-0)',
+          1: 'var(--color-surface-1)',
+          2: 'var(--color-surface-2)',
+          3: 'var(--color-surface-3)',
+          4: 'var(--color-surface-4)',
         },
-        // Border colors (kept for existing usage)
+        // Theme-aware border colors
         edge: {
-          DEFAULT: '#2a2d3e',
-          light: '#353850',
+          DEFAULT: 'var(--color-edge)',
+          light: 'var(--color-edge-light, #353850)',
           focus: 'var(--color-primary-600, #4f46e5)',
         },
-        // Text (kept for existing usage)
+        // Theme-aware text colors
         text: {
-          primary: '#f1f3f9',
-          secondary: '#9ca3bf',
-          muted: '#6b7194',
-          inverse: '#0f1117',
+          primary: 'var(--color-text-primary)',
+          secondary: 'var(--color-text-secondary)',
+          muted: 'var(--color-text-muted, #6b7194)',
+          inverse: 'var(--color-text-inverse, #0f1117)',
         },
         // Status (glowing variants)
         status: {

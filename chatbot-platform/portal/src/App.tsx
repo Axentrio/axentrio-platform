@@ -11,6 +11,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 
 // Context Providers
+import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { SocketProvider } from '@websocket/SocketContext';
 
 // Auth
@@ -32,7 +33,11 @@ import Queue from '@pages/Queue';
 import Analytics from '@pages/Analytics';
 import Tenants from '@pages/Tenants';
 import Team from '@pages/Team';
-import Settings from '@pages/Settings';
+import SettingsLayout from '@pages/settings/SettingsLayout';
+import ProfileSettings from '@pages/settings/ProfileSettings';
+import NotificationSettings from '@pages/settings/NotificationSettings';
+import AppearanceSettings from '@pages/settings/AppearanceSettings';
+import IntegrationSettings from '@pages/settings/IntegrationSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
@@ -91,55 +96,51 @@ const WidgetTestRouter: React.FC = () => {
   return <WidgetTest />;
 };
 
-const App: React.FC = () => {
-  // If on widget-test path, render only the widget test page (no Clerk)
-  if (window.location.pathname === '/widget-test') {
-    return (
-      <QueryClientProvider client={queryClient}>
-        <WidgetTestRouter />
-        <Toaster />
-      </QueryClientProvider>
-    );
-  }
+// Clerk provider with theme-aware appearance
+const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === 'dark';
 
   return (
     <ClerkProvider
       publishableKey={CLERK_PUBLISHABLE_KEY}
       appearance={{
         variables: {
-          colorBackground: '#161821',
-          colorInputBackground: '#1e2030',
-          colorText: '#f1f3f9',
-          colorTextSecondary: '#9ca3bf',
+          colorBackground: isDark ? '#161821' : '#ffffff',
+          colorInputBackground: isDark ? '#1e2030' : '#f9fafb',
+          colorText: isDark ? '#f1f3f9' : '#111827',
+          colorTextSecondary: isDark ? '#9ca3bf' : '#6b7280',
           colorPrimary: '#6366f1',
-          colorInputText: '#f1f3f9',
+          colorInputText: isDark ? '#f1f3f9' : '#111827',
           colorDanger: '#f87171',
           colorSuccess: '#34d399',
-          colorNeutral: '#9ca3bf',
+          colorNeutral: isDark ? '#9ca3bf' : '#6b7280',
           borderRadius: '0.75rem',
           fontFamily: "'Plus Jakarta Sans', sans-serif",
         },
         elements: {
           card: {
-            backgroundColor: '#161821',
-            border: '1px solid #2a2d3e',
-            boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)',
+            backgroundColor: isDark ? '#161821' : '#ffffff',
+            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
+            boxShadow: isDark
+              ? '0 25px 50px -12px rgba(0,0,0,0.5)'
+              : '0 25px 50px -12px rgba(0,0,0,0.1)',
           },
-          headerTitle: { color: '#f1f3f9' },
-          headerSubtitle: { color: '#9ca3bf' },
+          headerTitle: { color: isDark ? '#f1f3f9' : '#111827' },
+          headerSubtitle: { color: isDark ? '#9ca3bf' : '#6b7280' },
           socialButtonsBlockButton: {
-            backgroundColor: '#1e2030',
-            border: '1px solid #2a2d3e',
-            color: '#f1f3f9',
-            '&:hover': { backgroundColor: '#262940' },
+            backgroundColor: isDark ? '#1e2030' : '#f9fafb',
+            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
+            color: isDark ? '#f1f3f9' : '#111827',
+            '&:hover': { backgroundColor: isDark ? '#262940' : '#f3f4f6' },
           },
-          dividerLine: { backgroundColor: '#2a2d3e' },
-          dividerText: { color: '#9ca3bf' },
-          formFieldLabel: { color: '#9ca3bf' },
+          dividerLine: { backgroundColor: isDark ? '#2a2d3e' : '#e5e7eb' },
+          dividerText: { color: isDark ? '#9ca3bf' : '#6b7280' },
+          formFieldLabel: { color: isDark ? '#9ca3bf' : '#6b7280' },
           formFieldInput: {
-            backgroundColor: '#1e2030',
-            border: '1px solid #2a2d3e',
-            color: '#f1f3f9',
+            backgroundColor: isDark ? '#1e2030' : '#ffffff',
+            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
+            color: isDark ? '#f1f3f9' : '#111827',
             '&:focus': {
               borderColor: '#6366f1',
               boxShadow: '0 0 0 3px rgba(99,102,241,0.15)',
@@ -150,20 +151,41 @@ const App: React.FC = () => {
             '&:hover': { backgroundColor: '#818cf8' },
           },
           footerActionLink: { color: '#818cf8' },
-          footerActionText: { color: '#9ca3bf' },
+          footerActionText: { color: isDark ? '#9ca3bf' : '#6b7280' },
           identityPreviewEditButton: { color: '#818cf8' },
           formFieldAction: { color: '#818cf8' },
           otpCodeFieldInput: {
-            backgroundColor: '#1e2030',
-            border: '1px solid #2a2d3e',
-            color: '#f1f3f9',
+            backgroundColor: isDark ? '#1e2030' : '#ffffff',
+            border: isDark ? '1px solid #2a2d3e' : '1px solid #e5e7eb',
+            color: isDark ? '#f1f3f9' : '#111827',
           },
           footer: {
-            '& + div': { color: '#9ca3bf' },
+            '& + div': { color: isDark ? '#9ca3bf' : '#6b7280' },
           },
         },
       }}
     >
+      {children}
+    </ClerkProvider>
+  );
+};
+
+const App: React.FC = () => {
+  // If on widget-test path, render only the widget test page (no Clerk)
+  if (window.location.pathname === '/widget-test') {
+    return (
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <WidgetTestRouter />
+          <Toaster />
+        </QueryClientProvider>
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <ThemeProvider>
+      <ThemedClerkProvider>
       <QueryClientProvider client={queryClient}>
         <SignedOut>
           <div className="flex items-center justify-center h-screen bg-surface-1">
@@ -214,7 +236,13 @@ const App: React.FC = () => {
                           </SocketProvider>
                         }
                       />
-                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/settings" element={<SettingsLayout />}>
+                        <Route index element={<Navigate to="/settings/profile" replace />} />
+                        <Route path="profile" element={<ProfileSettings />} />
+                        <Route path="notifications" element={<NotificationSettings />} />
+                        <Route path="appearance" element={<AppearanceSettings />} />
+                        <Route path="integrations" element={<IntegrationSettings />} />
+                      </Route>
                     </Route>
 
                     {/* Supervisor/Admin routes */}
@@ -247,7 +275,8 @@ const App: React.FC = () => {
 
         <Toaster />
       </QueryClientProvider>
-    </ClerkProvider>
+      </ThemedClerkProvider>
+    </ThemeProvider>
   );
 };
 

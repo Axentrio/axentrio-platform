@@ -9,4 +9,4 @@ export { default as Queue } from './Queue';
 export { default as Analytics } from './Analytics';
 export { default as Tenants } from './Tenants';
 export { default as Team } from './Team';
-export { default as Settings } from './Settings';
+export { default as SettingsLayout } from './settings/SettingsLayout';

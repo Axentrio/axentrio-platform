@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useTenantSettings } from '@/queries/useTenantQueries';
+import { useTheme } from '@/contexts/ThemeContext';
 
 const DEFAULT_COLOR = '#6366f1';
 const HEX_REGEX = /^#[0-9a-fA-F]{6}$/;
@@ -65,18 +66,27 @@ function generatePalette(baseHex: string) {
   return { palette, h, s: clampedS };
 }
 
+/** Exported for reuse by accent color picker */
+export { generatePalette, hexToHsl };
+
 /**
  * Reads the tenant's primaryColor from settings and applies
  * a generated color palette as CSS custom properties.
+ * Also notifies ThemeProvider when org branding is active.
  */
 export function useTenantTheme() {
   const { data } = useTenantSettings();
+  const { setOrgAccent } = useTheme();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rawColor = (data as any)?.settings?.theme?.primaryColor;
-  const baseColor = typeof rawColor === 'string' && HEX_REGEX.test(rawColor)
-    ? rawColor
-    : DEFAULT_COLOR;
+  const hasOrgBranding = typeof rawColor === 'string' && HEX_REGEX.test(rawColor);
+  const baseColor = hasOrgBranding ? rawColor : DEFAULT_COLOR;
+
+  // Notify ThemeProvider whether org branding is active
+  useEffect(() => {
+    setOrgAccent(hasOrgBranding ? rawColor : null);
+  }, [hasOrgBranding, rawColor, setOrgAccent]);
 
   useEffect(() => {
     const root = document.documentElement;

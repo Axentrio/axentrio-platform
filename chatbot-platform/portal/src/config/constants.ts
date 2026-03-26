@@ -9,6 +9,7 @@ export const STORAGE_KEYS = {
   USER: 'handsoff_user',
   PREFERENCES: 'handsoff_preferences',
   THEME: 'handsoff_theme',
+  ACCENT: 'handsoff_accent',
 } as const;
 
 // Timeouts (in milliseconds)

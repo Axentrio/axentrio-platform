@@ -14,8 +14,6 @@
         var t = localStorage.getItem('handsoff_theme') || 'system';
         var d = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
         if (d) document.documentElement.classList.add('dark');
-        var a = localStorage.getItem('handsoff_accent');
-        if (a) document.documentElement.style.setProperty('--color-primary-500', a);
       })();
     </script>
   </head>

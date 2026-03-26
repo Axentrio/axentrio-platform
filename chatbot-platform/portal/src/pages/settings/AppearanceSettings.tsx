@@ -1,6 +1,6 @@
 /**
  * Appearance Settings
- * Theme switcher with mini previews and accent color picker
+ * Theme switcher with mini previews
  */
 
 import React from 'react';

@@ -1,6 +1,6 @@
 /**
  * Theme Context
- * Manages light/dark/system theme and accent color.
+ * Manages light/dark/system theme.
  * Applies .dark class on <html>, persists to localStorage.
  */
 
@@ -12,11 +12,7 @@ type ThemeMode = 'light' | 'dark' | 'system';
 interface ThemeContextValue {
   theme: ThemeMode;
   resolvedTheme: 'light' | 'dark';
-  accent: string;
-  accentSource: 'user' | 'org';
   setTheme: (theme: ThemeMode) => void;
-  setAccent: (color: string) => void;
-  setOrgAccent: (color: string | null) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -38,8 +34,6 @@ function applyThemeClass(resolved: 'light' | 'dark') {
   }
 }
 
-const DEFAULT_ACCENT = '#6366f1';
-
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<ThemeMode>(() => {
     const stored = localStorage.getItem(STORAGE_KEYS.THEME);
@@ -47,22 +41,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return 'system';
   });
 
-  const [accent, setAccentState] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEYS.ACCENT) || DEFAULT_ACCENT;
-  });
-
-  const [orgAccent, setOrgAccent] = useState<string | null>(null);
-
   const resolved = resolveTheme(theme);
-  const activeAccent = orgAccent || accent;
-  const accentSource: 'user' | 'org' = orgAccent ? 'org' : 'user';
 
-  // Apply theme class whenever resolved theme changes
   useEffect(() => {
     applyThemeClass(resolved);
   }, [resolved]);
 
-  // Listen for system theme changes when in 'system' mode
   useEffect(() => {
     if (theme !== 'system') return;
 
@@ -78,23 +62,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     applyThemeClass(resolveTheme(newTheme));
   }, []);
 
-  const setAccent = useCallback((color: string) => {
-    setAccentState(color);
-    localStorage.setItem(STORAGE_KEYS.ACCENT, color);
-  }, []);
-
   return (
-    <ThemeContext.Provider
-      value={{
-        theme,
-        resolvedTheme: resolved,
-        accent: activeAccent,
-        accentSource,
-        setTheme,
-        setAccent,
-        setOrgAccent,
-      }}
-    >
+    <ThemeContext.Provider value={{ theme, resolvedTheme: resolved, setTheme }}>
       {children}
     </ThemeContext.Provider>
   );

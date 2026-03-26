@@ -176,6 +176,56 @@ export function useOptimisticDemoteUser() {
   });
 }
 
+export function useOptimisticDeactivateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.patch(`/admin/users/${id}`, { isActive: false }),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.users(), (prev = []) =>
+        prev.map((u: Any) => (u.id === id ? { ...u, isActive: false } : u)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.users(), context.previousData);
+      }
+      toast.error('Failed to deactivate user');
+    },
+    onSuccess: () => toast.success('User deactivated'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
+    },
+  });
+}
+
+export function useOptimisticReactivateUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/admin/users/${id}/reactivate`),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.users(), (prev = []) =>
+        prev.map((u: Any) => (u.id === id ? { ...u, isActive: true } : u)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.users(), context.previousData);
+      }
+      toast.error('Failed to reactivate user');
+    },
+    onSuccess: () => toast.success('User reactivated'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
+    },
+  });
+}
+
 export function useDeleteUser() {
   const queryClient = useQueryClient();
   return useMutation({

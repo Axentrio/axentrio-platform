@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Loader2, Search, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
+import { Loader2, Search, ShieldCheck, ShieldOff, Trash2, UserX, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -12,8 +12,11 @@ import {
   useAdminUsers,
   useOptimisticPromoteUser,
   useOptimisticDemoteUser,
+  useOptimisticDeactivateUser,
+  useOptimisticReactivateUser,
   useDeleteUser,
 } from '../../queries/useAdminQueries';
+import { useAppAuth } from '@/auth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -62,7 +65,7 @@ interface AdminUser {
   createdAt: string;
 }
 
-type ConfirmAction = { type: 'promote' | 'demote' | 'delete'; user: AdminUser } | null;
+type ConfirmAction = { type: 'promote' | 'demote' | 'deactivate' | 'reactivate' | 'delete'; user: AdminUser } | null;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -105,11 +108,14 @@ const AdminUsers: React.FC = () => {
   const [mutatingRowIds, setMutatingRowIds] = useState<Set<string>>(new Set());
 
   /* ---- Data ---- */
+  const { user: currentUser, tenantId: currentTenantId } = useAppAuth();
   const { data, isLoading, isError } = useAdminUsers();
 
   /* ---- Mutations ---- */
   const promoteMutation = useOptimisticPromoteUser();
   const demoteMutation = useOptimisticDemoteUser();
+  const deactivateMutation = useOptimisticDeactivateUser();
+  const reactivateMutation = useOptimisticReactivateUser();
   const deleteMutation = useDeleteUser();
 
   const addMutatingRow = (id: string) =>
@@ -127,22 +133,20 @@ const AdminUsers: React.FC = () => {
     const userId = confirmAction.user.id;
     addMutatingRow(userId);
 
-    if (confirmAction.type === 'delete') {
-      deleteMutation.mutate(userId, {
-        onSettled: () => {
-          removeMutatingRow(userId);
-          setConfirmAction(null);
-        },
-      });
-    } else {
-      const mutation = confirmAction.type === 'promote' ? promoteMutation : demoteMutation;
-      mutation.mutate(userId, {
-        onSettled: () => {
-          removeMutatingRow(userId);
-          setConfirmAction(null);
-        },
-      });
-    }
+    const mutationMap = {
+      promote: promoteMutation,
+      demote: demoteMutation,
+      deactivate: deactivateMutation,
+      reactivate: reactivateMutation,
+      delete: deleteMutation,
+    } as const;
+    const mutation = mutationMap[confirmAction.type];
+    mutation.mutate(userId, {
+      onSettled: () => {
+        removeMutatingRow(userId);
+        setConfirmAction(null);
+      },
+    });
   };
 
   /* ---- Derived list ---- */
@@ -157,7 +161,7 @@ const AdminUsers: React.FC = () => {
     return matchesSearch && matchesRole;
   });
 
-  const isMutating = promoteMutation.isPending || demoteMutation.isPending || deleteMutation.isPending;
+  const isMutating = promoteMutation.isPending || demoteMutation.isPending || deactivateMutation.isPending || reactivateMutation.isPending || deleteMutation.isPending;
 
   /* ---- Render ---- */
   return (
@@ -225,7 +229,16 @@ const AdminUsers: React.FC = () => {
                       mutatingRowIds.has(user.id) && 'opacity-60 pointer-events-none',
                     )}
                   >
-                    <TableCell className="font-medium text-text-primary">{user.name}</TableCell>
+                    <TableCell className="font-medium text-text-primary">
+                      <span className="flex items-center gap-2">
+                        {user.name}
+                        {currentUser?.email === user.email && currentTenantId === user.tenantId && (
+                          <Badge className="bg-primary-600/15 text-primary-400 border-primary-500/25 text-[10px] px-1.5 py-0">
+                            You
+                          </Badge>
+                        )}
+                      </span>
+                    </TableCell>
                     <TableCell className="text-text-secondary">{user.email}</TableCell>
                     <TableCell>
                       <Badge className={roleBadgeClass(user.role)}>{roleLabel(user.role)}</Badge>
@@ -273,17 +286,42 @@ const AdminUsers: React.FC = () => {
                             Promote
                           </Button>
                         )}
-                        {!user.isActive && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={isMutating}
-                            onClick={() => setConfirmAction({ type: 'delete', user })}
-                            className="text-red-400 border-red-500/30 hover:bg-red-500/10 gap-1.5"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                            Delete
-                          </Button>
+                        {user.isActive ? (
+                          !(currentUser?.email === user.email && currentTenantId === user.tenantId) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isMutating}
+                              onClick={() => setConfirmAction({ type: 'deactivate', user })}
+                              className="text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10 gap-1.5"
+                            >
+                              <UserX className="w-3 h-3" />
+                              Deactivate
+                            </Button>
+                          )
+                        ) : (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isMutating}
+                              onClick={() => setConfirmAction({ type: 'reactivate', user })}
+                              className="text-status-online border-status-online/30 hover:bg-status-online/10 gap-1.5"
+                            >
+                              <UserCheck className="w-3 h-3" />
+                              Reactivate
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={isMutating}
+                              onClick={() => setConfirmAction({ type: 'delete', user })}
+                              className="text-red-400 border-red-500/30 hover:bg-red-500/10 gap-1.5"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              Delete
+                            </Button>
+                          </>
                         )}
                       </div>
                     </TableCell>
@@ -313,6 +351,10 @@ const AdminUsers: React.FC = () => {
                   ? 'Promote to Super Admin'
                   : confirmAction?.type === 'demote'
                   ? 'Demote from Super Admin'
+                  : confirmAction?.type === 'deactivate'
+                  ? 'Deactivate User'
+                  : confirmAction?.type === 'reactivate'
+                  ? 'Reactivate User'
                   : 'Permanently Delete User'}
               </AlertDialogTitle>
             <AlertDialogDescription>
@@ -329,6 +371,20 @@ const AdminUsers: React.FC = () => {
                     {confirmAction?.user.name}
                   </span>{' '}
                   from Super Admin? They will lose platform-wide privileges.
+                </>
+              ) : confirmAction?.type === 'deactivate' ? (
+                <>
+                  Are you sure you want to deactivate{' '}
+                  <span className="font-semibold text-text-primary">
+                    {confirmAction?.user.name}
+                  </span>? They will be removed from their Clerk organization and lose access.
+                </>
+              ) : confirmAction?.type === 'reactivate' ? (
+                <>
+                  Are you sure you want to reactivate{' '}
+                  <span className="font-semibold text-text-primary">
+                    {confirmAction?.user.name}
+                  </span>? They will be re-invited to their Clerk organization.
                 </>
               ) : (
                 <>
@@ -350,6 +406,10 @@ const AdminUsers: React.FC = () => {
                   ? 'bg-accent-500 hover:bg-accent-600'
                   : confirmAction?.type === 'demote'
                   ? 'bg-status-busy hover:bg-status-busy/90'
+                  : confirmAction?.type === 'deactivate'
+                  ? 'bg-yellow-600 hover:bg-yellow-700'
+                  : confirmAction?.type === 'reactivate'
+                  ? 'bg-green-600 hover:bg-green-700'
                   : 'bg-red-600 hover:bg-red-700'
               }
             >
@@ -359,6 +419,10 @@ const AdminUsers: React.FC = () => {
                 ? 'Promote'
                 : confirmAction?.type === 'demote'
                 ? 'Demote'
+                : confirmAction?.type === 'deactivate'
+                ? 'Deactivate'
+                : confirmAction?.type === 'reactivate'
+                ? 'Reactivate'
                 : 'Delete Permanently'}
             </AlertDialogAction>
           </AlertDialogFooter>

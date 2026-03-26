@@ -3,26 +3,13 @@
  * Theme switcher with mini previews and accent color picker
  */
 
-import React, { useState } from 'react';
-import { Paintbrush, Check } from 'lucide-react';
+import React from 'react';
+import { Paintbrush } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 
 type ThemeMode = 'light' | 'dark' | 'system';
-
-const PRESET_COLORS = [
-  { name: 'Indigo', hex: '#6366f1' },
-  { name: 'Violet', hex: '#8b5cf6' },
-  { name: 'Pink', hex: '#ec4899' },
-  { name: 'Amber', hex: '#f59e0b' },
-  { name: 'Emerald', hex: '#10b981' },
-  { name: 'Cyan', hex: '#06b6d4' },
-  { name: 'Rose', hex: '#f43f5e' },
-  { name: 'Blue', hex: '#3b82f6' },
-];
 
 /** Mini app preview for the theme cards */
 const ThemePreview: React.FC<{ mode: 'light' | 'dark' | 'system' }> = ({ mode }) => {
@@ -60,24 +47,13 @@ const ThemePreview: React.FC<{ mode: 'light' | 'dark' | 'system' }> = ({ mode })
 };
 
 const AppearanceSettings: React.FC = () => {
-  const { theme, setTheme, accent, accentSource, setAccent } = useTheme();
-  const [showCustomInput, setShowCustomInput] = useState(false);
-  const [customHex, setCustomHex] = useState(accent);
+  const { theme, setTheme } = useTheme();
 
   const themeOptions: { mode: ThemeMode; label: string }[] = [
     { mode: 'light', label: 'Light' },
     { mode: 'dark', label: 'Dark' },
     { mode: 'system', label: 'System' },
   ];
-
-  const isOrgBranded = accentSource === 'org';
-
-  const handleCustomColorApply = () => {
-    const hex = customHex.trim();
-    if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
-      setAccent(hex);
-    }
-  };
 
   return (
     <div className="space-y-6">
@@ -108,90 +84,6 @@ const AppearanceSettings: React.FC = () => {
               </button>
             ))}
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Accent Color */}
-      <Card variant="glass">
-        <CardHeader>
-          <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-            <Paintbrush className="w-5 h-5" />
-            Accent Color
-          </h2>
-          <p className="text-sm text-text-secondary">
-            {isOrgBranded
-              ? "Your organization's branding is applied"
-              : 'Pick your primary accent color'}
-          </p>
-        </CardHeader>
-        <CardContent>
-          <div className={cn(isOrgBranded && 'opacity-50 pointer-events-none')}>
-            <div className="flex items-center gap-3 flex-wrap">
-              {PRESET_COLORS.map((color) => (
-                <button
-                  key={color.hex}
-                  onClick={() => {
-                    setAccent(color.hex);
-                    setShowCustomInput(false);
-                  }}
-                  className={cn(
-                    'w-9 h-9 rounded-full transition-all relative',
-                    accent === color.hex && !showCustomInput
-                      ? 'ring-2 ring-offset-2 ring-offset-surface-1 ring-primary-500 scale-110'
-                      : 'hover:scale-105'
-                  )}
-                  style={{ backgroundColor: color.hex }}
-                  title={color.name}
-                >
-                  {accent === color.hex && !showCustomInput && (
-                    <Check className="w-4 h-4 text-white absolute inset-0 m-auto" />
-                  )}
-                </button>
-              ))}
-
-              {/* Divider */}
-              <div className="w-px h-6 bg-edge mx-1" />
-
-              {/* Custom color button */}
-              <button
-                onClick={() => setShowCustomInput(!showCustomInput)}
-                className={cn(
-                  'w-9 h-9 rounded-full transition-all',
-                  'bg-[conic-gradient(red,yellow,lime,aqua,blue,magenta,red)]',
-                  showCustomInput
-                    ? 'ring-2 ring-offset-2 ring-offset-surface-1 ring-primary-500 scale-110'
-                    : 'hover:scale-105'
-                )}
-                title="Custom color"
-              />
-            </div>
-
-            {showCustomInput && (
-              <div className="mt-4 flex items-center gap-3">
-                <div
-                  className="w-9 h-9 rounded-lg border border-edge flex-shrink-0"
-                  style={{ backgroundColor: customHex }}
-                />
-                <div className="flex-1">
-                  <Label className="text-text-secondary text-xs mb-1 block">Hex Color</Label>
-                  <Input
-                    value={customHex}
-                    onChange={(e) => setCustomHex(e.target.value)}
-                    onBlur={handleCustomColorApply}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCustomColorApply()}
-                    placeholder="#6366f1"
-                    className="font-mono text-sm"
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {isOrgBranded && (
-            <p className="text-xs text-text-muted mt-3 italic">
-              Accent color is managed by your organization's branding settings.
-            </p>
-          )}
         </CardContent>
       </Card>
     </div>

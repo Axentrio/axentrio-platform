@@ -159,7 +159,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         cn(
                           'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
                           isActive
-                            ? 'bg-amber-500/10 text-amber-400 border-l-2 border-amber-500'
+                            ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
                             : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
                         )
                       }

@@ -48,9 +48,15 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor - handle errors (no refresh needed, Clerk handles it)
+// Response interceptor - unwrap { success, data } envelope + handle errors
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // If the response has our standard envelope, unwrap it
+    if (response.data && typeof response.data === 'object' && 'success' in response.data && 'data' in response.data) {
+      response.data = response.data.data;
+    }
+    return response;
+  },
   async (error: AxiosError) => {
     return Promise.reject(error);
   }

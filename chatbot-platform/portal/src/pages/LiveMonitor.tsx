@@ -16,7 +16,7 @@ const LiveMonitor: React.FC = () => {
   const navigate = useNavigate();
   const { data: tenant } = useQuery<Tenant>({
     queryKey: ['tenant', 'me'],
-    queryFn: () => api.get<{ data: Tenant }>('/tenants/me').then((res) => res.data),
+    queryFn: () => api.get<Tenant>('/tenants/me'),
   });
   const tenants = tenant ? [tenant] : [];
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);

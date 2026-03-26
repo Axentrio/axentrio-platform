@@ -16,6 +16,7 @@ import {
   Mail,
   Save,
   Check,
+  Loader2,
 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { useNotificationSound } from '@websocket/notificationSound';
@@ -131,6 +132,7 @@ const Settings: React.FC = () => {
                         type="text"
                         value={profileData.firstName}
                         onChange={(e) => setProfileData({ ...profileData, firstName: e.target.value })}
+                        disabled={isSaving}
                       />
                     </div>
                     <div className="space-y-1">
@@ -140,6 +142,7 @@ const Settings: React.FC = () => {
                         type="text"
                         value={profileData.lastName}
                         onChange={(e) => setProfileData({ ...profileData, lastName: e.target.value })}
+                        disabled={isSaving}
                       />
                     </div>
                   </div>
@@ -163,7 +166,7 @@ const Settings: React.FC = () => {
                       disabled={isSaving}
                     >
                       {isSaving ? (
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
+                        <Loader2 className="w-4 h-4 animate-spin" />
                       ) : (
                         <Save className="w-4 h-4" />
                       )}

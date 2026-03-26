@@ -61,27 +61,6 @@ export function useAdminAuditLogs(params?: Record<string, unknown>) {
 
 // --- Mutations ---
 
-export function useSuspendTenant() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/suspend`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
-      toast.success('Tenant suspended');
-    },
-  });
-}
-
-export function useActivateTenant() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/activate`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
-      toast.success('Tenant activated');
-    },
-  });
-}
 
 export function useCreateTenant() {
   const queryClient = useQueryClient();
@@ -95,24 +74,104 @@ export function useCreateTenant() {
   });
 }
 
-export function usePromoteUser() {
+// --- Optimistic Mutations ---
+
+export function useOptimisticSuspendTenant() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`/admin/users/${id}/promote`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
-      toast.success('User promoted to super admin');
+    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/suspend`),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.tenants() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.tenants());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.tenants(), (prev = []) =>
+        prev.map((t: Any) => (t.id === id ? { ...t, status: 'suspended' } : t)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.tenants(), context.previousData);
+      }
+      toast.error('Failed to suspend tenant');
+    },
+    onSuccess: () => toast.success('Tenant suspended'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
     },
   });
 }
 
-export function useDemoteUser() {
+export function useOptimisticActivateTenant() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/admin/tenants/${id}/activate`),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.tenants() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.tenants());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.tenants(), (prev = []) =>
+        prev.map((t: Any) => (t.id === id ? { ...t, status: 'active' } : t)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.tenants(), context.previousData);
+      }
+      toast.error('Failed to activate tenant');
+    },
+    onSuccess: () => toast.success('Tenant activated'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
+    },
+  });
+}
+
+export function useOptimisticPromoteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/admin/users/${id}/promote`),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.users(), (prev = []) =>
+        prev.map((u: Any) => (u.id === id ? { ...u, role: 'super_admin' } : u)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.users(), context.previousData);
+      }
+      toast.error('Failed to promote user');
+    },
+    onSuccess: () => toast.success('User promoted to super admin'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
+    },
+  });
+}
+
+export function useOptimisticDemoteUser() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.post(`/admin/users/${id}/demote`),
-    onSuccess: () => {
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.users(), (prev = []) =>
+        prev.map((u: Any) => (u.id === id ? { ...u, role: 'admin' } : u)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.users(), context.previousData);
+      }
+      toast.error('Failed to demote user');
+    },
+    onSuccess: () => toast.success('User demoted'),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
-      toast.success('User demoted');
     },
   });
 }

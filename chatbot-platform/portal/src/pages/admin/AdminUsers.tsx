@@ -5,10 +5,13 @@
 
 import React, { useState } from 'react';
 import { Loader2, Search, ShieldCheck, ShieldOff } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import {
   useAdminUsers,
-  usePromoteUser,
-  useDemoteUser,
+  useOptimisticPromoteUser,
+  useOptimisticDemoteUser,
 } from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -98,22 +101,33 @@ const AdminUsers: React.FC = () => {
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
+  const [mutatingRowIds, setMutatingRowIds] = useState<Set<string>>(new Set());
 
   /* ---- Data ---- */
   const { data, isLoading, isError } = useAdminUsers();
 
   /* ---- Mutations ---- */
-  const promoteMutation = usePromoteUser();
-  const demoteMutation = useDemoteUser();
+  const promoteMutation = useOptimisticPromoteUser();
+  const demoteMutation = useOptimisticDemoteUser();
+
+  const addMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => new Set(prev).add(id));
+  const removeMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   /* ---- Confirm handler ---- */
   const handleConfirm = () => {
     if (!confirmAction) return;
-    if (confirmAction.type === 'promote') {
-      promoteMutation.mutate(confirmAction.user.id);
-    } else {
-      demoteMutation.mutate(confirmAction.user.id);
-    }
+    const userId = confirmAction.user.id;
+    addMutatingRow(userId);
+    const mutation = confirmAction.type === 'promote' ? promoteMutation : demoteMutation;
+    mutation.mutate(userId, {
+      onSettled: () => removeMutatingRow(userId),
+    });
     setConfirmAction(null);
   };
 
@@ -170,10 +184,7 @@ const AdminUsers: React.FC = () => {
       <Card variant="glass" className="overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-              <span className="ml-2 text-text-secondary">Loading users...</span>
-            </div>
+            <PageSkeleton variant="table" rows={5} />
           ) : isError ? (
             <div className="p-6 text-text-secondary">Failed to load users.</div>
           ) : filtered.length === 0 ? (
@@ -194,7 +205,12 @@ const AdminUsers: React.FC = () => {
               </TableHeader>
               <TableBody>
                 {filtered.map((user) => (
-                  <TableRow key={user.id}>
+                  <TableRow
+                    key={user.id}
+                    className={cn(
+                      mutatingRowIds.has(user.id) && 'opacity-60 pointer-events-none',
+                    )}
+                  >
                     <TableCell className="font-medium text-text-primary">{user.name}</TableCell>
                     <TableCell className="text-text-secondary">{user.email}</TableCell>
                     <TableCell>
@@ -261,10 +277,12 @@ const AdminUsers: React.FC = () => {
       {/* Confirm Dialog */}
       <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmAction?.type === 'promote' ? 'Promote to Super Admin' : 'Demote from Super Admin'}
-            </AlertDialogTitle>
+          <div className="relative">
+            <LoadingOverlay isLoading={isMutating} />
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {confirmAction?.type === 'promote' ? 'Promote to Super Admin' : 'Demote from Super Admin'}
+              </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAction?.type === 'promote' ? (
                 <>
@@ -284,18 +302,22 @@ const AdminUsers: React.FC = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isMutating}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirm}
+              disabled={isMutating}
               className={
                 confirmAction?.type === 'promote'
                   ? 'bg-accent-500 hover:bg-accent-600'
                   : 'bg-status-busy hover:bg-status-busy/90'
               }
             >
-              {confirmAction?.type === 'promote' ? 'Promote' : 'Demote'}
+              {isMutating ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : confirmAction?.type === 'promote' ? 'Promote' : 'Demote'}
             </AlertDialogAction>
           </AlertDialogFooter>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </div>

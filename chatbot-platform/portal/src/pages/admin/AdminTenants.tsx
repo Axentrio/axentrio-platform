@@ -6,10 +6,14 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2, Search, Plus } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
+import { InlineError } from '@/components/ui/inline-error';
 import {
   useAdminTenants,
-  useSuspendTenant,
-  useActivateTenant,
+  useOptimisticSuspendTenant,
+  useOptimisticActivateTenant,
   useCreateTenant,
 } from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
@@ -102,13 +106,15 @@ const AdminTenants: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<TenantStatus | 'all'>('all');
   const [showCreate, setShowCreate] = useState(false);
   const [newTenant, setNewTenant] = useState({ name: '', tier: 'free' as TenantTier, adminEmail: '' });
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [mutatingRowIds, setMutatingRowIds] = useState<Set<string>>(new Set());
 
   /* ---- Data ---- */
   const { data, isLoading, isError } = useAdminTenants();
 
   /* ---- Mutations ---- */
-  const suspendMutation = useSuspendTenant();
-  const activateMutation = useActivateTenant();
+  const suspendMutation = useOptimisticSuspendTenant();
+  const activateMutation = useOptimisticActivateTenant();
   const createMutation = useCreateTenant();
 
   /* ---- Derived list ---- */
@@ -124,6 +130,15 @@ const AdminTenants: React.FC = () => {
   });
 
   const isMutating = suspendMutation.isPending || activateMutation.isPending;
+
+  const addMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => new Set(prev).add(id));
+  const removeMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   /* ---- Render ---- */
   return (
@@ -184,10 +199,7 @@ const AdminTenants: React.FC = () => {
       <Card variant="glass" className="overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-              <span className="ml-2 text-text-secondary">Loading tenants...</span>
-            </div>
+            <PageSkeleton variant="table" rows={5} />
           ) : isError ? (
             <div className="p-6 text-text-secondary">Failed to load tenants.</div>
           ) : filtered.length === 0 ? (
@@ -206,7 +218,12 @@ const AdminTenants: React.FC = () => {
               </TableHeader>
               <TableBody>
                 {filtered.map((tenant) => (
-                  <TableRow key={tenant.id}>
+                  <TableRow
+                    key={tenant.id}
+                    className={cn(
+                      mutatingRowIds.has(tenant.id) && 'opacity-60 pointer-events-none',
+                    )}
+                  >
                     <TableCell>
                       <Link to={`/admin/tenants/${tenant.id}`} className="font-medium text-text-primary hover:text-primary-400 transition-colors">
                         {tenant.name}
@@ -234,7 +251,12 @@ const AdminTenants: React.FC = () => {
                           size="sm"
                           variant="outline"
                           disabled={isMutating}
-                          onClick={() => suspendMutation.mutate(tenant.id)}
+                          onClick={() => {
+                            addMutatingRow(tenant.id);
+                            suspendMutation.mutate(tenant.id, {
+                              onSettled: () => removeMutatingRow(tenant.id),
+                            });
+                          }}
                           className="text-status-busy border-status-busy/30 hover:bg-status-busy/10"
                         >
                           {suspendMutation.isPending ? (
@@ -248,7 +270,12 @@ const AdminTenants: React.FC = () => {
                           size="sm"
                           variant="outline"
                           disabled={isMutating}
-                          onClick={() => activateMutation.mutate(tenant.id)}
+                          onClick={() => {
+                            addMutatingRow(tenant.id);
+                            activateMutation.mutate(tenant.id, {
+                              onSettled: () => removeMutatingRow(tenant.id),
+                            });
+                          }}
                           className="text-status-online border-status-online/30 hover:bg-status-online/10"
                         >
                           {activateMutation.isPending ? (
@@ -279,81 +306,98 @@ const AdminTenants: React.FC = () => {
       {/* Create Tenant Dialog */}
       <AlertDialog open={showCreate} onOpenChange={(open) => !open && setShowCreate(false)}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Create New Tenant</AlertDialogTitle>
-            <AlertDialogDescription>
-              Create a new tenant organization. A Clerk organization will be created automatically.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <label className="text-sm font-medium text-text-secondary mb-1 block">
-                Tenant Name *
-              </label>
-              <Input
-                placeholder="e.g. Acme Corp"
-                value={newTenant.name}
-                onChange={(e) => setNewTenant((s) => ({ ...s, name: e.target.value }))}
-              />
+          <div className="relative">
+            <LoadingOverlay isLoading={createMutation.isPending} message="Creating tenant..." />
+            <AlertDialogHeader>
+              <AlertDialogTitle>Create New Tenant</AlertDialogTitle>
+              <AlertDialogDescription>
+                Create a new tenant organization. A Clerk organization will be created automatically.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-4 py-2">
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-1 block">
+                  Tenant Name *
+                </label>
+                <Input
+                  placeholder="e.g. Acme Corp"
+                  value={newTenant.name}
+                  onChange={(e) => setNewTenant((s) => ({ ...s, name: e.target.value }))}
+                  disabled={createMutation.isPending}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-1 block">Tier</label>
+                <Select
+                  value={newTenant.tier}
+                  onValueChange={(v) => setNewTenant((s) => ({ ...s, tier: v as TenantTier }))}
+                  disabled={createMutation.isPending}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="free">Free</SelectItem>
+                    <SelectItem value="pro">Pro</SelectItem>
+                    <SelectItem value="enterprise">Enterprise</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium text-text-secondary mb-1 block">
+                  Admin Email (optional)
+                </label>
+                <Input
+                  type="email"
+                  placeholder="admin@example.com"
+                  value={newTenant.adminEmail}
+                  onChange={(e) => setNewTenant((s) => ({ ...s, adminEmail: e.target.value }))}
+                  disabled={createMutation.isPending}
+                />
+                <p className="text-xs text-text-muted mt-1">
+                  If provided, this user will be invited as the tenant admin.
+                </p>
+              </div>
             </div>
-            <div>
-              <label className="text-sm font-medium text-text-secondary mb-1 block">Tier</label>
-              <Select
-                value={newTenant.tier}
-                onValueChange={(v) => setNewTenant((s) => ({ ...s, tier: v as TenantTier }))}
+            <InlineError message={createError} className="mt-2" />
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={createMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                disabled={!newTenant.name.trim() || createMutation.isPending}
+                onClick={() => {
+                  setCreateError(null);
+                  createMutation.mutate(
+                    {
+                      name: newTenant.name.trim(),
+                      tier: newTenant.tier,
+                      ...(newTenant.adminEmail.trim() && { adminEmail: newTenant.adminEmail.trim() }),
+                    } as Parameters<typeof createMutation.mutate>[0],
+                    {
+                      onSuccess: () => {
+                        setShowCreate(false);
+                        setNewTenant({ name: '', tier: 'free', adminEmail: '' });
+                        setCreateError(null);
+                      },
+                      onError: (error: any) => {
+                        setCreateError(
+                          error?.response?.data?.error?.message
+                          || error?.response?.data?.error
+                          || error?.message
+                          || 'Failed to create tenant'
+                        );
+                      },
+                    }
+                  );
+                }}
               >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="free">Free</SelectItem>
-                  <SelectItem value="pro">Pro</SelectItem>
-                  <SelectItem value="enterprise">Enterprise</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-text-secondary mb-1 block">
-                Admin Email (optional)
-              </label>
-              <Input
-                type="email"
-                placeholder="admin@example.com"
-                value={newTenant.adminEmail}
-                onChange={(e) => setNewTenant((s) => ({ ...s, adminEmail: e.target.value }))}
-              />
-              <p className="text-xs text-text-muted mt-1">
-                If provided, this user will be invited as the tenant admin.
-              </p>
-            </div>
+                {createMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  'Create'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!newTenant.name.trim() || createMutation.isPending}
-              onClick={() =>
-                createMutation.mutate(
-                  {
-                    name: newTenant.name.trim(),
-                    tier: newTenant.tier,
-                    ...(newTenant.adminEmail.trim() && { adminEmail: newTenant.adminEmail.trim() }),
-                  } as Parameters<typeof createMutation.mutate>[0],
-                  {
-                    onSuccess: () => {
-                      setShowCreate(false);
-                      setNewTenant({ name: '', tier: 'free', adminEmail: '' });
-                    },
-                  }
-                )
-              }
-            >
-              {createMutation.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                'Create'
-              )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </div>

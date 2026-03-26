@@ -7,6 +7,8 @@
 import React, { useState, useEffect } from 'react';
 import { Edit2, ExternalLink, Copy, Check, RefreshCw, Loader2 } from 'lucide-react';
 import { Modal } from '@components/Modal';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import type { Tenant } from '@app-types/index';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -103,12 +105,7 @@ const Tenants: React.FC = () => {
 
   // ---------- Loading / Error states ----------
   if (isLoading) {
-    return (
-      <div className="p-6 flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-        <span className="ml-2 text-text-secondary">Loading tenant...</span>
-      </div>
-    );
+    return <PageSkeleton variant="list" rows={3} />;
   }
 
   if (isError || !tenant) {
@@ -307,7 +304,8 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Edit Tenant" size="md">
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-4 relative">
+        <LoadingOverlay isLoading={!!isSaving} message="Saving changes..." />
         <div className="space-y-2">
           <Label htmlFor="tenant-name">Name</Label>
           <Input
@@ -316,6 +314,7 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
             value={formData.name}
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             required
+            disabled={isSaving}
           />
         </div>
 

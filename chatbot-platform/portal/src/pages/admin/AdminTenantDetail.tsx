@@ -19,11 +19,13 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { api } from '@services/apiClient';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import {
   useAdminTenantDetail,
   useAdminTenantAudit,
-  useSuspendTenant,
-  useActivateTenant,
+  useOptimisticSuspendTenant,
+  useOptimisticActivateTenant,
 } from '../../queries/useAdminQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { Card } from '@/components/ui/card';
@@ -128,8 +130,8 @@ const AdminTenantDetail: React.FC = () => {
   const { data, isLoading, isError } = useAdminTenantDetail(id ?? '');
   const { data: auditData } = useAdminTenantAudit(id ?? '');
 
-  const suspendMutation = useSuspendTenant();
-  const activateMutation = useActivateTenant();
+  const suspendMutation = useOptimisticSuspendTenant();
+  const activateMutation = useOptimisticActivateTenant();
 
   const rotateMutation = useMutation({
     mutationFn: () => api.post<{ apiKey: string }>(`/admin/tenants/${id}/api-key/rotate`),
@@ -147,11 +149,7 @@ const AdminTenantDetail: React.FC = () => {
   const auditLogs = (auditData as TenantDetailData['recentAuditLogs'] | undefined) ?? tenant?.recentAuditLogs ?? [];
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-      </div>
-    );
+    return <PageSkeleton variant="list" rows={4} />;
   }
 
   if (isError || !tenant) {
@@ -402,21 +400,25 @@ const AdminTenantDetail: React.FC = () => {
       {/* Rotate API Key Dialog */}
       <AlertDialog open={showRotateDialog} onOpenChange={(open) => !open && setShowRotateDialog(false)}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Rotate API Key</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will invalidate the current API key immediately. Any integrations using it will break until updated with the new key.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => rotateMutation.mutate()}
-              className="bg-status-busy hover:bg-status-busy/90"
-            >
-              {rotateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rotate Key'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
+          <div className="relative">
+            <LoadingOverlay isLoading={rotateMutation.isPending} message="Rotating API key..." />
+            <AlertDialogHeader>
+              <AlertDialogTitle>Rotate API Key</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will invalidate the current API key immediately. Any integrations using it will break until updated with the new key.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={rotateMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => rotateMutation.mutate()}
+                disabled={rotateMutation.isPending}
+                className="bg-status-busy hover:bg-status-busy/90"
+              >
+                {rotateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rotate Key'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </div>

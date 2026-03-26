@@ -90,36 +90,80 @@ export function useCancelInvite() {
   });
 }
 
-export function useUpdateMemberRole() {
+// --- Optimistic Mutations ---
+
+export function useOptimisticUpdateMemberRole() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ userId, role }: { userId: string; role: string }) =>
       api.patch(`/tenants/me/users/${userId}`, { role }),
-    onSuccess: () => {
+    onMutate: async ({ userId, role }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tenants.members() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.tenants.members());
+      queryClient.setQueryData<Any[]>(queryKeys.tenants.members(), (prev = []) =>
+        prev.map((m: Any) => (m.id === userId ? { ...m, role } : m)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.tenants.members(), context.previousData);
+      }
+      toast.error('Failed to update role');
+    },
+    onSuccess: () => toast.success('Role updated'),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.members() });
-      toast.success('Role updated');
     },
   });
 }
 
-export function useDeactivateMember() {
+export function useOptimisticDeactivateMember() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/deactivate`),
-    onSuccess: () => {
+    onMutate: async (userId: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tenants.members() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.tenants.members());
+      queryClient.setQueryData<Any[]>(queryKeys.tenants.members(), (prev = []) =>
+        prev.map((m: Any) => (m.id === userId ? { ...m, isActive: false } : m)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _userId, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.tenants.members(), context.previousData);
+      }
+      toast.error('Failed to deactivate member');
+    },
+    onSuccess: () => toast.success('Member deactivated'),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.members() });
-      toast.success('Member deactivated');
     },
   });
 }
 
-export function useReactivateMember() {
+export function useOptimisticReactivateMember() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (userId: string) => api.post(`/tenants/me/users/${userId}/reactivate`),
-    onSuccess: () => {
+    onMutate: async (userId: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tenants.members() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.tenants.members());
+      queryClient.setQueryData<Any[]>(queryKeys.tenants.members(), (prev = []) =>
+        prev.map((m: Any) => (m.id === userId ? { ...m, isActive: true } : m)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _userId, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.tenants.members(), context.previousData);
+      }
+      toast.error('Failed to reactivate member');
+    },
+    onSuccess: () => toast.success('Member reactivated'),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.members() });
-      toast.success('Member reactivated');
     },
   });
 }

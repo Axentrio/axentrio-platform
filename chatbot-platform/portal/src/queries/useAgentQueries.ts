@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, queryOptions, type QueryKey } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
@@ -54,24 +54,39 @@ export function useUpdateAgent() {
   });
 }
 
-// Optimistic update pattern: consumers can use mutation.variables.status + mutation.isPending
-// for UI-based optimistic rendering
-export function useUpdateAgentStatus() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch(`/agents/${id}/status`, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
-    },
-  });
-}
 
 export function useCreateAgent() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: Record<string, unknown>) => api.post('/agents', data),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
+    },
+  });
+}
+
+// --- Optimistic Mutations ---
+
+export function useOptimisticUpdateAgentStatus(queryKey: QueryKey) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      api.patch(`/agents/${id}/status`, { status }),
+    onMutate: async ({ id, status }) => {
+      await queryClient.cancelQueries({ queryKey });
+      const previousData = queryClient.getQueryData<Any[]>(queryKey);
+      queryClient.setQueryData<Any[]>(queryKey, (prev = []) =>
+        prev.map((a: Any) => (a.id === id ? { ...a, status } : a)),
+      );
+      return { previousData };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKey, context.previousData);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
     },
   });

@@ -4,7 +4,8 @@
  */
 
 import React, { useState } from 'react';
-import { Loader2, Search } from 'lucide-react';
+import { Search } from 'lucide-react';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { useAdminTenants, useAdminAuditLogs } from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -138,10 +139,7 @@ const AdminAuditLogs: React.FC = () => {
       <Card variant="glass" className="overflow-hidden">
         <CardContent className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-48">
-              <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-              <span className="ml-2 text-text-secondary">Loading audit logs...</span>
-            </div>
+            <PageSkeleton variant="table" rows={8} />
           ) : isError ? (
             <div className="p-6 text-text-secondary">Failed to load audit logs.</div>
           ) : filtered.length === 0 ? (

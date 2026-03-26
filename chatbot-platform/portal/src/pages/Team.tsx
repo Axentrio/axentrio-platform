@@ -5,13 +5,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { LoadingOverlay } from '@/components/ui/loading-overlay';
+import { InlineError } from '@/components/ui/inline-error';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
 import {
   useAgentList,
   useAgentShifts,
   useUpdateAgent,
-  useUpdateAgentStatus,
+  useOptimisticUpdateAgentStatus,
 } from '../queries/useAgentQueries';
 import { queryKeys } from '../queries/queryKeys';
 import {
@@ -20,9 +24,9 @@ import {
   useInviteMember,
   useResendInvite,
   useCancelInvite,
-  useUpdateMemberRole,
-  useDeactivateMember,
-  useReactivateMember,
+  useOptimisticUpdateMemberRole,
+  useOptimisticDeactivateMember,
+  useOptimisticReactivateMember,
 } from '../queries/useTenantQueries';
 import { Modal } from '@components/Modal';
 import type { Agent, AgentShift, UserStatus } from '@app-types/index';
@@ -112,7 +116,8 @@ const Team: React.FC = () => {
   // Fetch agents from API
   const { data: agentsData, isLoading: agentsLoading } = useAgentList();
 
-  const agents: Agent[] = (agentsData ?? []).map(mapApiAgent);
+  const agentsList = Array.isArray(agentsData) ? agentsData : (agentsData as any)?.data ?? [];
+  const agents: Agent[] = agentsList.map(mapApiAgent);
 
   // Fetch shifts for all visible agents
   const selectedShiftAgent = agents[0]; // shifts tab shows all; fetch per-agent if needed
@@ -142,8 +147,8 @@ const Team: React.FC = () => {
   // Mutation: update agent fields
   const updateAgentMutation = useUpdateAgent();
 
-  // Mutation: update agent status
-  const updateStatusMutation = useUpdateAgentStatus();
+  // Mutation: update agent status (optimistic)
+  const updateStatusMutation = useOptimisticUpdateAgentStatus(queryKeys.agents.list(undefined));
 
   const handleCreateAgent = () => {
     setEditingAgent(null);
@@ -186,19 +191,7 @@ const Team: React.FC = () => {
     : 0;
 
   if (agentsLoading) {
-    return (
-      <div className="p-6 space-y-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-surface-3 rounded w-1/4" />
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-24 bg-surface-3 rounded-xl" />
-            ))}
-          </div>
-          <div className="h-64 bg-surface-3 rounded-xl" />
-        </div>
-      </div>
-    );
+    return <PageSkeleton variant="list" rows={6} />;
   }
 
   return (
@@ -452,6 +445,8 @@ const OrgMembersPanel: React.FC = () => {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('agent');
   const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [mutatingRowIds, setMutatingRowIds] = useState<Set<string>>(new Set());
 
   // AlertDialog state for remove member
   const [removeMemberUserId, setRemoveMemberUserId] = useState<string | null>(null);
@@ -474,24 +469,43 @@ const OrgMembersPanel: React.FC = () => {
   const inviteMutation = useInviteMember();
 
   // Role change mutation — calls backend endpoint
-  const updateRoleMutation = useUpdateMemberRole();
+  const updateRoleMutation = useOptimisticUpdateMemberRole();
 
   const handleInvite = (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
+    setInviteError(null);
     inviteMutation.mutate({ email: inviteEmail.trim(), name: '', role: inviteRole }, {
       onSuccess: () => {
         setInviteEmail('');
         setShowInviteForm(false);
+        setInviteError(null);
+      },
+      onError: (error: any) => {
+        setInviteError(
+          error?.response?.data?.error?.message
+          || error?.response?.data?.error
+          || error?.message
+          || 'Failed to send invite'
+        );
       },
     });
   };
 
   // Deactivate mutation
-  const deactivateMutation = useDeactivateMember();
+  const deactivateMutation = useOptimisticDeactivateMember();
 
   // Reactivate mutation
-  const reactivateMutation = useReactivateMember();
+  const reactivateMutation = useOptimisticReactivateMember();
+
+  const addMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => new Set(prev).add(id));
+  const removeMutatingRow = (id: string) =>
+    setMutatingRowIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   const confirmRemoveMember = () => {
     if (removeMemberUserId) {
@@ -502,22 +516,15 @@ const OrgMembersPanel: React.FC = () => {
   };
 
   if (isLoading) {
-    return (
-      <Card variant="glass" className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-4 bg-surface-3 rounded w-1/4" />
-          <div className="h-12 bg-surface-3 rounded" />
-          <div className="h-12 bg-surface-3 rounded" />
-        </div>
-      </Card>
-    );
+    return <PageSkeleton variant="list" rows={4} />;
   }
 
   return (
     <div className="space-y-4">
       {/* Invite form */}
       {showInviteForm && (
-        <Card variant="glass" className="p-6">
+        <Card variant="glass" className="p-6 relative">
+          <LoadingOverlay isLoading={inviteMutation.isPending} message="Sending invite..." />
           <h3 className="text-lg font-semibold text-text-primary mb-4">Invite Member</h3>
           <form onSubmit={handleInvite} className="flex items-end gap-3">
             <div className="flex-1">
@@ -553,10 +560,12 @@ const OrgMembersPanel: React.FC = () => {
               type="button"
               variant="outline"
               onClick={() => setShowInviteForm(false)}
+              disabled={inviteMutation.isPending}
             >
               Cancel
             </Button>
           </form>
+          <InlineError message={inviteError} className="mt-2" />
         </Card>
       )}
 
@@ -589,7 +598,12 @@ const OrgMembersPanel: React.FC = () => {
               const joinedDate = new Date(member.createdAt).toLocaleDateString();
 
               return (
-                <TableRow key={member.id}>
+                <TableRow
+                  key={member.id}
+                  className={cn(
+                    mutatingRowIds.has(member.id) && 'opacity-60 pointer-events-none',
+                  )}
+                >
                   <TableCell>
                     <div className="flex items-center gap-3">
                       {member.avatarUrl ? (
@@ -612,19 +626,29 @@ const OrgMembersPanel: React.FC = () => {
                   </TableCell>
                   <TableCell className="text-text-secondary text-sm">{joinedDate}</TableCell>
                   <TableCell>
-                    <Select
-                      value={member.role}
-                      onValueChange={(value) => updateRoleMutation.mutate({ userId: member.id, role: value })}
-                    >
-                      <SelectTrigger className="w-[140px] h-8 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="supervisor">Supervisor</SelectItem>
-                        <SelectItem value="agent">Agent</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    {member.role === 'super_admin' ? (
+                      <span className="text-sm text-text-secondary capitalize">Super Admin</span>
+                    ) : (
+                      <Select
+                        value={member.role}
+                        onValueChange={(value) => {
+                          addMutatingRow(member.id);
+                          updateRoleMutation.mutate(
+                            { userId: member.id, role: value },
+                            { onSettled: () => removeMutatingRow(member.id) },
+                          );
+                        }}
+                      >
+                        <SelectTrigger className="w-[140px] h-8 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="admin">Admin</SelectItem>
+                          <SelectItem value="supervisor">Supervisor</SelectItem>
+                          <SelectItem value="agent">Agent</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div className="flex items-center gap-2">
@@ -632,8 +656,13 @@ const OrgMembersPanel: React.FC = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => reactivateMutation.mutate(member.id)}
-                          disabled={reactivateMutation.isPending}
+                          onClick={() => {
+                            addMutatingRow(member.id);
+                            reactivateMutation.mutate(member.id, {
+                              onSettled: () => removeMutatingRow(member.id),
+                            });
+                          }}
+                          disabled={reactivateMutation.isPending || mutatingRowIds.has(member.id)}
                           className="text-status-online border-status-online/30 hover:bg-status-online/10"
                         >
                           Reactivate

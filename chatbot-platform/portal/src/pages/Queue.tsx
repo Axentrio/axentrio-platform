@@ -15,8 +15,10 @@ import {
   Filter,
   ArrowRight
 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useHandoffsQuery, useAcceptHandoff, useRejectHandoff } from '../queries/useHandoffQueries';
 import { PriorityBadge } from '@components/StatusBadge';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { useNotificationSound } from '@websocket/notificationSound';
 import type { HandoffRequest, HandoffPriority } from '@app-types/index';
 import { Card } from '@/components/ui/card';
@@ -140,9 +142,7 @@ const Queue: React.FC = () => {
       {/* Queue List */}
       <div className="flex-1 overflow-y-auto p-6">
         {isLoading && filteredHandoffs.length === 0 ? (
-          <div className="flex items-center justify-center h-64">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-600" />
-          </div>
+          <PageSkeleton variant="list" rows={5} />
         ) : filteredHandoffs.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 text-text-secondary">
             <Headphones className="w-16 h-16 mb-4 text-text-muted" />
@@ -228,15 +228,25 @@ const Queue: React.FC = () => {
                           variant="outline"
                           size="sm"
                           onClick={() => handleDecline(handoff.id)}
+                          disabled={rejectHandoffMutation.isPending || acceptHandoffMutation.isPending}
                         >
-                          Decline
+                          {rejectHandoffMutation.isPending ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : 'Decline'}
                         </Button>
                         <Button
                           size="sm"
                           onClick={() => handleAccept(handoff)}
+                          disabled={acceptHandoffMutation.isPending || rejectHandoffMutation.isPending}
                         >
-                          Accept
-                          <ArrowRight className="w-4 h-4 ml-2" />
+                          {acceptHandoffMutation.isPending ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <>
+                              Accept
+                              <ArrowRight className="w-4 h-4 ml-2" />
+                            </>
+                          )}
                         </Button>
                       </div>
                     </div>

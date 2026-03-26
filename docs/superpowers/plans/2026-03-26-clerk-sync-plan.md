@@ -32,6 +32,57 @@
 
 ---
 
+## Task 0: Add clerkUserId to RequestUser type
+
+**Files:**
+- Modify: `api/src/types/index.ts`
+
+- [ ] **Step 1: Add clerkUserId to RequestUser interface**
+
+In `api/src/types/index.ts`, find the `RequestUser` interface and add `clerkUserId`:
+
+```typescript
+export interface RequestUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  tenantId: string;
+  clerkUserId?: string; // Added for Clerk sync operations
+  type?: string;
+}
+```
+
+Also update `attachToRequest` in `clerk.middleware.ts` to populate `req.user.clerkUserId`:
+
+```typescript
+// In attachToRequest function, add:
+req.user = {
+  ...req.user,
+  clerkUserId,
+} as RequestUser;
+```
+
+- [ ] **Step 2: Export cache invalidation function from clerk.middleware.ts**
+
+In `api/src/middleware/clerk.middleware.ts`, add an exported function after the cache helpers (~line 53):
+
+```typescript
+export function invalidateProvisionCache(orgId: string, userId: string): void {
+  idCache.delete(`${orgId}:${userId}`);
+}
+```
+
+This will be called by admin routes after role/status changes.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add api/src/types/index.ts api/src/middleware/clerk.middleware.ts
+git commit -m "feat: add clerkUserId to RequestUser and export cache invalidation"
+```
+
+---
+
 ## Task 1: Fix the autoProvision Role-Overwrite Bug
 
 **Files:**
@@ -55,36 +106,19 @@ Read the full function to confirm the current flow. The change is:
 In the new-user role determination block (lines 160-168), replace:
 
 ```typescript
-// Before (paginated list — may miss users in large orgs):
+// Use list with limit:100 to handle larger orgs
+// Note: @clerk/backend v3.2.2 does NOT have a single-member lookup method
 const memberships = await clerkClient.organizations.getOrganizationMembershipList({
   organizationId: clerkOrgId,
+  limit: 100,
 });
 const membership = memberships.data?.find((m) => m.publicUserData?.userId === clerkUserId);
-
-// After (single-member lookup — always works):
-const membership = await clerkClient.organizations.getOrganizationMembership({
-  organizationId: clerkOrgId,
-  userId: clerkUserId,
-});
-```
-
-**Important:** Verify this method exists in `@clerk/express` v2.0.6 / `@clerk/backend` v3.2.2. Check the SDK types:
-```bash
-cd chatbot-platform/api && grep -r "getOrganizationMembership" node_modules/@clerk/backend/dist/ --include="*.d.ts" | head -5
-```
-If the single-member method doesn't exist in this version, keep the list approach but add `limit: 100` to handle larger orgs, and document the limitation.
-
-Then update the role extraction:
-```typescript
-// Before:
 if (membership?.role === 'org:admin') role = 'admin';
 else if (membership?.role === 'org:supervisor') role = 'supervisor';
-
-// After:
-if (membership.role === 'org:admin') role = 'admin';
-else if (membership.role === 'org:supervisor') role = 'supervisor';
 // All other Clerk roles (org:member, etc.) → 'agent' (default)
 ```
+
+**Known limitation:** For orgs with 100+ members, the list may not include the user. This only affects the Clerk-role fallback path (when no PendingInvite exists), which is a backwards-compat path for Clerk Dashboard invites. For orgs this large, use PendingInvite-based invites exclusively.
 
 - [ ] **Step 3: Verify TypeScript compiles**
 
@@ -140,12 +174,12 @@ export class PendingInvite {
   @Column({ type: 'varchar', length: 50 })
   role!: string;
 
-  @Column({ type: 'uuid', name: 'invited_by' })
-  invitedBy!: string;
+  @Column({ type: 'uuid', name: 'invited_by', nullable: true })
+  invitedBy?: string;
 
   @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
   @JoinColumn({ name: 'invited_by' })
-  inviter!: User;
+  inviter?: User;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
@@ -194,7 +228,7 @@ export class CreatePendingInvite<timestamp> implements MigrationInterface {
         tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         email VARCHAR(255) NOT NULL,
         role VARCHAR(50) NOT NULL,
-        invited_by UUID NOT NULL REFERENCES users(id) ON DELETE SET NULL,
+        invited_by UUID REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         expires_at TIMESTAMP NOT NULL,
         CONSTRAINT uq_pending_invite_tenant_email UNIQUE (tenant_id, email)
@@ -253,7 +287,7 @@ try {
 const pendingInvite = await pendingInviteRepo
   .createQueryBuilder('pi')
   .where('pi.tenantId = :tenantId', { tenantId: tenant.id })
-  .andWhere('LOWER(pi.email) IN (:...emails)', { emails: clerkEmails })
+  .andWhere('pi.email IN (:...emails)', { emails: clerkEmails })
   .andWhere('pi.expiresAt > NOW()')
   .getOne();
 ```
@@ -278,13 +312,13 @@ if (pendingInvite) {
 } else {
   // Backwards compat: fall back to Clerk membership role for Clerk Dashboard invites
   try {
-    // Use single-member lookup (see Task 1 Step 2)
-    const membership = await clerkClient.organizations.getOrganizationMembership({
+    const memberships = await clerkClient.organizations.getOrganizationMembershipList({
       organizationId: clerkOrgId,
-      userId: clerkUserId,
+      limit: 100,
     });
-    if (membership.role === 'org:admin') role = 'admin';
-    else if (membership.role === 'org:supervisor') role = 'supervisor';
+    const membership = memberships.data?.find((m) => m.publicUserData?.userId === clerkUserId);
+    if (membership?.role === 'org:admin') role = 'admin';
+    else if (membership?.role === 'org:supervisor') role = 'supervisor';
   } catch {
     logger.warn('Could not fetch Clerk membership role', { clerkUserId, clerkOrgId });
   }
@@ -380,10 +414,8 @@ export async function updateClerkOrganization(
   updates: { name?: string; publicMetadata?: Record<string, unknown> }
 ): Promise<boolean> {
   try {
-    await clerkClient.organizations.updateOrganization({
-      organizationId: clerkOrgId,
-      ...updates,
-    });
+    // Note: updateOrganization uses positional args in @clerk/backend v3.2.2
+    await clerkClient.organizations.updateOrganization(clerkOrgId, updates);
     logger.info('Updated Clerk organization', { clerkOrgId, updates: Object.keys(updates) });
     return true;
   } catch (error) {
@@ -462,14 +494,19 @@ router.post('/tenants', async (req: Request, res: Response) => {
     } catch (dbError) {
       // Compensating transaction: delete the Clerk org
       logger.error('Failed to create tenant in DB, cleaning up Clerk org', { error: dbError });
-      // Best-effort cleanup — no await needed
-      updateClerkOrganization(clerkOrg.id, { publicMetadata: { deleted: true } });
+      try {
+        await clerkClient.organizations.deleteOrganization(clerkOrg.id);
+      } catch (cleanupErr) {
+        logger.error('Failed to clean up Clerk org after DB failure — manual cleanup needed', {
+          clerkOrgId: clerkOrg.id, error: cleanupErr,
+        });
+      }
       return res.status(500).json({ error: 'Failed to create tenant' });
     }
 
     // Step 3: Invite initial admin if email provided
     if (adminEmail) {
-      await inviteToClerkOrganization(clerkOrg.id, adminEmail, req.user?.clerkUserId);
+      await inviteToClerkOrganization(clerkOrg.id, adminEmail, (req as any).clerkUserId);
 
       const inviteRepo = AppDataSource.getRepository(PendingInvite);
       await inviteRepo.save(inviteRepo.create({
@@ -542,7 +579,7 @@ router.post('/tenants/:id/invite', async (req: Request, res: Response) => {
     const invited = await inviteToClerkOrganization(
       tenant.clerkOrgId,
       email,
-      req.user?.clerkUserId
+      (req as any).clerkUserId
     );
     if (!invited) {
       return res.status(502).json({ error: 'Failed to send invite via Clerk' });
@@ -654,7 +691,7 @@ router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
         where: { id: user.tenantId },
       });
       if (tenant?.clerkOrgId) {
-        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, req.user?.clerkUserId);
+        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, (req as any).clerkUserId);
       }
     }
 
@@ -780,6 +817,7 @@ In `api/src/routes/tenants.ts`, add:
 ```typescript
 import { inviteToClerkOrganization } from '../services/clerk-sync.service';
 import { PendingInvite } from '../database/entities/PendingInvite';
+import { invalidateProvisionCache } from '../middleware/clerk.middleware';
 
 // POST /tenants/me/invite — tenant admin invites a user
 router.post('/me/invite', requireAdmin, async (req: Request, res: Response) => {
@@ -803,7 +841,7 @@ router.post('/me/invite', requireAdmin, async (req: Request, res: Response) => {
     const invited = await inviteToClerkOrganization(
       tenant.clerkOrgId,
       email,
-      req.user?.clerkUserId
+      (req as any).clerkUserId
     );
     if (!invited) {
       return res.status(502).json({ error: 'Failed to send invite' });
@@ -856,9 +894,13 @@ router.patch('/me/users/:userId', requireAdmin, async (req: Request, res: Respon
     user.role = role;
     await userRepo.save(user);
 
-    // Invalidate autoProvision cache for this user
-    // Read clerk.middleware.ts to find the cache key pattern and delete it
-    // Key format: `${clerkOrgId}:${clerkUserId}`
+    // Invalidate autoProvision cache so the role change takes effect immediately
+    if (user.clerkUserId) {
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: req.tenantId } });
+      if (tenant?.clerkOrgId) {
+        invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+      }
+    }
 
     logger.info('Tenant admin changed user role', {
       userId: user.id, newRole: role, changedBy: req.userId,
@@ -1055,8 +1097,9 @@ git commit -m "feat: rewire Team page from Clerk SDK to backend invite/role endp
 All tasks are sequential:
 
 ```
-Task 1:  Fix role-overwrite bug (critical foundation)
-  → Task 2:  PendingInvite entity
+Task 0:  Add clerkUserId to RequestUser + export cache invalidation
+  → Task 1:  Fix role-overwrite bug (critical foundation)
+    → Task 2:  PendingInvite entity
     → Task 3:  PendingInvite migration
       → Task 4:  PendingInvite lookup in autoProvision
         → Task 5:  Clerk sync service
@@ -1071,6 +1114,6 @@ Task 1:  Fix role-overwrite bug (critical foundation)
                           → Task 14: E2E verification
 ```
 
-**Phase 1 boundary:** After Task 8, the core system works — roles persist, tenants are created with Clerk orgs, users can be invited and deactivated.
+**Phase 1 boundary:** After Task 8, the core system works — roles persist, tenants are created with Clerk orgs, users can be invited (by super admin) and deactivated. **Known Phase 1 limitation:** The existing Team page still uses Clerk's frontend SDK for invites, meaning tenant-admin invites won't create PendingInvite records and new users will fall back to Clerk role mapping. This is fixed in Phase 2 (Tasks 11 + 13).
 
 **Phase 2 boundary:** Tasks 9-13 add name sync, suspension, and Team page rewiring.

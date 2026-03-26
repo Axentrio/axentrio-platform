@@ -13,6 +13,7 @@ import {
   useUpdateAgent,
   useUpdateAgentStatus,
 } from '../queries/useAgentQueries';
+import { queryKeys } from '../queries/queryKeys';
 import {
   useTenantMembers,
   useTenantInvites,
@@ -120,7 +121,7 @@ const Team: React.FC = () => {
 
   // Fetch performance for each agent (aggregated)
   const { data: performanceMap } = useQuery({
-    queryKey: ['agents', 'performance', agents.map((a) => a.id).join(',')],
+    queryKey: [...queryKeys.agents.all(), 'performance-batch', agents.map((a) => a.id).join(',')],
     queryFn: async () => {
       const results: Record<string, PerformanceResponse> = {};
       await Promise.all(

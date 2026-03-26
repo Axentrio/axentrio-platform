@@ -25,6 +25,7 @@ import {
   useSuspendTenant,
   useActivateTenant,
 } from '../../queries/useAdminQueries';
+import { queryKeys } from '../../queries/queryKeys';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -135,7 +136,7 @@ const AdminTenantDetail: React.FC = () => {
     onSuccess: (result) => {
       setRevealedApiKey(result.apiKey);
       setShowApiKey(true);
-      queryClient.invalidateQueries({ queryKey: ['admin', 'tenant-detail', id] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(id ?? '') });
       toast.success('API key rotated');
       setShowRotateDialog(false);
     },

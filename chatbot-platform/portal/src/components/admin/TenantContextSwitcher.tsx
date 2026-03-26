@@ -21,14 +21,16 @@ export function TenantContextSwitcher() {
   const { activeTenant, setActiveTenant, clearTenant } = useTenantContextStore();
   const [isOpen, setIsOpen] = useState(false);
 
-  // Only render for super admins
-  if (!user || user.role !== 'super_admin') return null;
+  const isSuperAdmin = user?.role === 'super_admin';
 
   const { data: tenants } = useQuery<TenantsResponse>({
     queryKey: ['admin-tenants-switcher'],
     queryFn: () => api.get('/admin/tenants?limit=50'),
-    enabled: true,
+    enabled: isSuperAdmin,
   });
+
+  // Only render for super admins
+  if (!isSuperAdmin) return null;
 
   if (activeTenant) {
     return (

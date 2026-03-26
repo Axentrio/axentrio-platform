@@ -37,6 +37,25 @@ export async function inviteToClerkOrganization(
   }
 }
 
+export async function addMemberToClerkOrganization(
+  clerkOrgId: string,
+  clerkUserId: string,
+  role: string = 'org:admin'
+): Promise<boolean> {
+  try {
+    await clerkClient.organizations.createOrganizationMembership({
+      organizationId: clerkOrgId,
+      userId: clerkUserId,
+      role,
+    });
+    logger.info('Added member to Clerk organization', { clerkOrgId, clerkUserId, role });
+    return true;
+  } catch (error) {
+    logger.error('Failed to add member to Clerk org', { error, clerkOrgId, clerkUserId });
+    return false;
+  }
+}
+
 export async function removeFromClerkOrganization(
   clerkOrgId: string,
   clerkUserId: string

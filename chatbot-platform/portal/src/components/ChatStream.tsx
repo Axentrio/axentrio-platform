@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { Search, MessageSquare, Clock, User } from 'lucide-react';
-import { useChats } from '@hooks/useChats';
+import { useChatsQuery } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
 import { TenantSelector } from './TenantSelector';
 import { useDebounce } from '@hooks/useDebounce';
@@ -50,13 +50,12 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  const { chats, isLoading, error, refresh } = useChats({
+  const { chats, isLoading, error, refetch: refresh } = useChatsQuery({
     filters: {
       status: statusFilter === 'all' ? undefined : statusFilter,
       tenantId: tenantFilter,
       search: debouncedSearch || undefined,
     },
-    autoRefresh: true,
   });
 
   const formatTime = (dateString?: string) => {

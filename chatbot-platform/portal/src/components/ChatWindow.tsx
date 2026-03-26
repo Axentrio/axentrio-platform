@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, MoreVertical, Phone, User } from 'lucide-react';
-import { useChat } from '@hooks/useChat';
+import { useChatDetail } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { ChatStatusBadge } from './StatusBadge';
 import { TypingIndicator, CompactTypingIndicator } from './TypingIndicator';
@@ -32,8 +32,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const { messages, typingUsers, sendMessage, sendTyping } = useChat({
-    chatId: chat.id,
+  const { messages, typingUsers, sendMessage, sendTyping } = useChatDetail(chat.id, {
     enableSound: true,
   });
 

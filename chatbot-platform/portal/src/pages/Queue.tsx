@@ -15,7 +15,7 @@ import {
   Filter,
   ArrowRight
 } from 'lucide-react';
-import { useHandoffs } from '@hooks/useHandoffs';
+import { useHandoffsQuery, useAcceptHandoff, useRejectHandoff } from '../queries/useHandoffQueries';
 import { PriorityBadge } from '@components/StatusBadge';
 import { useNotificationSound } from '@websocket/notificationSound';
 import type { HandoffRequest, HandoffPriority } from '@app-types/index';
@@ -34,10 +34,9 @@ const priorityOrder: HandoffPriority[] = ['urgent', 'high', 'medium', 'low'];
 
 const Queue: React.FC = () => {
   const navigate = useNavigate();
-  const { handoffs, pendingCount, isLoading, acceptHandoff, declineHandoff } = useHandoffs({
-    status: 'pending',
-    autoRefresh: true,
-  });
+  const { handoffs, pendingCount, isLoading } = useHandoffsQuery('pending');
+  const acceptHandoffMutation = useAcceptHandoff();
+  const rejectHandoffMutation = useRejectHandoff();
   useNotificationSound();
 
   const [filterPriority, setFilterPriority] = useState<HandoffPriority | 'all'>('all');
@@ -58,7 +57,7 @@ const Queue: React.FC = () => {
 
   const handleAccept = async (handoff: HandoffRequest) => {
     try {
-      await acceptHandoff(handoff.id);
+      await acceptHandoffMutation.mutateAsync(handoff.id);
       navigate(`/takeover/${handoff.chatId}`);
     } catch (error) {
       console.error('Failed to accept handoff:', error);
@@ -67,7 +66,7 @@ const Queue: React.FC = () => {
 
   const handleDecline = async (handoffId: string) => {
     try {
-      await declineHandoff(handoffId, 'Agent unavailable');
+      await rejectHandoffMutation.mutateAsync({ handoffId, reason: 'Agent unavailable' });
     } catch (error) {
       console.error('Failed to decline handoff:', error);
     }

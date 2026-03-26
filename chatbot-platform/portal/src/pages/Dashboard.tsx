@@ -15,8 +15,8 @@ import {
   Headphones,
   ArrowRight
 } from 'lucide-react';
-import { useHandoffs } from '@hooks/useHandoffs';
-import { useChats } from '@hooks/useChats';
+import { useHandoffsQuery } from '../queries/useHandoffQueries';
+import { useChatsQuery } from '../queries/useChatQueries';
 import { ChatStatusBadge } from '@components/StatusBadge';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -80,8 +80,8 @@ const PerformanceSkeleton: React.FC = () => (
 
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { handoffs, pendingCount } = useHandoffs({ status: 'pending' });
-  const { chats } = useChats({ filters: { status: 'handsoff' }, autoRefresh: true });
+  const { handoffs, pendingCount } = useHandoffsQuery('pending');
+  const { chats } = useChatsQuery({ filters: { status: 'handsoff' } });
 
   const {
     data: rawDashboard,

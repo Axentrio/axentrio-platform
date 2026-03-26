@@ -510,6 +510,10 @@ router.post(
       .orUpdate(['role', 'invited_by', 'created_at', 'expires_at'], ['tenant_id', 'email'])
       .execute();
 
+    // Fetch the saved invite to get its ID for the audit log
+    const savedInvite = await inviteRepo.findOne({ where: { tenantId: tenant.id, email: email.toLowerCase() } });
+    await logAudit(req.userId!, 'invite.sent', 'invite', savedInvite?.id ?? tenant.id, tenantId, { email, role });
+
     res.json({ success: true, message: 'Invitation sent' });
   })
 );
@@ -651,6 +655,114 @@ router.post(
 
     logger.info('Reactivated user', { userId: user.id, tenantId, reactivatedBy: req.userId });
     return res.json({ success: true });
+  })
+);
+
+/**
+ * List pending invites for current tenant
+ * GET /api/v1/tenants/me/pending-invites
+ */
+router.get(
+  '/me/pending-invites',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+
+    const invites = await AppDataSource.getRepository(PendingInvite)
+      .find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+
+    // Resolve inviter names
+    const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];
+    const inviters = inviterIds.length > 0
+      ? await AppDataSource.getRepository(User)
+          .createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: inviterIds })
+          .getMany()
+      : [];
+    const inviterMap = new Map(inviters.map(u => [u.id, { name: u.name, email: u.email }]));
+
+    const data = invites.map(inv => ({
+      id: inv.id,
+      email: inv.email,
+      role: inv.role,
+      invitedBy: inv.invitedBy ? inviterMap.get(inv.invitedBy) ?? null : null,
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      isExpired: new Date() > inv.expiresAt,
+    }));
+
+    return res.json({ success: true, data });
+  })
+);
+
+/**
+ * Resend a pending invite
+ * POST /api/v1/tenants/me/pending-invites/:id/resend
+ */
+router.post(
+  '/me/pending-invites/:id/resend',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+
+    const invite = await inviteRepo.findOne({
+      where: { id: req.params.id, tenantId },
+    });
+
+    if (!invite) {
+      return res.status(404).json({ error: 'Invite not found' });
+    }
+
+    // Re-send Clerk invitation
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (!tenant?.clerkOrgId) {
+      return res.status(400).json({ error: 'Tenant has no Clerk organization linked' });
+    }
+
+    const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+    if (!sent) {
+      return res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+    }
+
+    // Reset expiry
+    invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    await inviteRepo.save(invite);
+
+    await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
+
+    return res.json({ success: true, message: 'Invite resent' });
+  })
+);
+
+/**
+ * Cancel a pending invite
+ * DELETE /api/v1/tenants/me/pending-invites/:id
+ */
+router.delete(
+  '/me/pending-invites/:id',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+
+    const invite = await inviteRepo.findOne({
+      where: { id: req.params.id, tenantId },
+    });
+
+    if (!invite) {
+      return res.status(404).json({ error: 'Invite not found' });
+    }
+
+    await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
+
+    await inviteRepo.remove(invite);
+
+    return res.json({ success: true, message: 'Invite cancelled' });
   })
 );
 

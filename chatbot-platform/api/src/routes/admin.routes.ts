@@ -719,4 +719,39 @@ router.get('/audit-logs/export', async (req: Request, res: Response) => {
   }
 });
 
+// GET /admin/tenants/:id/pending-invites — list pending invites for a tenant
+router.get('/tenants/:id/pending-invites', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.params.id;
+
+    const invites = await AppDataSource.getRepository(PendingInvite)
+      .find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+
+    const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];
+    const inviters = inviterIds.length > 0
+      ? await AppDataSource.getRepository(User)
+          .createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: inviterIds })
+          .getMany()
+      : [];
+    const inviterMap = new Map(inviters.map(u => [u.id, { name: u.name, email: u.email }]));
+
+    const data = invites.map(inv => ({
+      id: inv.id,
+      email: inv.email,
+      role: inv.role,
+      invitedBy: inv.invitedBy ? inviterMap.get(inv.invitedBy) ?? null : null,
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      isExpired: new Date() > inv.expiresAt,
+    }));
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    logger.error('Failed to list tenant pending invites', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

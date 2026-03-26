@@ -78,17 +78,15 @@ export async function createTestSession(
 
 export async function createTestParticipant(
   sessionId: string,
-  tenantId: string,
   overrides: Partial<Participant> = {},
 ): Promise<Participant> {
   const repo = AppDataSource.getRepository(Participant);
   return repo.save(
     repo.create({
       sessionId,
-      tenantId,
-      participantType: 'visitor',
-      participantId: `visitor-${crypto.randomBytes(4).toString('hex')}`,
+      type: 'user',
       name: 'Test Visitor',
+      joinedAt: new Date(),
       ...overrides,
     }),
   );

@@ -19,6 +19,7 @@ import { ProtectedRoute, AdminRoute, SupervisorRoute } from '@auth/ProtectedRout
 
 // Layout
 import { Sidebar } from '@components/Sidebar';
+import { TenantContextSwitcher } from '@components/admin/TenantContextSwitcher';
 
 // Pages
 import Dashboard from '@pages/Dashboard';
@@ -51,15 +52,15 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         <Sidebar />
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="md:hidden bg-surface-0 border-b border-edge px-4 py-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
-                <span className="text-white font-bold">H</span>
-              </div>
-              <span className="font-bold text-text-primary">HandsOff</span>
+        <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 md:hidden">
+            <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
+              <span className="text-white font-bold">H</span>
             </div>
+            <span className="font-bold text-text-primary">HandsOff</span>
           </div>
+          <div className="hidden md:block" />
+          <TenantContextSwitcher />
         </div>
         <main className="flex-1 overflow-hidden">
           {children}

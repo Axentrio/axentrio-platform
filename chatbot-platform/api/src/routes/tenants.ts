@@ -575,18 +575,21 @@ router.post(
 
     // Cannot deactivate yourself
     if (userId === req.userId) {
-      return res.status(400).json({ error: 'Cannot deactivate yourself' });
+      res.status(400).json({ error: 'Cannot deactivate yourself' });
+      return;
     }
 
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({ where: { id: userId, tenantId } });
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found in this tenant' });
+      res.status(404).json({ error: 'User not found in this tenant' });
+      return;
     }
 
     if (!user.isActive) {
-      return res.status(400).json({ error: 'User is already deactivated' });
+      res.status(400).json({ error: 'User is already deactivated' });
+      return;
     }
 
     // Cannot deactivate the last active admin
@@ -595,7 +598,8 @@ router.post(
         where: { tenantId, role: 'admin' as const, isActive: true },
       });
       if (activeAdminCount <= 1) {
-        return res.status(400).json({ error: 'Cannot deactivate the last active admin' });
+        res.status(400).json({ error: 'Cannot deactivate the last active admin' });
+        return;
       }
     }
 
@@ -613,7 +617,7 @@ router.post(
     await logAudit(req.userId!, 'user.deactivated', 'user', user.id, tenantId);
 
     logger.info('Deactivated user', { userId: user.id, tenantId, deactivatedBy: req.userId });
-    return res.json({ success: true });
+    res.json({ success: true });
   })
 );
 
@@ -633,11 +637,13 @@ router.post(
     const user = await userRepo.findOne({ where: { id: userId, tenantId } });
 
     if (!user) {
-      return res.status(404).json({ error: 'User not found in this tenant' });
+      res.status(404).json({ error: 'User not found in this tenant' });
+      return;
     }
 
     if (user.isActive) {
-      return res.status(400).json({ error: 'User is already active' });
+      res.status(400).json({ error: 'User is already active' });
+      return;
     }
 
     user.isActive = true;
@@ -654,7 +660,7 @@ router.post(
     await logAudit(req.userId!, 'user.reactivated', 'user', user.id, tenantId);
 
     logger.info('Reactivated user', { userId: user.id, tenantId, reactivatedBy: req.userId });
-    return res.json({ success: true });
+    res.json({ success: true });
   })
 );
 
@@ -693,7 +699,7 @@ router.get(
       isExpired: new Date() > inv.expiresAt,
     }));
 
-    return res.json({ success: true, data });
+    res.json({ success: true, data });
   })
 );
 
@@ -714,18 +720,21 @@ router.post(
     });
 
     if (!invite) {
-      return res.status(404).json({ error: 'Invite not found' });
+      res.status(404).json({ error: 'Invite not found' });
+      return;
     }
 
     // Re-send Clerk invitation
     const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
     if (!tenant?.clerkOrgId) {
-      return res.status(400).json({ error: 'Tenant has no Clerk organization linked' });
+      res.status(400).json({ error: 'Tenant has no Clerk organization linked' });
+      return;
     }
 
     const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
     if (!sent) {
-      return res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+      res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+      return;
     }
 
     // Reset expiry
@@ -734,7 +743,7 @@ router.post(
 
     await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
 
-    return res.json({ success: true, message: 'Invite resent' });
+    res.json({ success: true, message: 'Invite resent' });
   })
 );
 
@@ -755,14 +764,15 @@ router.delete(
     });
 
     if (!invite) {
-      return res.status(404).json({ error: 'Invite not found' });
+      res.status(404).json({ error: 'Invite not found' });
+      return;
     }
 
     await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
 
     await inviteRepo.remove(invite);
 
-    return res.json({ success: true, message: 'Invite cancelled' });
+    res.json({ success: true, message: 'Invite cancelled' });
   })
 );
 

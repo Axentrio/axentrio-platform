@@ -10,8 +10,10 @@ import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../mi
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
 import {
   createClerkOrganization,
+  addMemberToClerkOrganization,
   inviteToClerkOrganization,
   removeFromClerkOrganization,
   deleteClerkOrganization,
@@ -117,6 +119,7 @@ router.post('/tenants', async (req: Request, res: Response) => {
         settings,
       });
       await repo.save(tenant);
+      await logAudit(req.userId!, 'tenant.created', 'tenant', tenant.id, tenant.id, { name, tier: tier || 'free' });
     } catch (dbError) {
       // Compensating transaction: delete the Clerk org
       logger.error('Failed to create tenant in DB, cleaning up Clerk org', { error: dbError });
@@ -124,9 +127,17 @@ router.post('/tenants', async (req: Request, res: Response) => {
       return res.status(500).json({ error: 'Failed to create tenant' });
     }
 
-    // Step 3: Invite initial admin if email provided
+    // Step 3: Add the creating super admin as org admin so they can manage & invite
+    if (req.user?.clerkUserId) {
+      await addMemberToClerkOrganization(clerkOrg.id, req.user.clerkUserId, 'org:admin');
+    }
+
+    // Step 4: Invite initial admin if email provided
     if (adminEmail) {
-      await inviteToClerkOrganization(clerkOrg.id, adminEmail, req.user?.clerkUserId);
+      const invited = await inviteToClerkOrganization(clerkOrg.id, adminEmail, req.user?.clerkUserId);
+      if (!invited) {
+        logger.warn('Clerk invite failed, PendingInvite still created for auto-provision', { adminEmail });
+      }
 
       const inviteRepo = AppDataSource.getRepository(PendingInvite);
       await inviteRepo.save(inviteRepo.create({
@@ -162,6 +173,7 @@ router.patch('/tenants/:id', async (req: Request, res: Response) => {
     if (settings) tenant.settings = { ...tenant.settings, ...settings };
 
     await repo.save(tenant);
+    await logAudit(req.userId!, 'tenant.updated', 'tenant', tenant.id, tenant.id, { fields: Object.keys(req.body) });
 
     // Sync name change to Clerk
     if (name && tenant.clerkOrgId) {
@@ -187,6 +199,7 @@ router.post('/tenants/:id/suspend', async (req: Request, res: Response) => {
 
     tenant.status = 'suspended';
     await repo.save(tenant);
+    await logAudit(req.userId!, 'tenant.suspended', 'tenant', tenant.id, tenant.id);
 
     if (tenant.clerkOrgId) {
       await updateClerkOrganization(tenant.clerkOrgId, {
@@ -213,6 +226,7 @@ router.post('/tenants/:id/activate', async (req: Request, res: Response) => {
 
     tenant.status = 'active';
     await repo.save(tenant);
+    await logAudit(req.userId!, 'tenant.activated', 'tenant', tenant.id, tenant.id);
 
     if (tenant.clerkOrgId) {
       await updateClerkOrganization(tenant.clerkOrgId, {
@@ -321,6 +335,7 @@ router.patch('/users/:id', async (req: Request, res: Response) => {
     }
 
     const { role, isActive } = req.body;
+    const originalRole = user.role;
     if (role && ['admin', 'supervisor', 'agent'].includes(role)) {
       user.role = role;
     }
@@ -344,6 +359,10 @@ router.patch('/users/:id', async (req: Request, res: Response) => {
     }
 
     await repo.save(user);
+
+    if (role) {
+      await logAudit(req.userId!, 'user.role_changed', 'user', user.id, user.tenantId, { previousRole: originalRole, newRole: role });
+    }
 
     // Invalidate cache so changes take effect immediately
     if (user.clerkUserId) {
@@ -408,6 +427,10 @@ router.post('/tenants/:id/invite', async (req: Request, res: Response) => {
       .orUpdate(['role', 'invited_by', 'created_at', 'expires_at'], ['tenant_id', 'email'])
       .execute();
 
+    // Fetch the saved invite to get its ID for the audit log
+    const savedInvite = await inviteRepo.findOne({ where: { tenantId: tenant.id, email: email.toLowerCase() } });
+    await logAudit(req.userId!, 'invite.sent', 'invite', savedInvite?.id ?? tenant.id, tenant.id, { email, role });
+
     logger.info('Invited user to tenant', { tenantId: tenant.id, email, role, invitedBy: req.userId });
     return res.json({ success: true, message: 'Invitation sent' });
   } catch (error) {
@@ -436,6 +459,7 @@ router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
       user.role = role;
     }
     await userRepo.save(user);
+    await logAudit(req.userId!, 'user.reactivated', 'user', user.id, user.tenantId);
 
     // Re-invite to Clerk org
     if (user.clerkUserId) {
@@ -473,6 +497,7 @@ router.post('/users/:id/promote', async (req: Request, res: Response) => {
     user.role = 'super_admin';
     user.notificationPreferences = { ...user.notificationPreferences, _previousRole: previousRole } as typeof user.notificationPreferences;
     await repo.save(user);
+    await logAudit(req.userId!, 'user.promoted', 'user', user.id, user.tenantId, { previousRole });
 
     logger.info('User promoted to super_admin', { promotedBy: req.userId, userId: user.id });
     return res.json({ success: true, data: user });
@@ -512,6 +537,7 @@ router.post('/users/:id/demote', async (req: Request, res: Response) => {
       user.notificationPreferences = rest as typeof user.notificationPreferences;
     }
     await repo.save(user);
+    await logAudit(req.userId!, 'user.demoted', 'user', user.id, user.tenantId, { newRole: user.role });
 
     logger.info('User demoted from super_admin', { demotedBy: req.userId, userId: user.id, newRole: user.role });
     return res.json({ success: true, data: user });

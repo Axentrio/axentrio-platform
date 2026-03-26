@@ -1,11 +1,14 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { PendingInvite } from '../database/entities/PendingInvite';
+import { Agent } from '../database/entities/Agent';
+import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -359,7 +362,8 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
   const params = parsePaginationParams(req.query as Record<string, unknown>);
   const qb = AppDataSource.getRepository(User)
     .createQueryBuilder('user')
-    .leftJoinAndSelect('user.tenant', 'tenant');
+    .leftJoinAndSelect('user.tenant', 'tenant')
+    .where('user.deletedAt IS NULL');
 
   const search = req.query.search as string;
   if (search) {
@@ -398,7 +402,7 @@ router.get('/users', asyncHandler(async (req: Request, res: Response) => {
 // GET /admin/users/:id — user details
 router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const user = await AppDataSource.getRepository(User).findOne({
-    where: { id: req.params.id },
+    where: { id: req.params.id, deletedAt: IsNull() },
     relations: ['tenant'],
   });
 
@@ -421,7 +425,7 @@ router.get('/users/:id', asyncHandler(async (req: Request, res: Response) => {
 // PATCH /admin/users/:id — update user (with Clerk sync on deactivation)
 router.patch('/users/:id', asyncHandler(async (req: Request, res: Response) => {
   const repo = AppDataSource.getRepository(User);
-  const user = await repo.findOne({ where: { id: req.params.id } });
+  const user = await repo.findOne({ where: { id: req.params.id, deletedAt: IsNull() } });
 
   if (!user) throw new NotFoundError('User not found');
 
@@ -514,7 +518,7 @@ router.post('/tenants/:id/invite', validate(inviteMemberSchema), asyncHandler(as
 router.post('/users/:id/reactivate', asyncHandler(async (req: Request, res: Response) => {
   const { role } = req.body;
   const userRepo = AppDataSource.getRepository(User);
-  const user = await userRepo.findOne({ where: { id: req.params.id } });
+  const user = await userRepo.findOne({ where: { id: req.params.id, deletedAt: IsNull() } });
 
   if (!user) throw new NotFoundError('User not found');
   if (user.isActive) throw new BadRequestError('User is already active');
@@ -543,7 +547,7 @@ router.post('/users/:id/reactivate', asyncHandler(async (req: Request, res: Resp
 // POST /admin/users/:id/promote — promote to super admin
 router.post('/users/:id/promote', asyncHandler(async (req: Request, res: Response) => {
   const repo = AppDataSource.getRepository(User);
-  const user = await repo.findOne({ where: { id: req.params.id } });
+  const user = await repo.findOne({ where: { id: req.params.id, deletedAt: IsNull() } });
 
   if (!user) throw new NotFoundError('User not found');
   if (user.role === 'super_admin') throw new BadRequestError('User is already a super admin');
@@ -561,12 +565,12 @@ router.post('/users/:id/promote', asyncHandler(async (req: Request, res: Respons
 // POST /admin/users/:id/demote — demote super admin
 router.post('/users/:id/demote', asyncHandler(async (req: Request, res: Response) => {
   const repo = AppDataSource.getRepository(User);
-  const user = await repo.findOne({ where: { id: req.params.id } });
+  const user = await repo.findOne({ where: { id: req.params.id, deletedAt: IsNull() } });
 
   if (!user) throw new NotFoundError('User not found');
   if (user.role !== 'super_admin') throw new BadRequestError('User is not a super admin');
 
-  const superAdminCount = await repo.count({ where: { role: 'super_admin' as const } });
+  const superAdminCount = await repo.count({ where: { role: 'super_admin' as const, deletedAt: IsNull() } });
   if (superAdminCount <= 1) throw new BadRequestError('Cannot demote the last super admin');
 
   const prefs = user.notificationPreferences as Record<string, unknown> | undefined;
@@ -584,6 +588,90 @@ router.post('/users/:id/demote', asyncHandler(async (req: Request, res: Response
 
   logger.info('User demoted from super_admin', { demotedBy: req.userId, userId: user.id, newRole: user.role });
   sendSuccess(res, user);
+}));
+
+// DELETE /admin/users/:id — permanently anonymize and soft-delete a deactivated user
+router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.params.id;
+  const userRepo = AppDataSource.getRepository(User);
+  const user = await userRepo.findOne({ where: { id: userId, deletedAt: IsNull() } });
+
+  if (!user) throw new NotFoundError('User not found');
+  if (user.isActive) throw new BadRequestError('User must be deactivated before deletion');
+  if (userId === req.userId) throw new BadRequestError('Cannot delete yourself');
+
+  // Prevent deleting last super admin
+  if (user.role === 'super_admin') {
+    const superAdminCount = await userRepo.count({ where: { role: 'super_admin' as const, deletedAt: IsNull() } });
+    if (superAdminCount <= 1) throw new BadRequestError('Cannot delete the last super admin');
+  }
+
+  // Store Clerk info before anonymization (needed for post-transaction cleanup)
+  const clerkUserId = user.clerkUserId;
+  const tenantId = user.tenantId;
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+
+  // Find agent profile (if exists)
+  const agentRepo = AppDataSource.getRepository(Agent);
+  const agent = await agentRepo.findOne({ where: { userId, deletedAt: IsNull() } });
+
+  // Single transaction: anonymize + soft-delete + cleanup references
+  await AppDataSource.transaction(async (manager) => {
+    // 1. Anonymize user PII
+    user.name = 'Deleted User';
+    user.email = `deleted_${user.id}@removed.local`;
+    user.avatarUrl = null as unknown as string | undefined;
+    user.clerkUserId = null as unknown as string | undefined;
+    user.deletedAt = new Date();
+    await manager.save(User, user);
+
+    // 2. Soft-delete agent profile
+    if (agent) {
+      agent.status = 'offline';
+      agent.deletedAt = new Date();
+      await manager.save(Agent, agent);
+
+      // 3. Null out agent assignments on sessions
+      await manager
+        .createQueryBuilder()
+        .update(ChatSession)
+        .set({ assignedAgentId: null as unknown as string | undefined })
+        .where('assigned_agent_id = :agentId', { agentId: agent.id })
+        .execute();
+
+      // 4. Null out agent assignments on handoff requests
+      await manager
+        .createQueryBuilder()
+        .update(HandoffRequest)
+        .set({ assignedAgentId: null as unknown as string | undefined })
+        .where('assigned_agent_id = :agentId', { agentId: agent.id })
+        .execute();
+    }
+
+    // 5. Delete pending invites created by this user
+    await manager
+      .createQueryBuilder()
+      .delete()
+      .from(PendingInvite)
+      .where('invited_by = :userId', { userId })
+      .execute();
+  });
+
+  // Post-transaction: remove from Clerk org (non-blocking)
+  if (clerkUserId && tenant?.clerkOrgId) {
+    const removed = await removeFromClerkOrganization(tenant.clerkOrgId, clerkUserId);
+    if (!removed) {
+      logger.warn('Failed to remove deleted user from Clerk org', { userId, clerkUserId });
+    }
+    invalidateProvisionCache(tenant.clerkOrgId, clerkUserId);
+  }
+
+  await logAudit(req.userId!, 'user.deleted', 'user', userId, tenantId, {
+    deletedUserEmail: `deleted_${userId}@removed.local`,
+  });
+
+  logger.info('Permanently deleted user', { deletedBy: req.userId, userId });
+  sendSuccess(res, { deleted: true });
 }));
 
 // ==================

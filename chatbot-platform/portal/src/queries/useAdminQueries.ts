@@ -175,3 +175,28 @@ export function useOptimisticDemoteUser() {
     },
   });
 }
+
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/users/${id}`),
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
+      const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());
+      queryClient.setQueryData<Any[]>(queryKeys.admin.users(), (prev = []) =>
+        prev.filter((u: Any) => u.id !== id),
+      );
+      return { previousData };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(queryKeys.admin.users(), context.previousData);
+      }
+      toast.error('Failed to delete user');
+    },
+    onSuccess: () => toast.success('User permanently deleted'),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
+    },
+  });
+}

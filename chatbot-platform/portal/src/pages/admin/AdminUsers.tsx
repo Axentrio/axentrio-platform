@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Loader2, Search, ShieldCheck, ShieldOff } from 'lucide-react';
+import { Loader2, Search, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -12,6 +12,7 @@ import {
   useAdminUsers,
   useOptimisticPromoteUser,
   useOptimisticDemoteUser,
+  useDeleteUser,
 } from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -61,7 +62,7 @@ interface AdminUser {
   createdAt: string;
 }
 
-type ConfirmAction = { type: 'promote' | 'demote'; user: AdminUser } | null;
+type ConfirmAction = { type: 'promote' | 'demote' | 'delete'; user: AdminUser } | null;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -109,6 +110,7 @@ const AdminUsers: React.FC = () => {
   /* ---- Mutations ---- */
   const promoteMutation = useOptimisticPromoteUser();
   const demoteMutation = useOptimisticDemoteUser();
+  const deleteMutation = useDeleteUser();
 
   const addMutatingRow = (id: string) =>
     setMutatingRowIds((prev) => new Set(prev).add(id));
@@ -124,13 +126,23 @@ const AdminUsers: React.FC = () => {
     if (!confirmAction) return;
     const userId = confirmAction.user.id;
     addMutatingRow(userId);
-    const mutation = confirmAction.type === 'promote' ? promoteMutation : demoteMutation;
-    mutation.mutate(userId, {
-      onSettled: () => {
-        removeMutatingRow(userId);
-        setConfirmAction(null);
-      },
-    });
+
+    if (confirmAction.type === 'delete') {
+      deleteMutation.mutate(userId, {
+        onSettled: () => {
+          removeMutatingRow(userId);
+          setConfirmAction(null);
+        },
+      });
+    } else {
+      const mutation = confirmAction.type === 'promote' ? promoteMutation : demoteMutation;
+      mutation.mutate(userId, {
+        onSettled: () => {
+          removeMutatingRow(userId);
+          setConfirmAction(null);
+        },
+      });
+    }
   };
 
   /* ---- Derived list ---- */
@@ -145,7 +157,7 @@ const AdminUsers: React.FC = () => {
     return matchesSearch && matchesRole;
   });
 
-  const isMutating = promoteMutation.isPending || demoteMutation.isPending;
+  const isMutating = promoteMutation.isPending || demoteMutation.isPending || deleteMutation.isPending;
 
   /* ---- Render ---- */
   return (
@@ -237,29 +249,43 @@ const AdminUsers: React.FC = () => {
                       {formatDate(user.createdAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      {user.role === 'super_admin' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isMutating}
-                          onClick={() => setConfirmAction({ type: 'demote', user })}
-                          className="text-status-busy border-status-busy/30 hover:bg-status-busy/10 gap-1.5"
-                        >
-                          <ShieldOff className="w-3 h-3" />
-                          Demote
-                        </Button>
-                      ) : (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isMutating}
-                          onClick={() => setConfirmAction({ type: 'promote', user })}
-                          className="text-accent-400 border-accent-500/30 hover:bg-accent-500/10 gap-1.5"
-                        >
-                          <ShieldCheck className="w-3 h-3" />
-                          Promote
-                        </Button>
-                      )}
+                      <div className="flex items-center justify-end gap-2">
+                        {user.role === 'super_admin' ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isMutating}
+                            onClick={() => setConfirmAction({ type: 'demote', user })}
+                            className="text-status-busy border-status-busy/30 hover:bg-status-busy/10 gap-1.5"
+                          >
+                            <ShieldOff className="w-3 h-3" />
+                            Demote
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isMutating}
+                            onClick={() => setConfirmAction({ type: 'promote', user })}
+                            className="text-accent-400 border-accent-500/30 hover:bg-accent-500/10 gap-1.5"
+                          >
+                            <ShieldCheck className="w-3 h-3" />
+                            Promote
+                          </Button>
+                        )}
+                        {!user.isActive && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={isMutating}
+                            onClick={() => setConfirmAction({ type: 'delete', user })}
+                            className="text-red-400 border-red-500/30 hover:bg-red-500/10 gap-1.5"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Delete
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -283,7 +309,11 @@ const AdminUsers: React.FC = () => {
             <LoadingOverlay isLoading={isMutating} />
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {confirmAction?.type === 'promote' ? 'Promote to Super Admin' : 'Demote from Super Admin'}
+                {confirmAction?.type === 'promote'
+                  ? 'Promote to Super Admin'
+                  : confirmAction?.type === 'demote'
+                  ? 'Demote from Super Admin'
+                  : 'Permanently Delete User'}
               </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmAction?.type === 'promote' ? (
@@ -292,13 +322,20 @@ const AdminUsers: React.FC = () => {
                   <span className="font-semibold text-text-primary">{confirmAction.user.name}</span>{' '}
                   to Super Admin? They will gain full platform access.
                 </>
-              ) : (
+              ) : confirmAction?.type === 'demote' ? (
                 <>
                   Are you sure you want to demote{' '}
                   <span className="font-semibold text-text-primary">
                     {confirmAction?.user.name}
                   </span>{' '}
                   from Super Admin? They will lose platform-wide privileges.
+                </>
+              ) : (
+                <>
+                  This will anonymize{' '}
+                  <span className="font-semibold text-text-primary">
+                    {confirmAction?.user.name}
+                  </span>'s data and remove them permanently. This cannot be undone.
                 </>
               )}
             </AlertDialogDescription>
@@ -311,12 +348,18 @@ const AdminUsers: React.FC = () => {
               className={
                 confirmAction?.type === 'promote'
                   ? 'bg-accent-500 hover:bg-accent-600'
-                  : 'bg-status-busy hover:bg-status-busy/90'
+                  : confirmAction?.type === 'demote'
+                  ? 'bg-status-busy hover:bg-status-busy/90'
+                  : 'bg-red-600 hover:bg-red-700'
               }
             >
               {isMutating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : confirmAction?.type === 'promote' ? 'Promote' : 'Demote'}
+              ) : confirmAction?.type === 'promote'
+                ? 'Promote'
+                : confirmAction?.type === 'demote'
+                ? 'Demote'
+                : 'Delete Permanently'}
             </AlertDialogAction>
           </AlertDialogFooter>
           </div>

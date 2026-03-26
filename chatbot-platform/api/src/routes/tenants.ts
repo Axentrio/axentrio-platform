@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import axios from 'axios';
 import { Router, Request, Response } from 'express';
+import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
@@ -155,7 +156,8 @@ router.get(
 
     const qb = userRepository.createQueryBuilder('user')
       .select(['user.id', 'user.email', 'user.name', 'user.role', 'user.isActive', 'user.avatarUrl', 'user.lastLoginAt', 'user.createdAt'])
-      .where('user.tenantId = :tenantId', { tenantId });
+      .where('user.tenantId = :tenantId', { tenantId })
+      .andWhere('user.deletedAt IS NULL');
 
     if (!params.sortBy) {
       qb.orderBy('user.createdAt', 'DESC');
@@ -541,7 +543,7 @@ router.patch(
     const tenantId = req.user!.tenantId;
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({
-      where: { id: req.params.userId, tenantId },
+      where: { id: req.params.userId, tenantId, deletedAt: IsNull() },
     });
 
     if (!user) {
@@ -585,7 +587,7 @@ router.post(
     }
 
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({ where: { id: userId, tenantId } });
+    const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
 
     if (!user) {
       res.status(404).json({ error: 'User not found in this tenant' });
@@ -600,7 +602,7 @@ router.post(
     // Cannot deactivate the last active admin
     if (user.role === 'admin') {
       const activeAdminCount = await userRepo.count({
-        where: { tenantId, role: 'admin' as const, isActive: true },
+        where: { tenantId, role: 'admin' as const, isActive: true, deletedAt: IsNull() },
       });
       if (activeAdminCount <= 1) {
         res.status(400).json({ error: 'Cannot deactivate the last active admin' });
@@ -639,7 +641,7 @@ router.post(
     const { userId } = req.params;
 
     const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({ where: { id: userId, tenantId } });
+    const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
 
     if (!user) {
       res.status(404).json({ error: 'User not found in this tenant' });

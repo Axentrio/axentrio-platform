@@ -506,7 +506,7 @@ router.post('/tenants', async (req: Request, res: Response) => {
 
     // Step 3: Invite initial admin if email provided
     if (adminEmail) {
-      await inviteToClerkOrganization(clerkOrg.id, adminEmail, (req as any).clerkUserId);
+      await inviteToClerkOrganization(clerkOrg.id, adminEmail, req.user!.clerkUserId);
 
       const inviteRepo = AppDataSource.getRepository(PendingInvite);
       await inviteRepo.save(inviteRepo.create({
@@ -579,7 +579,7 @@ router.post('/tenants/:id/invite', async (req: Request, res: Response) => {
     const invited = await inviteToClerkOrganization(
       tenant.clerkOrgId,
       email,
-      (req as any).clerkUserId
+      req.user!.clerkUserId
     );
     if (!invited) {
       return res.status(502).json({ error: 'Failed to send invite via Clerk' });
@@ -634,6 +634,7 @@ In the existing `PATCH /admin/users/:id` handler, when `isActive` is set to `fal
 
 ```typescript
 import { removeFromClerkOrganization } from '../services/clerk-sync.service';
+import { invalidateProvisionCache } from '../middleware/clerk.middleware';
 
 // Inside the handler, after setting isActive:
 if (typeof isActive === 'boolean') {
@@ -651,6 +652,14 @@ if (typeof isActive === 'boolean') {
           userId: user.id, tenantId: tenant.id,
         });
       }
+    }
+  }
+
+  // Invalidate cache so deactivation takes effect immediately
+  if (user.clerkUserId) {
+    const t = tenant || await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
+    if (t?.clerkOrgId) {
+      invalidateProvisionCache(t.clerkOrgId, user.clerkUserId);
     }
   }
 
@@ -691,7 +700,7 @@ router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
         where: { id: user.tenantId },
       });
       if (tenant?.clerkOrgId) {
-        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, (req as any).clerkUserId);
+        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, req.user!.clerkUserId);
       }
     }
 
@@ -841,7 +850,7 @@ router.post('/me/invite', requireAdmin, async (req: Request, res: Response) => {
     const invited = await inviteToClerkOrganization(
       tenant.clerkOrgId,
       email,
-      (req as any).clerkUserId
+      req.user!.clerkUserId
     );
     if (!invited) {
       return res.status(502).json({ error: 'Failed to send invite' });

@@ -18,6 +18,7 @@ import { FileUpload } from './entities/FileUpload';
 import { HandoffRequest } from './entities/HandoffRequest';
 import { WebhookDeliveryLog } from './entities/WebhookDeliveryLog';
 import { PendingInvite } from './entities/PendingInvite';
+import { AuditLog } from './entities/AuditLog';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -41,6 +42,7 @@ export const AppDataSource = new DataSource({
     HandoffRequest,
     WebhookDeliveryLog,
     PendingInvite,
+    AuditLog,
   ],
 
   // Migration configuration
@@ -128,4 +130,5 @@ export const runInTransaction = async <T>(
   });
 };
 
-export default AppDataSource;
+// Default export removed — TypeORM CLI requires exactly one DataSource export.
+// Use the named export `AppDataSource` instead.

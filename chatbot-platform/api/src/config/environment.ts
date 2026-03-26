@@ -118,6 +118,9 @@ const envSchema = z.object({
   CLERK_WEBHOOK_SECRET: z.string().optional(),
 
   // ClamAV (optional)
+  // Audit
+  AUDIT_RETENTION_DAYS: z.string().default('90').transform(Number),
+
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.string().default('3310').transform(Number),
   CLAMAV_TIMEOUT: z.string().default('60000').transform(Number),
@@ -268,6 +271,10 @@ export const config = {
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
     signedUrlExpiry: env.S3_SIGNED_URL_EXPIRY,
     cdnUrl: env.CDN_URL,
+  },
+
+  audit: {
+    retentionDays: env.AUDIT_RETENTION_DAYS,
   },
 
   clamav: {

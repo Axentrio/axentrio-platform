@@ -12,8 +12,9 @@ import { User } from '../database/entities/User';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization } from '../services/clerk-sync.service';
+import { inviteToClerkOrganization, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
+import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
 function generateApiKey(): string {
@@ -553,6 +554,103 @@ router.patch(
       userId: user.id, newRole: role, changedBy: req.userId,
     });
     res.json({ success: true, data: { id: user.id, role: user.role } });
+  })
+);
+
+/**
+ * Deactivate a tenant member
+ * POST /api/v1/tenants/me/users/:userId/deactivate
+ */
+router.post(
+  '/me/users/:userId/deactivate',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const { userId } = req.params;
+
+    // Cannot deactivate yourself
+    if (userId === req.userId) {
+      return res.status(400).json({ error: 'Cannot deactivate yourself' });
+    }
+
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: userId, tenantId } });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found in this tenant' });
+    }
+
+    if (!user.isActive) {
+      return res.status(400).json({ error: 'User is already deactivated' });
+    }
+
+    // Cannot deactivate the last active admin
+    if (user.role === 'admin') {
+      const activeAdminCount = await userRepo.count({
+        where: { tenantId, role: 'admin' as const, isActive: true },
+      });
+      if (activeAdminCount <= 1) {
+        return res.status(400).json({ error: 'Cannot deactivate the last active admin' });
+      }
+    }
+
+    // Deactivate in DB
+    user.isActive = false;
+    await userRepo.save(user);
+
+    // Remove from Clerk org + invalidate cache
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (user.clerkUserId && tenant?.clerkOrgId) {
+      await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
+      invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+    }
+
+    await logAudit(req.userId!, 'user.deactivated', 'user', user.id, tenantId);
+
+    logger.info('Deactivated user', { userId: user.id, tenantId, deactivatedBy: req.userId });
+    return res.json({ success: true });
+  })
+);
+
+/**
+ * Reactivate a tenant member
+ * POST /api/v1/tenants/me/users/:userId/reactivate
+ */
+router.post(
+  '/me/users/:userId/reactivate',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const { userId } = req.params;
+
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: userId, tenantId } });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found in this tenant' });
+    }
+
+    if (user.isActive) {
+      return res.status(400).json({ error: 'User is already active' });
+    }
+
+    user.isActive = true;
+    await userRepo.save(user);
+
+    // Re-add to Clerk org
+    if (user.clerkUserId) {
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+      if (tenant?.clerkOrgId) {
+        await addMemberToClerkOrganization(tenant.clerkOrgId, user.clerkUserId, 'org:member');
+      }
+    }
+
+    await logAudit(req.userId!, 'user.reactivated', 'user', user.id, tenantId);
+
+    logger.info('Reactivated user', { userId: user.id, tenantId, reactivatedBy: req.userId });
+    return res.json({ success: true });
   })
 );
 

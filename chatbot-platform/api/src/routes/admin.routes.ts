@@ -468,7 +468,7 @@ router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
         where: { id: user.tenantId },
       });
       if (tenant?.clerkOrgId) {
-        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, req.user?.clerkUserId);
+        await addMemberToClerkOrganization(tenant.clerkOrgId, user.clerkUserId!, 'org:member');
       }
     }
 

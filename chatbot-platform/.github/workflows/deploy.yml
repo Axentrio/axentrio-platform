@@ -1,4 +1,4 @@
-name: Deploy to Railway
+name: Deploy API to Railway
 
 on:
   push:
@@ -9,6 +9,8 @@ on:
       - 'railway.toml'
   pull_request:
     branches: [main, master]
+    paths:
+      - 'api/**'
 
 jobs:
   test:
@@ -54,16 +56,15 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        run: railway up --service api --detach
+        run: railway up --service chatbot-api --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Notify deployment status
-        if: always()
+        if: always() && env.SLACK_WEBHOOK_URL != ''
         uses: 8398a7/action-slack@v3
         with:
           status: ${{ job.status }}
           text: 'API Deployment to Railway ${{ job.status }}'
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: env.SLACK_WEBHOOK_URL != ''

@@ -1,4 +1,4 @@
-name: Deploy Portal to Vercel/Railway
+name: Deploy Portal to Railway
 
 on:
   push:
@@ -37,9 +37,10 @@ jobs:
         run: npm run build
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          VITE_WS_URL: ${{ secrets.VITE_WS_URL }}
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
 
-  # Deploy to Vercel (recommended for frontend)
-  deploy-vercel:
+  deploy:
     needs: test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
@@ -47,28 +48,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Deploy to Vercel
-        uses: vercel/action-deploy@v1
-        with:
-          vercel-token: ${{ secrets.VERCEL_TOKEN }}
-          vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
-          vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
-          working-directory: ./portal
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
 
-  # Alternative: Deploy to Railway
-  # deploy-railway:
-  #   needs: test
-  #   runs-on: ubuntu-latest
-  #   if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-  #     
-  #     - name: Install Railway CLI
-  #       run: npm install -g @railway/cli
-  #     
-  #     - name: Deploy to Railway
-  #       working-directory: ./portal
-  #       run: railway up --service portal
-  #       env:
-  #         RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Deploy to Railway
+        run: railway up --service chatbot-portal --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Notify deployment status
+        if: always() && env.SLACK_WEBHOOK_URL != ''
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Portal Deployment to Railway ${{ job.status }}'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

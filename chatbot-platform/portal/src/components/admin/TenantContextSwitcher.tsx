@@ -1,20 +1,9 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { useTenantContextStore } from '../../stores/tenantContextStore';
 import { useAppAuth } from '../../auth/useAppAuth';
-import { api } from '../../services/apiClient';
+import { useAdminTenants } from '../../queries/useAdminQueries';
 
-interface TenantListItem {
-  id: string;
-  name: string;
-  tier: string;
-  status: string;
-}
 
-interface TenantsResponse {
-  success: boolean;
-  data: TenantListItem[];
-}
 
 export function TenantContextSwitcher() {
   const { user } = useAppAuth();
@@ -23,11 +12,7 @@ export function TenantContextSwitcher() {
 
   const isSuperAdmin = user?.role === 'super_admin';
 
-  const { data: tenants } = useQuery<TenantsResponse>({
-    queryKey: ['admin-tenants-switcher'],
-    queryFn: () => api.get('/admin/tenants?limit=50'),
-    enabled: isSuperAdmin,
-  });
+  const { data: tenants } = useAdminTenants();
 
   // Only render for super admins
   if (!isSuperAdmin) return null;
@@ -64,7 +49,7 @@ export function TenantContextSwitcher() {
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
           <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-surface-0 border border-edge rounded-lg shadow-xl overflow-hidden">
             <div className="max-h-64 overflow-y-auto">
-              {tenants?.data?.map((t) => (
+              {tenants?.map((t) => (
                 <button
                   key={t.id}
                   onClick={() => {
@@ -77,7 +62,7 @@ export function TenantContextSwitcher() {
                   <span className="text-xs text-text-muted capitalize ml-2">{t.tier}</span>
                 </button>
               ))}
-              {(!tenants?.data || tenants.data.length === 0) && (
+              {(!tenants || !Array.isArray(tenants) || tenants.length === 0) && (
                 <div className="px-3 py-4 text-sm text-text-muted text-center">
                   No tenants found
                 </div>

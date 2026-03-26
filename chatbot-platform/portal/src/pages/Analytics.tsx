@@ -4,8 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { api } from '@services/apiClient';
+import { useAnalyticsTimeseries, useAnalyticsChatMetrics, useAnalyticsAgents } from '../queries/useAnalyticsQueries';
 import {
   LineChart,
   Line,
@@ -150,46 +149,28 @@ const Analytics: React.FC = () => {
   const {
     data: timeseriesRes,
     isLoading: isLoadingTimeseries,
-  } = useQuery<{ success: boolean; timeseries: TimeseriesPoint[] }>({
-    queryKey: ['analytics-timeseries', startDate, endDate],
-    queryFn: () =>
-      api.get('/analytics/chats/timeseries', {
-        params: { startDate, endDate },
-      }),
-    enabled: activeTab === 'overview',
-  });
+  } = useAnalyticsTimeseries(startDate, endDate, activeTab === 'overview');
 
   // Chat metrics — used in overview tab (stats cards + resolution pie)
   const {
     data: metricsRes,
     isLoading: isLoadingMetrics,
-  } = useQuery<{ success: boolean; metrics: ChatMetrics }>({
-    queryKey: ['analytics-metrics', startDate, endDate],
-    queryFn: () =>
-      api.get('/analytics/chats', {
-        params: { from: startDate, to: endDate },
-      }),
-    enabled: activeTab === 'overview' || activeTab === 'chats',
-  });
+  } = useAnalyticsChatMetrics(startDate, endDate, activeTab === 'overview' || activeTab === 'chats');
 
   // Agent performance — used in agents tab + stats cards
   const {
     data: agentsRes,
     isLoading: isLoadingAgents,
-  } = useQuery<{ success: boolean; agents: AgentRow[] }>({
-    queryKey: ['analytics-agents'],
-    queryFn: () => api.get('/analytics/agents'),
-    enabled: activeTab === 'agents' || activeTab === 'overview',
-  });
+  } = useAnalyticsAgents(activeTab === 'agents' || activeTab === 'overview');
 
   /* ---------------------------------------------------------------- */
   /*  Derived data                                                     */
   /* ---------------------------------------------------------------- */
 
-  const chatVolumeData: TimeseriesPoint[] = timeseriesRes?.timeseries ?? [];
+  const chatVolumeData: TimeseriesPoint[] = (timeseriesRes as { timeseries?: TimeseriesPoint[] })?.timeseries ?? [];
 
-  const metrics = metricsRes?.metrics;
-  const agents = agentsRes?.agents ?? [];
+  const metrics = (metricsRes as { metrics?: ChatMetrics })?.metrics;
+  const agents: AgentRow[] = (agentsRes as { agents?: AgentRow[] })?.agents ?? [];
 
   // Resolution pie: bot resolved = closed minus human-handled, human = rest
   const resolutionData = useMemo(() => {

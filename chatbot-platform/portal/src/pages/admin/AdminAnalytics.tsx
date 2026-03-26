@@ -4,9 +4,8 @@
  */
 
 import React from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useAdminAnalytics } from '../../queries/useAdminQueries';
 import { Loader2, Building2, Users, Activity, MessageSquare } from 'lucide-react';
-import { api } from '@services/apiClient';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -39,10 +38,6 @@ interface AdminAnalyticsData {
   tenantBreakdown: TenantBreakdownRow[];
 }
 
-interface AnalyticsApiResponse {
-  success: boolean;
-  data: AdminAnalyticsData;
-}
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -94,12 +89,9 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, icon: Icon, iconColor
 /* ------------------------------------------------------------------ */
 
 const AdminAnalytics: React.FC = () => {
-  const { data, isLoading, isError } = useQuery<AnalyticsApiResponse>({
-    queryKey: ['admin', 'analytics'],
-    queryFn: () => api.get('/admin/analytics'),
-  });
+  const { data, isLoading, isError } = useAdminAnalytics();
 
-  const analytics = data?.data;
+  const analytics = data as AdminAnalyticsData | undefined;
 
   /* ---- Summary cards config ---- */
   const stats: StatCardProps[] = analytics

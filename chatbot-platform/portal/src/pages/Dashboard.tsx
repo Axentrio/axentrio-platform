@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useDashboardMetrics } from '../queries/useDashboardQueries';
 import {
   MessageSquare,
   Users,
@@ -18,7 +18,6 @@ import {
 import { useHandoffs } from '@hooks/useHandoffs';
 import { useChats } from '@hooks/useChats';
 import { ChatStatusBadge } from '@components/StatusBadge';
-import { api } from '@services/apiClient';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
@@ -26,7 +25,6 @@ import { cn } from '@/lib/utils';
 import type { DashboardMetrics } from '@app-types/index';
 
 interface DashboardApiResponse {
-  success: boolean;
   dashboard: {
     sessions: { total: number; active: number; waiting: number; handoff: number; bot: number };
     agents: { total: number; online: number };
@@ -90,11 +88,7 @@ const Dashboard: React.FC = () => {
     isLoading,
     isError,
     error,
-  } = useQuery<DashboardApiResponse>({
-    queryKey: ['dashboard-metrics'],
-    queryFn: () => api.get<DashboardApiResponse>('/analytics/dashboard'),
-    refetchInterval: 30000,
-  });
+  } = useDashboardMetrics();
 
   const metrics = rawDashboard ? mapApiToMetrics(rawDashboard) : undefined;
 

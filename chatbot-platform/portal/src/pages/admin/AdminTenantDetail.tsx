@@ -255,18 +255,22 @@ const AdminTenantDetail: React.FC = () => {
                 {showApiKey && revealedApiKey ? revealedApiKey : tenant.apiKeyMasked}
               </p>
               <div className="flex items-center gap-2 mt-1">
-                <button
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => { setShowApiKey(!showApiKey); if (!revealedApiKey) setShowApiKey(false); }}
-                  className="text-xs text-text-muted hover:text-text-secondary"
+                  className="h-6 w-6 text-text-muted hover:text-text-secondary"
                 >
                   {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={() => setShowRotateDialog(true)}
-                  className="text-xs text-text-muted hover:text-text-secondary"
+                  className="h-6 w-6 text-text-muted hover:text-text-secondary"
                 >
                   <RotateCw className="w-3 h-3" />
-                </button>
+                </Button>
               </div>
             </div>
           </div>

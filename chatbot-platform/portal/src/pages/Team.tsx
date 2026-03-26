@@ -908,9 +908,9 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
             {formData.skills?.map((skill) => (
               <Badge key={skill} variant="secondary" className="inline-flex items-center gap-1">
                 {skill}
-                <button type="button" onClick={() => handleRemoveSkill(skill)} className="hover:text-primary-300">
+                <Button variant="ghost" size="icon" type="button" onClick={() => handleRemoveSkill(skill)} className="h-4 w-4 hover:text-primary-300 p-0">
                   ×
-                </button>
+                </Button>
               </Badge>
             ))}
           </div>

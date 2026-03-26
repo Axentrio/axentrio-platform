@@ -13,6 +13,7 @@ import {
   DialogOverlay,
   DialogPortal,
 } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 interface ModalProps {
@@ -78,13 +79,14 @@ export const Modal: React.FC<ModalProps> = ({
                 <div />
               )}
               {showCloseButton && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="icon"
                   onClick={onClose}
-                  className="p-2 text-text-muted hover:text-text-secondary hover:bg-surface-3 rounded-xl transition-colors"
+                  className="text-text-muted hover:text-text-secondary hover:bg-surface-3 rounded-xl"
                 >
                   <X className="w-5 h-5" />
-                </button>
+                </Button>
               )}
             </DialogHeader>
           )}

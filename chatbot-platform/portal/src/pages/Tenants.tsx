@@ -185,11 +185,12 @@ const Tenants: React.FC = () => {
                   className="hidden"
                 />
                 <div className="relative group">
-                  <button
+                  <Button
+                    variant="ghost"
                     type="button"
                     onClick={() => logoInputRef.current?.click()}
                     disabled={isUploadingLogo}
-                    className="relative w-12 h-12 rounded-xl overflow-hidden cursor-pointer"
+                    className="relative w-12 h-12 rounded-xl overflow-hidden cursor-pointer p-0"
                   >
                     {organization?.hasImage ? (
                       <img
@@ -212,16 +213,18 @@ const Tenants: React.FC = () => {
                         <Camera className="w-4 h-4 text-white" />
                       )}
                     </div>
-                  </button>
+                  </Button>
                   {organization?.hasImage && !isUploadingLogo && (
-                    <button
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       type="button"
                       onClick={(e) => { e.stopPropagation(); handleLogoRemove(); }}
                       className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-3 border border-edge flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive text-text-muted hover:text-white"
                       title="Remove logo"
                     >
                       <X className="w-3 h-3" />
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <div>
@@ -375,11 +378,12 @@ const ColorField: React.FC<{ label: string; value: string; onChange: (c: string)
           <div className="absolute top-12 left-0 z-50 bg-surface-2 border border-edge rounded-lg p-3 shadow-lg">
             <div className="grid grid-cols-5 gap-1.5">
               {COLOR_PRESETS.map((color) => (
-                <button
+                <Button
                   key={color}
+                  variant="ghost"
                   type="button"
                   className={cn(
-                    'w-8 h-8 rounded-md border-2 transition-transform hover:scale-110',
+                    'w-8 h-8 rounded-md border-2 transition-transform hover:scale-110 p-0',
                     value === color ? 'border-white ring-1 ring-white/50' : 'border-transparent'
                   )}
                   style={{ backgroundColor: color }}

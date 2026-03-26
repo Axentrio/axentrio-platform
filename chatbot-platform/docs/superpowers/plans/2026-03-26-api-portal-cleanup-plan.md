@@ -4,6 +4,8 @@
 
 **Goal:** Standardize API error handling, validation, and response format; refactor all Portal data fetching to TanStack Query v5 best practices with centralized query layer.
 
+**Status:** Completed (2026-03-26) — All 14 tasks implemented across commits `66710ea`..`d9c9c33`.
+
 **Architecture:** Two workstreams — API consistency pass (Tasks 1-5) and Portal query refactor (Tasks 6-14). **Critical ordering:** Task 4 (portal apiClient envelope unwrap) MUST be completed before Task 5 (route conversion), per the spec's migration strategy. After that, Workstream B (Tasks 6-14) can proceed independently.
 
 **Tech Stack:** Express + TypeScript + Zod (API), React + TanStack Query v5 + Axios + Socket.IO (Portal)

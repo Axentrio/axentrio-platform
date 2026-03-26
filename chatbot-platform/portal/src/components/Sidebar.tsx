@@ -183,7 +183,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-status-online shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              <p className="text-xs text-text-muted capitalize">{user?.role}</p>
+              <p className="text-xs text-text-muted capitalize">{user?.role?.replace('_', ' ')}</p>
             </div>
           </div>
         </div>

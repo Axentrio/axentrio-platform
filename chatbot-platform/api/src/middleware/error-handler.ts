@@ -4,6 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { Sentry } from '../config/sentry';
 import { logger } from '../utils/logger';
 import { config } from '../config/environment';
 
@@ -121,6 +122,12 @@ export const errorHandler = (
 
   if (statusCode >= 500) {
     logger.error('Server error', logData);
+    Sentry.setContext('request', {
+      requestId: req.requestId,
+      userId: req.user?.id,
+      tenantId: req.tenant?.id || req.user?.tenantId,
+    });
+    Sentry.captureException(err);
   } else if (statusCode >= 400) {
     logger.warn('Client error', logData);
   }

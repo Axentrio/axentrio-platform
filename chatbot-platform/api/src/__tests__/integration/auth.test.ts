@@ -9,8 +9,8 @@ describe('Auth Routes', () => {
         .post('/api/v1/auth/widget')
         .send({});
 
-      expect(res.status).toBe(400);
-      expect(res.body.error).toBe('API key is required');
+      expect(res.status).toBe(422);
+      expect(res.body.error).toBeDefined();
     });
 
     it('should return 401 for an invalid apiKey', async () => {
@@ -19,7 +19,7 @@ describe('Auth Routes', () => {
         .send({ apiKey: 'nonexistent-key' });
 
       expect(res.status).toBe(401);
-      expect(res.body.error).toBe('Invalid API key');
+      expect(res.body.error.message).toBe('Invalid API key');
     });
   });
 

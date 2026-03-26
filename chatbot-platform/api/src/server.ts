@@ -2,6 +2,9 @@
  * Chatbot Platform API Server
  * Express + Socket.io with Redis adapter for multi-server scaling
  */
+import { initSentry, Sentry } from './config/sentry';
+initSentry();
+
 import 'reflect-metadata';
 import express from 'express';
 import { createServer } from 'http';
@@ -136,6 +139,9 @@ apiRouter.use('/admin', adminRoutes);
 
 app.use('/api/v1', apiRouter);
 
+// Sentry error handler (must be before other error handlers)
+Sentry.setupExpressErrorHandler(app);
+
 // Error handlers (must be last)
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -147,6 +153,16 @@ async function startServer(): Promise<void> {
 
     await AppDataSource.initialize();
     logger.info('Database connection established');
+
+    // Run pending migrations on startup
+    const pending = await AppDataSource.showMigrations();
+    if (pending) {
+      logger.info('Running pending database migrations...');
+      await AppDataSource.runMigrations();
+      logger.info('Database migrations completed');
+    } else {
+      logger.info('Database schema is up to date');
+    }
 
     await initializeRedis();
 
@@ -244,6 +260,9 @@ process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection:', reason);
 });
 
-startServer();
+// Only start the server when running directly (not when imported by tests)
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}
 export { app };
 export default httpServer;

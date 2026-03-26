@@ -84,7 +84,7 @@ function buildChatListParams(
   const params: Record<string, string> = {};
   if (!filters) return params;
   if (filters.tenantId) params.tenantId = filters.tenantId;
-  if (filters.status) params.status = filters.status;
+  if (filters.status) params.status = filters.status === 'handsoff' ? 'handoff' : filters.status;
   if (filters.assignedAgentId) params.assignedAgentId = filters.assignedAgentId;
   if (filters.search) params.search = filters.search;
   if (filters.dateFrom) params.dateFrom = filters.dateFrom;

@@ -4,25 +4,22 @@ if (!process.env.TEST_DATABASE_URL) {
 process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
 
 import { AppDataSource } from '../database/data-source';
-import { beforeAll, afterAll, afterEach } from 'vitest';
+import { beforeAll, afterEach } from 'vitest';
 
 beforeAll(async () => {
   if (!AppDataSource.isInitialized) {
     await AppDataSource.initialize();
+    // synchronize(false) creates tables/columns that don't exist yet
+    // Global setup already dropped the schema, so this creates everything fresh
+    await AppDataSource.synchronize();
   }
-  await AppDataSource.synchronize(true);
 });
 
 afterEach(async () => {
+  if (!AppDataSource.isInitialized) return;
   const entities = AppDataSource.entityMetadatas;
   for (const entity of entities) {
     const repository = AppDataSource.getRepository(entity.name);
     await repository.query(`TRUNCATE TABLE "${entity.tableName}" CASCADE`);
-  }
-});
-
-afterAll(async () => {
-  if (AppDataSource.isInitialized) {
-    await AppDataSource.destroy();
   }
 });

@@ -101,7 +101,9 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
         if (!res.ok) throw new Error(`Failed to fetch user info: ${res.status}`);
 
-        const data = await res.json();
+        const json = await res.json();
+        // API returns { success, data: { ... } } envelope
+        const data = json.data ?? json;
         if (!cancelled) {
           setDbIds({
             agentId: data.agentId,

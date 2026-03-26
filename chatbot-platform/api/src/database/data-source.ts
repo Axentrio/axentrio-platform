@@ -45,10 +45,10 @@ export const AppDataSource = new DataSource({
     AuditLog,
   ],
 
-  // Migration configuration
-  migrations: [__dirname + '/migrations/*.ts'],
+  // Migration configuration (disabled in test — tests use synchronize from entities)
+  migrations: config.server.isTest ? [] : [__dirname + '/migrations/*.ts'],
   migrationsTableName: 'migrations',
-  migrationsRun: false, // Run migrations manually
+  migrationsRun: false,
 
   // Connection pool settings
   extra: {

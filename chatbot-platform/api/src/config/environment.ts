@@ -118,6 +118,10 @@ const envSchema = z.object({
   CLERK_WEBHOOK_SECRET: z.string().optional(),
 
   // ClamAV (optional)
+  // Sentry
+  SENTRY_DSN: z.string().optional(),
+  SENTRY_ENVIRONMENT: z.string().optional(),
+
   // Audit
   AUDIT_RETENTION_DAYS: z.string().default('90').transform(Number),
 

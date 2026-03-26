@@ -11,7 +11,8 @@
     "migration:run": "npm run typeorm migration:run -- -d src/database/data-source.ts",
     "migration:generate": "npm run typeorm migration:generate -- -d src/database/data-source.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "keywords": [
     "chatbot",
@@ -27,6 +28,7 @@
     "@aws-sdk/s3-request-presigner": "^3.1015.0",
     "@clerk/backend": "^3.2.2",
     "@clerk/express": "^2.0.6",
+    "@sentry/node": "^10.46.0",
     "@socket.io/redis-adapter": "^8.2.1",
     "axios": "^1.13.6",
     "bcryptjs": "^3.0.3",

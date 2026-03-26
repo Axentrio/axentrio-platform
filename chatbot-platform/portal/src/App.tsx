@@ -34,6 +34,7 @@ import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
 import AdminAnalytics from '@pages/admin/AdminAnalytics';
+import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -219,6 +220,7 @@ const App: React.FC = () => {
                     {/* Super Admin routes */}
                     <Route element={<SuperAdminRoute />}>
                       <Route path="/admin/tenants" element={<AdminTenants />} />
+                      <Route path="/admin/tenants/:id" element={<AdminTenantDetail />} />
                       <Route path="/admin/users" element={<AdminUsers />} />
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
                     </Route>

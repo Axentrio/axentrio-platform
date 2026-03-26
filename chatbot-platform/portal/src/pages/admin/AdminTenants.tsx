@@ -4,9 +4,10 @@
  */
 
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Loader2, Search } from 'lucide-react';
+import { Loader2, Search, Plus } from 'lucide-react';
 import { api } from '@services/apiClient';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,16 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -99,6 +110,8 @@ const AdminTenants: React.FC = () => {
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<TenantTier | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<TenantStatus | 'all'>('all');
+  const [showCreate, setShowCreate] = useState(false);
+  const [newTenant, setNewTenant] = useState({ name: '', tier: 'free' as TenantTier, adminEmail: '' });
 
   /* ---- Data ---- */
   const { data, isLoading, isError } = useQuery<TenantsApiResponse>({
@@ -111,6 +124,7 @@ const AdminTenants: React.FC = () => {
     mutationFn: (id: string) => api.post(`/admin/tenants/${id}/suspend`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
       toast.success('Tenant suspended.');
     },
     onError: () => toast.error('Failed to suspend tenant.'),
@@ -120,9 +134,23 @@ const AdminTenants: React.FC = () => {
     mutationFn: (id: string) => api.post(`/admin/tenants/${id}/activate`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
       toast.success('Tenant activated.');
     },
     onError: () => toast.error('Failed to activate tenant.'),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (payload: { name: string; tier: string; adminEmail?: string }) =>
+      api.post('/admin/tenants', payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin', 'tenants'] });
+      queryClient.invalidateQueries({ queryKey: ['admin-tenants-switcher'] });
+      toast.success('Tenant created.');
+      setShowCreate(false);
+      setNewTenant({ name: '', tier: 'free', adminEmail: '' });
+    },
+    onError: () => toast.error('Failed to create tenant.'),
   });
 
   /* ---- Derived list ---- */
@@ -143,9 +171,15 @@ const AdminTenants: React.FC = () => {
   return (
     <div className="h-full overflow-y-auto p-6">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text-primary">Tenants</h1>
-        <p className="text-text-secondary mt-1">Manage all tenants across the platform.</p>
+      <div className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Tenants</h1>
+          <p className="text-text-secondary mt-1">Manage all tenants across the platform.</p>
+        </div>
+        <Button onClick={() => setShowCreate(true)} className="gap-1.5">
+          <Plus className="w-4 h-4" />
+          Create Tenant
+        </Button>
       </div>
 
       {/* Filters */}
@@ -215,7 +249,11 @@ const AdminTenants: React.FC = () => {
               <TableBody>
                 {filtered.map((tenant) => (
                   <TableRow key={tenant.id}>
-                    <TableCell className="font-medium text-text-primary">{tenant.name}</TableCell>
+                    <TableCell>
+                      <Link to={`/admin/tenants/${tenant.id}`} className="font-medium text-text-primary hover:text-primary-400 transition-colors">
+                        {tenant.name}
+                      </Link>
+                    </TableCell>
                     <TableCell className="text-text-secondary font-mono text-sm">
                       {tenant.slug}
                     </TableCell>
@@ -279,6 +317,79 @@ const AdminTenants: React.FC = () => {
           Showing {filtered.length} of {tenants.length} tenant{tenants.length !== 1 ? 's' : ''}
         </p>
       )}
+
+      {/* Create Tenant Dialog */}
+      <AlertDialog open={showCreate} onOpenChange={(open) => !open && setShowCreate(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Create New Tenant</AlertDialogTitle>
+            <AlertDialogDescription>
+              Create a new tenant organization. A Clerk organization will be created automatically.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <label className="text-sm font-medium text-text-secondary mb-1 block">
+                Tenant Name *
+              </label>
+              <Input
+                placeholder="e.g. Acme Corp"
+                value={newTenant.name}
+                onChange={(e) => setNewTenant((s) => ({ ...s, name: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-text-secondary mb-1 block">Tier</label>
+              <Select
+                value={newTenant.tier}
+                onValueChange={(v) => setNewTenant((s) => ({ ...s, tier: v as TenantTier }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="free">Free</SelectItem>
+                  <SelectItem value="pro">Pro</SelectItem>
+                  <SelectItem value="enterprise">Enterprise</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium text-text-secondary mb-1 block">
+                Admin Email (optional)
+              </label>
+              <Input
+                type="email"
+                placeholder="admin@example.com"
+                value={newTenant.adminEmail}
+                onChange={(e) => setNewTenant((s) => ({ ...s, adminEmail: e.target.value }))}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                If provided, this user will be invited as the tenant admin.
+              </p>
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!newTenant.name.trim() || createMutation.isPending}
+              onClick={() =>
+                createMutation.mutate({
+                  name: newTenant.name.trim(),
+                  tier: newTenant.tier,
+                  ...(newTenant.adminEmail.trim() && { adminEmail: newTenant.adminEmail.trim() }),
+                })
+              }
+            >
+              {createMutation.isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                'Create'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

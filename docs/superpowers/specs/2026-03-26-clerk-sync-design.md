@@ -49,6 +49,8 @@ Specifically in `clerk.middleware.ts`, the role mapping block (~lines 160-169) s
 - One fewer Clerk API call per returning user (perf improvement)
 - Clerk Dashboard role changes no longer affect the app (acceptable — all role management moves to our portal)
 
+**Cache staleness note:** The autoProvision 5-minute in-memory cache means role changes take up to 5 minutes to take effect for currently active users. This is acceptable latency. Cache invalidation across multiple API instances would require Redis pub/sub, which is over-engineering for now. Document as a known limitation.
+
 ---
 
 ## Section 2: Clerk API Writes — Phase 1 (Must-Have)
@@ -57,7 +59,7 @@ Specifically in `clerk.middleware.ts`, the role mapping block (~lines 160-169) s
 
 When `POST /admin/tenants` is called:
 
-1. Call `clerkClient.organizations.create({ name, createdBy: req.user.clerkUserId })`
+1. Call `clerkClient.organizations.create({ name })` — do NOT pass `createdBy`, because that would make the super admin a member of every org they create. The org starts empty; the initial admin is added via invite (step 2b).
 2. Get back `organization.id` (the `clerkOrgId`)
 3. Create local Tenant record with `clerkOrgId`, generated slug, generated apiKey
 4. Return tenant with ID
@@ -71,14 +73,15 @@ When `POST /admin/tenants` is called:
 
 New endpoint: `POST /admin/tenants/:id/invite`
 
-Body: `{ email, role }` (role is our app role: admin/supervisor/agent)
+Body: `{ email, role }` (role is our app role: admin/supervisor/agent — `super_admin` is NOT a valid invite role; super admin promotion is exclusively via `SUPER_ADMIN_EMAILS` env var or the promote endpoint)
 
 Flow:
 1. Look up tenant → get `clerkOrgId`
-2. Call `clerkClient.organizationInvitations.create({ organizationId: clerkOrgId, emailAddress: email, role: 'org:member' })`
+2. Call `clerkClient.organizationInvitations.create({ organizationId: clerkOrgId, emailAddress: email, role: 'org:member', inviterUserId: req.user.clerkUserId })` — pass `inviterUserId` so the invite email shows who sent it
    - Always use `org:member` in Clerk — our DB will set the real role
 3. Store a `PendingInvite` record in DB: `{ tenantId, email, role, invitedBy, createdAt }`
-4. When the user accepts the invite and logs in, autoProvision creates them. Check `PendingInvite` for their email+tenant — if found, use the stored role instead of mapping from Clerk membership. Delete the PendingInvite record.
+   - If a PendingInvite already exists for this `(tenantId, email)`, **upsert**: update the `role`, `invitedBy`, and `createdAt` fields. Log the change. This handles re-invites or role changes before the user accepts.
+4. When the user accepts the invite and logs in, autoProvision creates them. Check `PendingInvite` by matching against **all of the user's verified Clerk email addresses** (not just the primary) — Clerk users may sign up with a different email than the one invited. If found, use the stored role instead of mapping from Clerk membership. Delete the PendingInvite record.
 
 **Why `org:member` for all Clerk invites:** Clerk role is irrelevant since DB owns authorization. Using `org:member` avoids needing custom Clerk roles.
 
@@ -89,12 +92,16 @@ Flow:
 When `PATCH /admin/users/:id` sets `isActive: false`, or a dedicated deactivate endpoint:
 
 1. Set `user.isActive = false` in DB
-2. Call `clerkClient.organizationMemberships.delete({ organizationId: clerkOrgId, userId: user.clerkUserId })`
+2. Remove from Clerk org. **Important:** Verify the exact method name against `@clerk/backend@^3.2.2` SDK — it may be `clerkClient.organizations.deleteOrganizationMembership()` or `clerkClient.organizationMemberships.delete()` depending on the version. Check the SDK types before implementing.
 3. This prevents the user from logging in via Clerk (they're no longer in the org)
 
 **Error handling:**
 - If Clerk API fails → still deactivate locally (API-level block works as fallback), log warning for manual cleanup
-- Reactivation → `clerkClient.organizationInvitations.create()` to re-invite them
+
+**Reactivation path:**
+- Set `user.isActive = true` in DB and update `user.role` to the desired role directly
+- Call `clerkClient.organizationInvitations.create()` to re-invite them to the Clerk org
+- No PendingInvite needed — the user already exists in DB, so autoProvision takes the existing-user branch which keeps the DB role as-is
 
 ### 2d. Role Changes (DB-only, no Clerk call)
 
@@ -123,7 +130,8 @@ When `POST /admin/tenants/:id/suspend`:
 
 1. Set `tenant.status = 'suspended'` in DB
 2. Call `clerkClient.organizations.update({ organizationId: clerkOrgId, publicMetadata: { suspended: true } })`
-3. On the frontend, check `organization.publicMetadata.suspended` — if true, show a "Your organization has been suspended" message instead of letting them into the app. This gives users a clear message instead of mysterious 403s.
+3. **Backend enforcement:** Add a check in the tenant-resolution middleware (or autoProvision): if `tenant.status === 'suspended'`, return 403 with `{ error: 'Organization suspended', code: 'TENANT_SUSPENDED' }`. This is the security control — it blocks API access regardless of how the request is made.
+4. **Frontend UX:** Additionally, check `organization.publicMetadata.suspended` in `OrganizationRequired.tsx` or `AppAuthProvider.tsx` — if true, show a "Your organization has been suspended. Contact support." message. This provides a clear user-facing message instead of raw 403 errors.
 
 ### 3c. Activate Tenant (re-enable Clerk org)
 
@@ -162,7 +170,7 @@ Index: `(tenantId, email)` unique — one pending invite per email per tenant.
 **Lifecycle:**
 - Created when super admin or tenant admin invites a user
 - Consumed by autoProvision on first login (sets role, deletes record)
-- Expired records cleaned up by a scheduled job or on-read check
+- Expired records: add `AND expires_at > NOW()` to the PendingInvite lookup in autoProvision. A periodic cleanup of old rows is optional but recommended (e.g., weekly cron deleting `WHERE expiresAt < NOW() - INTERVAL '30 days'`)
 
 ---
 
@@ -173,7 +181,7 @@ The autoProvision function (`clerk.middleware.ts`) needs these changes:
 1. **New user creation branch:**
    - Before fetching Clerk membership role, check `PendingInvite` for this email + tenant
    - If PendingInvite found → use its role, delete the record
-   - If no PendingInvite → fall back to Clerk role mapping (backwards compat for users invited directly through Clerk Dashboard)
+   - If no PendingInvite → fall back to Clerk role mapping (backwards compat for users invited directly through Clerk Dashboard). **Important:** Use `clerkClient.organizations.getOrganizationMembership({ organizationId, userId })` (single-member lookup) instead of `getOrganizationMembershipList()` — the list endpoint is paginated (default 10) and may miss the user in large orgs.
 
 2. **Existing user branch:**
    - Skip the `getOrganizationMembershipList()` call entirely
@@ -235,9 +243,11 @@ if (organization?.publicMetadata?.suspended) {
 }
 ```
 
-### Team page invite flow
+### Team page overhaul
 
-Replace Clerk's frontend invite SDK with a call to `POST /tenants/me/invite`. This ensures PendingInvite records are created and roles are correctly assigned.
+**Invite flow:** Replace Clerk's frontend invite SDK with a call to `POST /tenants/me/invite`. This ensures PendingInvite records are created and roles are correctly assigned.
+
+**Role management:** The existing Team page Members tab has a role dropdown (`Team.tsx:607-616`) that calls `organization.updateMember({ userId, role })` — this writes to Clerk, which contradicts the DB-owned authorization model. This dropdown must be rewired to call a backend endpoint (`PATCH /tenants/me/users/:id` with `{ role }`) that updates the DB only. The dropdown options should show app roles (admin/supervisor/agent) instead of Clerk roles (`org:admin`/`org:member`).
 
 ---
 
@@ -256,6 +266,14 @@ Replace Clerk's frontend invite SDK with a call to `POST /tenants/me/invite`. Th
 - `PendingInvite` records are scoped to tenant — can't invite someone to a tenant you don't admin
 - `expiresAt` prevents stale invites from being honored months later
 - Deactivating a user both removes Clerk membership AND sets `isActive: false` (defense in depth)
+
+## Design Rationale: Why Not Clerk Webhooks?
+
+An alternative to PendingInvite is Clerk webhooks (`organization.invitation.accepted`, `organizationMembership.created`) which would allow real-time sync. We chose PendingInvite because:
+- Webhooks add infrastructure complexity (delivery guarantees, retry handling, idempotency)
+- We already have autoProvision running on every login — the pull model is simpler and already proven
+- PendingInvite is a single DB query per new user, not a whole webhook processing pipeline
+- If we add Clerk webhooks later (for the email verification spec), we can migrate to that model then
 
 ## Future (Not In Scope)
 

@@ -5,6 +5,7 @@
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
 import { API_CONFIG } from '@config/api.config';
+import { useTenantContextStore } from '../stores/tenantContextStore';
 
 // Token provider — set from React context via setTokenProvider()
 let tokenProvider: (() => Promise<string | null>) | null = null;
@@ -33,6 +34,13 @@ apiClient.interceptors.request.use(
         // Token fetch failed — request will proceed without auth
       }
     }
+
+    // Inject tenant context header for super admin context switching
+    const { activeTenant } = useTenantContextStore.getState();
+    if (activeTenant) {
+      config.headers['X-Tenant-Context'] = activeTenant.tenantId;
+    }
+
     return config;
   },
   (error) => {

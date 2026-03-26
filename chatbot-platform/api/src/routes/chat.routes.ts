@@ -22,6 +22,10 @@ import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
+import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { validate } from '../middleware/validate';
+import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
+import { sendMessageSchema, chatListQuerySchema } from '../schemas';
 
 /** Safely serialise a message for API responses, handling decryption failures. */
 function serialiseMessage(m: Message) {
@@ -68,47 +72,40 @@ router.get(
   '/:sessionId/history',
   authenticateWidget,
   validateTenant,
-  async (req: TenantRequest, res: Response): Promise<void> => {
-    try {
-      const { sessionId } = req.params;
-      const tenantId = req.tenant?.id;
-      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-      const offset = parseInt(req.query.offset as string) || 0;
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const { sessionId } = req.params;
+    const tenantId = req.tenant?.id;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
 
-      // Verify session belongs to tenant
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId, tenantId },
-      });
+    // Verify session belongs to tenant
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      // Get messages with pagination
-      const [messages, total] = await messageRepository.findAndCount({
-        where: { sessionId },
-        order: { createdAt: 'DESC' },
-        take: limit,
-        skip: offset,
-      });
-
-      res.json({
-        success: true,
-        sessionId,
-        messages: messages.reverse().map(serialiseMessage),
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
-        },
-      });
-    } catch (error) {
-      logger.error('Error fetching message history:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    // Get messages with pagination
+    const [messages, total] = await messageRepository.findAndCount({
+      where: { sessionId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+
+    sendSuccess(res, {
+      sessionId,
+      messages: messages.reverse().map(serialiseMessage),
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  })
 );
 
 /**
@@ -120,77 +117,63 @@ router.post(
   authenticateWidget,
   validateTenant,
   rateLimit(),
-  async (req: TenantRequest, res: Response): Promise<void> => {
-    try {
-      const { sessionId } = req.params;
-      const tenantId = req.tenant?.id;
-      const user = req.user;
-      const { content, type = 'text', metadata } = req.body as SendMessageRequest;
+  validate(sendMessageSchema),
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const { sessionId } = req.params;
+    const tenantId = req.tenant?.id;
+    const user = req.user;
+    const { content, type = 'text', metadata } = req.body as SendMessageRequest;
 
-      if (!content || content.trim().length === 0) {
-        res.status(400).json({ error: 'Message content is required' });
-        return;
-      }
+    // Verify session exists and belongs to tenant
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
 
-      // Verify session exists and belongs to tenant
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId, tenantId },
-      });
-
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      if (session.isClosed()) {
-        res.status(400).json({ error: 'Session is closed' });
-        return;
-      }
-
-      // Save message + update session in a single transaction
-      const message = messageRepository.create({
-        sessionId,
-        tenantId: tenantId!,
-        participantId: user?.id || 'anonymous',
-        type,
-        content: content.trim(),
-        metadata: metadata || undefined,
-      } as DeepPartial<Message>);
-
-      const savedMessage = await AppDataSource.transaction(async (manager) => {
-        const msg = await manager.save(message);
-        session.updateActivity();
-        await manager.save(session);
-        return msg;
-      });
-
-      // Emit and forward AFTER transaction commits
-      const messageData = {
-        id: savedMessage.id,
-        type: savedMessage.type,
-        content: savedMessage.content,
-        status: savedMessage.status,
-        createdAt: savedMessage.createdAt,
-        timestamp: new Date().toISOString(),
-      };
-
-      emitToSession(tenantId!, sessionId, 'message:receive', messageData);
-
-      forwardMessageToN8n(session, savedMessage).catch((err) => {
-        logger.error('Error in n8n message forwarding:', err);
-      });
-
-      logger.debug(`Message sent via HTTP for session ${sessionId}`);
-
-      res.status(201).json({
-        success: true,
-        message: messageData,
-      });
-    } catch (error) {
-      logger.error('Error sending message:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    if (session.isClosed()) {
+      throw new BadRequestError('Session is closed');
+    }
+
+    // Save message + update session in a single transaction
+    const message = messageRepository.create({
+      sessionId,
+      tenantId: tenantId!,
+      participantId: user?.id || 'anonymous',
+      type,
+      content: content.trim(),
+      metadata: metadata || undefined,
+    } as DeepPartial<Message>);
+
+    const savedMessage = await AppDataSource.transaction(async (manager) => {
+      const msg = await manager.save(message);
+      session.updateActivity();
+      await manager.save(session);
+      return msg;
+    });
+
+    // Emit and forward AFTER transaction commits
+    const messageData = {
+      id: savedMessage.id,
+      type: savedMessage.type,
+      content: savedMessage.content,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      timestamp: new Date().toISOString(),
+    };
+
+    emitToSession(tenantId!, sessionId, 'message:receive', messageData);
+
+    forwardMessageToN8n(session, savedMessage).catch((err) => {
+      logger.error('Error in n8n message forwarding:', err);
+    });
+
+    logger.debug(`Message sent via HTTP for session ${sessionId}`);
+
+    sendCreated(res, { message: messageData });
+  })
 );
 
 /**
@@ -201,52 +184,45 @@ router.get(
   '/:sessionId/status',
   authenticateWidget,
   validateTenant,
-  async (req: TenantRequest, res: Response): Promise<void> => {
-    try {
-      const { sessionId } = req.params;
-      const tenantId = req.tenant?.id;
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const { sessionId } = req.params;
+    const tenantId = req.tenant?.id;
 
-      // Single query: session + unread count via subquery
-      const result = await sessionRepository
-        .createQueryBuilder('s')
-        .leftJoinAndSelect('s.assignedAgent', 'agent')
-        .addSelect((qb) =>
-          qb.select('COUNT(*)')
-            .from(Message, 'm')
-            .where('m.session_id = s.id')
-            .andWhere("m.status = 'sent'"),
-          'unreadCount'
-        )
-        .where('s.id = :sessionId', { sessionId })
-        .andWhere('s.tenant_id = :tenantId', { tenantId })
-        .getRawAndEntities();
+    // Single query: session + unread count via subquery
+    const result = await sessionRepository
+      .createQueryBuilder('s')
+      .leftJoinAndSelect('s.assignedAgent', 'agent')
+      .addSelect((qb) =>
+        qb.select('COUNT(*)')
+          .from(Message, 'm')
+          .where('m.session_id = s.id')
+          .andWhere("m.status = 'sent'"),
+        'unreadCount'
+      )
+      .where('s.id = :sessionId', { sessionId })
+      .andWhere('s.tenant_id = :tenantId', { tenantId })
+      .getRawAndEntities();
 
-      const session = result.entities[0];
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      const unreadCount = parseInt(result.raw[0]?.unreadCount || '0');
-
-      res.json({
-        success: true,
-        session: {
-          id: session.id,
-          status: session.status,
-          assignedAgent: session.assignedAgent
-            ? { id: session.assignedAgent.id }
-            : null,
-          lastActivityAt: session.lastActivityAt,
-          createdAt: session.createdAt,
-        },
-        unreadCount,
-      });
-    } catch (error) {
-      logger.error('Error fetching session status:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    const session = result.entities[0];
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    const unreadCount = parseInt(result.raw[0]?.unreadCount || '0');
+
+    sendSuccess(res, {
+      session: {
+        id: session.id,
+        status: session.status,
+        assignedAgent: session.assignedAgent
+          ? { id: session.assignedAgent.id }
+          : null,
+        lastActivityAt: session.lastActivityAt,
+        createdAt: session.createdAt,
+      },
+      unreadCount,
+    });
+  })
 );
 
 /**
@@ -257,63 +233,55 @@ router.post(
   '/:sessionId/close',
   authenticateWidget,
   validateTenant,
-  async (req: TenantRequest, res: Response): Promise<void> => {
-    try {
-      const { sessionId } = req.params;
-      const tenantId = req.tenant?.id;
-      const { reason } = req.body;
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const { sessionId } = req.params;
+    const tenantId = req.tenant?.id;
+    const { reason } = req.body;
 
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId, tenantId },
-      });
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      if (!session.isActive()) {
-        res.status(400).json({ error: 'Session is already closed' });
-        return;
-      }
-
-      // Close session
-      session.close();
-      await sessionRepository.save(session);
-
-      // Add system message
-      const systemMessage = messageRepository.create({
-        sessionId,
-        tenantId: tenantId!,
-        participantId: 'system',
-        type: 'system',
-        content: `Session closed: ${reason || 'User closed the chat'}`,
-      } as DeepPartial<Message>);
-      await messageRepository.save(systemMessage);
-
-      // Notify via WebSocket
-      emitToSession(tenantId!, sessionId, 'session:closed', {
-        sessionId,
-        reason,
-        endedAt: session.endedAt,
-      });
-
-      logger.info(`Session ${sessionId} closed`, { reason });
-
-      res.json({
-        success: true,
-        message: 'Session closed successfully',
-        session: {
-          id: session.id,
-          status: session.status,
-          endedAt: session.endedAt,
-        },
-      });
-    } catch (error) {
-      logger.error('Error closing session:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    if (!session.isActive()) {
+      throw new BadRequestError('Session is already closed');
+    }
+
+    // Close session
+    session.close();
+    await sessionRepository.save(session);
+
+    // Add system message
+    const systemMessage = messageRepository.create({
+      sessionId,
+      tenantId: tenantId!,
+      participantId: 'system',
+      type: 'system',
+      content: `Session closed: ${reason || 'User closed the chat'}`,
+    } as DeepPartial<Message>);
+    await messageRepository.save(systemMessage);
+
+    // Notify via WebSocket
+    emitToSession(tenantId!, sessionId, 'session:closed', {
+      sessionId,
+      reason,
+      endedAt: session.endedAt,
+    });
+
+    logger.info(`Session ${sessionId} closed`, { reason });
+
+    sendSuccess(res, {
+      message: 'Session closed successfully',
+      session: {
+        id: session.id,
+        status: session.status,
+        endedAt: session.endedAt,
+      },
+    });
+  })
 );
 
 /**
@@ -324,47 +292,39 @@ router.get(
   '/sessions',
   requireClerkAuth, autoProvision, resolveTenantContext,
   validateTenant,
-  async (req: TenantRequest, res: Response): Promise<void> => {
-    try {
-      const tenantId = req.tenant?.id;
-      const status = req.query.status as string;
-      const params = parsePaginationParams(req.query as Record<string, unknown>);
+  validate(chatListQuerySchema, 'query'),
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const tenantId = req.tenant?.id;
+    const status = req.query.status as string;
+    const params = parsePaginationParams(req.query as Record<string, unknown>);
 
-      const qb = sessionRepository
-        .createQueryBuilder('session')
-        .leftJoinAndSelect('session.assignedAgent', 'agent')
-        .where('session.tenantId = :tenantId', { tenantId });
+    const qb = sessionRepository
+      .createQueryBuilder('session')
+      .leftJoinAndSelect('session.assignedAgent', 'agent')
+      .where('session.tenantId = :tenantId', { tenantId });
 
-      if (status && ['active', 'closed', 'waiting', 'handoff'].includes(status)) {
-        qb.andWhere('session.status = :status', { status });
-      }
-
-      if (!params.sortBy) {
-        qb.orderBy('session.lastActivityAt', 'DESC');
-      }
-
-      const result = await applyPagination(qb, params);
-
-      res.json({
-        success: true,
-        sessions: result.data.map((s) => ({
-          id: s.id,
-          status: s.status,
-          assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
-          lastActivityAt: s.lastActivityAt,
-          createdAt: s.createdAt,
-        })),
-        meta: result.meta,
-        pagination: {
-          ...result.meta,
-          offset: (result.meta.page - 1) * result.meta.limit,
-        },
-      });
-    } catch (error) {
-      logger.error('Error fetching sessions:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (status && ['active', 'closed', 'waiting', 'handoff'].includes(status)) {
+      qb.andWhere('session.status = :status', { status });
     }
-  }
+
+    if (!params.sortBy) {
+      qb.orderBy('session.lastActivityAt', 'DESC');
+    }
+
+    const result = await applyPagination(qb, params);
+
+    sendPaginated(
+      res,
+      result.data.map((s) => ({
+        id: s.id,
+        status: s.status,
+        assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
+        lastActivityAt: s.lastActivityAt,
+        createdAt: s.createdAt,
+      })),
+      result.meta
+    );
+  })
 );
 
 /**
@@ -374,55 +334,46 @@ router.get(
 router.post(
   '/:id/transfer',
   requireClerkAuth, autoProvision, resolveTenantContext,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const { agentId: targetAgentId } = req.body;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { agentId: targetAgentId } = req.body;
 
-      if (!targetAgentId) {
-        res.status(400).json({ error: 'Target agent ID is required' });
-        return;
-      }
-
-      const session = await sessionRepository.findOne({
-        where: { id, tenantId: req.user?.tenantId },
-      });
-
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      // Verify target agent exists
-      const targetAgent = await agentRepository.findOne({
-        where: { id: targetAgentId },
-      });
-
-      if (!targetAgent) {
-        res.status(404).json({ error: 'Target agent not found' });
-        return;
-      }
-
-      session.assignedAgentId = targetAgentId;
-      session.status = 'active';
-      await sessionRepository.save(session);
-
-      logger.info(`Session ${id} transferred to agent ${targetAgentId}`);
-
-      res.json({
-        success: true,
-        message: 'Session transferred',
-        session: {
-          id: session.id,
-          status: session.status,
-          assignedAgentId: targetAgentId,
-        },
-      });
-    } catch (error) {
-      logger.error('Error transferring session:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!targetAgentId) {
+      throw new BadRequestError('Target agent ID is required');
     }
-  }
+
+    const session = await sessionRepository.findOne({
+      where: { id, tenantId: req.user?.tenantId },
+    });
+
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    // Verify target agent exists
+    const targetAgent = await agentRepository.findOne({
+      where: { id: targetAgentId },
+    });
+
+    if (!targetAgent) {
+      throw new NotFoundError('Target agent not found');
+    }
+
+    session.assignedAgentId = targetAgentId;
+    session.status = 'active';
+    await sessionRepository.save(session);
+
+    logger.info(`Session ${id} transferred to agent ${targetAgentId}`);
+
+    sendSuccess(res, {
+      message: 'Session transferred',
+      session: {
+        id: session.id,
+        status: session.status,
+        assignedAgentId: targetAgentId,
+      },
+    });
+  })
 );
 
 /**
@@ -432,39 +383,32 @@ router.post(
 router.post(
   '/:id/close',
   requireClerkAuth, autoProvision, resolveTenantContext,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
 
-      const session = await sessionRepository.findOne({
-        where: { id, tenantId: req.user?.tenantId },
-      });
+    const session = await sessionRepository.findOne({
+      where: { id, tenantId: req.user?.tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      session.status = 'closed';
-      session.endedAt = new Date();
-      await sessionRepository.save(session);
-
-      logger.info(`Session ${id} closed by agent`);
-
-      res.json({
-        success: true,
-        message: 'Session closed',
-        session: {
-          id: session.id,
-          status: session.status,
-          endedAt: session.endedAt,
-        },
-      });
-    } catch (error) {
-      logger.error('Error closing session:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    session.status = 'closed';
+    session.endedAt = new Date();
+    await sessionRepository.save(session);
+
+    logger.info(`Session ${id} closed by agent`);
+
+    sendSuccess(res, {
+      message: 'Session closed',
+      session: {
+        id: session.id,
+        status: session.status,
+        endedAt: session.endedAt,
+      },
+    });
+  })
 );
 
 /**
@@ -474,51 +418,45 @@ router.post(
 router.get(
   '/:id/history',
   requireClerkAuth, autoProvision, resolveTenantContext,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
-      const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
-      const offset = parseInt(req.query.offset as string) || 0;
+  validate(chatListQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+    const offset = parseInt(req.query.offset as string) || 0;
 
-      const session = await sessionRepository.findOne({
-        where: { id, tenantId: req.user?.tenantId },
-      });
+    const session = await sessionRepository.findOne({
+      where: { id, tenantId: req.user?.tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      const [messages, total] = await messageRepository.findAndCount({
-        where: { sessionId: id },
-        order: { createdAt: 'DESC' },
-        take: limit,
-        skip: offset,
-      });
-
-      res.json({
-        success: true,
-        sessionId: id,
-        messages: messages.reverse().map((m) => ({
-          id: m.id,
-          type: m.type,
-          content: m.content,
-          status: m.status,
-          createdAt: m.createdAt,
-          metadata: m.metadata,
-        })),
-        pagination: {
-          total,
-          limit,
-          offset,
-          hasMore: offset + limit < total,
-        },
-      });
-    } catch (error) {
-      logger.error('Error fetching message history:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    const [messages, total] = await messageRepository.findAndCount({
+      where: { sessionId: id },
+      order: { createdAt: 'DESC' },
+      take: limit,
+      skip: offset,
+    });
+
+    sendSuccess(res, {
+      sessionId: id,
+      messages: messages.reverse().map((m) => ({
+        id: m.id,
+        type: m.type,
+        content: m.content,
+        status: m.status,
+        createdAt: m.createdAt,
+        metadata: m.metadata,
+      })),
+      pagination: {
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      },
+    });
+  })
 );
 
 /**
@@ -528,74 +466,58 @@ router.get(
 router.post(
   '/:id/read',
   requireClerkAuth, autoProvision, resolveTenantContext,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { id } = req.params;
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
 
-      const session = await sessionRepository.findOne({
-        where: { id, tenantId: req.user?.tenantId },
-      });
+    const session = await sessionRepository.findOne({
+      where: { id, tenantId: req.user?.tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      // Mark all unread messages in the session as read
-      await messageRepository.update(
-        { sessionId: id, readAt: IsNull() },
-        { readAt: new Date(), status: 'read' as MessageStatus }
-      );
-
-      logger.info(`Messages marked as read for session ${id}`);
-
-      res.json({
-        success: true,
-        message: 'Messages marked as read',
-      });
-    } catch (error) {
-      logger.error('Error marking messages as read:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    // Mark all unread messages in the session as read
+    await messageRepository.update(
+      { sessionId: id, readAt: IsNull() },
+      { readAt: new Date(), status: 'read' as MessageStatus }
+    );
+
+    logger.info(`Messages marked as read for session ${id}`);
+
+    sendSuccess(res, { message: 'Messages marked as read' });
+  })
 );
 
 router.delete(
   '/:sessionId/participants/:participantId',
   requireClerkAuth, autoProvision, resolveTenantContext,
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { sessionId, participantId } = req.params;
-      const tenantId = req.user?.tenantId;
-      const participantRepo = AppDataSource.getRepository(Participant);
+  asyncHandler(async (req: Request, res: Response) => {
+    const { sessionId, participantId } = req.params;
+    const tenantId = req.user?.tenantId;
+    const participantRepo = AppDataSource.getRepository(Participant);
 
-      const session = await sessionRepository.findOne({
-        where: { id: sessionId, tenantId },
-      });
+    const session = await sessionRepository.findOne({
+      where: { id: sessionId, tenantId },
+    });
 
-      if (!session) {
-        res.status(404).json({ error: 'Session not found' });
-        return;
-      }
-
-      const participant = await participantRepo.findOne({
-        where: { id: participantId, sessionId, isDeleted: false },
-      });
-
-      if (!participant) {
-        res.status(404).json({ error: 'Participant not found' });
-        return;
-      }
-
-      participant.softDelete();
-      await participantRepo.save(participant);
-
-      res.status(200).json({ success: true, message: 'Participant deleted' });
-    } catch (error) {
-      logger.error('Failed to soft-delete participant', { error, sessionId: req.params.sessionId });
-      res.status(500).json({ error: 'Internal server error' });
+    if (!session) {
+      throw new NotFoundError('Session not found');
     }
-  }
+
+    const participant = await participantRepo.findOne({
+      where: { id: participantId, sessionId, isDeleted: false },
+    });
+
+    if (!participant) {
+      throw new NotFoundError('Participant not found');
+    }
+
+    participant.softDelete();
+    await participantRepo.save(participant);
+
+    sendSuccess(res, { message: 'Participant deleted' });
+  })
 );
 
 export default router;

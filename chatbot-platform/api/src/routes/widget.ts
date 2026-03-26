@@ -14,6 +14,7 @@ import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
+import { sendSuccess, sendCreated } from '../utils/response';
 
 // Inline API key validation (looks up tenant by apiKey in DB)
 interface ApiKeyValidationResult {
@@ -65,25 +66,22 @@ router.get(
 
     const tenant = result.tenant;
 
-    res.json({
-      success: true,
-      data: {
-        tenantId: tenant.id,
-        name: tenant.name,
-        theme: tenant.settings?.theme || {
-          primaryColor: '#007bff',
-          backgroundColor: '#ffffff',
-          textColor: '#333333',
-        },
-        features: tenant.settings?.features || {
-          fileUploadEnabled: false,
-          handoffEnabled: true,
-          aiEnabled: true,
-        },
-        businessHours: tenant.settings?.businessHours || {
-          enabled: false,
-          timezone: 'UTC',
-        },
+    sendSuccess(res, {
+      tenantId: tenant.id,
+      name: tenant.name,
+      theme: tenant.settings?.theme || {
+        primaryColor: '#007bff',
+        backgroundColor: '#ffffff',
+        textColor: '#333333',
+      },
+      features: tenant.settings?.features || {
+        fileUploadEnabled: false,
+        handoffEnabled: true,
+        aiEnabled: true,
+      },
+      businessHours: tenant.settings?.businessHours || {
+        enabled: false,
+        timezone: 'UTC',
       },
     });
   })
@@ -125,17 +123,14 @@ router.post(
     if (existingSession) {
       const token = generateWidgetToken(tenant.id, visitorId, existingSession.id);
 
-      res.json({
-        success: true,
-        data: {
-          session: {
-            id: existingSession.id,
-            status: existingSession.status,
-            startedAt: existingSession.startedAt,
-          },
-          token,
-          isNew: false,
+      sendSuccess(res, {
+        session: {
+          id: existingSession.id,
+          status: existingSession.status,
+          startedAt: existingSession.startedAt,
         },
+        token,
+        isNew: false,
       });
       return;
     }
@@ -184,17 +179,14 @@ router.post(
       visitorId,
     });
 
-    res.json({
-      success: true,
-      data: {
-        session: {
-          id: session.id,
-          status: session.status,
-          startedAt: session.startedAt,
-        },
-        token,
-        isNew: true,
+    sendSuccess(res, {
+      session: {
+        id: session.id,
+        status: session.status,
+        startedAt: session.startedAt,
       },
+      token,
+      isNew: true,
     });
   })
 );
@@ -223,21 +215,18 @@ router.get(
       take: 100,
     });
 
-    res.json({
-      success: true,
-      data: messages.map((msg) => ({
-        id: msg.id,
-        type: msg.type,
-        content: msg.content,
-        sender: {
-          id: msg.participantId,
-          type: msg.participant?.type,
-          name: msg.participant?.name,
-        },
-        metadata: msg.metadata,
-        createdAt: msg.createdAt,
-      })),
-    });
+    sendSuccess(res, messages.map((msg) => ({
+      id: msg.id,
+      type: msg.type,
+      content: msg.content,
+      sender: {
+        id: msg.participantId,
+        type: msg.participant?.type,
+        name: msg.participant?.name,
+      },
+      metadata: msg.metadata,
+      createdAt: msg.createdAt,
+    })));
   })
 );
 
@@ -326,15 +315,12 @@ router.post(
       timestamp: message.createdAt.toISOString(),
     });
 
-    res.status(201).json({
-      success: true,
-      data: {
-        message: {
-          id: message.id,
-          content: message.content,
-          type: message.type,
-          createdAt: message.createdAt,
-        },
+    sendCreated(res, {
+      message: {
+        id: message.id,
+        content: message.content,
+        type: message.type,
+        createdAt: message.createdAt,
       },
     });
   })
@@ -384,13 +370,10 @@ router.post(
       priority,
     });
 
-    res.json({
-      success: true,
-      data: {
-        sessionId,
-        status: 'handoff_requested',
-        message: 'An agent will be with you shortly',
-      },
+    sendSuccess(res, {
+      sessionId,
+      status: 'handoff_requested',
+      message: 'An agent will be with you shortly',
     });
   })
 );
@@ -434,11 +417,8 @@ router.post(
       rating,
     });
 
-    res.json({
-      success: true,
-      data: {
-        message: 'Thank you for your feedback!',
-      },
+    sendSuccess(res, {
+      message: 'Thank you for your feedback!',
     });
   })
 );

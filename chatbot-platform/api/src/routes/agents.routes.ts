@@ -11,6 +11,10 @@ import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middlewa
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached, invalidate } from '../utils/cache';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
+import { asyncHandler, BadRequestError, NotFoundError, ConflictError } from '../middleware/error-handler';
+import { validate } from '../middleware/validate';
+import { sendSuccess, sendCreated } from '../utils/response';
+import { createAgentSchema, updateAgentSchema, updateAgentStatusSchema } from '../schemas';
 
 const router = Router();
 const agentRepository = AppDataSource.getRepository(Agent);
@@ -25,59 +29,54 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
  */
 router.get(
   '/',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const tenantId = authReq.user?.tenantId;
-      const params = parsePaginationParams(req.query as Record<string, unknown>);
-      const status = req.query.status as string;
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    const params = parsePaginationParams(req.query as Record<string, unknown>);
+    const status = req.query.status as string;
 
-      const isDefaultRequest = !status && params.page === 1 && params.limit === 20;
-      const cacheKey = isDefaultRequest ? `agents:${tenantId}` : null;
+    const isDefaultRequest = !status && params.page === 1 && params.limit === 20;
+    const cacheKey = isDefaultRequest ? `agents:${tenantId}` : null;
 
-      const getData = async () => {
-        const qb = agentRepository.createQueryBuilder('agent')
-          .leftJoinAndSelect('agent.user', 'user')
-          .where('agent.tenantId = :tenantId', { tenantId });
+    const getData = async () => {
+      const qb = agentRepository.createQueryBuilder('agent')
+        .leftJoinAndSelect('agent.user', 'user')
+        .where('agent.tenantId = :tenantId', { tenantId });
 
-        if (status && ['online', 'away', 'busy', 'offline'].includes(status)) {
-          qb.andWhere('agent.status = :status', { status });
-        }
+      if (status && ['online', 'away', 'busy', 'offline'].includes(status)) {
+        qb.andWhere('agent.status = :status', { status });
+      }
 
-        if (!params.sortBy) {
-          qb.orderBy('agent.createdAt', 'DESC');
-        }
+      if (!params.sortBy) {
+        qb.orderBy('agent.createdAt', 'DESC');
+      }
 
-        const result = await applyPagination(qb, params);
+      const result = await applyPagination(qb, params);
 
-        return {
-          agents: result.data.map((a) => ({
-            id: a.id,
-            name: a.user?.name,
-            email: a.user?.email,
-            role: a.user?.role,
-            status: a.status,
-            maxConcurrentChats: a.maxConcurrentChats,
-            currentChatCount: a.currentChatCount,
-            skills: a.skills,
-            languages: a.languages,
-            lastActiveAt: a.lastActiveAt,
-            createdAt: a.createdAt,
-          })),
-          meta: result.meta,
-        };
+      return {
+        agents: result.data.map((a) => ({
+          id: a.id,
+          name: a.user?.name,
+          email: a.user?.email,
+          role: a.user?.role,
+          status: a.status,
+          maxConcurrentChats: a.maxConcurrentChats,
+          currentChatCount: a.currentChatCount,
+          skills: a.skills,
+          languages: a.languages,
+          lastActiveAt: a.lastActiveAt,
+          createdAt: a.createdAt,
+        })),
+        meta: result.meta,
       };
+    };
 
-      const result = cacheKey
-        ? await cached(cacheKey, 60, getData)
-        : await getData();
+    const result = cacheKey
+      ? await cached(cacheKey, 60, getData)
+      : await getData();
 
-      res.json({ success: true, ...result });
-    } catch (error) {
-      logger.error('Error listing agents:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
+    sendSuccess(res, result);
+  })
 );
 
 /**
@@ -86,45 +85,38 @@ router.get(
  */
 router.get(
   '/:id',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const { id } = req.params;
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const { id } = req.params;
 
-      const agent = await agentRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
-        relations: ['user'],
-      });
+    const agent = await agentRepository.findOne({
+      where: { id, tenantId: authReq.user?.tenantId },
+      relations: ['user'],
+    });
 
-      if (!agent) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
-
-      res.json({
-        success: true,
-        agent: {
-          id: agent.id,
-          name: agent.user?.name,
-          email: agent.user?.email,
-          role: agent.user?.role,
-          status: agent.status,
-          maxConcurrentChats: agent.maxConcurrentChats,
-          currentChatCount: agent.currentChatCount,
-          skills: agent.skills,
-          languages: agent.languages,
-          totalChatsHandled: agent.totalChatsHandled,
-          avgResponseTimeSeconds: agent.avgResponseTimeSeconds,
-          satisfactionScore: agent.satisfactionScore,
-          lastActiveAt: agent.lastActiveAt,
-          createdAt: agent.createdAt,
-        },
-      });
-    } catch (error) {
-      logger.error('Error fetching agent:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!agent) {
+      throw new NotFoundError('Agent not found');
     }
-  }
+
+    sendSuccess(res, {
+      agent: {
+        id: agent.id,
+        name: agent.user?.name,
+        email: agent.user?.email,
+        role: agent.user?.role,
+        status: agent.status,
+        maxConcurrentChats: agent.maxConcurrentChats,
+        currentChatCount: agent.currentChatCount,
+        skills: agent.skills,
+        languages: agent.languages,
+        totalChatsHandled: agent.totalChatsHandled,
+        avgResponseTimeSeconds: agent.avgResponseTimeSeconds,
+        satisfactionScore: agent.satisfactionScore,
+        lastActiveAt: agent.lastActiveAt,
+        createdAt: agent.createdAt,
+      },
+    });
+  })
 );
 
 /**
@@ -133,66 +125,58 @@ router.get(
  */
 router.post(
   '/',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const tenantId = authReq.user?.tenantId;
-      const { userId, maxConcurrentChats, skills, languages } = req.body;
+  validate(createAgentSchema),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    const { userId, maxConcurrentChats, skills, languages } = req.body;
 
-      if (!userId) {
-        res.status(400).json({ error: 'userId is required' });
-        return;
-      }
-
-      // Verify user exists and belongs to tenant
-      const user = await userRepository.findOne({
-        where: { id: userId, tenantId },
-      });
-
-      if (!user) {
-        res.status(404).json({ error: 'User not found' });
-        return;
-      }
-
-      // Check if agent profile already exists
-      const existing = await agentRepository.findOne({
-        where: { userId },
-      });
-
-      if (existing) {
-        res.status(409).json({ error: 'Agent profile already exists for this user' });
-        return;
-      }
-
-      const agent = agentRepository.create({
-        tenantId: tenantId!,
-        userId,
-        maxConcurrentChats: maxConcurrentChats || 5,
-        skills: skills || [],
-        languages: languages || ['en'],
-      });
-
-      const saved = await agentRepository.save(agent);
-      await invalidate(`agents:${tenantId}`);
-
-      logger.info('Agent created', { agentId: saved.id, userId });
-
-      res.status(201).json({
-        success: true,
-        agent: {
-          id: saved.id,
-          userId: saved.userId,
-          status: saved.status,
-          maxConcurrentChats: saved.maxConcurrentChats,
-          skills: saved.skills,
-          languages: saved.languages,
-        },
-      });
-    } catch (error) {
-      logger.error('Error creating agent:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!userId) {
+      throw new BadRequestError('userId is required');
     }
-  }
+
+    // Verify user exists and belongs to tenant
+    const user = await userRepository.findOne({
+      where: { id: userId, tenantId },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found');
+    }
+
+    // Check if agent profile already exists
+    const existing = await agentRepository.findOne({
+      where: { userId },
+    });
+
+    if (existing) {
+      throw new ConflictError('Agent profile already exists for this user');
+    }
+
+    const agent = agentRepository.create({
+      tenantId: tenantId!,
+      userId,
+      maxConcurrentChats: maxConcurrentChats || 5,
+      skills: skills || [],
+      languages: languages || ['en'],
+    });
+
+    const saved = await agentRepository.save(agent);
+    await invalidate(`agents:${tenantId}`);
+
+    logger.info('Agent created', { agentId: saved.id, userId });
+
+    sendCreated(res, {
+      agent: {
+        id: saved.id,
+        userId: saved.userId,
+        status: saved.status,
+        maxConcurrentChats: saved.maxConcurrentChats,
+        skills: saved.skills,
+        languages: saved.languages,
+      },
+    });
+  })
 );
 
 /**
@@ -201,41 +185,35 @@ router.post(
  */
 router.patch(
   '/:id',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const { id } = req.params;
-      const { maxConcurrentChats, skills, languages } = req.body;
+  validate(updateAgentSchema),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const { id } = req.params;
+    const { maxConcurrentChats, skills, languages } = req.body;
 
-      const agent = await agentRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
-      });
+    const agent = await agentRepository.findOne({
+      where: { id, tenantId: authReq.user?.tenantId },
+    });
 
-      if (!agent) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
-
-      if (maxConcurrentChats !== undefined) agent.maxConcurrentChats = maxConcurrentChats;
-      if (skills !== undefined) agent.skills = skills;
-      if (languages !== undefined) agent.languages = languages;
-
-      await agentRepository.save(agent);
-
-      res.json({
-        success: true,
-        agent: {
-          id: agent.id,
-          maxConcurrentChats: agent.maxConcurrentChats,
-          skills: agent.skills,
-          languages: agent.languages,
-        },
-      });
-    } catch (error) {
-      logger.error('Error updating agent:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!agent) {
+      throw new NotFoundError('Agent not found');
     }
-  }
+
+    if (maxConcurrentChats !== undefined) agent.maxConcurrentChats = maxConcurrentChats;
+    if (skills !== undefined) agent.skills = skills;
+    if (languages !== undefined) agent.languages = languages;
+
+    await agentRepository.save(agent);
+
+    sendSuccess(res, {
+      agent: {
+        id: agent.id,
+        maxConcurrentChats: agent.maxConcurrentChats,
+        skills: agent.skills,
+        languages: agent.languages,
+      },
+    });
+  })
 );
 
 /**
@@ -244,43 +222,36 @@ router.patch(
  */
 router.patch(
   '/:id/status',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const { id } = req.params;
-      const { status } = req.body;
+  validate(updateAgentStatusSchema),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const { id } = req.params;
+    const { status } = req.body;
 
-      if (!status || !['online', 'away', 'busy', 'offline'].includes(status)) {
-        res.status(400).json({ error: 'Valid status is required (online, away, busy, offline)' });
-        return;
-      }
-
-      const agent = await agentRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
-      });
-
-      if (!agent) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
-
-      agent.updateStatus(status);
-      await agentRepository.save(agent);
-      await invalidate(`agents:${authReq.user?.tenantId}`);
-
-      res.json({
-        success: true,
-        agent: {
-          id: agent.id,
-          status: agent.status,
-          lastStatusChangeAt: agent.lastStatusChangeAt,
-        },
-      });
-    } catch (error) {
-      logger.error('Error updating agent status:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!status || !['online', 'away', 'busy', 'offline'].includes(status)) {
+      throw new BadRequestError('Valid status is required (online, away, busy, offline)');
     }
-  }
+
+    const agent = await agentRepository.findOne({
+      where: { id, tenantId: authReq.user?.tenantId },
+    });
+
+    if (!agent) {
+      throw new NotFoundError('Agent not found');
+    }
+
+    agent.updateStatus(status);
+    await agentRepository.save(agent);
+    await invalidate(`agents:${authReq.user?.tenantId}`);
+
+    sendSuccess(res, {
+      agent: {
+        id: agent.id,
+        status: agent.status,
+        lastStatusChangeAt: agent.lastStatusChangeAt,
+      },
+    });
+  })
 );
 
 /**
@@ -289,35 +260,28 @@ router.patch(
  */
 router.get(
   '/:id/performance',
-  async (req: Request, res: Response): Promise<void> => {
-    try {
-      const authReq = req as ProvisionedRequest;
-      const { id } = req.params;
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const { id } = req.params;
 
-      const agent = await agentRepository.findOne({
-        where: { id, tenantId: authReq.user?.tenantId },
-      });
+    const agent = await agentRepository.findOne({
+      where: { id, tenantId: authReq.user?.tenantId },
+    });
 
-      if (!agent) {
-        res.status(404).json({ error: 'Agent not found' });
-        return;
-      }
-
-      res.json({
-        success: true,
-        performance: {
-          agentId: agent.id,
-          totalChatsHandled: agent.totalChatsHandled,
-          avgResponseTimeSeconds: agent.avgResponseTimeSeconds,
-          satisfactionScore: agent.satisfactionScore,
-          currentChatCount: agent.currentChatCount,
-        },
-      });
-    } catch (error) {
-      logger.error('Error fetching agent performance:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    if (!agent) {
+      throw new NotFoundError('Agent not found');
     }
-  }
+
+    sendSuccess(res, {
+      performance: {
+        agentId: agent.id,
+        totalChatsHandled: agent.totalChatsHandled,
+        avgResponseTimeSeconds: agent.avgResponseTimeSeconds,
+        satisfactionScore: agent.satisfactionScore,
+        currentChatCount: agent.currentChatCount,
+      },
+    });
+  })
 );
 
 /**
@@ -326,12 +290,9 @@ router.get(
  */
 router.get(
   '/:id/shifts',
-  async (_req: Request, res: Response): Promise<void> => {
-    res.json({
-      success: true,
-      shifts: [],
-    });
-  }
+  asyncHandler(async (_req: Request, res: Response): Promise<void> => {
+    sendSuccess(res, { shifts: [] });
+  })
 );
 
 export default router;

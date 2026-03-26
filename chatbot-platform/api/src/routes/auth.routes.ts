@@ -11,6 +11,10 @@ import { generateWidgetToken } from '../middleware/auth.middleware';
 import { getTenantByApiKey } from '../middleware/tenant.middleware';
 import { rateLimitWidget } from '../middleware/rate-limit.middleware';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
+import { asyncHandler, BadRequestError, UnauthorizedError } from '../middleware/error-handler';
+import { validate } from '../middleware/validate';
+import { sendSuccess } from '../utils/response';
+import { widgetAuthSchema } from '../schemas';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -31,55 +35,36 @@ interface WidgetAuthRequest {
 router.post(
   '/widget',
   rateLimitWidget,
-  async (req: ProvisionedRequest, res: Response): Promise<void> => {
-    try {
-      const { apiKey, sessionId, userId, metadata } = req.body as WidgetAuthRequest;
+  validate(widgetAuthSchema),
+  asyncHandler(async (req: ProvisionedRequest, res: Response) => {
+    const { apiKey, sessionId, userId, metadata } = req.body as WidgetAuthRequest;
 
-      if (!apiKey) {
-        res.status(400).json({ error: 'API key is required' });
-        return;
-      }
+    if (!apiKey) {
+      throw new BadRequestError('API key is required');
+    }
 
-      // Validate API key and get tenant
-      const tenant = await getTenantByApiKey(apiKey);
+    // Validate API key and get tenant
+    const tenant = await getTenantByApiKey(apiKey);
 
-      if (!tenant) {
-        res.status(401).json({ error: 'Invalid API key' });
-        return;
-      }
+    if (!tenant) {
+      throw new UnauthorizedError('Invalid API key');
+    }
 
-      // Get or create session
-      let session: ChatSession;
+    // Get or create session
+    let session: ChatSession;
 
-      if (sessionId) {
-        // Try to find existing session
-        const existingSession = await sessionRepository.findOne({
-          where: { id: sessionId, tenantId: tenant.id },
-        });
+    if (sessionId) {
+      // Try to find existing session
+      const existingSession = await sessionRepository.findOne({
+        where: { id: sessionId, tenantId: tenant.id },
+      });
 
-        if (existingSession && existingSession.isActive()) {
-          session = existingSession;
-          session.updateActivity();
-          await sessionRepository.save(session);
-        } else {
-          // Create new session if not found or closed
-          session = sessionRepository.create({
-            tenantId: tenant.id,
-            visitorId: userId || 'anonymous',
-            status: 'waiting' as const,
-            startedAt: new Date(),
-            lastActivityAt: new Date(),
-            metadata: {
-              ...metadata,
-              userAgent: req.headers['user-agent'],
-              ipAddress: req.ip,
-              referrer: req.headers.referer,
-            },
-          });
-          await sessionRepository.save(session);
-        }
+      if (existingSession && existingSession.isActive()) {
+        session = existingSession;
+        session.updateActivity();
+        await sessionRepository.save(session);
       } else {
-        // Create new session
+        // Create new session if not found or closed
         session = sessionRepository.create({
           tenantId: tenant.id,
           visitorId: userId || 'anonymous',
@@ -95,34 +80,46 @@ router.post(
         });
         await sessionRepository.save(session);
       }
-
-      // Generate widget token
-      const token = generateWidgetToken(session.id, tenant.id, userId);
-
-      logger.info('Widget authenticated', {
-        sessionId: session.id,
+    } else {
+      // Create new session
+      session = sessionRepository.create({
         tenantId: tenant.id,
-      });
-
-      res.json({
-        success: true,
-        token,
-        session: {
-          id: session.id,
-          status: session.status,
-          tenantId: tenant.id,
-        },
-        tenant: {
-          id: tenant.id,
-          name: tenant.name,
-          settings: tenant.settings,
+        visitorId: userId || 'anonymous',
+        status: 'waiting' as const,
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+        metadata: {
+          ...metadata,
+          userAgent: req.headers['user-agent'],
+          ipAddress: req.ip,
+          referrer: req.headers.referer,
         },
       });
-    } catch (error) {
-      logger.error('Widget authentication error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+      await sessionRepository.save(session);
     }
-  }
+
+    // Generate widget token
+    const token = generateWidgetToken(session.id, tenant.id, userId);
+
+    logger.info('Widget authenticated', {
+      sessionId: session.id,
+      tenantId: tenant.id,
+    });
+
+    sendSuccess(res, {
+      token,
+      session: {
+        id: session.id,
+        status: session.status,
+        tenantId: tenant.id,
+      },
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        settings: tenant.settings,
+      },
+    });
+  })
 );
 
 /**
@@ -133,15 +130,15 @@ router.get(
   '/me',
   requireClerkAuth,
   autoProvision,
-  async (req: ProvisionedRequest, res: Response): Promise<void> => {
-    res.json({
+  asyncHandler(async (req: ProvisionedRequest, res: Response) => {
+    sendSuccess(res, {
       agentId: req.agentId,
       tenantId: req.tenantId,
       role: req.userRole,
       tenantName: req.tenantName,
       email: req.user?.email,
     });
-  }
+  })
 );
 
 export default router;

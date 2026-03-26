@@ -4,6 +4,8 @@ import { AppDataSource } from '../database/data-source';
 import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { config } from '../config/environment';
+import { asyncHandler, BadRequestError } from '../middleware/error-handler';
+import { sendSuccess } from '../utils/response';
 
 const router = Router();
 
@@ -21,18 +23,18 @@ interface ClerkUserEvent {
   };
 }
 
-router.post('/', async (req: Request, res: Response): Promise<void> => {
-  try {
-    const webhookSecret = config.clerk.webhookSecret;
-    if (!webhookSecret) {
-      logger.error('CLERK_WEBHOOK_SECRET not configured');
-      res.status(500).json({ error: 'Webhook not configured' });
-      return;
-    }
+router.post('/', asyncHandler(async (req: Request, res: Response) => {
+  const webhookSecret = config.clerk.webhookSecret;
+  if (!webhookSecret) {
+    logger.error('CLERK_WEBHOOK_SECRET not configured');
+    throw new BadRequestError('Webhook not configured');
+  }
 
+  let payload: ClerkUserEvent;
+  try {
     const wh = new Webhook(webhookSecret);
     const rawBody = req.body as Buffer;
-    const payload = wh.verify(
+    payload = wh.verify(
       rawBody.toString('utf8'),
       {
         'svix-id': req.headers['svix-id'] as string,
@@ -40,31 +42,31 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         'svix-signature': req.headers['svix-signature'] as string,
       }
     ) as ClerkUserEvent;
-
-    if (payload.type !== 'user.created' && payload.type !== 'user.updated') {
-      res.status(200).json({ received: true });
-      return;
-    }
-
-    const { id: clerkUserId, email_addresses } = payload.data;
-    const isVerified = email_addresses.some(
-      (e) => e.verification?.status === 'verified'
-    );
-
-    const userRepo = AppDataSource.getRepository(User);
-    const user = await userRepo.findOne({ where: { clerkUserId } });
-
-    if (user && user.emailVerified !== isVerified) {
-      user.emailVerified = isVerified;
-      await userRepo.save(user);
-      logger.info('Updated email verification status', { clerkUserId, emailVerified: isVerified });
-    }
-
-    res.status(200).json({ received: true });
   } catch (error) {
-    logger.error('Clerk webhook processing failed', { error });
-    res.status(400).json({ error: 'Webhook verification failed' });
+    logger.error('Clerk webhook verification failed', { error });
+    throw new BadRequestError('Webhook verification failed');
   }
-});
+
+  if (payload.type !== 'user.created' && payload.type !== 'user.updated') {
+    sendSuccess(res, { received: true });
+    return;
+  }
+
+  const { id: clerkUserId, email_addresses } = payload.data;
+  const isVerified = email_addresses.some(
+    (e) => e.verification?.status === 'verified'
+  );
+
+  const userRepo = AppDataSource.getRepository(User);
+  const user = await userRepo.findOne({ where: { clerkUserId } });
+
+  if (user && user.emailVerified !== isVerified) {
+    user.emailVerified = isVerified;
+    await userRepo.save(user);
+    logger.info('Updated email verification status', { clerkUserId, emailVerified: isVerified });
+  }
+
+  sendSuccess(res, { received: true });
+}));
 
 export default router;

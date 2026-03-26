@@ -94,11 +94,16 @@ router.patch(
       }
     }
 
-    // Merge settings
+    // Deep merge settings (preserve nested objects like theme, features)
     if (settings) {
+      const existing = tenant.settings || {};
       tenant.settings = {
-        ...tenant.settings,
+        ...existing,
         ...settings,
+        theme: settings.theme ? { ...existing.theme, ...settings.theme } : existing.theme,
+        features: settings.features !== undefined
+          ? { ...existing.features, ...settings.features }
+          : existing.features,
       };
     }
 

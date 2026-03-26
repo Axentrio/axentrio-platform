@@ -71,6 +71,11 @@ export interface Tenant {
 }
 
 export interface TenantSettings {
+  theme?: {
+    primaryColor?: string;
+    logoUrl?: string;
+    customCss?: string;
+  };
   businessHours: BusinessHours;
   autoHandoff: boolean;
   handoffTriggers: HandoffTriggers;

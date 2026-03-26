@@ -21,6 +21,8 @@ import { ProtectedRoute, AdminRoute, SupervisorRoute, SuperAdminRoute } from '@a
 // Layout
 import { Sidebar } from '@components/Sidebar';
 import { TenantContextSwitcher } from '@components/admin/TenantContextSwitcher';
+import { useTenantTheme } from '@/hooks/useTenantTheme';
+import { useOrganization } from '@clerk/clerk-react';
 
 // Pages
 import Dashboard from '@pages/Dashboard';
@@ -44,6 +46,9 @@ const queryClient = createQueryClient();
 
 // Layout wrapper for authenticated pages
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  useTenantTheme();
+  const { organization } = useOrganization();
+
   return (
     <div className="h-screen flex overflow-hidden bg-surface-1">
       <div className="hidden md:flex w-64 flex-shrink-0">
@@ -52,10 +57,22 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 md:hidden">
-            <div className="w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold">H</span>
-            </div>
-            <span className="font-bold text-text-primary">HandsOff</span>
+            {organization?.imageUrl ? (
+              <img
+                src={organization.imageUrl}
+                alt={organization.name ?? ''}
+                className="w-7 h-7 rounded-lg object-cover"
+              />
+            ) : (
+              <div className="w-7 h-7 bg-primary-600 rounded-lg flex items-center justify-center">
+                <span className="text-xs font-bold text-white">
+                  {organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
+                </span>
+              </div>
+            )}
+            <span className="font-semibold text-text-primary truncate max-w-[150px]">
+              {organization?.name ?? 'HandsOff'}
+            </span>
           </div>
           <div className="hidden md:block" />
           <TenantContextSwitcher />

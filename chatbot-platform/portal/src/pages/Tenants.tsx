@@ -42,8 +42,8 @@ function mapApiToTenant(data: TenantApiData): Tenant {
     name: data.name,
     slug: data.slug,
     apiKey: data.apiKey,
-    primaryColor: '#6366f1',   // not returned by API; use default
-    secondaryColor: '#4338ca', // not returned by API; use default
+    primaryColor: data.settings?.theme?.primaryColor || '#6366f1',
+    secondaryColor: '#4338ca', // not supported by backend yet
     webhookUrl: data.webhookUrl ?? undefined,
     settings: data.settings ?? {
       businessHours: { timezone: 'UTC', schedule: [] },
@@ -89,6 +89,12 @@ const Tenants: React.FC = () => {
     if (data.name) payload.name = data.name;
     if (data.webhookUrl !== undefined) payload.webhookUrl = data.webhookUrl;
     if (data.settings) payload.settings = data.settings;
+    if (data.primaryColor) {
+      payload.settings = {
+        ...(payload.settings as Record<string, unknown> || {}),
+        theme: { primaryColor: data.primaryColor },
+      };
+    }
     await updateMutation.mutateAsync(payload);
     setIsModalOpen(false);
   };
@@ -170,17 +176,10 @@ const Tenants: React.FC = () => {
             {/* Colors */}
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
-                <span className="text-sm text-text-muted">Primary:</span>
+                <span className="text-sm text-text-muted">Brand Color:</span>
                 <div
                   className="w-6 h-6 rounded border border-edge"
                   style={{ backgroundColor: tenant.primaryColor }}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-text-muted">Secondary:</span>
-                <div
-                  className="w-6 h-6 rounded border border-edge"
-                  style={{ backgroundColor: tenant.secondaryColor }}
                 />
               </div>
             </div>
@@ -264,6 +263,69 @@ const Tenants: React.FC = () => {
   );
 };
 
+// Color preset swatches
+const COLOR_PRESETS = [
+  '#6366f1', '#8b5cf6', '#a855f7', '#d946ef',
+  '#ec4899', '#f43f5e', '#ef4444', '#f97316',
+  '#f59e0b', '#eab308', '#84cc16', '#22c55e',
+  '#10b981', '#14b8a6', '#06b6d4', '#0ea5e9',
+  '#3b82f6', '#2563eb', '#4f46e5', '#7c3aed',
+];
+
+const ColorField: React.FC<{ label: string; value: string; onChange: (c: string) => void }> = ({
+  label,
+  value,
+  onChange,
+}) => {
+  const [showPicker, setShowPicker] = useState(false);
+
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <div className="relative">
+        <div
+          className="flex items-center gap-2 cursor-pointer"
+          onClick={() => setShowPicker(!showPicker)}
+        >
+          <div
+            className="w-10 h-10 rounded border border-edge shrink-0"
+            style={{ backgroundColor: value }}
+          />
+          <Input
+            type="text"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            className="flex-1 text-sm font-mono"
+            placeholder="#000000"
+          />
+        </div>
+        {showPicker && (
+          <div className="absolute top-12 left-0 z-50 bg-surface-2 border border-edge rounded-lg p-3 shadow-lg">
+            <div className="grid grid-cols-5 gap-1.5">
+              {COLOR_PRESETS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={cn(
+                    'w-8 h-8 rounded-md border-2 transition-transform hover:scale-110',
+                    value === color ? 'border-white ring-1 ring-white/50' : 'border-transparent'
+                  )}
+                  style={{ backgroundColor: color }}
+                  onClick={() => {
+                    onChange(color);
+                    setShowPicker(false);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 // Tenant Modal Component
 interface TenantModalProps {
   isOpen: boolean;
@@ -330,43 +392,11 @@ const TenantModal: React.FC<TenantModalProps> = ({ isOpen, onClose, tenant, onSa
           <p className="text-xs text-text-muted">Slug cannot be changed after creation.</p>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Primary Color</Label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={formData.primaryColor}
-                onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                className="w-10 h-10 rounded border border-edge bg-surface-3"
-              />
-              <Input
-                type="text"
-                value={formData.primaryColor}
-                onChange={(e) => setFormData({ ...formData, primaryColor: e.target.value })}
-                className="flex-1 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Secondary Color</Label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={formData.secondaryColor}
-                onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                className="w-10 h-10 rounded border border-edge bg-surface-3"
-              />
-              <Input
-                type="text"
-                value={formData.secondaryColor}
-                onChange={(e) => setFormData({ ...formData, secondaryColor: e.target.value })}
-                className="flex-1 text-sm"
-              />
-            </div>
-          </div>
-        </div>
+        <ColorField
+          label="Brand Color"
+          value={formData.primaryColor || '#6366f1'}
+          onChange={(c) => setFormData({ ...formData, primaryColor: c })}
+        />
 
         <div className="space-y-2">
           <Label htmlFor="tenant-webhook">Webhook URL</Label>

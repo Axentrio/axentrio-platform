@@ -25,17 +25,17 @@ module.exports = {
         primary: {
           DEFAULT: "hsl(var(--primary))",
           foreground: "hsl(var(--primary-foreground))",
-          // Keep original scale for existing usage
-          50: '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
+          // CSS-variable-backed scale (overridden at runtime by useTenantTheme)
+          50: 'var(--color-primary-50, #eef2ff)',
+          100: 'var(--color-primary-100, #e0e7ff)',
+          200: 'var(--color-primary-200, #c7d2fe)',
+          300: 'var(--color-primary-300, #a5b4fc)',
+          400: 'var(--color-primary-400, #818cf8)',
+          500: 'var(--color-primary-500, #6366f1)',
+          600: 'var(--color-primary-600, #4f46e5)',
+          700: 'var(--color-primary-700, #4338ca)',
+          800: 'var(--color-primary-800, #3730a3)',
+          900: 'var(--color-primary-900, #312e81)',
         },
         secondary: {
           DEFAULT: "hsl(var(--secondary))",
@@ -82,7 +82,7 @@ module.exports = {
         edge: {
           DEFAULT: '#2a2d3e',
           light: '#353850',
-          focus: '#4f46e5',
+          focus: 'var(--color-primary-600, #4f46e5)',
         },
         // Text (kept for existing usage)
         text: {
@@ -114,9 +114,9 @@ module.exports = {
         sm: "calc(var(--radius) - 4px)",
       },
       boxShadow: {
-        'glow-sm': '0 0 10px -3px rgba(99, 102, 241, 0.3)',
-        'glow': '0 0 20px -5px rgba(99, 102, 241, 0.4)',
-        'glow-lg': '0 0 30px -5px rgba(99, 102, 241, 0.5)',
+        'glow-sm': '0 0 10px -3px rgba(var(--color-primary-rgb, 99, 102, 241), 0.3)',
+        'glow': '0 0 20px -5px rgba(var(--color-primary-rgb, 99, 102, 241), 0.4)',
+        'glow-lg': '0 0 30px -5px rgba(var(--color-primary-rgb, 99, 102, 241), 0.5)',
         'card': '0 4px 24px -4px rgba(0, 0, 0, 0.3)',
         'card-hover': '0 8px 32px -4px rgba(0, 0, 0, 0.5)',
       },
@@ -138,8 +138,8 @@ module.exports = {
           to: { opacity: '1', transform: 'translateY(0)' },
         },
         glowPulse: {
-          '0%, 100%': { boxShadow: '0 0 8px rgba(99, 102, 241, 0.3)' },
-          '50%': { boxShadow: '0 0 20px rgba(99, 102, 241, 0.6)' },
+          '0%, 100%': { boxShadow: '0 0 8px rgba(var(--color-primary-rgb, 99, 102, 241), 0.3)' },
+          '50%': { boxShadow: '0 0 20px rgba(var(--color-primary-rgb, 99, 102, 241), 0.6)' },
         },
         "accordion-down": {
           from: { height: "0" },

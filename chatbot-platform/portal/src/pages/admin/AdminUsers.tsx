@@ -126,9 +126,11 @@ const AdminUsers: React.FC = () => {
     addMutatingRow(userId);
     const mutation = confirmAction.type === 'promote' ? promoteMutation : demoteMutation;
     mutation.mutate(userId, {
-      onSettled: () => removeMutatingRow(userId),
+      onSettled: () => {
+        removeMutatingRow(userId);
+        setConfirmAction(null);
+      },
     });
-    setConfirmAction(null);
   };
 
   /* ---- Derived list ---- */
@@ -304,7 +306,7 @@ const AdminUsers: React.FC = () => {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isMutating}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleConfirm}
+              onClick={(e) => { e.preventDefault(); handleConfirm(); }}
               disabled={isMutating}
               className={
                 confirmAction?.type === 'promote'

@@ -767,7 +767,7 @@ const OrgMembersPanel: React.FC = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmRemoveMember}>Remove</AlertDialogAction>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmRemoveMember(); }}>Remove</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

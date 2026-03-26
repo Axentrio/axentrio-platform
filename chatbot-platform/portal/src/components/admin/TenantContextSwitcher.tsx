@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTenantContextStore } from '../../stores/tenantContextStore';
 import { useAppAuth } from '../../auth/useAppAuth';
-import { useAdminTenants } from '../../queries/useAdminQueries';
+import { useQuery } from '@tanstack/react-query';
+import { adminOptions } from '../../queries/useAdminQueries';
 
 
 
@@ -12,7 +13,7 @@ export function TenantContextSwitcher() {
 
   const isSuperAdmin = user?.role === 'super_admin';
 
-  const { data: tenants } = useAdminTenants();
+  const { data: tenants } = useQuery({ ...adminOptions.tenants(), enabled: isSuperAdmin });
 
   // Only render for super admins
   if (!isSuperAdmin) return null;

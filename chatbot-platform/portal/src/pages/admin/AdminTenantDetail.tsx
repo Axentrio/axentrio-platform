@@ -411,7 +411,7 @@ const AdminTenantDetail: React.FC = () => {
             <AlertDialogFooter>
               <AlertDialogCancel disabled={rotateMutation.isPending}>Cancel</AlertDialogCancel>
               <AlertDialogAction
-                onClick={() => rotateMutation.mutate()}
+                onClick={(e) => { e.preventDefault(); rotateMutation.mutate(); }}
                 disabled={rotateMutation.isPending}
                 className="bg-status-busy hover:bg-status-busy/90"
               >

@@ -18,7 +18,7 @@ import {
   UserCog,
   TrendingUp,
 } from 'lucide-react';
-import { useClerk } from '@clerk/clerk-react';
+import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { Button } from '@/components/ui/button';
 import {
@@ -65,6 +65,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { user } = useAppAuth();
   const { signOut } = useClerk();
+  const { organization } = useOrganization();
   const hasAccess = (roles: UserRole[]) => {
     // While user is loading, show all items — route guards handle actual access
     if (!user) return true;
@@ -79,17 +80,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Gradient overlay at top */}
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
 
-      {/* Logo */}
+      {/* Org branding */}
       <div className="flex items-center gap-3 px-4 py-4 border-b border-edge relative">
         <div className="relative">
           <div className="absolute inset-0 bg-primary-500/20 rounded-xl blur-md" />
-          <div className="relative w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
-            <Headphones className="w-5 h-5 text-white" />
-          </div>
+          {organization?.imageUrl ? (
+            <img
+              src={organization.imageUrl}
+              alt={organization.name ?? ''}
+              className="relative w-8 h-8 rounded-xl object-cover"
+            />
+          ) : (
+            <div className="relative w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
+              <span className="text-sm font-bold text-white">
+                {organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
+              </span>
+            </div>
+          )}
         </div>
-        <div>
-          <h1 className="font-bold text-text-primary">HandsOff</h1>
-          <p className="text-xs text-text-muted">Agent Portal</p>
+        <div className="min-w-0 flex-1">
+          <h1 className="font-bold text-text-primary truncate">
+            {organization?.name ?? 'HandsOff'}
+          </h1>
+          <p className="text-xs text-text-muted">HandsOff</p>
         </div>
       </div>
 

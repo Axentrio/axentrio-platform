@@ -364,7 +364,8 @@ const AdminTenants: React.FC = () => {
               <AlertDialogCancel disabled={createMutation.isPending}>Cancel</AlertDialogCancel>
               <AlertDialogAction
                 disabled={!newTenant.name.trim() || createMutation.isPending}
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault();
                   setCreateError(null);
                   createMutation.mutate(
                     {

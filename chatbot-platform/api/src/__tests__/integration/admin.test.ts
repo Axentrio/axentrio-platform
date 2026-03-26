@@ -41,4 +41,13 @@ describe('Admin Routes', () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe('POST /api/v1/admin/users/:id/deactivate', () => {
+    it('should reject unauthenticated requests', async () => {
+      const res = await request(app).post(
+        '/api/v1/admin/users/00000000-0000-0000-0000-000000000000/deactivate',
+      );
+      expect(res.status).toBe(401);
+    });
+  });
 });

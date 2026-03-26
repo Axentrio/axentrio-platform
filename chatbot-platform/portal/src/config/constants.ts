@@ -69,6 +69,18 @@ export const DATE_FORMATS = {
 
 // Roles & Permissions
 export const ROLE_PERMISSIONS = {
+  super_admin: [
+    'view:all_chats',
+    'manage:agents',
+    'manage:tenants',
+    'manage:settings',
+    'view:analytics',
+    'takeover:any_chat',
+    'manage:team',
+    'admin:tenants',
+    'admin:users',
+    'admin:analytics',
+  ],
   admin: [
     'view:all_chats',
     'manage:agents',

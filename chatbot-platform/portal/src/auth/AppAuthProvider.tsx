@@ -18,6 +18,7 @@ function mapClerkRole(clerkRole?: string): UserRole {
 
 // Permission map
 const rolePermissions: Record<string, string[]> = {
+  super_admin: ['*'],
   admin: ['*'],
   supervisor: [
     'view:tenant_chats',
@@ -35,7 +36,7 @@ const rolePermissions: Record<string, string[]> = {
 };
 
 function checkPermission(role: UserRole, permission: string): boolean {
-  if (role === 'admin') return true;
+  if (role === 'admin' || role === 'super_admin') return true;
   return rolePermissions[role]?.includes(permission) || false;
 }
 

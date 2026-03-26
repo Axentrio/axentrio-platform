@@ -92,16 +92,20 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
 };
 
 // Role-specific route wrappers
+export const SuperAdminRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
+  <ProtectedRoute requiredRoles={['super_admin']}>{children}</ProtectedRoute>
+);
+
 export const AdminRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRoles={['admin']}>{children}</ProtectedRoute>
+  <ProtectedRoute requiredRoles={['super_admin', 'admin']}>{children}</ProtectedRoute>
 );
 
 export const SupervisorRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRoles={['admin', 'supervisor']}>{children}</ProtectedRoute>
+  <ProtectedRoute requiredRoles={['super_admin', 'admin', 'supervisor']}>{children}</ProtectedRoute>
 );
 
 export const AgentRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRoles={['admin', 'supervisor', 'agent']}>{children}</ProtectedRoute>
+  <ProtectedRoute requiredRoles={['super_admin', 'admin', 'supervisor', 'agent']}>{children}</ProtectedRoute>
 );
 
 export default ProtectedRoute;

@@ -1,2 +1,8 @@
 # Worktrees
 .worktrees/
+
+# MCP config
+.mcp.json
+
+# Superpowers cache
+.superpowers/

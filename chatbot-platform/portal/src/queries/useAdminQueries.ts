@@ -179,7 +179,7 @@ export function useOptimisticDemoteUser() {
 export function useOptimisticDeactivateUser() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.patch(`/admin/users/${id}`, { isActive: false }),
+    mutationFn: (id: string) => api.post(`/admin/users/${id}/deactivate`),
     onMutate: async (id: string) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.admin.users() });
       const previousData = queryClient.getQueryData<Any[]>(queryKeys.admin.users());

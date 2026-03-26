@@ -62,7 +62,102 @@ router.get('/tenants', async (req: Request, res: Response) => {
   }
 });
 
-// GET /admin/tenants/:id — tenant details
+// GET /admin/tenants/:id/pending-invites — list pending invites for a tenant
+router.get('/tenants/:id/pending-invites', async (req: Request, res: Response) => {
+  try {
+    const tenantId = req.params.id;
+
+    const invites = await AppDataSource.getRepository(PendingInvite)
+      .find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+
+    const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];
+    const inviters = inviterIds.length > 0
+      ? await AppDataSource.getRepository(User)
+          .createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: inviterIds })
+          .getMany()
+      : [];
+    const inviterMap = new Map(inviters.map(u => [u.id, { name: u.name, email: u.email }]));
+
+    const data = invites.map(inv => ({
+      id: inv.id,
+      email: inv.email,
+      role: inv.role,
+      invitedBy: inv.invitedBy ? inviterMap.get(inv.invitedBy) ?? null : null,
+      createdAt: inv.createdAt,
+      expiresAt: inv.expiresAt,
+      isExpired: new Date() > inv.expiresAt,
+    }));
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    logger.error('Failed to list tenant pending invites', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /admin/tenants/:id/audit-logs — paginated audit logs for a tenant
+router.get('/tenants/:id/audit-logs', async (req: Request, res: Response) => {
+  try {
+    const params = parsePaginationParams(req.query as Record<string, unknown>);
+    const qb = AppDataSource.getRepository(AuditLog)
+      .createQueryBuilder('log')
+      .where('log.tenantId = :tenantId', { tenantId: req.params.id })
+      .orderBy('log.createdAt', 'DESC');
+
+    const result = await applyPagination(qb, params);
+
+    const actorIds = [...new Set(result.data.map(l => l.actorId))];
+    const actors = actorIds.length > 0
+      ? await AppDataSource.getRepository(User).createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: actorIds })
+          .getMany()
+      : [];
+    const actorMap = new Map(actors.map(a => [a.id, { name: a.name, email: a.email }]));
+
+    const data = result.data.map(log => ({
+      id: log.id,
+      action: log.action,
+      entityType: log.entityType,
+      entityId: log.entityId,
+      actorName: actorMap.get(log.actorId)?.name ?? 'Unknown',
+      actorEmail: actorMap.get(log.actorId)?.email ?? '',
+      metadata: log.metadata,
+      createdAt: log.createdAt,
+    }));
+
+    return res.json({ success: true, data, meta: result.meta });
+  } catch (error) {
+    logger.error('Failed to list tenant audit logs', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/tenants/:id/api-key/rotate — rotate API key for a tenant
+router.post('/tenants/:id/api-key/rotate', async (req: Request, res: Response) => {
+  try {
+    const repo = AppDataSource.getRepository(Tenant);
+    const tenant = await repo.findOne({ where: { id: req.params.id } });
+
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+
+    tenant.apiKey = `ak_${crypto.randomUUID().replace(/-/g, '')}`;
+    await repo.save(tenant);
+
+    await logAudit(req.userId!, 'apikey.rotated', 'tenant', tenant.id, tenant.id);
+
+    return res.json({ success: true, data: { apiKey: tenant.apiKey } });
+  } catch (error) {
+    logger.error('Failed to rotate API key', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// GET /admin/tenants/:id — tenant details with users, invites, API key
 router.get('/tenants/:id', async (req: Request, res: Response) => {
   try {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
@@ -73,16 +168,85 @@ router.get('/tenants/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Tenant not found' });
     }
 
-    const userCount = await AppDataSource.getRepository(User).count({
+    const userRepo = AppDataSource.getRepository(User);
+    const userCount = await userRepo.count({ where: { tenantId: tenant.id } });
+    const users = await userRepo.find({
       where: { tenantId: tenant.id },
+      order: { createdAt: 'DESC' },
+      take: 10,
     });
+
     const sessionCount = await AppDataSource.getRepository(ChatSession).count({
       where: { tenantId: tenant.id },
     });
 
+    const messageCount = await AppDataSource.getRepository(Message).count({
+      where: { session: { tenantId: tenant.id } },
+    });
+
+    const pendingInvites = await AppDataSource.getRepository(PendingInvite).find({
+      where: { tenantId: tenant.id },
+      order: { createdAt: 'DESC' },
+    });
+
+    // Mask API key: show first 3 + last 4 chars
+    const ak = tenant.apiKey;
+    const apiKeyMasked = ak.length > 7
+      ? `${ak.slice(0, 3)}${'*'.repeat(ak.length - 7)}${ak.slice(-4)}`
+      : '****';
+
+    const recentAuditLogs = await AppDataSource.getRepository(AuditLog)
+      .find({
+        where: { tenantId: tenant.id },
+        order: { createdAt: 'DESC' },
+        take: 20,
+      });
+
+    // Resolve actor names for audit logs
+    const actorIds = [...new Set(recentAuditLogs.map(l => l.actorId))];
+    const actors = actorIds.length > 0
+      ? await userRepo.createQueryBuilder('u')
+          .select(['u.id', 'u.name', 'u.email'])
+          .where('u.id IN (:...ids)', { ids: actorIds })
+          .getMany()
+      : [];
+    const actorMap = new Map(actors.map(a => [a.id, { name: a.name, email: a.email }]));
+
     return res.json({
       success: true,
-      data: { ...tenant, userCount, sessionCount },
+      data: {
+        ...tenant,
+        apiKeyMasked,
+        userCount,
+        sessionCount,
+        messageCount,
+        users: users.map(u => ({
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          isActive: u.isActive,
+          lastLoginAt: u.lastLoginAt,
+          createdAt: u.createdAt,
+        })),
+        pendingInvites: pendingInvites.map(inv => ({
+          id: inv.id,
+          email: inv.email,
+          role: inv.role,
+          createdAt: inv.createdAt,
+          expiresAt: inv.expiresAt,
+          isExpired: new Date() > inv.expiresAt,
+        })),
+        recentAuditLogs: recentAuditLogs.map(log => ({
+          id: log.id,
+          action: log.action,
+          entityType: log.entityType,
+          entityId: log.entityId,
+          actorName: actorMap.get(log.actorId)?.name ?? 'Unknown',
+          metadata: log.metadata,
+          createdAt: log.createdAt,
+        })),
+      },
     });
   } catch (error) {
     logger.error('Failed to get tenant', { error });
@@ -715,41 +879,6 @@ router.get('/audit-logs/export', async (req: Request, res: Response) => {
     return res.send(header + rows);
   } catch (error) {
     logger.error('Failed to export audit logs', { error });
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
-
-// GET /admin/tenants/:id/pending-invites — list pending invites for a tenant
-router.get('/tenants/:id/pending-invites', async (req: Request, res: Response) => {
-  try {
-    const tenantId = req.params.id;
-
-    const invites = await AppDataSource.getRepository(PendingInvite)
-      .find({ where: { tenantId }, order: { createdAt: 'DESC' } });
-
-    const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];
-    const inviters = inviterIds.length > 0
-      ? await AppDataSource.getRepository(User)
-          .createQueryBuilder('u')
-          .select(['u.id', 'u.name', 'u.email'])
-          .where('u.id IN (:...ids)', { ids: inviterIds })
-          .getMany()
-      : [];
-    const inviterMap = new Map(inviters.map(u => [u.id, { name: u.name, email: u.email }]));
-
-    const data = invites.map(inv => ({
-      id: inv.id,
-      email: inv.email,
-      role: inv.role,
-      invitedBy: inv.invitedBy ? inviterMap.get(inv.invitedBy) ?? null : null,
-      createdAt: inv.createdAt,
-      expiresAt: inv.expiresAt,
-      isExpired: new Date() > inv.expiresAt,
-    }));
-
-    return res.json({ success: true, data });
-  } catch (error) {
-    logger.error('Failed to list tenant pending invites', { error });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

@@ -32,6 +32,7 @@ import notificationRoutes from './routes/notifications.routes';
 import userRoutes from './routes/users.routes';
 import clerkWebhookRoutes from './routes/clerk-webhook.routes';
 import webhookAdminRoutes from './routes/webhook-admin.routes';
+import adminRoutes from './routes/admin.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
@@ -127,6 +128,7 @@ apiRouter.use('/files', fileRoutes);
 apiRouter.use('/analytics', analyticsRoutes);
 apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
+apiRouter.use('/admin', adminRoutes);
 
 app.use('/api/v1', apiRouter);
 

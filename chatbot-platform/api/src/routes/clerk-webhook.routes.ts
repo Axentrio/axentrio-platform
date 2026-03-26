@@ -18,6 +18,9 @@ interface ClerkUserEvent {
   type: string;
   data: {
     id: string;
+    first_name: string | null;
+    last_name: string | null;
+    image_url: string | null;
     email_addresses: ClerkEmailAddress[];
     primary_email_address_id: string;
   };
@@ -52,7 +55,7 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
     return;
   }
 
-  const { id: clerkUserId, email_addresses } = payload.data;
+  const { id: clerkUserId, first_name, last_name, image_url, email_addresses } = payload.data;
   const isVerified = email_addresses.some(
     (e) => e.verification?.status === 'verified'
   );
@@ -60,10 +63,32 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
   const userRepo = AppDataSource.getRepository(User);
   const user = await userRepo.findOne({ where: { clerkUserId } });
 
-  if (user && user.emailVerified !== isVerified) {
-    user.emailVerified = isVerified;
-    await userRepo.save(user);
-    logger.info('Updated email verification status', { clerkUserId, emailVerified: isVerified });
+  if (user) {
+    let updated = false;
+
+    if (user.emailVerified !== isVerified) {
+      user.emailVerified = isVerified;
+      updated = true;
+    }
+
+    // Sync name from Clerk
+    const newName = [first_name, last_name].filter(Boolean).join(' ') || user.name;
+    if (newName && newName !== user.name) {
+      user.name = newName;
+      updated = true;
+      logger.info('Synced name from Clerk', { clerkUserId, name: newName });
+    }
+
+    // Sync avatar from Clerk
+    if (image_url !== undefined && image_url !== user.avatarUrl) {
+      user.avatarUrl = image_url ?? undefined;
+      updated = true;
+    }
+
+    if (updated) {
+      await userRepo.save(user);
+      logger.info('Updated user from Clerk webhook', { clerkUserId });
+    }
   }
 
   sendSuccess(res, { received: true });

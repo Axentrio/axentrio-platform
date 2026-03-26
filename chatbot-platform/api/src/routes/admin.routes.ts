@@ -429,30 +429,11 @@ router.patch('/users/:id', asyncHandler(async (req: Request, res: Response) => {
 
   if (!user) throw new NotFoundError('User not found');
 
-  const { role, isActive } = req.body;
+  const { role } = req.body;
   const originalRole = user.role;
   if (role && ['admin', 'supervisor', 'agent'].includes(role)) {
     user.role = role;
   }
-  if (typeof isActive === 'boolean') {
-    user.isActive = isActive;
-
-    // If deactivating and user has Clerk ID, remove from Clerk org
-    if (!isActive && user.clerkUserId) {
-      const tenant = await AppDataSource.getRepository(Tenant).findOne({
-        where: { id: user.tenantId },
-      });
-      if (tenant?.clerkOrgId) {
-        const removed = await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
-        if (!removed) {
-          logger.warn('Failed to remove user from Clerk org — deactivated locally only', {
-            userId: user.id, tenantId: tenant.id,
-          });
-        }
-      }
-    }
-  }
-
   await repo.save(user);
 
   if (role) {
@@ -512,6 +493,47 @@ router.post('/tenants/:id/invite', validate(inviteMemberSchema), asyncHandler(as
 
   logger.info('Invited user to tenant', { tenantId: tenant.id, email, role, invitedBy: req.userId });
   sendSuccess(res, { message: 'Invitation sent' });
+}));
+
+// POST /admin/users/:id/deactivate — deactivate a user
+router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Response) => {
+  const userRepo = AppDataSource.getRepository(User);
+  const user = await userRepo.findOne({ where: { id: req.params.id, deletedAt: IsNull() } });
+
+  if (!user) throw new NotFoundError('User not found');
+  if (!user.isActive) throw new BadRequestError('User is already inactive');
+  if (req.params.id === req.userId) throw new BadRequestError('Cannot deactivate yourself');
+
+  user.isActive = false;
+
+  // Remove from Clerk org if applicable
+  if (user.clerkUserId) {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: user.tenantId },
+    });
+    if (tenant?.clerkOrgId) {
+      const removed = await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
+      if (!removed) {
+        logger.warn('Failed to remove user from Clerk org — deactivated locally only', {
+          userId: user.id, tenantId: tenant.id,
+        });
+      }
+    }
+  }
+
+  await userRepo.save(user);
+  await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId);
+
+  // Invalidate cache so changes take effect immediately
+  if (user.clerkUserId) {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
+    if (tenant?.clerkOrgId) {
+      invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+    }
+  }
+
+  logger.info('Deactivated user', { userId: user.id, deactivatedBy: req.userId });
+  sendSuccess(res, user);
 }));
 
 // POST /admin/users/:id/reactivate — reactivate a deactivated user

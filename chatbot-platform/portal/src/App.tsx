@@ -57,7 +57,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2 md:hidden">
-            {organization?.imageUrl ? (
+            {organization?.hasImage ? (
               <img
                 src={organization.imageUrl}
                 alt={organization.name ?? ''}

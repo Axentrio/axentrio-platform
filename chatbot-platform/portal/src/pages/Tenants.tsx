@@ -4,8 +4,10 @@
  * Displays the current tenant only (no multi-tenant listing API exists).
  */
 
-import React, { useState, useEffect } from 'react';
-import { Edit2, ExternalLink, Copy, Check, RefreshCw, Loader2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Edit2, ExternalLink, Copy, Check, RefreshCw, Loader2, Camera, X } from 'lucide-react';
+import { useOrganization } from '@clerk/clerk-react';
+import { toast } from 'sonner';
 import { Modal } from '@components/Modal';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -63,6 +65,9 @@ function mapApiToTenant(data: TenantApiData): Tenant {
 const Tenants: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const { organization } = useOrganization();
 
   // ---------- Fetch current tenant ----------
   const {
@@ -109,6 +114,34 @@ const Tenants: React.FC = () => {
     await rotateMutation.mutateAsync();
   };
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !organization) return;
+    setIsUploadingLogo(true);
+    try {
+      await organization.setLogo({ file });
+      toast.success('Organization logo updated');
+    } catch {
+      toast.error('Failed to update logo');
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoInputRef.current) logoInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoRemove = async () => {
+    if (!organization) return;
+    setIsUploadingLogo(true);
+    try {
+      await organization.setLogo({ file: null });
+      toast.success('Organization logo removed');
+    } catch {
+      toast.error('Failed to remove logo');
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  };
+
   // ---------- Loading / Error states ----------
   if (isLoading) {
     return <PageSkeleton variant="list" rows={3} />;
@@ -141,17 +174,55 @@ const Tenants: React.FC = () => {
       <div className="max-w-2xl">
         <Card variant="glass" className="overflow-hidden">
           {/* Header */}
-          <CardHeader
-            className="px-6 py-4"
-            style={{ backgroundColor: tenant.primaryColor + '15' }}
-          >
+          <CardHeader className="px-6 py-4 bg-primary-600/10">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg"
-                  style={{ backgroundColor: tenant.primaryColor }}
-                >
-                  {tenant.name.charAt(0).toUpperCase()}
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleLogoUpload}
+                  className="hidden"
+                />
+                <div className="relative group">
+                  <button
+                    type="button"
+                    onClick={() => logoInputRef.current?.click()}
+                    disabled={isUploadingLogo}
+                    className="relative w-12 h-12 rounded-xl overflow-hidden cursor-pointer"
+                  >
+                    {organization?.hasImage ? (
+                      <img
+                        src={organization.imageUrl}
+                        alt={tenant.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-white font-bold text-lg bg-primary-600">
+                        {tenant.name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div className={cn(
+                      "absolute inset-0 bg-black/50 flex items-center justify-center transition-opacity",
+                      isUploadingLogo ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                    )}>
+                      {isUploadingLogo ? (
+                        <Loader2 className="w-4 h-4 text-white animate-spin" />
+                      ) : (
+                        <Camera className="w-4 h-4 text-white" />
+                      )}
+                    </div>
+                  </button>
+                  {organization?.hasImage && !isUploadingLogo && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleLogoRemove(); }}
+                      className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-3 border border-edge flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive text-text-muted hover:text-white"
+                      title="Remove logo"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
                 </div>
                 <div>
                   <h3 className="font-semibold text-text-primary">{tenant.name}</h3>

@@ -39,23 +39,30 @@ function hslToHex(h: number, s: number, l: number): string {
   return `#${f(0)}${f(8)}${f(4)}`;
 }
 
-/** Generate a full primary palette from a base hex color */
+/** Generate a full primary palette from a base hex color.
+ *  The input color is placed at step 500 and other steps are
+ *  derived relative to it, so the palette always contains
+ *  the exact input color. */
 function generatePalette(baseHex: string) {
-  const { h, s } = hexToHsl(baseHex);
+  const { h, s, l } = hexToHsl(baseHex);
+  const clampedS = Math.min(s, 90);
 
-  // Lightness steps tuned for dark UI surfaces
-  const steps: Record<string, number> = {
-    50: 95, 100: 90, 200: 82, 300: 71,
-    400: 60, 500: 50, 600: 42, 700: 33,
-    800: 24, 900: 17,
+  // Offsets from the base lightness for each step
+  const stepOffsets: Record<string, number> = {
+    50: 40, 100: 35, 200: 27, 300: 17,
+    400: 8, 500: 0, 600: -8, 700: -17,
+    800: -26, 900: -33,
   };
 
   const palette: Record<string, string> = {};
-  for (const [step, lightness] of Object.entries(steps)) {
-    palette[step] = hslToHex(h, Math.min(s, 90), lightness);
+  for (const [step, offset] of Object.entries(stepOffsets)) {
+    const lightness = Math.max(5, Math.min(97, l + offset));
+    palette[step] = hslToHex(h, clampedS, lightness);
   }
+  // Ensure step 500 is exactly the input color
+  palette['500'] = baseHex;
 
-  return { palette, h, s };
+  return { palette, h, s: clampedS };
 }
 
 /**
@@ -86,9 +93,10 @@ export function useTenantTheme() {
     const b500 = parseInt(palette['500'].slice(5, 7), 16);
     root.style.setProperty('--color-primary-rgb', `${r500}, ${g500}, ${b500}`);
 
-    // Set shadcn HSL tokens (format: "H S% L%")
-    root.style.setProperty('--primary', `${h} ${Math.min(s, 90)}% 50%`);
-    root.style.setProperty('--ring', `${h} ${Math.min(s, 90)}% 60%`);
+    // Set shadcn HSL tokens using the actual input color's values
+    const { l: baseL } = hexToHsl(baseColor);
+    root.style.setProperty('--primary', `${h} ${s}% ${baseL}%`);
+    root.style.setProperty('--ring', `${h} ${s}% ${Math.min(baseL + 10, 80)}%`);
 
     return () => {
       const vars = [

@@ -84,7 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex items-center gap-3 px-4 py-4 border-b border-edge relative">
         <div className="relative">
           <div className="absolute inset-0 bg-primary-500/20 rounded-xl blur-md" />
-          {organization?.imageUrl ? (
+          {organization?.hasImage ? (
             <img
               src={organization.imageUrl}
               alt={organization.name ?? ''}

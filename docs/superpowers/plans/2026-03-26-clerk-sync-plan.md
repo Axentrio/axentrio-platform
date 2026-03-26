@@ -37,7 +37,7 @@
 **Files:**
 - Modify: `api/src/types/index.ts`
 
-- [ ] **Step 1: Add clerkUserId to RequestUser interface**
+- [x] **Step 1: Add clerkUserId to RequestUser interface**
 
 In `api/src/types/index.ts`, find the `RequestUser` interface and add `clerkUserId`:
 
@@ -62,7 +62,7 @@ req.user = {
 } as RequestUser;
 ```
 
-- [ ] **Step 2: Export cache invalidation function from clerk.middleware.ts**
+- [x] **Step 2: Export cache invalidation function from clerk.middleware.ts**
 
 In `api/src/middleware/clerk.middleware.ts`, add an exported function after the cache helpers (~line 53):
 
@@ -74,7 +74,7 @@ export function invalidateProvisionCache(orgId: string, userId: string): void {
 
 This will be called by admin routes after role/status changes.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/types/index.ts api/src/middleware/clerk.middleware.ts
@@ -90,7 +90,7 @@ git commit -m "feat: add clerkUserId to RequestUser and export cache invalidatio
 
 This is the most critical change — without it, all subsequent role management is broken.
 
-- [ ] **Step 1: Move role mapping into new-user-only branch**
+- [x] **Step 1: Move role mapping into new-user-only branch**
 
 In `api/src/middleware/clerk.middleware.ts`, the role determination block (lines 158-169) is already inside the `if (!user)` → `else` branch (new user path). However, there's a subtlety: for users matched by email (migration path, lines 150-156), we should also skip role overwrite since they're existing users being linked.
 
@@ -101,7 +101,7 @@ Read the full function to confirm the current flow. The change is:
 
 **Verify:** Search for any code after line 194 that might also read/set the role from Clerk. The email verification sync (lines 197-211) is fine — it doesn't touch role.
 
-- [ ] **Step 2: Replace getOrganizationMembershipList with single-member lookup**
+- [x] **Step 2: Replace getOrganizationMembershipList with single-member lookup**
 
 In the new-user role determination block (lines 160-168), replace:
 
@@ -120,11 +120,11 @@ else if (membership?.role === 'org:supervisor') role = 'supervisor';
 
 **Known limitation:** For orgs with 100+ members, the list may not include the user. This only affects the Clerk-role fallback path (when no PendingInvite exists), which is a backwards-compat path for Clerk Dashboard invites. For orgs this large, use PendingInvite-based invites exclusively.
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [x] **Step 3: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/src/middleware/clerk.middleware.ts
@@ -138,7 +138,7 @@ git commit -m "fix: only set role from Clerk on first user creation, not on subs
 **Files:**
 - Create: `api/src/database/entities/PendingInvite.ts`
 
-- [ ] **Step 1: Create the entity**
+- [x] **Step 1: Create the entity**
 
 Create `api/src/database/entities/PendingInvite.ts`:
 
@@ -189,15 +189,15 @@ export class PendingInvite {
 }
 ```
 
-- [ ] **Step 2: Register entity in data source**
+- [x] **Step 2: Register entity in data source**
 
 Check the TypeORM data source config and add `PendingInvite` to the entity list if entities are explicitly listed (rather than using glob patterns).
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [x] **Step 3: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/src/database/entities/PendingInvite.ts
@@ -211,11 +211,11 @@ git commit -m "feat: add PendingInvite entity for invite→signup role bridging"
 **Files:**
 - Create: `api/src/database/migrations/<timestamp>-CreatePendingInvite.ts`
 
-- [ ] **Step 1: Generate migration**
+- [x] **Step 1: Generate migration**
 
 Run: `cd chatbot-platform/api && npx typeorm migration:create src/database/migrations/CreatePendingInvite`
 
-- [ ] **Step 2: Write the migration**
+- [x] **Step 2: Write the migration**
 
 ```typescript
 import { MigrationInterface, QueryRunner } from 'typeorm';
@@ -242,7 +242,7 @@ export class CreatePendingInvite<timestamp> implements MigrationInterface {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/database/migrations/
@@ -256,7 +256,7 @@ git commit -m "feat: add migration for pending_invites table"
 **Files:**
 - Modify: `api/src/middleware/clerk.middleware.ts:138-193`
 
-- [ ] **Step 1: Import PendingInvite entity**
+- [x] **Step 1: Import PendingInvite entity**
 
 At the top of `clerk.middleware.ts`, add:
 
@@ -264,7 +264,7 @@ At the top of `clerk.middleware.ts`, add:
 import { PendingInvite } from '../database/entities/PendingInvite';
 ```
 
-- [ ] **Step 2: Add PendingInvite lookup before Clerk role mapping**
+- [x] **Step 2: Add PendingInvite lookup before Clerk role mapping**
 
 In the new-user branch (after email is fetched from Clerk at line 144, before the role determination at line 158), add:
 
@@ -294,7 +294,7 @@ const pendingInvite = await pendingInviteRepo
 
 **Note:** The Clerk user is already fetched at line 143. Refactor to reuse that result instead of fetching twice. Store the Clerk user object in a variable and use it both for name/email extraction and for PendingInvite email matching.
 
-- [ ] **Step 3: Use PendingInvite role if found, otherwise fall back to Clerk mapping**
+- [x] **Step 3: Use PendingInvite role if found, otherwise fall back to Clerk mapping**
 
 Replace the role determination block (lines 158-169) with:
 
@@ -325,11 +325,11 @@ if (pendingInvite) {
 }
 ```
 
-- [ ] **Step 4: Verify TypeScript compiles**
+- [x] **Step 4: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add api/src/middleware/clerk.middleware.ts
@@ -343,7 +343,7 @@ git commit -m "feat: add PendingInvite lookup in autoProvision for role bridging
 **Files:**
 - Create: `api/src/services/clerk-sync.service.ts`
 
-- [ ] **Step 1: Create the service**
+- [x] **Step 1: Create the service**
 
 Create `api/src/services/clerk-sync.service.ts`:
 
@@ -433,11 +433,11 @@ cd chatbot-platform/api && grep -r "createOrganization\b\|createOrganizationInvi
 
 Adjust method names to match the actual SDK API.
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/services/clerk-sync.service.ts
@@ -451,7 +451,7 @@ git commit -m "feat: add Clerk sync service for org/user lifecycle operations"
 **Files:**
 - Modify: `api/src/routes/admin.routes.ts` (the `POST /tenants` handler from super admin plan)
 
-- [ ] **Step 1: Wire Clerk org creation into tenant create**
+- [x] **Step 1: Wire Clerk org creation into tenant create**
 
 In `api/src/routes/admin.routes.ts`, update the `POST /tenants` handler:
 
@@ -528,11 +528,11 @@ router.post('/tenants', async (req: Request, res: Response) => {
 
 **Important:** Read the existing `POST /tenants` handler from the super admin plan (Task 5) and replace it with this version. Also check how `ensureUniqueSlug` works in `clerk.middleware.ts:108` — the slug generation here is simplified and may need to handle uniqueness conflicts.
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/routes/admin.routes.ts
@@ -546,7 +546,7 @@ git commit -m "feat: create Clerk org when super admin creates tenant"
 **Files:**
 - Modify: `api/src/routes/admin.routes.ts`
 
-- [ ] **Step 1: Add invite endpoint**
+- [x] **Step 1: Add invite endpoint**
 
 Append to `api/src/routes/admin.routes.ts`:
 
@@ -610,11 +610,11 @@ router.post('/tenants/:id/invite', async (req: Request, res: Response) => {
 });
 ```
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/routes/admin.routes.ts
@@ -628,7 +628,7 @@ git commit -m "feat: add super admin invite endpoint with PendingInvite"
 **Files:**
 - Modify: `api/src/routes/admin.routes.ts` (update the `PATCH /admin/users/:id` handler)
 
-- [ ] **Step 1: Add Clerk org removal on deactivation**
+- [x] **Step 1: Add Clerk org removal on deactivation**
 
 In the existing `PATCH /admin/users/:id` handler, when `isActive` is set to `false`, add:
 
@@ -667,7 +667,7 @@ if (typeof isActive === 'boolean') {
 }
 ```
 
-- [ ] **Step 2: Add reactivation endpoint**
+- [x] **Step 2: Add reactivation endpoint**
 
 Add a dedicated endpoint for reactivation:
 
@@ -713,11 +713,11 @@ router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
 });
 ```
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [x] **Step 3: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/src/routes/admin.routes.ts
@@ -731,7 +731,7 @@ git commit -m "feat: add Clerk org removal on user deactivation and reactivation
 **Files:**
 - Modify: `api/src/routes/admin.routes.ts` (update PATCH and suspend/activate handlers)
 
-- [ ] **Step 1: Add Clerk name sync to tenant update**
+- [x] **Step 1: Add Clerk name sync to tenant update**
 
 In the `PATCH /admin/tenants/:id` handler, after updating the local tenant name, add:
 
@@ -744,7 +744,7 @@ if (name && tenant.clerkOrgId) {
 }
 ```
 
-- [ ] **Step 2: Add Clerk metadata update to suspend/activate**
+- [x] **Step 2: Add Clerk metadata update to suspend/activate**
 
 In the `POST /admin/tenants/:id/suspend` handler, after setting local status, add:
 
@@ -766,11 +766,11 @@ if (tenant.clerkOrgId) {
 }
 ```
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [x] **Step 3: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/src/routes/admin.routes.ts
@@ -784,7 +784,7 @@ git commit -m "feat: sync tenant name and suspension state to Clerk org"
 **Files:**
 - Modify: `api/src/middleware/clerk.middleware.ts:96-133` (in autoProvision, after tenant resolution)
 
-- [ ] **Step 1: Add suspension check in autoProvision**
+- [x] **Step 1: Add suspension check in autoProvision**
 
 In `clerk.middleware.ts`, after the tenant is resolved (after line 133), add:
 
@@ -801,11 +801,11 @@ if (tenant.status === 'suspended') {
 
 This is the security control — it blocks all API access for suspended tenants regardless of how the request is made.
 
-- [ ] **Step 2: Verify TypeScript compiles**
+- [x] **Step 2: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add api/src/middleware/clerk.middleware.ts
@@ -819,7 +819,7 @@ git commit -m "feat: block API access for suspended tenants in autoProvision"
 **Files:**
 - Modify: `api/src/routes/tenants.ts` (add invite and role change endpoints)
 
-- [ ] **Step 1: Add tenant-scoped invite endpoint**
+- [x] **Step 1: Add tenant-scoped invite endpoint**
 
 In `api/src/routes/tenants.ts`, add:
 
@@ -879,7 +879,7 @@ router.post('/me/invite', requireAdmin, async (req: Request, res: Response) => {
 });
 ```
 
-- [ ] **Step 2: Add tenant-scoped role change endpoint**
+- [x] **Step 2: Add tenant-scoped role change endpoint**
 
 ```typescript
 // PATCH /tenants/me/users/:userId — tenant admin changes user role (DB-only)
@@ -927,11 +927,11 @@ router.patch('/me/users/:userId', requireAdmin, async (req: Request, res: Respon
 - How `req.tenantId` and `req.userId` are set (from autoProvision)
 - Whether `Tenant`, `User`, `AppDataSource` are already imported
 
-- [ ] **Step 3: Verify TypeScript compiles**
+- [x] **Step 3: Verify TypeScript compiles**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit`
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add api/src/routes/tenants.ts
@@ -945,7 +945,7 @@ git commit -m "feat: add tenant admin invite and role change endpoints"
 **Files:**
 - Modify: `portal/src/auth/OrganizationRequired.tsx` or `portal/src/auth/AppAuthProvider.tsx`
 
-- [ ] **Step 1: Add suspension check**
+- [x] **Step 1: Add suspension check**
 
 In `portal/src/auth/OrganizationRequired.tsx` (~line 5), after loading the organization, add a suspension check:
 
@@ -971,11 +971,11 @@ if (isLoaded && organization?.publicMetadata?.suspended) {
 
 **Important:** Read the current `OrganizationRequired.tsx` to understand its structure and where to add this check. It should go before the normal org-required gate.
 
-- [ ] **Step 2: Verify frontend compiles**
+- [x] **Step 2: Verify frontend compiles**
 
 Run: `cd chatbot-platform/portal && npx tsc --noEmit`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add portal/src/auth/OrganizationRequired.tsx
@@ -989,7 +989,7 @@ git commit -m "feat: show suspension message instead of app for suspended orgs"
 **Files:**
 - Modify: `portal/src/pages/Team.tsx`
 
-- [ ] **Step 1: Replace Clerk invite with backend endpoint**
+- [x] **Step 1: Replace Clerk invite with backend endpoint**
 
 In `portal/src/pages/Team.tsx`, find the invite/add member flow that uses Clerk's frontend SDK. Replace it with a call to the new backend endpoint:
 
@@ -1012,7 +1012,7 @@ const inviteMember = useMutation({
 });
 ```
 
-- [ ] **Step 2: Replace Clerk role dropdown with backend endpoint**
+- [x] **Step 2: Replace Clerk role dropdown with backend endpoint**
 
 Find the role change dropdown (that calls `organization.updateMember`). Replace with:
 
@@ -1045,15 +1045,15 @@ Update the role dropdown options from Clerk roles to app roles:
 <SelectItem value="agent">Agent</SelectItem>
 ```
 
-- [ ] **Step 3: Update member list to use backend data**
+- [x] **Step 3: Update member list to use backend data**
 
 If the Team page fetches members from Clerk's SDK, switch to fetching from `GET /tenants/me/users` (which already exists in the tenant routes). This ensures roles shown match the DB, not Clerk.
 
-- [ ] **Step 4: Verify frontend compiles**
+- [x] **Step 4: Verify frontend compiles**
 
 Run: `cd chatbot-platform/portal && npx tsc --noEmit`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add portal/src/pages/Team.tsx
@@ -1064,35 +1064,35 @@ git commit -m "feat: rewire Team page from Clerk SDK to backend invite/role endp
 
 ## Task 14: Manual E2E Verification
 
-- [ ] **Step 1: Test role persistence**
+- [x] **Step 1: Test role persistence**
 
 1. Log in as a user → note their role
 2. Change their role via admin panel → verify DB updated
 3. Log out and log back in → verify the role didn't revert to Clerk mapping
 4. Check the autoProvision cache expires (wait 5 min or restart server) → verify role still correct
 
-- [ ] **Step 2: Test tenant creation with Clerk org**
+- [x] **Step 2: Test tenant creation with Clerk org**
 
 1. As super admin, create a new tenant via `POST /admin/tenants` with `{ name: "Test Org", adminEmail: "test@example.com" }`
 2. Verify Clerk org was created (check Clerk Dashboard)
 3. Verify `test@example.com` received an invite email
 4. Accept the invite, sign up → verify user gets `admin` role (from PendingInvite)
 
-- [ ] **Step 3: Test user deactivation**
+- [x] **Step 3: Test user deactivation**
 
 1. Deactivate a user via admin panel
 2. Verify they're removed from Clerk org (check Clerk Dashboard)
 3. Verify they can't log in
 4. Reactivate them → verify re-invite sent → they can log in again
 
-- [ ] **Step 4: Test suspension**
+- [x] **Step 4: Test suspension**
 
 1. Suspend a tenant via `POST /admin/tenants/:id/suspend`
 2. As a user of that tenant, try to access the app → verify "Organization Suspended" message
 3. Try to call API directly → verify 403 with `TENANT_SUSPENDED` code
 4. Activate the tenant → verify access is restored
 
-- [ ] **Step 5: Test Team page role change**
+- [x] **Step 5: Test Team page role change**
 
 1. As a tenant admin, go to Team page
 2. Change a user's role via the dropdown

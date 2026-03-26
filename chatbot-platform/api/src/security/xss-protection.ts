@@ -212,7 +212,7 @@ export class XSSProtectionService {
     }
 
     // Configure DOMPurify
-    const purifyConfig: DOMPurify.Config = {
+    const purifyConfig = {
       ALLOWED_TAGS: this.config.allowedTags,
       ALLOWED_ATTR: Object.entries(this.config.allowedAttributes).flatMap(
         ([tag, attrs]) => attrs.map((attr) => (tag === '*' ? attr : `${tag}.${attr}`))

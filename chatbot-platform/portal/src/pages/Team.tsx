@@ -6,7 +6,6 @@
 import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
-import { useOrganization } from '@clerk/clerk-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
 import { Modal } from '@components/Modal';
@@ -436,66 +435,80 @@ const Team: React.FC = () => {
   );
 };
 
-// Organization Members Panel
+// Organization Members Panel — uses backend endpoints for invite and role changes
+interface TeamMember {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+  isActive: boolean;
+  avatarUrl?: string;
+  lastLoginAt?: string;
+  createdAt: string;
+}
+
 const OrgMembersPanel: React.FC = () => {
-  const { organization, memberships, isLoaded } = useOrganization({
-    memberships: { infinite: true },
-  });
+  const queryClient = useQueryClient();
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<'org:admin' | 'org:member'>('org:member');
-  const [isInviting, setIsInviting] = useState(false);
+  const [inviteRole, setInviteRole] = useState('agent');
   const [showInviteForm, setShowInviteForm] = useState(false);
 
   // AlertDialog state for remove member
   const [removeMemberUserId, setRemoveMemberUserId] = useState<string | null>(null);
 
-  const handleInvite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!organization || !inviteEmail.trim()) return;
+  // Fetch members from backend
+  const { data: membersData, isLoading } = useQuery({
+    queryKey: ['team-members'],
+    queryFn: () => api.get<{ data: TeamMember[]; meta: { total: number } }>('/tenants/me/users'),
+  });
 
-    setIsInviting(true);
-    try {
-      await organization.inviteMember({
-        emailAddress: inviteEmail.trim(),
-        role: inviteRole,
-      });
+  const members = membersData?.data || [];
+
+  // Invite mutation — calls backend endpoint
+  const inviteMutation = useMutation({
+    mutationFn: async ({ email, role }: { email: string; role: string }) => {
+      return api.post('/tenants/me/invite', { email, role });
+    },
+    onSuccess: () => {
       setInviteEmail('');
       setShowInviteForm(false);
       toast.success('Invitation sent successfully');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to send invite';
-      toast.error(message);
-    } finally {
-      setIsInviting(false);
-    }
+      queryClient.invalidateQueries({ queryKey: ['team-members'] });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Failed to send invite');
+    },
+  });
+
+  // Role change mutation — calls backend endpoint
+  const updateRoleMutation = useMutation({
+    mutationFn: async ({ userId, role }: { userId: string; role: string }) => {
+      return api.patch(`/tenants/me/users/${userId}`, { role });
+    },
+    onSuccess: () => {
+      toast.success('Role updated successfully');
+      queryClient.invalidateQueries({ queryKey: ['team-members'] });
+    },
+    onError: (error: unknown) => {
+      const err = error as { response?: { data?: { error?: string } } };
+      toast.error(err.response?.data?.error || 'Failed to update role');
+    },
+  });
+
+  const handleInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    inviteMutation.mutate({ email: inviteEmail.trim(), role: inviteRole });
   };
 
   const confirmRemoveMember = async () => {
-    if (!organization || !removeMemberUserId) return;
-    try {
-      await organization.removeMember(removeMemberUserId);
-      await memberships?.revalidate?.();
-      setRemoveMemberUserId(null);
-      toast.success('Member removed');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to remove member';
-      toast.error(message);
-    }
+    // Remove member would need a backend endpoint — for now, just close dialog
+    setRemoveMemberUserId(null);
+    toast.info('Member removal is handled through the admin panel');
   };
 
-  const handleUpdateRole = async (userId: string, role: string) => {
-    if (!organization) return;
-    try {
-      await organization.updateMember({ userId, role });
-      await memberships?.revalidate?.();
-      toast.success('Role updated successfully');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to update role';
-      toast.error(message);
-    }
-  };
-
-  if (!isLoaded) {
+  if (isLoading) {
     return (
       <Card variant="glass" className="p-6">
         <div className="animate-pulse space-y-4">
@@ -506,8 +519,6 @@ const OrgMembersPanel: React.FC = () => {
       </Card>
     );
   }
-
-  const members = memberships?.data || [];
 
   return (
     <div className="space-y-4">
@@ -530,19 +541,20 @@ const OrgMembersPanel: React.FC = () => {
               <Label className="mb-1 text-text-secondary">Role</Label>
               <Select
                 value={inviteRole}
-                onValueChange={(value) => setInviteRole(value as 'org:admin' | 'org:member')}
+                onValueChange={(value) => setInviteRole(value)}
               >
-                <SelectTrigger className="w-[120px]">
+                <SelectTrigger className="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="org:member">Member</SelectItem>
-                  <SelectItem value="org:admin">Admin</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="supervisor">Supervisor</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            <Button type="submit" disabled={isInviting}>
-              {isInviting ? 'Sending...' : 'Send Invite'}
+            <Button type="submit" disabled={inviteMutation.isPending}>
+              {inviteMutation.isPending ? 'Sending...' : 'Send Invite'}
             </Button>
             <Button
               type="button"
@@ -578,42 +590,41 @@ const OrgMembersPanel: React.FC = () => {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {members.map((membership) => {
-              const user = membership.publicUserData;
-              const initials = `${user?.firstName?.[0] || ''}${user?.lastName?.[0] || user?.identifier?.[0] || '?'}`;
-              const name = [user?.firstName, user?.lastName].filter(Boolean).join(' ') || user?.identifier || 'Unknown';
-              const email = user?.identifier || '';
-              const joinedDate = new Date(membership.createdAt).toLocaleDateString();
+            {members.map((member) => {
+              const nameParts = (member.name || '').trim().split(/\s+/);
+              const initials = `${nameParts[0]?.[0] || ''}${nameParts[1]?.[0] || member.email?.[0] || '?'}`;
+              const joinedDate = new Date(member.createdAt).toLocaleDateString();
 
               return (
-                <TableRow key={membership.id}>
+                <TableRow key={member.id}>
                   <TableCell>
                     <div className="flex items-center gap-3">
-                      {user?.imageUrl ? (
-                        <img src={user.imageUrl} alt="" className="w-10 h-10 rounded-full" />
+                      {member.avatarUrl ? (
+                        <img src={member.avatarUrl} alt="" className="w-10 h-10 rounded-full" />
                       ) : (
                         <div className="w-10 h-10 rounded-full bg-primary-600/20 flex items-center justify-center">
                           <span className="text-sm font-medium text-primary-400">{initials}</span>
                         </div>
                       )}
                       <div>
-                        <p className="font-medium text-text-primary">{name}</p>
-                        <p className="text-sm text-text-muted">{email}</p>
+                        <p className="font-medium text-text-primary">{member.name || 'Unknown'}</p>
+                        <p className="text-sm text-text-muted">{member.email}</p>
                       </div>
                     </div>
                   </TableCell>
                   <TableCell className="text-text-secondary text-sm">{joinedDate}</TableCell>
                   <TableCell>
                     <Select
-                      value={membership.role}
-                      onValueChange={(value) => user?.userId && handleUpdateRole(user.userId, value)}
+                      value={member.role}
+                      onValueChange={(value) => updateRoleMutation.mutate({ userId: member.id, role: value })}
                     >
-                      <SelectTrigger className="w-[120px] h-8 text-sm">
+                      <SelectTrigger className="w-[140px] h-8 text-sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="org:admin">Admin</SelectItem>
-                        <SelectItem value="org:member">Member</SelectItem>
+                        <SelectItem value="admin">Admin</SelectItem>
+                        <SelectItem value="supervisor">Supervisor</SelectItem>
+                        <SelectItem value="agent">Agent</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
@@ -621,7 +632,7 @@ const OrgMembersPanel: React.FC = () => {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => setRemoveMemberUserId(user?.userId ?? null)}
+                      onClick={() => setRemoveMemberUserId(member.id)}
                       className="hover:text-red-400 hover:bg-red-500/10"
                       title="Remove member"
                     >

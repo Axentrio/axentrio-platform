@@ -2,7 +2,7 @@
 // User & Authentication Types
 // ============================================
 
-export type UserRole = 'admin' | 'supervisor' | 'agent';
+export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'agent';
 
 export type UserStatus = 'online' | 'away' | 'offline' | 'busy';
 

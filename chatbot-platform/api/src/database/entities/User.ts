@@ -17,7 +17,7 @@ import {
 import { Tenant } from './Tenant';
 import { Agent } from './Agent';
 
-export type UserRole = 'admin' | 'supervisor' | 'agent';
+export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'agent';
 
 @Entity('users')
 @Index(['tenantId', 'email'], { unique: true })
@@ -42,7 +42,7 @@ export class User {
 
   @Column({
     type: 'enum',
-    enum: ['admin', 'supervisor', 'agent'],
+    enum: ['super_admin', 'admin', 'supervisor', 'agent'],
     default: 'agent',
   })
   role!: UserRole;
@@ -110,8 +110,12 @@ export class User {
     return this.role === 'supervisor';
   }
 
+  isSuperAdmin(): boolean {
+    return this.role === 'super_admin';
+  }
+
   canAccessAdminPanel(): boolean {
-    return this.role === 'admin' || this.role === 'supervisor';
+    return this.role === 'super_admin' || this.role === 'admin' || this.role === 'supervisor';
   }
 
   getDisplayName(): string {

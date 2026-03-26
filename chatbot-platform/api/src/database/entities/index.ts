@@ -11,3 +11,4 @@ export { Participant, ParticipantType } from './Participant';
 export { Message, MessageType, MessageStatus } from './Message';
 export { FileUpload, FileUploadStatus } from './FileUpload';
 export { HandoffRequest, HandoffStatus, HandoffReason } from './HandoffRequest';
+export { PendingInvite } from './PendingInvite';

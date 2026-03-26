@@ -9,8 +9,10 @@ import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
+import { PendingInvite } from '../database/entities/PendingInvite';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
-import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
+import { inviteToClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 
@@ -453,6 +455,104 @@ router.post(
         message: 'Webhook secret regenerated. Update your n8n workflow with the new secret.',
       },
     });
+  })
+);
+
+/**
+ * Invite user to tenant
+ * POST /api/v1/tenants/me/invite
+ */
+router.post(
+  '/me/invite',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { email, role } = req.body;
+    if (!email || !role) {
+      throw new ValidationError('Email and role are required');
+    }
+
+    if (!['admin', 'supervisor', 'agent'].includes(role)) {
+      throw new ValidationError('Invalid role');
+    }
+
+    const tenantId = req.user!.tenantId;
+    const tenantRepo = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+
+    if (!tenant?.clerkOrgId) {
+      throw new ValidationError('No Clerk organization linked');
+    }
+
+    const invited = await inviteToClerkOrganization(
+      tenant.clerkOrgId,
+      email,
+      req.user!.clerkUserId
+    );
+    if (!invited) {
+      res.status(502).json({ error: 'Failed to send invite' });
+      return;
+    }
+
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+    await inviteRepo
+      .createQueryBuilder()
+      .insert()
+      .into(PendingInvite)
+      .values({
+        tenantId: tenant.id,
+        email: email.toLowerCase(),
+        role,
+        invitedBy: req.userId!,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      })
+      .orUpdate(['role', 'invited_by', 'created_at', 'expires_at'], ['tenant_id', 'email'])
+      .execute();
+
+    res.json({ success: true, message: 'Invitation sent' });
+  })
+);
+
+/**
+ * Change user role within tenant
+ * PATCH /api/v1/tenants/me/users/:userId
+ */
+router.patch(
+  '/me/users/:userId',
+  requireClerkAuth, autoProvision,
+  requireAdmin,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { role } = req.body;
+
+    if (!role || !['admin', 'supervisor', 'agent'].includes(role)) {
+      throw new ValidationError('Invalid role');
+    }
+
+    const tenantId = req.user!.tenantId;
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({
+      where: { id: req.params.userId, tenantId },
+    });
+
+    if (!user) {
+      throw new NotFoundError('User not found in this tenant');
+    }
+
+    user.role = role;
+    await userRepo.save(user);
+
+    // Invalidate autoProvision cache so role change takes effect immediately
+    if (user.clerkUserId) {
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+      if (tenant?.clerkOrgId) {
+        invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+      }
+    }
+
+    logger.info('Tenant admin changed user role', {
+      userId: user.id, newRole: role, changedBy: req.userId,
+    });
+    res.json({ success: true, data: { id: user.id, role: user.role } });
   })
 );
 

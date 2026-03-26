@@ -9,7 +9,7 @@ import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { Agent } from '../database/entities/Agent';
-import type { RequestUser } from '../types';
+import type { RequestUser, UserRole } from '../types';
 
 export interface AuthenticatedRequest extends Request {
   user?: RequestUser;
@@ -157,7 +157,7 @@ export async function authenticateAgent(
     req.user = {
       id: payload.userId,
       email: payload.email,
-      role: payload.role,
+      role: payload.role as UserRole,
       tenantId: payload.tenantId,
       type: 'agent',
     };
@@ -206,7 +206,7 @@ export async function authenticateWidget(
     req.user = {
       id: payload.userId,
       email: payload.email,
-      role: 'widget',
+      role: 'agent' as UserRole,
       tenantId: payload.tenantId,
       type: 'widget',
     };
@@ -257,7 +257,7 @@ export async function authenticateSocket(
     socket.data.user = {
       id: payload.userId,
       email: payload.email,
-      role: payload.role,
+      role: payload.role as UserRole,
       tenantId: payload.tenantId,
       type: payload.type,
     };

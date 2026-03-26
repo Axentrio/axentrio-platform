@@ -10,8 +10,9 @@
 export interface RequestUser {
   id: string;
   email: string;
-  role: string;
+  role: UserRole;
   tenantId: string;
+  clerkUserId?: string;
   type: 'agent' | 'widget';
 }
 
@@ -102,7 +103,7 @@ export interface IScheduleDay {
 // User & Agent Types
 // ============================================================================
 
-export type UserRole = 'admin' | 'agent' | 'viewer';
+export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'agent';
 export type AgentStatus = 'online' | 'away' | 'busy' | 'offline';
 
 export interface IUser {

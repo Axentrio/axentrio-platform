@@ -11,9 +11,10 @@ import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
+import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import type { RequestUser } from '../types';
+import type { RequestUser, UserRole } from '../types';
 
 export interface ProvisionedRequest extends Request {
   clerkUserId?: string;
@@ -21,7 +22,7 @@ export interface ProvisionedRequest extends Request {
   tenantId?: string;
   userId?: string;
   agentId?: string;
-  userRole?: string;
+  userRole?: UserRole;
   tenantName?: string;
   user?: RequestUser;
 }
@@ -32,7 +33,7 @@ interface CachedIds {
   tenantId: string;
   userId: string;
   agentId: string;
-  userRole: string;
+  userRole: UserRole;
   tenantName: string;
   email: string;
   cachedAt: number;
@@ -133,20 +134,34 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       logger.info('Auto-provisioned tenant', { tenantId: tenant.id, orgName });
     }
 
+    // --- Block suspended tenants ---
+    if (tenant.status === 'suspended') {
+      res.status(403).json({
+        error: 'Organization suspended',
+        code: 'TENANT_SUSPENDED',
+      });
+      return;
+    }
+
     // --- Resolve User ---
     let user = await userRepo.findOne({ where: { clerkUserId } });
 
     if (!user) {
-      // Migration path: match by email
+      // Fetch Clerk user info (reused for email, name, and PendingInvite matching)
       let email = 'unknown@user.local';
       let name = 'User';
+      let clerkEmails: string[] = [];
       try {
         const clerkUser = await clerkClient.users.getUser(clerkUserId);
         email = clerkUser.emailAddresses?.[0]?.emailAddress || email;
         name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
+        clerkEmails = (clerkUser.emailAddresses || [])
+          .filter(e => e.verification?.status === 'verified')
+          .map(e => e.emailAddress.toLowerCase());
       } catch {
         logger.warn('Could not fetch Clerk user info', { clerkUserId });
       }
+      if (clerkEmails.length === 0) clerkEmails = [email.toLowerCase()];
 
       // Check for existing user by email (migration)
       const existingByEmail = await userRepo.findOne({ where: { email, tenantId: tenant.id } });
@@ -156,17 +171,35 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
         user = existingByEmail;
         logger.info('Linked existing user to Clerk', { userId: user.id, email });
       } else {
-        // Determine role from Clerk org membership
+        // Check for PendingInvite — bridges invite→signup role assignment
         let role: 'admin' | 'supervisor' | 'agent' = 'agent';
-        try {
-          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-            organizationId: clerkOrgId,
+        const pendingInviteRepo = AppDataSource.getRepository(PendingInvite);
+        const pendingInvite = await pendingInviteRepo
+          .createQueryBuilder('pi')
+          .where('pi.tenantId = :tenantId', { tenantId: tenant.id })
+          .andWhere('pi.email IN (:...emails)', { emails: clerkEmails })
+          .andWhere('pi.expiresAt > NOW()')
+          .getOne();
+
+        if (pendingInvite) {
+          role = pendingInvite.role as 'admin' | 'supervisor' | 'agent';
+          await pendingInviteRepo.remove(pendingInvite);
+          logger.info('Used PendingInvite for role assignment', {
+            email, tenantId: tenant.id, role, invitedBy: pendingInvite.invitedBy,
           });
-          const membership = memberships.data?.find((m) => m.publicUserData?.userId === clerkUserId);
-          if (membership?.role === 'org:admin') role = 'admin';
-          else if (membership?.role === 'org:supervisor') role = 'supervisor';
-        } catch {
-          logger.warn('Could not fetch Clerk membership role', { clerkUserId, clerkOrgId });
+        } else {
+          // Backwards compat: fall back to Clerk membership role for Clerk Dashboard invites
+          try {
+            const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+              organizationId: clerkOrgId,
+              limit: 100,
+            });
+            const membership = memberships.data?.find((m) => m.publicUserData?.userId === clerkUserId);
+            if (membership?.role === 'org:admin') role = 'admin';
+            else if (membership?.role === 'org:supervisor') role = 'supervisor';
+          } catch {
+            logger.warn('Could not fetch Clerk membership role', { clerkUserId, clerkOrgId });
+          }
         }
 
         // Upsert user
@@ -280,8 +313,13 @@ function attachToRequest(req: ProvisionedRequest, clerkUserId: string, clerkOrgI
     email: ids.email,
     role: ids.userRole,
     tenantId: ids.tenantId,
+    clerkUserId,
     type: 'agent',
   };
+}
+
+export function invalidateProvisionCache(orgId: string, userId: string): void {
+  idCache.delete(`${orgId}:${userId}`);
 }
 
 async function ensureUniqueSlug(name: string, tenantRepo: { findOne(options: { where: { slug: string } }): Promise<{ slug: string } | null> }): Promise<string> {

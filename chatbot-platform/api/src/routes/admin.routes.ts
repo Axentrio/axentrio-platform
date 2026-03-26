@@ -5,10 +5,18 @@ import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
-import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { PendingInvite } from '../database/entities/PendingInvite';
+import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { logger } from '../utils/logger';
+import {
+  createClerkOrganization,
+  inviteToClerkOrganization,
+  removeFromClerkOrganization,
+  deleteClerkOrganization,
+  updateClerkOrganization,
+} from '../services/clerk-sync.service';
 
 const router = Router();
 
@@ -79,20 +87,56 @@ router.get('/tenants/:id', async (req: Request, res: Response) => {
   }
 });
 
-// POST /admin/tenants — create tenant
+// POST /admin/tenants — create tenant with Clerk org
 router.post('/tenants', async (req: Request, res: Response) => {
   try {
-    const { name, tier, settings } = req.body;
+    const { name, tier, settings, adminEmail } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name is required' });
     }
 
+    // Step 1: Create Clerk org first
+    const clerkOrg = await createClerkOrganization(name);
+    if (!clerkOrg) {
+      return res.status(502).json({ error: 'Failed to create organization in Clerk' });
+    }
+
+    // Step 2: Create local Tenant record
     const repo = AppDataSource.getRepository(Tenant);
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
     const apiKey = `ak_${crypto.randomUUID().replace(/-/g, '')}`;
 
-    const tenant = repo.create({ name, slug, apiKey, tier: tier || 'free', settings });
-    await repo.save(tenant);
+    let tenant;
+    try {
+      tenant = repo.create({
+        name,
+        slug,
+        apiKey,
+        clerkOrgId: clerkOrg.id,
+        tier: tier || 'free',
+        settings,
+      });
+      await repo.save(tenant);
+    } catch (dbError) {
+      // Compensating transaction: delete the Clerk org
+      logger.error('Failed to create tenant in DB, cleaning up Clerk org', { error: dbError });
+      await deleteClerkOrganization(clerkOrg.id);
+      return res.status(500).json({ error: 'Failed to create tenant' });
+    }
+
+    // Step 3: Invite initial admin if email provided
+    if (adminEmail) {
+      await inviteToClerkOrganization(clerkOrg.id, adminEmail, req.user?.clerkUserId);
+
+      const inviteRepo = AppDataSource.getRepository(PendingInvite);
+      await inviteRepo.save(inviteRepo.create({
+        tenantId: tenant.id,
+        email: adminEmail.toLowerCase(),
+        role: 'admin',
+        invitedBy: req.userId!,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
+      }));
+    }
 
     return res.status(201).json({ success: true, data: tenant });
   } catch (error) {
@@ -118,6 +162,12 @@ router.patch('/tenants/:id', async (req: Request, res: Response) => {
     if (settings) tenant.settings = { ...tenant.settings, ...settings };
 
     await repo.save(tenant);
+
+    // Sync name change to Clerk
+    if (name && tenant.clerkOrgId) {
+      await updateClerkOrganization(tenant.clerkOrgId, { name });
+    }
+
     return res.json({ success: true, data: tenant });
   } catch (error) {
     logger.error('Failed to update tenant', { error });
@@ -137,6 +187,13 @@ router.post('/tenants/:id/suspend', async (req: Request, res: Response) => {
 
     tenant.status = 'suspended';
     await repo.save(tenant);
+
+    if (tenant.clerkOrgId) {
+      await updateClerkOrganization(tenant.clerkOrgId, {
+        publicMetadata: { suspended: true },
+      });
+    }
+
     return res.json({ success: true, data: tenant });
   } catch (error) {
     logger.error('Failed to suspend tenant', { error });
@@ -156,6 +213,13 @@ router.post('/tenants/:id/activate', async (req: Request, res: Response) => {
 
     tenant.status = 'active';
     await repo.save(tenant);
+
+    if (tenant.clerkOrgId) {
+      await updateClerkOrganization(tenant.clerkOrgId, {
+        publicMetadata: { suspended: false },
+      });
+    }
+
     return res.json({ success: true, data: tenant });
   } catch (error) {
     logger.error('Failed to activate tenant', { error });
@@ -246,7 +310,7 @@ router.get('/users/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /admin/users/:id — update user
+// PATCH /admin/users/:id — update user (with Clerk sync on deactivation)
 router.patch('/users/:id', async (req: Request, res: Response) => {
   try {
     const repo = AppDataSource.getRepository(User);
@@ -262,12 +326,131 @@ router.patch('/users/:id', async (req: Request, res: Response) => {
     }
     if (typeof isActive === 'boolean') {
       user.isActive = isActive;
+
+      // If deactivating and user has Clerk ID, remove from Clerk org
+      if (!isActive && user.clerkUserId) {
+        const tenant = await AppDataSource.getRepository(Tenant).findOne({
+          where: { id: user.tenantId },
+        });
+        if (tenant?.clerkOrgId) {
+          const removed = await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
+          if (!removed) {
+            logger.warn('Failed to remove user from Clerk org — deactivated locally only', {
+              userId: user.id, tenantId: tenant.id,
+            });
+          }
+        }
+      }
     }
 
     await repo.save(user);
+
+    // Invalidate cache so changes take effect immediately
+    if (user.clerkUserId) {
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
+      if (tenant?.clerkOrgId) {
+        invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+      }
+    }
+
     return res.json({ success: true, data: user });
   } catch (error) {
     logger.error('Failed to update user', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/tenants/:id/invite — invite user to a tenant
+router.post('/tenants/:id/invite', async (req: Request, res: Response) => {
+  try {
+    const { email, role } = req.body;
+    if (!email || !role) {
+      return res.status(400).json({ error: 'Email and role are required' });
+    }
+
+    if (!['admin', 'supervisor', 'agent'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be admin, supervisor, or agent' });
+    }
+
+    const tenantRepo = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: req.params.id } });
+
+    if (!tenant) {
+      return res.status(404).json({ error: 'Tenant not found' });
+    }
+
+    if (!tenant.clerkOrgId) {
+      return res.status(400).json({ error: 'Tenant has no Clerk organization linked' });
+    }
+
+    const invited = await inviteToClerkOrganization(
+      tenant.clerkOrgId,
+      email,
+      req.user?.clerkUserId
+    );
+    if (!invited) {
+      return res.status(502).json({ error: 'Failed to send invite via Clerk' });
+    }
+
+    // Create or upsert PendingInvite
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+    await inviteRepo
+      .createQueryBuilder()
+      .insert()
+      .into(PendingInvite)
+      .values({
+        tenantId: tenant.id,
+        email: email.toLowerCase(),
+        role,
+        invitedBy: req.userId!,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      })
+      .orUpdate(['role', 'invited_by', 'created_at', 'expires_at'], ['tenant_id', 'email'])
+      .execute();
+
+    logger.info('Invited user to tenant', { tenantId: tenant.id, email, role, invitedBy: req.userId });
+    return res.json({ success: true, message: 'Invitation sent' });
+  } catch (error) {
+    logger.error('Failed to invite user', { error });
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /admin/users/:id/reactivate — reactivate a deactivated user
+router.post('/users/:id/reactivate', async (req: Request, res: Response) => {
+  try {
+    const { role } = req.body;
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id: req.params.id } });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    if (user.isActive) {
+      return res.status(400).json({ error: 'User is already active' });
+    }
+
+    user.isActive = true;
+    if (role && ['admin', 'supervisor', 'agent'].includes(role)) {
+      user.role = role;
+    }
+    await userRepo.save(user);
+
+    // Re-invite to Clerk org
+    if (user.clerkUserId) {
+      const tenant = await AppDataSource.getRepository(Tenant).findOne({
+        where: { id: user.tenantId },
+      });
+      if (tenant?.clerkOrgId) {
+        await inviteToClerkOrganization(tenant.clerkOrgId, user.email, req.user?.clerkUserId);
+      }
+    }
+
+    logger.info('Reactivated user', { userId: user.id, role: user.role });
+    return res.json({ success: true, data: user });
+  } catch (error) {
+    logger.error('Failed to reactivate user', { error });
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

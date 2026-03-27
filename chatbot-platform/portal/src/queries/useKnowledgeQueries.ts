@@ -16,7 +16,7 @@ export const knowledgeOptions = {
   documents: () => queryOptions({
     queryKey: queryKeys.knowledge.documents(),
     queryFn: async () => {
-      const res = await api.get<Any>('/knowledge/documents', { params: { limit: 500 } });
+      const res = await api.get<Any>('/knowledge/documents', { params: { limit: 100 } });
       return Array.isArray(res) ? res : res?.documents ?? [];
     },
   }),

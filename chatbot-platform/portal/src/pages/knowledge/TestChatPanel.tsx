@@ -73,7 +73,8 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
       {
         onSuccess: (data) => {
           const resp = data as TestChatResponse;
-          const botMsg: ChatMessage = { role: 'assistant', content: resp.response };
+          const content = resp.response || '(No response — check your brand voice and guardrails configuration)';
+          const botMsg: ChatMessage = { role: 'assistant', content };
           setMessages((prev) => [...prev, botMsg]);
         },
         onError: () => {

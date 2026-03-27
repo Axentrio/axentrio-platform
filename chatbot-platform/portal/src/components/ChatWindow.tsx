@@ -82,13 +82,14 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const renderMessage = (message: Message) => {
     const isAgent = message.sender === 'agent';
     const isBot = message.sender === 'bot';
+    const isVisitor = !isAgent && !isBot;
 
     return (
       <div
         key={message.id}
-        className={`flex ${isAgent ? 'justify-end' : 'justify-start'} mb-4`}
+        className={`flex ${isVisitor ? 'justify-end' : 'justify-start'} mb-4`}
       >
-        <div className={`flex max-w-[80%] ${isAgent ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
+        <div className={`flex max-w-[80%] ${isVisitor ? 'flex-row-reverse' : 'flex-row'} gap-2`}>
           {/* Avatar */}
           <div className={cn(
             'flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium',
@@ -102,17 +103,17 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
 
           {/* Message content */}
-          <div className={`flex flex-col ${isAgent ? 'items-end' : 'items-start'}`}>
+          <div className={`flex flex-col ${isVisitor ? 'items-end' : 'items-start'}`}>
             {/* Sender name */}
             <span className="text-xs text-text-muted mb-1">
-              {message.senderName || (isAgent ? 'Agent' : isBot ? 'Bot' : 'User')}
+              {message.senderName || (isAgent ? 'Agent' : isBot ? 'Bot' : 'Visitor')}
             </span>
 
             {/* Message bubble */}
             <div
               className={cn(
                 'px-4 py-2 rounded-2xl',
-                isAgent
+                isVisitor
                   ? 'bg-primary-600 text-white rounded-br-md'
                   : isBot
                     ? 'bg-chat-bot/10 text-text-primary rounded-bl-md'

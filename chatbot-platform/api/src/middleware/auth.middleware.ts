@@ -286,7 +286,8 @@ export function requireRole(...allowedRoles: string[]) {
       return;
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    // super_admin bypasses all role checks
+    if (req.user.role !== 'super_admin' && !allowedRoles.includes(req.user.role)) {
       res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
       return;
     }

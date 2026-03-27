@@ -153,6 +153,8 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const isRole = useCallback((role: UserRole | UserRole[]): boolean => {
     if (!user) return false;
+    // super_admin matches any role check
+    if (user.role === 'super_admin') return true;
     if (Array.isArray(role)) return role.includes(user.role);
     return user.role === role;
   }, [user]);

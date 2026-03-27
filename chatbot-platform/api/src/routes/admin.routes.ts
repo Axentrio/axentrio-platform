@@ -506,18 +506,18 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
 
   user.isActive = false;
 
+  // Fetch tenant once for Clerk removal + cache invalidation
+  const tenant = user.clerkUserId
+    ? await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } })
+    : null;
+
   // Remove from Clerk org if applicable
-  if (user.clerkUserId) {
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({
-      where: { id: user.tenantId },
-    });
-    if (tenant?.clerkOrgId) {
-      const removed = await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
-      if (!removed) {
-        logger.warn('Failed to remove user from Clerk org — deactivated locally only', {
-          userId: user.id, tenantId: tenant.id,
-        });
-      }
+  if (user.clerkUserId && tenant?.clerkOrgId) {
+    const removed = await removeFromClerkOrganization(tenant.clerkOrgId, user.clerkUserId);
+    if (!removed) {
+      logger.warn('Failed to remove user from Clerk org — deactivated locally only', {
+        userId: user.id, tenantId: tenant.id,
+      });
     }
   }
 
@@ -525,11 +525,8 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
   await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId);
 
   // Invalidate cache so changes take effect immediately
-  if (user.clerkUserId) {
-    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
-    if (tenant?.clerkOrgId) {
-      invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
-    }
+  if (user.clerkUserId && tenant?.clerkOrgId) {
+    invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
   }
 
   logger.info('Deactivated user', { userId: user.id, deactivatedBy: req.userId });

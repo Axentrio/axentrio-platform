@@ -11,10 +11,8 @@ export class KnowledgeService {
   private kbRepo: Repository<KnowledgeBase>;
   private docRepo: Repository<KnowledgeDocument>;
   private chunkRepo: Repository<KnowledgeChunk>;
-  private dataSource: DataSource;
 
   constructor(dataSource: DataSource) {
-    this.dataSource = dataSource;
     this.kbRepo = dataSource.getRepository(KnowledgeBase);
     this.docRepo = dataSource.getRepository(KnowledgeDocument);
     this.chunkRepo = dataSource.getRepository(KnowledgeChunk);

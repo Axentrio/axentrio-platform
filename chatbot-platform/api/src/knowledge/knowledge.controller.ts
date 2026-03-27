@@ -84,7 +84,10 @@ export async function createDocument(req: Request, res: Response) {
 export async function getDocument(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const doc = await getService().getDocument(tenantId, req.params.id);
-  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  if (!doc) {
+    res.status(404).json({ error: 'Document not found' });
+    return;
+  }
   res.json(doc);
 }
 
@@ -134,10 +137,14 @@ export async function retryDocument(req: Request, res: Response) {
 export async function uploadFile(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const file = (req as any).file;
-  if (!file) return res.status(400).json({ error: 'No file provided' });
+  if (!file) {
+    res.status(400).json({ error: 'No file provided' });
+    return;
+  }
 
   if (!config.s3?.bucket) {
-    return res.status(503).json({ error: 'File storage is not configured' });
+    res.status(503).json({ error: 'File storage is not configured' });
+    return;
   }
 
   const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${file.originalname}`;
@@ -180,7 +187,7 @@ export async function updateAiSettings(req: Request, res: Response) {
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
-  const existingAi = tenant.settings?.ai || {};
+  const existingAi: any = tenant.settings?.ai || {};
   const updatedAi: any = { ...existingAi };
 
   if (data.enabled !== undefined) updatedAi.enabled = data.enabled;
@@ -206,7 +213,10 @@ export async function testAiSettings(req: Request, res: Response) {
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
   const ai = tenant.settings?.ai;
-  if (!ai?.enabled) return res.status(400).json({ error: 'AI is not enabled' });
+  if (!ai?.enabled) {
+    res.status(400).json({ error: 'AI is not enabled' });
+    return;
+  }
 
   const result = await generateResponse(AppDataSource, tenantId, ai, question, []);
   res.json({

@@ -83,7 +83,6 @@ export interface ITenantSettings {
   features?: {
     fileUploadEnabled: boolean;
     handoffEnabled: boolean;
-    aiEnabled: boolean;
   };
   businessHours?: {
     enabled: boolean;

@@ -9,14 +9,19 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
+import { Participant } from '../database/entities/Participant';
+import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload } from '../n8n/types';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { generateResponse } from '../llm/rag.service';
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
 const tenantRepository = AppDataSource.getRepository(Tenant);
+const participantRepository = AppDataSource.getRepository(Participant);
+const handoffRepository = AppDataSource.getRepository(HandoffRequest);
 
 // Module-level service references, set via initialize()
 let outboundService: OutboundService | null = null;
@@ -72,6 +77,71 @@ export async function forwardMessageToN8n(
   if (session.status !== 'bot' && session.status !== 'waiting') {
     return false;
   }
+
+  // ── RAG-powered bot handling ──────────────────────────────────────────
+  if (session.status === 'bot' && savedMessage.type === 'text') {
+    const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
+    const aiSettings = tenant?.settings?.ai;
+
+    if (tenant && aiSettings?.enabled) {
+      try {
+        // Check escalation keywords first
+        const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
+        const lowerContent = savedMessage.content.toLowerCase();
+        const matchedKeyword = escalationKeywords.find((kw: string) =>
+          lowerContent.includes(kw.toLowerCase())
+        );
+
+        if (matchedKeyword) {
+          logger.info(`Escalation keyword "${matchedKeyword}" detected in session ${session.id}`);
+          const botParticipant = await ensureBotParticipant(session, aiSettings);
+          await sendBotMessage(
+            session,
+            botParticipant.id,
+            aiSettings.guardrails?.fallbackMessage || "I'm connecting you to a human agent."
+          );
+          await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+          return true;
+        }
+
+        // Call RAG service
+        const history = await getConversationHistory(session.id);
+        const ragResult = await generateResponse(
+          AppDataSource,
+          session.tenantId,
+          aiSettings as Parameters<typeof generateResponse>[2],
+          savedMessage.content,
+          history
+        );
+
+        const botParticipant = await ensureBotParticipant(session, aiSettings);
+        await sendBotMessage(session, botParticipant.id, ragResult.response);
+
+        if (ragResult.shouldHandoff && ragResult.handoffReason) {
+          await handleBotHandoff(session, botParticipant.id, ragResult.handoffReason as HandoffRequest['reason']);
+        }
+
+        return true;
+      } catch (error) {
+        logger.error(`RAG processing failed for session ${session.id}`, error);
+        // On RAG error, trigger handoff so session isn't stuck
+        try {
+          const botParticipant = await ensureBotParticipant(session, aiSettings);
+          await sendBotMessage(
+            session,
+            botParticipant.id,
+            aiSettings.guardrails?.fallbackMessage || "I'm having trouble right now. Let me connect you to a human agent."
+          );
+          await handleBotHandoff(session, botParticipant.id, 'bot_error');
+        } catch (innerError) {
+          logger.error(`Failed to handle RAG error gracefully for session ${session.id}`, innerError);
+        }
+        return true;
+      }
+    }
+  }
+
+  // ── n8n forwarding (fallthrough) ──────────────────────────────────────
 
   if (!outboundService) {
     logger.warn('Message forwarding not initialized — outboundService is null');
@@ -148,4 +218,118 @@ export async function forwardMessageToN8n(
 
     return true;
   }
+}
+
+// ── RAG Helper Functions ──────────────────────────────────────────────────
+
+/**
+ * Find or create a bot Participant for the session
+ */
+async function ensureBotParticipant(
+  session: ChatSession,
+  aiSettings: NonNullable<Tenant['settings']>['ai']
+): Promise<Participant> {
+  let botParticipant = await participantRepository.findOne({
+    where: { sessionId: session.id, type: 'bot', isDeleted: false },
+  });
+
+  if (!botParticipant) {
+    botParticipant = participantRepository.create({
+      sessionId: session.id,
+      type: 'bot',
+      name: aiSettings?.brandVoice?.name || 'AI Assistant',
+      isAnonymous: false,
+      joinedAt: new Date(),
+    });
+    botParticipant = await participantRepository.save(botParticipant);
+  }
+
+  return botParticipant;
+}
+
+/**
+ * Load last 10 messages with participant join to determine role
+ */
+async function getConversationHistory(
+  sessionId: string
+): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
+  const messages = await messageRepository
+    .createQueryBuilder('message')
+    .leftJoinAndSelect('message.participant', 'participant')
+    .where('message.sessionId = :sessionId', { sessionId })
+    .andWhere('message.isDeleted = false')
+    .andWhere('message.type = :type', { type: 'text' })
+    .orderBy('message.createdAt', 'DESC')
+    .take(10)
+    .getMany();
+
+  // Reverse to chronological order
+  return messages.reverse().map((msg) => ({
+    role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
+    content: msg.content,
+  }));
+}
+
+/**
+ * Create a bot Message and emit via WebSocket
+ */
+async function sendBotMessage(
+  session: ChatSession,
+  botParticipantId: string,
+  content: string
+): Promise<Message> {
+  const botMsg = messageRepository.create({
+    sessionId: session.id,
+    tenantId: session.tenantId,
+    participantId: botParticipantId,
+    type: 'text' as Message['type'],
+    content,
+    status: 'sent' as Message['status'],
+    sentAt: new Date(),
+  });
+  const saved = await messageRepository.save(botMsg);
+
+  emitToSession(session.tenantId, session.id, 'message:receive', {
+    id: saved.id,
+    type: 'text',
+    content,
+    senderType: 'bot',
+    timestamp: new Date().toISOString(),
+  });
+
+  return saved;
+}
+
+/**
+ * Transition session to handoff and create a HandoffRequest
+ */
+async function handleBotHandoff(
+  session: ChatSession,
+  botParticipantId: string,
+  reason: HandoffRequest['reason']
+): Promise<void> {
+  // Update session status
+  session.requestHandoff();
+  await sessionRepository.save(session);
+
+  // Create handoff request
+  const handoff = handoffRepository.create({
+    sessionId: session.id,
+    tenantId: session.tenantId,
+    requestedBy: botParticipantId,
+    requestedAt: new Date(),
+    reason,
+    priority: 'medium',
+  } as Partial<HandoffRequest>);
+  await handoffRepository.save(handoff);
+
+  // Notify agents
+  emitToTenantAgents(session.tenantId, 'handoff:requested', {
+    sessionId: session.id,
+    handoffId: handoff.id,
+    reason,
+    requestedAt: new Date().toISOString(),
+  });
+
+  logger.info(`Bot handoff triggered for session ${session.id}`, { reason });
 }

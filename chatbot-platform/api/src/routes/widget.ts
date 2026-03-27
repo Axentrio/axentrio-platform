@@ -9,6 +9,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
+import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
@@ -135,6 +136,13 @@ router.post(
       return;
     }
 
+    // Determine initial status based on AI settings
+    const aiEnabled = tenant.settings?.ai?.enabled;
+    const kb = aiEnabled
+      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: tenant.id, status: 'active' } })
+      : null;
+    const initialStatus = (aiEnabled && kb) ? 'bot' : 'waiting';
+
     // Create new session
     const session = sessionRepository.create({
       tenantId: tenant.id,
@@ -147,7 +155,7 @@ router.post(
         pageUrl: metadata?.pageUrl,
         referrer: metadata?.referrer,
       },
-      status: 'waiting',
+      status: initialStatus,
       startedAt: new Date(),
       lastActivityAt: new Date(),
     });
@@ -169,6 +177,33 @@ router.post(
     });
 
     await participantRepository.save(participant);
+
+    // Send bot greeting if session starts in bot mode
+    if (initialStatus === 'bot') {
+      const greetingMessage = tenant.settings?.ai?.guardrails?.greetingMessage;
+      if (greetingMessage) {
+        const messageRepository = AppDataSource.getRepository(Message);
+        const botParticipant = participantRepository.create({
+          sessionId: session.id,
+          type: 'bot',
+          name: tenant.settings?.ai?.brandVoice?.name || 'AI Assistant',
+          isAnonymous: false,
+          joinedAt: new Date(),
+        });
+        await participantRepository.save(botParticipant);
+
+        const greeting = messageRepository.create({
+          sessionId: session.id,
+          tenantId: tenant.id,
+          participantId: botParticipant.id,
+          type: 'text' as Message['type'],
+          content: greetingMessage,
+          status: 'sent' as Message['status'],
+          sentAt: new Date(),
+        });
+        await messageRepository.save(greeting);
+      }
+    }
 
     // Generate token
     const token = generateWidgetToken(tenant.id, visitorId, session.id);

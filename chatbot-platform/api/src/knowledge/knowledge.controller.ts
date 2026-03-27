@@ -263,14 +263,24 @@ export async function testChat(req: Request, res: Response) {
   }
 
   if (useKnowledgeBase) {
-    const result = await generateResponse(AppDataSource, tenantId, ai, message, history);
-    res.json({
-      response: result.response,
-      provider: ai.provider,
-      model: ai.model,
-      confidence: result.confidence,
-      chunksUsed: result.chunks.length,
-    });
+    try {
+      const result = await generateResponse(AppDataSource, tenantId, ai, message, history);
+      res.json({
+        response: result.response || ai.guardrails?.fallbackMessage || 'I could not find an answer in the knowledge base.',
+        provider: ai.provider,
+        model: ai.model,
+        confidence: result.confidence,
+        chunksUsed: result.chunks.length,
+      });
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('OPENAI_API_KEY')) {
+        res.status(400).json({ error: 'Knowledge base requires OPENAI_API_KEY environment variable for embeddings.' });
+      } else {
+        logger.error('Test chat RAG failed', err);
+        res.status(500).json({ error: 'RAG pipeline failed. Check server logs.' });
+      }
+    }
   } else {
     const { getProvider } = await import('../llm/provider-factory');
     const provider = getProvider(ai.provider, ai.apiKey);

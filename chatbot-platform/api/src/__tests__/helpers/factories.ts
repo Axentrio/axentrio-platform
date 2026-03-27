@@ -6,6 +6,9 @@ import { Agent } from '../../database/entities/Agent';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Participant } from '../../database/entities/Participant';
 import { Message } from '../../database/entities/Message';
+import { AuditLog } from '../../database/entities/AuditLog';
+import { PendingInvite } from '../../database/entities/PendingInvite';
+import { HandoffRequest } from '../../database/entities/HandoffRequest';
 
 export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise<Tenant> {
   const repo = AppDataSource.getRepository(Tenant);
@@ -71,6 +74,8 @@ export async function createTestSession(
       source: 'widget',
       messageCount: 0,
       unreadCount: 0,
+      startedAt: new Date(),
+      lastActivityAt: new Date(),
       ...overrides,
     }),
   );
@@ -107,6 +112,56 @@ export async function createTestMessage(
       type: 'text',
       content: 'Test message',
       status: 'sent',
+      ...overrides,
+    }),
+  );
+}
+
+export async function createTestAuditLog(overrides: Partial<AuditLog> = {}): Promise<AuditLog> {
+  const repo = AppDataSource.getRepository(AuditLog);
+  return repo.save(
+    repo.create({
+      actorId: crypto.randomUUID(),
+      action: 'test.action',
+      entityType: 'test',
+      entityId: crypto.randomUUID(),
+      ...overrides,
+    }),
+  );
+}
+
+export async function createTestPendingInvite(
+  tenantId: string,
+  overrides: Partial<PendingInvite> = {},
+): Promise<PendingInvite> {
+  const repo = AppDataSource.getRepository(PendingInvite);
+  return repo.save(
+    repo.create({
+      tenantId,
+      email: `invite-${crypto.randomBytes(4).toString('hex')}@test.com`,
+      role: 'agent',
+      invitedBy: crypto.randomUUID(),
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      ...overrides,
+    }),
+  );
+}
+
+export async function createTestHandoffRequest(
+  sessionId: string,
+  tenantId: string,
+  overrides: Partial<HandoffRequest> = {},
+): Promise<HandoffRequest> {
+  const repo = AppDataSource.getRepository(HandoffRequest);
+  return repo.save(
+    repo.create({
+      sessionId,
+      tenantId,
+      requestedBy: crypto.randomUUID(),
+      requestedAt: new Date(),
+      status: 'requested',
+      reason: 'user_request',
+      priority: 'medium',
       ...overrides,
     }),
   );

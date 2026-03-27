@@ -177,7 +177,7 @@ export const config = {
     name: parsedDbUrl ? parsedDbUrl.database ?? 'chatbot_platform' : env.DB_NAME,
     user: parsedDbUrl ? parsedDbUrl.user ?? 'postgres' : env.DB_USER,
     password: parsedDbUrl ? parsedDbUrl.password ?? '' : env.DB_PASSWORD,
-    ssl: parsedDbUrl ? true : env.DB_SSL,
+    ssl: env.NODE_ENV === 'test' ? false : (parsedDbUrl ? true : env.DB_SSL),
     poolSize: env.DB_POOL_SIZE,
     connectionTimeout: env.DB_CONNECTION_TIMEOUT,
     url: env.DATABASE_URL ?? `postgresql://${env.DB_USER}:${env.DB_PASSWORD}@${env.DB_HOST}:${env.DB_PORT}/${env.DB_NAME}`,

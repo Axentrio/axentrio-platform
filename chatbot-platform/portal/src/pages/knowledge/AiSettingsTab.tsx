@@ -78,7 +78,7 @@ const AiSettingsTab: React.FC = () => {
       model,
       apiKey: apiKey || (hasExistingKey ? undefined : null),
       brandVoice: {
-        name: botName,
+        name: botName || 'AI Assistant',
         tone,
         customInstructions,
       },
@@ -103,7 +103,7 @@ const AiSettingsTab: React.FC = () => {
         provider,
         model,
         apiKey: apiKey || (hasExistingKey ? undefined : null),
-        brandVoice: { name: botName, tone, customInstructions },
+        brandVoice: { name: botName || 'AI Assistant', tone, customInstructions },
         guardrails: { greetingMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, fallbackMessage, offHoursMessage },
       }, { onSuccess: () => resolve(), onError: () => reject() });
     });

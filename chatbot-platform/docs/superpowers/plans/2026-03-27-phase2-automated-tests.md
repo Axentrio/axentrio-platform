@@ -4,9 +4,16 @@
 
 **Goal:** Add ~30 integration tests for critical API flows and set up GitHub Actions CI to run them on every push/PR.
 
-**Architecture:** Tests use Vitest + Supertest against the Express app with a real PostgreSQL database. Clerk auth is mocked via `vi.mock()` before the app module loads. Each test file truncates all tables after each test via the existing `setup.ts`. CI runs PostgreSQL as a service container.
+**Architecture:** Tests use Vitest + Supertest against the Express app with a real PostgreSQL database. Clerk auth is mocked via top-level `vi.mock()` + `vi.hoisted()` in each test file. Each test file truncates all tables after each test via the existing `setup.ts`. CI runs PostgreSQL as a service container.
 
 **Tech Stack:** Vitest, Supertest, PostgreSQL 15, GitHub Actions, TypeORM
+
+**Key patterns:**
+- `vi.hoisted()` creates shared auth state accessible to mock factories
+- Top-level `vi.mock()` calls (Vitest hoists these before imports)
+- `configureMockAuth()` updates auth state between tests
+- Chat history/close routes use widget auth (the widget middleware matches first in Express routing)
+- Response envelope is `{ success, data, meta? }` via `sendSuccess()`, but inner shapes vary per endpoint
 
 ---
 
@@ -16,6 +23,8 @@
 - Create: `.github/workflows/test.yml`
 
 - [ ] **Step 1: Create the workflow file**
+
+The repo root is one level above `chatbot-platform/`, so working-directory paths need the prefix.
 
 ```yaml
 name: CI
@@ -90,8 +99,6 @@ jobs:
         run: npm run build
 ```
 
-Note: The repo root contains a `chatbot-platform/` directory. Check if the checkout lands in the right place — if the workflow file is at `chatbot-platform/.github/workflows/test.yml`, the `working-directory` paths may need adjustment. Verify by checking where `api/package.json` is relative to the `.github/workflows/` directory. If they're siblings (i.e., `.github/` and `api/` are both under `chatbot-platform/`), remove the `chatbot-platform/` prefix from all `working-directory` values.
-
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -101,95 +108,77 @@ git commit -m "ci: add GitHub Actions workflow with Postgres service"
 
 ---
 
-### Task 2: Upgrade Auth Mock + Factory Fixes
+### Task 2: Auth Mock Infrastructure + Factory Fixes
 
 **Files:**
 - Modify: `api/src/__tests__/helpers/auth.ts`
 - Modify: `api/src/__tests__/helpers/factories.ts`
-- Create: `api/src/__tests__/helpers/clerk-mocks.ts`
 
-- [ ] **Step 1: Upgrade mockClerkAuth to support role and UUID overrides**
+- [ ] **Step 1: Rewrite auth.ts with hoisted mock pattern**
 
-Replace the entire content of `api/src/__tests__/helpers/auth.ts` with:
+Replace the entire content of `api/src/__tests__/helpers/auth.ts`:
 
 ```typescript
 import { vi } from 'vitest';
-import crypto from 'crypto';
-
-export interface MockAuthOptions {
-  role?: string;
-  tenantId?: string;
-  userId?: string;
-  agentId?: string;
-  email?: string;
-  clerkUserId?: string;
-  clerkOrgId?: string;
-}
-
-const defaultUUID = () => crypto.randomUUID();
 
 /**
- * Configure the mocked Clerk auth + autoProvision middleware.
- * Call this in beforeEach or at the top of a describe block.
- * The mock must be set up via setupClerkMocks() before importing app.
+ * Auth mock infrastructure for integration tests.
+ *
+ * Usage in each test file (MUST be at the top, before app import):
+ *
+ *   import { createAuthMocks, configureMockAuth } from '../helpers/auth';
+ *   const { auth } = createAuthMocks();
+ *   import { app } from '../../server';
+ *
+ * Then in beforeEach:
+ *   configureMockAuth(auth, { userId: '...', role: 'super_admin' });
  */
-export function configureMockAuth(options: MockAuthOptions = {}) {
-  const userId = options.userId || defaultUUID();
-  const tenantId = options.tenantId || defaultUUID();
-  const agentId = options.agentId || defaultUUID();
-  const role = options.role || 'super_admin';
-  const email = options.email || 'test@example.com';
 
-  // Update the shared state that the mocked middleware reads
-  currentAuth.userId = userId;
-  currentAuth.tenantId = tenantId;
-  currentAuth.agentId = agentId;
-  currentAuth.role = role;
-  currentAuth.email = email;
-  currentAuth.clerkUserId = options.clerkUserId || `clerk_${crypto.randomBytes(8).toString('hex')}`;
-  currentAuth.clerkOrgId = options.clerkOrgId || `org_${crypto.randomBytes(8).toString('hex')}`;
-
-  return { userId, tenantId, agentId, role };
+export interface MockAuthState {
+  userId: string;
+  tenantId: string;
+  agentId: string;
+  role: string;
+  email: string;
+  clerkUserId: string;
+  clerkOrgId: string;
 }
 
-// Shared mutable state read by mocked middleware
-export const currentAuth = {
-  userId: '',
-  tenantId: '',
-  agentId: '',
-  role: 'super_admin',
-  email: 'test@example.com',
-  clerkUserId: '',
-  clerkOrgId: '',
-};
-
 /**
- * Setup vi.mock() for Clerk middleware and super-admin middleware.
- * MUST be called at the top of the test file, before any app import.
+ * Create all vi.mock() calls and return the hoisted auth state.
+ * MUST be called at top of test file before any app/server import.
  */
-export function setupClerkMocks() {
-  // Mock the Clerk middleware module
+export function createAuthMocks() {
+  const auth = vi.hoisted((): MockAuthState => ({
+    userId: '',
+    tenantId: '',
+    agentId: '',
+    role: 'super_admin',
+    email: 'test@example.com',
+    clerkUserId: '',
+    clerkOrgId: '',
+  }));
+
   vi.mock('../../middleware/clerk.middleware', () => ({
     requireClerkAuth: (req: any, _res: any, next: any) => {
-      // Simulate what requireClerkAuth + autoProvision do together
-      req.userId = currentAuth.userId;
-      req.tenantId = currentAuth.tenantId;
-      req.agentId = currentAuth.agentId;
+      req.userId = auth.userId;
+      req.tenantId = auth.tenantId;
+      req.agentId = auth.agentId;
       req.user = {
-        id: currentAuth.userId,
-        email: currentAuth.email,
-        role: currentAuth.role,
-        tenantId: currentAuth.tenantId,
-        clerkUserId: currentAuth.clerkUserId,
+        id: auth.userId,
+        email: auth.email,
+        role: auth.role,
+        tenantId: auth.tenantId,
+        clerkUserId: auth.clerkUserId,
         type: 'agent',
       };
       next();
     },
     autoProvision: (_req: any, _res: any, next: any) => next(),
     invalidateProvisionCache: () => {},
+    resolveClerkIds: () => ({}),
   }));
 
-  // Mock super-admin middleware to just check our role field
   vi.mock('../../middleware/super-admin.middleware', () => ({
     requireSuperAdmin: (req: any, res: any, next: any) => {
       if (req.user?.role !== 'super_admin') {
@@ -201,17 +190,34 @@ export function setupClerkMocks() {
     resolveTenantContext: (_req: any, _res: any, next: any) => next(),
   }));
 
-  // Mock Clerk service functions (no real Clerk in tests)
   vi.mock('../../services/clerk-sync.service', () => ({
     inviteToClerkOrganization: () => Promise.resolve(true),
     removeFromClerkOrganization: () => Promise.resolve(true),
   }));
+
+  return { auth };
+}
+
+/**
+ * Update auth state for the next request.
+ * Call in beforeEach or before a specific request.
+ */
+export function configureMockAuth(
+  auth: MockAuthState,
+  options: Partial<MockAuthState> = {},
+): MockAuthState {
+  const defaults: Partial<MockAuthState> = {
+    role: 'super_admin',
+    email: 'test@example.com',
+  };
+  Object.assign(auth, defaults, options);
+  return auth;
 }
 ```
 
 - [ ] **Step 2: Fix createTestSession factory**
 
-In `api/src/__tests__/helpers/factories.ts`, find the `createTestSession` function and add `startedAt` and `lastActivityAt`:
+In `api/src/__tests__/helpers/factories.ts`, replace the `createTestSession` function with:
 
 ```typescript
 export async function createTestSession(
@@ -237,13 +243,17 @@ export async function createTestSession(
 
 - [ ] **Step 3: Add new factories**
 
-Add these to the bottom of `api/src/__tests__/helpers/factories.ts`:
+Add these imports at the top of `api/src/__tests__/helpers/factories.ts`:
 
 ```typescript
 import { AuditLog } from '../../database/entities/AuditLog';
 import { PendingInvite } from '../../database/entities/PendingInvite';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
+```
 
+Then add these functions at the bottom:
+
+```typescript
 export async function createTestAuditLog(overrides: Partial<AuditLog> = {}): Promise<AuditLog> {
   const repo = AppDataSource.getRepository(AuditLog);
   return repo.save(
@@ -303,12 +313,12 @@ Run: `cd api && npx tsc --noEmit 2>&1 | head -20`
 
 ```bash
 git add api/src/__tests__/helpers/auth.ts api/src/__tests__/helpers/factories.ts
-git commit -m "test(api): upgrade auth mock, fix session factory, add new factories"
+git commit -m "test(api): upgrade auth mock with vi.hoisted pattern, fix factories"
 ```
 
 ---
 
-### Task 3: Deactivation + Session Cleanup Tests
+### Task 3: Deactivation + Session Cleanup Tests (6 tests)
 
 **Files:**
 - Create: `api/src/__tests__/integration/deactivation.test.ts`
@@ -317,10 +327,9 @@ git commit -m "test(api): upgrade auth mock, fix session factory, add new factor
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-// Mocks MUST be set up before importing app
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
@@ -338,15 +347,12 @@ import {
 
 describe('Deactivation + Session Cleanup', () => {
   let tenantId: string;
-  let adminUserId: string;
 
   beforeEach(async () => {
     const tenant = await createTestTenant();
     tenantId = tenant.id;
-    // Create the admin user who will perform deactivation
     const admin = await createTestUser(tenantId, { role: 'super_admin' });
-    adminUserId = admin.id;
-    configureMockAuth({ userId: adminUserId, tenantId, role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
   });
 
   it('should release active sessions when user is deactivated', async () => {
@@ -357,18 +363,14 @@ describe('Deactivation + Session Cleanup', () => {
 
     const res = await request(app)
       .post(`/api/v1/admin/users/${targetUser.id}/deactivate`);
-
     expect(res.status).toBe(200);
 
     const sessions = await AppDataSource.getRepository(ChatSession)
-      .find({ where: { assignedAgentId: undefined } });
-    // Both sessions should now be waiting with no agent
-    const agentSessions = await AppDataSource.getRepository(ChatSession)
       .createQueryBuilder('s')
       .where('s.tenantId = :tenantId', { tenantId })
       .getMany();
-    expect(agentSessions).toHaveLength(2);
-    agentSessions.forEach(s => {
+    expect(sessions).toHaveLength(2);
+    sessions.forEach(s => {
       expect(s.status).toBe('waiting');
       expect(s.assignedAgentId).toBeNull();
     });
@@ -386,11 +388,9 @@ describe('Deactivation + Session Cleanup', () => {
 
     const res = await request(app)
       .post(`/api/v1/admin/users/${targetUser.id}/deactivate`);
-
     expect(res.status).toBe(200);
 
-    const handoffs = await AppDataSource.getRepository(HandoffRequest)
-      .find({ where: { tenantId } });
+    const handoffs = await AppDataSource.getRepository(HandoffRequest).find({ where: { tenantId } });
     expect(handoffs).toHaveLength(1);
     expect(handoffs[0].status).toBe('requested');
     expect(handoffs[0].assignedAgentId).toBeNull();
@@ -398,11 +398,9 @@ describe('Deactivation + Session Cleanup', () => {
 
   it('should succeed when user has no agent record', async () => {
     const targetUser = await createTestUser(tenantId, { role: 'admin' });
-    // No agent created for this user
 
     const res = await request(app)
       .post(`/api/v1/admin/users/${targetUser.id}/deactivate`);
-
     expect(res.status).toBe(200);
 
     const user = await AppDataSource.getRepository(User).findOneBy({ id: targetUser.id });
@@ -414,56 +412,27 @@ describe('Deactivation + Session Cleanup', () => {
 
     const res = await request(app)
       .post(`/api/v1/admin/users/${targetUser.id}/deactivate`);
-
     expect(res.status).toBe(400);
   });
 
   it('should return 400 when trying to deactivate yourself', async () => {
-    // The mock auth userId IS the target user
     const self = await createTestUser(tenantId);
-    configureMockAuth({ userId: self.id, tenantId, role: 'super_admin' });
+    configureMockAuth(auth, { userId: self.id, tenantId, role: 'super_admin' });
 
     const res = await request(app)
       .post(`/api/v1/admin/users/${self.id}/deactivate`);
-
     expect(res.status).toBe(400);
   });
 
   it('should return 400 when deactivating last active admin (tenant-level)', async () => {
-    // Create a tenant with exactly one admin
-    const tenant = await createTestTenant();
-    const onlyAdmin = await createTestUser(tenant.id, { role: 'admin' });
-    // Configure auth as this admin (tenant-level endpoint uses requireAdmin, not requireSuperAdmin)
-    configureMockAuth({ userId: onlyAdmin.id, tenantId: tenant.id, role: 'admin' });
-
-    // We need a second user to deactivate the admin — but since there's only one admin,
-    // we need to create a second non-admin user who tries to deactivate the admin.
-    // Actually, the tenant-level endpoint checks if the TARGET is the last admin.
-    // So we need a second admin to perform the action on the only admin.
-    const secondAdmin = await createTestUser(tenant.id, { role: 'admin' });
-    configureMockAuth({ userId: secondAdmin.id, tenantId: tenant.id, role: 'admin' });
-
-    // Now deactivate secondAdmin first to make onlyAdmin the last admin
-    await request(app).post(`/api/v1/tenants/me/users/${secondAdmin.id}/deactivate`);
-
-    // Now try to deactivate onlyAdmin — should fail
-    configureMockAuth({ userId: secondAdmin.id, tenantId: tenant.id, role: 'admin' });
-    // secondAdmin is now inactive, so reconfigure as onlyAdmin trying to deactivate...
-    // Actually, let's simplify: create tenant with 1 admin, create a super_admin caller
-    const caller = await createTestUser(tenant.id, { role: 'admin' });
-    configureMockAuth({ userId: caller.id, tenantId: tenant.id, role: 'admin' });
-
-    // Deactivate caller first so onlyAdmin is the last admin
-    // ... this is getting complex. Simpler approach:
-    // Create tenant, create exactly 1 admin. Try to deactivate them via tenant-level endpoint.
-    const t2 = await createTestTenant();
-    const soleAdmin = await createTestUser(t2.id, { role: 'admin' });
-    const otherUser = await createTestUser(t2.id, { role: 'agent' });
-    configureMockAuth({ userId: otherUser.id, tenantId: t2.id, role: 'admin' });
+    const t = await createTestTenant();
+    const soleAdmin = await createTestUser(t.id, { role: 'admin' });
+    const caller = await createTestUser(t.id, { role: 'agent' });
+    // requireAdmin allows admin + super_admin, so set role to admin
+    configureMockAuth(auth, { userId: caller.id, tenantId: t.id, role: 'admin' });
 
     const res = await request(app)
       .post(`/api/v1/tenants/me/users/${soleAdmin.id}/deactivate`);
-
     expect(res.status).toBe(400);
   });
 });
@@ -472,7 +441,7 @@ describe('Deactivation + Session Cleanup', () => {
 - [ ] **Step 2: Run the test**
 
 Run: `cd api && npx vitest run src/__tests__/integration/deactivation.test.ts 2>&1`
-Expected: All 6 tests pass. If there are failures, debug and fix.
+Expected: All 6 tests pass. If any mock issues, check that `createAuthMocks()` is called before the `app` import.
 
 - [ ] **Step 3: Commit**
 
@@ -483,20 +452,18 @@ git commit -m "test(api): add deactivation + session cleanup integration tests"
 
 ---
 
-### Task 4: Super-Admin Invite Resend/Cancel Tests
+### Task 4: Super-Admin Invite Resend/Cancel Tests (4 tests)
 
 **Files:**
 - Modify: `api/src/__tests__/integration/admin.test.ts`
 
-- [ ] **Step 1: Rewrite admin.test.ts with auth mocking and new tests**
-
-Replace the entire content of `api/src/__tests__/integration/admin.test.ts`:
+- [ ] **Step 1: Rewrite admin.test.ts**
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
@@ -504,72 +471,60 @@ import { AppDataSource } from '../../database/data-source';
 import { PendingInvite } from '../../database/entities/PendingInvite';
 import { createTestTenant, createTestUser, createTestPendingInvite } from '../helpers/factories';
 
-describe('Admin Routes', () => {
-  // Existing auth-rejection tests (keep these — they test the unmocked path)
-  // Note: These will now use mocked middleware, so they may behave differently.
-  // Move auth-rejection tests to a separate describe with different mock config if needed.
+describe('Admin Routes — Invite Management', () => {
+  let tenantId: string;
 
-  describe('Invite Resend/Cancel (authenticated)', () => {
-    let tenantId: string;
+  beforeEach(async () => {
+    // Tenant needs clerkOrgId for the resend endpoint
+    const tenant = await createTestTenant({ clerkOrgId: 'org_test123' });
+    tenantId = tenant.id;
+    const admin = await createTestUser(tenantId, { role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
+  });
 
-    beforeEach(async () => {
-      const tenant = await createTestTenant({ clerkOrgId: 'org_test123' });
-      tenantId = tenant.id;
-      const admin = await createTestUser(tenantId, { role: 'super_admin' });
-      configureMockAuth({ userId: admin.id, tenantId, role: 'super_admin' });
+  it('should resend an invite and update expiresAt', async () => {
+    const invite = await createTestPendingInvite(tenantId, {
+      expiresAt: new Date(Date.now() - 86400000),
     });
 
-    it('should resend an invite and update expiresAt', async () => {
-      const invite = await createTestPendingInvite(tenantId, {
-        expiresAt: new Date(Date.now() - 86400000), // expired yesterday
-      });
+    const res = await request(app)
+      .post(`/api/v1/admin/tenants/${tenantId}/pending-invites/${invite.id}/resend`);
 
-      const res = await request(app)
-        .post(`/api/v1/admin/tenants/${tenantId}/pending-invites/${invite.id}/resend`);
+    expect(res.status).toBe(200);
+    const body = res.body.data || res.body;
+    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+  });
 
-      expect(res.status).toBe(200);
-      const body = res.body.data || res.body;
-      expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
-    });
+  it('should return 404 when resending non-existent invite', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000099';
+    const res = await request(app)
+      .post(`/api/v1/admin/tenants/${tenantId}/pending-invites/${fakeId}/resend`);
+    expect(res.status).toBe(404);
+  });
 
-    it('should return 404 when resending non-existent invite', async () => {
-      const fakeId = '00000000-0000-0000-0000-000000000099';
-      const res = await request(app)
-        .post(`/api/v1/admin/tenants/${tenantId}/pending-invites/${fakeId}/resend`);
+  it('should cancel an invite and return 204', async () => {
+    const invite = await createTestPendingInvite(tenantId);
 
-      expect(res.status).toBe(404);
-    });
+    const res = await request(app)
+      .delete(`/api/v1/admin/tenants/${tenantId}/pending-invites/${invite.id}`);
+    expect(res.status).toBe(204);
 
-    it('should cancel an invite and return 204', async () => {
-      const invite = await createTestPendingInvite(tenantId);
+    const found = await AppDataSource.getRepository(PendingInvite).findOneBy({ id: invite.id });
+    expect(found).toBeNull();
+  });
 
-      const res = await request(app)
-        .delete(`/api/v1/admin/tenants/${tenantId}/pending-invites/${invite.id}`);
-
-      expect(res.status).toBe(204);
-
-      const found = await AppDataSource.getRepository(PendingInvite)
-        .findOneBy({ id: invite.id });
-      expect(found).toBeNull();
-    });
-
-    it('should return 404 when cancelling non-existent invite', async () => {
-      const fakeId = '00000000-0000-0000-0000-000000000099';
-      const res = await request(app)
-        .delete(`/api/v1/admin/tenants/${tenantId}/pending-invites/${fakeId}`);
-
-      expect(res.status).toBe(404);
-    });
+  it('should return 404 when cancelling non-existent invite', async () => {
+    const fakeId = '00000000-0000-0000-0000-000000000099';
+    const res = await request(app)
+      .delete(`/api/v1/admin/tenants/${tenantId}/pending-invites/${fakeId}`);
+    expect(res.status).toBe(404);
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/admin.test.ts 2>&1`
-Expected: All 4 tests pass.
-
-- [ ] **Step 3: Commit**
 
 ```bash
 git add api/src/__tests__/integration/admin.test.ts
@@ -578,7 +533,7 @@ git commit -m "test(api): add invite resend/cancel integration tests"
 
 ---
 
-### Task 5: Audit Log Fix Tests
+### Task 5: Audit Log Fix Tests (4 tests)
 
 **Files:**
 - Create: `api/src/__tests__/integration/audit.test.ts`
@@ -587,11 +542,12 @@ git commit -m "test(api): add invite resend/cancel integration tests"
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
+import { app } from '../../server';
 import { createTestTenant, createTestUser, createTestAuditLog } from '../helpers/factories';
 
 describe('Audit Log API', () => {
@@ -603,125 +559,100 @@ describe('Audit Log API', () => {
     tenantId = tenant.id;
     tenantName = tenant.name;
     const admin = await createTestUser(tenantId, { role: 'super_admin' });
-    configureMockAuth({ userId: admin.id, tenantId, role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
   });
 
   it('should include tenantName in audit log response', async () => {
-    await createTestAuditLog({ tenantId, action: 'test.action', actorId: 'actor-1' });
+    await createTestAuditLog({ tenantId, action: 'test.action' });
 
-    const res = await request(app)
-      .get('/api/v1/admin/audit-logs');
+    const res = await request(app).get('/api/v1/admin/audit-logs');
 
     expect(res.status).toBe(200);
     const logs = res.body.data;
     expect(logs.length).toBeGreaterThanOrEqual(1);
     const log = logs.find((l: any) => l.tenantId === tenantId);
+    expect(log).toBeDefined();
     expect(log.tenantName).toBe(tenantName);
   });
 
   it('should include events from the full end day when using to filter', async () => {
-    // Create a log at 3pm on a specific date
     await createTestAuditLog({
       tenantId,
       action: 'test.endofday',
       createdAt: new Date('2026-03-27T15:00:00Z'),
     });
 
-    const res = await request(app)
-      .get('/api/v1/admin/audit-logs?to=2026-03-27');
+    const res = await request(app).get('/api/v1/admin/audit-logs?to=2026-03-27');
 
     expect(res.status).toBe(200);
-    const logs = res.body.data;
-    const found = logs.find((l: any) => l.action === 'test.endofday');
+    const found = res.body.data.find((l: any) => l.action === 'test.endofday');
     expect(found).toBeDefined();
   });
 
   it('should include tenant_name in CSV export', async () => {
     await createTestAuditLog({ tenantId, action: 'test.csv' });
 
-    const res = await request(app)
-      .get('/api/v1/admin/audit-logs/export');
+    const res = await request(app).get('/api/v1/admin/audit-logs/export');
 
     expect(res.status).toBe(200);
     expect(res.headers['content-type']).toContain('text/csv');
-    const csv = res.text;
-    const lines = csv.split('\n');
+    const lines = res.text.split('\n');
     expect(lines[0]).toContain('tenant_name');
-    // Find the row with our test action
     const dataRow = lines.find((l: string) => l.includes('test.csv'));
     expect(dataRow).toContain(tenantName);
   });
 
   it('should return correct pagination meta', async () => {
-    // Create 30 audit logs
-    const promises = Array.from({ length: 30 }, (_, i) =>
-      createTestAuditLog({ tenantId, action: `test.page.${i}` }),
+    await Promise.all(
+      Array.from({ length: 30 }, (_, i) =>
+        createTestAuditLog({ tenantId, action: `test.page.${i}` }),
+      ),
     );
-    await Promise.all(promises);
 
-    const res = await request(app)
-      .get('/api/v1/admin/audit-logs?page=1&limit=10');
+    const res = await request(app).get('/api/v1/admin/audit-logs?page=1&limit=10');
 
     expect(res.status).toBe(200);
-    // The response envelope has data + meta via sendSuccess
-    const meta = res.body.meta?.pagination || res.body.pagination;
+    // sendSuccess wraps as { success, data, meta: { pagination } }
+    const meta = res.body.meta?.pagination;
     expect(meta).toBeDefined();
     expect(meta.total).toBe(30);
     expect(meta.totalPages).toBe(3);
-    expect(meta.page).toBe(1);
     expect(res.body.data).toHaveLength(10);
   });
 });
 ```
 
-Note: The `app` import needs to be after `setupClerkMocks()`. Add it after the mock setup:
-
-```typescript
-import { app } from '../../server';
-```
-
-(Insert after `setupClerkMocks();` line)
-
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/audit.test.ts 2>&1`
-Expected: All 4 tests pass.
-
-- [ ] **Step 3: Commit**
 
 ```bash
 git add api/src/__tests__/integration/audit.test.ts
-git commit -m "test(api): add audit log integration tests (tenant name, date range, CSV, pagination)"
+git commit -m "test(api): add audit log integration tests"
 ```
 
 ---
 
-### Task 6: Chat Lifecycle Tests
+### Task 6: Chat Lifecycle Tests (4 tests)
 
 **Files:**
 - Modify: `api/src/__tests__/integration/chat.test.ts`
 
-- [ ] **Step 1: Rewrite chat.test.ts**
+Note: Chat history and close routes use `authenticateWidget` middleware (defined first in Express router). Tests must obtain a widget session token via `POST /auth/widget`, then use it for subsequent requests.
 
-Replace the entire file. The existing tests were auth-rejection only — we're replacing with authenticated integration tests.
+- [ ] **Step 1: Rewrite chat.test.ts**
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
-import {
-  createTestTenant,
-  createTestUser,
-  createTestSession,
-  createTestParticipant,
-  createTestMessage,
-} from '../helpers/factories';
+import { createTestTenant, createTestUser } from '../helpers/factories';
 
 describe('Chat Routes', () => {
   describe('Widget Auth', () => {
@@ -733,97 +664,107 @@ describe('Chat Routes', () => {
         .send({ apiKey: tenant.apiKey });
 
       expect(res.status).toBe(200);
-      // Should return a token or session info
-      expect(res.body.data || res.body).toBeDefined();
+      const data = res.body.data || res.body;
+      expect(data.token || data.sessionId).toBeDefined();
     });
   });
 
-  describe('Chat Operations (authenticated)', () => {
-    let tenantId: string;
+  describe('Chat Operations (via widget auth)', () => {
+    let tenant: any;
+    let widgetToken: string;
+    let sessionId: string;
 
     beforeEach(async () => {
-      const tenant = await createTestTenant();
-      tenantId = tenant.id;
-      const user = await createTestUser(tenantId, { role: 'super_admin' });
-      configureMockAuth({ userId: user.id, tenantId, role: 'super_admin' });
+      tenant = await createTestTenant();
+      // Get widget token
+      const authRes = await request(app)
+        .post('/api/v1/auth/widget')
+        .send({ apiKey: tenant.apiKey });
+      const authData = authRes.body.data || authRes.body;
+      widgetToken = authData.token;
+      sessionId = authData.sessionId || authData.session?.id;
     });
 
-    it('should get chat history', async () => {
-      const session = await createTestSession(tenantId);
-      const participant = await createTestParticipant(session.id);
-      await createTestMessage(session.id, tenantId, participant.id, { content: 'Hello' });
-      await createTestMessage(session.id, tenantId, participant.id, { content: 'World' });
+    it('should send a message and retrieve it in history', async () => {
+      // Send a message
+      const sendRes = await request(app)
+        .post(`/api/v1/chats/${sessionId}/message`)
+        .set('Authorization', `Bearer ${widgetToken}`)
+        .send({ content: 'Hello from test', type: 'text' });
 
+      expect(sendRes.status).toBe(200);
+
+      // Get history — messages may be encrypted in DB but API returns decrypted
+      const historyRes = await request(app)
+        .get(`/api/v1/chats/${sessionId}/history`)
+        .set('Authorization', `Bearer ${widgetToken}`);
+
+      expect(historyRes.status).toBe(200);
+      const data = historyRes.body.data || historyRes.body;
+      const messages = data.messages || data;
+      expect(Array.isArray(messages)).toBe(true);
+      expect(messages.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should close a session', async () => {
       const res = await request(app)
-        .get(`/api/v1/chats/${session.id}/history`);
+        .post(`/api/v1/chats/${sessionId}/close`)
+        .set('Authorization', `Bearer ${widgetToken}`);
 
       expect(res.status).toBe(200);
-      const data = res.body.data || res.body;
-      // Messages are returned (may be decrypted by the API)
-      expect(data.messages || data).toBeDefined();
+
+      const updated = await AppDataSource.getRepository(ChatSession).findOneBy({ id: sessionId });
+      expect(updated!.status).toBe('closed');
     });
 
     it('should get chat history with pagination', async () => {
-      const session = await createTestSession(tenantId);
-      const participant = await createTestParticipant(session.id);
-      // Create 15 messages
+      // Send multiple messages
       for (let i = 0; i < 15; i++) {
-        await createTestMessage(session.id, tenantId, participant.id, {
-          content: `Message ${i}`,
-        });
+        await request(app)
+          .post(`/api/v1/chats/${sessionId}/message`)
+          .set('Authorization', `Bearer ${widgetToken}`)
+          .send({ content: `Message ${i}`, type: 'text' });
       }
 
       const res = await request(app)
-        .get(`/api/v1/chats/${session.id}/history?limit=10`);
+        .get(`/api/v1/chats/${sessionId}/history?limit=10`)
+        .set('Authorization', `Bearer ${widgetToken}`);
 
       expect(res.status).toBe(200);
       const data = res.body.data || res.body;
       const messages = data.messages || data;
       expect(Array.isArray(messages) ? messages.length : 0).toBeLessThanOrEqual(10);
     });
-
-    it('should close a session', async () => {
-      const session = await createTestSession(tenantId, { status: 'active' });
-
-      const res = await request(app)
-        .post(`/api/v1/chats/${session.id}/close`);
-
-      expect(res.status).toBe(200);
-
-      const updated = await AppDataSource.getRepository(ChatSession)
-        .findOneBy({ id: session.id });
-      expect(updated!.status).toBe('closed');
-    });
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/chat.test.ts 2>&1`
-Expected: Tests pass. If widget auth returns a different status or shape, adjust assertions.
-
-- [ ] **Step 3: Commit**
+Expected: Tests pass. Widget auth flow creates a session + returns a token. If the response shape differs, adjust `widgetToken` and `sessionId` extraction.
 
 ```bash
 git add api/src/__tests__/integration/chat.test.ts
-git commit -m "test(api): add chat lifecycle integration tests"
+git commit -m "test(api): add chat lifecycle integration tests via widget auth"
 ```
 
 ---
 
-### Task 7: Handoff Flow Tests
+### Task 7: Handoff Flow Tests (4 tests)
 
 **Files:**
 - Modify: `api/src/__tests__/integration/handoff.test.ts`
+
+Uses the DB-backed handoff endpoints: `POST /handoffs/:id/accept`, `POST /handoffs/:id/decline`, `GET /handoffs/queue`.
 
 - [ ] **Step 1: Rewrite handoff.test.ts**
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
@@ -837,54 +778,44 @@ import {
   createTestHandoffRequest,
 } from '../helpers/factories';
 
-describe('Handoff Routes', () => {
+describe('Handoff Routes (DB-backed)', () => {
   let tenantId: string;
 
   beforeEach(async () => {
     const tenant = await createTestTenant();
     tenantId = tenant.id;
     const admin = await createTestUser(tenantId, { role: 'super_admin' });
-    configureMockAuth({ userId: admin.id, tenantId, role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
   });
 
   it('should accept a handoff request', async () => {
     const user = await createTestUser(tenantId);
     const agent = await createTestAgent(tenantId, user.id, { status: 'online' });
     const session = await createTestSession(tenantId, { status: 'waiting' });
-    const handoff = await createTestHandoffRequest(session.id, tenantId, {
-      status: 'requested',
-    });
+    const handoff = await createTestHandoffRequest(session.id, tenantId);
 
-    configureMockAuth({ userId: user.id, tenantId, agentId: agent.id, role: 'admin' });
+    configureMockAuth(auth, { userId: user.id, tenantId, agentId: agent.id, role: 'admin' });
 
-    const res = await request(app)
-      .post(`/api/v1/handoffs/${handoff.id}/accept`);
-
+    const res = await request(app).post(`/api/v1/handoffs/${handoff.id}/accept`);
     expect(res.status).toBe(200);
 
-    const updated = await AppDataSource.getRepository(HandoffRequest)
-      .findOneBy({ id: handoff.id });
+    const updated = await AppDataSource.getRepository(HandoffRequest).findOneBy({ id: handoff.id });
     expect(updated!.status).toBe('accepted');
     expect(updated!.assignedAgentId).toBe(agent.id);
   });
 
   it('should decline a handoff request', async () => {
     const session = await createTestSession(tenantId, { status: 'waiting' });
-    const handoff = await createTestHandoffRequest(session.id, tenantId, {
-      status: 'requested',
-    });
+    const handoff = await createTestHandoffRequest(session.id, tenantId);
 
-    const res = await request(app)
-      .post(`/api/v1/handoffs/${handoff.id}/decline`);
-
+    const res = await request(app).post(`/api/v1/handoffs/${handoff.id}/decline`);
     expect(res.status).toBe(200);
 
-    const updated = await AppDataSource.getRepository(HandoffRequest)
-      .findOneBy({ id: handoff.id });
+    const updated = await AppDataSource.getRepository(HandoffRequest).findOneBy({ id: handoff.id });
     expect(updated!.status).toBe('rejected');
   });
 
-  it('should get handoff queue with only pending requests', async () => {
+  it('should return only pending requests in queue', async () => {
     const s1 = await createTestSession(tenantId);
     const s2 = await createTestSession(tenantId);
     const s3 = await createTestSession(tenantId);
@@ -892,32 +823,26 @@ describe('Handoff Routes', () => {
     await createTestHandoffRequest(s2.id, tenantId, { status: 'requested' });
     await createTestHandoffRequest(s3.id, tenantId, { status: 'accepted' });
 
-    const res = await request(app)
-      .get('/api/v1/handoffs/queue');
-
+    const res = await request(app).get('/api/v1/handoffs/queue');
     expect(res.status).toBe(200);
+
+    // Response shape: { success, data: { queue: [...] } } or similar
     const data = res.body.data || res.body;
-    const items = Array.isArray(data) ? data : data.requests || data.queue || [];
-    // Should only return the 2 requested ones
+    const items = data.queue || data.requests || (Array.isArray(data) ? data : []);
     expect(items.length).toBe(2);
   });
 
-  it('should handle non-existent handoff request', async () => {
+  it('should return 404 for non-existent handoff', async () => {
     const fakeId = '00000000-0000-0000-0000-000000000099';
-    const res = await request(app)
-      .post(`/api/v1/handoffs/${fakeId}/accept`);
-
+    const res = await request(app).post(`/api/v1/handoffs/${fakeId}/accept`);
     expect(res.status).toBe(404);
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/handoff.test.ts 2>&1`
-Expected: Tests pass. Adjust response shape assertions if needed.
-
-- [ ] **Step 3: Commit**
 
 ```bash
 git add api/src/__tests__/integration/handoff.test.ts
@@ -926,7 +851,7 @@ git commit -m "test(api): add handoff flow integration tests"
 
 ---
 
-### Task 8: Agent Management Tests
+### Task 8: Agent Management Tests (3 tests)
 
 **Files:**
 - Modify: `api/src/__tests__/integration/agents.test.ts`
@@ -935,17 +860,13 @@ git commit -m "test(api): add handoff flow integration tests"
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
-import {
-  createTestTenant,
-  createTestUser,
-  createTestAgent,
-} from '../helpers/factories';
+import { createTestTenant, createTestUser, createTestAgent } from '../helpers/factories';
 
 describe('Agent Routes', () => {
   let tenantId: string;
@@ -954,7 +875,7 @@ describe('Agent Routes', () => {
     const tenant = await createTestTenant();
     tenantId = tenant.id;
     const admin = await createTestUser(tenantId, { role: 'super_admin' });
-    configureMockAuth({ userId: admin.id, tenantId, role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
   });
 
   it('should list agents scoped to tenant', async () => {
@@ -966,11 +887,12 @@ describe('Agent Routes', () => {
     await createTestAgent(tenantId, u3.id);
 
     const res = await request(app).get('/api/v1/agents');
-
     expect(res.status).toBe(200);
+
+    // Response: { success, data: { agents: [...], meta } }
     const data = res.body.data || res.body;
-    const agents = data.agents || data;
-    expect(Array.isArray(agents) ? agents.length : 0).toBeGreaterThanOrEqual(3);
+    const agents = data.agents || (Array.isArray(data) ? data : []);
+    expect(agents.length).toBeGreaterThanOrEqual(3);
   });
 
   it('should create an agent with default offline status', async () => {
@@ -981,8 +903,10 @@ describe('Agent Routes', () => {
       .send({ userId: user.id });
 
     expect(res.status).toBe(201);
+    // Response: { success, data: { agent: { ... } } }
     const data = res.body.data || res.body;
-    expect(data.status).toBe('offline');
+    const agent = data.agent || data;
+    expect(agent.status).toBe('offline');
   });
 
   it('should update agent status', async () => {
@@ -995,16 +919,15 @@ describe('Agent Routes', () => {
 
     expect(res.status).toBe(200);
     const data = res.body.data || res.body;
-    expect(data.status).toBe('online');
+    const updated = data.agent || data;
+    expect(updated.status).toBe('online');
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/agents.test.ts 2>&1`
-
-- [ ] **Step 3: Commit**
 
 ```bash
 git add api/src/__tests__/integration/agents.test.ts
@@ -1013,7 +936,7 @@ git commit -m "test(api): add agent management integration tests"
 
 ---
 
-### Task 9: Tenant Management Tests
+### Task 9: Tenant Management + Widget Config Tests (4 tests)
 
 **Files:**
 - Modify: `api/src/__tests__/integration/tenant.test.ts`
@@ -1022,9 +945,9 @@ git commit -m "test(api): add agent management integration tests"
 
 ```typescript
 import { describe, it, expect, beforeEach } from 'vitest';
-import { setupClerkMocks, configureMockAuth } from '../helpers/auth';
+import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
-setupClerkMocks();
+const { auth } = createAuthMocks();
 
 import request from 'supertest';
 import { app } from '../../server';
@@ -1038,22 +961,20 @@ describe('Tenant Routes', () => {
       const tenant = await createTestTenant();
       tenantId = tenant.id;
       const user = await createTestUser(tenantId, { role: 'admin' });
-      configureMockAuth({ userId: user.id, tenantId, role: 'admin' });
+      configureMockAuth(auth, { userId: user.id, tenantId, role: 'admin' });
     });
 
     it('should get tenant details', async () => {
       const res = await request(app).get('/api/v1/tenants/me');
-
       expect(res.status).toBe(200);
       const data = res.body.data || res.body;
-      expect(data.id || data.tenantId).toBeDefined();
+      expect(data.id || data.name).toBeDefined();
     });
 
     it('should update tenant webhook URL', async () => {
       const res = await request(app)
         .patch('/api/v1/tenants/me')
         .send({ webhookUrl: 'https://example.com/webhook' });
-
       expect(res.status).toBe(200);
     });
   });
@@ -1062,8 +983,7 @@ describe('Tenant Routes', () => {
     it('should rotate API key and return new raw key', async () => {
       const tenant = await createTestTenant();
       const admin = await createTestUser(tenant.id, { role: 'super_admin' });
-      configureMockAuth({ userId: admin.id, tenantId: tenant.id, role: 'super_admin' });
-
+      configureMockAuth(auth, { userId: admin.id, tenantId: tenant.id, role: 'super_admin' });
       const oldKey = tenant.apiKey;
 
       const res = await request(app)
@@ -1071,7 +991,6 @@ describe('Tenant Routes', () => {
 
       expect(res.status).toBe(200);
       const data = res.body.data || res.body;
-      // Should return a new key that's different from the old one
       expect(data.apiKey).toBeDefined();
       expect(data.apiKey).not.toBe(oldKey);
     });
@@ -1083,22 +1002,21 @@ describe('Tenant Routes', () => {
 
       const res = await request(app)
         .get(`/api/v1/widget/config/${tenant.id}`);
-
       expect(res.status).toBe(200);
+      const data = res.body.data || res.body;
+      expect(data.tenantId || data.name).toBeDefined();
     });
   });
 });
 ```
 
-- [ ] **Step 2: Run the test**
+- [ ] **Step 2: Run and commit**
 
 Run: `cd api && npx vitest run src/__tests__/integration/tenant.test.ts 2>&1`
 
-- [ ] **Step 3: Commit**
-
 ```bash
 git add api/src/__tests__/integration/tenant.test.ts
-git commit -m "test(api): add tenant management and widget config integration tests"
+git commit -m "test(api): add tenant management and widget config tests"
 ```
 
 ---
@@ -1108,15 +1026,12 @@ git commit -m "test(api): add tenant management and widget config integration te
 - [ ] **Step 1: Run the full test suite**
 
 Run: `cd api && npx vitest run 2>&1`
-Expected: All tests pass. Note the total count — should be ~30+ tests.
+Expected: All tests pass. Count should be ~30+ tests.
 
 - [ ] **Step 2: Run type checks**
 
 Run: `cd api && npx tsc --noEmit && cd ../portal && npx tsc --noEmit`
-Expected: No errors.
 
-- [ ] **Step 3: Verify CI workflow file location**
+- [ ] **Step 3: Verify CI workflow location**
 
-Check that `.github/workflows/test.yml` is in the right place relative to the repo root. If the git repo root is one level above `chatbot-platform/`, the workflow needs to be at the repo root's `.github/` directory, not inside `chatbot-platform/.github/`.
-
-Run: `git rev-parse --show-toplevel` to find the repo root, then verify.
+Run: `git rev-parse --show-toplevel` — should show the repo root (one level above `chatbot-platform/`). The workflow at `.github/workflows/test.yml` should be relative to this root. If the git root IS `chatbot-platform/`, remove the `chatbot-platform/` prefix from all `working-directory` values in the workflow.

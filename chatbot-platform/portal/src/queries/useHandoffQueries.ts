@@ -24,7 +24,12 @@ export const handoffOptions = {
   list: (status?: string) =>
     queryOptions({
       queryKey: queryKeys.handoffs.list(status),
-      queryFn: () => api.get<Any>('/handoffs/pending').then((res) => (res.data ?? []) as HandoffRequest[]),
+      queryFn: async () => {
+        const res = await api.get<Any>('/handoffs/pending');
+        // Handle both { data: { pendingRequests }, meta } and bare { pendingRequests } shapes
+        const inner = res?.data ?? res;
+        return (inner?.pendingRequests ?? inner ?? []) as HandoffRequest[];
+      },
     }),
 };
 

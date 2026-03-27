@@ -39,19 +39,19 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ onNavigateToDocuments }) => {
           <p className="text-sm text-text-muted mb-2">Total Documents</p>
           <p className="text-3xl font-bold text-text-primary">{total}</p>
         </Card>
-        <Card className="p-5 border-l-4 border-l-status-online">
+        <Card className="p-5 border-l-4 border-l-emerald-400">
           <p className="text-sm text-text-muted mb-2">Indexed</p>
-          <p className="text-3xl font-bold text-status-online">{indexed}</p>
+          <p className="text-3xl font-bold text-emerald-400">{indexed}</p>
         </Card>
-        <Card className="p-5 border-l-4 border-l-status-away">
+        <Card className="p-5 border-l-4 border-l-amber-400">
           <p className="text-sm text-text-muted mb-2">Processing</p>
-          <p className="text-3xl font-bold text-status-away">{processing}</p>
+          <p className="text-3xl font-bold text-amber-400">{processing}</p>
         </Card>
-        <Card className="p-5 border-l-4 border-l-status-offline">
+        <Card className="p-5 border-l-4 border-l-red-400">
           <p className="text-sm text-text-muted mb-2">Failed</p>
           <button
             onClick={() => onNavigateToDocuments('failed')}
-            className="text-3xl font-bold text-status-offline underline hover:opacity-80"
+            className="text-3xl font-bold text-red-400 underline hover:opacity-80"
           >
             {failed}
           </button>

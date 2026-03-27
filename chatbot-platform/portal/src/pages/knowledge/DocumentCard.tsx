@@ -33,10 +33,10 @@ const typeIcons: Record<string, React.ElementType> = {
 };
 
 const statusConfig: Record<string, { color: string; label: string }> = {
-  indexed: { color: 'text-status-online', label: 'Indexed' },
-  processing: { color: 'text-status-away', label: 'Processing' },
+  indexed: { color: 'text-emerald-400', label: 'Indexed' },
+  processing: { color: 'text-amber-400', label: 'Processing' },
   pending: { color: 'text-text-muted', label: 'Pending' },
-  failed: { color: 'text-status-offline', label: 'Failed' },
+  failed: { color: 'text-red-400', label: 'Failed' },
 };
 
 function timeAgo(dateStr: string): string {
@@ -75,7 +75,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
                 {document.status === 'failed' && (
                   <DropdownMenuItem onClick={onRetry}>Retry</DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={onDelete} className="text-status-offline">
+                <DropdownMenuItem onClick={onDelete} className="text-red-400">
                   Delete
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -92,12 +92,12 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
       </p>
 
       {document.status === 'failed' && document.errorMessage && (
-        <div className="mt-3 p-2 bg-status-offline/10 rounded-lg">
-          <p className="text-xs text-status-offline line-clamp-1">{document.errorMessage}</p>
+        <div className="mt-3 p-2 bg-red-400/10 rounded-lg">
+          <p className="text-xs text-red-400 line-clamp-1">{document.errorMessage}</p>
           {isAdmin && (
             <button
               onClick={onRetry}
-              className="text-xs text-status-offline underline mt-1"
+              className="text-xs text-red-400 underline mt-1"
             >
               Retry
             </button>

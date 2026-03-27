@@ -33,7 +33,16 @@ export function useKnowledgeBase() {
 }
 
 export function useKnowledgeDocuments() {
-  return useQuery(knowledgeOptions.documents());
+  return useQuery({
+    ...knowledgeOptions.documents(),
+    // Auto-poll every 5s while any document is pending/processing
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      const hasProcessing = Array.isArray(data) &&
+        data.some((d: Any) => d.status === 'pending' || d.status === 'processing');
+      return hasProcessing ? 5000 : false;
+    },
+  });
 }
 
 export function useKnowledgeStats() {

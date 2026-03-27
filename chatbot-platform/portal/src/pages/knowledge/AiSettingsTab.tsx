@@ -94,8 +94,20 @@ const AiSettingsTab: React.FC = () => {
     });
   };
 
-  const handleTest = () => {
+  const handleTest = async () => {
     setTestResult(null);
+    // Save settings first so the backend has the latest config
+    await new Promise<void>((resolve, reject) => {
+      updateSettings.mutate({
+        enabled,
+        provider,
+        model,
+        apiKey: apiKey || (hasExistingKey ? undefined : null),
+        brandVoice: { name: botName, tone, customInstructions },
+        guardrails: { greetingMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, fallbackMessage, offHoursMessage },
+      }, { onSuccess: () => resolve(), onError: () => reject() });
+    });
+    // Then run the test
     testSettings.mutate('What are your return policies?', {
       onSuccess: (data) => setTestResult(data),
     });
@@ -107,20 +119,25 @@ const AiSettingsTab: React.FC = () => {
   const readOnly = !isAdmin;
 
   return (
-    <div className="mt-4 space-y-4">
+    <div className="mt-4 space-y-5">
       {/* Enable toggle */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-text-primary">AI Bot</p>
-          <p className="text-xs text-text-muted">Enable AI-powered responses for visitors</p>
+      <div className="flex items-center justify-between p-4 rounded-xl bg-surface-2">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-surface-3">
+            <FlaskConical className="w-4 h-4 text-primary-400" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-text-primary">AI Bot</p>
+            <p className="text-xs text-text-muted">Enable AI-powered responses for visitors</p>
+          </div>
         </div>
         <Switch checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
       </div>
 
       <div className={enabled ? '' : 'opacity-50 pointer-events-none'}>
-        <Accordion type="multiple" defaultValue={['provider']} className="space-y-2">
+        <Accordion type="multiple" defaultValue={['provider']} className="space-y-3">
           {/* Provider Configuration */}
-          <AccordionItem value="provider" className="border rounded-xl px-4">
+          <AccordionItem value="provider" className="border border-edge rounded-xl px-5 bg-surface-0/50">
             <AccordionTrigger className="text-sm font-semibold">
               <span className="flex items-center gap-2">Provider Configuration</span>
             </AccordionTrigger>
@@ -228,7 +245,7 @@ const AiSettingsTab: React.FC = () => {
           </AccordionItem>
 
           {/* Brand Voice */}
-          <AccordionItem value="brand-voice" className="border rounded-xl px-4">
+          <AccordionItem value="brand-voice" className="border border-edge rounded-xl px-5 bg-surface-0/50">
             <AccordionTrigger className="text-sm font-semibold">
               <span className="flex items-center gap-2">Brand Voice</span>
             </AccordionTrigger>
@@ -281,7 +298,7 @@ const AiSettingsTab: React.FC = () => {
           </AccordionItem>
 
           {/* Guardrails */}
-          <AccordionItem value="guardrails" className="border rounded-xl px-4">
+          <AccordionItem value="guardrails" className="border border-edge rounded-xl px-5 bg-surface-0/50">
             <AccordionTrigger className="text-sm font-semibold">
               <span className="flex items-center gap-2">Guardrails</span>
             </AccordionTrigger>
@@ -354,8 +371,8 @@ const AiSettingsTab: React.FC = () => {
       </div>
 
       {isAdmin && (
-        <div className="flex justify-end pt-2">
-          <Button onClick={handleSave} disabled={updateSettings.isPending}>
+        <div className="flex justify-end pt-4 pb-2">
+          <Button onClick={handleSave} disabled={updateSettings.isPending} size="lg">
             {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Save Settings
           </Button>

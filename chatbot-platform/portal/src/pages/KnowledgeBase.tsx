@@ -22,7 +22,7 @@ const KnowledgeBase: React.FC = () => {
   };
 
   return (
-    <div className="p-6">
+    <div className="h-full overflow-y-auto p-6">
       <div className="flex justify-between items-center mb-4">
         <div>
           <h1 className="text-xl font-semibold text-text-primary">Knowledge Base</h1>

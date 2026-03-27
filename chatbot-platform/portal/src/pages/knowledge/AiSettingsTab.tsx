@@ -146,12 +146,28 @@ const AiSettingsTab: React.FC = () => {
                 </div>
                 <div>
                   <Label className="mb-2 text-text-secondary">Model</Label>
-                  <Input
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    placeholder="e.g. gpt-4o"
-                    disabled={readOnly}
-                  />
+                  <Select value={model} onValueChange={setModel} disabled={readOnly}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a model" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {provider === 'openai' ? (
+                        <>
+                          <SelectItem value="gpt-4o">GPT-4o</SelectItem>
+                          <SelectItem value="gpt-4o-mini">GPT-4o Mini</SelectItem>
+                          <SelectItem value="gpt-4-turbo">GPT-4 Turbo</SelectItem>
+                          <SelectItem value="gpt-3.5-turbo">GPT-3.5 Turbo</SelectItem>
+                        </>
+                      ) : (
+                        <>
+                          <SelectItem value="claude-sonnet-4-20250514">Claude Sonnet 4</SelectItem>
+                          <SelectItem value="claude-haiku-4-20250414">Claude Haiku 4</SelectItem>
+                          <SelectItem value="claude-3-5-sonnet-20241022">Claude 3.5 Sonnet</SelectItem>
+                          <SelectItem value="claude-3-haiku-20240307">Claude 3 Haiku</SelectItem>
+                        </>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 

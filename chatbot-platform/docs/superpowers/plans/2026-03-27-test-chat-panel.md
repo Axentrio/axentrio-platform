@@ -50,6 +50,10 @@ export async function testChat(req: Request, res: Response) {
     res.status(400).json({ error: 'AI is not enabled. Save your AI settings first.' });
     return;
   }
+  if (!ai.provider || !ai.model || !ai.brandVoice?.name) {
+    res.status(400).json({ error: 'Incomplete AI settings. Configure provider, model, and brand voice first.' });
+    return;
+  }
 
   if (useKnowledgeBase) {
     // Full RAG pipeline — requires OPENAI_API_KEY for embeddings
@@ -85,6 +89,7 @@ Rules:
       model: ai.model,
       maxTokens: 1000,
       temperature: 0.3,
+      jsonMode: false,
     });
 
     res.json({
@@ -144,7 +149,7 @@ interface TestChatMessage {
   content: string;
 }
 
-interface TestChatResponse {
+export interface TestChatResponse {
   response: string;
   provider: string;
   model: string;
@@ -186,7 +191,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { CompactTypingIndicator } from '@/components/TypingIndicator';
-import { useTestChat } from '@/queries/useKnowledgeQueries';
+import { useTestChat, type TestChatResponse } from '@/queries/useKnowledgeQueries';
 
 interface TestChatPanelProps {
   isOpen: boolean;
@@ -243,7 +248,8 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
 
     const history = updatedMessages
       .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+      .slice(-20); // keep last 20 messages to stay within schema limit
 
     testChat.mutate(
       {
@@ -253,8 +259,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
       },
       {
         onSuccess: (data) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const resp = data as any;
+          const resp = data as TestChatResponse;
           const botMsg: ChatMessage = { role: 'assistant', content: resp.response };
           setMessages((prev) => [...prev, botMsg]);
         },
@@ -467,11 +472,13 @@ Replace with:
           </div>
         </div>
         <div className="flex items-center gap-3">
-          {isAdmin && aiSettings?.enabled && (
+          {isAdmin && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => setIsTestChatOpen(true)}
+              disabled={!aiSettings?.enabled}
+              title={!aiSettings?.enabled ? 'Save AI settings with bot enabled first' : undefined}
             >
               <MessageSquare className="w-4 h-4 mr-2" />
               Test Chat

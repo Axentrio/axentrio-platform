@@ -7,3 +7,4 @@ export * from './webhook.schema';
 export * from './admin.schema';
 export * from './analytics.schema';
 export * from './user.schema';
+export * from './canned-response.schema';

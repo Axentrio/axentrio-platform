@@ -22,6 +22,7 @@ import { AuditLog } from './entities/AuditLog';
 import { KnowledgeBase } from './entities/KnowledgeBase';
 import { KnowledgeDocument } from './entities/KnowledgeDocument';
 import { KnowledgeChunk } from './entities/KnowledgeChunk';
+import { CannedResponse } from './entities/CannedResponse';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -49,6 +50,7 @@ export const AppDataSource = new DataSource({
     KnowledgeBase,
     KnowledgeDocument,
     KnowledgeChunk,
+    CannedResponse,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

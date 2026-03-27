@@ -50,13 +50,16 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
   const debouncedSearch = useDebounce(searchQuery, 300);
 
-  const { chats, isLoading, error, refetch: refresh } = useChatsQuery({
+  const { chats: allChats, isLoading, error, refetch: refresh } = useChatsQuery({
     filters: {
       status: statusFilter === 'all' ? undefined : statusFilter,
       tenantId: tenantFilter,
       search: debouncedSearch || undefined,
     },
   });
+
+  // Hide sessions with no messages
+  const chats = allChats.filter((c: any) => c.messageCount > 0 || c.lastMessage);
 
   const formatTime = (dateString?: string) => {
     if (!dateString) return '';

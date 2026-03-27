@@ -51,6 +51,7 @@ const AiSettingsTab: React.FC = () => {
   const [offHoursMessage, setOffHoursMessage] = useState('');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [testResult, setTestResult] = useState<any>(null);
+  const [testFailed, setTestFailed] = useState(false);
 
   useEffect(() => {
     if (aiSettings) {
@@ -96,6 +97,7 @@ const AiSettingsTab: React.FC = () => {
 
   const handleTest = async () => {
     setTestResult(null);
+    setTestFailed(false);
     // Save settings first so the backend has the latest config
     await new Promise<void>((resolve, reject) => {
       updateSettings.mutate({
@@ -110,6 +112,7 @@ const AiSettingsTab: React.FC = () => {
     // Then run the test
     testSettings.mutate('What are your return policies?', {
       onSuccess: (data) => setTestResult(data),
+      onError: () => setTestFailed(true),
     });
   };
 
@@ -230,14 +233,16 @@ const AiSettingsTab: React.FC = () => {
                     Test Connection
                   </Button>
                   {testResult && (
-                    <Card className="mt-3 p-3 space-y-2">
-                      <p className="text-sm text-text-primary">{testResult.response}</p>
-                      <div className="flex gap-3 text-xs text-text-muted">
-                        <span>Confidence: {(testResult.confidence * 100).toFixed(0)}%</span>
-                        <span>{testResult.provider} / {testResult.model}</span>
-                        <span>{testResult.chunks?.length || 0} chunks used</span>
-                      </div>
-                    </Card>
+                    <p className="text-xs text-emerald-400 mt-2 flex items-center gap-1.5">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                      Connection successful — {testResult.provider} / {testResult.model}
+                    </p>
+                  )}
+                  {testFailed && (
+                    <p className="text-xs text-red-400 mt-2 flex items-center gap-1.5">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-400" />
+                      Connection failed — check your API key and model
+                    </p>
                   )}
                 </div>
               )}

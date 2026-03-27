@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
+import apiClient, { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 import { toast } from 'sonner';
 
@@ -36,6 +36,17 @@ export function useAdminTenants() {
   return useQuery(adminOptions.tenants());
 }
 
+export function useAdminTenantsAll() {
+  return useQuery({
+    queryKey: [...queryKeys.admin.tenants(), 'all'],
+    queryFn: async () => {
+      const result = await api.get<Any>('/admin/tenants', { params: { limit: 1000 } });
+      // Handle both { data, meta } shape and bare array
+      return (Array.isArray(result) ? result : result?.data ?? result) as Any[];
+    },
+  });
+}
+
 export function useAdminTenantDetail(id: string) {
   return useQuery(adminOptions.tenantDetail(id));
 }
@@ -52,10 +63,23 @@ export function useAdminAnalytics() {
   return useQuery(adminOptions.analytics());
 }
 
+interface AuditLogResponse {
+  data: unknown[];
+  meta?: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean };
+}
+
 export function useAdminAuditLogs(params?: Record<string, unknown>) {
   return useQuery({
     queryKey: [...queryKeys.admin.auditLogs(), params],
-    queryFn: () => api.get('/admin/audit-logs', { params }),
+    queryFn: async () => {
+      const result = await api.get<AuditLogResponse>('/admin/audit-logs', { params });
+      // When meta is present, apiClient returns { data, meta }
+      if (result && typeof result === 'object' && 'meta' in result) {
+        return result as AuditLogResponse;
+      }
+      // Fallback: no meta (shouldn't happen after apiClient fix)
+      return { data: result as unknown as unknown[] };
+    },
   });
 }
 
@@ -249,4 +273,49 @@ export function useDeleteUser() {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.users() });
     },
   });
+}
+
+export function useAdminResendInvite(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) =>
+      api.post(`/admin/tenants/${tenantId}/pending-invites/${inviteId}/resend`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Invite resent');
+    },
+    onError: () => toast.error('Failed to resend invite'),
+  });
+}
+
+export function useAdminCancelInvite(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) =>
+      api.delete(`/admin/tenants/${tenantId}/pending-invites/${inviteId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Invite cancelled');
+    },
+    onError: () => toast.error('Failed to cancel invite'),
+  });
+}
+
+// --- CSV Export ---
+
+export async function downloadAuditLogsCsv(params: Record<string, string>) {
+  const response = await apiClient.get('/admin/audit-logs/export', {
+    params,
+    responseType: 'blob',
+  });
+  const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  window.URL.revokeObjectURL(url);
 }

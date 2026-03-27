@@ -8,7 +8,6 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { Agent } from '../database/entities/Agent';
-import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -27,6 +26,8 @@ import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/erro
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { createTenantSchema, inviteMemberSchema } from '../schemas';
+import { releaseAgentSessions } from '../utils/releaseAgentSessions';
+import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 
 const router = Router();
 
@@ -92,6 +93,55 @@ router.get('/tenants/:id/pending-invites', asyncHandler(async (req: Request, res
   }));
 
   sendSuccess(res, data);
+}));
+
+// POST /admin/tenants/:id/pending-invites/:inviteId/resend
+router.post('/tenants/:id/pending-invites/:inviteId/resend', asyncHandler(async (req: Request, res: Response) => {
+  const { id: tenantId, inviteId } = req.params;
+
+  const invite = await AppDataSource.getRepository(PendingInvite).findOne({
+    where: { id: inviteId, tenantId },
+  });
+  if (!invite) throw new NotFoundError('Invite not found');
+
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant?.clerkOrgId) throw new BadRequestError('Tenant has no Clerk organization linked');
+
+  const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email);
+  if (!sent) {
+    res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+    return;
+  }
+
+  invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await AppDataSource.getRepository(PendingInvite).save(invite);
+
+  await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
+
+  logger.info('Super-admin resent invite', { inviteId, tenantId, resendBy: req.userId });
+  sendSuccess(res, {
+    id: invite.id,
+    email: invite.email,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+  });
+}));
+
+// DELETE /admin/tenants/:id/pending-invites/:inviteId
+router.delete('/tenants/:id/pending-invites/:inviteId', asyncHandler(async (req: Request, res: Response) => {
+  const { id: tenantId, inviteId } = req.params;
+
+  const inviteRepo = AppDataSource.getRepository(PendingInvite);
+  const invite = await inviteRepo.findOne({ where: { id: inviteId, tenantId } });
+  if (!invite) throw new NotFoundError('Invite not found');
+
+  const inviteEmail = invite.email;
+  const inviteIdForAudit = invite.id;
+  await inviteRepo.remove(invite);
+  await logAudit(req.userId!, 'invite.cancelled', 'invite', inviteIdForAudit, tenantId, { email: inviteEmail });
+
+  logger.info('Super-admin cancelled invite', { inviteId, tenantId, cancelledBy: req.userId });
+  res.status(204).send();
 }));
 
 // GET /admin/tenants/:id/audit-logs — paginated audit logs for a tenant
@@ -504,7 +554,13 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
   if (!user.isActive) throw new BadRequestError('User is already inactive');
   if (req.params.id === req.userId) throw new BadRequestError('Cannot deactivate yourself');
 
-  user.isActive = false;
+  // Wrap in transaction for atomicity
+  let releaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
+  await AppDataSource.transaction(async (manager) => {
+    user.isActive = false;
+    await manager.save(User, user);
+    releaseResult = await releaseAgentSessions(user.id, user.tenantId, manager);
+  });
 
   // Fetch tenant once for Clerk removal + cache invalidation
   const tenant = user.clerkUserId
@@ -521,12 +577,27 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
     }
   }
 
-  await userRepo.save(user);
-  await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId);
+  await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId, {
+    releasedSessions: releaseResult.releasedSessions,
+    returnedHandoffs: releaseResult.returnedHandoffs,
+  });
 
   // Invalidate cache so changes take effect immediately
   if (user.clerkUserId && tenant?.clerkOrgId) {
     invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+  }
+
+  // Socket events — after transaction committed
+  for (const sessionId of releaseResult.affectedSessionIds) {
+    emitToSession(user.tenantId, sessionId, 'agent:removed', {
+      sessionId,
+      reason: 'agent_deactivated',
+    });
+  }
+  if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
+    emitToTenantAgents(user.tenantId, 'handoff:queue_updated', {
+      reason: 'agent_deactivated',
+    });
   }
 
   logger.info('Deactivated user', { userId: user.id, deactivatedBy: req.userId });
@@ -650,21 +721,8 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
       agent.deletedAt = new Date();
       await manager.save(Agent, agent);
 
-      // 3. Null out agent assignments on sessions
-      await manager
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({ assignedAgentId: null as unknown as string | undefined })
-        .where('assigned_agent_id = :agentId', { agentId: agent.id })
-        .execute();
-
-      // 4. Null out agent assignments on handoff requests
-      await manager
-        .createQueryBuilder()
-        .update(HandoffRequest)
-        .set({ assignedAgentId: null as unknown as string | undefined })
-        .where('assigned_agent_id = :agentId', { agentId: agent.id })
-        .execute();
+      // 3. Release agent sessions + handoff requests
+      await releaseAgentSessions(userId, tenantId!, manager);
     }
 
     // 5. Delete pending invites created by this user
@@ -771,7 +829,10 @@ router.get('/audit-logs', asyncHandler(async (req: Request, res: Response) => {
 
   const to = req.query.to as string;
   if (to) {
-    qb.andWhere('log.createdAt <= :to', { to: new Date(to) });
+    // Normalize to end-of-day: use exclusive next-day comparison
+    const nextDay = new Date(to);
+    nextDay.setDate(nextDay.getDate() + 1);
+    qb.andWhere('log.createdAt < :toExclusive', { toExclusive: nextDay });
   }
 
   qb.orderBy('log.createdAt', 'DESC');
@@ -789,9 +850,21 @@ router.get('/audit-logs', asyncHandler(async (req: Request, res: Response) => {
     : [];
   const actorMap = new Map(actors.map(a => [a.id, { name: a.name, email: a.email }]));
 
+  // Resolve tenant names
+  const tenantIds = [...new Set(result.data.map(l => l.tenantId).filter(Boolean))];
+  const tenantNames = tenantIds.length > 0
+    ? await AppDataSource.getRepository(Tenant)
+        .createQueryBuilder('t')
+        .select(['t.id', 't.name'])
+        .where('t.id IN (:...ids)', { ids: tenantIds })
+        .getMany()
+    : [];
+  const tenantMap = new Map(tenantNames.map(t => [t.id, t.name]));
+
   const data = result.data.map(log => ({
     id: log.id,
     tenantId: log.tenantId,
+    tenantName: log.tenantId ? (tenantMap.get(log.tenantId) ?? null) : null,
     actorId: log.actorId,
     actorName: actorMap.get(log.actorId)?.name ?? 'Unknown',
     actorEmail: actorMap.get(log.actorId)?.email ?? '',
@@ -818,7 +891,11 @@ router.get('/audit-logs/export', asyncHandler(async (req: Request, res: Response
   if (from) qb.andWhere('log.createdAt >= :from', { from: new Date(from) });
 
   const to = req.query.to as string;
-  if (to) qb.andWhere('log.createdAt <= :to', { to: new Date(to) });
+  if (to) {
+    const nextDay = new Date(to);
+    nextDay.setDate(nextDay.getDate() + 1);
+    qb.andWhere('log.createdAt < :toExclusive', { toExclusive: nextDay });
+  }
 
   const action = req.query.action as string;
   if (action) qb.andWhere('log.action = :action', { action });
@@ -834,11 +911,21 @@ router.get('/audit-logs/export', asyncHandler(async (req: Request, res: Response
     : [];
   const actorMap = new Map(actors.map(a => [a.id, a]));
 
-  const header = 'timestamp,actor_name,actor_email,action,entity_type,entity_id,metadata\n';
+  const tenantIds = [...new Set(logs.map(l => l.tenantId).filter(Boolean))];
+  const tenantEntities = tenantIds.length > 0
+    ? await AppDataSource.getRepository(Tenant).createQueryBuilder('t')
+        .select(['t.id', 't.name'])
+        .where('t.id IN (:...ids)', { ids: tenantIds })
+        .getMany()
+    : [];
+  const tenantMap = new Map(tenantEntities.map(t => [t.id, t.name]));
+
+  const header = 'timestamp,actor_name,actor_email,tenant_name,action,entity_type,entity_id,metadata\n';
   const rows = logs.map(l => {
     const actor = actorMap.get(l.actorId);
+    const tName = l.tenantId ? (tenantMap.get(l.tenantId) ?? '') : '';
     const meta = l.metadata ? JSON.stringify(l.metadata).replace(/"/g, '""') : '';
-    return `${l.createdAt.toISOString()},"${actor?.name ?? 'Unknown'}","${actor?.email ?? ''}",${l.action},${l.entityType},${l.entityId},"${meta}"`;
+    return `${l.createdAt.toISOString()},"${actor?.name ?? 'Unknown'}","${actor?.email ?? ''}","${tName}",${l.action},${l.entityType},${l.entityId},"${meta}"`;
   }).join('\n');
 
   res.setHeader('Content-Type', 'text/csv');

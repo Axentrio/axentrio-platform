@@ -53,7 +53,12 @@ apiClient.interceptors.response.use(
   (response) => {
     // If the response has our standard envelope, unwrap it
     if (response.data && typeof response.data === 'object' && 'success' in response.data && 'data' in response.data) {
-      response.data = response.data.data;
+      if ('meta' in response.data && response.data.meta) {
+        // Preserve pagination metadata alongside data
+        response.data = { data: response.data.data, meta: response.data.meta };
+      } else {
+        response.data = response.data.data;
+      }
     }
     return response;
   },

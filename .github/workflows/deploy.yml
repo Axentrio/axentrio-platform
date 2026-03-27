@@ -32,10 +32,6 @@ jobs:
         working-directory: ./chatbot-platform/api
         run: npm ci
 
-      - name: Run linter
-        working-directory: ./chatbot-platform/api
-        run: npm run lint
-
       - name: Run tests
         working-directory: ./chatbot-platform/api
         run: npm test

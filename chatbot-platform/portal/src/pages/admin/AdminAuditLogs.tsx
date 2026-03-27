@@ -5,8 +5,9 @@
 
 import React, { useState } from 'react';
 import { Download } from 'lucide-react';
+import { toast } from 'sonner';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
-import { useAdminTenants, useAdminAuditLogs, downloadAuditLogsCsv } from '../../queries/useAdminQueries';
+import { useAdminTenantsAll, useAdminAuditLogs, downloadAuditLogsCsv } from '../../queries/useAdminQueries';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -101,8 +102,8 @@ const AdminAuditLogs: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
 
   /* ---- Data ---- */
-  const { data: tenantsData, isLoading: isLoadingTenants } = useAdminTenants();
-  const tenants = (tenantsData as AdminTenant[] | undefined) ?? [];
+  const { data: tenantsRaw, isLoading: isLoadingTenants } = useAdminTenantsAll();
+  const tenants = (tenantsRaw as AdminTenant[] | undefined) ?? [];
 
   const params: Record<string, unknown> = { page, limit: PAGE_SIZE };
   if (tenantId !== 'all') params.tenantId = tenantId;
@@ -130,6 +131,8 @@ const AdminAuditLogs: React.FC = () => {
       if (fromDate) exportParams.from = fromDate;
       if (toDate) exportParams.to = toDate;
       await downloadAuditLogsCsv(exportParams);
+    } catch {
+      toast.error('Failed to export audit logs');
     } finally {
       setIsExporting(false);
     }

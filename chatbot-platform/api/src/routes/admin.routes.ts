@@ -135,8 +135,10 @@ router.delete('/tenants/:id/pending-invites/:inviteId', asyncHandler(async (req:
   const invite = await inviteRepo.findOne({ where: { id: inviteId, tenantId } });
   if (!invite) throw new NotFoundError('Invite not found');
 
-  await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
+  const inviteEmail = invite.email;
+  const inviteIdForAudit = invite.id;
   await inviteRepo.remove(invite);
+  await logAudit(req.userId!, 'invite.cancelled', 'invite', inviteIdForAudit, tenantId, { email: inviteEmail });
 
   logger.info('Super-admin cancelled invite', { inviteId, tenantId, cancelledBy: req.userId });
   res.status(204).send();

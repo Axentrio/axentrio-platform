@@ -33,9 +33,17 @@ export const adminOptions = {
 };
 
 export function useAdminTenants() {
+  return useQuery(adminOptions.tenants());
+}
+
+export function useAdminTenantsAll() {
   return useQuery({
-    ...adminOptions.tenants(),
-    queryFn: () => api.get<Any[]>('/admin/tenants', { params: { limit: 1000 } }),
+    queryKey: [...queryKeys.admin.tenants(), 'all'],
+    queryFn: async () => {
+      const result = await api.get<Any>('/admin/tenants', { params: { limit: 1000 } });
+      // Handle both { data, meta } shape and bare array
+      return (Array.isArray(result) ? result : result?.data ?? result) as Any[];
+    },
   });
 }
 

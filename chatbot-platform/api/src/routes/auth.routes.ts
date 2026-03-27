@@ -116,7 +116,11 @@ router.post(
       tenant: {
         id: tenant.id,
         name: tenant.name,
-        settings: tenant.settings,
+        settings: {
+          theme: tenant.settings?.theme,
+          features: tenant.settings?.features,
+          businessHours: tenant.settings?.businessHours,
+        },
       },
     });
   })

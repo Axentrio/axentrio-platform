@@ -90,14 +90,17 @@ export async function forwardMessageToN8n(
         if (bh?.enabled && bh.schedule?.length) {
           const now = new Date();
           const tz = bh.timezone || 'UTC';
-          const localTime = new Date(now.toLocaleString('en-US', { timeZone: tz }));
-          const dayName = localTime.toLocaleDateString('en-US', { weekday: 'long', timeZone: tz }).toLowerCase();
+          const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' });
+          const dayName = dayFormatter.format(now).toLowerCase();
+          const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+          const parts = timeFormatter.formatToParts(now);
+          const hour = parts.find(p => p.type === 'hour')!.value;
+          const minute = parts.find(p => p.type === 'minute')!.value;
+          const timeStr = `${hour}:${minute}`;
           const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
 
-          const isOutsideHours = !daySchedule || daySchedule.closed || (() => {
-            const timeStr = localTime.toTimeString().slice(0, 5); // HH:MM
-            return timeStr < daySchedule.open || timeStr >= daySchedule.close;
-          })();
+          const isOutsideHours = !daySchedule || daySchedule.closed ||
+            timeStr < daySchedule.open || timeStr >= daySchedule.close;
 
           if (isOutsideHours) {
             const botParticipant = await ensureBotParticipant(session, aiSettings);

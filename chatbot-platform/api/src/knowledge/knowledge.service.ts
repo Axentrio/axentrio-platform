@@ -24,6 +24,14 @@ const DOCUMENT_LIMITS: Record<string, number> = {
   enterprise: Infinity,
 };
 
+let s3Client: S3Client | null = null;
+function getS3Client(): S3Client {
+  if (!s3Client) {
+    s3Client = new S3Client({ region: config.s3?.region });
+  }
+  return s3Client;
+}
+
 export class KnowledgeService {
   private kbRepo: Repository<KnowledgeBase>;
   private docRepo: Repository<KnowledgeDocument>;
@@ -154,8 +162,7 @@ export class KnowledgeService {
     // Delete S3 object if file-based document
     if (doc.storagePath && config.s3?.bucket) {
       try {
-        const s3 = new S3Client({ region: config.s3.region });
-        await s3.send(new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: doc.storagePath }));
+        await getS3Client().send(new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: doc.storagePath }));
       } catch (err) {
         logger.warn(`Failed to delete S3 object ${doc.storagePath}`, { error: err });
       }

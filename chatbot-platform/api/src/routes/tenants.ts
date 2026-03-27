@@ -143,12 +143,19 @@ router.patch(
       updates: { name, webhookUrl: !!webhookUrl, settings: !!settings },
     });
 
+    // Strip encrypted AI API key from response
+    const responseSettings = { ...tenant.settings };
+    if (responseSettings.ai) {
+      const { apiKey: _k, ...aiRest } = responseSettings.ai;
+      responseSettings.ai = { ...aiRest, hasApiKey: !!_k } as any;
+    }
+
     res.json({
       success: true,
       data: {
         id: tenant.id,
         name: tenant.name,
-        settings: tenant.settings,
+        settings: responseSettings,
         webhookUrl: tenant.webhookUrl,
         webhookSecret: tenant.webhookSecret,
         updatedAt: tenant.updatedAt,

@@ -324,13 +324,46 @@ router.get(
 
     const result = await applyPagination(qb, params);
 
+    // Fetch last message for each session in one query
+    const sessionIds = result.data.map(s => s.id);
+    const lastMessages: Record<string, { content: string; senderType: string }> = {};
+    if (sessionIds.length > 0) {
+      const msgs = await messageRepository
+        .createQueryBuilder('m')
+        .leftJoin(Participant, 'p', 'p.id = m.participant_id')
+        .select(['m.session_id AS session_id', 'm.content AS content', 'm.content_encrypted AS encrypted', 'm.id AS id', 'p.type AS sender_type'])
+        .where('m.session_id IN (:...ids)', { ids: sessionIds })
+        .orderBy('m.created_at', 'DESC')
+        .distinctOn(['m.session_id'])
+        .getRawMany();
+
+      for (const row of msgs) {
+        let content = row.content || '';
+        if (row.encrypted && content) {
+          try { content = decrypt(content, row.id); } catch { content = '[encrypted]'; }
+        }
+        lastMessages[row.session_id] = {
+          content: content.substring(0, 80),
+          senderType: row.sender_type || 'user',
+        };
+      }
+    }
+
     sendPaginated(
       res,
       result.data.map((s) => ({
         id: s.id,
+        sessionId: s.id,
         status: s.status,
+        userName: `Visitor ${s.visitorId?.substring(0, 8) || 'Anonymous'}`,
         assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
+        assignedAgentName: s.assignedAgent?.userId ?? null,
+        messageCount: s.messageCount,
+        lastMessage: lastMessages[s.id]?.content || null,
+        lastMessageSender: lastMessages[s.id]?.senderType || null,
+        lastMessageAt: s.lastActivityAt,
         lastActivityAt: s.lastActivityAt,
+        source: s.source,
         createdAt: s.createdAt,
       })),
       result.meta

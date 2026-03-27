@@ -79,12 +79,16 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
     return date.toLocaleDateString();
   };
 
-  const getLastMessage = (chat: Chat) => {
+  const getLastMessage = (chat: any) => {
+    // Use lastMessage from enriched API response
+    if (chat.lastMessage) {
+      return chat.lastMessage.length > 60 ? chat.lastMessage.substring(0, 60) + '...' : chat.lastMessage;
+    }
     if (chat.messages && chat.messages.length > 0) {
       const lastMsg = chat.messages[chat.messages.length - 1];
       return lastMsg.content.substring(0, 60) + (lastMsg.content.length > 60 ? '...' : '');
     }
-    return 'No messages';
+    return 'No messages yet';
   };
 
   return (
@@ -197,8 +201,14 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                   <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {formatTime(chat.lastMessageAt)}
+                      {formatTime(chat.lastMessageAt || chat.lastActivityAt)}
                     </span>
+                    {(chat as any).messageCount > 0 && (
+                      <span className="flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        {(chat as any).messageCount}
+                      </span>
+                    )}
                     {chat.tenantName && (
                       <span>{chat.tenantName}</span>
                     )}

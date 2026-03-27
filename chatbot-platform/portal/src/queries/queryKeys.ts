@@ -45,6 +45,12 @@ export const queryKeys = {
     chatMetrics: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'chat-metrics', from, to] as const,
     agents: () => [...queryKeys.analytics.all(), 'agents'] as const,
   },
+  knowledge: {
+    all: () => ['knowledge'] as const,
+    base: () => [...queryKeys.knowledge.all(), 'base'] as const,
+    documents: () => [...queryKeys.knowledge.all(), 'documents'] as const,
+    stats: () => [...queryKeys.knowledge.all(), 'stats'] as const,
+  },
   admin: {
     all: () => ['admin'] as const,
     users: () => [...queryKeys.admin.all(), 'users'] as const,

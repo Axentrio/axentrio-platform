@@ -12,6 +12,42 @@
 
 ---
 
+### Task 0: Add Agent Read Access to Backend Knowledge Routes
+
+**Files:**
+- Modify: `api/src/knowledge/knowledge.routes.ts`
+
+- [ ] **Step 1: Add 'agent' to read-only routes**
+
+In `chatbot-platform/api/src/knowledge/knowledge.routes.ts`, update the four read-only routes to include `'agent'`:
+
+```typescript
+// Read-only: admin, supervisor, agent
+router.get('/base', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getKnowledgeBase));
+router.get('/documents', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listDocuments));
+router.get('/documents/:id', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getDocument));
+router.get('/stats', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getStats));
+```
+
+Write-only routes remain admin-only — no change needed.
+
+- [ ] **Step 2: Verify TypeScript compiles**
+
+```bash
+cd chatbot-platform/api && npx tsc --noEmit
+```
+
+Expected: no errors.
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add chatbot-platform/api/src/knowledge/knowledge.routes.ts
+git commit -m "feat: allow agent role read access to knowledge base routes"
+```
+
+---
+
 ### Task 1: Add shadcn Accordion Component
 
 **Files:**
@@ -35,8 +71,10 @@ Expected: file listed.
 
 - [ ] **Step 3: Commit**
 
+Note: `npx shadcn add` also installs `@radix-ui/react-accordion` and updates `package.json` / lockfile.
+
 ```bash
-git add src/components/ui/accordion.tsx
+git add src/components/ui/accordion.tsx package.json package-lock.json
 git commit -m "feat: add shadcn accordion component"
 ```
 
@@ -84,7 +122,7 @@ export const knowledgeOptions = {
   documents: () => queryOptions({
     queryKey: queryKeys.knowledge.documents(),
     queryFn: async () => {
-      const res = await api.get<Any>('/knowledge/documents');
+      const res = await api.get<Any>('/knowledge/documents', { params: { limit: 500 } });
       return Array.isArray(res) ? res : res?.documents ?? [];
     },
   }),
@@ -184,6 +222,7 @@ export function useUpdateAiSettings() {
       api.patch('/tenants/me/ai-settings', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.tenants.me(), 'ai-settings'] });
       toast.success('AI settings saved');
     },
     onError: () => toast.error('Failed to save AI settings'),
@@ -315,15 +354,27 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { InlineError } from '@/components/ui/inline-error';
 
 interface OverviewTabProps {
   onNavigateToDocuments: (filter?: string) => void;
 }
 
-const OverviewTab: React.FC<OverviewTabProps> = ({ onNavigateToDocuments }) => {
-  const { data: stats, isLoading } = useKnowledgeStats();
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const minutes = Math.floor(diff / 60000);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
-  if (isLoading) return <PageSkeleton />;
+const OverviewTab: React.FC<OverviewTabProps> = ({ onNavigateToDocuments }) => {
+  const { data: stats, isLoading, error } = useKnowledgeStats();
+
+  if (isLoading) return <PageSkeleton variant="cards" />;
+  if (error) return <InlineError message="Failed to load stats" />;
 
   const documents = stats?.documents || {};
   const indexed = parseInt(documents.indexed || '0');
@@ -376,7 +427,7 @@ const OverviewTab: React.FC<OverviewTabProps> = ({ onNavigateToDocuments }) => {
             <p className="text-sm text-text-muted mb-1">Last Indexed</p>
             <p className="text-sm text-text-primary">
               {stats?.lastIndexedAt
-                ? new Date(stats.lastIndexedAt).toLocaleString()
+                ? timeAgo(stats.lastIndexedAt)
                 : 'Never'}
             </p>
           </div>
@@ -613,6 +664,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Loader2, Upload } from 'lucide-react';
+import { toast } from 'sonner';
 import { useCreateDocument, useUpdateDocument, useUploadFile } from '@/queries/useKnowledgeQueries';
 
 type DocType = 'text' | 'faq' | 'pdf' | 'docx';
@@ -658,8 +710,21 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
     }
   }, [editingDocument, isOpen]);
 
+  const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB
+  const MAX_CONTENT_LENGTH = 500_000;
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Client-side validation
+    if (isFileType && file && file.size > MAX_FILE_SIZE) {
+      toast.error('File exceeds 25MB limit');
+      return;
+    }
+    if (!isFileType && content.length > MAX_CONTENT_LENGTH) {
+      toast.error('Content exceeds 500,000 character limit');
+      return;
+    }
 
     if (isEditing) {
       updateDoc.mutate(
@@ -670,12 +735,16 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
     }
 
     if (isFileType && file) {
-      const result = await uploadFile.mutateAsync(file);
-      const token = (result as any)?.uploadToken;
-      createDoc.mutate(
-        { type: docType, title, uploadToken: token },
-        { onSuccess: onClose },
-      );
+      try {
+        const result = await uploadFile.mutateAsync(file);
+        const token = (result as any)?.uploadToken;
+        createDoc.mutate(
+          { type: docType, title, uploadToken: token },
+          { onSuccess: onClose },
+        );
+      } catch {
+        // uploadFile.onError already shows toast
+      }
     } else {
       createDoc.mutate(
         { type: docType, title, sourceContent: content },
@@ -720,7 +789,12 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
           />
         </div>
 
-        {isFileType ? (
+        {isFileType && isEditing ? (
+          <div>
+            <Label className="mb-1 text-text-secondary">File</Label>
+            <p className="text-sm text-text-muted">File re-upload is not supported yet. Delete and re-create the document to change the file.</p>
+          </div>
+        ) : isFileType ? (
           <div>
             <Label className="mb-1 text-text-secondary">File</Label>
             <div
@@ -804,8 +878,8 @@ git commit -m "feat: add AddDocumentModal with type selector and file upload"
 Create `portal/src/pages/knowledge/DocumentsTab.tsx`:
 
 ```tsx
-import React, { useState, useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Plus, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
@@ -820,6 +894,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { InlineError } from '@/components/ui/inline-error';
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useKnowledgeDocuments, useDeleteDocument, useRetryDocument } from '@/queries/useKnowledgeQueries';
 import DocumentCard from './DocumentCard';
@@ -828,6 +903,7 @@ import AddDocumentModal from './AddDocumentModal';
 type DocType = 'text' | 'faq' | 'pdf' | 'docx';
 
 const typeFilters = ['all', 'pdf', 'docx', 'text', 'faq'] as const;
+const statusFilters = ['failed', 'processing', 'pending', 'indexed'];
 
 interface DocumentsTabProps {
   initialFilter?: string;
@@ -836,7 +912,7 @@ interface DocumentsTabProps {
 const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin');
-  const { data: documents = [], isLoading } = useKnowledgeDocuments();
+  const { data: documents = [], isLoading, error } = useKnowledgeDocuments();
   const deleteDoc = useDeleteDocument();
   const retryDoc = useRetryDocument();
 
@@ -846,10 +922,19 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
   const [editingDoc, setEditingDoc] = useState<any>(null);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
+  // Sync filter from parent (e.g., clicking failed count in Overview)
+  useEffect(() => {
+    if (initialFilter) setTypeFilter(initialFilter);
+  }, [initialFilter]);
+
   const filtered = useMemo(() => {
     let result = documents as any[];
     if (typeFilter !== 'all') {
-      result = result.filter((d: any) => d.type === typeFilter || d.status === typeFilter);
+      // Filter by type name OR status name (for cross-tab "failed" filter)
+      const isStatus = statusFilters.includes(typeFilter);
+      result = result.filter((d: any) =>
+        isStatus ? d.status === typeFilter : d.type === typeFilter
+      );
     }
     if (search) {
       const lower = search.toLowerCase();
@@ -858,7 +943,8 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
     return result;
   }, [documents, typeFilter, search]);
 
-  if (isLoading) return <PageSkeleton />;
+  if (isLoading) return <PageSkeleton variant="cards" />;
+  if (error) return <InlineError message="Failed to load documents" />;
 
   const handleEdit = (doc: any) => {
     setEditingDoc(doc);
@@ -911,17 +997,31 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
           <div className="p-4 bg-surface-2 rounded-2xl mb-4">
             <Plus className="w-8 h-8 text-text-muted" />
           </div>
-          <h3 className="text-lg font-semibold text-text-primary">No documents yet</h3>
-          <p className="text-sm text-text-muted mt-1 max-w-sm">
-            {isAdmin
-              ? 'Add your first document to start building your knowledge base.'
-              : 'No documents have been added yet.'}
-          </p>
-          {isAdmin && (
-            <Button className="mt-4" onClick={() => setIsModalOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              Add your first document
-            </Button>
+          {(documents as any[]).length === 0 ? (
+            <>
+              <h3 className="text-lg font-semibold text-text-primary">No documents yet</h3>
+              <p className="text-sm text-text-muted mt-1 max-w-sm">
+                {isAdmin
+                  ? 'Add your first document to start building your knowledge base.'
+                  : 'No documents have been added yet.'}
+              </p>
+              {isAdmin && (
+                <Button className="mt-4" onClick={() => setIsModalOpen(true)}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add your first document
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <h3 className="text-lg font-semibold text-text-primary">No matching documents</h3>
+              <p className="text-sm text-text-muted mt-1 max-w-sm">
+                Try adjusting your search or filter.
+              </p>
+              <Button variant="outline" className="mt-4" onClick={() => { setTypeFilter('all'); setSearch(''); }}>
+                Clear filters
+              </Button>
+            </>
           )}
         </div>
       ) : (
@@ -998,9 +1098,11 @@ Replace the Documents `TabsContent` placeholder:
 
 ```tsx
 <TabsContent value="documents">
-  <DocumentsTab initialFilter={activeTab === 'documents' ? undefined : undefined} />
+  <DocumentsTab initialFilter={docFilter} />
 </TabsContent>
 ```
+
+Note: `docFilter` state is wired up in Task 10 when KnowledgeBase.tsx gets its final version.
 
 - [ ] **Step 3: Verify in browser**
 
@@ -1137,12 +1239,13 @@ import {
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useGetAiSettings, useUpdateAiSettings, useTestAiSettings } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
 
 const AiSettingsTab: React.FC = () => {
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin');
-  const { data: aiSettings, isLoading } = useGetAiSettings();
+  const { data: aiSettings, isLoading, error } = useGetAiSettings();
   const updateSettings = useUpdateAiSettings();
   const testSettings = useTestAiSettings();
 
@@ -1187,7 +1290,7 @@ const AiSettingsTab: React.FC = () => {
       enabled,
       provider,
       model,
-      ...(apiKey ? { apiKey } : {}),
+      apiKey: apiKey || (hasExistingKey ? undefined : null),
       brandVoice: {
         name: botName,
         tone,
@@ -1212,7 +1315,8 @@ const AiSettingsTab: React.FC = () => {
     });
   };
 
-  if (isLoading) return <PageSkeleton />;
+  if (isLoading) return <PageSkeleton variant="cards" />;
+  if (error) return <InlineError message="Failed to load AI settings" />;
 
   const readOnly = !isAdmin;
 
@@ -1569,25 +1673,47 @@ const KnowledgeBase: React.FC = () => {
 };
 ```
 
-- [ ] **Step 2: Make DocumentsTab respond to initialFilter changes**
+- [ ] **Step 2: Verify cross-tab navigation**
 
-In `portal/src/pages/knowledge/DocumentsTab.tsx`, add a `useEffect` to sync the filter:
-
-After the existing `useState` for `typeFilter`, add:
-
-```typescript
-useEffect(() => {
-  if (initialFilter) setTypeFilter(initialFilter);
-}, [initialFilter]);
-```
-
-- [ ] **Step 3: Verify cross-tab navigation**
+Note: DocumentsTab already has the `useEffect` to sync `initialFilter` (added in Task 7).
 
 In the browser, go to Overview tab, click the failed count number. Should switch to Documents tab filtered to show only failed documents.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add portal/src/pages/KnowledgeBase.tsx portal/src/pages/knowledge/DocumentsTab.tsx
+git add portal/src/pages/KnowledgeBase.tsx
 git commit -m "feat: wire up cross-tab navigation and document filter sync"
 ```
+
+---
+
+### Task 11: Build Verification
+
+**Files:** None (verification only)
+
+- [ ] **Step 1: Run TypeScript build**
+
+```bash
+cd chatbot-platform/portal && npm run build
+```
+
+Expected: build succeeds with no errors. Fix any type errors or import issues that surface.
+
+- [ ] **Step 2: Run API TypeScript check**
+
+```bash
+cd chatbot-platform/api && npx tsc --noEmit
+```
+
+Expected: no errors (Task 0 backend change compiles clean).
+
+- [ ] **Step 3: Manual smoke test**
+
+Navigate to `http://localhost:4080/knowledge` and verify:
+1. All three tabs render without errors
+2. Document CRUD works (create text doc, edit title, delete)
+3. AI Settings save + load works
+4. Overview stats reflect document changes
+5. Failed count click navigates to filtered Documents tab
+6. Non-admin users see read-only views (test with supervisor/agent role)

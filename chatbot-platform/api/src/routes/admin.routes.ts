@@ -8,7 +8,6 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { Agent } from '../database/entities/Agent';
-import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -27,6 +26,8 @@ import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/erro
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { createTenantSchema, inviteMemberSchema } from '../schemas';
+import { releaseAgentSessions } from '../utils/releaseAgentSessions';
+import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 
 const router = Router();
 
@@ -504,7 +505,13 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
   if (!user.isActive) throw new BadRequestError('User is already inactive');
   if (req.params.id === req.userId) throw new BadRequestError('Cannot deactivate yourself');
 
-  user.isActive = false;
+  // Wrap in transaction for atomicity
+  let releaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
+  await AppDataSource.transaction(async (manager) => {
+    user.isActive = false;
+    await manager.save(User, user);
+    releaseResult = await releaseAgentSessions(user.id, user.tenantId, manager);
+  });
 
   // Fetch tenant once for Clerk removal + cache invalidation
   const tenant = user.clerkUserId
@@ -521,12 +528,27 @@ router.post('/users/:id/deactivate', asyncHandler(async (req: Request, res: Resp
     }
   }
 
-  await userRepo.save(user);
-  await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId);
+  await logAudit(req.userId!, 'user.deactivated', 'user', user.id, user.tenantId, {
+    releasedSessions: releaseResult.releasedSessions,
+    returnedHandoffs: releaseResult.returnedHandoffs,
+  });
 
   // Invalidate cache so changes take effect immediately
   if (user.clerkUserId && tenant?.clerkOrgId) {
     invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+  }
+
+  // Socket events — after transaction committed
+  for (const sessionId of releaseResult.affectedSessionIds) {
+    emitToSession(user.tenantId, sessionId, 'agent:removed', {
+      sessionId,
+      reason: 'agent_deactivated',
+    });
+  }
+  if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
+    emitToTenantAgents(user.tenantId, 'handoff:queue_updated', {
+      reason: 'agent_deactivated',
+    });
   }
 
   logger.info('Deactivated user', { userId: user.id, deactivatedBy: req.userId });
@@ -650,21 +672,8 @@ router.delete('/users/:id', asyncHandler(async (req: Request, res: Response) => 
       agent.deletedAt = new Date();
       await manager.save(Agent, agent);
 
-      // 3. Null out agent assignments on sessions
-      await manager
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({ assignedAgentId: null as unknown as string | undefined })
-        .where('assigned_agent_id = :agentId', { agentId: agent.id })
-        .execute();
-
-      // 4. Null out agent assignments on handoff requests
-      await manager
-        .createQueryBuilder()
-        .update(HandoffRequest)
-        .set({ assignedAgentId: null as unknown as string | undefined })
-        .where('assigned_agent_id = :agentId', { agentId: agent.id })
-        .execute();
+      // 3. Release agent sessions + handoff requests
+      await releaseAgentSessions(userId, tenantId!, manager);
     }
 
     // 5. Delete pending invites created by this user

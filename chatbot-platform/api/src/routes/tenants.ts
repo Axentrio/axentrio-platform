@@ -17,6 +17,8 @@ import { inviteToClerkOrganization, removeFromClerkOrganization, addMemberToCler
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
+import { releaseAgentSessions } from '../utils/releaseAgentSessions';
+import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -610,9 +612,13 @@ router.post(
       }
     }
 
-    // Deactivate in DB
-    user.isActive = false;
-    await userRepo.save(user);
+    // Deactivate in DB + cleanup sessions in one transaction
+    let releaseResult = { releasedSessions: 0, returnedHandoffs: 0, affectedSessionIds: [] as string[] };
+    await AppDataSource.transaction(async (manager) => {
+      user.isActive = false;
+      await manager.save(User, user);
+      releaseResult = await releaseAgentSessions(user.id, tenantId, manager);
+    });
 
     // Remove from Clerk org + invalidate cache
     const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
@@ -621,7 +627,23 @@ router.post(
       invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
     }
 
-    await logAudit(req.userId!, 'user.deactivated', 'user', user.id, tenantId);
+    await logAudit(req.userId!, 'user.deactivated', 'user', user.id, tenantId, {
+      releasedSessions: releaseResult.releasedSessions,
+      returnedHandoffs: releaseResult.returnedHandoffs,
+    });
+
+    // Socket events — after transaction committed
+    for (const sessionId of releaseResult.affectedSessionIds) {
+      emitToSession(tenantId, sessionId, 'agent:removed', {
+        sessionId,
+        reason: 'agent_deactivated',
+      });
+    }
+    if (releaseResult.releasedSessions > 0 || releaseResult.returnedHandoffs > 0) {
+      emitToTenantAgents(tenantId, 'handoff:queue_updated', {
+        reason: 'agent_deactivated',
+      });
+    }
 
     logger.info('Deactivated user', { userId: user.id, tenantId, deactivatedBy: req.userId });
     res.json({ success: true });

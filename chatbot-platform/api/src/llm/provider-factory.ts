@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { LLMProvider } from './llm.types';
 import { OpenAIProvider } from './openai.provider';
 import { AnthropicProvider } from './anthropic.provider';
@@ -22,7 +23,8 @@ export function getProvider(
     apiKey = config.rag.anthropicApiKey;
   }
 
-  const cacheKey = `${provider}:${apiKey.slice(-8)}`;
+  const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
+  const cacheKey = `${provider}:${keyHash}`;
   const cached = providerCache.get(cacheKey);
   if (cached) return cached;
 

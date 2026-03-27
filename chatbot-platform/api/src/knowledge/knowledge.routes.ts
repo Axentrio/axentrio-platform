@@ -3,11 +3,12 @@ import multer from 'multer';
 import { asyncHandler } from '../middleware/error-handler';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
+import { requireRole } from '../middleware/auth.middleware';
 import * as ctrl from './knowledge.controller';
 
 const router = Router();
 
-// All routes require agent authentication
+// All routes require authentication
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 const upload = multer({
@@ -19,15 +20,18 @@ const upload = multer({
   },
 });
 
-router.get('/base', asyncHandler(ctrl.getKnowledgeBase));
-router.patch('/base', asyncHandler(ctrl.updateKnowledgeBase));
-router.post('/documents/upload', upload.single('file'), asyncHandler(ctrl.uploadFile));
-router.get('/documents', asyncHandler(ctrl.listDocuments));
-router.post('/documents', asyncHandler(ctrl.createDocument));
-router.get('/documents/:id', asyncHandler(ctrl.getDocument));
-router.put('/documents/:id', asyncHandler(ctrl.updateDocument));
-router.delete('/documents/:id', asyncHandler(ctrl.deleteDocument));
-router.post('/documents/:id/retry', asyncHandler(ctrl.retryDocument));
-router.get('/stats', asyncHandler(ctrl.getStats));
+// Read-only: admin, supervisor
+router.get('/base', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getKnowledgeBase));
+router.get('/documents', requireRole('admin', 'supervisor'), asyncHandler(ctrl.listDocuments));
+router.get('/documents/:id', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getDocument));
+router.get('/stats', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getStats));
+
+// Write: admin only
+router.patch('/base', requireRole('admin'), asyncHandler(ctrl.updateKnowledgeBase));
+router.post('/documents/upload', requireRole('admin'), upload.single('file'), asyncHandler(ctrl.uploadFile));
+router.post('/documents', requireRole('admin'), asyncHandler(ctrl.createDocument));
+router.put('/documents/:id', requireRole('admin'), asyncHandler(ctrl.updateDocument));
+router.delete('/documents/:id', requireRole('admin'), asyncHandler(ctrl.deleteDocument));
+router.post('/documents/:id/retry', requireRole('admin'), asyncHandler(ctrl.retryDocument));
 
 export default router;

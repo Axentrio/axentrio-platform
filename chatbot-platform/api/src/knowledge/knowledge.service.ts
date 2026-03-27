@@ -1,21 +1,40 @@
 import crypto from 'crypto';
 import { DataSource, Repository } from 'typeorm';
+import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { KnowledgeDocument, DocumentType } from '../database/entities/KnowledgeDocument';
 import { KnowledgeChunk } from '../database/entities/KnowledgeChunk';
+import { Tenant } from '../database/entities/Tenant';
+import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 
 const uploadTokens = new Map<string, { tenantId: string; storagePath: string; expiresAt: Date }>();
+
+// Periodically clean expired upload tokens (every 15 minutes)
+setInterval(() => {
+  const now = new Date();
+  for (const [key, val] of uploadTokens) {
+    if (val.expiresAt < now) uploadTokens.delete(key);
+  }
+}, 15 * 60 * 1000).unref();
+
+const DOCUMENT_LIMITS: Record<string, number> = {
+  free: 50,
+  pro: 500,
+  enterprise: Infinity,
+};
 
 export class KnowledgeService {
   private kbRepo: Repository<KnowledgeBase>;
   private docRepo: Repository<KnowledgeDocument>;
   private chunkRepo: Repository<KnowledgeChunk>;
+  private tenantRepo: Repository<Tenant>;
 
   constructor(dataSource: DataSource) {
     this.kbRepo = dataSource.getRepository(KnowledgeBase);
     this.docRepo = dataSource.getRepository(KnowledgeDocument);
     this.chunkRepo = dataSource.getRepository(KnowledgeChunk);
+    this.tenantRepo = dataSource.getRepository(Tenant);
   }
 
   async getOrCreateKnowledgeBase(tenantId: string): Promise<KnowledgeBase> {
@@ -38,10 +57,6 @@ export class KnowledgeService {
 
     Object.assign(kb, updates);
     const saved = await this.kbRepo.save(kb);
-
-    if (configChanged) {
-      await this.reprocessAllDocuments(tenantId, kb.id);
-    }
 
     return { kb: saved, configChanged };
   }
@@ -79,6 +94,16 @@ export class KnowledgeService {
     }
   ): Promise<KnowledgeDocument> {
     const kb = await this.getOrCreateKnowledgeBase(tenantId);
+
+    // Enforce tier-based document limits
+    const tenant = await this.tenantRepo.findOneOrFail({ where: { id: tenantId } });
+    const limit = DOCUMENT_LIMITS[tenant.tier] ?? DOCUMENT_LIMITS.free;
+    if (limit !== Infinity) {
+      const docCount = await this.docRepo.count({ where: { knowledgeBaseId: kb.id } });
+      if (docCount >= limit) {
+        throw new Error(`Document limit reached for ${tenant.tier} tier (${limit} documents). Upgrade to add more.`);
+      }
+    }
 
     let storagePath: string | null = null;
     if (data.uploadToken) {
@@ -125,6 +150,17 @@ export class KnowledgeService {
 
   async deleteDocument(tenantId: string, documentId: string): Promise<void> {
     const doc = await this.docRepo.findOneOrFail({ where: { id: documentId, tenantId } });
+
+    // Delete S3 object if file-based document
+    if (doc.storagePath && config.s3?.bucket) {
+      try {
+        const s3 = new S3Client({ region: config.s3.region });
+        await s3.send(new DeleteObjectCommand({ Bucket: config.s3.bucket, Key: doc.storagePath }));
+      } catch (err) {
+        logger.warn(`Failed to delete S3 object ${doc.storagePath}`, { error: err });
+      }
+    }
+
     await this.docRepo.remove(doc);
   }
 
@@ -173,13 +209,14 @@ export class KnowledgeService {
     };
   }
 
-  private async reprocessAllDocuments(tenantId: string, kbId: string): Promise<void> {
+  async reprocessAllDocuments(tenantId: string, kbId: string): Promise<KnowledgeDocument[]> {
     const docs = await this.docRepo.find({ where: { knowledgeBaseId: kbId, tenantId } });
     for (const doc of docs) {
       doc.processingVersion += 1;
       doc.status = 'pending';
     }
-    await this.docRepo.save(docs);
+    const saved = await this.docRepo.save(docs);
     logger.info(`Reprocessing ${docs.length} documents for tenant ${tenantId}`);
+    return saved;
   }
 }

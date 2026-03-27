@@ -45,6 +45,13 @@ router.get(
       throw new NotFoundError('Tenant not found');
     }
 
+    // Strip encrypted AI API key from response
+    const settings = { ...tenant.settings };
+    if (settings.ai) {
+      const { apiKey, ...aiRest } = settings.ai;
+      settings.ai = { ...aiRest, hasApiKey: !!apiKey } as any;
+    }
+
     res.json({
       success: true,
       data: {
@@ -54,7 +61,7 @@ router.get(
         apiKey: tenant.apiKey,
         tier: tenant.tier,
         status: tenant.status,
-        settings: tenant.settings,
+        settings,
         maxSessions: tenant.maxSessions,
         currentSessions: tenant.currentSessions,
         webhookUrl: tenant.webhookUrl,

@@ -85,6 +85,31 @@ export async function forwardMessageToN8n(
 
     if (tenant && aiSettings?.enabled) {
       try {
+        // Check business hours — if outside hours, send offHoursMessage and skip LLM
+        const bh = tenant.settings?.businessHours;
+        if (bh?.enabled && bh.schedule?.length) {
+          const now = new Date();
+          const tz = bh.timezone || 'UTC';
+          const localTime = new Date(now.toLocaleString('en-US', { timeZone: tz }));
+          const dayName = localTime.toLocaleDateString('en-US', { weekday: 'long', timeZone: tz }).toLowerCase();
+          const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
+
+          const isOutsideHours = !daySchedule || daySchedule.closed || (() => {
+            const timeStr = localTime.toTimeString().slice(0, 5); // HH:MM
+            return timeStr < daySchedule.open || timeStr >= daySchedule.close;
+          })();
+
+          if (isOutsideHours) {
+            const botParticipant = await ensureBotParticipant(session, aiSettings);
+            await sendBotMessage(
+              session,
+              botParticipant.id,
+              aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon."
+            );
+            return true;
+          }
+        }
+
         // Check escalation keywords first
         const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
         const lowerContent = savedMessage.content.toLowerCase();
@@ -308,6 +333,18 @@ async function handleBotHandoff(
   botParticipantId: string,
   reason: HandoffRequest['reason']
 ): Promise<void> {
+  // Check if handoff is enabled for this tenant
+  const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
+  if (tenant?.settings?.features?.handoffEnabled === false) {
+    // Handoff disabled — send fallback message but keep session in bot status
+    const aiSettings = tenant.settings?.ai;
+    const fallbackMsg = aiSettings?.guardrails?.fallbackMessage ||
+      "I'm sorry, I couldn't find an answer to your question.";
+    await sendBotMessage(session, botParticipantId, fallbackMsg);
+    logger.info(`Handoff skipped for session ${session.id} (handoff disabled)`, { reason });
+    return;
+  }
+
   // Update session status
   session.requestHandoff();
   await sessionRepository.save(session);

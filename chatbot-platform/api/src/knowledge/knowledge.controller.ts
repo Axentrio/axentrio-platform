@@ -37,8 +37,9 @@ export async function updateKnowledgeBase(req: Request, res: Response) {
   const { kb, configChanged } = await getService().updateKnowledgeBase(tenantId, data);
 
   if (configChanged) {
-    const { documents } = await getService().listDocuments(tenantId, { status: 'pending', limit: 1000 });
-    for (const doc of documents) {
+    // reprocessAllDocuments already set all docs to pending and returned them
+    const pendingDocs = await getService().reprocessAllDocuments(tenantId, kb.id);
+    for (const doc of pendingDocs) {
       try {
         const { addJob } = await import('../queue/message-queue');
         await addJob('knowledge-processing', {

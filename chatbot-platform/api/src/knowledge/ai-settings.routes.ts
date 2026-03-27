@@ -15,5 +15,6 @@ router.get('/ai-settings', requireRole('admin', 'supervisor'), asyncHandler(ctrl
 // Write: admin only
 router.patch('/ai-settings', requireRole('admin'), asyncHandler(ctrl.updateAiSettings));
 router.post('/ai-settings/test', requireRole('admin'), asyncHandler(ctrl.testAiSettings));
+router.post('/ai-settings/test-chat', requireRole('admin'), asyncHandler(ctrl.testChat));
 
 export default router;

@@ -13,7 +13,7 @@ import {
   updateDocumentSchema,
   listDocumentsSchema,
 } from '../schemas/knowledge.schema';
-import { updateAiSettingsSchema, testAiSettingsSchema } from '../schemas/ai-settings.schema';
+import { updateAiSettingsSchema, testAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
 
 let knowledgeService: KnowledgeService;
@@ -244,4 +244,63 @@ export async function testAiSettings(req: Request, res: Response) {
     provider: testProvider,
     model: testModel,
   });
+}
+
+export async function testChat(req: Request, res: Response) {
+  const tenantId = (req as any).tenantId;
+  const { message, history, useKnowledgeBase } = testChatSchema.parse(req.body);
+  const tenantRepo = AppDataSource.getRepository(Tenant);
+  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+
+  const ai = tenant.settings?.ai;
+  if (!ai?.enabled) {
+    res.status(400).json({ error: 'AI is not enabled. Save your AI settings first.' });
+    return;
+  }
+  if (!ai.provider || !ai.model || !ai.brandVoice?.name) {
+    res.status(400).json({ error: 'Incomplete AI settings. Configure provider, model, and brand voice first.' });
+    return;
+  }
+
+  if (useKnowledgeBase) {
+    const result = await generateResponse(AppDataSource, tenantId, ai, message, history);
+    res.json({
+      response: result.response,
+      provider: ai.provider,
+      model: ai.model,
+      confidence: result.confidence,
+      chunksUsed: result.chunks.length,
+    });
+  } else {
+    const { getProvider } = await import('../llm/provider-factory');
+    const provider = getProvider(ai.provider, ai.apiKey);
+
+    const systemPrompt = `You are ${ai.brandVoice.name}.
+Tone: ${ai.brandVoice.tone}
+${ai.brandVoice.customInstructions}
+
+Rules:
+- Never discuss: ${ai.guardrails.topicsToAvoid.join(', ') || 'N/A'}
+- Max response: ${ai.guardrails.maxResponseLength} characters
+- If you cannot help, say: "${ai.guardrails.fallbackMessage}"`;
+
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...history.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      { role: 'user' as const, content: message },
+    ];
+
+    const response = await provider.chat(messages, {
+      model: ai.model,
+      maxTokens: 1000,
+      temperature: 0.3,
+      jsonMode: false,
+    });
+
+    res.json({
+      response: response.content,
+      provider: ai.provider,
+      model: ai.model,
+    });
+  }
 }

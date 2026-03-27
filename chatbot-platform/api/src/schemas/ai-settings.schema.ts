@@ -27,3 +27,12 @@ export const testAiSettingsSchema = z.object({
   model: z.string().min(1).optional(),
   apiKey: z.string().min(1).optional(),
 });
+
+export const testChatSchema = z.object({
+  message: z.string().min(1).max(2000),
+  history: z.array(z.object({
+    role: z.enum(['user', 'assistant']),
+    content: z.string(),
+  })).max(50).default([]),
+  useKnowledgeBase: z.boolean().default(false),
+});

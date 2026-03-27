@@ -267,6 +267,34 @@ export function useDeleteUser() {
   });
 }
 
+export function useAdminResendInvite(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) =>
+      api.post(`/admin/tenants/${tenantId}/pending-invites/${inviteId}/resend`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Invite resent');
+    },
+    onError: () => toast.error('Failed to resend invite'),
+  });
+}
+
+export function useAdminCancelInvite(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (inviteId: string) =>
+      api.delete(`/admin/tenants/${tenantId}/pending-invites/${inviteId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Invite cancelled');
+    },
+    onError: () => toast.error('Failed to cancel invite'),
+  });
+}
+
 // --- CSV Export ---
 
 export async function downloadAuditLogsCsv(params: Record<string, string>) {

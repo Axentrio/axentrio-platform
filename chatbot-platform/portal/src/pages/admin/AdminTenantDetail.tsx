@@ -17,6 +17,7 @@ import {
   Eye,
   EyeOff,
   RotateCw,
+  X,
 } from 'lucide-react';
 import { api } from '@services/apiClient';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -26,6 +27,8 @@ import {
   useAdminTenantAudit,
   useOptimisticSuspendTenant,
   useOptimisticActivateTenant,
+  useAdminResendInvite,
+  useAdminCancelInvite,
 } from '../../queries/useAdminQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { Card } from '@/components/ui/card';
@@ -132,6 +135,8 @@ const AdminTenantDetail: React.FC = () => {
 
   const suspendMutation = useOptimisticSuspendTenant();
   const activateMutation = useOptimisticActivateTenant();
+  const resendInvite = useAdminResendInvite(id!);
+  const cancelInvite = useAdminCancelInvite(id!);
 
   const rotateMutation = useMutation({
     mutationFn: () => api.post<{ apiKey: string }>(`/admin/tenants/${id}/api-key/rotate`),
@@ -340,6 +345,7 @@ const AdminTenantDetail: React.FC = () => {
                 <TableHead>Role</TableHead>
                 <TableHead>Sent</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -354,6 +360,28 @@ const AdminTenantDetail: React.FC = () => {
                     ) : (
                       <Badge className="bg-status-online/10 text-status-online border-status-online/20">Pending</Badge>
                     )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => resendInvite.mutate(inv.id)}
+                        disabled={resendInvite.isPending}
+                        title="Resend invite"
+                      >
+                        <RotateCw className="w-4 h-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => cancelInvite.mutate(inv.id)}
+                        disabled={cancelInvite.isPending}
+                        title="Cancel invite"
+                      >
+                        <X className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

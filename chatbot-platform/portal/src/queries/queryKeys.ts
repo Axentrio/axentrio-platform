@@ -51,6 +51,12 @@ export const queryKeys = {
     documents: () => [...queryKeys.knowledge.all(), 'documents'] as const,
     stats: () => [...queryKeys.knowledge.all(), 'stats'] as const,
   },
+  cannedResponses: {
+    all: () => ['cannedResponses'] as const,
+    lists: () => [...queryKeys.cannedResponses.all(), 'list'] as const,
+    list: (filters?: Record<string, unknown>) => [...queryKeys.cannedResponses.lists(), filters] as const,
+    detail: (id: string) => [...queryKeys.cannedResponses.all(), 'detail', id] as const,
+  },
   admin: {
     all: () => ['admin'] as const,
     users: () => [...queryKeys.admin.all(), 'users'] as const,

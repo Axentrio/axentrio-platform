@@ -116,6 +116,65 @@ const AiSettingsTab: React.FC = () => {
   if (error) return <InlineError message="Failed to load AI settings" />;
 
   const readOnly = !isAdmin;
+  const isFirstSetup = !aiSettings?.provider && !aiSettings?.model && !aiSettings?.enabled;
+
+  // First-time setup prompt
+  if (isFirstSetup && isAdmin) {
+    return (
+      <div className="mt-8 flex flex-col items-center text-center max-w-md mx-auto">
+        <div className="p-4 rounded-2xl bg-primary-500/5 mb-5">
+          <FlaskConical className="w-10 h-10 text-primary-400/60" />
+        </div>
+        <h2 className="text-lg font-semibold text-text-primary">Set up your AI Bot</h2>
+        <p className="text-sm text-text-muted mt-2 leading-relaxed">
+          Configure an AI provider to enable automated responses for your visitors.
+          Your bot will use your knowledge base documents to answer questions accurately.
+        </p>
+        <div className="mt-6 space-y-3 w-full text-left">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-2">
+            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary-500/10 text-primary-400 flex items-center justify-center text-xs font-bold">1</span>
+            <div>
+              <p className="text-sm font-medium text-text-primary">Choose a provider</p>
+              <p className="text-xs text-text-muted">OpenAI or Anthropic — select your LLM provider</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-2">
+            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary-500/10 text-primary-400 flex items-center justify-center text-xs font-bold">2</span>
+            <div>
+              <p className="text-sm font-medium text-text-primary">Add your API key</p>
+              <p className="text-xs text-text-muted">Your key is encrypted and never exposed</p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-surface-2">
+            <span className="flex-shrink-0 w-6 h-6 rounded-full bg-primary-500/10 text-primary-400 flex items-center justify-center text-xs font-bold">3</span>
+            <div>
+              <p className="text-sm font-medium text-text-primary">Customize your bot</p>
+              <p className="text-xs text-text-muted">Set brand voice, tone, and guardrails</p>
+            </div>
+          </div>
+        </div>
+        <Button className="mt-6" onClick={() => {
+          setEnabled(true);
+        }}>
+          Get Started
+        </Button>
+      </div>
+    );
+  }
+
+  if (isFirstSetup && !isAdmin) {
+    return (
+      <div className="mt-8 flex flex-col items-center text-center max-w-sm mx-auto">
+        <div className="p-4 rounded-2xl bg-surface-2 mb-4">
+          <FlaskConical className="w-8 h-8 text-text-muted/40" />
+        </div>
+        <h2 className="text-base font-medium text-text-primary">AI Bot not configured</h2>
+        <p className="text-xs text-text-muted mt-1.5">
+          An admin needs to set up the AI provider and settings before the bot can be used.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-4 space-y-5">

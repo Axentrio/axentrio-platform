@@ -760,14 +760,14 @@ const OrgMembersPanel: React.FC = () => {
       <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) setRemoveMemberUserId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remove Member</AlertDialogTitle>
+            <AlertDialogTitle>Deactivate Member</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove this member from the organization? This action cannot be undone.
+              Deactivate this member? They will lose access to the organization. You can reactivate them later.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmRemoveMember(); }}>Remove</AlertDialogAction>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmRemoveMember(); }}>Deactivate</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

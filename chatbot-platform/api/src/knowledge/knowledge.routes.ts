@@ -20,11 +20,11 @@ const upload = multer({
   },
 });
 
-// Read-only: admin, supervisor
-router.get('/base', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getKnowledgeBase));
-router.get('/documents', requireRole('admin', 'supervisor'), asyncHandler(ctrl.listDocuments));
-router.get('/documents/:id', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getDocument));
-router.get('/stats', requireRole('admin', 'supervisor'), asyncHandler(ctrl.getStats));
+// Read-only: admin, supervisor, agent
+router.get('/base', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getKnowledgeBase));
+router.get('/documents', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listDocuments));
+router.get('/documents/:id', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getDocument));
+router.get('/stats', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getStats));
 
 // Write: admin only
 router.patch('/base', requireRole('admin'), asyncHandler(ctrl.updateKnowledgeBase));

@@ -357,9 +357,10 @@ router.get(
       throw new NotFoundError('Session not found');
     }
 
-    // Get recent messages for this session
+    // Get recent messages with participant info for sender identity
     const messages = await messageRepository.find({
       where: { sessionId: id },
+      relations: ['participant'],
       order: { createdAt: 'DESC' },
       take: 50,
     });
@@ -372,7 +373,12 @@ router.get(
       visitorId: session.visitorId,
       assignedAgentId: session.assignedAgentId,
       assignedAgentName: session.assignedAgent?.userId ?? null,
-      messages: messages.reverse().map(serialiseMessage),
+      messages: messages.reverse().map((m) => ({
+        ...serialiseMessage(m),
+        sender: m.participant?.type ?? 'user',
+        senderName: m.participant?.name ?? 'Unknown',
+        participantId: m.participantId,
+      })),
       metadata: {
         source: session.source,
       },

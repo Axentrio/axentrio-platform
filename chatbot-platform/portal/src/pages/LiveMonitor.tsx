@@ -71,10 +71,10 @@ const LiveMonitor: React.FC = () => {
         isOpen={isChatModalOpen}
         onClose={handleCloseModal}
         title="Chat Preview"
-        size="lg"
+        size="xl"
       >
         {selectedChat && (
-          <div className="h-[600px]">
+          <div className="h-[70vh]">
             <ChatWindow
               chat={selectedChat}
               onClose={handleCloseModal}

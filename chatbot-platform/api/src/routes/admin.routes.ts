@@ -95,6 +95,53 @@ router.get('/tenants/:id/pending-invites', asyncHandler(async (req: Request, res
   sendSuccess(res, data);
 }));
 
+// POST /admin/tenants/:id/pending-invites/:inviteId/resend
+router.post('/tenants/:id/pending-invites/:inviteId/resend', asyncHandler(async (req: Request, res: Response) => {
+  const { id: tenantId, inviteId } = req.params;
+
+  const invite = await AppDataSource.getRepository(PendingInvite).findOne({
+    where: { id: inviteId, tenantId },
+  });
+  if (!invite) throw new NotFoundError('Invite not found');
+
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant?.clerkOrgId) throw new BadRequestError('Tenant has no Clerk organization linked');
+
+  const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email);
+  if (!sent) {
+    res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+    return;
+  }
+
+  invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  await AppDataSource.getRepository(PendingInvite).save(invite);
+
+  await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
+
+  logger.info('Super-admin resent invite', { inviteId, tenantId, resendBy: req.userId });
+  sendSuccess(res, {
+    id: invite.id,
+    email: invite.email,
+    role: invite.role,
+    expiresAt: invite.expiresAt,
+  });
+}));
+
+// DELETE /admin/tenants/:id/pending-invites/:inviteId
+router.delete('/tenants/:id/pending-invites/:inviteId', asyncHandler(async (req: Request, res: Response) => {
+  const { id: tenantId, inviteId } = req.params;
+
+  const inviteRepo = AppDataSource.getRepository(PendingInvite);
+  const invite = await inviteRepo.findOne({ where: { id: inviteId, tenantId } });
+  if (!invite) throw new NotFoundError('Invite not found');
+
+  await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
+  await inviteRepo.remove(invite);
+
+  logger.info('Super-admin cancelled invite', { inviteId, tenantId, cancelledBy: req.userId });
+  res.status(204).send();
+}));
+
 // GET /admin/tenants/:id/audit-logs — paginated audit logs for a tenant
 router.get('/tenants/:id/audit-logs', asyncHandler(async (req: Request, res: Response) => {
   const params = parsePaginationParams(req.query as Record<string, unknown>);

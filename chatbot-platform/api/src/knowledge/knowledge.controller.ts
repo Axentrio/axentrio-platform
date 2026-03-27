@@ -209,32 +209,39 @@ export async function updateAiSettings(req: Request, res: Response) {
 
 export async function testAiSettings(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
-  const { question } = testAiSettingsSchema.parse(req.body);
+  const { question, provider: inlineProvider, model: inlineModel, apiKey: inlineApiKey } = testAiSettingsSchema.parse(req.body);
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
   const ai = tenant.settings?.ai;
-  if (!ai?.enabled) {
-    res.status(400).json({ error: 'AI is not enabled' });
+
+  // Use inline values from the form, fall back to saved settings
+  const testProvider = inlineProvider || ai?.provider;
+  const testModel = inlineModel || ai?.model;
+  const testApiKey = inlineApiKey || ai?.apiKey;
+
+  if (!testProvider || !testModel) {
+    res.status(400).json({ error: 'Provider and model are required' });
     return;
   }
 
-  // Simple LLM ping — just test that the API key and model work, no embeddings needed
+  // Simple LLM ping — just test that the API key and model work
   const { getProvider } = await import('../llm/provider-factory');
-  const provider = getProvider(ai.provider, ai.apiKey);
+  // If an inline (unencrypted) API key is provided, pass it directly; otherwise use saved encrypted key
+  const provider = inlineApiKey
+    ? getProvider(testProvider, undefined, inlineApiKey)
+    : getProvider(testProvider, testApiKey);
   const response = await provider.chat(
     [
       { role: 'system', content: 'You are a helpful assistant. Reply briefly.' },
       { role: 'user', content: question },
     ],
-    { model: ai.model, maxTokens: 200, temperature: 0.3 }
+    { model: testModel, maxTokens: 200, temperature: 0.3 }
   );
 
   res.json({
     response: response.content,
-    confidence: 1,
-    chunks: [],
-    provider: ai.provider,
-    model: ai.model,
+    provider: testProvider,
+    model: testModel,
   });
 }

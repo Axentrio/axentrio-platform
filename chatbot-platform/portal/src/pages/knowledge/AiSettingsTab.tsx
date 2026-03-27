@@ -95,25 +95,17 @@ const AiSettingsTab: React.FC = () => {
     });
   };
 
-  const handleTest = async () => {
+  const handleTest = () => {
     setTestResult(null);
     setTestFailed(false);
-    // Save settings first so the backend has the latest config
-    await new Promise<void>((resolve, reject) => {
-      updateSettings.mutate({
-        enabled,
-        provider,
-        model,
-        apiKey: apiKey || (hasExistingKey ? undefined : null),
-        brandVoice: { name: botName || 'AI Assistant', tone, customInstructions },
-        guardrails: { greetingMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, fallbackMessage, offHoursMessage },
-      }, { onSuccess: () => resolve(), onError: () => reject() });
-    });
-    // Then run the test
-    testSettings.mutate('What are your return policies?', {
-      onSuccess: (data) => setTestResult(data),
-      onError: () => setTestFailed(true),
-    });
+    // Send current form values directly — no save needed
+    testSettings.mutate(
+      { question: 'Hello, can you help me?', provider, model, apiKey: apiKey || undefined },
+      {
+        onSuccess: (data) => setTestResult(data),
+        onError: () => setTestFailed(true),
+      },
+    );
   };
 
   if (isLoading) return <PageSkeleton variant="cards" />;

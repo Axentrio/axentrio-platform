@@ -23,4 +23,7 @@ export const updateAiSettingsSchema = z.object({
 
 export const testAiSettingsSchema = z.object({
   question: z.string().min(1).max(1000),
+  provider: z.enum(['openai', 'anthropic']).optional(),
+  model: z.string().min(1).optional(),
+  apiKey: z.string().min(1).optional(),
 });

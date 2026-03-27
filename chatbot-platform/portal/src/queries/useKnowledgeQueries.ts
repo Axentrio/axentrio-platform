@@ -141,8 +141,8 @@ export function useGetAiSettings() {
 
 export function useTestAiSettings() {
   return useMutation({
-    mutationFn: (question: string) =>
-      api.post<{ response: string; confidence: number; chunks: Any[]; provider: string; model: string }>('/tenants/me/ai-settings/test', { question }),
+    mutationFn: (data: { question: string; provider?: string; model?: string; apiKey?: string }) =>
+      api.post<{ response: string; provider: string; model: string }>('/tenants/me/ai-settings/test', data),
     onError: () => toast.error('Test failed'),
   });
 }

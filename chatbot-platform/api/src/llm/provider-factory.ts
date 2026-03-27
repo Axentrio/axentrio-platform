@@ -9,11 +9,14 @@ const providerCache = new Map<string, LLMProvider>();
 
 export function getProvider(
   provider: 'openai' | 'anthropic',
-  encryptedApiKey?: string
+  encryptedApiKey?: string,
+  rawApiKey?: string
 ): LLMProvider {
   let apiKey: string;
 
-  if (encryptedApiKey) {
+  if (rawApiKey) {
+    apiKey = rawApiKey;
+  } else if (encryptedApiKey) {
     apiKey = decrypt(encryptedApiKey);
   } else if (provider === 'openai') {
     if (!config.rag.openaiApiKey) throw new Error('OPENAI_API_KEY not configured');

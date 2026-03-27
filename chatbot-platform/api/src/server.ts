@@ -36,6 +36,8 @@ import userRoutes from './routes/users.routes';
 import clerkWebhookRoutes from './routes/clerk-webhook.routes';
 import webhookAdminRoutes from './routes/webhook-admin.routes';
 import adminRoutes from './routes/admin.routes';
+import knowledgeRoutes from './knowledge/knowledge.routes';
+import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
@@ -138,6 +140,8 @@ apiRouter.use('/files', fileRoutes);
 apiRouter.use('/notifications', notificationRoutes);
 apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
 apiRouter.use('/admin', adminRoutes);
+apiRouter.use('/knowledge', knowledgeRoutes);
+apiRouter.use('/tenants/me', aiSettingsRoutes);
 
 app.use('/api/v1', apiRouter);
 
@@ -175,6 +179,20 @@ async function startServer(): Promise<void> {
       logger.info('Message queue initialized');
     } catch (err) {
       logger.warn('Queue initialization failed, falling back to synchronous processing', { error: err });
+    }
+
+    // Register knowledge ingestion processor
+    try {
+      const { registerProcessor } = await import('./queue/message-queue');
+      const { createIngestionProcessor } = await import('./knowledge/ingestion.worker');
+      const { S3Client } = await import('@aws-sdk/client-s3');
+      const s3Client = config.s3?.bucket
+        ? new S3Client({ region: config.s3?.region || 'eu-west-1' })
+        : null;
+      registerProcessor('knowledge-processing', createIngestionProcessor(AppDataSource, s3Client));
+      logger.info('Knowledge ingestion processor registered');
+    } catch (err) {
+      logger.warn('Knowledge ingestion processor registration failed', { error: err });
     }
 
     // Initialize webhook integration module

@@ -12,6 +12,8 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Agent } from '../database/entities/Agent';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
+import { Tenant } from '../database/entities/Tenant';
+import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
@@ -270,8 +272,13 @@ router.post(
       throw new ForbiddenError('You are not assigned to this session');
     }
 
-    // Update session - return to waiting
-    session.status = 'waiting';
+    // Update session - return to bot if AI enabled, otherwise waiting
+    const tenantForAi = await AppDataSource.getRepository(Tenant).findOne({ where: { id: session.tenantId } });
+    const aiEnabled = (tenantForAi as any)?.settings?.ai?.enabled;
+    const kb = aiEnabled
+      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: session.tenantId, status: 'active' } })
+      : null;
+    session.status = (aiEnabled && kb) ? 'bot' : 'waiting';
     session.assignedAgentId = undefined;
     await sessionRepository.save(session);
 

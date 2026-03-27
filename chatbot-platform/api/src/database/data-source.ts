@@ -19,6 +19,9 @@ import { HandoffRequest } from './entities/HandoffRequest';
 import { WebhookDeliveryLog } from './entities/WebhookDeliveryLog';
 import { PendingInvite } from './entities/PendingInvite';
 import { AuditLog } from './entities/AuditLog';
+import { KnowledgeBase } from './entities/KnowledgeBase';
+import { KnowledgeDocument } from './entities/KnowledgeDocument';
+import { KnowledgeChunk } from './entities/KnowledgeChunk';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -43,6 +46,9 @@ export const AppDataSource = new DataSource({
     WebhookDeliveryLog,
     PendingInvite,
     AuditLog,
+    KnowledgeBase,
+    KnowledgeDocument,
+    KnowledgeChunk,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

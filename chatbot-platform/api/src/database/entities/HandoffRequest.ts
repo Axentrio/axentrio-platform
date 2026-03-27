@@ -17,7 +17,7 @@ import { ChatSession } from './ChatSession';
 import { Agent } from './Agent';
 
 export type HandoffStatus = 'requested' | 'accepted' | 'rejected' | 'completed' | 'timeout';
-export type HandoffReason = 'user_request' | 'bot_confidence_low' | 'escalation_trigger' | 'business_hours';
+export type HandoffReason = 'user_request' | 'bot_confidence_low' | 'escalation_trigger' | 'business_hours' | 'bot_escalation_keyword' | 'bot_no_knowledge' | 'bot_error';
 
 @Entity('handoff_requests')
 @Index(['sessionId', 'status'])
@@ -48,7 +48,7 @@ export class HandoffRequest {
 
   @Column({
     type: 'enum',
-    enum: ['user_request', 'bot_confidence_low', 'escalation_trigger', 'business_hours'],
+    enum: ['user_request', 'bot_confidence_low', 'escalation_trigger', 'business_hours', 'bot_escalation_keyword', 'bot_no_knowledge', 'bot_error'],
   })
   reason!: HandoffReason;
 

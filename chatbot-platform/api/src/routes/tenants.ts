@@ -45,6 +45,13 @@ router.get(
       throw new NotFoundError('Tenant not found');
     }
 
+    // Strip encrypted AI API key from response
+    const settings = { ...tenant.settings };
+    if (settings.ai) {
+      const { apiKey, ...aiRest } = settings.ai;
+      settings.ai = { ...aiRest, hasApiKey: !!apiKey } as any;
+    }
+
     res.json({
       success: true,
       data: {
@@ -54,7 +61,7 @@ router.get(
         apiKey: tenant.apiKey,
         tier: tenant.tier,
         status: tenant.status,
-        settings: tenant.settings,
+        settings,
         maxSessions: tenant.maxSessions,
         currentSessions: tenant.currentSessions,
         webhookUrl: tenant.webhookUrl,
@@ -97,6 +104,14 @@ router.patch(
       }
     }
 
+    // Reject AI settings updates via this endpoint
+    if (settings?.ai !== undefined) {
+      res.status(400).json({
+        error: 'AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.',
+      });
+      return;
+    }
+
     // Deep merge settings (preserve nested objects like theme, features)
     if (settings) {
       const existing = tenant.settings || {};
@@ -128,12 +143,19 @@ router.patch(
       updates: { name, webhookUrl: !!webhookUrl, settings: !!settings },
     });
 
+    // Strip encrypted AI API key from response
+    const responseSettings = { ...tenant.settings };
+    if (responseSettings.ai) {
+      const { apiKey: _k, ...aiRest } = responseSettings.ai;
+      responseSettings.ai = { ...aiRest, hasApiKey: !!_k } as any;
+    }
+
     res.json({
       success: true,
       data: {
         id: tenant.id,
         name: tenant.name,
-        settings: tenant.settings,
+        settings: responseSettings,
         webhookUrl: tenant.webhookUrl,
         webhookSecret: tenant.webhookSecret,
         updatedAt: tenant.updatedAt,

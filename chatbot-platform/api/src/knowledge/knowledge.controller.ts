@@ -219,11 +219,21 @@ export async function testAiSettings(req: Request, res: Response) {
     return;
   }
 
-  const result = await generateResponse(AppDataSource, tenantId, ai, question, []);
+  // Simple LLM ping — just test that the API key and model work, no embeddings needed
+  const { getProvider } = await import('../llm/provider-factory');
+  const provider = getProvider(ai.provider, ai.apiKey);
+  const response = await provider.chat(
+    [
+      { role: 'system', content: 'You are a helpful assistant. Reply briefly.' },
+      { role: 'user', content: question },
+    ],
+    { model: ai.model, maxTokens: 200, temperature: 0.3 }
+  );
+
   res.json({
-    response: result.response,
-    confidence: result.confidence,
-    chunks: result.chunks,
+    response: response.content,
+    confidence: 1,
+    chunks: [],
     provider: ai.provider,
     model: ai.model,
   });

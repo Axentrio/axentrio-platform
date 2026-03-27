@@ -333,8 +333,9 @@ router.get(
         .leftJoin(Participant, 'p', 'p.id = m.participant_id')
         .select(['m.session_id AS session_id', 'm.content AS content', 'm.content_encrypted AS encrypted', 'm.id AS id', 'p.type AS sender_type'])
         .where('m.session_id IN (:...ids)', { ids: sessionIds })
-        .orderBy('m.created_at', 'DESC')
         .distinctOn(['m.session_id'])
+        .orderBy('m.session_id')
+        .addOrderBy('m.created_at', 'DESC')
         .getRawMany();
 
       for (const row of msgs) {

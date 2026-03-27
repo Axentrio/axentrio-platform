@@ -31,7 +31,6 @@ import {
 
 describe('Handoff Flow', () => {
   let tenantId: string;
-  let agentId: string;
 
   beforeEach(async () => {
     const tenant = await createTestTenant();
@@ -39,7 +38,6 @@ describe('Handoff Flow', () => {
 
     const user = await createTestUser(tenantId, { role: 'admin' });
     const agent = await createTestAgent(tenantId, user.id);
-    agentId = agent.id;
 
     configureMockAuth(auth, {
       userId: agent.id,

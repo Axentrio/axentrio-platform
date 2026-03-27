@@ -60,13 +60,11 @@ import {
 
 describe('Chat Lifecycle', () => {
   let tenantId: string;
-  let participantId: string;
-
   beforeEach(async () => {
     const tenant = await createTestTenant();
     tenantId = tenant.id;
 
-    const admin = await createTestUser(tenantId, { role: 'admin' });
+    await createTestUser(tenantId, { role: 'admin' });
 
     // Create a default session + participant for the auth mock userId
     const session = await createTestSession(tenantId, { status: 'active' });
@@ -74,7 +72,6 @@ describe('Chat Lifecycle', () => {
       type: 'user',
       name: 'Widget User',
     });
-    participantId = participant.id;
 
     // Set auth userId to participant ID so message creation uses a valid FK
     configureMockAuth(auth, {

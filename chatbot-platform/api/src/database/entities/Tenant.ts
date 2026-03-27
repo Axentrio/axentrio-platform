@@ -68,7 +68,6 @@ export class Tenant {
     features?: {
       fileUploadEnabled: boolean;
       handoffEnabled: boolean;
-      aiEnabled: boolean;
     };
     businessHours?: {
       enabled: boolean;
@@ -79,6 +78,26 @@ export class Tenant {
         close: string;
         closed: boolean;
       }>;
+    };
+    ai?: {
+      enabled: boolean;
+      provider: 'openai' | 'anthropic';
+      model: string;
+      apiKey?: string;
+      brandVoice: {
+        name: string;
+        tone: 'formal' | 'casual' | 'friendly' | 'professional';
+        customInstructions: string;
+      };
+      guardrails: {
+        topicsToAvoid: string[];
+        escalationKeywords: string[];
+        confidenceThreshold: number;
+        maxResponseLength: number;
+        greetingMessage: string;
+        fallbackMessage: string;
+        offHoursMessage: string;
+      };
     };
   };
 

@@ -108,6 +108,18 @@ const envSchema = z.object({
   S3_SIGNED_URL_EXPIRY: z.string().default('900').transform(Number),
   CDN_URL: z.string().optional(),
 
+  // LLM / RAG
+  OPENAI_API_KEY: z.string().optional(),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  RAG_DEFAULT_CHUNK_SIZE: z.string().default('1000').transform(Number),
+  RAG_DEFAULT_CHUNK_OVERLAP: z.string().default('200').transform(Number),
+  RAG_MAX_CONTEXT_CHUNKS: z.string().default('5').transform(Number),
+  RAG_MIN_SIMILARITY: z.string().default('0.5').transform(Number),
+  RAG_CONVERSATION_HISTORY_LIMIT: z.string().default('10').transform(Number),
+  RAG_EMBEDDING_BATCH_SIZE: z.string().default('100').transform(Number),
+  RAG_MAX_EXTRACTED_CHARS: z.string().default('500000').transform(Number),
+  RAG_MAX_CHUNKS_PER_DOC: z.string().default('1000').transform(Number),
+
   // Super Admin
   SUPER_ADMIN_EMAILS: z.string().default('').transform(v =>
     v.split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
@@ -275,6 +287,19 @@ export const config = {
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
     signedUrlExpiry: env.S3_SIGNED_URL_EXPIRY,
     cdnUrl: env.CDN_URL,
+  },
+
+  rag: {
+    openaiApiKey: env.OPENAI_API_KEY,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    defaultChunkSize: env.RAG_DEFAULT_CHUNK_SIZE,
+    defaultChunkOverlap: env.RAG_DEFAULT_CHUNK_OVERLAP,
+    maxContextChunks: env.RAG_MAX_CONTEXT_CHUNKS,
+    minSimilarity: env.RAG_MIN_SIMILARITY,
+    conversationHistoryLimit: env.RAG_CONVERSATION_HISTORY_LIMIT,
+    embeddingBatchSize: env.RAG_EMBEDDING_BATCH_SIZE,
+    maxExtractedChars: env.RAG_MAX_EXTRACTED_CHARS,
+    maxChunksPerDoc: env.RAG_MAX_CHUNKS_PER_DOC,
   },
 
   audit: {

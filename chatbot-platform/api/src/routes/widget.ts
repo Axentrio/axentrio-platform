@@ -74,10 +74,10 @@ router.get(
         backgroundColor: '#ffffff',
         textColor: '#333333',
       },
-      features: tenant.settings?.features || {
-        fileUploadEnabled: false,
-        handoffEnabled: true,
-        aiEnabled: true,
+      features: {
+        fileUploadEnabled: tenant.settings?.features?.fileUploadEnabled ?? false,
+        handoffEnabled: tenant.settings?.features?.handoffEnabled ?? true,
+        aiEnabled: tenant.settings?.ai?.enabled ?? false,
       },
       businessHours: tenant.settings?.businessHours || {
         enabled: false,

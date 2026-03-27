@@ -97,6 +97,13 @@ router.patch(
       }
     }
 
+    // Reject AI settings updates via this endpoint
+    if (settings?.ai !== undefined) {
+      return res.status(400).json({
+        error: 'AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.',
+      });
+    }
+
     // Deep merge settings (preserve nested objects like theme, features)
     if (settings) {
       const existing = tenant.settings || {};

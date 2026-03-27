@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Plus } from 'lucide-react';
+import { Plus, Search, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card } from '@/components/ui/card';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -81,15 +80,15 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
     <div className="mt-4 space-y-4">
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between gap-3">
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-1.5 flex-wrap">
           {typeFilters.map((f) => (
             <button
               key={f}
               onClick={() => setTypeFilter(f)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
                 typeFilter === f
-                  ? 'bg-primary-500 text-white'
-                  : 'bg-surface-2 text-text-muted hover:text-text-secondary'
+                  ? 'bg-primary-500 text-white shadow-sm'
+                  : 'bg-surface-2 text-text-muted hover:text-text-secondary hover:bg-surface-3'
               }`}
             >
               {f === 'all' ? 'All' : f.toUpperCase()}
@@ -97,15 +96,18 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
           ))}
         </div>
         <div className="flex gap-2">
-          <Input
-            placeholder="Search..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-48"
-          />
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted" />
+            <Input
+              placeholder="Search documents..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-52 pl-8 h-8 text-xs"
+            />
+          </div>
           {isAdmin && (
-            <Button onClick={() => setIsModalOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
+            <Button size="sm" onClick={() => setIsModalOpen(true)}>
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
               Add Document
             </Button>
           )}
@@ -114,32 +116,35 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
 
       {/* Card Grid */}
       {filtered.length === 0 && !isLoading ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <div className="p-4 bg-surface-2 rounded-2xl mb-4">
-            <Plus className="w-8 h-8 text-text-muted" />
-          </div>
+        <div className="flex flex-col items-center justify-center py-16 text-center">
           {documents.length === 0 ? (
             <>
-              <h3 className="text-lg font-semibold text-text-primary">No documents yet</h3>
-              <p className="text-sm text-text-muted mt-1 max-w-sm">
+              <div className="p-4 rounded-2xl bg-primary-500/5 mb-4">
+                <Upload className="w-8 h-8 text-primary-400/60" />
+              </div>
+              <h3 className="text-base font-medium text-text-primary">No documents yet</h3>
+              <p className="text-xs text-text-muted mt-1.5 max-w-xs leading-relaxed">
                 {isAdmin
-                  ? 'Add your first document to start building your knowledge base.'
-                  : 'No documents have been added yet.'}
+                  ? 'Upload PDFs, paste text, or add FAQs to train your AI bot.'
+                  : 'No documents have been added to the knowledge base yet.'}
               </p>
               {isAdmin && (
-                <Button className="mt-4" onClick={() => setIsModalOpen(true)}>
-                  <Plus className="w-4 h-4 mr-2" />
+                <Button size="sm" className="mt-5" onClick={() => setIsModalOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1.5" />
                   Add your first document
                 </Button>
               )}
             </>
           ) : (
             <>
-              <h3 className="text-lg font-semibold text-text-primary">No matching documents</h3>
-              <p className="text-sm text-text-muted mt-1 max-w-sm">
+              <div className="p-4 rounded-2xl bg-surface-2 mb-4">
+                <Search className="w-8 h-8 text-text-muted/40" />
+              </div>
+              <h3 className="text-base font-medium text-text-primary">No matching documents</h3>
+              <p className="text-xs text-text-muted mt-1.5">
                 Try adjusting your search or filter.
               </p>
-              <Button variant="outline" className="mt-4" onClick={() => { setTypeFilter('all'); setSearch(''); }}>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => { setTypeFilter('all'); setSearch(''); }}>
                 Clear filters
               </Button>
             </>
@@ -157,15 +162,17 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
             />
           ))}
           {isAdmin && (
-            <Card
+            <div
               onClick={() => setIsModalOpen(true)}
-              className="border-2 border-dashed flex items-center justify-center min-h-[140px] cursor-pointer hover:border-primary-500 transition-colors"
+              className="border border-dashed border-edge rounded-xl flex items-center justify-center min-h-[140px] cursor-pointer hover:border-primary-500/50 hover:bg-primary-500/[0.02] transition-all duration-200 group/add"
             >
               <div className="text-center text-text-muted">
-                <Plus className="w-6 h-6 mx-auto mb-2" />
-                <p className="text-sm">Drop file or click to add</p>
+                <div className="p-2 rounded-lg bg-surface-2 group-hover/add:bg-primary-500/10 transition-colors mx-auto w-fit mb-2">
+                  <Plus className="w-4 h-4 group-hover/add:text-primary-400 transition-colors" />
+                </div>
+                <p className="text-xs">Add document</p>
               </div>
-            </Card>
+            </div>
           )}
         </div>
       )}

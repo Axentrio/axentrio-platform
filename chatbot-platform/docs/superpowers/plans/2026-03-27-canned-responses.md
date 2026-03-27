@@ -4,9 +4,18 @@
 
 **Goal:** Add pre-written message templates that agents can quickly insert during live chat via slash commands or a searchable picker.
 
-**Architecture:** Standalone CRUD module (entity, routes, schema, queries) following existing codebase patterns. Chat input component enhanced with slash-command detection and a canned-response picker popover. Variable substitution resolves `{{placeholders}}` at insert time.
+**Architecture:** Standalone CRUD module (entity, routes, schema, queries) following existing codebase patterns. Chat input component enhanced with slash-command detection and a canned-response picker popover. Variable substitution resolves `{{placeholders}}` at insert time using agent/session context.
 
 **Tech Stack:** TypeORM entity + migration, Express routes with Zod validation, React Query hooks, shadcn/ui components.
+
+**Important codebase conventions:**
+- `req.user.id` is the **agent ID**, not the DB user ID. Use `(req as ProvisionedRequest).userId` for the DB user ID.
+- `resolveTenantContext` sets `req.tenantId` for super-admin tenant switching. Always read `(req as ProvisionedRequest).tenantId` (not `req.user.tenantId`).
+- Migration column names use **quoted camelCase** (e.g. `"tenantId"`) to match TypeORM's default naming, NOT snake_case.
+- `api.get/post/patch/delete` in the portal **unwrap the response envelope** — callers get the inner data directly.
+- `validate(schema)` defaults to `req.body`. For query params, use `validate(schema, 'query')`.
+- Portal pages use **direct imports**, not `React.lazy`. No `Suspense` wrapper exists.
+- Shared canned responses can be managed by `admin`, `supervisor`, and `super_admin` roles.
 
 ---
 
@@ -74,6 +83,8 @@ git commit -m "feat(api): add canned_responses table migration"
 
 - [ ] **Step 1: Create entity file**
 
+Note: Column `name` properties use the **same quoted camelCase** as the migration (TypeORM default naming strategy).
+
 ```typescript
 import {
   Entity,
@@ -97,10 +108,10 @@ export class CannedResponse {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ type: 'uuid', name: 'tenant_id' })
+  @Column({ type: 'uuid' })
   tenantId!: string;
 
-  @Column({ type: 'uuid', nullable: true, name: 'created_by_user_id' })
+  @Column({ type: 'uuid', nullable: true })
   createdByUserId?: string;
 
   @Column({ type: 'varchar', length: 100 })
@@ -121,24 +132,24 @@ export class CannedResponse {
   @Column({ type: 'varchar', length: 10, default: 'personal' })
   scope!: CannedResponseScope;
 
-  @Column({ type: 'int', default: 0, name: 'usage_count' })
+  @Column({ type: 'int', default: 0 })
   usageCount!: number;
 
-  @Column({ type: 'boolean', default: true, name: 'is_active' })
+  @Column({ type: 'boolean', default: true })
   isActive!: boolean;
 
-  @CreateDateColumn({ name: 'created_at' })
+  @CreateDateColumn()
   createdAt!: Date;
 
-  @UpdateDateColumn({ name: 'updated_at' })
+  @UpdateDateColumn()
   updatedAt!: Date;
 
   @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'tenant_id' })
+  @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
 
   @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'created_by_user_id' })
+  @JoinColumn({ name: 'createdByUserId' })
   createdBy?: User;
 }
 ```
@@ -169,6 +180,8 @@ git commit -m "feat(api): add CannedResponse entity and register in data source"
 
 - [ ] **Step 1: Create schema file**
 
+Includes a `listCannedResponsesSchema` for query param validation (used with `validate(schema, 'query')`).
+
 ```typescript
 import { z } from 'zod';
 
@@ -193,6 +206,14 @@ export const updateCannedResponseSchema = z.object({
   content: z.string().min(1).max(5000).optional(),
   category: z.string().max(50).nullable().optional(),
   tags: z.array(z.string().max(50)).max(10).optional(),
+});
+
+export const listCannedResponsesSchema = z.object({
+  search: z.string().optional(),
+  category: z.string().optional(),
+  scope: z.enum(['shared', 'personal']).optional(),
+  page: z.coerce.number().int().positive().optional(),
+  limit: z.coerce.number().int().positive().max(100).optional(),
 });
 
 export const useCannedResponseSchema = z.object({
@@ -224,11 +245,14 @@ git commit -m "feat(api): add canned response validation schemas"
 
 - [ ] **Step 1: Add factory helper**
 
-Add to the bottom of `api/src/__tests__/helpers/factories.ts`:
-
+Add the `CannedResponse` import **at the top** of `api/src/__tests__/helpers/factories.ts` with the other imports:
 ```typescript
 import { CannedResponse } from '../../database/entities/CannedResponse';
+```
 
+Add the factory function **at the bottom** of the file (after the last existing factory):
+
+```typescript
 export async function createTestCannedResponse(
   tenantId: string,
   overrides: Partial<CannedResponse> = {},
@@ -248,6 +272,8 @@ export async function createTestCannedResponse(
 ```
 
 - [ ] **Step 2: Create integration test file**
+
+Note: `configureMockAuth` sets `req.userId` to the value passed as `userId`. Tests use the DB user ID (from `createTestUser`).
 
 ```typescript
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -339,32 +365,57 @@ describe('Canned Responses', () => {
 
       expect(res.status).toBe(403);
     });
+
+    it('should reject duplicate shortcut for shared responses', async () => {
+      await createTestCannedResponse(tenantId, {
+        scope: 'shared',
+        shortcut: 'duplicate',
+      });
+
+      const res = await request(app)
+        .post('/api/v1/canned-responses')
+        .send({
+          title: 'Another',
+          shortcut: 'duplicate',
+          content: 'content',
+          scope: 'shared',
+        });
+
+      expect(res.status).toBe(409);
+    });
   });
 
   describe('GET /api/v1/canned-responses', () => {
     it('should list shared + own personal responses', async () => {
+      // Create admin's personal response
+      await createTestCannedResponse(tenantId, {
+        scope: 'personal',
+        createdByUserId: adminUserId,
+        shortcut: 'mypersonal',
+      });
+
+      // Create shared response
       await createTestCannedResponse(tenantId, {
         scope: 'shared',
         createdByUserId: adminUserId,
         shortcut: 'shared1',
       });
 
+      // Create another user's personal response
       const agent = await createTestUser(tenantId, { role: 'agent' });
       await createTestCannedResponse(tenantId, {
         scope: 'personal',
         createdByUserId: agent.id,
-        shortcut: 'personal1',
+        shortcut: 'otherpersonal',
       });
-
-      // Agent should see shared but not other users' personal
-      configureMockAuth(auth, { userId: adminUserId, tenantId, role: 'admin' });
 
       const res = await request(app).get('/api/v1/canned-responses');
 
       expect(res.status).toBe(200);
       const shortcuts = res.body.data.data.map((r: any) => r.shortcut);
       expect(shortcuts).toContain('shared1');
-      expect(shortcuts).not.toContain('personal1');
+      expect(shortcuts).toContain('mypersonal');
+      expect(shortcuts).not.toContain('otherpersonal');
     });
 
     it('should filter by category', async () => {
@@ -383,6 +434,46 @@ describe('Canned Responses', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.data.every((r: any) => r.category === 'Billing')).toBe(true);
+    });
+
+    it('should not return soft-deleted responses', async () => {
+      await createTestCannedResponse(tenantId, {
+        scope: 'shared',
+        shortcut: 'deleted1',
+        isActive: false,
+      });
+
+      const res = await request(app).get('/api/v1/canned-responses');
+
+      expect(res.status).toBe(200);
+      const shortcuts = res.body.data.data.map((r: any) => r.shortcut);
+      expect(shortcuts).not.toContain('deleted1');
+    });
+  });
+
+  describe('GET /api/v1/canned-responses/:id', () => {
+    it('should return a single canned response', async () => {
+      const cr = await createTestCannedResponse(tenantId, {
+        scope: 'shared',
+        shortcut: 'detail1',
+      });
+
+      const res = await request(app).get(`/api/v1/canned-responses/${cr.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body.data.shortcut).toBe('detail1');
+    });
+
+    it('should not return another users personal response', async () => {
+      const agent = await createTestUser(tenantId, { role: 'agent' });
+      const cr = await createTestCannedResponse(tenantId, {
+        scope: 'personal',
+        createdByUserId: agent.id,
+      });
+
+      const res = await request(app).get(`/api/v1/canned-responses/${cr.id}`);
+
+      expect(res.status).toBe(404);
     });
   });
 
@@ -412,6 +503,23 @@ describe('Canned Responses', () => {
 
       expect(res.status).toBe(403);
     });
+
+    it('should reject agent editing another agents personal response', async () => {
+      const otherAgent = await createTestUser(tenantId, { role: 'agent' });
+      const cr = await createTestCannedResponse(tenantId, {
+        scope: 'personal',
+        createdByUserId: otherAgent.id,
+      });
+
+      const agent = await createTestUser(tenantId, { role: 'agent' });
+      configureMockAuth(auth, { userId: agent.id, tenantId, role: 'agent' });
+
+      const res = await request(app)
+        .patch(`/api/v1/canned-responses/${cr.id}`)
+        .send({ title: 'Stolen' });
+
+      expect(res.status).toBe(404);
+    });
   });
 
   describe('DELETE /api/v1/canned-responses/:id', () => {
@@ -424,6 +532,11 @@ describe('Canned Responses', () => {
       const res = await request(app).delete(`/api/v1/canned-responses/${cr.id}`);
 
       expect(res.status).toBe(204);
+
+      // Verify it's gone from listing
+      const listRes = await request(app).get('/api/v1/canned-responses');
+      const ids = listRes.body.data.data.map((r: any) => r.id);
+      expect(ids).not.toContain(cr.id);
     });
   });
 
@@ -486,6 +599,12 @@ git commit -m "test(api): add canned responses integration tests"
 
 - [ ] **Step 1: Create route file**
 
+Key conventions used:
+- `(req as ProvisionedRequest).userId` for the DB user ID (not `req.user.id` which is the agent ID)
+- `(req as ProvisionedRequest).tenantId` for the effective tenant (supports super-admin context switching)
+- `validate(listCannedResponsesSchema, 'query')` for GET query param validation
+- Duplicate shortcut conflicts caught and returned as 409
+
 ```typescript
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
@@ -493,13 +612,14 @@ import { CannedResponse } from '../database/entities/CannedResponse';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
-import { asyncHandler, NotFoundError, ForbiddenError } from '../middleware/error-handler';
+import { asyncHandler, NotFoundError, ForbiddenError, ConflictError } from '../middleware/error-handler';
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import {
   createCannedResponseSchema,
   updateCannedResponseSchema,
   useCannedResponseSchema,
+  listCannedResponsesSchema,
 } from '../schemas';
 
 const router = Router();
@@ -513,10 +633,11 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
  */
 router.get(
   '/',
+  validate(listCannedResponsesSchema, 'query'),
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
     const params = parsePaginationParams(req.query as Record<string, unknown>);
     const { search, category, scope } = req.query;
 
@@ -558,8 +679,8 @@ router.get(
   '/:id',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
 
     const cr = await cannedResponseRepository.findOne({
       where: { id: req.params.id, tenantId, isActive: true },
@@ -576,20 +697,37 @@ router.get(
 
 /**
  * POST /canned-responses
- * Admins can create shared. Anyone can create personal.
+ * Admins/supervisors can create shared. Anyone can create personal.
  */
 router.post(
   '/',
   validate(createCannedResponseSchema),
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
-    const role = authReq.user?.role;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
+    const role = authReq.userRole;
     const body = req.body;
 
     if (body.scope === 'shared' && !['admin', 'supervisor', 'super_admin'].includes(role!)) {
       throw new ForbiddenError('Only admins can create shared canned responses');
+    }
+
+    // Check for duplicate shortcut
+    const existingQb = cannedResponseRepository.createQueryBuilder('cr')
+      .where('cr.tenantId = :tenantId', { tenantId })
+      .andWhere('cr.shortcut = :shortcut', { shortcut: body.shortcut })
+      .andWhere('cr.isActive = true');
+
+    if (body.scope === 'shared') {
+      existingQb.andWhere('cr.scope = :scope', { scope: 'shared' });
+    } else {
+      existingQb.andWhere('cr.scope = :scope AND cr.createdByUserId = :userId', { scope: 'personal', userId });
+    }
+
+    const existing = await existingQb.getOne();
+    if (existing) {
+      throw new ConflictError('A canned response with this shortcut already exists');
     }
 
     const cr = cannedResponseRepository.create({
@@ -605,16 +743,16 @@ router.post(
 
 /**
  * PATCH /canned-responses/:id
- * Admins can edit shared. Owners can edit their personal.
+ * Admins/supervisors can edit shared. Owners can edit their personal.
  */
 router.patch(
   '/:id',
   validate(updateCannedResponseSchema),
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
-    const role = authReq.user?.role;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
+    const role = authReq.userRole;
 
     const cr = await cannedResponseRepository.findOne({
       where: { id: req.params.id, tenantId, isActive: true },
@@ -626,7 +764,7 @@ router.patch(
       throw new ForbiddenError('Only admins can edit shared canned responses');
     }
     if (cr.scope === 'personal' && cr.createdByUserId !== userId) {
-      throw new ForbiddenError('You can only edit your own personal responses');
+      throw new NotFoundError('Canned response not found');
     }
 
     Object.assign(cr, req.body);
@@ -643,9 +781,9 @@ router.delete(
   '/:id',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
-    const role = authReq.user?.role;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
+    const role = authReq.userRole;
 
     const cr = await cannedResponseRepository.findOne({
       where: { id: req.params.id, tenantId, isActive: true },
@@ -657,7 +795,7 @@ router.delete(
       throw new ForbiddenError('Only admins can delete shared canned responses');
     }
     if (cr.scope === 'personal' && cr.createdByUserId !== userId) {
-      throw new ForbiddenError('You can only delete your own personal responses');
+      throw new NotFoundError('Canned response not found');
     }
 
     cr.isActive = false;
@@ -675,8 +813,8 @@ router.post(
   validate(useCannedResponseSchema),
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
-    const userId = authReq.user?.id;
+    const tenantId = authReq.tenantId;
+    const userId = authReq.userId;
     const { variables = {} } = req.body;
 
     const cr = await cannedResponseRepository.findOne({
@@ -751,6 +889,8 @@ Add to `portal/src/queries/queryKeys.ts` inside the `queryKeys` object, after th
 ```
 
 - [ ] **Step 2: Create query hooks file**
+
+Note: `api.get/post/patch/delete` unwrap the response envelope. For list endpoints returning `sendSuccess(res, result)` where result is `{data, meta}`, callers receive `{data, meta}`. For single-object responses, callers get the object directly.
 
 ```typescript
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
@@ -880,9 +1020,11 @@ git commit -m "feat(portal): add canned response query keys and hooks"
 
 - [ ] **Step 1: Create the CannedResponses page component**
 
+Note: Uses `PageSkeleton` from `@/components/ui/page-skeleton` and `InlineError` from `@/components/ui/inline-error` (both exist in this codebase). Uses direct import in App.tsx (no React.lazy).
+
 ```typescript
 import React, { useState, useMemo } from 'react';
-import { Plus, Search, Pencil, Trash2, Zap } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
   useCannedResponses,
@@ -928,8 +1070,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { PageSkeleton } from '@/components/PageSkeleton';
-import { InlineError } from '@/components/InlineError';
+import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { InlineError } from '@/components/ui/inline-error';
 import { toast } from 'sonner';
 
 interface FormData {
@@ -1265,9 +1407,9 @@ export default CannedResponses;
 
 - [ ] **Step 2: Add to Sidebar**
 
-In `portal/src/components/Sidebar.tsx`, add the `Zap` icon import (it's already imported in the page but needs to be added to the sidebar icons):
+In `portal/src/components/Sidebar.tsx`:
 
-Add to the lucide-react import:
+Add `Zap` to the lucide-react import:
 ```typescript
 Zap,
 ```
@@ -1279,12 +1421,12 @@ Add to the `menuItems` array after the Knowledge Base entry:
 
 - [ ] **Step 3: Add route to App.tsx**
 
-Add import at the top of `portal/src/App.tsx`:
+Add a direct import at the top of `portal/src/App.tsx` with the other page imports:
 ```typescript
-const CannedResponses = React.lazy(() => import('./pages/CannedResponses'));
+import CannedResponses from './pages/CannedResponses';
 ```
 
-Add the route inside the protected routes section (after the `/knowledge` route, around line 240):
+Add the route inside the protected routes section (after the `/knowledge` route):
 ```typescript
 <Route path="/canned-responses" element={<CannedResponses />} />
 ```
@@ -1313,9 +1455,14 @@ git commit -m "feat(portal): add canned responses management page with CRUD"
 
 This component handles both the slash-command dropdown and the picker button popover.
 
+Key fixes from review:
+- `api.post` returns unwrapped data, so `result.content` not `result.data.content`
+- Passes `agent_name` from auth context as a built-in variable to `/use` endpoint
+
 ```typescript
 import React, { useState, useEffect, useRef } from 'react';
 import { Zap, Search } from 'lucide-react';
+import { useAppAuth } from '@auth/useAppAuth';
 import { useCannedResponses, useUseCannedResponse } from '../queries/useCannedResponseQueries';
 import type { CannedResponse } from '../queries/useCannedResponseQueries';
 import { Button } from '@/components/ui/button';
@@ -1340,10 +1487,10 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   onClose,
   visible,
 }) => {
+  const { user } = useAppAuth();
   const { data } = useCannedResponses();
   const useMutation = useUseCannedResponse();
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const listRef = useRef<HTMLDivElement>(null);
 
   const responses: CannedResponse[] = data?.data ?? [];
   const filtered = responses.filter((r) =>
@@ -1354,43 +1501,25 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
     setSelectedIndex(0);
   }, [query]);
 
-  useEffect(() => {
-    if (!visible) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
-      } else if (e.key === 'Enter' && filtered[selectedIndex]) {
-        e.preventDefault();
-        handleSelect(filtered[selectedIndex]);
-      } else if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [visible, filtered, selectedIndex]);
-
   const handleSelect = async (cr: CannedResponse) => {
     try {
-      const result = await useMutation.mutateAsync({ id: cr.id });
-      onSelect((result as any)?.data?.content ?? cr.content);
+      const result = await useMutation.mutateAsync({
+        id: cr.id,
+        variables: { agent_name: user?.name ?? '' },
+      });
+      onSelect((result as any)?.content ?? cr.content);
     } catch {
       onSelect(cr.content);
     }
   };
 
+  // Keyboard handler — called from ChatWindow's onKeyDown to avoid conflicts
+  // This is exposed via the `onKeyDown` prop pattern below
+
   if (!visible || filtered.length === 0) return null;
 
   return (
     <div
-      ref={listRef}
       className="absolute bottom-full left-0 right-0 mb-1 bg-surface-2 border border-edge rounded-lg shadow-lg max-h-[200px] overflow-y-auto z-50"
     >
       {filtered.map((cr, i) => (
@@ -1418,6 +1547,38 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   );
 };
 
+// Export keyboard handler for use in ChatWindow
+export function useSlashCommandKeyboard(
+  visible: boolean,
+  filteredCount: number,
+  selectedIndex: number,
+  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
+) {
+  return (e: React.KeyboardEvent): boolean => {
+    if (!visible || filteredCount === 0) return false;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((i) => Math.min(i + 1, filteredCount - 1));
+      return true;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((i) => Math.max(i - 1, 0));
+      return true;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      return true; // Signal to ChatWindow to trigger selection
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      return true;
+    }
+    return false;
+  };
+}
+
 interface CannedResponsePickerButtonProps {
   onSelect: (content: string) => void;
 }
@@ -1425,6 +1586,7 @@ interface CannedResponsePickerButtonProps {
 export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProps> = ({
   onSelect,
 }) => {
+  const { user } = useAppAuth();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const { data } = useCannedResponses();
@@ -1448,8 +1610,11 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
 
   const handleSelect = async (cr: CannedResponse) => {
     try {
-      const result = await useMutation.mutateAsync({ id: cr.id });
-      onSelect((result as any)?.data?.content ?? cr.content);
+      const result = await useMutation.mutateAsync({
+        id: cr.id,
+        variables: { agent_name: user?.name ?? '' },
+      });
+      onSelect((result as any)?.content ?? cr.content);
     } catch {
       onSelect(cr.content);
     }
@@ -1557,6 +1722,30 @@ const handleCannedResponseSelect = (content: string) => {
   setMessageInput(content);
   setShowSlashMenu(false);
   inputRef.current?.focus();
+};
+```
+
+**Update the `handleKeyPress` function** to intercept Enter/ArrowUp/ArrowDown when the slash menu is open (this prevents Enter from sending `/shortcut` as a message):
+```typescript
+const handleKeyPress = (e: React.KeyboardEvent) => {
+  // When slash menu is open, let it handle navigation keys
+  if (showSlashMenu) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowSlashMenu(false);
+      return;
+    }
+    // ArrowUp/ArrowDown/Enter are handled by the slash dropdown
+    if (['ArrowUp', 'ArrowDown', 'Enter'].includes(e.key)) {
+      // Don't send the message — the dropdown will handle selection
+      return;
+    }
+  }
+
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    handleSend();
+  }
 };
 ```
 

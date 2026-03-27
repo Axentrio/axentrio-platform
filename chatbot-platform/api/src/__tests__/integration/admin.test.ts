@@ -50,4 +50,22 @@ describe('Admin Routes', () => {
       expect(res.status).toBe(401);
     });
   });
+
+  describe('POST /api/v1/admin/tenants/:id/pending-invites/:inviteId/resend', () => {
+    it('should reject unauthenticated requests', async () => {
+      const res = await request(app).post(
+        '/api/v1/admin/tenants/00000000-0000-0000-0000-000000000000/pending-invites/00000000-0000-0000-0000-000000000001/resend',
+      );
+      expect(res.status).toBe(401);
+    });
+  });
+
+  describe('DELETE /api/v1/admin/tenants/:id/pending-invites/:inviteId', () => {
+    it('should reject unauthenticated requests', async () => {
+      const res = await request(app).delete(
+        '/api/v1/admin/tenants/00000000-0000-0000-0000-000000000000/pending-invites/00000000-0000-0000-0000-000000000001',
+      );
+      expect(res.status).toBe(401);
+    });
+  });
 });

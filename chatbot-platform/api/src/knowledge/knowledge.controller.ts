@@ -290,17 +290,22 @@ Rules:
       { role: 'user' as const, content: message },
     ];
 
-    const response = await provider.chat(messages, {
-      model: ai.model,
-      maxTokens: 1000,
-      temperature: 0.3,
-      jsonMode: false,
-    });
+    try {
+      const response = await provider.chat(messages, {
+        model: ai.model,
+        maxTokens: 1000,
+        temperature: 0.3,
+        jsonMode: false,
+      });
 
-    res.json({
-      response: response.content,
-      provider: ai.provider,
-      model: ai.model,
-    });
+      res.json({
+        response: response.content,
+        provider: ai.provider,
+        model: ai.model,
+      });
+    } catch (err) {
+      logger.error('Test chat LLM call failed', err);
+      res.status(500).json({ error: 'LLM call failed. Check your API key and model.' });
+    }
   }
 }

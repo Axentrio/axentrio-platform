@@ -88,7 +88,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
       const lastMsg = chat.messages[chat.messages.length - 1];
       return lastMsg.content.substring(0, 60) + (lastMsg.content.length > 60 ? '...' : '');
     }
-    return 'No messages yet';
+    return '';
   };
 
   return (
@@ -194,7 +194,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
                   {/* Last message */}
                   <p className="text-sm text-text-secondary truncate">
-                    {getLastMessage(chat)}
+                    {getLastMessage(chat) || ''}
                   </p>
 
                   {/* Meta info */}

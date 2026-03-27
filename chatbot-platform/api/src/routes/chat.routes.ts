@@ -339,6 +339,52 @@ router.get(
 );
 
 /**
+ * GET /chat/:id
+ * Get a single chat session detail (agent endpoint)
+ */
+router.get(
+  '/:id',
+  requireClerkAuth, autoProvision, resolveTenantContext,
+  asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+
+    const session = await sessionRepository.findOne({
+      where: { id, tenantId: req.user?.tenantId },
+      relations: ['assignedAgent'],
+    });
+
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    // Get recent messages for this session
+    const messages = await messageRepository.find({
+      where: { sessionId: id },
+      order: { createdAt: 'DESC' },
+      take: 50,
+    });
+
+    sendSuccess(res, {
+      id: session.id,
+      sessionId: session.id,
+      tenantId: session.tenantId,
+      status: session.status,
+      visitorId: session.visitorId,
+      assignedAgentId: session.assignedAgentId,
+      assignedAgentName: session.assignedAgent?.userId ?? null,
+      messages: messages.reverse().map(serialiseMessage),
+      metadata: {
+        source: session.source,
+      },
+      createdAt: session.createdAt,
+      updatedAt: session.lastActivityAt,
+      lastMessageAt: session.lastActivityAt,
+      closedAt: session.endedAt,
+    });
+  })
+);
+
+/**
  * POST /chat/:id/transfer
  * Transfer session to another agent
  */

@@ -28,9 +28,9 @@ export function TenantCommandPalette() {
   } | null>(null);
 
   const handleSelect = useCallback(
-    (tenantId: string, tenantName: string, status: string) => {
+    (tenantId: string, tenantName: string, status?: string) => {
       // Don't allow selecting suspended/cancelled tenants
-      if (status !== 'active') return;
+      if (status === 'suspended' || status === 'cancelled') return;
       // Selecting the already-active tenant is a no-op
       if (activeTenant?.tenantId === tenantId) {
         closeTenantPalette();

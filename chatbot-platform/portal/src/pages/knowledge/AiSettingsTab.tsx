@@ -333,6 +333,26 @@ const AiSettingsTab: React.FC = () => {
                 </div>
               </div>
               <div>
+                <Label className="mb-1 text-text-secondary">Fallback Message</Label>
+                <Textarea
+                  value={fallbackMessage}
+                  onChange={(e) => setFallbackMessage(e.target.value)}
+                  placeholder="I'm connecting you to a human agent..."
+                  rows={2}
+                  disabled={readOnly}
+                />
+                <p className="text-[10px] text-text-muted mt-1">Shown when the bot can't answer confidently</p>
+              </div>
+            </AccordionContent>
+          </AccordionItem>
+
+          {/* Advanced Settings */}
+          <AccordionItem value="advanced" className="border border-edge rounded-xl px-5 bg-surface-0/50">
+            <AccordionTrigger className="text-sm font-semibold">
+              <span className="flex items-center gap-2 text-text-muted">Advanced Settings</span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pb-4">
+              <div>
                 <Label className="mb-1 text-text-secondary">Custom Instructions</Label>
                 <Textarea
                   value={customInstructions}
@@ -341,6 +361,7 @@ const AiSettingsTab: React.FC = () => {
                   rows={3}
                   disabled={readOnly}
                 />
+                <p className="text-[10px] text-text-muted mt-1">Extra context appended to the system prompt</p>
               </div>
               <div>
                 <Label className="mb-1 text-text-secondary">Greeting Message</Label>
@@ -351,15 +372,6 @@ const AiSettingsTab: React.FC = () => {
                   disabled={readOnly}
                 />
               </div>
-            </AccordionContent>
-          </AccordionItem>
-
-          {/* Guardrails */}
-          <AccordionItem value="guardrails" className="border border-edge rounded-xl px-5 bg-surface-0/50">
-            <AccordionTrigger className="text-sm font-semibold">
-              <span className="flex items-center gap-2">Guardrails</span>
-            </AccordionTrigger>
-            <AccordionContent className="space-y-4 pb-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <Label className="mb-2 text-text-secondary">
@@ -373,6 +385,7 @@ const AiSettingsTab: React.FC = () => {
                     step={0.05}
                     disabled={readOnly}
                   />
+                  <p className="text-[10px] text-text-muted mt-1">Below this, bot hands off to an agent</p>
                 </div>
                 <div>
                   <Label className="mb-1 text-text-secondary">Max Response Length</Label>
@@ -382,6 +395,7 @@ const AiSettingsTab: React.FC = () => {
                     onChange={(e) => setMaxResponseLength(parseInt(e.target.value) || 0)}
                     disabled={readOnly}
                   />
+                  <p className="text-[10px] text-text-muted mt-1">Characters</p>
                 </div>
               </div>
               <div>
@@ -392,6 +406,7 @@ const AiSettingsTab: React.FC = () => {
                   placeholder="Type a keyword and press Enter..."
                   disabled={readOnly}
                 />
+                <p className="text-[10px] text-text-muted mt-1">Messages containing these trigger handoff to agent</p>
               </div>
               <div>
                 <Label className="mb-1 text-text-secondary">Topics to Avoid</Label>
@@ -399,16 +414,6 @@ const AiSettingsTab: React.FC = () => {
                   value={topicsToAvoid}
                   onChange={setTopicsToAvoid}
                   placeholder="Type a topic and press Enter..."
-                  disabled={readOnly}
-                />
-              </div>
-              <div>
-                <Label className="mb-1 text-text-secondary">Fallback Message</Label>
-                <Textarea
-                  value={fallbackMessage}
-                  onChange={(e) => setFallbackMessage(e.target.value)}
-                  placeholder="I'm connecting you to a human agent..."
-                  rows={2}
                   disabled={readOnly}
                 />
               </div>

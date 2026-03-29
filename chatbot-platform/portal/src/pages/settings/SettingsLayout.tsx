@@ -3,10 +3,11 @@
  * Vertical sidebar navigation for settings pages
  */
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
-import { User, Bell, Paintbrush, Plug } from 'lucide-react';
+import { User, Bell, Paintbrush, Palette, Plug } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAppAuth } from '@auth/useAppAuth';
 
 interface SettingsNavItem {
   path: string;
@@ -19,17 +20,24 @@ const settingsNav: SettingsNavItem[] = [
   { path: '/settings/profile', label: 'Profile', icon: User, group: 'Account' },
   { path: '/settings/notifications', label: 'Notifications', icon: Bell, group: 'Account' },
   { path: '/settings/appearance', label: 'Appearance', icon: Paintbrush, group: 'Account' },
+  { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Workspace' },
   { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Workspace' },
 ];
 
 const SettingsLayout: React.FC = () => {
   const location = useLocation();
+  const { isRole } = useAppAuth();
+
+  const visibleNav = useMemo(() => {
+    if (isRole(['admin', 'super_admin'])) return settingsNav;
+    return settingsNav.filter((item) => item.group !== 'Workspace');
+  }, [isRole]);
 
   if (location.pathname === '/settings') {
     return <Navigate to="/settings/profile" replace />;
   }
 
-  const groups = [...new Set(settingsNav.map((item) => item.group))];
+  const groups = [...new Set(visibleNav.map((item) => item.group))];
 
   return (
     <div className="h-full overflow-auto">
@@ -43,7 +51,7 @@ const SettingsLayout: React.FC = () => {
         {/* Mobile horizontal tabs */}
         <nav className="md:hidden w-full mb-4 overflow-x-auto">
           <div className="flex gap-1 border-b border-edge pb-2">
-            {settingsNav.map((item) => (
+            {visibleNav.map((item) => (
               <NavLink
                 key={item.path}
                 to={item.path}
@@ -72,7 +80,7 @@ const SettingsLayout: React.FC = () => {
                   {group}
                 </span>
                 <ul className="space-y-0.5">
-                  {settingsNav
+                  {visibleNav
                     .filter((item) => item.group === group)
                     .map((item) => (
                       <li key={item.path}>

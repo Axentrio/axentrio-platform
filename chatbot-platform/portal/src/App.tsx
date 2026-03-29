@@ -40,6 +40,7 @@ import ProfileSettings from '@pages/settings/ProfileSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import IntegrationSettings from '@pages/settings/IntegrationSettings';
+import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
@@ -245,6 +246,7 @@ const App: React.FC = () => {
                         <Route path="profile" element={<ProfileSettings />} />
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />
+                        <Route path="widget" element={<WidgetBrandSettings />} />
                         <Route path="integrations" element={<IntegrationSettings />} />
                       </Route>
                     </Route>

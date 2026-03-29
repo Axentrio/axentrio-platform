@@ -27,6 +27,7 @@ jobs:
 
     env:
       TEST_DATABASE_URL: postgresql://test:test@localhost:5432/chatbot_test
+      DATABASE_URL: postgresql://test:test@localhost:5432/chatbot_test
       JWT_SECRET: test-jwt-secret-for-ci
       ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef
       NODE_ENV: test

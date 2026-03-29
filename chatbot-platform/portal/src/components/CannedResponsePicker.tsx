@@ -76,9 +76,12 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
             handleSelect(cr);
           }}
         >
-          <div className="truncate mr-2">
-            <span className="font-medium text-text-primary">{cr.title}</span>
-            <span className="text-text-muted ml-2">/{cr.shortcut}</span>
+          <div className="min-w-0 mr-2">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-text-primary">{cr.title}</span>
+              <span className="text-text-muted">/{cr.shortcut}</span>
+            </div>
+            <div className="text-xs text-text-muted truncate">{cr.content}</div>
           </div>
           {cr.category && (
             <span className="text-xs text-text-muted flex-shrink-0">{cr.category}</span>

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useCallback } from 'react';
 import { Check } from 'lucide-react';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { DialogTitle } from '@/components/ui/dialog';
@@ -24,11 +24,6 @@ export function TenantCommandPalette() {
   const { switchTenant } = useTenantSwitch();
   const { data: tenants, isLoading, isError, refetch } = useAdminTenantsAll();
 
-  const [pendingTenant, setPendingTenant] = useState<{
-    tenantId: string;
-    tenantName: string;
-  } | null>(null);
-
   const handleSelect = useCallback(
     (tenantId: string, tenantName: string, status?: string) => {
       // Don't allow selecting suspended/cancelled tenants
@@ -38,27 +33,16 @@ export function TenantCommandPalette() {
         closeTenantPalette();
         return;
       }
-      setPendingTenant({ tenantId, tenantName });
+      // Switch directly
+      switchTenant({ tenantId, tenantName });
     },
-    [activeTenant, closeTenantPalette]
+    [activeTenant, closeTenantPalette, switchTenant]
   );
-
-  const handleConfirm = useCallback(() => {
-    if (pendingTenant) {
-      switchTenant(pendingTenant);
-      setPendingTenant(null);
-    }
-  }, [pendingTenant, switchTenant]);
-
-  const handleCancel = useCallback(() => {
-    setPendingTenant(null);
-  }, []);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
         closeTenantPalette();
-        setPendingTenant(null);
       }
     },
     [closeTenantPalette]
@@ -145,23 +129,6 @@ export function TenantCommandPalette() {
           </>
         )}
       </CommandList>
-
-      {/* Confirmation bar */}
-      {pendingTenant && (
-        <div className="border-t border-edge px-4 py-3 flex items-center justify-between bg-surface-1">
-          <span className="text-sm text-text-secondary">
-            Switch to <strong className="text-text-primary">{pendingTenant.tenantName}</strong>?
-          </span>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleCancel}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={handleConfirm}>
-              Confirm
-            </Button>
-          </div>
-        </div>
-      )}
     </CommandDialog>
   );
 }

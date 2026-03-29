@@ -34,13 +34,14 @@ export function TenantCommandPalette() {
   const handleSelect = useCallback(
     (tenantId: string, tenantName: string, status?: string) => {
       if (status === 'suspended' || status === 'cancelled') return;
-      if (activeTenant?.tenantId === tenantId) {
+      const currentId = activeTenant?.tenantId ?? ownTenantId;
+      if (currentId === tenantId) {
         closeTenantPalette();
         return;
       }
       switchTenant({ tenantId, tenantName });
     },
-    [activeTenant, closeTenantPalette, switchTenant]
+    [activeTenant, ownTenantId, closeTenantPalette, switchTenant]
   );
 
   // Sort: active tenant pinned to top, then alphabetical

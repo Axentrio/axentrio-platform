@@ -1,5 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Check } from 'lucide-react';
+import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
+import { DialogTitle } from '@/components/ui/dialog';
 import {
   CommandDialog,
   CommandInput,
@@ -73,6 +75,9 @@ export function TenantCommandPalette() {
 
   return (
     <CommandDialog open={isTenantPaletteOpen} onOpenChange={handleOpenChange}>
+      <VisuallyHidden>
+        <DialogTitle>Switch tenant</DialogTitle>
+      </VisuallyHidden>
       <CommandInput placeholder="Search tenants..." />
       <CommandList>
         {isLoading && (

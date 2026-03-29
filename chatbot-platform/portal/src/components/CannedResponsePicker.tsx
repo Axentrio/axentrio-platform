@@ -58,13 +58,17 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
 
   return (
     <div
+      role="listbox"
+      aria-label="Canned responses"
       className="absolute bottom-full left-0 right-0 mb-1 bg-surface-2 border border-edge rounded-lg shadow-lg max-h-[200px] overflow-y-auto z-50"
     >
       {filtered.map((cr, i) => (
         <button
           key={cr.id}
+          role="option"
+          aria-selected={i === selectedIndex}
           className={cn(
-            'w-full px-3 py-2 text-left text-sm flex items-center justify-between hover:bg-surface-3',
+            'w-full px-3 min-h-[44px] text-left text-sm flex items-center justify-between hover:bg-surface-3',
             i === selectedIndex && 'bg-surface-3'
           )}
           onMouseDown={(e) => {
@@ -72,12 +76,12 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
             handleSelect(cr);
           }}
         >
-          <div>
+          <div className="truncate mr-2">
             <span className="font-medium text-text-primary">{cr.title}</span>
             <span className="text-text-muted ml-2">/{cr.shortcut}</span>
           </div>
           {cr.category && (
-            <span className="text-xs text-text-muted">{cr.category}</span>
+            <span className="text-xs text-text-muted flex-shrink-0">{cr.category}</span>
           )}
         </button>
       ))}
@@ -185,6 +189,9 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
             />
           </div>
         </div>
+        <div className="px-3 py-1.5 text-xs text-text-muted border-b border-edge">
+          Tip: Type <kbd className="px-1 py-0.5 bg-surface-3 rounded text-[10px] font-mono">/</kbd> in chat to quick-select
+        </div>
         <div className="max-h-[300px] overflow-y-auto">
           {Object.keys(grouped).length === 0 ? (
             <div className="p-4 text-center text-sm text-text-muted">
@@ -199,16 +206,16 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
                 {items.map((cr) => (
                   <button
                     key={cr.id}
-                    className="w-full px-3 py-2 text-left text-sm hover:bg-surface-3 flex items-center justify-between"
+                    className="w-full px-3 min-h-[44px] py-2 text-left text-sm hover:bg-surface-3 flex items-center justify-between"
                     onClick={() => handleSelect(cr)}
                   >
-                    <div>
-                      <div className="font-medium text-text-primary">{cr.title}</div>
-                      <div className="text-xs text-text-muted truncate max-w-[220px]">
+                    <div className="min-w-0 mr-2">
+                      <div className="font-medium text-text-primary truncate">{cr.title}</div>
+                      <div className="text-xs text-text-muted truncate">
                         {cr.content}
                       </div>
                     </div>
-                    <code className="text-xs text-text-muted">/{cr.shortcut}</code>
+                    <code className="text-xs text-text-muted flex-shrink-0">/{cr.shortcut}</code>
                   </button>
                 ))}
               </div>

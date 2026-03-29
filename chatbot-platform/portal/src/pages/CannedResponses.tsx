@@ -184,7 +184,7 @@ const CannedResponses: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           <Input
@@ -233,8 +233,19 @@ const CannedResponses: React.FC = () => {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-text-muted py-8">
-                  No canned responses found
+                <TableCell colSpan={6} className="text-center py-12">
+                  <div className="flex flex-col items-center gap-3">
+                    <p className="text-text-muted">
+                      {responses.length === 0
+                        ? 'No canned responses yet'
+                        : 'No responses match your filters'}
+                    </p>
+                    {responses.length === 0 && (
+                      <Button variant="outline" size="sm" onClick={openCreate}>
+                        <Plus className="w-4 h-4 mr-2" /> Create your first response
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             ) : (
@@ -253,10 +264,10 @@ const CannedResponses: React.FC = () => {
                   <TableCell className="text-right">{cr.usageCount}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1 justify-end">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(cr)}>
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(cr)} aria-label={`Edit ${cr.title}`}>
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeletingId(cr.id)}>
+                      <Button variant="ghost" size="icon" onClick={() => setDeletingId(cr.id)} aria-label={`Delete ${cr.title}`}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -350,9 +361,9 @@ const CannedResponses: React.FC = () => {
             <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button
               onClick={handleSubmit}
-              disabled={!form.title || !form.shortcut || !form.content}
+              disabled={!form.title || !form.shortcut || !form.content || createMutation.isPending || updateMutation.isPending}
             >
-              {editingId ? 'Save' : 'Create'}
+              {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : editingId ? 'Save' : 'Create'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -369,7 +380,7 @@ const CannedResponses: React.FC = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>Delete</AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

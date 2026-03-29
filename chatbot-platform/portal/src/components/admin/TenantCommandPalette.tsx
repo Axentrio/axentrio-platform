@@ -123,6 +123,11 @@ export function TenantCommandPalette() {
                   <span className="truncate">{tenant.name}</span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                  {isActive && (
+                    <Badge variant="success" className="text-xs">
+                      Active
+                    </Badge>
+                  )}
                   {isInactive && (
                     <Badge variant="outline" className="text-xs capitalize">
                       {tenant.status}

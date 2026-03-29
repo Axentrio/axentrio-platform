@@ -332,7 +332,7 @@ const CannedResponses: React.FC = () => {
                 rows={4}
               />
               <p className="text-xs text-text-muted">
-                Use {'{{variable_name}}'} for dynamic content
+                Available variables: <code className="bg-surface-3 px-1 rounded">{'{{agent_name}}'}</code> <code className="bg-surface-3 px-1 rounded">{'{{customer_name}}'}</code> — or add your own like <code className="bg-surface-3 px-1 rounded">{'{{order_id}}'}</code>
               </p>
             </div>
             <div className="grid grid-cols-2 gap-4">

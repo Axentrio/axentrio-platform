@@ -20,6 +20,11 @@ interface SlashCommandDropdownProps {
   registerKeyHandler?: (handler: (e: React.KeyboardEvent) => boolean) => void;
 }
 
+// Resolve {{variables}} client-side for instant insertion
+function resolveVariables(content: string, variables: Record<string, string>): string {
+  return content.replace(/\{\{(\w+)\}\}/g, (match, key) => variables[key] ?? match);
+}
+
 export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   query,
   onSelect,
@@ -41,16 +46,15 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
     setSelectedIndex(0);
   }, [query]);
 
-  const handleSelect = async (cr: CannedResponse) => {
-    try {
-      const result = await useMutation.mutateAsync({
-        id: cr.id,
-        variables: { agent_name: user?.firstName ?? '' },
-      });
-      onSelect((result as any)?.content ?? cr.content);
-    } catch {
-      onSelect(cr.content);
-    }
+  const handleSelect = (cr: CannedResponse) => {
+    // Insert immediately with client-side variable resolution
+    const resolved = resolveVariables(cr.content, {
+      agent_name: user?.firstName ?? '',
+    });
+    onSelect(resolved);
+
+    // Track usage in background (fire-and-forget)
+    useMutation.mutate({ id: cr.id, variables: { agent_name: user?.firstName ?? '' } });
   };
 
   // Register keyboard handler with ChatWindow so it can delegate key events
@@ -155,18 +159,17 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
     return acc;
   }, {});
 
-  const handleSelect = async (cr: CannedResponse) => {
-    try {
-      const result = await useMutation.mutateAsync({
-        id: cr.id,
-        variables: { agent_name: user?.firstName ?? '' },
-      });
-      onSelect((result as any)?.content ?? cr.content);
-    } catch {
-      onSelect(cr.content);
-    }
+  const handleSelect = (cr: CannedResponse) => {
+    // Insert immediately with client-side variable resolution
+    const resolved = resolveVariables(cr.content, {
+      agent_name: user?.firstName ?? '',
+    });
+    onSelect(resolved);
     setOpen(false);
     setSearch('');
+
+    // Track usage in background (fire-and-forget)
+    useMutation.mutate({ id: cr.id, variables: { agent_name: user?.firstName ?? '' } });
   };
 
   return (

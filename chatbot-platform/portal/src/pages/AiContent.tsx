@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BookOpen, MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical } from 'lucide-react';
+import { MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -24,17 +24,17 @@ import AiSettingsTab from './knowledge/AiSettingsTab';
 import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
 
-type Tab = 'knowledge' | 'canned' | 'ai-settings';
+type Tab = 'bot' | 'canned';
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: 'knowledge', label: 'Knowledge Base', icon: BookOpen },
+  { key: 'bot', label: 'AI Bot', icon: Bot },
   { key: 'canned', label: 'Canned Responses', icon: MessageSquareText },
-  { key: 'ai-settings', label: 'AI Settings', icon: Settings2 },
 ];
 
 const AiContent: React.FC = () => {
   const { isRole } = useAppAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('knowledge');
+  const [activeTab, setActiveTab] = useState<Tab>('bot');
+  const [showAiSettings, setShowAiSettings] = useState(false);
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | undefined>();
@@ -116,40 +116,65 @@ const AiContent: React.FC = () => {
 
       {/* Tab Content */}
       <div className="px-6 py-4">
-        {activeTab === 'knowledge' && (
-          <DocumentsTab
-            initialFilter={activeFilter}
-            onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
-            showAiBanner={queriesReady && total > 0 && !hasAiConfigured && isRole(['admin', 'supervisor'])}
-            onConfigureAi={() => setActiveTab('ai-settings')}
-          />
+        {activeTab === 'bot' && (
+          <div className="space-y-6">
+            {/* AI Settings — collapsible section */}
+            {isRole(['admin', 'supervisor']) && (
+              <div className="border border-edge rounded-xl overflow-hidden">
+                <button
+                  onClick={() => setShowAiSettings(!showAiSettings)}
+                  className="w-full flex items-center justify-between px-4 py-3 bg-surface-2 hover:bg-surface-3 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    <Settings2 className="w-4 h-4 text-text-muted" />
+                    <span className="text-sm font-medium text-text-primary">AI Settings</span>
+                    {aiSettings?.enabled && (
+                      <span className="px-1.5 py-0.5 text-xs rounded-full bg-status-online/10 text-status-online">Active</span>
+                    )}
+                    {!aiSettings?.enabled && queriesReady && (
+                      <span className="px-1.5 py-0.5 text-xs rounded-full bg-accent-500/10 text-accent-400">Not configured</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {isRole('admin') && showAiSettings && (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
+                            <MoreVertical className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setShowResetConfirm(true)} className="text-red-400">
+                            Reset AI Settings
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
+                    <svg className={`w-4 h-4 text-text-muted transition-transform ${showAiSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                  </div>
+                </button>
+                {showAiSettings && (
+                  <div className="px-4 py-4 border-t border-edge">
+                    <div className="max-w-2xl">
+                      <AiSettingsTab />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Knowledge Base documents */}
+            <DocumentsTab
+              initialFilter={activeFilter}
+              onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
+              showAiBanner={queriesReady && total > 0 && !hasAiConfigured && isRole(['admin', 'supervisor'])}
+              onConfigureAi={() => setShowAiSettings(true)}
+            />
+          </div>
         )}
 
         {activeTab === 'canned' && (
           <CannedResponsesContent />
-        )}
-
-        {activeTab === 'ai-settings' && (
-          <div className="max-w-2xl">
-            <div className="flex items-center justify-between mb-4">
-              <div />
-              {isRole('admin') && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={() => setShowResetConfirm(true)} className="text-red-400">
-                      Reset AI Settings
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-            </div>
-            <AiSettingsTab />
-          </div>
         )}
       </div>
 

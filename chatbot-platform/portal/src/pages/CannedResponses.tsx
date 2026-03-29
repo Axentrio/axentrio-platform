@@ -223,6 +223,7 @@ const CannedResponses: React.FC = () => {
           <TableHeader>
             <TableRow>
               <TableHead>Title</TableHead>
+              <TableHead className="hidden md:table-cell">Content</TableHead>
               <TableHead>Shortcut</TableHead>
               <TableHead>Category</TableHead>
               <TableHead>Scope</TableHead>
@@ -233,7 +234,7 @@ const CannedResponses: React.FC = () => {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-12">
+                <TableCell colSpan={7} className="text-center py-12">
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-text-muted">
                       {responses.length === 0
@@ -251,7 +252,21 @@ const CannedResponses: React.FC = () => {
             ) : (
               filtered.map((cr) => (
                 <TableRow key={cr.id}>
-                  <TableCell className="font-medium">{cr.title}</TableCell>
+                  <TableCell>
+                    <div className="font-medium">{cr.title}</div>
+                    {cr.tags.length > 0 && (
+                      <div className="flex gap-1 mt-1 flex-wrap">
+                        {cr.tags.map((tag) => (
+                          <span key={tag} className="text-[10px] px-1.5 py-0.5 bg-surface-3 text-text-muted rounded">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell">
+                    <p className="text-sm text-text-secondary truncate max-w-[300px]">{cr.content}</p>
+                  </TableCell>
                   <TableCell>
                     <code className="text-xs bg-surface-3 px-1.5 py-0.5 rounded">/{cr.shortcut}</code>
                   </TableCell>
@@ -375,7 +390,12 @@ const CannedResponses: React.FC = () => {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete canned response?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will remove the response from your team. This action cannot be undone.
+              {(() => {
+                const target = responses.find((r) => r.id === deletingId);
+                return target
+                  ? `"${target.title}" (/${target.shortcut}) will be removed. This action cannot be undone.`
+                  : 'This will remove the response. This action cannot be undone.';
+              })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

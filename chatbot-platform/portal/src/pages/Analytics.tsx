@@ -4,7 +4,10 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAnalyticsTimeseries, useAnalyticsChatMetrics, useAnalyticsAgents } from '../queries/useAnalyticsQueries';
+import { useDashboardMetrics } from '../queries/useDashboardQueries';
+import { useAppAuth } from '@auth/useAppAuth';
 import {
   LineChart,
   Line,
@@ -22,7 +25,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { Download, TrendingUp, Users, MessageSquare, Clock, Star } from 'lucide-react';
+import { Download, TrendingUp, Users, MessageSquare, Clock, Star, Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -136,6 +139,9 @@ const chartTooltipStyle = {
 };
 
 const Analytics: React.FC = () => {
+  const navigate = useNavigate();
+  const { user } = useAppAuth();
+  const isAgent = user?.role === 'agent';
   const [dateRange, setDateRange] = useState('7d');
   const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'chats'>('overview');
 
@@ -162,6 +168,10 @@ const Analytics: React.FC = () => {
     data: agentsRes,
     isLoading: isLoadingAgents,
   } = useAnalyticsAgents(activeTab === 'agents' || activeTab === 'overview');
+
+  // Dashboard real-time metrics (sessions, agents, etc.)
+  const { data: rawDashboard } = useDashboardMetrics();
+  const dashboard = (rawDashboard as any)?.dashboard;
 
   /* ---------------------------------------------------------------- */
   /*  Derived data                                                     */
@@ -198,29 +208,55 @@ const Analytics: React.FC = () => {
 
   const activeAgentCount = agents.filter((a) => a.status === 'online').length;
 
-  // Stats cards
-  const stats = [
+  // Stats cards — 6 real-time metrics combining Dashboard + Analytics data
+  const stats: Array<{
+    label: string;
+    value: string;
+    change: string;
+    icon: React.FC<any>;
+    color: string;
+    bgColor: string;
+    onClick?: () => void;
+  }> = [
     {
-      label: 'Total Chats',
-      value: metrics ? metrics.total.toLocaleString() : '—',
-      change: '', // no comparison endpoint yet
+      label: 'Active Chats',
+      value: dashboard ? String(dashboard.sessions.active + dashboard.sessions.bot) : '—',
+      change: '',
       icon: MessageSquare,
       color: 'text-primary-400',
       bgColor: 'bg-primary-600/10',
+      onClick: () => navigate('/inbox'),
     },
     {
-      label: 'Avg Response Time',
-      value: metrics ? `${metrics.avgDurationSeconds}s` : '—',
+      label: 'Pending Handoffs',
+      value: dashboard ? String(dashboard.sessions.handoff) : '—',
       change: '',
-      icon: Clock,
+      icon: Headphones,
+      color: 'text-accent-400',
+      bgColor: 'bg-accent-500/10',
+      onClick: () => navigate('/inbox'),
+    },
+    {
+      label: 'Online Agents',
+      value: dashboard ? `${dashboard.agents.online}/${dashboard.agents.total}` : '—',
+      change: '',
+      icon: Users,
       color: 'text-status-online',
       bgColor: 'bg-status-online/10',
     },
     {
+      label: 'Avg Response Time',
+      value: dashboard ? `${dashboard.avgResponseTimeSeconds}s` : '—',
+      change: '',
+      icon: Clock,
+      color: 'text-chat-bot',
+      bgColor: 'bg-chat-bot/10',
+    },
+    {
       label: 'CSAT Score',
       value:
-        agents.length > 0
-          ? `${(agents.reduce((s, a) => s + a.satisfactionScore, 0) / agents.length).toFixed(1)}/5`
+        dashboard?.csatScore != null
+          ? `${dashboard.csatScore}/5`
           : '—',
       change: '',
       icon: Star,
@@ -228,12 +264,12 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-accent-500/10',
     },
     {
-      label: 'Active Agents',
-      value: agents.length > 0 ? String(activeAgentCount) : '—',
+      label: 'Total Chats',
+      value: metrics ? metrics.total.toLocaleString() : '—',
       change: '',
-      icon: Users,
-      color: 'text-chat-bot',
-      bgColor: 'bg-chat-bot/10',
+      icon: TrendingUp,
+      color: 'text-primary-400',
+      bgColor: 'bg-primary-600/10',
     },
   ];
 
@@ -283,9 +319,14 @@ const Analytics: React.FC = () => {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         {stats.map((stat, index) => (
-          <Card key={index} variant="glass" className={cn("animate-fade-in-up", `stagger-${index + 1}`)}>
+          <Card
+            key={index}
+            variant="glass"
+            className={cn("animate-fade-in-up", `stagger-${index + 1}`, stat.onClick && "cursor-pointer")}
+            onClick={stat.onClick}
+          >
             <CardContent className="p-6">
               <div className="flex items-start justify-between">
                 <div>
@@ -307,7 +348,15 @@ const Analytics: React.FC = () => {
         ))}
       </div>
 
-      {/* Tabs */}
+      {/* Tabs — agents only see a link to Inbox */}
+      {isAgent ? (
+        <div className="text-center py-12">
+          <p className="text-text-secondary">
+            <Button variant="link" onClick={() => navigate('/inbox')}>Go to Inbox</Button>
+            {' '}to manage conversations
+          </p>
+        </div>
+      ) : (
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -464,6 +513,7 @@ const Analytics: React.FC = () => {
           </Card>
         </TabsContent>
       </Tabs>
+      )}
     </div>
   );
 };

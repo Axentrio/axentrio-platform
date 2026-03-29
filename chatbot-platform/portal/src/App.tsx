@@ -21,9 +21,12 @@ import { ProtectedRoute, AdminRoute, SupervisorRoute, SuperAdminRoute } from '@a
 
 // Layout
 import { Sidebar } from '@components/Sidebar';
-import { TenantContextSwitcher } from '@components/admin/TenantContextSwitcher';
+import { TenantCommandPalette } from '@components/admin/TenantCommandPalette';
+import { TenantImpersonationBanner } from '@components/admin/TenantImpersonationBanner';
 import { useTenantTheme } from '@/hooks/useTenantTheme';
 import { useOrganization } from '@clerk/clerk-react';
+import { useUiStore } from './stores/uiStore';
+import { useAppAuth } from '@auth/useAppAuth';
 
 // Pages
 import Dashboard from '@pages/Dashboard';
@@ -55,6 +58,33 @@ const queryClient = createQueryClient();
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   useTenantTheme();
   const { organization } = useOrganization();
+  const { openTenantPalette } = useUiStore();
+  const { user } = useAppAuth();
+  const isSuperAdmin = user?.role === 'super_admin';
+
+  // Global keyboard shortcut: Cmd+K / Ctrl+K
+  React.useEffect(() => {
+    if (!isSuperAdmin) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        // Don't trigger inside inputs/textareas/contenteditable
+        const target = e.target as HTMLElement;
+        if (
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable
+        ) {
+          return;
+        }
+        e.preventDefault();
+        openTenantPalette();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isSuperAdmin, openTenantPalette]);
 
   return (
     <div className="h-screen flex overflow-hidden bg-surface-1">
@@ -62,8 +92,8 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         <Sidebar />
       </div>
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 md:hidden">
+        <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between md:hidden">
+          <div className="flex items-center gap-2">
             {organization?.hasImage ? (
               <img
                 src={organization.imageUrl}
@@ -81,13 +111,13 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
               {organization?.name ?? 'HandsOff'}
             </span>
           </div>
-          <div className="hidden md:block" />
-          <TenantContextSwitcher />
         </div>
+        <TenantImpersonationBanner />
         <main className="flex-1 overflow-hidden">
           {children}
         </main>
       </div>
+      {isSuperAdmin && <TenantCommandPalette />}
     </div>
   );
 };

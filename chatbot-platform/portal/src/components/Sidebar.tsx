@@ -19,9 +19,13 @@ import {
   TrendingUp,
   BookOpen,
   Zap,
+  ChevronDown,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
+import { useTenantContextStore } from '../stores/tenantContextStore';
+import { useUiStore } from '../stores/uiStore';
+import { useTenantSwitch } from '../hooks/useTenantSwitch';
 import { Button } from '@/components/ui/button';
 import {
   Tooltip,
@@ -70,6 +74,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { user } = useAppAuth();
   const { signOut } = useClerk();
   const { organization } = useOrganization();
+  const { activeTenant } = useTenantContextStore();
+  const { openTenantPalette } = useUiStore();
+  const { exitTenant } = useTenantSwitch();
+  const isSuperAdmin = user?.role === 'super_admin';
+  const isImpersonating = isSuperAdmin && !!activeTenant;
+
   const hasAccess = (roles: UserRole[]) => {
     // While user is loading, show all items — route guards handle actual access
     if (!user) return true;
@@ -80,34 +90,73 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredAdminItems = adminMenuItems.filter((item) => hasAccess(item.roles));
 
   return (
-    <aside className={cn('flex flex-col w-full h-full bg-surface-0 border-r border-edge', className)}>
+    <aside className={cn(
+      'flex flex-col w-full h-full bg-surface-0 border-r border-edge',
+      isImpersonating && 'border-l-[3px] border-l-orange-500',
+      className
+    )}>
       {/* Gradient overlay at top */}
       <div className="absolute top-0 left-0 right-0 h-32 bg-gradient-to-b from-primary-600/5 to-transparent pointer-events-none" />
 
-      {/* Org branding */}
-      <div className="flex items-center gap-3 px-4 py-4 border-b border-edge relative">
+      {/* Org branding / Tenant switcher trigger */}
+      <div
+        className={cn(
+          'flex items-center gap-3 px-4 py-4 border-b border-edge relative',
+          isImpersonating && 'bg-orange-500/10'
+        )}
+      >
         <div className="relative">
-          <div className="absolute inset-0 bg-primary-500/20 rounded-xl blur-md" />
-          {organization?.hasImage ? (
+          <div className={cn(
+            'absolute inset-0 rounded-xl blur-md',
+            isImpersonating ? 'bg-orange-500/20' : 'bg-primary-500/20'
+          )} />
+          {!isImpersonating && organization?.hasImage ? (
             <img
               src={organization.imageUrl}
               alt={organization.name ?? ''}
               className="relative w-8 h-8 rounded-xl object-cover"
             />
           ) : (
-            <div className="relative w-8 h-8 bg-primary-600 rounded-xl flex items-center justify-center">
+            <div className={cn(
+              'relative w-8 h-8 rounded-xl flex items-center justify-center',
+              isImpersonating ? 'bg-orange-500' : 'bg-primary-600'
+            )}>
               <span className="text-sm font-bold text-white">
-                {organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
+                {isImpersonating
+                  ? activeTenant.tenantName.charAt(0).toUpperCase()
+                  : organization?.name?.charAt(0)?.toUpperCase() ?? 'H'}
               </span>
             </div>
           )}
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="font-bold text-text-primary truncate">
-            {organization?.name ?? 'HandsOff'}
+            {isImpersonating ? activeTenant.tenantName : organization?.name ?? 'HandsOff'}
           </h1>
-          <p className="text-xs text-text-muted">HandsOff</p>
+          <p className={cn(
+            'text-xs',
+            isImpersonating ? 'text-orange-400 font-medium' : 'text-text-muted'
+          )}>
+            {isImpersonating ? 'Impersonating' : 'HandsOff'}
+          </p>
         </div>
+        {isSuperAdmin && !isImpersonating && (
+          <button
+            onClick={openTenantPalette}
+            className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+            title="Switch tenant"
+          >
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        )}
+        {isImpersonating && (
+          <button
+            onClick={exitTenant}
+            className="px-2 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors"
+          >
+            Exit
+          </button>
+        )}
       </div>
 
       {/* Navigation */}

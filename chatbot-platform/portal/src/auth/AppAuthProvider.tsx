@@ -8,6 +8,7 @@ import { useUser, useAuth, useOrganization } from '@clerk/clerk-react';
 import type { User, UserRole } from '@app-types/index';
 import { API_CONFIG, ENDPOINTS } from '@config/api.config';
 import { setTokenProvider } from '@services/apiClient';
+import { useTenantContextStore } from '../stores/tenantContextStore';
 
 // Map Clerk org role to app role
 function mapClerkRole(clerkRole?: string): UserRole {
@@ -127,6 +128,64 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
     fetchMe();
     return () => { cancelled = true; };
   }, [isSignedIn, organization?.id, getToken]);
+
+  // Clear tenant impersonation context on auth state changes
+  useEffect(() => {
+    const { activeTenant, clearTenant } = useTenantContextStore.getState();
+    if (!activeTenant) return;
+
+    // Clear if signed out
+    if (!isSignedIn) {
+      clearTenant();
+      return;
+    }
+
+    // Clear if user is no longer super_admin
+    if (dbIds && dbIds.role !== 'super_admin') {
+      clearTenant();
+      return;
+    }
+  }, [isSignedIn, organization?.id, dbIds]);
+
+  // Validate persisted tenant context on load
+  useEffect(() => {
+    if (!dbIds || dbIds.role !== 'super_admin') return;
+
+    const { activeTenant, clearTenant } = useTenantContextStore.getState();
+    if (!activeTenant) return;
+
+    async function validateTenant() {
+      try {
+        const token = await getToken();
+        const res = await fetch(
+          `${API_CONFIG.baseURL}/admin/tenants/${activeTenant!.tenantId}`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+        if (!res.ok) {
+          clearTenant();
+          const { toast } = await import('sonner');
+          toast.info('Previous tenant context is no longer available');
+          return;
+        }
+        const json = await res.json();
+        const tenant = json.data ?? json;
+        if (tenant.status === 'suspended' || tenant.status === 'cancelled') {
+          clearTenant();
+          const { toast } = await import('sonner');
+          toast.info('Previous tenant context is no longer available');
+        }
+      } catch {
+        // Network error — leave context as-is, will be caught by API calls
+      }
+    }
+
+    validateTenant();
+  }, [dbIds, getToken]);
 
   // Build the User object the app expects
   const user: User | null = clerkUser && dbIds ? {

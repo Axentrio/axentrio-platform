@@ -27,7 +27,7 @@ interface ChatStreamProps {
   onTakeover: (chatId: string) => void;
   selectedChatId?: string;
   className?: string;
-  initialStatusFilter?: 'all' | 'bot' | 'handsoff' | 'human' | 'closed';
+  initialStatusFilter?: ChatStatus | 'all';
 }
 
 const statusFilters: { value: ChatStatus | 'all'; label: string }[] = [

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Zap, Search } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { useCannedResponses, useUseCannedResponse } from '../queries/useCannedResponseQueries';
@@ -36,48 +36,72 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   const { data } = useCannedResponses();
   const useMutation = useUseCannedResponse();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const selectedIndexRef = useRef(0);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const responses: CannedResponse[] = data?.data ?? [];
   const filtered = responses.filter((r) =>
     r.shortcut.toLowerCase().startsWith(query.toLowerCase())
   );
+  const filteredRef = useRef(filtered);
+  filteredRef.current = filtered;
 
   useEffect(() => {
     setSelectedIndex(0);
+    selectedIndexRef.current = 0;
   }, [query]);
 
-  const handleSelect = (cr: CannedResponse) => {
-    // Insert immediately with client-side variable resolution
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedIndexRef.current = selectedIndex;
+  }, [selectedIndex]);
+
+  // Scroll selected item into view
+  useEffect(() => {
+    if (!listRef.current) return;
+    const items = listRef.current.querySelectorAll('[role="option"]');
+    items[selectedIndex]?.scrollIntoView({ block: 'nearest' });
+  }, [selectedIndex]);
+
+  const handleSelect = useCallback((cr: CannedResponse) => {
     const resolved = resolveVariables(cr.content, {
       agent_name: user?.firstName ?? '',
     });
     onSelect(resolved);
-
-    // Track usage in background (fire-and-forget)
     useMutation.mutate({ id: cr.id, variables: { agent_name: user?.firstName ?? '' } });
-  };
+  }, [user?.firstName, onSelect, useMutation]);
 
-  // Register keyboard handler with ChatWindow so it can delegate key events
+  // Register keyboard handler — uses refs to always have fresh values
   useEffect(() => {
     if (!registerKeyHandler) return;
 
     const handler = (e: React.KeyboardEvent): boolean => {
-      if (!visible || filtered.length === 0) return false;
+      const f = filteredRef.current;
+      if (!visible || f.length === 0) return false;
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+        setSelectedIndex((i) => {
+          const next = Math.min(i + 1, f.length - 1);
+          selectedIndexRef.current = next;
+          return next;
+        });
         return true;
       }
       if (e.key === 'ArrowUp') {
         e.preventDefault();
-        setSelectedIndex((i) => Math.max(i - 1, 0));
+        setSelectedIndex((i) => {
+          const next = Math.max(i - 1, 0);
+          selectedIndexRef.current = next;
+          return next;
+        });
         return true;
       }
       if (e.key === 'Enter') {
         e.preventDefault();
-        if (filtered[selectedIndex]) {
-          handleSelect(filtered[selectedIndex]);
+        const idx = selectedIndexRef.current;
+        if (f[idx]) {
+          handleSelect(f[idx]);
         }
         return true;
       }
@@ -96,6 +120,7 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
 
   return (
     <div
+      ref={listRef}
       role="listbox"
       aria-label="Canned responses"
       className="absolute bottom-full left-0 right-0 mb-1 bg-surface-2 border border-edge rounded-lg shadow-lg max-h-[200px] overflow-y-auto z-50"
@@ -106,8 +131,8 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
           role="option"
           aria-selected={i === selectedIndex}
           className={cn(
-            'w-full px-3 min-h-[44px] text-left text-sm flex items-center justify-between hover:bg-surface-3',
-            i === selectedIndex && 'bg-surface-3'
+            'w-full px-3 min-h-[44px] text-left text-sm flex items-center justify-between hover:bg-surface-3 transition-colors',
+            i === selectedIndex && 'bg-primary-500/10 border-l-2 border-primary-500'
           )}
           onMouseDown={(e) => {
             e.preventDefault();

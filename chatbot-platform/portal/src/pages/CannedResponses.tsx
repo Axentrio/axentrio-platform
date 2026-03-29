@@ -67,7 +67,7 @@ const emptyForm: FormData = {
   scope: 'personal',
 };
 
-const CannedResponses: React.FC = () => {
+export const CannedResponsesContent: React.FC = () => {
   const { user } = useAppAuth();
   const isAdmin = user && ['admin', 'supervisor', 'super_admin'].includes(user.role);
 
@@ -169,15 +169,10 @@ const CannedResponses: React.FC = () => {
   if (error) return <InlineError message="Failed to load canned responses" />;
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
+    <div className="space-y-6">
+      {/* New Response button + Filters */}
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">Canned Responses</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            Pre-written message templates for quick replies
-          </p>
-        </div>
+        <div />
         <Button onClick={openCreate}>
           <Plus className="w-4 h-4 mr-2" /> New Response
         </Button>
@@ -404,6 +399,23 @@ const CannedResponses: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+};
+
+const CannedResponses: React.FC = () => {
+  return (
+    <div className="p-6 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-text-primary">Canned Responses</h1>
+          <p className="text-sm text-text-secondary mt-1">
+            Pre-written message templates for quick replies
+          </p>
+        </div>
+      </div>
+      <CannedResponsesContent />
     </div>
   );
 };

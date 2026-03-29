@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from './queries/queryConfig';
 import { Toaster } from '@/components/ui/sonner';
@@ -17,7 +17,7 @@ import { SocketProvider } from '@websocket/SocketContext';
 // Auth
 import { OrganizationRequired } from '@auth/OrganizationRequired';
 import { AppAuthProvider } from '@auth/AppAuthProvider';
-import { ProtectedRoute, AdminRoute, SupervisorRoute, SuperAdminRoute } from '@auth/ProtectedRoute';
+import { ProtectedRoute, SupervisorRoute, SuperAdminRoute } from '@auth/ProtectedRoute';
 
 // Layout
 import { Sidebar } from '@components/Sidebar';
@@ -28,21 +28,20 @@ import { useOrganization } from '@clerk/clerk-react';
 import { useUiStore } from './stores/uiStore';
 import { useAppAuth } from '@auth/useAppAuth';
 
+// Auth (for redirects)
+import { useAppAuth } from '@auth/useAppAuth';
+
 // Pages
-import Dashboard from '@pages/Dashboard';
-import LiveMonitor from '@pages/LiveMonitor';
-import ChatTakeover from '@pages/ChatTakeover';
-import Queue from '@pages/Queue';
+import Inbox from '@pages/Inbox';
+import AiContent from '@pages/AiContent';
 import Analytics from '@pages/Analytics';
-import Tenants from '@pages/Tenants';
 import Team from '@pages/Team';
-import KnowledgeBase from '@pages/KnowledgeBase';
-import CannedResponses from './pages/CannedResponses';
 import SettingsLayout from '@pages/settings/SettingsLayout';
 import ProfileSettings from '@pages/settings/ProfileSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import IntegrationSettings from '@pages/settings/IntegrationSettings';
+import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
@@ -202,6 +201,20 @@ const ThemedClerkProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
+// Redirect helpers for old routes
+const TakeoverRedirect: React.FC = () => {
+  const { chatId } = useParams<{ chatId: string }>();
+  return <Navigate to={`/inbox?chat=${chatId}`} replace />;
+};
+
+const DefaultRedirect: React.FC = () => {
+  const { user } = useAppAuth();
+  if (user?.role === 'agent') {
+    return <Navigate to="/inbox" replace />;
+  }
+  return <Navigate to="/analytics" replace />;
+};
+
 const App: React.FC = () => {
   // If on widget-test path, render only the widget test page (no Clerk)
   if (window.location.pathname === '/widget-test') {
@@ -231,63 +244,28 @@ const App: React.FC = () => {
         <SignedIn>
           <AppAuthProvider>
             <BrowserRouter>
+              <SocketProvider>
               <AuthenticatedLayout>
                 <OrganizationRequired>
                   <Routes>
-                    {/* Protected routes */}
+                    {/* New navigation structure */}
                     <Route element={<ProtectedRoute />}>
-                      <Route
-                        path="/"
-                        element={
-                          <SocketProvider>
-                            <Dashboard />
-                          </SocketProvider>
-                        }
-                      />
-                      <Route
-                        path="/monitor"
-                        element={
-                          <SocketProvider>
-                            <LiveMonitor />
-                          </SocketProvider>
-                        }
-                      />
-                      <Route
-                        path="/takeover/:chatId"
-                        element={
-                          <SocketProvider>
-                            <ChatTakeover />
-                          </SocketProvider>
-                        }
-                      />
-                      <Route
-                        path="/queue"
-                        element={
-                          <SocketProvider>
-                            <Queue />
-                          </SocketProvider>
-                        }
-                      />
-                      <Route path="/knowledge" element={<KnowledgeBase />} />
-                      <Route path="/canned-responses" element={<CannedResponses />} />
+                      <Route path="/inbox" element={<Inbox />} />
+                      <Route path="/ai" element={<AiContent />} />
+                      <Route path="/analytics" element={<Analytics />} />
                       <Route path="/settings" element={<SettingsLayout />}>
                         <Route index element={<Navigate to="/settings/profile" replace />} />
                         <Route path="profile" element={<ProfileSettings />} />
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />
+                        <Route path="widget" element={<WidgetBrandSettings />} />
                         <Route path="integrations" element={<IntegrationSettings />} />
                       </Route>
                     </Route>
 
                     {/* Supervisor/Admin routes */}
                     <Route element={<SupervisorRoute />}>
-                      <Route path="/analytics" element={<Analytics />} />
                       <Route path="/team" element={<Team />} />
-                    </Route>
-
-                    {/* Admin only routes */}
-                    <Route element={<AdminRoute />}>
-                      <Route path="/tenants" element={<Tenants />} />
                     </Route>
 
                     {/* Super Admin routes */}
@@ -298,11 +276,21 @@ const App: React.FC = () => {
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
                     </Route>
 
+                    {/* Redirects for old routes */}
+                    <Route path="/" element={<DefaultRedirect />} />
+                    <Route path="/monitor" element={<Navigate to="/inbox" replace />} />
+                    <Route path="/queue" element={<Navigate to="/inbox?filter=handoff" replace />} />
+                    <Route path="/takeover/:chatId" element={<TakeoverRedirect />} />
+                    <Route path="/knowledge" element={<Navigate to="/ai?tab=knowledge" replace />} />
+                    <Route path="/canned-responses" element={<Navigate to="/ai?tab=canned" replace />} />
+                    <Route path="/tenants" element={<Navigate to="/settings/widget" replace />} />
+
                     {/* Catch all */}
-                    <Route path="*" element={<Navigate to="/" replace />} />
+                    <Route path="*" element={<Navigate to="/inbox" replace />} />
                   </Routes>
                 </OrganizationRequired>
               </AuthenticatedLayout>
+              </SocketProvider>
             </BrowserRouter>
           </AppAuthProvider>
         </SignedIn>

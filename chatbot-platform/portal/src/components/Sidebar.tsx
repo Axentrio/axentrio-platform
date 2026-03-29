@@ -6,20 +6,15 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
-  LayoutDashboard,
   MessageSquare,
   Users,
   BarChart3,
-  Building2,
   Settings,
   LogOut,
-  Headphones,
   Shield,
   UserCog,
   TrendingUp,
   BookOpen,
-  Zap,
-  ChevronDown,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
@@ -34,6 +29,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { useHandoffsQuery } from '../queries/useHandoffQueries';
 import type { UserRole } from '@app-types/index';
 
 interface MenuItem {
@@ -45,13 +41,9 @@ interface MenuItem {
 }
 
 const menuItems: MenuItem[] = [
-  { path: '/', label: 'Dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/monitor', label: 'Live Monitor', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/queue', label: 'Queue', icon: Headphones, roles: ['super_admin', 'admin', 'supervisor', 'agent'], badge: 0 },
-  { path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor'] },
-  { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/canned-responses', label: 'Canned Responses', icon: Zap, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/tenants', label: 'Tenants', icon: Building2, roles: ['super_admin', 'admin'] },
+  { path: '/inbox', label: 'Inbox', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/ai', label: 'AI & Content', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
   { path: '/team', label: 'Team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
 ];
@@ -63,14 +55,13 @@ const adminMenuItems: MenuItem[] = [
 ];
 
 interface SidebarProps {
-  pendingHandoffs?: number;
   className?: string;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
-  pendingHandoffs = 0,
   className = ''
 }) => {
+  const { pendingCount } = useHandoffsQuery('pending');
   const { user } = useAppAuth();
   const { signOut } = useClerk();
   const { organization } = useOrganization();
@@ -185,9 +176,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </TooltipContent>
                   </Tooltip>
                   <span className="flex-1">{item.label}</span>
-                  {item.path === '/queue' && pendingHandoffs > 0 && (
+                  {item.path === '/inbox' && pendingCount > 0 && (
                     <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full">
-                      {pendingHandoffs > 99 ? '99+' : pendingHandoffs}
+                      {pendingCount > 99 ? '99+' : pendingCount}
                     </span>
                   )}
                 </NavLink>

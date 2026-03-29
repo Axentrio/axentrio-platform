@@ -92,38 +92,6 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   );
 };
 
-// Export keyboard handler for use in ChatWindow
-export function useSlashCommandKeyboard(
-  visible: boolean,
-  filteredCount: number,
-  _selectedIndex: number,
-  setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
-) {
-  return (e: React.KeyboardEvent): boolean => {
-    if (!visible || filteredCount === 0) return false;
-
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex((i) => Math.min(i + 1, filteredCount - 1));
-      return true;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex((i) => Math.max(i - 1, 0));
-      return true;
-    }
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      return true; // Signal to ChatWindow to trigger selection
-    }
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      return true;
-    }
-    return false;
-  };
-}
-
 interface CannedResponsePickerButtonProps {
   onSelect: (content: string) => void;
 }
@@ -175,6 +143,7 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
           size="icon"
           className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl flex-shrink-0"
           title="Canned responses"
+          aria-label="Canned responses"
         >
           <Zap className="w-5 h-5" />
         </Button>

@@ -350,7 +350,7 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
 
     // Determine sender type
     const senderType = user?.type === 'agent' ? 'agent' : 'user';
-    const senderId = (socket.data as any).participantId || user?.id || socket.id;
+    const senderId = socket.data.participantId || user?.id || socket.id;
 
     // Encrypt message content before saving
     const encryptedContent = encrypt(content);

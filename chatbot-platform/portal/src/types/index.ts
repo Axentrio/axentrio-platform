@@ -128,6 +128,7 @@ export interface Chat {
   createdAt: string;
   updatedAt: string;
   lastMessageAt?: string;
+  lastActivityAt?: string;
   closedAt?: string;
   csatScore?: number;
 }

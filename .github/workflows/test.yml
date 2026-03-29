@@ -61,7 +61,7 @@ jobs:
 
       - name: Type-check Portal
         working-directory: chatbot-platform/portal
-        run: npx tsc --noEmit
+        run: pnpm exec tsc --noEmit
 
       - name: Run API tests
         working-directory: chatbot-platform/api

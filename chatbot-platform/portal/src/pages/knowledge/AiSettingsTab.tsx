@@ -7,6 +7,16 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectTrigger,
   SelectContent,
@@ -53,6 +63,7 @@ const AiSettingsTab: React.FC = () => {
   const [testResult, setTestResult] = useState<any>(null);
   const [testFailed, setTestFailed] = useState(false);
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stats } = useKnowledgeStats() as { data: any };
   const hasIndexedDocs = parseInt(stats?.documents?.indexed || '0') > 0;
@@ -445,13 +456,60 @@ const AiSettingsTab: React.FC = () => {
       </div>
 
       {isAdmin && (
-        <div className="flex justify-end pt-4 pb-2">
+        <div className="flex justify-between items-center pt-4 pb-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-400 hover:text-red-400 hover:bg-red-400/10"
+            onClick={() => setShowResetConfirm(true)}
+          >
+            Reset AI Settings
+          </Button>
           <Button onClick={handleSave} disabled={updateSettings.isPending} size="lg">
             {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Save Settings
           </Button>
         </div>
       )}
+
+      {/* Reset Confirmation */}
+      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Reset AI Settings</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will disable the AI bot and clear all configuration including provider, API key, brand voice, and guardrails. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-500 hover:bg-red-600"
+              onClick={() => {
+                updateSettings.mutate({
+                  enabled: false,
+                  provider: 'openai',
+                  model: '',
+                  apiKey: null,
+                  brandVoice: { name: '', tone: 'friendly', customInstructions: '' },
+                  guardrails: {
+                    greetingMessage: '',
+                    confidenceThreshold: 0.7,
+                    maxResponseLength: 500,
+                    escalationKeywords: [],
+                    topicsToAvoid: [],
+                    fallbackMessage: '',
+                    offHoursMessage: '',
+                  },
+                });
+                setShowResetConfirm(false);
+              }}
+            >
+              Reset
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {isAdmin && (
         <TestChatPanel

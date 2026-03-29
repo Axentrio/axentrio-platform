@@ -3,7 +3,7 @@
  * Live chat feed with filtering and quick actions
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, MessageSquare, Clock, User } from 'lucide-react';
 import { useChatsQuery } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
@@ -27,6 +27,7 @@ interface ChatStreamProps {
   onTakeover: (chatId: string) => void;
   selectedChatId?: string;
   className?: string;
+  initialStatusFilter?: 'all' | 'bot' | 'handsoff' | 'human' | 'closed';
 }
 
 const statusFilters: { value: ChatStatus | 'all'; label: string }[] = [
@@ -43,10 +44,17 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
   onTakeover,
   selectedChatId,
   className = '',
+  initialStatusFilter = 'all',
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ChatStatus | 'all'>('all');
+  const [statusFilter, setStatusFilter] = useState<ChatStatus | 'all'>(initialStatusFilter);
   const [tenantFilter, setTenantFilter] = useState<string | undefined>();
+
+  useEffect(() => {
+    if (initialStatusFilter) {
+      setStatusFilter(initialStatusFilter);
+    }
+  }, [initialStatusFilter]);
 
   const debouncedSearch = useDebounce(searchQuery, 300);
 
@@ -124,21 +132,23 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
 
           {/* Status and Tenant filters */}
           <div className="flex gap-2">
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => setStatusFilter(value as ChatStatus | 'all')}
-            >
-              <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
-                <SelectValue placeholder="All Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusFilters.map((filter) => (
-                  <SelectItem key={filter.value} value={filter.value}>
-                    {filter.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {initialStatusFilter === 'all' && (
+              <Select
+                value={statusFilter}
+                onValueChange={(value) => setStatusFilter(value as ChatStatus | 'all')}
+              >
+                <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
+                  <SelectValue placeholder="All Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusFilters.map((filter) => (
+                    <SelectItem key={filter.value} value={filter.value}>
+                      {filter.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
 
             <TenantSelector
               tenants={tenants}

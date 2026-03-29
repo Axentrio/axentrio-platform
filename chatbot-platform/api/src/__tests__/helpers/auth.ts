@@ -35,6 +35,7 @@ export function createAuthMocks() {
       req.userId = auth.userId;
       req.tenantId = auth.tenantId;
       req.agentId = auth.agentId;
+      req.userRole = auth.role;
       req.user = {
         id: auth.userId,
         email: auth.email,

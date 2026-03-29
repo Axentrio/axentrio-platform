@@ -19,14 +19,25 @@ import { useKnowledgeDocuments, useDeleteDocument, useRetryDocument } from '@/qu
 import DocumentCard from './DocumentCard';
 import AddDocumentModal from './AddDocumentModal';
 
-const typeFilters = ['all', 'pdf', 'docx', 'text', 'faq'] as const;
-const statusFilters = ['failed', 'processing', 'pending', 'indexed'];
+const allFilters = [
+  { key: 'all', label: 'All', group: 'all' },
+  { key: 'indexed', label: 'Indexed', group: 'status' },
+  { key: 'processing', label: 'Processing', group: 'status' },
+  { key: 'failed', label: 'Failed', group: 'status' },
+  { key: 'pdf', label: 'PDF', group: 'type' },
+  { key: 'docx', label: 'DOCX', group: 'type' },
+  { key: 'text', label: 'Text', group: 'type' },
+  { key: 'faq', label: 'FAQ', group: 'type' },
+] as const;
 
 interface DocumentsTabProps {
   initialFilter?: string;
+  onFilterChange?: (filter: string) => void;
+  showAiBanner?: boolean;
+  onConfigureAi?: () => void;
 }
 
-const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
+const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChange, showAiBanner, onConfigureAi }) => {
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin');
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -41,7 +52,6 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
   const [editingDoc, setEditingDoc] = useState<any>(null);
   const [deletingDocId, setDeletingDocId] = useState<string | null>(null);
 
-  // Sync filter from parent (e.g., clicking failed count in Overview)
   useEffect(() => {
     if (initialFilter) setTypeFilter(initialFilter);
   }, [initialFilter]);
@@ -50,7 +60,8 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let result = documents as any[];
     if (typeFilter !== 'all') {
-      const isStatus = statusFilters.includes(typeFilter);
+      const statusKeys = ['indexed', 'processing', 'failed', 'pending'];
+      const isStatus = statusKeys.includes(typeFilter);
       result = result.filter((d) =>
         isStatus ? d.status === typeFilter : d.type === typeFilter
       );
@@ -76,24 +87,61 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
     setEditingDoc(null);
   };
 
+  const handleFilterClick = (key: string) => {
+    setTypeFilter(key);
+    onFilterChange?.(key);
+  };
+
   return (
     <div className="space-y-4">
+      {/* AI not configured banner */}
+      {showAiBanner && onConfigureAi && (
+        <div className="flex items-center justify-between p-3 rounded-lg bg-amber-400/5 border border-amber-400/10">
+          <p className="text-xs text-amber-400/80">
+            AI bot is not configured — documents won't be used for responses until you set up a provider.
+          </p>
+          <button
+            onClick={onConfigureAi}
+            className="text-xs font-medium text-amber-400 hover:text-amber-300 flex-shrink-0 ml-3"
+          >
+            Configure AI →
+          </button>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between gap-3">
-        <div className="flex gap-1.5 flex-wrap">
-          {typeFilters.map((f) => (
-            <button
-              key={f}
-              onClick={() => setTypeFilter(f)}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
-                typeFilter === f
-                  ? 'bg-primary-500 text-white shadow-sm'
-                  : 'bg-surface-2 text-text-muted hover:text-text-secondary hover:bg-surface-3'
-              }`}
-            >
-              {f === 'all' ? 'All' : f.toUpperCase()}
-            </button>
-          ))}
+        <div className="flex gap-1.5 flex-wrap items-center">
+          {allFilters.map((f) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const count = f.key === 'all'
+              ? documents.length
+              : f.group === 'status'
+                ? documents.filter((d: any) => d.status === f.key).length
+                : documents.filter((d: any) => d.type === f.key).length;
+
+            if (count === 0 && f.key !== 'all') return null;
+
+            const isFirstType = f.key === 'pdf';
+
+            return (
+              <React.Fragment key={f.key}>
+                {isFirstType && documents.some((d: any) => ['pdf', 'docx', 'text', 'faq'].includes(d.type)) && (
+                  <div className="w-px h-4 bg-edge mx-0.5" />
+                )}
+                <button
+                  onClick={() => handleFilterClick(f.key)}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
+                    typeFilter === f.key
+                      ? 'bg-primary-500 text-white shadow-sm'
+                      : 'bg-surface-2 text-text-muted hover:text-text-secondary hover:bg-surface-3'
+                  }`}
+                >
+                  {f.label} ({count})
+                </button>
+              </React.Fragment>
+            );
+          })}
         </div>
         <div className="flex gap-2">
           <div className="relative">
@@ -144,7 +192,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
               <p className="text-xs text-text-muted mt-1.5">
                 Try adjusting your search or filter.
               </p>
-              <Button variant="outline" size="sm" className="mt-4" onClick={() => { setTypeFilter('all'); setSearch(''); }}>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => { handleFilterClick('all'); setSearch(''); }}>
                 Clear filters
               </Button>
             </>
@@ -161,19 +209,6 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
               onDelete={() => setDeletingDocId(doc.id)}
             />
           ))}
-          {isAdmin && (
-            <div
-              onClick={() => setIsModalOpen(true)}
-              className="border border-dashed border-edge rounded-xl flex items-center justify-center min-h-[140px] cursor-pointer hover:border-primary-500/50 hover:bg-primary-500/[0.02] transition-all duration-200 group/add"
-            >
-              <div className="text-center text-text-muted">
-                <div className="p-2 rounded-lg bg-surface-2 group-hover/add:bg-primary-500/10 transition-colors mx-auto w-fit mb-2">
-                  <Plus className="w-4 h-4 group-hover/add:text-primary-400 transition-colors" />
-                </div>
-                <p className="text-xs">Add document</p>
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -200,7 +235,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
                 if (deletingDocId) deleteDoc.mutate(deletingDocId);
                 setDeletingDocId(null);
               }}
-              className="bg-status-offline hover:bg-status-offline/90"
+              className="bg-red-500 hover:bg-red-600"
             >
               Delete
             </AlertDialogAction>

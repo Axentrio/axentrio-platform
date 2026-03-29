@@ -1,21 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, FlaskConical, MessageSquare } from 'lucide-react';
+import { Loader2, FlaskConical } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import {
   Select,
   SelectTrigger,
@@ -30,11 +20,10 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useGetAiSettings, useUpdateAiSettings, useTestAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
+import { useGetAiSettings, useUpdateAiSettings, useTestAiSettings } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
-import TestChatPanel from './TestChatPanel';
 
 const AiSettingsTab: React.FC = () => {
   const { isRole } = useAppAuth();
@@ -62,11 +51,6 @@ const AiSettingsTab: React.FC = () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [testResult, setTestResult] = useState<any>(null);
   const [testFailed, setTestFailed] = useState(false);
-  const [isTestChatOpen, setIsTestChatOpen] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: stats } = useKnowledgeStats() as { data: any };
-  const hasIndexedDocs = parseInt(stats?.documents?.indexed || '0') > 0;
 
   useEffect(() => {
     if (aiSettings) {
@@ -200,21 +184,7 @@ const AiSettingsTab: React.FC = () => {
             <p className="text-xs text-text-muted">Enable AI-powered responses for visitors</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {isAdmin && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsTestChatOpen(true)}
-              disabled={!aiSettings?.enabled}
-              title={!aiSettings?.enabled ? 'Save AI settings with bot enabled first' : undefined}
-            >
-              <MessageSquare className="w-4 h-4 mr-2" />
-              Test Chat
-            </Button>
-          )}
-          <Switch checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
-        </div>
+        <Switch checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
       </div>
 
       <div className={enabled ? '' : 'opacity-50 pointer-events-none'}>
@@ -456,15 +426,7 @@ const AiSettingsTab: React.FC = () => {
       </div>
 
       {isAdmin && (
-        <div className="flex justify-between items-center pt-4 pb-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-red-400 hover:text-red-400 hover:bg-red-400/10"
-            onClick={() => setShowResetConfirm(true)}
-          >
-            Reset AI Settings
-          </Button>
+        <div className="flex justify-end pt-4 pb-2">
           <Button onClick={handleSave} disabled={updateSettings.isPending} size="lg">
             {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
             Save Settings
@@ -472,53 +434,6 @@ const AiSettingsTab: React.FC = () => {
         </div>
       )}
 
-      {/* Reset Confirmation */}
-      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reset AI Settings</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will disable the AI bot and clear all configuration including provider, API key, brand voice, and guardrails. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-500 hover:bg-red-600"
-              onClick={() => {
-                updateSettings.mutate({
-                  enabled: false,
-                  apiKey: null,
-                  brandVoice: { name: 'AI Assistant', tone: 'friendly', customInstructions: '' },
-                  guardrails: {
-                    greetingMessage: '',
-                    confidenceThreshold: 0.7,
-                    maxResponseLength: 500,
-                    escalationKeywords: [],
-                    topicsToAvoid: [],
-                    fallbackMessage: '',
-                    offHoursMessage: '',
-                  },
-                });
-                setShowResetConfirm(false);
-              }}
-            >
-              Reset
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {isAdmin && (
-        <TestChatPanel
-          isOpen={isTestChatOpen}
-          onClose={() => setIsTestChatOpen(false)}
-          botName={aiSettings?.brandVoice?.name || 'AI Assistant'}
-          provider={aiSettings?.provider || 'openai'}
-          model={aiSettings?.model || ''}
-          hasIndexedDocs={hasIndexedDocs}
-        />
-      )}
     </div>
   );
 };

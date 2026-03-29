@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical, Sparkles, ChevronRight } from 'lucide-react';
+import { MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -35,12 +35,12 @@ const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
 const AiContent: React.FC = () => {
   const { isRole } = useAppAuth();
   const [activeTab, setActiveTab] = useState<Tab>('bot');
-  const [showAiSettings, setShowAiSettings] = useState(false);
+  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | undefined>();
   const [showAddDoc, setShowAddDoc] = useState(false);
-  const [skipOnboarding, setSkipOnboarding] = useState(false);
+  const [skipInlineSetup, setSkipInlineSetup] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stats, isLoading: statsLoading } = useKnowledgeStats() as { data: any; isLoading: boolean };
@@ -61,8 +61,11 @@ const AiContent: React.FC = () => {
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
 
-  // Show unified onboarding when nothing is set up yet
-  const showOnboarding = !skipOnboarding && queriesReady && !hasAiConfigured && total === 0 && isAdmin;
+  // When AI is not configured and no documents: show inline setup as primary content
+  const showInlineSetup = !skipInlineSetup && queriesReady && !hasAiConfigured && isAdmin;
+
+  const providerLabel = aiSettings?.provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
+  const modelLabel = aiSettings?.model || 'Not set';
 
   return (
     <div className="h-full overflow-y-auto">
@@ -78,7 +81,7 @@ const AiContent: React.FC = () => {
               <p className="text-xs text-text-muted">Knowledge base, canned responses, and AI configuration</p>
             </div>
           </div>
-          {isAdminOrSupervisor && !showOnboarding && (
+          {isAdminOrSupervisor && (
             <div className="flex items-center gap-2">
               {isAdmin && (
                 <Button
@@ -125,102 +128,64 @@ const AiContent: React.FC = () => {
       {/* Tab Content */}
       <div className="px-6 py-4">
         {activeTab === 'bot' && (
-          <>
-            {showOnboarding ? (
-              /* Unified onboarding — single flow, one CTA per step */
-              <div className="max-w-lg mx-auto py-12">
-                <div className="text-center mb-8">
-                  <div className="inline-flex p-3 rounded-2xl bg-primary-500/5 mb-4">
-                    <Sparkles className="w-8 h-8 text-primary-400" />
-                  </div>
-                  <h2 className="text-xl font-semibold text-text-primary">Get your AI bot up and running</h2>
-                  <p className="text-sm text-text-muted mt-2 max-w-sm mx-auto">
-                    Two steps to start answering your visitors' questions automatically.
+          <div className="space-y-4">
+            {showInlineSetup && total === 0 ? (
+              /* ── Not configured + no documents: inline setup form ── */
+              <div className="max-w-2xl">
+                <div className="mb-6">
+                  <h2 className="text-base font-semibold text-text-primary">Configure your AI bot</h2>
+                  <p className="text-sm text-text-muted mt-1">
+                    Set up a provider and add documents to start answering visitors automatically.
                   </p>
                 </div>
-
-                <div className="space-y-3">
-                  {/* Step 1: Configure AI */}
+                <AiSettingsTab />
+                <div className="mt-4 pt-4 border-t border-edge">
                   <button
-                    onClick={() => { setSkipOnboarding(true); setShowAiSettings(true); }}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl border border-edge bg-surface-0 hover:bg-surface-2 hover:border-primary-500/30 transition-all group text-left"
+                    onClick={() => setSkipInlineSetup(true)}
+                    className="text-xs text-text-muted hover:text-text-secondary transition-colors"
                   >
-                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary-500/10 flex items-center justify-center">
-                      <span className="text-sm font-bold text-primary-400">1</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text-primary">Connect your AI provider</p>
-                      <p className="text-xs text-text-muted mt-0.5">Choose OpenAI or Anthropic, add your API key, and customize your bot's personality.</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary-400 transition-colors flex-shrink-0" />
-                  </button>
-
-                  {/* Step 2: Add documents */}
-                  <button
-                    onClick={() => { setSkipOnboarding(true); setShowAddDoc(true); }}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl border border-edge bg-surface-0 hover:bg-surface-2 hover:border-primary-500/30 transition-all group text-left"
-                  >
-                    <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary-500/10 flex items-center justify-center">
-                      <span className="text-sm font-bold text-primary-400">2</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-text-primary">Add knowledge base documents</p>
-                      <p className="text-xs text-text-muted mt-0.5">Upload PDFs, paste text, or add FAQs so your bot can answer accurately.</p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-text-muted group-hover:text-primary-400 transition-colors flex-shrink-0" />
+                    Skip to documents →
                   </button>
                 </div>
-
-                <p className="text-xs text-text-muted text-center mt-6">
-                  You can do these in any order — both are needed for your bot to work.
-                </p>
               </div>
             ) : (
-              /* Normal view — AI Settings collapsible + Documents */
-              <div className="space-y-6">
-                {/* AI Settings — collapsible section */}
+              /* ── Normal view: status bar + documents ── */
+              <>
+                {/* AI Status Bar — compact, clickable to open slide-over */}
                 {isAdminOrSupervisor && (
-                  <div className="border border-edge rounded-xl overflow-hidden">
-                    <button
-                      onClick={() => setShowAiSettings(!showAiSettings)}
-                      className="w-full flex items-center justify-between px-4 py-3 bg-surface-2 hover:bg-surface-3 transition-colors"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Settings2 className="w-4 h-4 text-text-muted" />
-                        <span className="text-sm font-medium text-text-primary">AI Settings</span>
-                        {aiSettings?.enabled && (
-                          <span className="px-1.5 py-0.5 text-xs rounded-full bg-status-online/10 text-status-online">Active</span>
-                        )}
-                        {!aiSettings?.enabled && queriesReady && (
-                          <span className="px-1.5 py-0.5 text-xs rounded-full bg-accent-500/10 text-accent-400">Not configured</span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isAdmin && showAiSettings && (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => e.stopPropagation()}>
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setShowResetConfirm(true)} className="text-red-400">
-                                Reset AI Settings
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
-                        <svg className={`w-4 h-4 text-text-muted transition-transform ${showAiSettings ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                      </div>
-                    </button>
-                    {showAiSettings && (
-                      <div className="px-4 py-4 border-t border-edge">
-                        <div className="max-w-2xl">
-                          <AiSettingsTab />
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  <button
+                    onClick={() => setIsSettingsPanelOpen(true)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-surface-2 hover:bg-surface-3 transition-colors group"
+                  >
+                    <div className="flex items-center gap-3">
+                      <Settings2 className="w-4 h-4 text-text-muted" />
+                      {hasAiConfigured ? (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-status-online" />
+                            <span className="text-sm text-text-primary">{providerLabel}</span>
+                          </div>
+                          <span className="text-xs text-text-muted">{modelLabel}</span>
+                          {aiSettings?.brandVoice?.name && aiSettings.brandVoice.name !== 'AI Assistant' && (
+                            <>
+                              <span className="text-text-muted">·</span>
+                              <span className="text-xs text-text-muted">{aiSettings.brandVoice.name}</span>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-accent-400" />
+                            <span className="text-sm text-text-secondary">AI not configured</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    <span className="text-xs text-text-muted group-hover:text-primary-400 transition-colors">
+                      Configure →
+                    </span>
+                  </button>
                 )}
 
                 {/* Knowledge Base documents */}
@@ -228,17 +193,59 @@ const AiContent: React.FC = () => {
                   initialFilter={activeFilter}
                   onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
                   showAiBanner={queriesReady && total > 0 && !hasAiConfigured && isAdminOrSupervisor}
-                  onConfigureAi={() => setShowAiSettings(true)}
+                  onConfigureAi={() => setIsSettingsPanelOpen(true)}
                 />
-              </div>
+              </>
             )}
-          </>
+          </div>
         )}
 
         {activeTab === 'canned' && (
           <CannedResponsesContent />
         )}
       </div>
+
+      {/* AI Settings Slide-over Panel */}
+      {isSettingsPanelOpen && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setIsSettingsPanelOpen(false)}
+          />
+          <div className="relative w-full max-w-lg bg-surface-0 border-l border-edge shadow-2xl flex flex-col overflow-hidden">
+            {/* Panel header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-edge flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-text-muted" />
+                <h2 className="text-sm font-semibold text-text-primary">AI Settings</h2>
+              </div>
+              <div className="flex items-center gap-1">
+                {isAdmin && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setShowResetConfirm(true)} className="text-red-400">
+                        Reset AI Settings
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsSettingsPanelOpen(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            {/* Panel body */}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              <AiSettingsTab />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Reset Confirmation */}
       <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
@@ -261,6 +268,7 @@ const AiContent: React.FC = () => {
                   guardrails: { greetingMessage: '', confidenceThreshold: 0.7, maxResponseLength: 500, escalationKeywords: [], topicsToAvoid: [], fallbackMessage: '', offHoursMessage: '' },
                 });
                 setShowResetConfirm(false);
+                setIsSettingsPanelOpen(false);
               }}
             >
               Reset
@@ -269,7 +277,7 @@ const AiContent: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Add Document Modal — used by onboarding */}
+      {/* Add Document Modal */}
       <AddDocumentModal
         isOpen={showAddDoc}
         onClose={() => setShowAddDoc(false)}

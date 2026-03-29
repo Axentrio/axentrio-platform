@@ -77,7 +77,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter }) => {
   };
 
   return (
-    <div className="mt-4 space-y-4">
+    <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row justify-between gap-3">
         <div className="flex gap-1.5 flex-wrap">

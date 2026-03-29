@@ -20,6 +20,7 @@ export interface AuthenticatedSocket extends Socket {
     user?: RequestUser;
     tenantId?: string;
     sessionId?: string;
+    participantId?: string;
   };
 }
 

@@ -236,7 +236,7 @@ export async function testAiSettings(req: Request, res: Response) {
       { role: 'system', content: 'You are a helpful assistant. Reply briefly.' },
       { role: 'user', content: question },
     ],
-    { model: testModel, maxTokens: 200, temperature: 0.3 }
+    { model: testModel, maxTokens: 200, temperature: 0.3, jsonMode: false }
   );
 
   res.json({

@@ -204,7 +204,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                   <div className="flex items-center gap-3 mt-2 text-xs text-text-muted">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
-                      {formatTime(chat.lastMessageAt || chat.lastActivityAt)}
+                      {formatTime(chat.lastMessageAt || chat.updatedAt)}
                     </span>
                     {(chat as any).messageCount > 0 && (
                       <span className="flex items-center gap-1">

@@ -19,6 +19,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
+import { Participant } from '../database/entities/Participant';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { encrypt } from '../utils/encryption';
 
@@ -349,7 +350,7 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
 
     // Determine sender type
     const senderType = user?.type === 'agent' ? 'agent' : 'user';
-    const senderId = user?.id || socket.id;
+    const senderId = (socket.data as any).participantId || user?.id || socket.id;
 
     // Encrypt message content before saving
     const encryptedContent = encrypt(content);
@@ -628,6 +629,18 @@ async function handleSessionJoin(
 
     // Store session ID in socket data
     socket.data.sessionId = sessionId;
+
+    // For widget users, resolve the participant ID so messages can be saved
+    if (socket.data.user?.type === 'widget') {
+      const participantRepo = AppDataSource.getRepository(Participant);
+      const participant = await participantRepo.findOne({
+        where: { sessionId, type: 'user' },
+        order: { joinedAt: 'DESC' },
+      });
+      if (participant) {
+        socket.data.participantId = participant.id;
+      }
+    }
 
     // Notify room about user joining
     socket.to(roomName).emit('session:user:joined', {

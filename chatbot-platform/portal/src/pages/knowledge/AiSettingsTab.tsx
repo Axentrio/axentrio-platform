@@ -488,10 +488,8 @@ const AiSettingsTab: React.FC = () => {
               onClick={() => {
                 updateSettings.mutate({
                   enabled: false,
-                  provider: 'openai',
-                  model: '',
                   apiKey: null,
-                  brandVoice: { name: '', tone: 'friendly', customInstructions: '' },
+                  brandVoice: { name: 'AI Assistant', tone: 'friendly', customInstructions: '' },
                   guardrails: {
                     greetingMessage: '',
                     confidenceThreshold: 0.7,

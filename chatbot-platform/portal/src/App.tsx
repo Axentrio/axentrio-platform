@@ -28,9 +28,6 @@ import { useOrganization } from '@clerk/clerk-react';
 import { useUiStore } from './stores/uiStore';
 import { useAppAuth } from '@auth/useAppAuth';
 
-// Auth (for redirects)
-import { useAppAuth } from '@auth/useAppAuth';
-
 // Pages
 import Inbox from '@pages/Inbox';
 import AiContent from '@pages/AiContent';

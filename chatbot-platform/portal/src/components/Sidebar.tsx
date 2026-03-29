@@ -15,6 +15,7 @@ import {
   UserCog,
   TrendingUp,
   BookOpen,
+  ChevronDown,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';

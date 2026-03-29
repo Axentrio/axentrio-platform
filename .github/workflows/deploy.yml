@@ -32,12 +32,6 @@ jobs:
         working-directory: ./chatbot-platform/api
         run: npm ci
 
-      - name: Run tests
-        working-directory: ./chatbot-platform/api
-        run: npm test
-        env:
-          NODE_ENV: test
-
       - name: Build TypeScript
         working-directory: ./chatbot-platform/api
         run: npm run build

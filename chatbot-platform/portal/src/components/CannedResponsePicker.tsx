@@ -17,13 +17,15 @@ interface SlashCommandDropdownProps {
   onSelect: (content: string) => void;
   onClose: () => void;
   visible: boolean;
+  registerKeyHandler?: (handler: (e: React.KeyboardEvent) => boolean) => void;
 }
 
 export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   query,
   onSelect,
-  onClose: _onClose,
+  onClose,
   visible,
+  registerKeyHandler,
 }) => {
   const { user } = useAppAuth();
   const { data } = useCannedResponses();
@@ -51,8 +53,40 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
     }
   };
 
-  // Keyboard handler — called from ChatWindow's onKeyDown to avoid conflicts
-  // This is exposed via the `onKeyDown` prop pattern below
+  // Register keyboard handler with ChatWindow so it can delegate key events
+  useEffect(() => {
+    if (!registerKeyHandler) return;
+
+    const handler = (e: React.KeyboardEvent): boolean => {
+      if (!visible || filtered.length === 0) return false;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.min(i + 1, filtered.length - 1));
+        return true;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((i) => Math.max(i - 1, 0));
+        return true;
+      }
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        if (filtered[selectedIndex]) {
+          handleSelect(filtered[selectedIndex]);
+        }
+        return true;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        return true;
+      }
+      return false;
+    };
+
+    registerKeyHandler(handler);
+  });
 
   if (!visible || filtered.length === 0) return null;
 

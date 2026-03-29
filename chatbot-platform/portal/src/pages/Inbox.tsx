@@ -23,7 +23,6 @@ import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge, PriorityBadge } from '@components/StatusBadge';
 import { Modal } from '@components/Modal';
-import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';

@@ -206,7 +206,6 @@ const Analytics: React.FC = () => {
     [agents],
   );
 
-  const activeAgentCount = agents.filter((a) => a.status === 'online').length;
 
   // Stats cards — 6 real-time metrics combining Dashboard + Analytics data
   const stats: Array<{

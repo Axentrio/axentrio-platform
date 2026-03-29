@@ -40,6 +40,7 @@ const AiContent: React.FC = () => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | undefined>();
   const [showAddDoc, setShowAddDoc] = useState(false);
+  const [skipOnboarding, setSkipOnboarding] = useState(false);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stats, isLoading: statsLoading } = useKnowledgeStats() as { data: any; isLoading: boolean };
@@ -61,7 +62,7 @@ const AiContent: React.FC = () => {
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
 
   // Show unified onboarding when nothing is set up yet
-  const showOnboarding = queriesReady && !hasAiConfigured && total === 0 && isAdmin;
+  const showOnboarding = !skipOnboarding && queriesReady && !hasAiConfigured && total === 0 && isAdmin;
 
   return (
     <div className="h-full overflow-y-auto">
@@ -141,7 +142,7 @@ const AiContent: React.FC = () => {
                 <div className="space-y-3">
                   {/* Step 1: Configure AI */}
                   <button
-                    onClick={() => setShowAiSettings(true)}
+                    onClick={() => { setSkipOnboarding(true); setShowAiSettings(true); }}
                     className="w-full flex items-center gap-4 p-4 rounded-xl border border-edge bg-surface-0 hover:bg-surface-2 hover:border-primary-500/30 transition-all group text-left"
                   >
                     <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary-500/10 flex items-center justify-center">
@@ -156,7 +157,7 @@ const AiContent: React.FC = () => {
 
                   {/* Step 2: Add documents */}
                   <button
-                    onClick={() => setShowAddDoc(true)}
+                    onClick={() => { setSkipOnboarding(true); setShowAddDoc(true); }}
                     className="w-full flex items-center gap-4 p-4 rounded-xl border border-edge bg-surface-0 hover:bg-surface-2 hover:border-primary-500/30 transition-all group text-left"
                   >
                     <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-primary-500/10 flex items-center justify-center">

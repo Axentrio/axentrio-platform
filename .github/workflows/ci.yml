@@ -86,15 +86,14 @@ jobs:
         run: npm ci && npm run build
 
       - name: Upload source maps to Sentry
+        continue-on-error: true
         working-directory: chatbot-platform/api
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
           SENTRY_PROJECT: ${{ secrets.SENTRY_PROJECT }}
         run: |
-          npx @sentry/cli releases new "$GITHUB_SHA"
-          npx @sentry/cli releases files "$GITHUB_SHA" upload-sourcemaps ./dist --ext js --ext map
-          npx @sentry/cli releases finalize "$GITHUB_SHA"
+          npx @sentry/cli sourcemaps upload ./dist --release="$GITHUB_SHA"
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

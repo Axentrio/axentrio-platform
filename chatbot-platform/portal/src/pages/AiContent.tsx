@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,7 +35,11 @@ const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
 
 const AiContent: React.FC = () => {
   const { isRole } = useAppAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('bot');
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab');
+  // Map old redirect values: 'knowledge' maps to 'bot' tab, 'canned' stays 'canned'
+  const resolvedTab: Tab = initialTab === 'canned' ? 'canned' : 'bot';
+  const [activeTab, setActiveTab] = useState<Tab>(resolvedTab);
   const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);

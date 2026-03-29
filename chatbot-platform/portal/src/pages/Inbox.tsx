@@ -7,6 +7,7 @@
  */
 
 import React, { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Headphones,
   Clock,
@@ -17,6 +18,7 @@ import {
   UserCheck,
   Users,
   X,
+  ArrowLeft,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { ChatStream } from '@components/ChatStream';
@@ -119,8 +121,13 @@ const Inbox: React.FC = () => {
   const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
 
+  // Query params for deep-linking from redirects
+  const [searchParams] = useSearchParams();
+  const initialFilter = searchParams.get('filter') as InboxTab | null;
+  const initialChatId = searchParams.get('chat');
+
   // Tabs & filters
-  const [activeTab, setActiveTab] = useState<InboxTab>('all');
+  const [activeTab, setActiveTab] = useState<InboxTab>(initialFilter || 'all');
 
   // Selected chat (right panel)
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
@@ -134,6 +141,15 @@ const Inbox: React.FC = () => {
   const acceptHandoffMutation = useAcceptHandoff();
   const rejectHandoffMutation = useRejectHandoff();
   useNotificationSound();
+
+  // Auto-load chat from query param (deep-link from redirect)
+  React.useEffect(() => {
+    if (initialChatId && !selectedChat) {
+      api.get<{ data: Chat }>(`/chats/${initialChatId}`).then((res) => {
+        setSelectedChat(res.data ?? (res as unknown as Chat));
+      }).catch(() => {});
+    }
+  }, [initialChatId]);
 
   // Agent list (for transfer modal)
   const { data: rawAgents, isLoading: isLoadingAgents } = useQuery({
@@ -265,7 +281,10 @@ const Inbox: React.FC = () => {
       {/* Split pane content */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left panel: Chat list / Handoff queue */}
-        <div className="w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col">
+        <div className={cn(
+          'w-full md:w-[400px] md:min-w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col',
+          selectedChat && 'hidden md:flex'
+        )}>
           {activeTab === 'handsoff' && pendingCount > 0 ? (
             /* Handoff queue cards */
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -371,12 +390,22 @@ const Inbox: React.FC = () => {
         </div>
 
         {/* Right panel: Chat detail */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className={cn(
+          'flex-1 flex flex-col overflow-hidden',
+          !selectedChat && 'hidden md:flex'
+        )}>
           {selectedChat ? (
             <>
               {/* Action bar */}
               <div className="px-4 py-3 border-b border-edge bg-surface-2 flex items-center justify-between">
                 <div className="flex items-center gap-3">
+                  <button
+                    className="md:hidden p-1 rounded-lg hover:bg-surface-3 transition-colors"
+                    onClick={() => setSelectedChat(null)}
+                    aria-label="Back to chat list"
+                  >
+                    <ArrowLeft className="w-5 h-5 text-text-secondary" />
+                  </button>
                   <div>
                     <h2 className="font-semibold text-text-primary">
                       {selectedChat.userName || 'Anonymous User'}

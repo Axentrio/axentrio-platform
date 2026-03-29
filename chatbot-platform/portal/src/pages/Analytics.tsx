@@ -219,7 +219,7 @@ const Analytics: React.FC = () => {
   }> = [
     {
       label: 'Active Chats',
-      value: dashboard ? String(dashboard.sessions.active + dashboard.sessions.bot) : '—',
+      value: dashboard ? String((dashboard?.sessions?.active ?? 0) + (dashboard?.sessions?.bot ?? 0)) : '—',
       change: '',
       icon: MessageSquare,
       color: 'text-primary-400',
@@ -228,7 +228,7 @@ const Analytics: React.FC = () => {
     },
     {
       label: 'Pending Handoffs',
-      value: dashboard ? String(dashboard.sessions.handoff) : '—',
+      value: dashboard ? String(dashboard?.sessions?.handoff ?? 0) : '—',
       change: '',
       icon: Headphones,
       color: 'text-accent-400',
@@ -237,7 +237,7 @@ const Analytics: React.FC = () => {
     },
     {
       label: 'Online Agents',
-      value: dashboard ? `${dashboard.agents.online}/${dashboard.agents.total}` : '—',
+      value: dashboard ? `${dashboard?.agents?.online ?? 0}/${dashboard?.agents?.total ?? 0}` : '—',
       change: '',
       icon: Users,
       color: 'text-status-online',
@@ -245,7 +245,7 @@ const Analytics: React.FC = () => {
     },
     {
       label: 'Avg Response Time',
-      value: dashboard ? `${dashboard.avgResponseTimeSeconds}s` : '—',
+      value: dashboard ? `${dashboard?.avgResponseTimeSeconds ?? 0}s` : '—',
       change: '',
       icon: Clock,
       color: 'text-chat-bot',

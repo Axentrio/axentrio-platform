@@ -35,7 +35,7 @@ export function useTenantSwitch() {
     // Reconnect socket so server picks up new tenant context
     reconnect();
     // Redirect to dashboard to avoid 404s on tenant-scoped routes
-    navigate('/', { replace: true });
+    navigate('/inbox', { replace: true });
   }, [queryClient, navigate, reconnect]);
 
   const switchTenant = useCallback(

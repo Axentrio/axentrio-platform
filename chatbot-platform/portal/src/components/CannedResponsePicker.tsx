@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Zap, Search } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import { useCannedResponses, useUseCannedResponse } from '../queries/useCannedResponseQueries';
@@ -22,7 +22,7 @@ interface SlashCommandDropdownProps {
 export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   query,
   onSelect,
-  onClose,
+  onClose: _onClose,
   visible,
 }) => {
   const { user } = useAppAuth();
@@ -43,7 +43,7 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
     try {
       const result = await useMutation.mutateAsync({
         id: cr.id,
-        variables: { agent_name: user?.name ?? '' },
+        variables: { agent_name: user?.firstName ?? '' },
       });
       onSelect((result as any)?.content ?? cr.content);
     } catch {
@@ -89,7 +89,7 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
 export function useSlashCommandKeyboard(
   visible: boolean,
   filteredCount: number,
-  selectedIndex: number,
+  _selectedIndex: number,
   setSelectedIndex: React.Dispatch<React.SetStateAction<number>>,
 ) {
   return (e: React.KeyboardEvent): boolean => {
@@ -150,7 +150,7 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
     try {
       const result = await useMutation.mutateAsync({
         id: cr.id,
-        variables: { agent_name: user?.name ?? '' },
+        variables: { agent_name: user?.firstName ?? '' },
       });
       onSelect((result as any)?.content ?? cr.content);
     } catch {

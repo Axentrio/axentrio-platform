@@ -1,4 +1,3 @@
-```typescript
 import React, { useState, useMemo } from 'react';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';

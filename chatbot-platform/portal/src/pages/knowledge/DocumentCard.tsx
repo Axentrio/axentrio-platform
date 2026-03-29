@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
+import { timeAgo } from '@/utils/timeAgo';
 
 interface DocumentCardProps {
   document: {
@@ -38,17 +39,6 @@ const statusConfig: Record<string, { dot: string; label: string; bg: string }> =
   pending: { dot: 'bg-text-muted', label: 'Pending', bg: 'bg-surface-3 text-text-muted' },
   failed: { dot: 'bg-red-400', label: 'Failed', bg: 'bg-red-400/10 text-red-400' },
 };
-
-function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
 
 const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, onDelete }) => {
   const { isRole } = useAppAuth();

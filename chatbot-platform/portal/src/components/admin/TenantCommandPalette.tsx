@@ -11,11 +11,13 @@ import { useUiStore } from '../../stores/uiStore';
 import { useTenantContextStore } from '../../stores/tenantContextStore';
 import { useAdminTenantsAll } from '../../queries/useAdminQueries';
 import { useTenantSwitch } from '../../hooks/useTenantSwitch';
+import { useAppAuth } from '../../auth/useAppAuth';
 import { cn } from '@/lib/utils';
 
 export function TenantCommandPalette() {
   const { isTenantPaletteOpen, closeTenantPalette } = useUiStore();
   const { activeTenant } = useTenantContextStore();
+  const { tenantId: ownTenantId } = useAppAuth();
   const { switchTenant } = useTenantSwitch();
   const { data: tenants, isLoading, isError, refetch } = useAdminTenantsAll();
   const [search, setSearch] = useState('');
@@ -42,12 +44,13 @@ export function TenantCommandPalette() {
   );
 
   // Sort: active tenant pinned to top, then alphabetical
+  const currentTenantId = activeTenant?.tenantId ?? ownTenantId;
   const sortedTenants = tenants
     ? [...tenants]
         .filter((t) => t.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => {
-          if (a.id === activeTenant?.tenantId) return -1;
-          if (b.id === activeTenant?.tenantId) return 1;
+          if (a.id === currentTenantId) return -1;
+          if (b.id === currentTenantId) return 1;
           return (a.name as string).localeCompare(b.name as string);
         })
     : [];
@@ -100,7 +103,9 @@ export function TenantCommandPalette() {
           )}
 
           {!isLoading && !isError && sortedTenants.map((tenant) => {
-            const isActive = activeTenant?.tenantId === tenant.id;
+            const isActive = activeTenant
+              ? activeTenant.tenantId === tenant.id
+              : ownTenantId === tenant.id;
             const isInactive = tenant.status === 'suspended' || tenant.status === 'cancelled';
 
             return (

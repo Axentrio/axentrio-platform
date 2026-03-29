@@ -10,6 +10,43 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-29-navigation-restructure-design.md`
 
+**Codex Review:** Plan cross-checked against actual codebase. Import paths, component props, type shapes, and task ordering verified.
+
+---
+
+## Verified Import Paths (reference for all tasks)
+
+These are the actual import paths confirmed from the existing codebase:
+
+| What | Correct Import Path |
+|------|-------------------|
+| API client | `@services/apiClient` (NOT `@/lib/api`) |
+| Tenant hooks | `../queries/useTenantQueries` or `@/queries/useTenantQueries` |
+| AI/Knowledge hooks | `@/queries/useKnowledgeQueries` (NOT `useAiQueries` — all AI hooks live here) |
+| Canned response hooks + type | `../queries/useCannedResponseQueries` (CannedResponse type is here, NOT in `@app-types/index`) |
+| Handoff hooks | `../queries/useHandoffQueries` |
+| Agent query options | `../queries/useAgentQueries` |
+| Chat hooks | `../queries/useChatQueries` |
+| Analytics hooks | `../queries/useAnalyticsQueries` |
+| Dashboard hooks | `../queries/useDashboardQueries` |
+| Notification sound | `@websocket/notificationSound` (NOT `@/hooks/useNotificationSound`) |
+| Socket context | `@websocket/SocketContext` |
+| Chat/HandoffRequest types | `@app-types/index` |
+
+---
+
+## Verified Component Props (reference for all tasks)
+
+| Component | Actual Props |
+|-----------|-------------|
+| `ChatStream` | `tenants`, `onChatSelect`, `onTakeover`, `selectedChatId?`, `className?` — **NO `filter` prop**. Has its own internal status filter UI. |
+| `ChatWindow` | `chat`, `onClose?`, `onTransfer?(chatId: string)`, `className?` |
+| `DocumentsTab` | `initialFilter?`, `onFilterChange?`, `showAiBanner?`, `onConfigureAi?` — **NOT `filter` or `onAddDocument`**. Owns its own add-document modal. |
+| `AiSettingsTab` | No props (self-contained) |
+| `TestChatPanel` | `isOpen`, `onClose`, `botName`, `provider`, `model`, `hasIndexedDocs` — **`isOpen` is required** and it renders its own backdrop. |
+| `AddDocumentModal` | `isOpen`, `onClose`, `editingDocument?` |
+| RawAgent shape | `maxConcurrentChats` (NOT `maxChats`), maps to Agent.`maxConcurrentChats` |
+
 ---
 
 ## File Structure
@@ -23,11 +60,12 @@ portal/src/pages/settings/WidgetBrandSettings.tsx   — Widget & Brand settings 
 
 ### Files to modify
 ```
-portal/src/App.tsx                                  — Route definitions and redirects
-portal/src/components/Sidebar.tsx                   — Menu items (9 → 5)
-portal/src/pages/Analytics.tsx                      — Add Dashboard metric cards
+portal/src/App.tsx                                  — Route definitions, redirects, hoist SocketProvider
+portal/src/components/Sidebar.tsx                   — Menu items (9 → 5), add handoff query
+portal/src/pages/Analytics.tsx                      — Add Dashboard metric cards + agent role guard
 portal/src/pages/settings/SettingsLayout.tsx         — Add Widget & Brand nav item
-portal/src/components/settings/IntegrationTab.tsx   — Already handles webhook/API key (no changes needed)
+portal/src/components/ChatStream.tsx                — Accept optional initialStatusFilter prop
+portal/src/pages/CannedResponses.tsx                — Extract CannedResponsesContent named export
 ```
 
 ### Files retired (kept but no longer routed to)
@@ -37,18 +75,91 @@ portal/src/pages/LiveMonitor.tsx        — Merged into Inbox
 portal/src/pages/Queue.tsx              — Merged into Inbox
 portal/src/pages/ChatTakeover.tsx       — Merged into Inbox (right panel)
 portal/src/pages/KnowledgeBase.tsx      — Merged into AiContent
-portal/src/pages/CannedResponses.tsx    — Merged into AiContent
 portal/src/pages/Tenants.tsx            — Split into Settings > Widget & Brand + Integrations
 ```
 
 ---
 
-## Task 1: Create the Inbox page
+## Task 1: Add initialStatusFilter prop to ChatStream
+
+**Files:**
+- Modify: `portal/src/components/ChatStream.tsx`
+
+ChatStream already has its own internal status filter UI (dropdown with `'all' | 'bot' | 'handsoff' | 'human' | 'closed'`). We need to let the Inbox page set the initial filter value so the tabs drive it.
+
+- [ ] **Step 1: Read ChatStream.tsx**
+
+Read `portal/src/components/ChatStream.tsx` to find the exact state variable for the status filter and its initialization.
+
+- [ ] **Step 2: Add initialStatusFilter prop**
+
+Add to the `ChatStreamProps` interface:
+```tsx
+interface ChatStreamProps {
+  tenants: Tenant[];
+  onChatSelect: (chat: Chat) => void;
+  onTakeover: (chatId: string) => void;
+  selectedChatId?: string;
+  className?: string;
+  initialStatusFilter?: 'all' | 'bot' | 'handsoff' | 'human' | 'closed';  // NEW
+}
+```
+
+In the component destructuring, accept it:
+```tsx
+const ChatStream: React.FC<ChatStreamProps> = ({
+  tenants,
+  onChatSelect,
+  onTakeover,
+  selectedChatId,
+  className,
+  initialStatusFilter = 'all',  // NEW — default to 'all'
+}) => {
+```
+
+Find the internal status filter state (likely `useState<string>('all')`) and change the default:
+```tsx
+const [statusFilter, setStatusFilter] = useState(initialStatusFilter);
+```
+
+Also add a `useEffect` to sync when the prop changes:
+```tsx
+React.useEffect(() => {
+  setStatusFilter(initialStatusFilter);
+}, [initialStatusFilter]);
+```
+
+When `initialStatusFilter` is provided from Inbox, optionally hide the internal filter dropdown to avoid duplication. Add a prop `hideStatusFilter?: boolean` or simply check if the prop was passed:
+```tsx
+{!initialStatusFilter || initialStatusFilter === 'all' ? (
+  // render internal status filter dropdown
+) : null}
+```
+
+- [ ] **Step 3: Verify compilation**
+
+Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add portal/src/components/ChatStream.tsx
+git commit -m "feat: add initialStatusFilter prop to ChatStream
+
+Allows parent components to set the initial status filter
+and optionally hide the internal filter dropdown."
+```
+
+---
+
+## Task 2: Create the Inbox page
 
 **Files:**
 - Create: `portal/src/pages/Inbox.tsx`
 
-This is the highest-impact change. It merges Live Monitor, Queue, and Chat Takeover into a single split-pane workspace with filter tabs.
+This merges Live Monitor, Queue, and Chat Takeover into a single split-pane workspace with filter tabs. Uses `ChatStream` with the new `initialStatusFilter` prop.
+
+**Important:** Chat statuses are `'bot' | 'handsoff' | 'human'` (not `'agent'` or `'handoff'`). The Inbox tab labels use friendly names but map to these actual status values.
 
 - [ ] **Step 1: Create the Inbox page file**
 
@@ -80,7 +191,6 @@ import {
 } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Select,
@@ -106,45 +216,52 @@ import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 
 import { useTenantSettings } from '@/queries/useTenantQueries';
-import { useChatsQuery } from '@/queries/useChatQueries';
-import { useHandoffsQuery, useAcceptHandoff, useRejectHandoff } from '@/queries/useHandoffQueries';
-import { useNotificationSound } from '@/hooks/useNotificationSound';
-import { agentOptions } from '@/queries/useAgentQueries';
-import { api } from '@/lib/api';
+import { useHandoffsQuery, useAcceptHandoff, useRejectHandoff } from '../queries/useHandoffQueries';
+import { useNotificationSound } from '@websocket/notificationSound';
+import { agentOptions } from '../queries/useAgentQueries';
+import api from '@services/apiClient';
 
 import type { Chat, HandoffRequest } from '@app-types/index';
 
-type InboxFilter = 'all' | 'bot' | 'handoff' | 'agent';
+type InboxTab = 'all' | 'bot' | 'handoff' | 'human';
 type HandoffPriority = 'urgent' | 'high' | 'medium' | 'low';
+
+// Maps Inbox tabs to ChatStream status filter values
+const tabToStatusFilter: Record<InboxTab, 'all' | 'bot' | 'handsoff' | 'human'> = {
+  all: 'all',
+  bot: 'bot',
+  handoff: 'handsoff',  // Inbox shows "Handoff" tab, but the status value is 'handsoff'
+  human: 'human',
+};
 
 interface RawAgent {
   id: string;
   name: string;
   status: string;
   currentChatCount: number;
-  maxChats: number;
+  maxConcurrentChats: number;
   skills?: string[];
 }
 
-interface Agent {
+interface MappedAgent {
   id: string;
   firstName: string;
   lastName: string;
   status: string;
   currentChatCount: number;
-  maxChats: number;
+  maxConcurrentChats: number;
   skills: string[];
 }
 
-function mapRawAgent(raw: RawAgent): Agent {
-  const parts = raw.name.split(' ');
+function mapRawAgent(raw: RawAgent): MappedAgent {
+  const parts = raw.name?.split(' ') || ['Unknown'];
   return {
     id: raw.id,
     firstName: parts[0] || '',
     lastName: parts.slice(1).join(' ') || '',
     status: raw.status,
     currentChatCount: raw.currentChatCount,
-    maxChats: raw.maxChats,
+    maxConcurrentChats: raw.maxConcurrentChats ?? 5,
     skills: raw.skills ?? [],
   };
 }
@@ -175,10 +292,10 @@ function formatWaitTime(seconds: number): string {
 
 const Inbox: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
-  const initialFilter = (searchParams.get('filter') as InboxFilter) || 'all';
+  const initialTab = (searchParams.get('filter') as InboxTab) || 'all';
   const initialChatId = searchParams.get('chat') || null;
 
-  const [activeFilter, setActiveFilter] = useState<InboxFilter>(initialFilter);
+  const [activeTab, setActiveTab] = useState<InboxTab>(initialTab);
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(initialChatId);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
@@ -188,7 +305,6 @@ const Inbox: React.FC = () => {
   // Data hooks
   const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
-  const { chats } = useChatsQuery({ filters: { status: undefined } });
   const { handoffs, pendingCount, isLoading: handoffsLoading } = useHandoffsQuery('pending');
   const acceptMutation = useAcceptHandoff();
   const rejectMutation = useRejectHandoff();
@@ -199,18 +315,7 @@ const Inbox: React.FC = () => {
     ...agentOptions.list({ status: 'online' }),
     enabled: isTransferModalOpen,
   });
-  const agents: Agent[] = ((rawAgents as RawAgent[] | undefined) ?? []).map(mapRawAgent);
-
-  // Filter chats by tab
-  const filteredChats = useMemo(() => {
-    if (!chats) return [];
-    switch (activeFilter) {
-      case 'bot': return chats.filter((c: Chat) => c.status === 'bot');
-      case 'agent': return chats.filter((c: Chat) => c.status === 'human');
-      case 'handoff': return []; // Handoff tab shows handoff cards, not chats
-      default: return chats;
-    }
-  }, [chats, activeFilter]);
+  const agents: MappedAgent[] = ((rawAgents as RawAgent[] | undefined) ?? []).map(mapRawAgent);
 
   // Filter handoffs by priority
   const filteredHandoffs = useMemo(() => {
@@ -227,9 +332,10 @@ const Inbox: React.FC = () => {
     }
   }, [initialChatId, selectedChat]);
 
-  const handleFilterChange = (filter: string) => {
-    setActiveFilter(filter as InboxFilter);
-    setSearchParams(filter === 'all' ? {} : { filter });
+  const handleTabChange = (tab: string) => {
+    const t = tab as InboxTab;
+    setActiveTab(t);
+    setSearchParams(t === 'all' ? {} : { filter: t });
   };
 
   const handleChatSelect = (chat: Chat) => {
@@ -290,7 +396,7 @@ const Inbox: React.FC = () => {
     setSelectedChat(null);
     setSelectedChatId(null);
     setIsMobileChatOpen(false);
-    setSearchParams(activeFilter === 'all' ? {} : { filter: activeFilter });
+    setSearchParams(activeTab === 'all' ? {} : { filter: activeTab });
   };
 
   const isHandoff = selectedChat?.status === 'handsoff';
@@ -311,7 +417,7 @@ const Inbox: React.FC = () => {
         )}>
           {/* Filter tabs */}
           <div className="px-4 py-3 border-b border-edge flex-shrink-0">
-            <Tabs value={activeFilter} onValueChange={handleFilterChange}>
+            <Tabs value={activeTab} onValueChange={handleTabChange}>
               <TabsList className="w-full">
                 <TabsTrigger value="all" className="flex-1">All</TabsTrigger>
                 <TabsTrigger value="bot" className="flex-1">
@@ -327,7 +433,7 @@ const Inbox: React.FC = () => {
                     </span>
                   )}
                 </TabsTrigger>
-                <TabsTrigger value="agent" className="flex-1">
+                <TabsTrigger value="human" className="flex-1">
                   <UserCheck className="w-4 h-4 mr-1" />
                   Agent
                 </TabsTrigger>
@@ -335,7 +441,7 @@ const Inbox: React.FC = () => {
             </Tabs>
 
             {/* Priority filter for handoff tab */}
-            {activeFilter === 'handoff' && (
+            {activeTab === 'handoff' && (
               <div className="mt-2">
                 <Select value={filterPriority} onValueChange={(v) => setFilterPriority(v as HandoffPriority | 'all')}>
                   <SelectTrigger className="w-full">
@@ -355,8 +461,8 @@ const Inbox: React.FC = () => {
 
           {/* List content */}
           <div className="flex-1 overflow-y-auto">
-            {activeFilter === 'handoff' ? (
-              /* Handoff list */
+            {activeTab === 'handoff' ? (
+              /* Handoff list — renders handoff cards with accept/decline */
               <div className="p-3 space-y-2">
                 {handoffsLoading ? (
                   Array.from({ length: 3 }).map((_, i) => (
@@ -429,14 +535,14 @@ const Inbox: React.FC = () => {
                 )}
               </div>
             ) : (
-              /* Chat list via ChatStream */
+              /* Chat list via ChatStream — uses initialStatusFilter to sync with tab */
               <ChatStream
                 tenants={tenants}
                 onChatSelect={handleChatSelect}
                 onTakeover={handleTakeover}
                 selectedChatId={selectedChatId ?? undefined}
                 className="h-full"
-                filter={activeFilter === 'all' ? undefined : activeFilter}
+                initialStatusFilter={tabToStatusFilter[activeTab]}
               />
             )}
           </div>
@@ -560,7 +666,7 @@ const Inbox: React.FC = () => {
                     )}
                   </div>
                   <span className="text-sm text-text-secondary">
-                    {agent.currentChatCount}/{agent.maxChats} chats
+                    {agent.currentChatCount}/{agent.maxConcurrentChats} chats
                   </span>
                 </button>
               ))
@@ -582,17 +688,9 @@ export default Inbox;
 
 Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
 
-Note: There may be TypeScript errors related to the `ChatStream` `filter` prop — this component may not yet accept a `filter` prop. If so, proceed to Step 3 to fix it; if it compiles, skip Step 3.
+Fix any remaining import path issues by checking the actual imports in LiveMonitor.tsx, Queue.tsx, and ChatTakeover.tsx.
 
-- [ ] **Step 3: Add filter prop to ChatStream if needed**
-
-Check the `ChatStream` component interface. If it doesn't accept a `filter` prop, you have two options:
-1. Filter the chats at the Inbox level before passing to ChatStream (preferred if ChatStream accepts a `chats` array prop)
-2. Add a `filter` prop to ChatStream
-
-Read `ChatStream` source first. Adapt the filtering approach to match how ChatStream currently works. The goal is to show only bot/agent/all chats based on the active tab.
-
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add portal/src/pages/Inbox.tsx
@@ -604,14 +702,45 @@ split-pane workspace with filter tabs (All/Bot/Handoff/Agent)."
 
 ---
 
-## Task 2: Create the AI & Content page
+## Task 3: Create the AI & Content page
 
 **Files:**
 - Create: `portal/src/pages/AiContent.tsx`
+- Modify: `portal/src/pages/CannedResponses.tsx`
 
-This merges Knowledge Base and Canned Responses into a single tabbed page, promoting AI Settings from a slide-over panel to a first-class tab.
+Merges Knowledge Base and Canned Responses into a single tabbed page, promoting AI Settings to a first-class tab.
 
-- [ ] **Step 1: Create the AiContent page file**
+**Key corrections from Codex review:**
+- `DocumentsTab` accepts `initialFilter`, NOT `filter`. It owns its own add-document modal.
+- `TestChatPanel` requires `isOpen` prop and renders its own backdrop — don't wrap it in another overlay.
+- AI hooks come from `@/queries/useKnowledgeQueries`, NOT `useAiQueries`.
+
+- [ ] **Step 1: Extract CannedResponsesContent from CannedResponses page**
+
+Read `portal/src/pages/CannedResponses.tsx`. Refactor so all the hooks, state, handlers, and JSX (minus the outer page wrapper and h1 header) live in a named export `CannedResponsesContent`. The default export wraps it with the page header for backward compat:
+
+```tsx
+export const CannedResponsesContent: React.FC = () => {
+  // ... all current hooks, state, handlers, and JSX from CannedResponses
+  // MINUS the outer <div className="p-6 space-y-6"> and <h1> header
+  // Include the filter controls, table, create/edit dialog, and delete dialog
+};
+
+const CannedResponses: React.FC = () => {
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-text-primary">Canned Responses</h1>
+      </div>
+      <CannedResponsesContent />
+    </div>
+  );
+};
+
+export default CannedResponses;
+```
+
+- [ ] **Step 2: Create the AiContent page file**
 
 Create `portal/src/pages/AiContent.tsx`:
 
@@ -638,17 +767,10 @@ import { cn } from '@/lib/utils';
 import { DocumentsTab } from '@/pages/knowledge/DocumentsTab';
 import { AiSettingsTab } from '@/pages/knowledge/AiSettingsTab';
 import { TestChatPanel } from '@/pages/knowledge/TestChatPanel';
-import { AddDocumentModal } from '@/pages/knowledge/AddDocumentModal';
 
 import { useAppAuth } from '@auth/useAppAuth';
-import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
-import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useAiQueries';
-import { useCannedResponses, useCreateCannedResponse, useUpdateCannedResponse, useDeleteCannedResponse } from '@/queries/useCannedResponseQueries';
+import { useKnowledgeStats, useGetAiSettings } from '@/queries/useKnowledgeQueries';
 
-import type { CannedResponse } from '@app-types/index';
-
-// Inline the canned responses content to avoid importing the full page component.
-// This keeps the tab self-contained while reusing the same hooks.
 import { CannedResponsesContent } from '@/pages/CannedResponses';
 
 type AiContentTab = 'knowledge' | 'canned' | 'settings';
@@ -659,8 +781,7 @@ const AiContent: React.FC = () => {
 
   const [activeTab, setActiveTab] = useState<AiContentTab>(initialTab);
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<string | undefined>();
-  const [showAddDoc, setShowAddDoc] = useState(false);
+  const [docFilter, setDocFilter] = useState<string | undefined>();
 
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin') || isRole('super_admin');
@@ -668,7 +789,6 @@ const AiContent: React.FC = () => {
 
   const { data: stats } = useKnowledgeStats() as { data: any };
   const { data: aiSettings } = useGetAiSettings() as { data: any };
-  const updateSettings = useUpdateAiSettings();
 
   const documents = stats?.documents || {};
   const indexed = parseInt(documents.indexed || '0');
@@ -734,10 +854,10 @@ const AiContent: React.FC = () => {
               ].map((stat) => (
                 <button
                   key={stat.label}
-                  onClick={() => stat.filterKey && setActiveFilter(activeFilter === stat.filterKey ? undefined : stat.filterKey)}
+                  onClick={() => stat.filterKey && setDocFilter(docFilter === stat.filterKey ? undefined : stat.filterKey)}
                   className={cn(
                     'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                    activeFilter === stat.filterKey
+                    docFilter === stat.filterKey
                       ? 'bg-primary-600/10 text-primary-400'
                       : 'bg-surface-3 text-text-secondary hover:bg-surface-4',
                     !stat.filterKey && 'cursor-default'
@@ -751,9 +871,10 @@ const AiContent: React.FC = () => {
               ))}
             </div>
 
+            {/* DocumentsTab — uses initialFilter prop, NOT filter */}
             <DocumentsTab
-              filter={activeFilter}
-              onAddDocument={() => setShowAddDoc(true)}
+              initialFilter={docFilter}
+              onFilterChange={setDocFilter}
             />
           </TabsContent>
 
@@ -769,29 +890,15 @@ const AiContent: React.FC = () => {
         </Tabs>
       </div>
 
-      {/* Test Chat slide-over */}
-      {isTestChatOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setIsTestChatOpen(false)} />
-          <div className="relative w-full max-w-md bg-surface-0 border-l border-edge shadow-xl">
-            <TestChatPanel
-              botName={aiSettings?.brandVoice?.name || 'AI Bot'}
-              provider={aiSettings?.provider}
-              model={aiSettings?.model}
-              hasIndexedDocs={hasIndexedDocs}
-              onClose={() => setIsTestChatOpen(false)}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Add Document Modal */}
-      {showAddDoc && (
-        <AddDocumentModal
-          isOpen={showAddDoc}
-          onClose={() => setShowAddDoc(false)}
-        />
-      )}
+      {/* Test Chat Panel — it renders its own backdrop/panel, just pass isOpen */}
+      <TestChatPanel
+        isOpen={isTestChatOpen}
+        onClose={() => setIsTestChatOpen(false)}
+        botName={aiSettings?.brandVoice?.name || 'AI Bot'}
+        provider={aiSettings?.provider}
+        model={aiSettings?.model}
+        hasIndexedDocs={hasIndexedDocs}
+      />
     </div>
   );
 };
@@ -799,39 +906,9 @@ const AiContent: React.FC = () => {
 export default AiContent;
 ```
 
-- [ ] **Step 2: Extract CannedResponsesContent from CannedResponses page**
-
-The `CannedResponses.tsx` page currently exports a default component that includes the page header. We need a version without the outer header wrapper so it fits inside the AI & Content tab. Add a named export `CannedResponsesContent` at the bottom of `portal/src/pages/CannedResponses.tsx`:
-
-Read the current file first to determine the exact component structure. Then extract the inner content (everything below the page header) into a `CannedResponsesContent` component. The existing default export should render `CannedResponsesContent` wrapped in the page header, so the old `/canned-responses` route still works during the transition.
-
-Pattern:
-```tsx
-// At the bottom of CannedResponses.tsx, refactor:
-export const CannedResponsesContent: React.FC = () => {
-  // ... all the hooks, state, handlers, and JSX that currently live in CannedResponses
-  // MINUS the outer <div className="p-6 space-y-6"> and <h1>Canned Responses</h1> header
-};
-
-const CannedResponses: React.FC = () => {
-  return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-text-primary">Canned Responses</h1>
-      </div>
-      <CannedResponsesContent />
-    </div>
-  );
-};
-
-export default CannedResponses;
-```
-
 - [ ] **Step 3: Verify imports compile**
 
 Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
-
-Fix any import path issues. The query hook imports may need adjustment based on actual file paths — check the existing import paths in `KnowledgeBase.tsx` and `CannedResponses.tsx` to match exactly.
 
 - [ ] **Step 4: Commit**
 
@@ -845,37 +922,43 @@ a single tabbed page. Extracts CannedResponsesContent for reuse."
 
 ---
 
-## Task 3: Merge Dashboard metrics into Analytics
+## Task 4: Merge Dashboard metrics into Analytics + agent role guard
 
 **Files:**
 - Modify: `portal/src/pages/Analytics.tsx`
 
-Add the Dashboard's real-time metric cards (Active Chats, Pending Handoffs, Online Agents) to the top of the Analytics page, combining both data sources.
+**Important (from Codex review):** `useHandoffsQuery()` calls `useSocket()` internally, so Analytics must be wrapped in SocketProvider before this hook is used. Since this task runs before the route change (Task 6), we must either:
+1. Move the route change first, OR
+2. Avoid `useHandoffsQuery()` and use a simple REST query for the count instead.
 
-- [ ] **Step 1: Add Dashboard hooks and metric cards to Analytics**
+**Chosen approach:** Use `useDashboardMetrics()` only (which does NOT require SocketProvider). The pending handoff count is already available in the dashboard response as `dashboard.sessions.handoff`. Skip `useHandoffsQuery()` entirely for the Analytics page — it's unnecessary.
 
-Read the current `portal/src/pages/Analytics.tsx` and `portal/src/pages/Dashboard.tsx` files first.
+Also add role-based rendering: agents see metric cards only, supervisors+ see full charts.
 
-Add the Dashboard's `useDashboardMetrics` hook import and extend the stats cards array to include all 6 metrics. Update the import section and the stats array:
+- [ ] **Step 1: Read current Analytics.tsx**
 
+Read `portal/src/pages/Analytics.tsx` to get exact imports, state, and JSX structure.
+
+- [ ] **Step 2: Add Dashboard metrics and role guard**
+
+Add imports:
 ```tsx
-// Add to existing imports in Analytics.tsx:
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
-import { useHandoffsQuery } from '../queries/useHandoffQueries';
 import { useNavigate } from 'react-router-dom';
 import { Headphones, TrendingUp } from 'lucide-react';
+import { useAppAuth } from '@auth/useAppAuth';
 ```
 
-In the component body, add:
+Add to component body:
 ```tsx
 const navigate = useNavigate();
+const { user } = useAppAuth();
+const isAgent = user?.role === 'agent';
 const { data: rawDashboard } = useDashboardMetrics();
-const { pendingCount } = useHandoffsQuery('pending');
-
 const dashboard = rawDashboard?.dashboard;
 ```
 
-Replace the existing 4-item `stats` array with a 6-item version combining Dashboard and Analytics data:
+Replace the existing 4-item `stats` array with 6 items:
 ```tsx
 const stats = [
   {
@@ -888,11 +971,11 @@ const stats = [
   },
   {
     label: 'Pending Handoffs',
-    value: pendingCount ?? 0,
+    value: dashboard?.sessions.handoff ?? 0,
     icon: Headphones,
     color: 'text-accent-400',
     bgColor: 'bg-accent-500/10',
-    alert: (pendingCount ?? 0) > 3,
+    alert: (dashboard?.sessions.handoff ?? 0) > 3,
     onClick: () => navigate('/inbox?filter=handoff'),
   },
   {
@@ -904,7 +987,7 @@ const stats = [
   },
   {
     label: 'Avg Response Time',
-    value: dashboard ? `${dashboard.avgResponseTimeSeconds}s` : (metrics?.avgDurationSeconds != null ? `${metrics.avgDurationSeconds}s` : '--'),
+    value: dashboard ? `${dashboard.avgResponseTimeSeconds}s` : '--',
     icon: Clock,
     color: 'text-status-online',
     bgColor: 'bg-status-online/10',
@@ -926,50 +1009,66 @@ const stats = [
 ];
 ```
 
-Update the stats grid to be 6-column on large screens:
+Update stats grid:
 ```tsx
 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
 ```
 
-Make clickable cards navigate when they have an `onClick`:
+Add click handling to cards:
 ```tsx
 <Card
   key={index}
   variant="glass"
   hover
-  className={cn('cursor-pointer', stat.onClick && 'cursor-pointer')}
+  className={cn(stat.onClick && 'cursor-pointer')}
   onClick={stat.onClick}
 >
 ```
 
-- [ ] **Step 2: Verify the page renders**
+After the stats grid, conditionally render charts only for non-agents:
+```tsx
+{isAgent ? (
+  <div className="text-center py-12">
+    <p className="text-text-secondary">
+      <Button variant="link" onClick={() => navigate('/inbox')}>Go to Inbox</Button>
+      to manage conversations
+    </p>
+  </div>
+) : (
+  /* existing Tabs with Overview/Agents/Chats */
+)}
+```
+
+- [ ] **Step 3: Verify compilation**
 
 Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add portal/src/pages/Analytics.tsx
-git commit -m "feat: merge Dashboard metrics into Analytics page
+git commit -m "feat: merge Dashboard metrics into Analytics + agent role guard
 
-Adds real-time metric cards (Active Chats, Pending Handoffs,
-Online Agents, CSAT, Bot Resolution) from Dashboard to Analytics,
-making Analytics the single source for all performance data."
+Adds 6 real-time metric cards. Agents see cards only with link
+to Inbox. Supervisors+ see full charts and tables."
 ```
 
 ---
 
-## Task 4: Add Widget & Brand settings page
+## Task 5: Add Widget & Brand settings page
 
 **Files:**
 - Create: `portal/src/pages/settings/WidgetBrandSettings.tsx`
 - Modify: `portal/src/pages/settings/SettingsLayout.tsx`
 
-Extract the branding/widget configuration from `Tenants.tsx` into a new Settings sub-page.
+**Key corrections from Codex review:**
+- Color lives at `settings.theme.primaryColor`, NOT `settings.primaryColor`
+- Save payload uses `settings: { theme: { primaryColor } }` (nested)
+- Session fields are `currentAgents`/`maxAgents` on the mapped Tenant (mapped from API's `currentSessions`/`maxSessions`)
 
 - [ ] **Step 1: Create WidgetBrandSettings page**
 
-Read `portal/src/pages/Tenants.tsx` first to get the exact component structure, then create a simplified version that shows the branding config:
+Read `portal/src/pages/Tenants.tsx` lines 23-105 first for the exact data shape.
 
 Create `portal/src/pages/settings/WidgetBrandSettings.tsx`:
 
@@ -982,7 +1081,6 @@ Create `portal/src/pages/settings/WidgetBrandSettings.tsx`:
 
 import React, { useState, useRef } from 'react';
 import {
-  Palette,
   Upload,
   Trash2,
   Building2,
@@ -1014,11 +1112,15 @@ const WidgetBrandSettings: React.FC = () => {
   const updateMutation = useUpdateTenant();
 
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-  const [editingColor, setEditingColor] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string | null>(null);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
+  // Map the raw API tenant data the same way Tenants.tsx does
+  // Read mapApiToTenant in Tenants.tsx for the exact shape
   const tenant = rawTenant as any;
+  // primaryColor lives at settings.theme.primaryColor on the raw data,
+  // or at tenant.primaryColor on the mapped Tenant shape
+  const primaryColor = tenant?.primaryColor || tenant?.settings?.theme?.primaryColor || '#6366f1';
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1049,8 +1151,10 @@ const WidgetBrandSettings: React.FC = () => {
 
   const handleColorSave = async (color: string) => {
     try {
-      await updateMutation.mutateAsync({ settings: { primaryColor: color } });
-      setEditingColor(null);
+      // Must use nested settings.theme.primaryColor structure
+      await updateMutation.mutateAsync({
+        settings: { theme: { primaryColor: color } },
+      });
       toast.success('Brand color updated');
     } catch {
       toast.error('Failed to update color');
@@ -1077,11 +1181,9 @@ const WidgetBrandSettings: React.FC = () => {
     );
   }
 
-  const primaryColor = tenant?.settings?.primaryColor || '#6366f1';
-
   return (
     <div className="space-y-6">
-      {/* Logo */}
+      {/* Branding */}
       <Card variant="glass">
         <CardHeader className="pb-2">
           <h3 className="font-semibold text-text-primary flex items-center gap-2">
@@ -1124,7 +1226,6 @@ const WidgetBrandSettings: React.FC = () => {
             </div>
           </div>
 
-          {/* Name */}
           <div>
             <Label className="text-sm text-text-secondary mb-2 block">Display Name</Label>
             <div className="flex items-center gap-2">
@@ -1142,13 +1243,12 @@ const WidgetBrandSettings: React.FC = () => {
             <p className="text-xs text-text-muted mt-1">Slug: {tenant?.slug}</p>
           </div>
 
-          {/* Brand Color */}
           <div>
             <Label className="text-sm text-text-secondary mb-2 block">Brand Color</Label>
             <div className="flex flex-wrap gap-2">
-              {colorPresets.map((color) => (
+              {colorPresets.map((color, i) => (
                 <button
-                  key={color}
+                  key={`${color}-${i}`}
                   onClick={() => handleColorSave(color)}
                   className={cn(
                     'w-8 h-8 rounded-lg transition-all',
@@ -1162,7 +1262,7 @@ const WidgetBrandSettings: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Session Stats */}
+      {/* Usage */}
       <Card variant="glass">
         <CardHeader className="pb-2">
           <h3 className="font-semibold text-text-primary flex items-center gap-2">
@@ -1175,11 +1275,11 @@ const WidgetBrandSettings: React.FC = () => {
             <div>
               <p className="text-sm text-text-secondary">Active Sessions</p>
               <p className="text-2xl font-bold font-mono text-text-primary">
-                {tenant?.activeSessions ?? 0} / {tenant?.maxSessions ?? '∞'}
+                {tenant?.currentAgents ?? 0} / {tenant?.maxAgents ?? '∞'}
               </p>
             </div>
-            <Badge variant={tenant?.status === 'active' ? 'default' : 'secondary'}>
-              {tenant?.status ?? 'active'}
+            <Badge variant={tenant?.isActive ? 'default' : 'secondary'}>
+              {tenant?.isActive ? 'Active' : 'Inactive'}
             </Badge>
           </div>
         </CardContent>
@@ -1193,19 +1293,35 @@ export default WidgetBrandSettings;
 
 - [ ] **Step 2: Add Widget & Brand to SettingsLayout navigation**
 
-Read `portal/src/pages/settings/SettingsLayout.tsx`, then add the new nav item. Add the import and nav entry:
+Read `portal/src/pages/settings/SettingsLayout.tsx`. Add the import and nav entry:
 
-Add to imports:
 ```tsx
 import { Palette } from 'lucide-react';
 ```
 
-Add to the `settingsNav` array, in the Workspace group before Integrations:
+Add to `settingsNav` array in the Workspace group before Integrations:
 ```tsx
 { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Workspace' },
 ```
 
-The Workspace group items should show only for admin/super_admin roles. Read the current file to check if role filtering exists in `SettingsLayout`. If not, add role-based filtering using `useAppAuth()`.
+Add role-based filtering to hide Workspace items from agents. Read the current code to see if `useAppAuth()` is already imported. If not, add:
+```tsx
+import { useAppAuth } from '@auth/useAppAuth';
+```
+
+In the component, filter nav items:
+```tsx
+const { user } = useAppAuth();
+const isAdminOrAbove = user && ['admin', 'super_admin'].includes(user.role);
+
+// Filter nav items by role
+const visibleNav = settingsNav.filter((item) => {
+  if (item.group === 'Workspace' && !isAdminOrAbove) return false;
+  return true;
+});
+```
+
+Then use `visibleNav` instead of `settingsNav` for rendering.
 
 - [ ] **Step 3: Verify compilation**
 
@@ -1223,58 +1339,71 @@ into Settings > Workspace > Widget & Brand."
 
 ---
 
-## Task 5: Update routes and add redirects in App.tsx
+## Task 6: Update routes, hoist SocketProvider, and add redirects in App.tsx
 
 **Files:**
 - Modify: `portal/src/App.tsx`
 
-Wire up the new pages, add redirects for old routes, and set role-based default landing pages.
+**Critical (from Codex review):** `useHandoffsQuery()` in the Inbox and Sidebar requires `useSocket()` from SocketProvider. Currently SocketProvider is route-level (inside each page route). We need to hoist it above `AuthenticatedLayout` so the Sidebar can access socket context for the handoff badge count.
 
 - [ ] **Step 1: Read current App.tsx**
 
-Read `portal/src/App.tsx` to get the exact current route structure, line numbers, and import paths.
+Read `portal/src/App.tsx` to get the exact structure.
 
-- [ ] **Step 2: Add new page imports**
+- [ ] **Step 2: Add new page imports and redirect components**
 
-Add to the imports section of App.tsx:
+Add to imports:
 ```tsx
 import Inbox from './pages/Inbox';
 import AiContent from './pages/AiContent';
 import WidgetBrandSettings from './pages/settings/WidgetBrandSettings';
 ```
 
-- [ ] **Step 3: Replace route definitions**
+Add redirect helper components above the main App component:
+```tsx
+const TakeoverRedirect: React.FC = () => {
+  const { chatId } = useParams<{ chatId: string }>();
+  return <Navigate to={`/inbox?chat=${chatId}`} replace />;
+};
 
-Replace the existing protected routes with the new structure. Keep all existing wrappers (SocketProvider, ProtectedRoute, etc.):
+const DefaultRedirect: React.FC = () => {
+  const { user } = useAppAuth();
+  if (user?.role === 'agent') {
+    return <Navigate to="/inbox" replace />;
+  }
+  return <Navigate to="/analytics" replace />;
+};
+```
 
-**New protected routes (replace existing):**
+- [ ] **Step 3: Hoist SocketProvider above AuthenticatedLayout**
+
+In the route tree, wrap `AuthenticatedLayout` in `SocketProvider` so all child routes and the Sidebar can access socket context:
+
+```tsx
+<Route element={
+  <OrganizationRequired>
+    <SocketProvider>
+      <AuthenticatedLayout>
+        <Outlet />
+      </AuthenticatedLayout>
+    </SocketProvider>
+  </OrganizationRequired>
+}>
+  {/* All child routes go here — no individual SocketProvider wrappers needed */}
+</Route>
+```
+
+Remove the per-route `<SocketProvider>` wrappers from Dashboard, LiveMonitor, ChatTakeover, and Queue routes since the provider is now at the layout level.
+
+- [ ] **Step 4: Replace route definitions**
+
 ```tsx
 {/* === NEW ROUTES === */}
-
-{/* Inbox — replaces /monitor, /queue, /takeover */}
-<Route path="/inbox" element={
-  <ProtectedRoute><SocketProvider><Inbox /></SocketProvider></ProtectedRoute>
-} />
-
-{/* AI & Content — replaces /knowledge, /canned-responses */}
-<Route path="/ai" element={
-  <ProtectedRoute><AiContent /></ProtectedRoute>
-} />
-
-{/* Analytics — now includes Dashboard metrics */}
-<Route path="/analytics" element={
-  <ProtectedRoute><SocketProvider><Analytics /></SocketProvider></ProtectedRoute>
-} />
-
-{/* Team — unchanged */}
-<Route path="/team" element={
-  <SupervisorRoute><Team /></SupervisorRoute>
-} />
-
-{/* Settings — now includes Widget & Brand */}
-<Route path="/settings" element={
-  <ProtectedRoute><SettingsLayout /></ProtectedRoute>
-}>
+<Route path="/inbox" element={<ProtectedRoute><Inbox /></ProtectedRoute>} />
+<Route path="/ai" element={<ProtectedRoute><AiContent /></ProtectedRoute>} />
+<Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
+<Route path="/team" element={<SupervisorRoute><Team /></SupervisorRoute>} />
+<Route path="/settings" element={<ProtectedRoute><SettingsLayout /></ProtectedRoute>}>
   <Route index element={<Navigate to="/settings/profile" replace />} />
   <Route path="profile" element={<ProfileSettings />} />
   <Route path="notifications" element={<NotificationSettings />} />
@@ -1283,11 +1412,11 @@ Replace the existing protected routes with the new structure. Keep all existing 
   <Route path="integrations" element={<IntegrationSettings />} />
 </Route>
 
-{/* === REDIRECTS for old routes === */}
+{/* === REDIRECTS === */}
 <Route path="/" element={<DefaultRedirect />} />
 <Route path="/monitor" element={<Navigate to="/inbox" replace />} />
 <Route path="/queue" element={<Navigate to="/inbox?filter=handoff" replace />} />
-<Route path="/takeover/:chatId" element={<Navigate to="/inbox" replace />} />
+<Route path="/takeover/:chatId" element={<TakeoverRedirect />} />
 <Route path="/knowledge" element={<Navigate to="/ai?tab=knowledge" replace />} />
 <Route path="/canned-responses" element={<Navigate to="/ai?tab=canned" replace />} />
 <Route path="/tenants" element={<Navigate to="/settings/widget" replace />} />
@@ -1298,42 +1427,13 @@ Replace the existing protected routes with the new structure. Keep all existing 
 <Route path="/admin/users" element={<SuperAdminRoute><AdminUsers /></SuperAdminRoute>} />
 <Route path="/admin/analytics" element={<SuperAdminRoute><AdminAnalytics /></SuperAdminRoute>} />
 
-{/* Catch-all */}
 <Route path="*" element={<Navigate to="/inbox" replace />} />
 ```
 
-Note: The `/takeover/:chatId` redirect is simplified — the Navigate component doesn't support dynamic param forwarding in the `to` prop directly. A proper implementation would use a small redirect component:
+- [ ] **Step 5: Remove old page imports**
 
 ```tsx
-const TakeoverRedirect: React.FC = () => {
-  const { chatId } = useParams<{ chatId: string }>();
-  return <Navigate to={`/inbox?chat=${chatId}`} replace />;
-};
-
-// Then in routes:
-<Route path="/takeover/:chatId" element={<TakeoverRedirect />} />
-```
-
-Add `TakeoverRedirect` inline in App.tsx above the main App component, or at the top of the routes section.
-
-Also add a `DefaultRedirect` component for role-based landing:
-```tsx
-const DefaultRedirect: React.FC = () => {
-  const { user } = useAppAuth();
-  // Agents land on Inbox (conversations are their primary workflow)
-  // Supervisors/Admins/Super Admins land on Analytics (overview first)
-  if (user?.role === 'agent') {
-    return <Navigate to="/inbox" replace />;
-  }
-  return <Navigate to="/analytics" replace />;
-};
-```
-
-- [ ] **Step 4: Remove old route imports that are no longer directly routed**
-
-Remove these imports from App.tsx (the components are still used transitionally but no longer have direct routes):
-```tsx
-// Remove these imports:
+// Remove:
 import Dashboard from './pages/Dashboard';
 import LiveMonitor from './pages/LiveMonitor';
 import Queue from './pages/Queue';
@@ -1343,38 +1443,58 @@ import CannedResponses from './pages/CannedResponses';
 import Tenants from './pages/Tenants';
 ```
 
-- [ ] **Step 5: Verify compilation**
+- [ ] **Step 6: Verify compilation**
 
 Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add portal/src/App.tsx
-git commit -m "feat: update routes for new navigation structure
+git commit -m "feat: update routes, hoist SocketProvider, add redirects
 
-Wires Inbox, AI & Content, and Widget & Brand pages.
-Adds redirects for all old routes (/monitor, /queue, /takeover,
-/knowledge, /canned-responses, /tenants) to their new locations."
+Wires Inbox, AI & Content, Widget & Brand pages. Hoists
+SocketProvider above layout so Sidebar can access handoff count.
+Adds redirects for all old routes."
 ```
 
 ---
 
-## Task 6: Update the Sidebar
+## Task 7: Update the Sidebar with handoff badge
 
 **Files:**
 - Modify: `portal/src/components/Sidebar.tsx`
 
-Reduce menu items from 9 to 5 and move the handoff badge to the Inbox item.
+Now that SocketProvider is hoisted (Task 6), the Sidebar can use `useHandoffsQuery()` directly to get a real-time pending count.
 
 - [ ] **Step 1: Read current Sidebar.tsx**
 
-Read `portal/src/components/Sidebar.tsx` to confirm the exact current menu items array structure.
+Read `portal/src/components/Sidebar.tsx`.
 
-- [ ] **Step 2: Update the menuItems array**
+- [ ] **Step 2: Add handoff query import and remove pendingHandoffs prop**
 
-Replace the `menuItems` array (currently lines 43-53) with:
+The current Sidebar accepts `pendingHandoffs` as a prop (defaulting to 0) but it's never actually passed from App.tsx. Replace this with a direct query:
 
+Add import:
+```tsx
+import { useHandoffsQuery } from '../queries/useHandoffQueries';
+```
+
+In the component, remove `pendingHandoffs` from props and add:
+```tsx
+const { pendingCount } = useHandoffsQuery('pending');
+```
+
+Update the SidebarProps interface to remove `pendingHandoffs`:
+```tsx
+interface SidebarProps {
+  className?: string;
+}
+```
+
+- [ ] **Step 3: Update the menuItems array**
+
+Replace the `menuItems` array with:
 ```tsx
 const menuItems: MenuItem[] = [
   { path: '/inbox', label: 'Inbox', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
@@ -1385,34 +1505,36 @@ const menuItems: MenuItem[] = [
 ];
 ```
 
-- [ ] **Step 3: Update the badge logic**
+- [ ] **Step 4: Update badge rendering**
 
-The badge currently shows on the `/queue` item. Update it to show on `/inbox`:
-
-Change the badge rendering condition from:
+Change from:
 ```tsx
 {item.path === '/queue' && pendingHandoffs > 0 && (
 ```
 to:
 ```tsx
-{item.path === '/inbox' && pendingHandoffs > 0 && (
+{item.path === '/inbox' && pendingCount > 0 && (
 ```
 
-- [ ] **Step 4: Remove unused icon imports**
-
-Remove icons that are no longer used in the menu items:
+And update the display:
 ```tsx
-// Remove from imports:
+{pendingCount > 99 ? '99+' : pendingCount}
+```
+
+- [ ] **Step 5: Clean up unused imports**
+
+Remove:
+```tsx
 import { LayoutDashboard, Headphones, Zap, Building2 } from 'lucide-react';
 ```
 
 Keep: `MessageSquare`, `Users`, `BarChart3`, `Settings`, `LogOut`, `BookOpen`, `Shield`, `UserCog`, `TrendingUp`
 
-- [ ] **Step 5: Verify compilation**
+- [ ] **Step 6: Verify compilation**
 
 Run: `cd chatbot-platform && npx tsc --noEmit 2>&1 | head -30`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add portal/src/components/Sidebar.tsx
@@ -1420,17 +1542,15 @@ git commit -m "feat: consolidate sidebar from 9 items to 5
 
 Updates navigation to intent-based groups:
 Inbox, AI & Content, Analytics, Team, Settings.
-Moves handoff badge from Queue to Inbox."
+Uses useHandoffsQuery for real-time badge count."
 ```
 
 ---
 
-## Task 7: Smoke test and fix integration issues
+## Task 8: Smoke test and fix integration issues
 
 **Files:**
 - Potentially modify any of the new files based on what breaks
-
-This task is for running the app and fixing any integration issues that surface.
 
 - [ ] **Step 1: Start the dev server**
 
@@ -1438,33 +1558,34 @@ Run: `cd chatbot-platform && npm run dev`
 
 Open the portal in the browser. Check each new page:
 
-1. `/inbox` — verify chat list renders, filter tabs work, selecting a chat opens the right panel
-2. `/ai` — verify Knowledge Base tab shows documents, Canned Responses tab works, AI Settings tab shows config
-3. `/analytics` — verify 6 metric cards render, charts load, clickable cards navigate to Inbox
-4. `/settings/widget` — verify branding config renders
-5. Old URLs redirect: `/monitor` → `/inbox`, `/queue` → `/inbox?filter=handoff`, etc.
+1. `/inbox` — verify chat list renders, filter tabs work (All/Bot/Handoff/Agent), selecting a chat opens the right panel, accept/decline handoff works
+2. `/ai` — verify Knowledge Base tab shows documents (DocumentsTab renders), Canned Responses tab shows table (CannedResponsesContent renders), AI Settings tab shows config form
+3. `/analytics` — verify 6 metric cards render, clicking Active Chats navigates to `/inbox`, charts load for supervisor+ roles, agents see cards only
+4. `/settings/widget` — verify branding config renders, color picker works, logo upload works
+5. Sidebar shows 5 items with correct handoff badge count on Inbox
 
-- [ ] **Step 2: Fix any ChatStream filter prop issues**
+- [ ] **Step 2: Test all redirects**
 
-If `ChatStream` doesn't support filtering by status, you'll need to adapt. Options:
-1. Pass filtered `chats` array if ChatStream accepts a `chats` prop
-2. Add a `filter` prop to ChatStream
-3. Filter in Inbox and render chat items directly instead of using ChatStream
+Navigate to each old URL and verify:
+- `/` → `/inbox` (agent) or `/analytics` (admin)
+- `/monitor` → `/inbox`
+- `/queue` → `/inbox?filter=handoff`
+- `/takeover/some-id` → `/inbox?chat=some-id`
+- `/knowledge` → `/ai?tab=knowledge`
+- `/canned-responses` → `/ai?tab=canned`
+- `/tenants` → `/settings/widget`
 
-Read ChatStream source to determine the right approach.
+- [ ] **Step 3: Fix any issues found**
 
-- [ ] **Step 3: Fix any import path issues**
-
-Common issues:
-- Query hook import paths may differ from what's shown in the plan (check actual paths in existing pages)
-- Type imports may need adjustment
-- `CannedResponsesContent` export may need the exact inner JSX from the current page
+Common issues to watch for:
+- Import path mismatches — check actual paths against the reference table at the top of this plan
+- Component prop mismatches — check actual interfaces against the reference table
+- SocketProvider context errors — should be resolved by hoisting in Task 6
+- ChatStream `initialStatusFilter` not syncing — verify the useEffect in Task 1
 
 - [ ] **Step 4: Fix any TypeScript errors**
 
 Run: `cd chatbot-platform && npx tsc --noEmit`
-
-Fix all errors before proceeding.
 
 - [ ] **Step 5: Commit fixes**
 
@@ -1475,36 +1596,30 @@ git commit -m "fix: resolve integration issues from navigation restructure"
 
 ---
 
-## Task 8: Clean up and final commit
+## Task 9: Final verification and cleanup
 
-**Files:**
-- No new files
-
-- [ ] **Step 1: Verify all redirects work**
-
-Test each redirect in the browser:
-- `/` → should land on `/inbox` (or `/analytics` depending on role)
-- `/monitor` → `/inbox`
-- `/queue` → `/inbox?filter=handoff`
-- `/takeover/some-id` → `/inbox?chat=some-id`
-- `/knowledge` → `/ai?tab=knowledge`
-- `/canned-responses` → `/ai?tab=canned`
-- `/tenants` → `/settings/widget`
-
-- [ ] **Step 2: Verify role-based access**
+- [ ] **Step 1: Verify role-based access**
 
 Test with different roles if possible:
-- Agent should see: Inbox, AI & Content (read), Analytics (cards only), Settings (account only)
-- Admin should see: all items including Widget & Brand and Integrations in Settings
-- Super Admin should see: all items + Super Admin section
+- Agent: Inbox, AI & Content (read), Analytics (cards only), Settings (account only)
+- Supervisor: all + Team + full Analytics
+- Admin: all + Widget & Brand + Integrations
+- Super Admin: all + Super Admin section
+
+- [ ] **Step 2: Verify mobile responsiveness**
+
+Test at < 768px:
+- Inbox: list takes full width, selecting chat pushes full-screen view with back button
+- AI & Content: tabs stack properly
+- Settings: horizontal tabs (not sidebar) on mobile
 
 - [ ] **Step 3: Final commit**
 
-If any remaining fixes were needed:
 ```bash
 git add -A
 git commit -m "chore: finalize navigation restructure
 
 All 5 navigation groups working: Inbox, AI & Content,
-Analytics, Team, Settings. Old routes redirect correctly."
+Analytics, Team, Settings. Old routes redirect correctly.
+Role-based access verified."
 ```

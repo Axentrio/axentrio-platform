@@ -111,7 +111,8 @@ const AiSettingsTab: React.FC = () => {
   if (error) return <InlineError message="Failed to load AI settings" />;
 
   const readOnly = !isAdmin;
-  const isFirstSetup = !aiSettings?.enabled && !aiSettings?.hasApiKey;
+  const [skipOnboarding, setSkipOnboarding] = useState(false);
+  const isFirstSetup = !skipOnboarding && !aiSettings?.enabled && !aiSettings?.hasApiKey;
 
   // First-time setup prompt
   if (isFirstSetup && isAdmin) {
@@ -150,6 +151,7 @@ const AiSettingsTab: React.FC = () => {
         </div>
         <Button className="mt-6" onClick={() => {
           setEnabled(true);
+          setSkipOnboarding(true);
         }}>
           Get Started
         </Button>

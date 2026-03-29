@@ -216,8 +216,13 @@ Add `filterKey` to each stat item:
 Update the DocumentsTab prop:
 
 ```tsx
-<DocumentsTab initialFilter={activeFilter} />
+<DocumentsTab
+  initialFilter={activeFilter}
+  onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
+/>
 ```
+
+This creates two-way binding: stat clicks set `activeFilter` which flows down to DocumentsTab via `initialFilter`, and chip clicks flow back up via `onFilterChange`. Clicking "All" clears the highlight.
 
 - [ ] **Step 2: Commit**
 
@@ -451,21 +456,23 @@ In the slide-over header, add a dropdown menu before the close button:
 
 ```tsx
               <div className="flex items-center gap-1">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-7 w-7">
-                      <MoreVertical className="w-4 h-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onClick={() => setShowResetConfirm(true)}
-                      className="text-red-400"
-                    >
-                      Reset AI Settings
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {isRole('admin') && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-7 w-7">
+                        <MoreVertical className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onClick={() => setShowResetConfirm(true)}
+                        className="text-red-400"
+                      >
+                        Reset AI Settings
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
                 <Button variant="ghost" size="icon" onClick={() => setIsSettingsOpen(false)}>
                   <X className="w-4 h-4" />
                 </Button>
@@ -547,6 +554,7 @@ Update the interface:
 ```typescript
 interface DocumentsTabProps {
   initialFilter?: string;
+  onFilterChange?: (filter: string) => void;
   showAiBanner?: boolean;
   onConfigureAi?: () => void;
 }
@@ -555,7 +563,16 @@ interface DocumentsTabProps {
 Update the component signature:
 
 ```typescript
-const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, showAiBanner, onConfigureAi }) => {
+const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChange, showAiBanner, onConfigureAi }) => {
+```
+
+Update the filter chip `onClick` to notify the parent:
+
+```tsx
+                  onClick={() => {
+                    setTypeFilter(f.key);
+                    onFilterChange?.(f.key);
+                  }}
 ```
 
 Add the banner just before the toolbar, inside the return:
@@ -579,12 +596,29 @@ Add the banner just before the toolbar, inside the return:
 
 - [ ] **Step 2: Pass banner props from KnowledgeBase**
 
-In `chatbot-platform/portal/src/pages/KnowledgeBase.tsx`, update the DocumentsTab usage:
+In `chatbot-platform/portal/src/pages/KnowledgeBase.tsx`, update the DocumentsTab usage.
+
+First, add loading state checks. Destructure `isLoading` from both queries:
+
+```typescript
+const { data: stats, isLoading: statsLoading } = useKnowledgeStats() as { data: any; isLoading: boolean };
+const { data: aiSettings, isLoading: aiLoading } = useGetAiSettings() as { data: any; isLoading: boolean };
+```
+
+Add a derived state for AI configured (matches spec):
+
+```typescript
+const hasAiConfigured = aiSettings?.enabled && aiSettings?.hasApiKey;
+const queriesReady = !statsLoading && !aiLoading;
+```
+
+Update the DocumentsTab usage:
 
 ```tsx
         <DocumentsTab
           initialFilter={activeFilter}
-          showAiBanner={total > 0 && !aiSettings?.enabled}
+          onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
+          showAiBanner={queriesReady && total > 0 && !hasAiConfigured && isRole(['admin', 'supervisor'])}
           onConfigureAi={() => setIsSettingsOpen(true)}
         />
 ```
@@ -600,8 +634,8 @@ import { BookOpen, Settings2, CheckCircle2, Loader2, AlertCircle, Database, Cloc
 Before the stats strip, add a check for the unified empty state. After the header div and before the stats strip div, add:
 
 ```tsx
-      {/* Unified first-time empty state */}
-      {total === 0 && !aiSettings?.enabled && isRole('admin') && (
+      {/* Unified first-time empty state — only after queries load */}
+      {queriesReady && total === 0 && !hasAiConfigured && isRole('admin') && (
         <div className="px-6 pb-4">
           <div className="flex flex-col items-center text-center py-12">
             <div className="p-4 rounded-2xl bg-primary-500/5 mb-5">
@@ -667,7 +701,7 @@ Wrap the stats strip and documents section in a conditional so they only show wh
 
 ```tsx
       {/* Only show stats + documents when not in unified empty state */}
-      {!(total === 0 && !aiSettings?.enabled && isRole('admin')) && (
+      {!(queriesReady && total === 0 && !hasAiConfigured && isRole('admin')) && (
         <>
           {/* Stats Strip */}
           <div className="px-6 pb-4">

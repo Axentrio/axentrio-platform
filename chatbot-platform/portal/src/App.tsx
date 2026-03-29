@@ -34,6 +34,7 @@ import Analytics from '@pages/Analytics';
 import Tenants from '@pages/Tenants';
 import Team from '@pages/Team';
 import KnowledgeBase from '@pages/KnowledgeBase';
+import CannedResponses from './pages/CannedResponses';
 import SettingsLayout from '@pages/settings/SettingsLayout';
 import ProfileSettings from '@pages/settings/ProfileSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
@@ -238,6 +239,7 @@ const App: React.FC = () => {
                         }
                       />
                       <Route path="/knowledge" element={<KnowledgeBase />} />
+                      <Route path="/canned-responses" element={<CannedResponses />} />
                       <Route path="/settings" element={<SettingsLayout />}>
                         <Route index element={<Navigate to="/settings/profile" replace />} />
                         <Route path="profile" element={<ProfileSettings />} />

@@ -18,6 +18,7 @@ import {
   UserCog,
   TrendingUp,
   BookOpen,
+  Zap,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
@@ -45,6 +46,7 @@ const menuItems: MenuItem[] = [
   { path: '/queue', label: 'Queue', icon: Headphones, roles: ['super_admin', 'admin', 'supervisor', 'agent'], badge: 0 },
   { path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor'] },
   { path: '/knowledge', label: 'Knowledge Base', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/canned-responses', label: 'Canned Responses', icon: Zap, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
   { path: '/tenants', label: 'Tenants', icon: Building2, roles: ['super_admin', 'admin'] },
   { path: '/team', label: 'Team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },

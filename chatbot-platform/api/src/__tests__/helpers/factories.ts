@@ -9,6 +9,7 @@ import { Message } from '../../database/entities/Message';
 import { AuditLog } from '../../database/entities/AuditLog';
 import { PendingInvite } from '../../database/entities/PendingInvite';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
+import { CannedResponse } from '../../database/entities/CannedResponse';
 
 export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise<Tenant> {
   const repo = AppDataSource.getRepository(Tenant);
@@ -162,6 +163,23 @@ export async function createTestHandoffRequest(
       status: 'requested',
       reason: 'user_request',
       priority: 'medium',
+      ...overrides,
+    }),
+  );
+}
+
+export async function createTestCannedResponse(
+  tenantId: string,
+  overrides: Partial<CannedResponse> = {},
+): Promise<CannedResponse> {
+  const repo = AppDataSource.getRepository(CannedResponse);
+  return repo.save(
+    repo.create({
+      tenantId,
+      title: 'Test Response',
+      shortcut: `test-${crypto.randomBytes(4).toString('hex')}`,
+      content: 'Hello {{customer_name}}, how can I help you?',
+      scope: 'shared',
       ...overrides,
     }),
   );

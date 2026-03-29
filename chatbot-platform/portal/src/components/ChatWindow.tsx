@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, MoreVertical, Phone, User } from 'lucide-react';
 import { useChatDetail } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
+import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedResponsePicker';
 import { ChatStatusBadge } from './StatusBadge';
 import { TypingIndicator, CompactTypingIndicator } from './TypingIndicator';
 import { FileAttachment } from './FilePreview';
@@ -31,6 +32,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [slashQuery, setSlashQuery] = useState('');
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
 
   const { messages, typingUsers, sendMessage, sendTyping } = useChatDetail(chat.id, {
     enableSound: true,
@@ -48,6 +51,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     const value = e.target.value;
     setMessageInput(value);
     sendTyping(value.length > 0);
+
+    // Slash command detection
+    const match = value.match(/^\/(\S*)$/);
+    if (match) {
+      setSlashQuery(match[1]);
+      setShowSlashMenu(true);
+    } else {
+      setShowSlashMenu(false);
+    }
   };
 
   // Send message
@@ -64,8 +76,29 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
     }
   };
 
+  // Handle canned response selection
+  const handleCannedResponseSelect = (content: string) => {
+    setMessageInput(content);
+    setShowSlashMenu(false);
+    inputRef.current?.focus();
+  };
+
   // Handle key press
   const handleKeyPress = (e: React.KeyboardEvent) => {
+    // When slash menu is open, let it handle navigation keys
+    if (showSlashMenu) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setShowSlashMenu(false);
+        return;
+      }
+      // ArrowUp/ArrowDown/Enter are handled by the slash dropdown
+      if (['ArrowUp', 'ArrowDown', 'Enter'].includes(e.key)) {
+        // Don't send the message — the dropdown will handle selection
+        return;
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -236,7 +269,15 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             <Paperclip className="w-5 h-5" />
           </Button>
 
+          <CannedResponsePickerButton onSelect={handleCannedResponseSelect} />
+
           <div className="flex-1 relative">
+            <SlashCommandDropdown
+              query={slashQuery}
+              onSelect={handleCannedResponseSelect}
+              onClose={() => setShowSlashMenu(false)}
+              visible={showSlashMenu}
+            />
             <Textarea
               ref={inputRef}
               value={messageInput}

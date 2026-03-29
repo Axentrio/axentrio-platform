@@ -34,6 +34,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const [slashQuery, setSlashQuery] = useState('');
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const slashKeyHandlerRef = useRef<((e: React.KeyboardEvent) => boolean) | null>(null);
 
   const { messages, typingUsers, sendMessage, sendTyping } = useChatDetail(chat.id, {
     enableSound: true,
@@ -85,18 +86,10 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
 
   // Handle key press
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    // When slash menu is open, let it handle navigation keys
-    if (showSlashMenu) {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        setShowSlashMenu(false);
-        return;
-      }
-      // ArrowUp/ArrowDown/Enter are handled by the slash dropdown
-      if (['ArrowUp', 'ArrowDown', 'Enter'].includes(e.key)) {
-        // Don't send the message — the dropdown will handle selection
-        return;
-      }
+    // When slash menu is open, delegate to the dropdown's keyboard handler
+    if (showSlashMenu && slashKeyHandlerRef.current) {
+      const handled = slashKeyHandlerRef.current(e);
+      if (handled) return;
     }
 
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -277,6 +270,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               onSelect={handleCannedResponseSelect}
               onClose={() => setShowSlashMenu(false)}
               visible={showSlashMenu}
+              registerKeyHandler={(handler) => { slashKeyHandlerRef.current = handler; }}
             />
             <Textarea
               ref={inputRef}

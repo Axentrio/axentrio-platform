@@ -127,7 +127,7 @@ const AiSettingsTab: React.FC = () => {
   if (error) return <InlineError message="Failed to load AI settings" />;
 
   const readOnly = !isAdmin;
-  const isFirstSetup = !aiSettings?.provider && !aiSettings?.model && !aiSettings?.enabled;
+  const isFirstSetup = !aiSettings?.enabled && !aiSettings?.hasApiKey;
 
   // First-time setup prompt
   if (isFirstSetup && isAdmin) {

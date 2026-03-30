@@ -20,11 +20,27 @@ interface DocumentCardProps {
     chunkCount: number;
     errorMessage?: string | null;
     updatedAt: string;
+    qualityReport?: {
+      contentType: string;
+      contentSummary: string;
+      qualityScore: 'excellent' | 'good' | 'fair' | 'poor';
+      qualityReason: string;
+      transformedSections: number;
+      strippedSections: number;
+      chunksCreated: number;
+    } | null;
   };
   onEdit: () => void;
   onRetry: () => void;
   onDelete: () => void;
 }
+
+const qualityConfig: Record<string, { color: string; label: string }> = {
+  excellent: { color: 'bg-emerald-400', label: 'Excellent quality' },
+  good: { color: 'bg-emerald-400', label: 'Good quality' },
+  fair: { color: 'bg-amber-400', label: 'Fair quality' },
+  poor: { color: 'bg-red-400', label: 'Poor quality' },
+};
 
 const typeConfig: Record<string, { icon: React.ElementType; label: string; accent: string }> = {
   pdf: { icon: FileText, label: 'PDF', accent: 'text-rose-400 bg-rose-400/10' },
@@ -93,6 +109,25 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
         <span className="w-0.5 h-0.5 rounded-full bg-text-muted" />
         <span>{timeAgo(document.updatedAt)}</span>
       </div>
+
+      {/* Quality indicator */}
+      {document.qualityReport && document.status === 'indexed' && (
+        <div className="mt-2 flex items-center gap-1.5" title={document.qualityReport.qualityReason}>
+          <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${qualityConfig[document.qualityReport.qualityScore]?.color || 'bg-gray-400'}`} />
+          <span className="text-[10px] text-text-muted truncate">
+            {document.qualityReport.contentSummary
+              ? document.qualityReport.contentSummary.slice(0, 60) + (document.qualityReport.contentSummary.length > 60 ? '...' : '')
+              : qualityConfig[document.qualityReport.qualityScore]?.label}
+          </span>
+        </div>
+      )}
+
+      {/* Quality warning for fair/poor */}
+      {document.qualityReport && ['poor', 'fair'].includes(document.qualityReport.qualityScore) && document.status === 'indexed' && (
+        <p className="text-[10px] text-amber-400/80 mt-1">
+          {document.qualityReport.qualityReason}
+        </p>
+      )}
 
       {/* Processing progress bar */}
       {document.status === 'processing' && (

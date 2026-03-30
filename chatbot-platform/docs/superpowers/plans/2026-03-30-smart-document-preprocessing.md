@@ -10,6 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-03-30-smart-document-preprocessing-design.md`
 
+**Codex Review:** Plan cross-checked against actual codebase. Key fixes applied:
+- Stale-job guard added after preprocessing (re-check `processingVersion`)
+- Empty `processedText` check added after preprocessing
+- Min-length bypass (skip classification for docs < 200 chars)
+- `QualityReport` type exported from service, imported into entity (no inline duplication)
+- Migration run command corrected to `npm run migration:run`
+- Reprocessing clears old `qualityReport` when status goes to pending
+- Graceful degradation test removed (OPENAI_API_KEY is already required for embeddings)
+
 ---
 
 ## Verified Import Paths (reference for all tasks)
@@ -35,8 +44,9 @@ api/src/database/migrations/1775500000000-AddQualityReportColumn.ts — migratio
 
 ### Files to modify
 ```
-api/src/database/entities/KnowledgeDocument.ts        — add qualityReport column
-api/src/knowledge/ingestion.worker.ts                 — call preprocessor between extract and chunk
+api/src/database/entities/KnowledgeDocument.ts        — add qualityReport column (import type from service)
+api/src/knowledge/ingestion.worker.ts                 — call preprocessor, add version re-check, handle empty output
+api/src/knowledge/knowledge.service.ts                — clear qualityReport on reprocessing
 portal/src/pages/knowledge/DocumentCard.tsx            — show quality indicator
 ```
 
@@ -74,35 +84,23 @@ export class AddQualityReportColumn1775500000000 implements MigrationInterface {
 
 - [ ] **Step 2: Add the column to the KnowledgeDocument entity**
 
-Read `api/src/database/entities/KnowledgeDocument.ts`. Add the new column after the `metadata` column (around line 67):
+Read `api/src/database/entities/KnowledgeDocument.ts`. Add an import for the `QualityReport` type from the preprocessor service (created in Task 3, but the type can be imported once the file exists — create the entity change after Task 3 or use a forward-compatible approach):
+
+Add to imports:
+```typescript
+import type { QualityReport } from '../knowledge/content-preprocessor.service';
+```
+
+Add the new column after the `metadata` column (around line 67):
 
 ```typescript
 @Column({ type: 'jsonb', nullable: true, default: null })
-qualityReport: {
-  contentType: 'prose' | 'tabular' | 'mixed' | 'structured_list' | 'low_value';
-  contentSummary: string;
-  originalCharCount: number;
-  processedCharCount: number;
-  strippedCharCount: number;
-  transformedSections: number;
-  passthroughSections: number;
-  strippedSections: number;
-  qualityScore: 'excellent' | 'good' | 'fair' | 'poor';
-  qualityReason: string;
-  chunksCreated: number;
-  estimatedTokenCost: number;
-} | null;
+qualityReport!: QualityReport | null;
 ```
 
 - [ ] **Step 3: Run the migration**
 
-Run: `cd chatbot-platform/api && npx typeorm migration:run -d src/database/data-source.ts`
-
-If this doesn't work with ts-node, check how existing migrations are run. Look for a script in `package.json`:
-
-Run: `cd chatbot-platform/api && grep -i "migration" package.json`
-
-Use whatever command the project uses for migrations.
+Run: `cd chatbot-platform/api && npm run migration:run`
 
 - [ ] **Step 4: Verify the column exists**
 
@@ -283,6 +281,7 @@ export interface PreprocessResult {
 
 const MODEL = 'gpt-4o-mini';
 const CLASSIFICATION_SAMPLE_CHARS = 2000;
+const MIN_CHARS_FOR_PREPROCESSING = 200;  // Skip classification for very short docs
 const MAX_CHARS_PER_LLM_CALL = 50000;
 const TRANSFORM_TIMEOUT_MS = 60000;
 const TOTAL_TIMEOUT_MS = 300000;
@@ -312,9 +311,9 @@ function getClient(): OpenAI {
 export async function preprocess(rawText: string): Promise<PreprocessResult> {
   const originalCharCount = rawText.length;
 
-  // If no OpenAI key, skip preprocessing entirely
-  if (!config.rag.openaiApiKey) {
-    logger.info('[Preprocessor] No OPENAI_API_KEY, skipping preprocessing');
+  // Skip preprocessing for very short documents — not worth the LLM call
+  if (originalCharCount < MIN_CHARS_FOR_PREPROCESSING) {
+    logger.info(`[Preprocessor] Document too short (${originalCharCount} chars), skipping`);
     return {
       transformedText: rawText,
       qualityReport: {
@@ -326,8 +325,8 @@ export async function preprocess(rawText: string): Promise<PreprocessResult> {
         transformedSections: 0,
         passthroughSections: 1,
         strippedSections: 0,
-        qualityScore: 'fair',
-        qualityReason: 'Preprocessing skipped — OPENAI_API_KEY not configured.',
+        qualityScore: 'excellent',
+        qualityReason: 'Short document, passed through without preprocessing.',
         estimatedTokenCost: 0,
       },
     };
@@ -645,6 +644,23 @@ After the text truncation block (around line 67) and before the `const kb = ...`
       const preprocessResult = await preprocess(text);
       const processedText = preprocessResult.transformedText;
       logger.info(`[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})`);
+
+      // Re-check for stale job after LLM preprocessing (avoids wasting embedding tokens)
+      const freshCheck = await docRepo.findOne({ where: { id: documentId, tenantId } });
+      if (!freshCheck || freshCheck.processingVersion !== processingVersion) {
+        logger.info(`Stale job for document ${documentId} after preprocessing, discarding`);
+        return;
+      }
+
+      // Guard against empty output from preprocessing (e.g., pure low-value doc)
+      if (!processedText.trim()) {
+        doc.status = 'indexed';
+        doc.chunkCount = 0;
+        doc.qualityReport = { ...preprocessResult.qualityReport, chunksCreated: 0 };
+        await docRepo.save(doc);
+        logger.warn(`[Ingestion] Document ${documentId} produced no usable content after preprocessing`);
+        return;
+      }
 ```
 
 - [ ] **Step 4: Update chunking to use preprocessed text**
@@ -671,18 +687,29 @@ Find where the document status is set to 'indexed' (around line 105). Before sav
 
 This should go right before or alongside where `doc.chunkCount = chunks.length` is set.
 
-- [ ] **Step 6: Verify TypeScript compilation**
+- [ ] **Step 6: Clear qualityReport on reprocessing**
+
+Read `api/src/knowledge/knowledge.service.ts`. Find `updateDocument`, `retryDocument`, and `reprocessAllDocuments` methods. In each, where `status` is set back to `'pending'`, also clear the old quality report:
+
+```typescript
+doc.qualityReport = null;
+```
+
+This ensures stale quality data doesn't persist during reprocessing.
+
+- [ ] **Step 7: Verify TypeScript compilation**
 
 Run: `cd chatbot-platform/api && npx tsc --noEmit 2>&1 | head -20`
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add api/src/knowledge/ingestion.worker.ts
+git add api/src/knowledge/ingestion.worker.ts api/src/knowledge/knowledge.service.ts
 git commit -m "feat: integrate content preprocessor into ingestion pipeline
 
 Calls preprocess() between text extraction and chunking.
-Stores quality report on the document entity after indexing."
+Adds stale-job guard after preprocessing, empty output handling,
+and clears qualityReport on reprocessing."
 ```
 
 ---
@@ -828,14 +855,11 @@ Verify the document card shows appropriate quality indicator and content summary
 
 Use the Test Chat panel to ask questions about the uploaded content. Verify that queries which previously failed (like asking about specific transactions) now return relevant results.
 
-- [ ] **Step 5: Verify graceful degradation**
+- [ ] **Step 5: Test reprocessing clears quality report**
 
-Temporarily remove `OPENAI_API_KEY` from `.env` and restart. Upload a document. Verify:
-- No crash
-- Document is indexed normally (raw text chunking)
-- Quality report is null or shows "skipped"
-
-Restore the API key after testing.
+Find an already-indexed document in the portal. Click retry/reprocess. Verify:
+- Quality report is cleared while processing
+- New quality report is generated after re-indexing
 
 - [ ] **Step 6: Commit any fixes**
 

@@ -42,7 +42,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -188,7 +188,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -239,7 +239,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -270,7 +270,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -301,7 +301,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -332,7 +332,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "https://d418-175-143-196-161.ngrok-free.app/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

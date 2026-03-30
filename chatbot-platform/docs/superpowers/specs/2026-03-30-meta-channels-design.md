@@ -19,7 +19,7 @@ Add Facebook Messenger and Instagram DM channels to the chatbot platform, buildi
 2. **Shared inbound, separate outbound** — one webhook endpoint and event normalizer for both channels. Separate outbound transports with different capability profiles and API endpoints.
 3. **Dedicated Meta webhook route** — does NOT go through the generic `/:channel/webhook` router. Meta needs raw body for HMAC verification and app-level challenge verification (not per-connection). One webhook payload can contain events for multiple Pages/channels.
 4. **`messenger` and `instagram` as stored channel types** — not `meta`. Sessions, connections, and outbound routing use the specific channel type.
-5. **Separate identity for Instagram** — IG connections store `igUserId` (Instagram-scoped user ID) in addition to `pageId`. IG webhook resolution and Send API use the IG user ID, not the Page ID.
+5. **Separate identity for Instagram** — IG connections store the IG Business Account ID (`igBusinessId`) as `platformAccountId`. This is the ID used for webhook routing (`recipient.id` in IG webhooks) and the Send API URL (`/{igBusinessId}/messages`). This is NOT the same as the customer's Instagram-Scoped ID (IGSID), which appears as `sender.id` in webhook events and is stored as `externalUserId` on ConversationBinding.
 6. **Facebook Login flow** — tenants log in with Facebook, app accesses linked IG accounts via the Page. May add Instagram Login as an alternative later.
 
 ## Architecture
@@ -90,21 +90,24 @@ This keeps the Meta route self-contained without forcing changes to the generic 
    g. Redirect to portal with session token: /settings/channels?meta_setup={session_token}
 
 5. Portal: Fetches available Pages/IG accounts, tenant selects which to connect
-   → POST /api/v1/channels/meta/connect with selected page IDs
+   → GET /api/v1/channels/meta/oauth/pages?session={session_token}
+     Returns: { pages: [{ id, name, picture, hasMessaging, instagramAccount?: { id, username, profilePic } }] }
+     Session token is a signed JWT (15-min expiry) containing the cached page data
+   → POST /api/v1/channels/meta/connect with selected page IDs + session token
 
 6. Backend: For each selected Page:
-   a. Subscribe Page to app webhooks
-      POST /{page_id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,messaging_optins,message_deliveries,message_reads
+   a. Subscribe Page to Messenger webhooks
+      POST /{page_id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,messaging_optins,message_deliveries,message_reads,messaging_referrals
    b. Create ChannelConnection:
       channel='messenger', platformAccountId=page_id
       credentials={ pageAccessToken: encrypted, pageId }
       config={ pageName, pageImageUrl }
    c. If IG account linked:
       → Get IG user ID from instagram_business_account
-      → Subscribe IG to webhooks: POST /{ig_user_id}/subscribed_apps
+      → Subscribe IG to webhooks: POST /{ig_business_id}/subscribed_apps?subscribed_fields=messages,messaging_postbacks,message_reactions
       → Create ChannelConnection:
-        channel='instagram', platformAccountId=ig_user_id
-        credentials={ pageAccessToken: encrypted, pageId, igUserId }
+        channel='instagram', platformAccountId=ig_business_id
+        credentials={ pageAccessToken: encrypted, pageId, igBusinessId }
         config={ igUsername, igProfilePicUrl }
 ```
 
@@ -134,7 +137,7 @@ const connection = await connectionRepo.findOne({
 });
 ```
 
-**Uniqueness constraint:** `UNIQUE(platformAccountId, channel)` on `channel_connections`. Same Page/IG account cannot be connected by two tenants.
+**Uniqueness constraint:** Partial unique index `UNIQUE(platformAccountId, channel) WHERE channel IN ('messenger', 'instagram')` on `channel_connections`. Scoped to Meta channels only — Telegram allows the same bot across tenants in different contexts. Same Page/IG account cannot be connected by two tenants.
 
 ### Event Normalization
 
@@ -169,8 +172,8 @@ Event mapping:
 | `message.quick_reply` | postback | quick_reply.payload as postback payload |
 | `message.is_echo=true` | skip | Our own messages echoed back |
 | `postback.payload` | postback | |
-| `delivery.mids[]` | delivery | Update MessageDelivery status |
-| `read.watermark` | read | Update MessageDelivery status |
+| `delivery.mids[]` | delivery | Update MessageDelivery status by platformMessageId |
+| `read.watermark` | read | Log only for v1 (watermark doesn't map to specific message IDs; current pipeline requires explicit IDs) |
 | `referral` | referral | Logged, not processed as message |
 | `reaction` | status | Logged, not processed as message |
 | `message_edit` | status | Logged, future: update existing message |
@@ -223,15 +226,31 @@ When an agent in the portal takes over a conversation (handoff), outbound messag
 - **Messenger:** `messaging_type: 'MESSAGE_TAG'` with `tag: 'HUMAN_AGENT'` — allows sending up to 7 days after last user message
 - **Instagram:** `HUMAN_AGENT` tag available — same 7-day window
 
-The outbound transport checks the session status. If `status === 'active'` (agent assigned), use HUMAN_AGENT tag. If `status === 'bot'`, use RESPONSE type.
+The outbound transport determines `messaging_type` from session status:
+| Session Status | messaging_type | Notes |
+|---------------|---------------|-------|
+| `bot` | `RESPONSE` | Within 24h standard window |
+| `waiting` | `RESPONSE` | System/fallback messages |
+| `handoff` | `RESPONSE` | Handoff notification messages |
+| `active` (agent assigned) | `MESSAGE_TAG` + `tag: HUMAN_AGENT` | 7-day window for live agent |
+| Any status, >24h since last user message | `MESSAGE_TAG` + `tag: HUMAN_AGENT` | Only if agent is involved |
 
 ### Profile Enrichment
 
 Meta messaging events don't include sender names/avatars. When creating a new ConversationBinding:
+
+**Messenger:**
 1. Call `GET https://graph.facebook.com/v21.0/{sender_psid}?fields=first_name,last_name,profile_pic&access_token={page_token}`
-2. Store `displayName` and `avatarUrl` on the ConversationBinding
-3. Cache profiles for 24h to avoid excessive API calls
-4. Gracefully degrade if profile fetch fails (use "Facebook User" / "Instagram User" as fallback)
+2. Store `displayName` (first + last) and `avatarUrl` on the ConversationBinding
+
+**Instagram:**
+1. Call `GET https://graph.facebook.com/v21.0/{igsid}?fields=name,profile_pic&access_token={page_token}`
+2. If unavailable (privacy settings), fall back to "Instagram User"
+
+**Both channels:**
+- Cache profiles for 24h to avoid excessive API calls
+- Gracefully degrade if profile fetch fails
+- Update profile on subsequent conversations if cached data is stale
 
 ### 24-Hour Messaging Window
 
@@ -266,9 +285,20 @@ At `/settings/channels`:
 
 ### Database Changes
 
-1. Add unique constraint: `UNIQUE(platformAccountId, channel)` on `channel_connections`
+1. Add partial unique index: `UNIQUE(platformAccountId, channel) WHERE channel IN ('messenger', 'instagram')` on `channel_connections` (scoped to Meta channels only)
 2. Add `lastInboundAt` timestamp to `conversation_bindings` (messaging window tracking)
 3. New migration for both changes
+
+### Files Changed Outside channels/meta/
+
+- `server.ts` — mount Meta webhook route (before express.json), mount OAuth routes, register adapters
+- `config/environment.ts` — add META_APP_ID, META_APP_SECRET, META_VERIFY_TOKEN, META_OAUTH_REDIRECT_URI, META_OAUTH_JWT_SECRET
+- `database/migrations/` — new migration for unique index + lastInboundAt
+- `portal/src/App.tsx` — add /settings/channels route
+- `portal/src/pages/settings/SettingsLayout.tsx` — add Channels nav item
+- `portal/src/pages/settings/ChannelsSettings.tsx` — new page component
+- `portal/src/components/settings/ConnectFacebookModal.tsx` — OAuth flow UI
+- `portal/src/queries/useChannelQueries.ts` — API hooks for channel management
 
 ### Disconnect Flow
 

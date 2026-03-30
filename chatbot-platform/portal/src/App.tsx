@@ -39,6 +39,7 @@ import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
 import IntegrationSettings from '@pages/settings/IntegrationSettings';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
+import ChannelsSettings from '@pages/settings/ChannelsSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
@@ -257,6 +258,7 @@ const App: React.FC = () => {
                         <Route path="appearance" element={<AppearanceSettings />} />
                         <Route path="widget" element={<WidgetBrandSettings />} />
                         <Route path="integrations" element={<IntegrationSettings />} />
+                        <Route path="channels" element={<ChannelsSettings />} />
                       </Route>
                     </Route>
 

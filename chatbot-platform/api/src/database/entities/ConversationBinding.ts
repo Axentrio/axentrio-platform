@@ -40,6 +40,9 @@ export class ConversationBinding {
   @Column({ type: 'jsonb', default: '{}' })
   platformUserData!: Record<string, unknown>;
 
+  @Column({ type: 'timestamp', nullable: true })
+  lastInboundAt!: Date | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

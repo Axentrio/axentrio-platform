@@ -14,7 +14,7 @@ import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
-import { WebhookConfig, OutboundMessage, MessagePayload } from '../n8n/types';
+import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata } from '../n8n/types';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { routeOutboundMessage } from '../channels/outbound-router';
@@ -63,6 +63,36 @@ export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
     createdAt: tenant.createdAt.toISOString(),
     updatedAt: tenant.updatedAt.toISOString(),
   };
+}
+
+export function buildTenantAiConfig(tenant: Tenant): TenantAiConfig | undefined {
+  const ai = tenant.settings?.ai;
+  if (!ai?.enabled) return undefined;
+
+  return {
+    brandName: ai.brandVoice?.name || tenant.name,
+    brandTone: ai.brandVoice?.tone || 'professional',
+    systemPrompt: ai.brandVoice?.customInstructions || '',
+    guardrails: {
+      topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
+      confidenceThreshold: ai.guardrails?.confidenceThreshold ?? 0.7,
+      maxResponseLength: ai.guardrails?.maxResponseLength ?? 500,
+      escalationKeywords: ai.guardrails?.escalationKeywords || [],
+    },
+  };
+}
+
+export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<KnowledgeBaseMetadata> {
+  try {
+    const result = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
+      [tenantId]
+    );
+    const docCount = result[0]?.count || 0;
+    return { enabled: docCount > 0, documentCount: docCount };
+  } catch {
+    return { enabled: false, documentCount: 0 };
+  }
 }
 
 /**

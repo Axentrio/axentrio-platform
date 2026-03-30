@@ -46,6 +46,12 @@ import { createWebhookModule } from './n8n';
 import { initializeForwarding } from './services/message-forwarding.service';
 import { EventEmitter } from './utils/event-emitter';
 
+// Channel integrations
+import channelWebhookRoutes from './channels/channel-webhook.routes';
+import channelManagementRoutes from './channels/channel-management.routes';
+import { registerChannelAdapter } from './channels/channel-registry';
+import { telegramAdapter } from './channels/telegram';
+
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
@@ -227,6 +233,30 @@ async function startServer(): Promise<void> {
     }
 
     initializeSocketIO(httpServer);
+
+    // Register channel adapters and mount channel webhook routes
+    registerChannelAdapter(telegramAdapter);
+    apiRouter.use(channelWebhookRoutes);
+    apiRouter.use('/channels', channelManagementRoutes);
+    logger.info('Channel adapters registered: telegram');
+
+    // Cleanup old webhook event logs and message deliveries (7-day retention)
+    const cleanupChannelLogs = async () => {
+      try {
+        const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        await AppDataSource.query(
+          `DELETE FROM "webhook_event_log" WHERE "createdAt" < $1 AND "status" IN ('processed', 'skipped')`,
+          [cutoff],
+        );
+        await AppDataSource.query(
+          `DELETE FROM "message_deliveries" WHERE "createdAt" < $1 AND "status" IN ('sent', 'delivered', 'read')`,
+          [cutoff],
+        );
+      } catch (error) {
+        logger.error('Channel event log cleanup failed', { error });
+      }
+    };
+    setInterval(cleanupChannelLogs, 24 * 60 * 60 * 1000);
 
     // Audit log cleanup — batched to avoid table locks
     const cleanupAuditLogs = async () => {

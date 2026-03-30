@@ -23,6 +23,10 @@ import { KnowledgeBase } from './entities/KnowledgeBase';
 import { KnowledgeDocument } from './entities/KnowledgeDocument';
 import { KnowledgeChunk } from './entities/KnowledgeChunk';
 import { CannedResponse } from './entities/CannedResponse';
+import { ChannelConnection } from './entities/ChannelConnection';
+import { ConversationBinding } from './entities/ConversationBinding';
+import { WebhookEventLog } from './entities/WebhookEventLog';
+import { MessageDelivery } from './entities/MessageDelivery';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -51,6 +55,10 @@ export const AppDataSource = new DataSource({
     KnowledgeDocument,
     KnowledgeChunk,
     CannedResponse,
+    ChannelConnection,
+    ConversationBinding,
+    WebhookEventLog,
+    MessageDelivery,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

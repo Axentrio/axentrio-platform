@@ -16,6 +16,7 @@ import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload } from '../n8n/types';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
+import { routeOutboundMessage } from '../channels/outbound-router';
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
@@ -317,13 +318,21 @@ async function sendBotMessage(
   });
   const saved = await messageRepository.save(botMsg);
 
-  emitToSession(session.tenantId, session.id, 'message:receive', {
-    id: saved.id,
-    type: 'text',
-    content,
-    senderType: 'bot',
-    timestamp: new Date().toISOString(),
-  });
+  // Route through outbound router — handles both WebSocket and external channels
+  await routeOutboundMessage(
+    { type: 'text', content },
+    { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
+    {
+      event: 'message:receive',
+      data: {
+        id: saved.id,
+        type: 'text',
+        content,
+        senderType: 'bot',
+        timestamp: new Date().toISOString(),
+      },
+    },
+  );
 
   return saved;
 }

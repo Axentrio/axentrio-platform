@@ -11,6 +11,7 @@ const OAUTH_SCOPES = [
   'pages_messaging',
   'pages_manage_metadata',
   'pages_show_list',
+  'business_management',
 ].join(',');
 
 interface MetaPage {
@@ -42,6 +43,7 @@ export function buildOAuthUrl(tenantId: string): string {
     scope: OAUTH_SCOPES,
     state,
     response_type: 'code',
+    auth_type: 'rerequest', // Force re-show permission dialog
   });
 
   return `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
@@ -86,26 +88,73 @@ export async function handleOAuthCallback(code: string): Promise<{
   });
   const longLivedUserToken = longLivedResponse.data.access_token;
 
-  // 3. Get pages the user manages
+  // Debug: check what permissions the token has
+  try {
+    const debugResponse = await axios.get(`${GRAPH_API}/me/permissions`, {
+      params: { access_token: longLivedUserToken },
+      timeout: 10000,
+    });
+    console.log('[meta-oauth] Token permissions:', JSON.stringify(debugResponse.data.data));
+  } catch (e: any) {
+    console.log('[meta-oauth] Permission check failed:', e.response?.data || e.message);
+  }
+
+  // 3. Get pages the user manages (personal pages)
+  const pageFields = 'id,name,access_token,picture,tasks,instagram_business_account{id,username,profile_picture_url}';
   const pagesResponse = await axios.get(`${GRAPH_API}/me/accounts`, {
     params: {
       access_token: longLivedUserToken,
-      fields: 'id,name,access_token,picture,tasks,instagram_business_account{id,username,profile_picture_url}',
+      fields: pageFields,
       limit: 100,
     },
     timeout: 10000,
   });
 
+  const allPageData: any[] = [...(pagesResponse.data.data || [])];
+
+  // 4. Also get pages from Business Portfolios (Business Manager-managed pages)
+  try {
+    const businessesResponse = await axios.get(`${GRAPH_API}/me/businesses`, {
+      params: { access_token: longLivedUserToken, fields: 'id,name', limit: 100 },
+      timeout: 10000,
+    });
+
+    for (const biz of businessesResponse.data.data || []) {
+      try {
+        const bizPagesResponse = await axios.get(`${GRAPH_API}/${biz.id}/owned_pages`, {
+          params: {
+            access_token: longLivedUserToken,
+            fields: pageFields,
+            limit: 100,
+          },
+          timeout: 10000,
+        });
+        // Add business pages that aren't already in the list
+        for (const bizPage of bizPagesResponse.data.data || []) {
+          if (!allPageData.find((p: any) => p.id === bizPage.id)) {
+            allPageData.push(bizPage);
+          }
+        }
+      } catch (e: any) {
+        console.log(`[meta-oauth] Failed to get pages for business ${biz.id}:`, e.response?.data?.error?.message || e.message);
+      }
+    }
+  } catch (e: any) {
+    console.log('[meta-oauth] Failed to get businesses:', e.response?.data?.error?.message || e.message);
+  }
+
+  console.log('[meta-oauth] Total pages found:', allPageData.map((p: any) => ({ id: p.id, name: p.name, tasks: p.tasks })));
+
   const pages: MetaPage[] = [];
 
-  for (const page of pagesResponse.data.data || []) {
+  for (const page of allPageData) {
     // Filter pages that have MESSAGING task
     if (!page.tasks?.includes('MESSAGING')) continue;
 
     const metaPage: MetaPage = {
       id: page.id,
       name: page.name,
-      accessToken: page.access_token, // Long-lived page token (does not expire)
+      accessToken: page.access_token,
       picture: page.picture?.data?.url,
       tasks: page.tasks,
     };

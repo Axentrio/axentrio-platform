@@ -47,22 +47,42 @@ export async function setupMetaConnections(
       throw new Error(`Failed to subscribe Page "${page.name}" to webhooks`);
     }
 
-    // 2. Create Messenger connection
-    const messengerConn = repo.create({
-      tenantId,
-      channel: 'messenger',
-      status: 'active',
-      label: page.name,
-      platformAccountId: page.id,
-      credentials: {
+    // 2. Create or reuse Messenger connection (reactivate if previously disconnected)
+    let messengerConn = await repo.findOne({
+      where: { platformAccountId: page.id, channel: 'messenger' as any },
+    });
+
+    if (messengerConn) {
+      // Reactivate existing connection
+      messengerConn.tenantId = tenantId;
+      messengerConn.status = 'active';
+      messengerConn.label = page.name;
+      messengerConn.credentials = {
         pageAccessToken: encryptCredential(page.accessToken),
         pageId: page.id,
-      },
-      config: {
+      };
+      messengerConn.config = {
         pageName: page.name,
         pageImageUrl: page.picture,
-      },
-    });
+      };
+      messengerConn.lastError = null;
+    } else {
+      messengerConn = repo.create({
+        tenantId,
+        channel: 'messenger',
+        status: 'active',
+        label: page.name,
+        platformAccountId: page.id,
+        credentials: {
+          pageAccessToken: encryptCredential(page.accessToken),
+          pageId: page.id,
+        },
+        config: {
+          pageName: page.name,
+          pageImageUrl: page.picture,
+        },
+      });
+    }
     const savedMessenger = await repo.save(messengerConn);
     connections.push(savedMessenger);
 
@@ -81,25 +101,48 @@ export async function setupMetaConnections(
           },
         );
 
-        const igConn = repo.create({
-          tenantId,
-          channel: 'instagram',
-          status: 'active',
-          label: page.instagramAccount.username
+        let igConn = await repo.findOne({
+          where: { platformAccountId: page.instagramAccount.id, channel: 'instagram' as any },
+        });
+
+        if (igConn) {
+          igConn.tenantId = tenantId;
+          igConn.status = 'active';
+          igConn.label = page.instagramAccount.username
             ? `@${page.instagramAccount.username}`
-            : `${page.name} (Instagram)`,
-          platformAccountId: page.instagramAccount.id,
-          credentials: {
+            : `${page.name} (Instagram)`;
+          igConn.credentials = {
             pageAccessToken: encryptCredential(page.accessToken),
             pageId: page.id,
             igBusinessId: page.instagramAccount.id,
-          },
-          config: {
+          };
+          igConn.config = {
             igUsername: page.instagramAccount.username,
             igProfilePicUrl: page.instagramAccount.profilePicUrl,
             linkedPageId: page.id,
-          },
-        });
+          };
+          igConn.lastError = null;
+        } else {
+          igConn = repo.create({
+            tenantId,
+            channel: 'instagram',
+            status: 'active',
+            label: page.instagramAccount.username
+              ? `@${page.instagramAccount.username}`
+              : `${page.name} (Instagram)`,
+            platformAccountId: page.instagramAccount.id,
+            credentials: {
+              pageAccessToken: encryptCredential(page.accessToken),
+              pageId: page.id,
+              igBusinessId: page.instagramAccount.id,
+            },
+            config: {
+              igUsername: page.instagramAccount.username,
+              igProfilePicUrl: page.instagramAccount.profilePicUrl,
+              linkedPageId: page.id,
+            },
+          });
+        }
         const savedIg = await repo.save(igConn);
         connections.push(savedIg);
       } catch (error) {

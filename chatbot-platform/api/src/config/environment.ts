@@ -140,6 +140,13 @@ const envSchema = z.object({
   CLAMAV_HOST: z.string().optional(),
   CLAMAV_PORT: z.string().default('3310').transform(Number),
   CLAMAV_TIMEOUT: z.string().default('60000').transform(Number),
+
+  // Meta (Messenger + Instagram)
+  META_APP_ID: z.string().optional(),
+  META_APP_SECRET: z.string().optional(),
+  META_VERIFY_TOKEN: z.string().optional(),
+  META_OAUTH_REDIRECT_URI: z.string().optional(),
+  META_OAUTH_JWT_SECRET: z.string().optional(),
 });
 
 // Parse and validate environment variables
@@ -329,6 +336,14 @@ export const config = {
 
   widget: {
     apiKey: env.WIDGET_API_KEY,
+  },
+
+  meta: {
+    appId: env.META_APP_ID || '',
+    appSecret: env.META_APP_SECRET || '',
+    verifyToken: env.META_VERIFY_TOKEN || '',
+    oauthRedirectUri: env.META_OAUTH_REDIRECT_URI || '',
+    oauthJwtSecret: env.META_OAUTH_JWT_SECRET || '',
   },
 
   api: {

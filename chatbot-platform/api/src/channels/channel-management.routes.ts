@@ -14,6 +14,7 @@ import {
   setupTelegramConnection,
   disconnectTelegramConnection,
 } from './telegram/setup.service';
+import { disconnectMetaConnection } from './meta/disconnect.service';
 
 const router = Router();
 
@@ -107,6 +108,10 @@ router.delete(
     let connection: ChannelConnection;
     if (existing.channel === 'telegram') {
       connection = await disconnectTelegramConnection(connectionId);
+    } else if (existing.channel === 'messenger' || existing.channel === 'instagram') {
+      await disconnectMetaConnection(connectionId);
+      // Re-fetch after disconnect to get updated state
+      connection = await repo.findOne({ where: { id: connectionId } }) as ChannelConnection;
     } else {
       // Generic disconnect for other channels
       existing.status = 'disconnected';

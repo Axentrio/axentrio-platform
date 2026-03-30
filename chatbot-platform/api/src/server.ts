@@ -47,10 +47,13 @@ import { initializeForwarding } from './services/message-forwarding.service';
 import { EventEmitter } from './utils/event-emitter';
 
 // Channel integrations
+import metaWebhookRoutes from './channels/meta/webhook.routes';
 import channelWebhookRoutes from './channels/channel-webhook.routes';
 import channelManagementRoutes from './channels/channel-management.routes';
 import { registerChannelAdapter } from './channels/channel-registry';
 import { telegramAdapter } from './channels/telegram';
+import { messengerAdapter, instagramAdapter } from './channels/meta';
+import metaOAuthRoutes from './channels/meta/oauth.routes';
 
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
@@ -73,6 +76,9 @@ app.get('/health', (_req, res) => {
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
 app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
+
+// Meta webhook — must use raw body parser for HMAC verification
+app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
 
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);
@@ -234,9 +240,12 @@ async function startServer(): Promise<void> {
 
     // Register channel adapters and mount channel webhook routes
     registerChannelAdapter(telegramAdapter);
+    registerChannelAdapter(messengerAdapter);
+    registerChannelAdapter(instagramAdapter);
     apiRouter.use(channelWebhookRoutes);
     apiRouter.use('/channels', channelManagementRoutes);
-    logger.info('Channel adapters registered: telegram');
+    apiRouter.use('/channels/meta/oauth', metaOAuthRoutes);
+    logger.info('Channel adapters registered: telegram, messenger, instagram');
 
     // Cleanup old webhook event logs and message deliveries (7-day retention)
     const cleanupChannelLogs = async () => {

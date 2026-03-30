@@ -30,3 +30,12 @@ export function getTelegramBotToken(credentials: Record<string, unknown>): strin
   if (!token) return null;
   return decryptCredential(token, true);
 }
+
+/**
+ * Get the page access token from a Meta (Messenger/Instagram) connection, decrypting it.
+ */
+export function getMetaPageAccessToken(credentials: Record<string, unknown>): string | null {
+  const token = credentials.pageAccessToken as string | undefined;
+  if (!token) return null;
+  return decryptCredential(token, true);
+}

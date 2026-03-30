@@ -5,7 +5,7 @@
 
 import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
-import { User, Bell, Paintbrush, Palette, Plug } from 'lucide-react';
+import { User, Bell, Paintbrush, Palette, Plug, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppAuth } from '@auth/useAppAuth';
 
@@ -22,6 +22,7 @@ const settingsNav: SettingsNavItem[] = [
   { path: '/settings/appearance', label: 'Appearance', icon: Paintbrush, group: 'Account' },
   { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Workspace' },
   { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Workspace' },
+  { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Workspace' },
 ];
 
 const SettingsLayout: React.FC = () => {

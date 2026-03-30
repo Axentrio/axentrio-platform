@@ -1,3 +1,4 @@
+import OpenAI from 'openai';
 import { DataSource } from 'typeorm';
 import { embed } from '../knowledge/embedding.service';
 import { getProvider } from './provider-factory';
@@ -38,6 +39,52 @@ export interface RagResult {
   chunks: RetrievedChunk[];
 }
 
+/**
+ * Rewrite a follow-up query using conversation history so the embedding
+ * search can find relevant chunks even for contextual questions like
+ * "what about the battery life?" (after discussing a specific product).
+ */
+async function rewriteQuery(
+  message: string,
+  history: { role: 'user' | 'assistant'; content: string }[]
+): Promise<string> {
+  if (history.length === 0) return message;
+
+  try {
+    const openai = new OpenAI({ apiKey: config.rag.openaiApiKey });
+    const historyText = history
+      .slice(-4) // last 2 exchanges max
+      .map((m) => `${m.role}: ${m.content}`)
+      .join('\n');
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        {
+          role: 'system',
+          content: 'Rewrite the user\'s latest message as a standalone search query that includes all necessary context from the conversation. Output ONLY the rewritten query, nothing else. If the message is already self-contained, return it unchanged.',
+        },
+        {
+          role: 'user',
+          content: `Conversation:\n${historyText}\n\nLatest message: ${message}`,
+        },
+      ],
+      temperature: 0,
+      max_tokens: 150,
+    });
+
+    const rewritten = response.choices[0]?.message?.content?.trim();
+    if (rewritten && rewritten !== message) {
+      logger.info(`[RAG] Query rewritten: "${message}" → "${rewritten}"`);
+      return rewritten;
+    }
+    return message;
+  } catch (err) {
+    logger.warn('[RAG] Query rewrite failed, using original', err);
+    return message;
+  }
+}
+
 export async function generateResponse(
   dataSource: DataSource,
   tenantId: string,
@@ -45,8 +92,10 @@ export async function generateResponse(
   customerMessage: string,
   conversationHistory: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<RagResult> {
-  logger.info(`[RAG] Query: "${customerMessage}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
-  const queryEmbedding = await embed(customerMessage);
+  // Rewrite contextual follow-ups into standalone queries
+  const searchQuery = await rewriteQuery(customerMessage, conversationHistory);
+  logger.info(`[RAG] Query: "${searchQuery}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
+  const queryEmbedding = await embed(searchQuery);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
   logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);
 

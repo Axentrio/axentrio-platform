@@ -27,7 +27,12 @@ export async function setup() {
   await ds.query('CREATE SCHEMA public');
   // Pre-create extensions so TypeORM synchronize can handle uuid and vector columns
   await ds.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-  await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
+  // pgvector may not be available in all environments (e.g., CI with plain postgres)
+  try {
+    await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
+  } catch {
+    console.warn('pgvector extension not available — skipping (knowledge base features will not work in tests)');
+  }
 
   await ds.destroy();
 }

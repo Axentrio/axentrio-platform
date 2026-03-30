@@ -66,6 +66,22 @@ export class KnowledgeDocument {
   @Column({ type: 'jsonb', default: {} })
   metadata!: Record<string, any>;
 
+  @Column({ type: 'jsonb', nullable: true, default: null })
+  qualityReport!: {
+    contentType: string;
+    contentSummary: string;
+    originalCharCount: number;
+    processedCharCount: number;
+    strippedCharCount: number;
+    transformedSections: number;
+    passthroughSections: number;
+    strippedSections: number;
+    qualityScore: string;
+    qualityReason: string;
+    chunksCreated: number;
+    estimatedTokenCost: number;
+  } | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

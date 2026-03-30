@@ -3,7 +3,7 @@
  * Express routes for n8n webhook endpoints
  */
 
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response, NextFunction, json } from 'express';
 import { WebhookController } from './webhook.controller';
 import { rateLimit } from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
@@ -71,6 +71,7 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
    */
   router.post(
     '/inbound',
+    json({ limit: '100kb' }),
     webhookRateLimiter,
     [
       body('action')

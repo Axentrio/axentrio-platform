@@ -8,6 +8,8 @@ import { logger } from '../utils/logger';
 import { config } from '../config/environment';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import { ChatSession } from '../database/entities/ChatSession';
+import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { WebhookService } from './webhook.service';
 import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
@@ -58,6 +60,20 @@ export class WebhookController {
         res.status(400).json({
           success: false,
           error: 'Bad Request: Empty request body',
+        });
+        return;
+      }
+
+      // Reject oversized payloads — max 50KB for message content
+      const MAX_CONTENT_SIZE = 50_000;
+      const contentLength = typeof req.body?.payload?.content === 'string'
+        ? req.body.payload.content.length
+        : 0;
+      if (contentLength > MAX_CONTENT_SIZE) {
+        logger.warn(`[${requestId}] Payload content too large: ${contentLength} chars (max ${MAX_CONTENT_SIZE})`);
+        res.status(413).json({
+          success: false,
+          error: `Payload too large: content is ${contentLength} chars (max ${MAX_CONTENT_SIZE})`,
         });
         return;
       }
@@ -277,6 +293,34 @@ export class WebhookController {
     if (this.config.circuitBreaker.isOpen()) {
       logger.warn(`[${requestId}] Circuit breaker is OPEN, triggering fallback`);
       return this.config.fallbackService.handleCircuitOpen(message);
+    }
+
+    // Session state guard — reject bot actions for closed sessions
+    // Allow handsoff.release and session.clear to work on any session state
+    const exemptActions = ['handsoff.release', 'session.clear', 'typing.start', 'typing.stop'];
+    if (!exemptActions.includes(action)) {
+      const sessionRepo = AppDataSource.getRepository(ChatSession);
+      const session = await sessionRepo.findOne({ where: { id: sessionId } });
+      if (session?.status === 'closed') {
+        logger.warn(`[${requestId}] Action ${action} rejected — session ${sessionId} is closed`);
+        return { success: false, error: `Session is closed — action ${action} not accepted` };
+      }
+      // For non-handoff actions, also reject if session is in handoff (human owns it)
+      if (session?.status === 'handoff' && action !== 'handsoff.trigger') {
+        logger.warn(`[${requestId}] Action ${action} rejected — session ${sessionId} is in handoff`);
+        return { success: false, error: `Session is in handoff — bot action ${action} not accepted` };
+      }
+      // Prevent duplicate handoff requests
+      if (action === 'handsoff.trigger' && session?.status === 'handoff') {
+        const handoffRepo = AppDataSource.getRepository(HandoffRequest);
+        const existing = await handoffRepo.findOne({
+          where: { sessionId, status: 'requested' as HandoffRequest['status'] },
+        });
+        if (existing) {
+          logger.warn(`[${requestId}] Duplicate handoff rejected — session ${sessionId} already has pending handoff ${existing.id}`);
+          return { success: false, error: 'Handoff already pending for this session' };
+        }
+      }
     }
 
     try {

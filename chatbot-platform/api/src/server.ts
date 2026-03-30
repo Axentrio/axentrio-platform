@@ -80,9 +80,6 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
 
-// Meta OAuth callback — must be before Clerk middleware (Facebook redirects here unauthenticated)
-app.use('/api/v1/channels/meta/oauth', metaOAuthRoutes);
-
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);
 
@@ -129,6 +126,9 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(rateLimitByIp);
+
+// Meta OAuth routes — after CORS but before Clerk (callback is unauthenticated)
+app.use('/api/v1/channels/meta/oauth', metaOAuthRoutes);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());

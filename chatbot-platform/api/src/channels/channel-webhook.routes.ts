@@ -4,6 +4,7 @@ import { WebhookEventLog } from '../database/entities/WebhookEventLog';
 import { getChannelAdapter } from './channel-registry';
 import { ChannelType } from '../database/entities/ChannelConnection';
 import { processInboundEvent } from './inbound-pipeline';
+import { getChannelInboundQueue } from './inbound-queue.processor';
 
 const router = Router();
 
@@ -64,8 +65,19 @@ router.all('/channels/:channel/webhook', async (req: Request, res: Response) => 
       });
       await eventLogRepo.save(logEntry);
 
-      // Process inline for now; Bull queue integration added in Task 9
-      await processInboundEvent(event, connection);
+      // Try Bull queue first; fall back to inline processing if unavailable
+      const queue = getChannelInboundQueue();
+      if (queue) {
+        await queue.add('channel-inbound', {
+          eventDedupeKey: event.dedupeKey,
+          connectionId: connection.id,
+          event,
+        }, {
+          jobId: event.dedupeKey, // Idempotent by dedupe key
+        });
+      } else {
+        await processInboundEvent(event, connection);
+      }
     } catch (error: any) {
       if (error?.code === '23505') continue; // Duplicate dedupe key
       console.error(`[channel-webhook] Error processing ${channel} event:`, error);

@@ -97,6 +97,9 @@ const envSchema = z.object({
   // Webhook / N8N
   WEBHOOK_URL: z.string().optional(),
   N8N_WEBHOOK_URL: z.string().optional(),
+  N8N_DEFAULT_WEBHOOK_URL: z.string().optional(),
+  RAG_INTERNAL_SECRET: z.string().optional(),
+  N8N_INBOUND_SECRET: z.string().optional(),
 
   // AWS S3
   AWS_ACCESS_KEY_ID: z.string().optional(),
@@ -322,7 +325,10 @@ export const config = {
 
   n8n: {
     webhookUrl: env.WEBHOOK_URL || env.N8N_WEBHOOK_URL,
-    enabled: !!(env.WEBHOOK_URL || env.N8N_WEBHOOK_URL),
+    defaultWebhookUrl: env.N8N_DEFAULT_WEBHOOK_URL || env.WEBHOOK_URL || env.N8N_WEBHOOK_URL,
+    enabled: !!(env.WEBHOOK_URL || env.N8N_WEBHOOK_URL || env.N8N_DEFAULT_WEBHOOK_URL),
+    ragInternalSecret: env.RAG_INTERNAL_SECRET,
+    inboundSecret: env.N8N_INBOUND_SECRET,
   },
 
   superAdmin: {

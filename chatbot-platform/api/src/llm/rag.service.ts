@@ -99,17 +99,24 @@ export async function generateResponse(
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
   logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);
 
+  // Hybrid search: combine vector similarity with keyword matching
+  // Vector similarity is the primary signal; keyword match boosts chunks
+  // that contain exact terms the user searched for (fixes "IPX7", phone numbers, etc.)
   const chunks: RetrievedChunk[] = await dataSource.query(
     `SELECT kc.id, kc.content, kc.metadata, kd.title,
-            1 - (kc.embedding <=> $1::vector) AS similarity
+            1 - (kc.embedding <=> $1::vector) AS similarity,
+            ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) AS keyword_rank
      FROM knowledge_chunks kc
      JOIN knowledge_documents kd ON kd.id = kc."documentId"
      WHERE kc."tenantId" = $2
        AND kd.status = 'indexed'
-       AND 1 - (kc.embedding <=> $1::vector) >= $3
-     ORDER BY kc.embedding <=> $1::vector
+       AND (
+         1 - (kc.embedding <=> $1::vector) >= $3
+         OR kc.tsv @@ websearch_to_tsquery('english', $5)
+       )
+     ORDER BY (1 - (kc.embedding <=> $1::vector)) + ts_rank(kc.tsv, websearch_to_tsquery('english', $5)) * 0.5 DESC
      LIMIT $4`,
-    [embeddingStr, tenantId, config.rag.minSimilarity, config.rag.maxContextChunks]
+    [embeddingStr, tenantId, config.rag.minSimilarity, config.rag.maxContextChunks, searchQuery]
   );
 
   logger.info(`[RAG] Retrieved ${chunks.length} chunks${chunks.length > 0 ? `, top similarity: ${chunks[0]?.similarity}` : ''}`);

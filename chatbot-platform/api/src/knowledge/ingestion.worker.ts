@@ -111,8 +111,8 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
 
         for (let i = 0; i < chunks.length; i++) {
           await manager.query(
-            `INSERT INTO knowledge_chunks (id, "documentId", "tenantId", content, embedding, "chunkIndex", "charCount", metadata, "createdAt")
-             VALUES (gen_random_uuid(), $1, $2, $3, $4::vector, $5, $6, $7, NOW())`,
+            `INSERT INTO knowledge_chunks (id, "documentId", "tenantId", content, embedding, tsv, "chunkIndex", "charCount", metadata, "createdAt")
+             VALUES (gen_random_uuid(), $1, $2, $3, $4::vector, to_tsvector('english', $3), $5, $6, $7, NOW())`,
             [
               documentId,
               tenantId,

@@ -49,6 +49,12 @@ export class ChatSession {
   @Column({ type: 'varchar', length: 100, default: 'widget' })
   source!: string;
 
+  @Column({ type: 'varchar', length: 20, default: 'widget' })
+  channel!: 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp';
+
+  @Column('uuid', { nullable: true })
+  channelConnectionId!: string | null;
+
   @Column({ type: 'varchar', length: 500, nullable: true })
   subject?: string;
 

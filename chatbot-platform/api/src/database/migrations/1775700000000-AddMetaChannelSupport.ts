@@ -6,7 +6,7 @@ export class AddMetaChannelSupport1775700000000 implements MigrationInterface {
     await queryRunner.query(`
       CREATE UNIQUE INDEX "IDX_channel_conn_platform_channel_meta"
       ON "channel_connections" ("platformAccountId", "channel")
-      WHERE "channel" IN ('messenger', 'instagram')
+      WHERE "channel" IN ('messenger', 'instagram') AND "status" = 'active'
     `);
 
     // Add lastInboundAt to conversation_bindings

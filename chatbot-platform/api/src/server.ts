@@ -53,7 +53,7 @@ import channelManagementRoutes from './channels/channel-management.routes';
 import { registerChannelAdapter } from './channels/channel-registry';
 import { telegramAdapter } from './channels/telegram';
 import { messengerAdapter, instagramAdapter } from './channels/meta';
-import metaOAuthRoutes from './channels/meta/oauth.routes';
+import metaOAuthRoutes, { metaOAuthCallbackRouter } from './channels/meta/oauth.routes';
 
 // Middleware
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
@@ -127,8 +127,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(rateLimitByIp);
 
-// Meta OAuth routes — after CORS but before Clerk (callback is unauthenticated)
-app.use('/api/v1/channels/meta/oauth', metaOAuthRoutes);
+// Meta OAuth callback — after CORS but before Clerk (Facebook redirects here unauthenticated)
+app.use('/api/v1/channels/meta/oauth', metaOAuthCallbackRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());
@@ -247,7 +247,8 @@ async function startServer(): Promise<void> {
     registerChannelAdapter(instagramAdapter);
     apiRouter.use(channelWebhookRoutes);
     apiRouter.use('/channels', channelManagementRoutes);
-    // Note: Meta OAuth routes mounted at app level (before Clerk middleware) for unauthenticated callback
+    apiRouter.use('/channels/meta/oauth', metaOAuthRoutes); // Authenticated routes (url, pages, connect)
+    // Note: OAuth callback mounted at app level before Clerk for unauthenticated Facebook redirect
     logger.info('Channel adapters registered: telegram, messenger, instagram');
 
     // Cleanup old webhook event logs and message deliveries (7-day retention)

@@ -13,6 +13,9 @@ import { setupMetaConnections } from './setup.service';
 
 const router = Router();
 
+// Separate router for the callback — mounted before Clerk middleware
+export const metaOAuthCallbackRouter = Router();
+
 /**
  * GET /api/v1/channels/meta/oauth/url
  * Returns the Facebook Login URL for the authenticated tenant.
@@ -34,8 +37,9 @@ router.get('/url', requireClerkAuth, autoProvision, async (req: Request, res: Re
 /**
  * GET /api/v1/channels/meta/oauth/callback
  * Facebook redirects here after user grants permissions.
+ * On the callback router (no Clerk auth required).
  */
-router.get('/callback', async (req: Request, res: Response) => {
+metaOAuthCallbackRouter.get('/callback', async (req: Request, res: Response) => {
   const { code, state, error: oauthError } = req.query;
 
   if (oauthError) {

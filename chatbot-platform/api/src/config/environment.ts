@@ -114,7 +114,7 @@ const envSchema = z.object({
   RAG_DEFAULT_CHUNK_SIZE: z.string().default('1000').transform(Number),
   RAG_DEFAULT_CHUNK_OVERLAP: z.string().default('200').transform(Number),
   RAG_MAX_CONTEXT_CHUNKS: z.string().default('5').transform(Number),
-  RAG_MIN_SIMILARITY: z.string().default('0.5').transform(Number),
+  RAG_MIN_SIMILARITY: z.string().default('0.3').transform(Number),
   RAG_CONVERSATION_HISTORY_LIMIT: z.string().default('10').transform(Number),
   RAG_EMBEDDING_BATCH_SIZE: z.string().default('100').transform(Number),
   RAG_MAX_EXTRACTED_CHARS: z.string().default('500000').transform(Number),

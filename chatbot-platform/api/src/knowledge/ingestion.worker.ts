@@ -5,7 +5,7 @@ import { extractText } from './document-extractors/text.extractor';
 import { extractPdf } from './document-extractors/pdf.extractor';
 import { extractDocx } from './document-extractors/docx.extractor';
 import { chunkText } from './chunking.service';
-import { embedBatch } from './embedding.service';
+import { embed, embedBatch } from './embedding.service';
 import { preprocess } from './content-preprocessor.service';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
@@ -106,6 +106,13 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
         return;
       }
 
+      // Create document-level summary chunk for broad queries
+      const summaryText = preprocessResult.qualityReport.contentSummary;
+      const summaryContent = summaryText
+        ? `[Document: ${doc.title}] ${summaryText}`
+        : `[Document: ${doc.title}]`;
+      const summaryEmbedding = summaryContent.length > 10 ? await embed(summaryContent) : null;
+
       await dataSource.transaction(async (manager) => {
         await manager.query(`DELETE FROM knowledge_chunks WHERE "documentId" = $1`, [documentId]);
 
@@ -121,6 +128,22 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
               chunks[i].chunkIndex,
               chunks[i].charCount,
               JSON.stringify(chunks[i].metadata),
+            ]
+          );
+        }
+
+        // Insert summary chunk (chunkIndex -1 to distinguish from content chunks)
+        if (summaryEmbedding) {
+          await manager.query(
+            `INSERT INTO knowledge_chunks (id, "documentId", "tenantId", content, embedding, tsv, "chunkIndex", "charCount", metadata, "createdAt")
+             VALUES (gen_random_uuid(), $1, $2, $3, $4::vector, to_tsvector('english', $3), -1, $5, $6, NOW())`,
+            [
+              documentId,
+              tenantId,
+              summaryContent,
+              `[${summaryEmbedding.join(',')}]`,
+              summaryContent.length,
+              JSON.stringify({ type: 'document_summary' }),
             ]
           );
         }

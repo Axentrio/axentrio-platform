@@ -25,6 +25,9 @@ export async function setup() {
   // Drop and recreate public schema to ensure clean state
   await ds.query('DROP SCHEMA IF EXISTS public CASCADE');
   await ds.query('CREATE SCHEMA public');
+  // Pre-create extensions so TypeORM synchronize can handle uuid and vector columns
+  await ds.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
+  await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
 
   await ds.destroy();
 }

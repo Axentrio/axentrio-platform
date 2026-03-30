@@ -1,7 +1,7 @@
 version: '3.8'
 services:
   test-db:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     environment:
       POSTGRES_USER: test
       POSTGRES_PASSWORD: test

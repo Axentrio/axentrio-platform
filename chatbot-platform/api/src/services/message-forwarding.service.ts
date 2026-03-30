@@ -8,6 +8,7 @@ import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
+import { decrypt } from '../utils/encryption';
 import { Tenant } from '../database/entities/Tenant';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
@@ -192,7 +193,9 @@ export async function forwardMessageToN8n(
     timestamp: new Date().toISOString(),
     payload: {
       type: (savedMessage.type as MessagePayload['type']) || 'text',
-      content: savedMessage.content,
+      content: savedMessage.contentEncrypted
+        ? decrypt(savedMessage.content)
+        : savedMessage.content,
       metadata: savedMessage.metadata || undefined,
     },
   };
@@ -217,10 +220,25 @@ export async function forwardMessageToN8n(
     // n8n is down — send fallback message, transition to handoff
     const fallbackContent = "We're connecting you to an agent. Please hold on.";
 
+    // Ensure a system participant exists for system messages
+    let systemParticipant = await participantRepository.findOne({
+      where: { sessionId: session.id, type: 'system', isDeleted: false },
+    });
+    if (!systemParticipant) {
+      systemParticipant = participantRepository.create({
+        sessionId: session.id,
+        type: 'system',
+        name: 'System',
+        isAnonymous: false,
+        joinedAt: new Date(),
+      });
+      systemParticipant = await participantRepository.save(systemParticipant);
+    }
+
     const fallbackMsg = messageRepository.create({
       sessionId: session.id,
       tenantId: session.tenantId,
-      participantId: 'system',
+      participantId: systemParticipant.id,
       type: 'system' as Message['type'],
       content: fallbackContent,
     });

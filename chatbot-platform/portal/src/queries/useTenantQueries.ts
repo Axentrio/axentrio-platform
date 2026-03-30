@@ -13,11 +13,17 @@ export const tenantOptions = {
   }),
   members: () => queryOptions({
     queryKey: queryKeys.tenants.members(),
-    queryFn: () => api.get<Any[]>('/tenants/me/users'),
+    queryFn: async () => {
+      const res = await api.get<Any>('/tenants/me/users');
+      return Array.isArray(res) ? res : res?.data ?? [];
+    },
   }),
   invites: () => queryOptions({
     queryKey: queryKeys.tenants.invites(),
-    queryFn: () => api.get<Any[]>('/tenants/me/pending-invites'),
+    queryFn: async () => {
+      const res = await api.get<Any>('/tenants/me/pending-invites');
+      return Array.isArray(res) ? res : res?.data ?? [];
+    },
   }),
 };
 

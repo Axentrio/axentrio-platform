@@ -10,6 +10,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
+import { Participant } from '../database/entities/Participant';
 import { emitToTenantAgents } from '../websocket/socket.handler';
 import { EventEmitter } from '../utils/event-emitter';
 import { routeOutboundMessage } from '../channels/outbound-router';
@@ -496,6 +497,24 @@ export class WebhookService {
   // Private Helper Methods
   // ============================================================================
 
+  private async getOrCreateBotParticipant(sessionId: string): Promise<string> {
+    const participantRepo = AppDataSource.getRepository(Participant);
+    let botParticipant = await participantRepo.findOne({
+      where: { sessionId, type: 'bot' },
+    });
+    if (!botParticipant) {
+      botParticipant = participantRepo.create({
+        sessionId,
+        type: 'bot',
+        name: 'Bot',
+        isAnonymous: false,
+        joinedAt: new Date(),
+      });
+      await participantRepo.save(botParticipant);
+    }
+    return botParticipant.id;
+  }
+
   private async saveMessage(
     sessionId: string,
     tenantId: string,
@@ -503,10 +522,11 @@ export class WebhookService {
     content: string,
     metadata?: Record<string, unknown>
   ): Promise<string> {
+    const participantId = await this.getOrCreateBotParticipant(sessionId);
     const message = this.messageRepo.create({
       sessionId,
       tenantId,
-      participantId: 'bot',
+      participantId,
       type,
       content,
       metadata: metadata || undefined,

@@ -2,7 +2,8 @@ import crypto from 'crypto';
 import { Request, Response } from 'express';
 import { KnowledgeService } from './knowledge.service';
 import { AppDataSource } from '../database/data-source';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { createS3Client } from '../config/s3.config';
 import { config } from '../config/environment';
 import { encrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
@@ -150,13 +151,12 @@ export async function uploadFile(req: Request, res: Response) {
 
   const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${file.originalname}`;
 
-  const s3 = new S3Client({ region: config.s3.region });
+  const s3 = createS3Client();
   await s3.send(new PutObjectCommand({
     Bucket: config.s3.bucket,
     Key: key,
     Body: file.buffer,
     ContentType: file.mimetype,
-    ServerSideEncryption: 'AES256',
   }));
 
   const token = getService().registerUploadToken(tenantId, key);

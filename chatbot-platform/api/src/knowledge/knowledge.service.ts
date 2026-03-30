@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { DataSource, Repository } from 'typeorm';
-import { S3Client, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand } from '@aws-sdk/client-s3';
+import { createS3Client } from '../config/s3.config';
 import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { KnowledgeDocument, DocumentType } from '../database/entities/KnowledgeDocument';
 import { KnowledgeChunk } from '../database/entities/KnowledgeChunk';
@@ -24,12 +25,12 @@ const DOCUMENT_LIMITS: Record<string, number> = {
   enterprise: Infinity,
 };
 
-let s3Client: S3Client | null = null;
-function getS3Client(): S3Client {
-  if (!s3Client) {
-    s3Client = new S3Client({ region: config.s3?.region });
+let s3ClientInstance: ReturnType<typeof createS3Client> | null = null;
+function getS3Client() {
+  if (!s3ClientInstance) {
+    s3ClientInstance = createS3Client();
   }
-  return s3Client;
+  return s3ClientInstance;
 }
 
 export class KnowledgeService {
@@ -153,6 +154,7 @@ export class KnowledgeService {
     if (data.metadata) doc.metadata = { ...doc.metadata, ...data.metadata };
     doc.processingVersion += 1;
     doc.status = 'pending';
+    doc.qualityReport = null;
     return this.docRepo.save(doc);
   }
 
@@ -177,6 +179,7 @@ export class KnowledgeService {
     doc.processingVersion += 1;
     doc.status = 'pending';
     doc.errorMessage = null;
+    doc.qualityReport = null;
     return this.docRepo.save(doc);
   }
 

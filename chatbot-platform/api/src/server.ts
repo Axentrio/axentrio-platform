@@ -193,10 +193,8 @@ async function startServer(): Promise<void> {
     try {
       const { registerProcessor } = await import('./queue/message-queue');
       const { createIngestionProcessor } = await import('./knowledge/ingestion.worker');
-      const { S3Client } = await import('@aws-sdk/client-s3');
-      const s3Client = config.s3?.bucket
-        ? new S3Client({ region: config.s3?.region || 'eu-west-1' })
-        : null;
+      const { createS3Client } = await import('./config/s3.config');
+      const s3Client = config.s3?.bucket ? createS3Client() : null;
       registerProcessor('knowledge-processing', createIngestionProcessor(AppDataSource, s3Client));
       logger.info('Knowledge ingestion processor registered');
     } catch (err) {

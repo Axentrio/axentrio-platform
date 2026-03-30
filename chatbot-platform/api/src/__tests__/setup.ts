@@ -17,9 +17,10 @@ beforeAll(async () => {
 
 afterEach(async () => {
   if (!AppDataSource.isInitialized) return;
-  const entities = AppDataSource.entityMetadatas;
-  for (const entity of entities) {
-    const repository = AppDataSource.getRepository(entity.name);
-    await repository.query(`TRUNCATE TABLE "${entity.tableName}" CASCADE`);
+  const tableNames = AppDataSource.entityMetadatas
+    .map((entity) => `"${entity.tableName}"`)
+    .join(', ');
+  if (tableNames) {
+    await AppDataSource.query(`TRUNCATE TABLE ${tableNames} CASCADE`);
   }
 });

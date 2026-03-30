@@ -74,7 +74,7 @@ export const AppDataSource = new DataSource({
   },
 
   // Logging
-  logging: config.server.isDevelopment ? ['query', 'error'] : ['error'],
+  logging: ['error'],
   logger: 'advanced-console',
 
   // Synchronization disabled — always use migrations instead

@@ -6,6 +6,7 @@ import { extractPdf } from './document-extractors/pdf.extractor';
 import { extractDocx } from './document-extractors/docx.extractor';
 import { chunkText } from './chunking.service';
 import { embedBatch } from './embedding.service';
+import { preprocess } from './content-preprocessor.service';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
@@ -66,8 +67,31 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
         logger.warn(`Document ${documentId} text truncated to ${config.rag.maxExtractedChars} chars`);
       }
 
+      // Preprocess: classify and transform content
+      const preprocessResult = await preprocess(text);
+      const processedText = preprocessResult.transformedText;
+      logger.info(`[Ingestion] Document ${documentId} preprocessed: ${preprocessResult.qualityReport.contentType} (${preprocessResult.qualityReport.qualityScore})`);
+
+      // Re-check for stale job after LLM preprocessing
+      const freshCheckAfterPreprocess = await docRepo.findOne({ where: { id: documentId, tenantId } });
+      if (!freshCheckAfterPreprocess || freshCheckAfterPreprocess.processingVersion !== processingVersion) {
+        logger.info(`Stale job for document ${documentId} after preprocessing, discarding`);
+        return;
+      }
+
+      // Guard against empty output from preprocessing
+      if (!processedText.trim()) {
+        doc.status = 'indexed';
+        doc.chunkCount = 0;
+        doc.errorMessage = null;
+        doc.qualityReport = { ...preprocessResult.qualityReport, chunksCreated: 0 };
+        await docRepo.save(doc);
+        logger.warn(`[Ingestion] Document ${documentId} produced no usable content after preprocessing`);
+        return;
+      }
+
       const kb = await kbRepo.findOneOrFail({ where: { tenantId } });
-      let chunks = chunkText(text, kb.chunkSize, kb.chunkOverlap);
+      let chunks = chunkText(processedText, kb.chunkSize, kb.chunkOverlap);
 
       if (chunks.length > config.rag.maxChunksPerDoc) {
         logger.warn(`Document ${documentId} capped at ${config.rag.maxChunksPerDoc} chunks (had ${chunks.length})`);
@@ -105,6 +129,7 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
       doc.status = 'indexed';
       doc.chunkCount = chunks.length;
       doc.errorMessage = null;
+      doc.qualityReport = { ...preprocessResult.qualityReport, chunksCreated: chunks.length };
       await docRepo.save(doc);
 
       kb.lastIndexedAt = new Date();

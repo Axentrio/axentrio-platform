@@ -30,7 +30,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
-  const [useKB, setUseKB] = useState(false);
+  const [useKB, setUseKB] = useState(hasIndexedDocs);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const testChat = useTestChat();
@@ -40,7 +40,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
     if (isOpen) {
       setMessages([]);
       setInput('');
-      setUseKB(false);
+      setUseKB(hasIndexedDocs);
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen, hasIndexedDocs]);

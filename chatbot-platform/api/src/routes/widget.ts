@@ -122,7 +122,7 @@ router.post(
     });
 
     if (existingSession) {
-      const token = generateWidgetToken(tenant.id, visitorId, existingSession.id);
+      const token = generateWidgetToken(existingSession.id, tenant.id, visitorId);
 
       sendSuccess(res, {
         session: {
@@ -206,7 +206,7 @@ router.post(
     }
 
     // Generate token
-    const token = generateWidgetToken(tenant.id, visitorId, session.id);
+    const token = generateWidgetToken(session.id, tenant.id, visitorId);
 
     logger.info('Widget session initialized', {
       sessionId: session.id,

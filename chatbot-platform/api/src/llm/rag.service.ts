@@ -45,8 +45,10 @@ export async function generateResponse(
   customerMessage: string,
   conversationHistory: { role: 'user' | 'assistant'; content: string }[]
 ): Promise<RagResult> {
+  logger.info(`[RAG] Query: "${customerMessage}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
   const queryEmbedding = await embed(customerMessage);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
+  logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);
 
   const chunks: RetrievedChunk[] = await dataSource.query(
     `SELECT kc.id, kc.content, kc.metadata, kd.title,
@@ -61,7 +63,10 @@ export async function generateResponse(
     [embeddingStr, tenantId, config.rag.minSimilarity, config.rag.maxContextChunks]
   );
 
+  logger.info(`[RAG] Retrieved ${chunks.length} chunks${chunks.length > 0 ? `, top similarity: ${chunks[0]?.similarity}` : ''}`);
+
   if (chunks.length === 0) {
+    logger.warn(`[RAG] No chunks found — returning fallback`);
     return {
       response: aiSettings.guardrails.fallbackMessage,
       confidence: 0,
@@ -130,6 +135,7 @@ ${knowledgeContext}`;
   }
 
   const shouldHandoff = confidence < aiSettings.guardrails.confidenceThreshold;
+  logger.info(`[RAG] Confidence: ${confidence}, threshold: ${aiSettings.guardrails.confidenceThreshold}, handoff: ${shouldHandoff}`);
 
   return {
     response: shouldHandoff ? aiSettings.guardrails.fallbackMessage : response,

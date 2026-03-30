@@ -201,6 +201,18 @@ export async function updateAiSettings(req: Request, res: Response) {
   if (data.guardrails) updatedAi.guardrails = { ...existingAi.guardrails, ...data.guardrails };
 
   tenant.settings = { ...tenant.settings, ai: updatedAi };
+
+  // Auto-provision webhook URL + secret when AI is enabled and no custom URL is set
+  if (updatedAi.enabled && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
+    // Set webhookSecret to the shared inbound secret so the default n8n workflow
+    // can authenticate callbacks. Per-tenant secrets are only for custom workflows.
+    if (!tenant.webhookSecret && config.n8n.inboundSecret) {
+      tenant.webhookSecret = config.n8n.inboundSecret;
+    }
+    logger.info(`Auto-provisioned webhook URL for tenant ${tenantId}`);
+  }
+
   await tenantRepo.save(tenant);
 
   const { apiKey, ...rest } = updatedAi;

@@ -49,10 +49,20 @@ export class KnowledgeService {
   async getOrCreateKnowledgeBase(tenantId: string): Promise<KnowledgeBase> {
     let kb = await this.kbRepo.findOne({ where: { tenantId } });
     if (!kb) {
-      kb = this.kbRepo.create({ tenantId, status: 'inactive' });
-      kb = await this.kbRepo.save(kb);
+      try {
+        kb = this.kbRepo.create({ tenantId, status: 'inactive' });
+        kb = await this.kbRepo.save(kb);
+      } catch (err: any) {
+        // Race condition: another request created it between our findOne and save
+        if (err?.message?.includes('duplicate key') || err?.code === '23505') {
+          kb = await this.kbRepo.findOne({ where: { tenantId } });
+          if (!kb) throw err; // genuinely broken
+        } else {
+          throw err;
+        }
+      }
     }
-    return kb;
+    return kb!;
   }
 
   async updateKnowledgeBase(

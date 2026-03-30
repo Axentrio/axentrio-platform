@@ -71,6 +71,7 @@ export const AppDataSource = new DataSource({
     max: config.database.poolSize,
     connectionTimeoutMillis: config.database.connectionTimeout,
     idleTimeoutMillis: 30000,
+    options: '-c timezone=UTC',
   },
 
   // Logging

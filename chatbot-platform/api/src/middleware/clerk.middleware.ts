@@ -82,7 +82,15 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
   try {
     const auth = getAuth(req);
     const clerkUserId = auth.userId!;
-    const clerkOrgId = auth.orgId!;
+    const clerkOrgId = auth.orgId;
+
+    logger.info('[AutoProvision] Starting', { clerkUserId, clerkOrgId: clerkOrgId || 'NONE' });
+
+    if (!clerkOrgId) {
+      logger.warn('[AutoProvision] No orgId in auth token — user may not have selected an organization');
+      res.status(400).json({ error: 'No organization selected. Please select or create an organization.' });
+      return;
+    }
 
     // Check cache first
     const cached = getCached(clerkOrgId, clerkUserId);
@@ -99,32 +107,39 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
     let tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
 
     if (!tenant) {
+      logger.info('[AutoProvision] Tenant not found, creating...', { clerkOrgId });
       let orgName = 'Organization';
       try {
         const org = await clerkClient.organizations.getOrganization({ organizationId: clerkOrgId });
         orgName = org.name;
-      } catch {
-        logger.warn('Could not fetch Clerk org name', { clerkOrgId });
+        logger.info('[AutoProvision] Fetched org name from Clerk', { orgName });
+      } catch (err: any) {
+        logger.warn('[AutoProvision] Could not fetch Clerk org name', { clerkOrgId, error: err?.message });
       }
 
       const slug = await ensureUniqueSlug(orgName, tenantRepo);
       const apiKey = crypto.randomBytes(32).toString('hex');
 
       // Upsert to handle race conditions
-      await tenantRepo
-        .createQueryBuilder()
-        .insert()
-        .into(Tenant)
-        .values({
-          name: orgName,
-          slug,
-          apiKey,
-          clerkOrgId,
-          tier: 'pro',
-          status: 'active',
-        })
-        .orIgnore() // ON CONFLICT DO NOTHING
-        .execute();
+      try {
+        await tenantRepo
+          .createQueryBuilder()
+          .insert()
+          .into(Tenant)
+          .values({
+            name: orgName,
+            slug,
+            apiKey,
+            clerkOrgId,
+            tier: 'pro',
+            status: 'active',
+          })
+          .orIgnore() // ON CONFLICT DO NOTHING
+          .execute();
+        logger.info('[AutoProvision] Tenant insert executed');
+      } catch (insertErr: any) {
+        logger.error('[AutoProvision] Tenant insert FAILED', { error: insertErr?.message });
+      }
 
       tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
       if (!tenant) {

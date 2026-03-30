@@ -134,13 +134,16 @@ export async function forwardMessageToN8n(
           return true;
         }
 
-        // Call RAG service
+        // Call RAG service — decrypt message content first
         const history = await getConversationHistory(session.id);
+        const messageContent = savedMessage.contentEncrypted
+          ? decrypt(savedMessage.content)
+          : savedMessage.content;
         const ragResult = await generateResponse(
           AppDataSource,
           session.tenantId,
           aiSettings as Parameters<typeof generateResponse>[2],
-          savedMessage.content,
+          messageContent,
           history
         );
 

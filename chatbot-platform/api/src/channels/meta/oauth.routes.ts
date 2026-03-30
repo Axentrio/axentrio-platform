@@ -71,8 +71,9 @@ metaOAuthCallbackRouter.get('/callback', async (req: Request, res: Response) => 
 /**
  * GET /api/v1/channels/meta/oauth/pages
  * Returns available Pages from the OAuth session.
+ * On the callback router — no Clerk auth needed, session JWT is self-validating.
  */
-router.get('/pages', requireClerkAuth, autoProvision, async (req: Request, res: Response) => {
+metaOAuthCallbackRouter.get('/pages', async (req: Request, res: Response) => {
   const sessionToken = req.query.session as string;
   if (!sessionToken) {
     return res.status(400).json({ error: 'session token required' });

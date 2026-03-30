@@ -10,8 +10,9 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
-import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { emitToTenantAgents } from '../websocket/socket.handler';
 import { EventEmitter } from '../utils/event-emitter';
+import { routeOutboundMessage } from '../channels/outbound-router';
 import {
   ResponsePayload,
   WebhookResponse,
@@ -111,14 +112,21 @@ export class WebhookService {
         timestamp: new Date().toISOString(),
       });
 
-      // Emit via WebSocket to the session room
-      emitToSession(session.tenantId, sessionId, 'message:receive', {
-        id: messageId,
-        type: payload.type || 'text',
-        content: payload.content,
-        senderType: 'bot',
-        timestamp: new Date().toISOString(),
-      });
+      // Route through outbound router — handles WebSocket + external channels
+      await routeOutboundMessage(
+        payload,
+        { sessionId, tenantId: session.tenantId, messageId },
+        {
+          event: 'message:receive',
+          data: {
+            id: messageId,
+            type: payload.type || 'text',
+            content: payload.content,
+            senderType: 'bot',
+            timestamp: new Date().toISOString(),
+          },
+        },
+      );
 
       logger.info(`Message sent to session ${sessionId}`, { messageId, type: payload.type });
 

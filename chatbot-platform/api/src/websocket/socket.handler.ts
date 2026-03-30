@@ -22,6 +22,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { Participant } from '../database/entities/Participant';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { encrypt } from '../utils/encryption';
+import { routeOutboundMessage } from '../channels/outbound-router';
 
 // Socket event types
 interface MessageSendData {
@@ -402,6 +403,17 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
     if (senderType === 'user') {
       forwardMessageToN8n(session, savedMessage).catch((err) => {
         logger.error('Error in n8n message forwarding:', err);
+      });
+    }
+
+    // Route agent replies to external channels (WebSocket already emitted above)
+    if (senderType === 'agent' && session.channel !== 'widget') {
+      routeOutboundMessage(
+        { type: 'text', content },
+        { sessionId, tenantId: session.tenantId, messageId: savedMessage.id },
+        undefined, // Skip WebSocket — already emitted above
+      ).catch((err) => {
+        logger.error('Error routing agent reply to external channel:', err);
       });
     }
   } catch (error) {

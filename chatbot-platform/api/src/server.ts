@@ -80,6 +80,9 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
 
+// Meta OAuth callback — must be before Clerk middleware (Facebook redirects here unauthenticated)
+app.use('/api/v1/channels/meta/oauth', metaOAuthRoutes);
+
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);
 
@@ -244,7 +247,7 @@ async function startServer(): Promise<void> {
     registerChannelAdapter(instagramAdapter);
     apiRouter.use(channelWebhookRoutes);
     apiRouter.use('/channels', channelManagementRoutes);
-    apiRouter.use('/channels/meta/oauth', metaOAuthRoutes);
+    // Note: Meta OAuth routes mounted at app level (before Clerk middleware) for unauthenticated callback
     logger.info('Channel adapters registered: telegram, messenger, instagram');
 
     // Cleanup old webhook event logs and message deliveries (7-day retention)

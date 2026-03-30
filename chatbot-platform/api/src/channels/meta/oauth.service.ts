@@ -5,13 +5,12 @@ import { config } from '../../config/environment';
 
 const GRAPH_API = 'https://graph.facebook.com/v21.0';
 
+// Scopes must be added to the app in Meta Developer Console before requesting.
+// Start with core messaging scopes; add instagram scopes after enabling in console.
 const OAUTH_SCOPES = [
   'pages_messaging',
-  'pages_read_engagement',
   'pages_manage_metadata',
   'pages_show_list',
-  'instagram_basic',
-  'instagram_business_manage_messages',
 ].join(',');
 
 interface MetaPage {

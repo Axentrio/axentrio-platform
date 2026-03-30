@@ -95,7 +95,7 @@ export class FileUpload {
   @Column({ type: 'varchar', length: 500, nullable: true, name: 'error_message' })
   errorMessage?: string;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'expires_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'expires_at' })
   expiresAt?: Date;
 
   @CreateDateColumn({ name: 'created_at' })
@@ -104,7 +104,7 @@ export class FileUpload {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'completed_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'completed_at' })
   completedAt?: Date;
 
   // Helper methods

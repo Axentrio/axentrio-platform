@@ -124,7 +124,7 @@ export class Tenant {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   // Relationships

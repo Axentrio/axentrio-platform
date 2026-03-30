@@ -61,10 +61,10 @@ export class Agent {
   @Column({ type: 'decimal', precision: 3, scale: 2, default: 0, name: 'satisfaction_score' })
   satisfactionScore!: number;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'last_status_change_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'last_status_change_at' })
   lastStatusChangeAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'last_active_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'last_active_at' })
   lastActiveAt?: Date;
 
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'current_ip' })
@@ -76,7 +76,7 @@ export class Agent {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   // Relationships

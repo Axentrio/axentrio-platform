@@ -82,16 +82,16 @@ export class ChatSession {
   @Column({ type: 'varchar', length: 100, nullable: true, name: 'tags', array: true })
   tags?: string[];
 
-  @Column({ type: 'timestamp', name: 'started_at' })
+  @Column({ type: 'timestamptz', name: 'started_at' })
   startedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'ended_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'ended_at' })
   endedAt?: Date;
 
-  @Column({ type: 'timestamp', name: 'last_activity_at' })
+  @Column({ type: 'timestamptz', name: 'last_activity_at' })
   lastActivityAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'first_response_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'first_response_at' })
   firstResponseAt?: Date;
 
   @Column({ type: 'int', nullable: true, name: 'first_response_time_seconds' })
@@ -109,7 +109,7 @@ export class ChatSession {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   // Relationships

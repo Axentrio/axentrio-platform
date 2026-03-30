@@ -39,6 +39,6 @@ export class PendingInvite {
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 
-  @Column({ type: 'timestamp', name: 'expires_at' })
+  @Column({ type: 'timestamptz', name: 'expires_at' })
   expiresAt!: Date;
 }

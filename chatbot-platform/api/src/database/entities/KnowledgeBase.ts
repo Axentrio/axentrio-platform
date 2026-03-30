@@ -39,7 +39,7 @@ export class KnowledgeBase {
   @Column({ type: 'int', default: 200 })
   chunkOverlap!: number;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastIndexedAt!: Date | null;
 
   @OneToMany(() => KnowledgeDocument, (doc) => doc.knowledgeBase)

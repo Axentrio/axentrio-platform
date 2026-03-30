@@ -71,13 +71,13 @@ export class User {
     handoffRequest?: boolean;
   };
 
-  @Column({ type: 'timestamp', nullable: true, name: 'last_login_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'last_login_at' })
   lastLoginAt?: Date;
 
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'last_login_ip' })
   lastLoginIp?: string;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'password_changed_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'password_changed_at' })
   passwordChangedAt?: Date;
 
   @CreateDateColumn({ name: 'created_at' })
@@ -86,7 +86,7 @@ export class User {
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   // Relationships

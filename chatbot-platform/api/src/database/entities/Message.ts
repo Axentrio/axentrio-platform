@@ -76,13 +76,13 @@ export class Message {
   @Column({ type: 'uuid', nullable: true, name: 'reply_to_id' })
   replyToId?: string;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'sent_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'sent_at' })
   sentAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'delivered_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'delivered_at' })
   deliveredAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'read_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'read_at' })
   readAt?: Date;
 
   @Column({ type: 'int', default: 0, name: 'edit_count' })
@@ -91,7 +91,7 @@ export class Message {
   @Column({ type: 'boolean', default: false, name: 'is_deleted' })
   isDeleted!: boolean;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   @CreateDateColumn({ name: 'created_at' })

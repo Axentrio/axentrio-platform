@@ -73,13 +73,13 @@ export class Participant {
   @Column({ type: 'boolean', default: false, name: 'is_anonymous' })
   isAnonymous!: boolean;
 
-  @Column({ type: 'timestamp', name: 'joined_at' })
+  @Column({ type: 'timestamptz', name: 'joined_at' })
   joinedAt!: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'left_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'left_at' })
   leftAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'last_seen_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'last_seen_at' })
   lastSeenAt?: Date;
 
   @CreateDateColumn({ name: 'created_at' })
@@ -91,7 +91,7 @@ export class Participant {
   @Column({ type: 'boolean', default: false, name: 'is_deleted' })
   isDeleted!: boolean;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'deleted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 
   // Relationships

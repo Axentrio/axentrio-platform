@@ -36,7 +36,7 @@ export class HandoffRequest {
   @Column({ type: 'uuid', name: 'requested_by' })
   requestedBy!: string;
 
-  @Column({ type: 'timestamp', name: 'requested_at' })
+  @Column({ type: 'timestamptz', name: 'requested_at' })
   requestedAt!: Date;
 
   @Column({
@@ -58,13 +58,13 @@ export class HandoffRequest {
   @Column({ type: 'uuid', nullable: true, name: 'assigned_agent_id' })
   assignedAgentId?: string;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'accepted_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'accepted_at' })
   acceptedAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'completed_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'completed_at' })
   completedAt?: Date;
 
-  @Column({ type: 'timestamp', nullable: true, name: 'timeout_at' })
+  @Column({ type: 'timestamptz', nullable: true, name: 'timeout_at' })
   timeoutAt?: Date;
 
   @Column({ type: 'text', nullable: true })

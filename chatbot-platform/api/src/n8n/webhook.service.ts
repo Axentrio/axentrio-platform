@@ -67,6 +67,15 @@ export class WebhookService {
         };
       }
 
+      // Reject bot messages for sessions that are in handoff or closed status
+      if (session.status === 'handoff' || session.status === 'closed') {
+        logger.warn(`Bot message rejected — session ${sessionId} is in ${session.status} status`);
+        return {
+          success: false,
+          error: `Session is in ${session.status} status — bot messages not accepted`,
+        };
+      }
+
       // Apply delay if specified
       const actualDelay = Math.min(delay, this.config.maxDelay || 30000);
       if (actualDelay > 0) {
@@ -271,13 +280,30 @@ export class WebhookService {
       session.requestHandoff();
       await this.sessionRepo.save(session);
 
+      // Find or create a bot participant to use as requestedBy
+      const participantRepo = AppDataSource.getRepository(Participant);
+      let botParticipant = await participantRepo.findOne({
+        where: { sessionId, type: 'bot', isDeleted: false },
+      });
+      if (!botParticipant) {
+        botParticipant = participantRepo.create({
+          sessionId,
+          type: 'bot',
+          name: 'AI Assistant',
+          isAnonymous: false,
+          joinedAt: new Date(),
+        });
+        botParticipant = await participantRepo.save(botParticipant);
+      }
+
       // Create handoff request record
       const handoff = this.handoffRepo.create({
         sessionId,
         tenantId: session.tenantId,
-        requestedBy: 'bot',
-        reason: (payload?.reason || 'Bot escalation') as HandoffRequest['reason'],
-        priority: (payload?.priority || 'normal') as HandoffRequest['priority'],
+        requestedBy: botParticipant.id,
+        requestedAt: new Date(),
+        reason: (payload?.reason || 'escalation_trigger') as HandoffRequest['reason'],
+        priority: (payload?.priority || 'medium') as HandoffRequest['priority'],
         notes: payload?.summary,
       } as Partial<HandoffRequest>);
       const savedHandoff = await this.handoffRepo.save(handoff);

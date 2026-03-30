@@ -51,7 +51,7 @@ export class ChannelConnection {
   @Column({ type: 'simple-array', nullable: true })
   scopes!: string[] | null;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: 'timestamptz', nullable: true })
   lastHealthCheckAt!: Date | null;
 
   @Column({ type: 'varchar', length: 500, nullable: true })

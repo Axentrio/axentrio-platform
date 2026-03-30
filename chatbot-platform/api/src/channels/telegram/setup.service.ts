@@ -8,6 +8,7 @@ import crypto from 'crypto';
 import { getRepository } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { logger } from '../../utils/logger';
+import { encryptCredential, getTelegramBotToken } from '../credential-utils';
 
 const TELEGRAM_API = 'https://api.telegram.org';
 
@@ -90,7 +91,7 @@ export async function setupTelegramConnection(
   });
 
   if (connection) {
-    connection.credentials = { botToken };
+    connection.credentials = { botToken: encryptCredential(botToken) };
     connection.webhookSecret = webhookSecret;
     connection.label = label ?? connection.label;
     connection.status = 'pending_setup';
@@ -103,7 +104,7 @@ export async function setupTelegramConnection(
       status: 'pending_setup',
       label: label ?? `@${botInfo.username}`,
       platformAccountId: String(botInfo.id),
-      credentials: { botToken },
+      credentials: { botToken: encryptCredential(botToken) },
       webhookSecret,
       config: { botUsername: botInfo.username, botFirstName: botInfo.first_name },
     });
@@ -112,7 +113,7 @@ export async function setupTelegramConnection(
   connection = await repo.save(connection) as ChannelConnection;
 
   // 4. Register webhook with Telegram
-  const webhookUrl = `${baseUrl}/api/v1/channels/telegram/webhook?token=${webhookSecret}`;
+  const webhookUrl = `${baseUrl}/api/v1/channels/telegram/webhook`;
 
   try {
     await registerTelegramWebhook(botToken, webhookUrl, webhookSecret);
@@ -140,7 +141,9 @@ export async function disconnectTelegramConnection(connectionId: string): Promis
   }
 
   // Attempt to remove webhook (best-effort; bot token may already be revoked)
-  const botToken = connection.credentials?.botToken as string | undefined;
+  const botToken = connection.credentials
+    ? getTelegramBotToken(connection.credentials as Record<string, unknown>)
+    : null;
   if (botToken) {
     try {
       await removeTelegramWebhook(botToken);

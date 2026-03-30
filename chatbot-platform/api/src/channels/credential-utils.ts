@@ -1,0 +1,32 @@
+import { encrypt, decrypt } from '../utils/encryption';
+
+/**
+ * Encrypt a credential value before storing in the database.
+ */
+export function encryptCredential(value: string): string {
+  return encrypt(value);
+}
+
+/**
+ * Decrypt a credential value read from the database.
+ */
+export function decryptCredential(encryptedValue: string, fallbackToPlaintext = false): string {
+  try {
+    return decrypt(encryptedValue, 'credential');
+  } catch {
+    if (fallbackToPlaintext) {
+      // Support reading legacy unencrypted values during migration
+      return encryptedValue;
+    }
+    throw new Error('Failed to decrypt credential');
+  }
+}
+
+/**
+ * Get the bot token from a Telegram channel connection, decrypting it.
+ */
+export function getTelegramBotToken(credentials: Record<string, unknown>): string | null {
+  const token = credentials.botToken as string | undefined;
+  if (!token) return null;
+  return decryptCredential(token, true);
+}

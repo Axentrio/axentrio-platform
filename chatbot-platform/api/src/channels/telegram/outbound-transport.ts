@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
+import { getTelegramBotToken } from '../credential-utils';
 import {
   OutboundTransport,
   OutboundChannelMessage,
@@ -234,7 +235,7 @@ export class TelegramOutboundTransport implements OutboundTransport {
   }
 
   private getBotToken(connection: ChannelConnection): string {
-    const token = connection.credentials?.botToken as string | undefined;
+    const token = getTelegramBotToken(connection.credentials as Record<string, unknown>);
     if (!token) {
       throw new Error('Telegram bot token not found in connection credentials');
     }

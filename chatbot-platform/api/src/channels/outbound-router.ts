@@ -16,11 +16,6 @@ import { formatResponseForChannel, DeliveryResult } from './types';
 import { emitToSession } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 
-const sessionRepository = AppDataSource.getRepository(ChatSession);
-const bindingRepository = AppDataSource.getRepository(ConversationBinding);
-const connectionRepository = AppDataSource.getRepository(ChannelConnection);
-const deliveryRepository = AppDataSource.getRepository(MessageDelivery);
-
 export interface OutboundContext {
   sessionId: string;
   tenantId: string;
@@ -40,6 +35,11 @@ export async function routeOutboundMessage(
     data: Record<string, unknown>;
   },
 ): Promise<DeliveryResult> {
+  const sessionRepository = AppDataSource.getRepository(ChatSession);
+  const bindingRepository = AppDataSource.getRepository(ConversationBinding);
+  const connectionRepository = AppDataSource.getRepository(ChannelConnection);
+  const deliveryRepository = AppDataSource.getRepository(MessageDelivery);
+
   // Always broadcast to portal agents via WebSocket
   if (socketEvent) {
     emitToSession(context.tenantId, context.sessionId, socketEvent.event, socketEvent.data);
@@ -124,6 +124,10 @@ export async function routeTypingIndicator(
   tenantId: string,
   isTyping: boolean,
 ): Promise<void> {
+  const sessionRepository = AppDataSource.getRepository(ChatSession);
+  const bindingRepository = AppDataSource.getRepository(ConversationBinding);
+  const connectionRepository = AppDataSource.getRepository(ChannelConnection);
+
   // Always send to WebSocket for portal
   emitToSession(tenantId, sessionId, 'typing:indicator', {
     isTyping,

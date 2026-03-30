@@ -9,9 +9,9 @@ export class TelegramWebhookVerifier implements WebhookVerifier {
 
   verifySignature(req: Request, connection: ChannelConnection): boolean {
     const headerToken = req.headers['x-telegram-bot-api-secret-token'] as string | undefined;
-    if (headerToken && connection.webhookSecret) {
-      return headerToken === connection.webhookSecret;
+    if (!headerToken || !connection.webhookSecret) {
+      return false;
     }
-    return true; // If resolved via query param, that's sufficient
+    return headerToken === connection.webhookSecret;
   }
 }

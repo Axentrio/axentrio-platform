@@ -104,7 +104,14 @@ router.delete(
       throw new NotFoundError('Channel connection not found');
     }
 
-    const connection = await disconnectTelegramConnection(connectionId);
+    let connection: ChannelConnection;
+    if (existing.channel === 'telegram') {
+      connection = await disconnectTelegramConnection(connectionId);
+    } else {
+      // Generic disconnect for other channels
+      existing.status = 'disconnected';
+      connection = await repo.save(existing) as ChannelConnection;
+    }
 
     // Strip credentials from the response
     const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;

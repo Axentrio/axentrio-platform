@@ -39,10 +39,23 @@ export async function processInboundEvent(
   }
 
   // ── 2. Mark as processing ──────────────────────────────────────────────
-  if (existing) {
-    existing.status = 'processing';
-    existing.processingAttempts += 1;
-    await eventLogRepo.save(existing);
+  let eventLogEntry = existing;
+  if (eventLogEntry) {
+    eventLogEntry.status = 'processing';
+    eventLogEntry.processingAttempts += 1;
+    await eventLogRepo.save(eventLogEntry);
+  } else {
+    console.warn(`[inbound-pipeline] No event log entry found for dedupe key: ${event.dedupeKey}, creating one`);
+    // Create the missing entry
+    const newEntry = eventLogRepo.create({
+      channelConnectionId: connection.id,
+      channel: connection.channel,
+      dedupeKey: event.dedupeKey,
+      eventType: event.rawEventType,
+      rawPayload: {},
+      status: 'received',
+    });
+    eventLogEntry = await eventLogRepo.save(newEntry);
   }
 
   try {
@@ -128,10 +141,10 @@ export async function processInboundEvent(
     await markEventProcessed(eventLogRepo, event.dedupeKey);
   } catch (error) {
     // Mark as failed
-    if (existing) {
-      existing.status = 'failed';
-      existing.error = error instanceof Error ? error.message.slice(0, 500) : 'Unknown error';
-      await eventLogRepo.save(existing);
+    if (eventLogEntry) {
+      eventLogEntry.status = 'failed';
+      eventLogEntry.error = error instanceof Error ? error.message.slice(0, 500) : 'Unknown error';
+      await eventLogRepo.save(eventLogEntry);
     }
     throw error;
   }
@@ -202,7 +215,55 @@ async function findOrCreateConversation(
     }
   }
 
-  // Create new session + participant + binding in a transaction
+  if (existingBinding && (!existingBinding.session || existingBinding.session.status === 'closed')) {
+    // Session is closed — create new session and update existing binding
+    return AppDataSource.transaction(async (manager: EntityManager) => {
+      const now = new Date();
+
+      const newSession = manager.create(ChatSession, {
+        tenantId: connection.tenantId,
+        visitorId: event.sender.externalUserId,
+        status: 'waiting',
+        source: connection.channel,
+        channel: connection.channel,
+        channelConnectionId: connection.id,
+        startedAt: now,
+        lastActivityAt: now,
+        metadata: {
+          customData: {
+            externalUserId: event.sender.externalUserId,
+            externalThreadId: event.sender.externalThreadId,
+            displayName: event.sender.displayName,
+          },
+        },
+      } as DeepPartial<ChatSession>);
+      const savedSession = await manager.save(ChatSession, newSession);
+
+      const newParticipant = manager.create(Participant, {
+        sessionId: savedSession.id,
+        type: 'user',
+        name: event.sender.displayName || 'Visitor',
+        avatarUrl: event.sender.avatarUrl || undefined,
+        isAnonymous: !event.sender.displayName,
+        joinedAt: now,
+      } as DeepPartial<Participant>);
+      const savedParticipant = await manager.save(Participant, newParticipant) as Participant;
+
+      // Update existing binding to point to new session
+      existingBinding.sessionId = savedSession.id;
+      existingBinding.externalUserName = event.sender.displayName || existingBinding.externalUserName;
+      existingBinding.externalAvatarUrl = event.sender.avatarUrl || existingBinding.externalAvatarUrl;
+      const updatedBinding = await manager.save(ConversationBinding, existingBinding) as ConversationBinding;
+
+      return {
+        session: savedSession,
+        participant: savedParticipant,
+        binding: updatedBinding,
+      };
+    });
+  }
+
+  // No existing binding — create new session + participant + binding in a transaction
   return AppDataSource.transaction(async (manager: EntityManager) => {
     const now = new Date();
 

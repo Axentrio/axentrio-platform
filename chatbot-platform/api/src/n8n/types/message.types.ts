@@ -97,6 +97,23 @@ export interface MessagePayload {
   metadata?: FileMetadata;
 }
 
+export interface TenantAiConfig {
+  brandName: string;
+  brandTone: string;
+  systemPrompt: string;
+  guardrails: {
+    topicsToAvoid: string[];
+    confidenceThreshold: number;
+    maxResponseLength: number;
+    escalationKeywords: string[];
+  };
+}
+
+export interface KnowledgeBaseMetadata {
+  enabled: boolean;
+  documentCount: number;
+}
+
 export interface OutboundMessage {
   event: MessageEvent;
   tenantId: string;
@@ -105,6 +122,8 @@ export interface OutboundMessage {
   payload: MessagePayload;
   user?: UserContext;
   context?: ChatContext;
+  tenantConfig?: TenantAiConfig;
+  knowledgeBase?: KnowledgeBaseMetadata;
 }
 
 // ============================================================================

@@ -48,7 +48,9 @@ router.post('/', async (req: Request, res: Response) => {
     .update(rawBody)
     .digest('hex');
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+  const sigBuffer = Buffer.from(signature);
+  const expectedBuffer = Buffer.from(expectedSignature);
+  if (sigBuffer.length !== expectedBuffer.length || !crypto.timingSafeEqual(sigBuffer, expectedBuffer)) {
     logger.warn('[meta-webhook] Invalid HMAC signature');
     return res.status(401).json({ error: 'Invalid signature' });
   }

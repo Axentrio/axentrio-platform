@@ -142,7 +142,9 @@ export async function handleOAuthCallback(code: string): Promise<{
   return { pages, sessionToken };
 }
 
-// Temporary in-memory cache for page tokens during OAuth flow
+// TODO: Replace with Redis for multi-instance deployments.
+// Currently, OAuth callback and /connect may hit different instances,
+// causing "No valid pages found" errors with multiple replicas.
 const pageTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
 export function getCachedPageToken(pageId: string): string | null {

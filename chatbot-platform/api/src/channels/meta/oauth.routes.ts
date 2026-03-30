@@ -49,14 +49,14 @@ router.get('/callback', async (req: Request, res: Response) => {
 
   try {
     // Validate state JWT
-    const { tenantId } = validateOAuthState(state as string);
+    const { tenantId: _tenantId } = validateOAuthState(state as string);
 
     // Exchange code for tokens + list pages
     const { sessionToken } = await handleOAuthCallback(code as string);
 
     // Redirect to portal with session token
     return res.redirect(
-      `${getPortalUrl()}/settings/channels?meta_setup=${sessionToken}&tenant=${tenantId}`,
+      `${getPortalUrl()}/settings/channels?meta_setup=${sessionToken}`,
     );
   } catch (error) {
     logger.error('[meta-oauth] Callback error:', error);
@@ -93,6 +93,10 @@ router.post('/connect', requireClerkAuth, autoProvision, async (req: Request, re
   }
 
   const { pageIds, sessionToken } = req.body as { pageIds: string[]; sessionToken: string };
+
+  if (!sessionToken || typeof sessionToken !== 'string') {
+    return res.status(400).json({ error: 'sessionToken required' });
+  }
 
   if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
     return res.status(400).json({ error: 'pageIds required' });

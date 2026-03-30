@@ -81,6 +81,11 @@ export class InstagramOutboundTransport implements OutboundTransport {
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       recipient: { id: recipientId },
+      // TODO: Support HUMAN_AGENT tag for live agent sessions.
+      // When session status is 'active' (agent assigned), should use:
+      //   messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT'
+      // This enables a 7-day messaging window for human agent replies.
+      // Requires threading session status through to the transport's send method.
       messaging_type: 'RESPONSE',
     };
 

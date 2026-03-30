@@ -73,7 +73,7 @@ export function useConnectMeta() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (data: { pageIds: string[]; sessionToken: string }) => {
-      return api.post('/channels/meta/connect', data);
+      return api.post('/channels/meta/oauth/connect', data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['channels'] });

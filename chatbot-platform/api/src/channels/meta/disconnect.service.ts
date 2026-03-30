@@ -36,9 +36,9 @@ export async function disconnectMetaConnection(connectionId: string): Promise<vo
   connection.status = 'disconnected';
   await repo.save(connection);
 
-  // If disconnecting a Messenger Page, also disconnect linked IG
+  // If disconnecting a Messenger Page, also disconnect linked IG accounts
   if (connection.channel === 'messenger') {
-    const linkedIg = await repo.findOne({
+    const linkedIgConnections = await repo.find({
       where: {
         tenantId: connection.tenantId,
         channel: 'instagram' as any,
@@ -46,13 +46,13 @@ export async function disconnectMetaConnection(connectionId: string): Promise<vo
       },
     });
 
-    if (linkedIg) {
-      const linkedPageId = (linkedIg.config as any)?.linkedPageId;
+    for (const ig of linkedIgConnections) {
+      const linkedPageId = (ig.config as any)?.linkedPageId;
       if (linkedPageId === connection.platformAccountId) {
-        linkedIg.credentials = {};
-        linkedIg.status = 'disconnected';
-        await repo.save(linkedIg);
-        logger.info(`[meta-disconnect] Also disconnected linked IG ${linkedIg.id}`);
+        ig.credentials = {};
+        ig.status = 'disconnected';
+        await repo.save(ig);
+        logger.info(`[meta-disconnect] Also disconnected linked IG ${ig.id}`);
       }
     }
   }

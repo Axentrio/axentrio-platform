@@ -115,7 +115,7 @@ async function getConversationHistoryForPayload(
 
   return messages.reverse().map((msg) => ({
     role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
-    content: msg.content,
+    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
     timestamp: msg.createdAt?.toISOString() || new Date().toISOString(),
   }));
 }
@@ -349,7 +349,7 @@ async function getConversationHistory(
   // Reverse to chronological order
   return messages.reverse().map((msg) => ({
     role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
-    content: msg.content,
+    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
   }));
 }
 

@@ -4,6 +4,7 @@
  * Auth: Bearer token using RAG_INTERNAL_SECRET (platform-level, not per-tenant).
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import { config } from '../config/environment';
@@ -21,8 +22,10 @@ function verifyInternalAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  const authHeader = req.headers.authorization;
-  if (!authHeader || authHeader !== `Bearer ${secret}`) {
+  const authHeader = req.headers.authorization || '';
+  const expected = `Bearer ${secret}`;
+  if (authHeader.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }

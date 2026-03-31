@@ -106,6 +106,33 @@ Used for:
 
 All endpoints use `Bearer RAG_INTERNAL_SECRET` auth (same as RAG search endpoint). Tenant derived from `sessionId` server-side — never from the request body.
 
+### POST /api/v1/internal/booking/list
+
+Lookup existing bookings for a customer. Required for reschedule/cancel flows — the AI agent won't always have the bookingId in conversation history.
+
+```json
+// Request
+{
+  "sessionId": "uuid",
+  "attendeeEmail": "jane@example.com"
+}
+
+// Response
+{
+  "bookings": [
+    {
+      "id": "cal_booking_xyz",
+      "startTime": "2026-04-05T09:00:00+02:00",
+      "endTime": "2026-04-05T09:30:00+02:00",
+      "attendee": { "name": "Jane Doe", "email": "jane@example.com" },
+      "status": "accepted"
+    }
+  ]
+}
+```
+
+Server validates that the attendeeEmail matches a booking in `booking_logs` for this tenant before returning results.
+
 ### POST /api/v1/internal/booking/availability
 
 ```json
@@ -265,27 +292,38 @@ Language-specific variants generated based on `integrations.calcom.language`.
 
 ### AI Agent Tool Nodes
 
-Four tool nodes added to the AI Agent:
+Five tool nodes added to the AI Agent. In all tools, `sessionId` is injected via n8n expression (`$('Extract Message').item.json.sessionId`), NOT exposed as a placeholder the AI fills.
+
+**list_bookings** (toolHttpRequest):
+- POST `{$env.API_URL}/api/v1/internal/booking/list`
+- Auth: `Bearer {$env.RAG_INTERNAL_SECRET}`
+- Static body fields: `sessionId` (from Extract Message expression)
+- AI-filled placeholders: `attendeeEmail`
+- Use case: AI calls this to find existing bookings before reschedule/cancel
 
 **check_availability** (toolHttpRequest):
 - POST `{$env.API_URL}/api/v1/internal/booking/availability`
 - Auth: `Bearer {$env.RAG_INTERNAL_SECRET}`
-- Body: `{ sessionId (from context), startDate, endDate (from AI) }`
+- Static body fields: `sessionId` (from Extract Message expression)
+- AI-filled placeholders: `startDate`, `endDate`
 
 **create_booking** (toolHttpRequest):
 - POST `{$env.API_URL}/api/v1/internal/booking/create`
 - Auth: `Bearer {$env.RAG_INTERNAL_SECRET}`
-- Body: `{ sessionId (from context), idempotencyKey (AI generates), startTime, attendee, notes (from AI) }`
+- Static body fields: `sessionId` (from Extract Message expression)
+- AI-filled placeholders: `idempotencyKey`, `startTime`, `attendee.name`, `attendee.email`, `notes`
 
 **reschedule_booking** (toolHttpRequest):
 - POST `{$env.API_URL}/api/v1/internal/booking/reschedule`
 - Auth: `Bearer {$env.RAG_INTERNAL_SECRET}`
-- Body: `{ sessionId (from context), bookingId, newStartTime (from AI) }`
+- Static body fields: `sessionId` (from Extract Message expression)
+- AI-filled placeholders: `bookingId`, `newStartTime`
 
 **cancel_booking** (toolHttpRequest):
 - POST `{$env.API_URL}/api/v1/internal/booking/cancel`
 - Auth: `Bearer {$env.RAG_INTERNAL_SECRET}`
-- Body: `{ sessionId (from context), bookingId, reason (from AI) }`
+- Static body fields: `sessionId` (from Extract Message expression)
+- AI-filled placeholders: `bookingId`, `reason`
 
 ---
 
@@ -322,11 +360,38 @@ async function sendBookingNotification(
 ## Security
 
 - **Credentials never leave the platform** — n8n calls platform proxy endpoints, not Cal.com directly
-- **Tenant derived from sessionId** — prevents cross-tenant booking via prompt injection
-- **API key encrypted at rest** — same encrypt/decrypt as AI BYOK keys
-- **API key redacted in API responses** — stripped from `GET /tenants/me`
+- **Tenant derived from sessionId** — prevents cross-tenant booking via prompt injection. Note: this is a different contract from the RAG search endpoint (which uses `tenantId`). Booking endpoints use `sessionId` because they are side-effectful.
+- **API key encrypted at rest** — same `encrypt()`/`decrypt()` as AI BYOK keys
+- **API key managed via dedicated controller** — NOT through generic `PATCH /tenants/me`. Follows the same pattern as `ai-settings.routes.ts` with dedicated Zod schema, encryption on write, and `hasApiKey`-style response (never returns raw key)
+- **Booking ownership validation** — `reschedule` and `cancel` endpoints verify the `bookingId` exists in `booking_logs` for this tenant before calling Cal.com. Prevents cross-tenant booking mutation.
 - **Bearer token auth** — same `RAG_INTERNAL_SECRET` as RAG search endpoint
-- **Idempotency** — prevents duplicate bookings from AI agent retries
+- **Idempotency key scoped to tenant** — `idempotency_key` is unique per tenant (composite unique on `tenant_id` + `idempotency_key`), not globally unique
+- **`sessionId` injected by n8n expression, not AI-controlled** — Tool nodes use `$('Extract Message').item.json.sessionId` in the request body, NOT as a placeholder the AI agent fills. The AI agent cannot control which session's tenant is used.
+
+## Error Handling
+
+- **Malformed dates** — `400 BAD_REQUEST` with validation error. Dates must be valid ISO 8601. Do not pass invalid dates to Cal.com.
+- **Cal.com downtime** — `503 BOOKING_UNAVAILABLE` when Cal.com API returns 5xx or times out. AI agent should tell the customer to try again later.
+- **Slot race condition** — `409 SLOT_UNAVAILABLE` when the selected slot was taken between availability check and booking. AI agent should suggest checking availability again.
+- **Booking not configured** — `400 BOOKING_NOT_CONFIGURED` when tenant has no `integrations.calcom` settings.
+- **Missing timezone** — defaults to `'UTC'` when `tenant.settings.businessHours.timezone` is not set.
+
+## What Gets Built
+
+**Platform (7 items):**
+1. `api/src/n8n/booking.routes.ts` — Five internal endpoints (list, availability, create, reschedule, cancel)
+2. `api/src/n8n/booking.service.ts` — Cal.com API client, credential decryption, idempotency, booking ownership validation
+3. `api/src/database/entities/BookingLog.ts` — Entity for booking_logs table
+4. Database migration for booking_logs table
+5. `api/src/knowledge/integrations.routes.ts` — Dedicated controller for integrations config (encrypt on write, redact on read, Zod validation)
+6. Outbound payload enrichment — add `IntegrationsConfig` to types, JSON schema, and payload builder
+7. Mount booking routes + integrations routes in `api/src/server.ts`
+
+**n8n (4 items):**
+1. Updated "Extract Message" node — parse `integrations` from payload
+2. Updated "Build System Prompt" node — inject booking instructions when calcom enabled
+3. 5 tool nodes on AI Agent (list_bookings, check_availability, create_booking, reschedule_booking, cancel_booking)
+4. All tools use `sessionId` from Extract Message expression (not AI-controlled)
 
 ## Out of Scope
 
@@ -334,4 +399,4 @@ async function sendBookingNotification(
 - Calendly or other booking providers (separate integration)
 - Multiple event types per tenant
 - Booking analytics/reporting
-- Resend email setup (tenant configures separately)
+- Resend email sending (stubbed — tenant configures Resend separately later)

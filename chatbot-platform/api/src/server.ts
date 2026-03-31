@@ -44,6 +44,7 @@ import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 // Webhook integration
 import { createWebhookModule } from './n8n';
 import { initializeForwarding } from './services/message-forwarding.service';
+import ragSearchRoutes from './n8n/rag-search.routes';
 import { EventEmitter } from './utils/event-emitter';
 
 // Channel integrations
@@ -238,6 +239,9 @@ async function startServer(): Promise<void> {
     } catch (err) {
       logger.warn('Webhook module initialization failed — webhooks disabled', { error: err });
     }
+
+    // Internal RAG search endpoint for n8n (independent of webhook module)
+    apiRouter.use('/internal/rag', ragSearchRoutes);
 
     initializeSocketIO(httpServer);
 

@@ -203,6 +203,33 @@ export const outboundMessageSchema: JSONSchema7 = {
         },
       },
     },
+    tenantConfig: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        brandName: { type: 'string' },
+        brandTone: { type: 'string' },
+        systemPrompt: { type: 'string' },
+        guardrails: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            topicsToAvoid: { type: 'array', items: { type: 'string' } },
+            confidenceThreshold: { type: 'number' },
+            maxResponseLength: { type: 'number' },
+            escalationKeywords: { type: 'array', items: { type: 'string' } },
+          },
+        },
+      },
+    },
+    knowledgeBase: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        enabled: { type: 'boolean' },
+        documentCount: { type: 'number' },
+      },
+    },
   },
 };
 

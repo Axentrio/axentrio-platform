@@ -14,10 +14,11 @@ import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
-import { WebhookConfig, OutboundMessage, MessagePayload } from '../n8n/types';
-import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata } from '../n8n/types';
+import { emitToTenantAgents } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { routeOutboundMessage } from '../channels/outbound-router';
+import { config } from '../config/environment';
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
@@ -65,6 +66,60 @@ export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
   };
 }
 
+export function buildTenantAiConfig(tenant: Tenant): TenantAiConfig | undefined {
+  const ai = tenant.settings?.ai;
+  if (!ai?.enabled) return undefined;
+
+  return {
+    brandName: ai.brandVoice?.name || tenant.name,
+    brandTone: ai.brandVoice?.tone || 'professional',
+    systemPrompt: ai.brandVoice?.customInstructions || '',
+    guardrails: {
+      topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
+      confidenceThreshold: ai.guardrails?.confidenceThreshold ?? 0.7,
+      maxResponseLength: ai.guardrails?.maxResponseLength ?? 500,
+      escalationKeywords: ai.guardrails?.escalationKeywords || [],
+    },
+  };
+}
+
+export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<KnowledgeBaseMetadata> {
+  try {
+    const result = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
+      [tenantId]
+    );
+    const docCount = result[0]?.count || 0;
+    return { enabled: docCount > 0, documentCount: docCount };
+  } catch {
+    return { enabled: false, documentCount: 0 };
+  }
+}
+
+/**
+ * Load last 10 text messages with timestamps for the n8n outbound payload.
+ * Separate from getConversationHistory() which is used by the RAG fallback path.
+ */
+async function getConversationHistoryForPayload(
+  sessionId: string
+): Promise<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }[]> {
+  const messages = await messageRepository
+    .createQueryBuilder('message')
+    .leftJoinAndSelect('message.participant', 'participant')
+    .where('message.sessionId = :sessionId', { sessionId })
+    .andWhere('message.isDeleted = false')
+    .andWhere('message.type = :type', { type: 'text' })
+    .orderBy('message.createdAt', 'DESC')
+    .take(10)
+    .getMany();
+
+  return messages.reverse().map((msg) => ({
+    role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
+    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
+    timestamp: msg.createdAt?.toISOString() || new Date().toISOString(),
+  }));
+}
+
 /**
  * Forward a visitor message to n8n if applicable.
  * Called after the message is saved to DB and broadcast via WebSocket.
@@ -80,114 +135,83 @@ export async function forwardMessageToN8n(
     return false;
   }
 
-  // ── RAG-powered bot handling ──────────────────────────────────────────
-  if (session.status === 'bot' && savedMessage.type === 'text') {
-    const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
-    const aiSettings = tenant?.settings?.ai;
-
-    if (tenant && aiSettings?.enabled) {
-      try {
-        // Check business hours — if outside hours, send offHoursMessage and skip LLM
-        const bh = tenant.settings?.businessHours;
-        if (bh?.enabled && bh.schedule?.length) {
-          const now = new Date();
-          const tz = bh.timezone || 'UTC';
-          const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' });
-          const dayName = dayFormatter.format(now).toLowerCase();
-          const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
-          const parts = timeFormatter.formatToParts(now);
-          const hour = parts.find(p => p.type === 'hour')!.value;
-          const minute = parts.find(p => p.type === 'minute')!.value;
-          const timeStr = `${hour}:${minute}`;
-          const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
-
-          const isOutsideHours = !daySchedule || daySchedule.closed ||
-            timeStr < daySchedule.open || timeStr >= daySchedule.close;
-
-          if (isOutsideHours) {
-            const botParticipant = await ensureBotParticipant(session, aiSettings);
-            await sendBotMessage(
-              session,
-              botParticipant.id,
-              aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon."
-            );
-            return true;
-          }
-        }
-
-        // Check escalation keywords first
-        const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
-        const lowerContent = savedMessage.content.toLowerCase();
-        const matchedKeyword = escalationKeywords.find((kw: string) =>
-          lowerContent.includes(kw.toLowerCase())
-        );
-
-        if (matchedKeyword) {
-          logger.info(`Escalation keyword "${matchedKeyword}" detected in session ${session.id}`);
-          const botParticipant = await ensureBotParticipant(session, aiSettings);
-          await sendBotMessage(
-            session,
-            botParticipant.id,
-            aiSettings.guardrails?.fallbackMessage || "I'm connecting you to a human agent."
-          );
-          await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
-          return true;
-        }
-
-        // Call RAG service — decrypt message content first
-        const history = await getConversationHistory(session.id);
-        const messageContent = savedMessage.contentEncrypted
-          ? decrypt(savedMessage.content)
-          : savedMessage.content;
-        const ragResult = await generateResponse(
-          AppDataSource,
-          session.tenantId,
-          aiSettings as Parameters<typeof generateResponse>[2],
-          messageContent,
-          history
-        );
-
-        const botParticipant = await ensureBotParticipant(session, aiSettings);
-        await sendBotMessage(session, botParticipant.id, ragResult.response);
-
-        if (ragResult.shouldHandoff && ragResult.handoffReason) {
-          await handleBotHandoff(session, botParticipant.id, ragResult.handoffReason as HandoffRequest['reason']);
-        }
-
-        return true;
-      } catch (error) {
-        logger.error(`RAG processing failed for session ${session.id}`, error);
-        // On RAG error, trigger handoff so session isn't stuck
-        try {
-          const botParticipant = await ensureBotParticipant(session, aiSettings);
-          await sendBotMessage(
-            session,
-            botParticipant.id,
-            aiSettings.guardrails?.fallbackMessage || "I'm having trouble right now. Let me connect you to a human agent."
-          );
-          await handleBotHandoff(session, botParticipant.id, 'bot_error');
-        } catch (innerError) {
-          logger.error(`Failed to handle RAG error gracefully for session ${session.id}`, innerError);
-        }
-        return true;
-      }
-    }
-  }
-
-  // ── n8n forwarding (fallthrough) ──────────────────────────────────────
-
   if (!outboundService) {
     logger.warn('Message forwarding not initialized — outboundService is null');
     return false;
   }
 
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
-  if (!tenant?.webhookUrl) {
-    // No webhook configured — session stays waiting, agent picks it up from queue
+  if (!tenant) {
+    logger.warn(`Tenant not found for session ${session.id}`);
     return false;
   }
 
+  const aiSettings = tenant.settings?.ai;
+
+  // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants
+  const webhookUrl = tenant.webhookUrl || (aiSettings?.enabled ? config.n8n.defaultWebhookUrl : undefined);
+  if (!webhookUrl) {
+    // No webhook configured and AI not enabled — session stays waiting, agent picks up
+    return false;
+  }
+
+  // ── Pre-forwarding checks (cheap, local) ──────────────────────────────
+  if (session.status === 'bot' && savedMessage.type === 'text' && aiSettings?.enabled) {
+    // Business hours check
+    const bh = tenant.settings?.businessHours;
+    if (bh?.enabled && bh.schedule?.length) {
+      const now = new Date();
+      const tz = bh.timezone || 'UTC';
+      const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' });
+      const dayName = dayFormatter.format(now).toLowerCase();
+      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+      const parts = timeFormatter.formatToParts(now);
+      const hour = parts.find(p => p.type === 'hour')!.value;
+      const minute = parts.find(p => p.type === 'minute')!.value;
+      const timeStr = `${hour}:${minute}`;
+      const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
+
+      const isOutsideHours = !daySchedule || daySchedule.closed ||
+        timeStr < daySchedule.open || timeStr >= daySchedule.close;
+
+      if (isOutsideHours) {
+        const botParticipant = await ensureBotParticipant(session, aiSettings);
+        await sendBotMessage(
+          session,
+          botParticipant.id,
+          aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon."
+        );
+        return true;
+      }
+    }
+
+    // Escalation keyword check — decrypt first if needed
+    const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
+    const plainContent = savedMessage.contentEncrypted
+      ? decrypt(savedMessage.content)
+      : savedMessage.content;
+    const lowerContent = plainContent.toLowerCase();
+    const matchedKeyword = escalationKeywords.find((kw: string) =>
+      lowerContent.includes(kw.toLowerCase())
+    );
+
+    if (matchedKeyword) {
+      logger.info(`Escalation keyword "${matchedKeyword}" detected in session ${session.id}`);
+      const botParticipant = await ensureBotParticipant(session, aiSettings);
+      await sendBotMessage(
+        session,
+        botParticipant.id,
+        aiSettings.guardrails?.fallbackMessage || "I'm connecting you to a human agent."
+      );
+      await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+      return true;
+    }
+  }
+
+  // ── Build enriched outbound payload ────────────────────────────────────
   const webhookConfig = buildWebhookConfig(tenant);
+  // Override URL with resolved webhook URL (may be global default)
+  webhookConfig.url = webhookUrl;
 
   const outboundPayload: OutboundMessage = {
     event: 'message.received',
@@ -201,11 +225,19 @@ export async function forwardMessageToN8n(
         : savedMessage.content,
       metadata: savedMessage.metadata || undefined,
     },
+    tenantConfig: buildTenantAiConfig(tenant),
+    knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
+    context: {
+      previousMessages: await getConversationHistoryForPayload(session.id),
+    },
   };
 
-  try {
-    await outboundService.sendToWebhook(webhookConfig, outboundPayload);
+  // ── Forward to n8n ─────────────────────────────────────────────────────
+  // NOTE: sendToWebhook() swallows HTTP errors and returns { success: false }
+  // instead of throwing. Must check result.success, not rely on catch.
+  const result = await outboundService.sendToWebhook(webhookConfig, outboundPayload);
 
+  if (result.success) {
     // Transition waiting → bot atomically on first forwarded message
     if (session.status === 'waiting') {
       await sessionRepository
@@ -217,57 +249,58 @@ export async function forwardMessageToN8n(
     }
 
     return true;
-  } catch (error) {
-    logger.error(`n8n forwarding failed for session ${session.id}`, error);
-
-    // n8n is down — send fallback message, transition to handoff
-    const fallbackContent = "We're connecting you to an agent. Please hold on.";
-
-    // Ensure a system participant exists for system messages
-    let systemParticipant = await participantRepository.findOne({
-      where: { sessionId: session.id, type: 'system', isDeleted: false },
-    });
-    if (!systemParticipant) {
-      systemParticipant = participantRepository.create({
-        sessionId: session.id,
-        type: 'system',
-        name: 'System',
-        isAnonymous: false,
-        joinedAt: new Date(),
-      });
-      systemParticipant = await participantRepository.save(systemParticipant);
-    }
-
-    const fallbackMsg = messageRepository.create({
-      sessionId: session.id,
-      tenantId: session.tenantId,
-      participantId: systemParticipant.id,
-      type: 'system' as Message['type'],
-      content: fallbackContent,
-    });
-    const savedFallback = await messageRepository.save(fallbackMsg);
-
-    // Broadcast fallback to visitor
-    emitToSession(session.tenantId, session.id, 'message:receive', {
-      id: savedFallback.id,
-      type: 'system',
-      content: fallbackContent,
-      senderType: 'system',
-      timestamp: new Date().toISOString(),
-    });
-
-    // Transition session to handoff so agents can pick it up
-    await sessionRepository.update(session.id, { status: 'handoff' as ChatSession['status'] });
-
-    // Notify agents about the new handoff
-    emitToTenantAgents(session.tenantId, 'handoff:requested', {
-      sessionId: session.id,
-      reason: 'n8n_unavailable',
-      requestedAt: new Date().toISOString(),
-    });
-
-    return true;
   }
+
+  // ── n8n forwarding failed ──────────────────────────────────────────────
+  logger.error(`n8n forwarding failed for session ${session.id}`, { error: result.error });
+
+  // ── RAG fallback (text messages only, when tenant has KB) ──────────
+  if (
+    session.status === 'bot' &&
+    savedMessage.type === 'text' &&
+    aiSettings?.enabled &&
+    outboundPayload.knowledgeBase?.enabled
+  ) {
+    try {
+      logger.info(`[Fallback] Attempting native RAG for session ${session.id}`);
+      const history = await getConversationHistory(session.id);
+      const messageContent = savedMessage.contentEncrypted
+        ? decrypt(savedMessage.content)
+        : savedMessage.content;
+      const ragResult = await generateResponse(
+        AppDataSource,
+        session.tenantId,
+        aiSettings as Parameters<typeof generateResponse>[2],
+        messageContent,
+        history
+      );
+
+      const botParticipant = await ensureBotParticipant(session, aiSettings);
+      await sendBotMessage(session, botParticipant.id, ragResult.response);
+
+      if (ragResult.shouldHandoff && ragResult.handoffReason) {
+        await handleBotHandoff(session, botParticipant.id, ragResult.handoffReason as HandoffRequest['reason']);
+      }
+
+      logger.info(`[Fallback] Native RAG succeeded for session ${session.id}`);
+      return true;
+    } catch (ragError) {
+      logger.error(`[Fallback] Native RAG also failed for session ${session.id}`, ragError);
+    }
+  }
+
+  // ── Final fallback: bot message + proper handoff ────────────────────
+  try {
+    const botParticipant = await ensureBotParticipant(session, aiSettings);
+    const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
+      "We're connecting you to an agent. Please hold on.";
+    await sendBotMessage(session, botParticipant.id, fallbackContent);
+    await handleBotHandoff(session, botParticipant.id, 'bot_error');
+  } catch (innerError) {
+    logger.error(`Failed to handle n8n failure gracefully for session ${session.id}`, innerError);
+  }
+
+  return true;
 }
 
 // ── RAG Helper Functions ──────────────────────────────────────────────────
@@ -316,7 +349,7 @@ async function getConversationHistory(
   // Reverse to chronological order
   return messages.reverse().map((msg) => ({
     role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
-    content: msg.content,
+    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
   }));
 }
 

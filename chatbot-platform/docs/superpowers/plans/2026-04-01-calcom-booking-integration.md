@@ -58,6 +58,7 @@ import { Tenant } from './Tenant';
 @Entity('booking_logs')
 @Index(['tenantId', 'createdAt'])
 @Index(['tenantId', 'attendeeEmail'])
+@Index(['calBookingId'])
 @Unique(['tenantId', 'idempotencyKey'])
 export class BookingLog {
   @PrimaryGeneratedColumn('uuid')
@@ -113,7 +114,7 @@ export class CreateBookingLogs1780000000000 implements MigrationInterface {
   public async up(queryRunner: QueryRunner): Promise<void> {
     await queryRunner.query(`
       CREATE TABLE booking_logs (
-        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         session_id UUID NOT NULL,
         idempotency_key VARCHAR(255),
@@ -181,7 +182,7 @@ import { z } from 'zod';
 export const updateIntegrationsSchema = z.object({
   calcom: z.object({
     apiKey: z.string().min(1).optional().nullable(),
-    eventTypeId: z.number().int().positive(),
+    eventTypeId: z.number().int().positive().optional(),
     collectFields: z.array(z.string()).min(1).max(10).default(['name', 'email']),
     language: z.enum(['en', 'nl', 'fr', 'de']).default('en'),
   }).optional().nullable(),
@@ -257,7 +258,11 @@ export async function updateIntegrations(req: Request, res: Response) {
 }
 ```
 
-- [ ] **Step 3: Create routes**
+- [ ] **Step 3: Update Tenant.ts settings type and redact in GET response**
+
+In `api/src/database/entities/Tenant.ts`, find the settings type definition and add `integrations?` to it. Also update `api/src/routes/tenants.ts` to redact `settings.integrations.calcom.apiKey` in the GET response, following the same pattern used for `settings.ai.apiKey`.
+
+- [ ] **Step 4: Create routes**
 
 Create `api/src/knowledge/integrations.routes.ts`:
 
@@ -282,7 +287,7 @@ router.patch('/integrations', requireRole('admin'), asyncHandler(ctrl.updateInte
 export default router;
 ```
 
-- [ ] **Step 4: Mount in server.ts**
+- [ ] **Step 5: Mount in server.ts**
 
 In `api/src/server.ts`, add the import:
 
@@ -296,11 +301,11 @@ Mount it alongside the existing ai-settings route (around line 161):
 apiRouter.use('/tenants/me', integrationsRoutes);
 ```
 
-- [ ] **Step 5: Verify TypeScript compiles**
+- [ ] **Step 6: Verify TypeScript compiles**
 
 Run: `cd api && npx tsc --noEmit`
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add api/src/schemas/integrations.schema.ts api/src/knowledge/integrations.controller.ts api/src/knowledge/integrations.routes.ts api/src/server.ts
@@ -406,14 +411,25 @@ export async function listBookings(sessionId: string, attendeeEmail: string) {
   const { tenant } = await resolveSessionTenant(sessionId);
 
   const bookingLogRepo = AppDataSource.getRepository(BookingLog);
-  const logs = await bookingLogRepo.find({
-    where: { tenantId: tenant.id, attendeeEmail, eventType: 'created' },
-    order: { createdAt: 'DESC' },
-    take: 10,
+  const logs = await bookingLogRepo
+    .createQueryBuilder('bl')
+    .where('bl.tenant_id = :tenantId', { tenantId: tenant.id })
+    .andWhere('bl.attendee_email = :email', { email: attendeeEmail })
+    .andWhere('bl.event_type != :cancelled', { cancelled: 'cancelled' })
+    .andWhere('bl.cal_booking_id IS NOT NULL')
+    .orderBy('bl.created_at', 'DESC')
+    .getMany();
+
+  // Deduplicate by calBookingId (keep latest)
+  const seen = new Set<string>();
+  const unique = logs.filter(log => {
+    if (!log.calBookingId || seen.has(log.calBookingId)) return false;
+    seen.add(log.calBookingId);
+    return true;
   });
 
   return {
-    bookings: logs.map(log => ({
+    bookings: unique.map(log => ({
       id: log.calBookingId,
       startTime: log.startTime?.toISOString(),
       endTime: log.endTime?.toISOString(),
@@ -589,7 +605,7 @@ export async function rescheduleBooking(
   }
 
   try {
-    const response = await axios.patch(`https://api.cal.com/v2/bookings/${bookingId}/reschedule`, {
+    const response = await axios.post(`https://api.cal.com/v2/bookings/${bookingId}/reschedule`, {
       start: newStartTime,
     }, {
       headers: {

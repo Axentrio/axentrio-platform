@@ -481,8 +481,7 @@
       "parameters": {
         "toolDescription": "Check available appointment time slots for a given date. Call this when the customer wants to book an appointment. Returns available time slots.",
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/availability",
-        "sendHeaders": true,
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/availability",
         "parametersHeaders": {
           "values": [
             {
@@ -493,7 +492,7 @@
             {
               "name": "Authorization",
               "valueProvider": "fieldValue",
-              "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
             }
           ]
         },

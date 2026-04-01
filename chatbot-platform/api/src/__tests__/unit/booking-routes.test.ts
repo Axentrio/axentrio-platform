@@ -237,7 +237,7 @@ describe('Booking Routes', () => {
         .send({ sessionId: VALID_UUID, attendeeEmail: 'a@b.com' });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(result);
+      expect(res.body).toEqual({ data: result });
       expect(mockListBookings).toHaveBeenCalledWith(VALID_UUID, 'a@b.com');
     });
 
@@ -255,7 +255,7 @@ describe('Booking Routes', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(result);
+      expect(res.body).toEqual({ data: result });
       expect(mockCheckAvailability).toHaveBeenCalledWith(
         VALID_UUID, '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z'
       );
@@ -277,7 +277,7 @@ describe('Booking Routes', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(result);
+      expect(res.body).toEqual({ data: result });
       expect(mockCreateBooking).toHaveBeenCalledWith(
         VALID_UUID, 'key-abc', '2026-04-01T10:00:00Z',
         { name: 'Alice', email: 'alice@test.com' }, 'Hello'
@@ -298,7 +298,7 @@ describe('Booking Routes', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(result);
+      expect(res.body).toEqual({ data: result });
       expect(mockRescheduleBooking).toHaveBeenCalledWith(VALID_UUID, '42', '2026-04-02T10:00:00Z');
     });
 
@@ -316,7 +316,7 @@ describe('Booking Routes', () => {
         });
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual(result);
+      expect(res.body).toEqual({ data: result });
       expect(mockCancelBooking).toHaveBeenCalledWith(VALID_UUID, '42', 'Changed plans');
     });
   });

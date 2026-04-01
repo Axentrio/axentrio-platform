@@ -9,7 +9,10 @@ type Any = any;
 export const adminOptions = {
   tenants: () => queryOptions({
     queryKey: queryKeys.admin.tenants(),
-    queryFn: () => api.get<Any[]>('/admin/tenants'),
+    queryFn: async () => {
+      const result = await api.get<Any>('/admin/tenants');
+      return (Array.isArray(result) ? result : result?.data ?? result) as Any[];
+    },
   }),
   tenantDetail: (id: string) => queryOptions({
     queryKey: queryKeys.admin.tenantDetail(id),

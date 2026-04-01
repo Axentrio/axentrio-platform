@@ -479,28 +479,10 @@
     },
     {
       "parameters": {
-        "toolDescription": "List upcoming bookings for a customer. Use this when the customer asks to see their bookings, wants to reschedule, or wants to cancel. Requires the customer's email address.",
+        "toolDescription": "Check available appointment time slots for a given date. Call this when the customer wants to book an appointment. Returns available time slots.",
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/list",
+        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/availability",
         "sendHeaders": true,
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"attendeeEmail\": \"{attendeeEmail}\"\n}",
-        "placeholderDefinitions": {
-          "values": [
-            {
-              "name": "sessionId",
-              "description": "The session ID. ALWAYS use the exact value provided in the BOOKING ASSISTANT instructions. Do not make up a session ID.",
-              "type": "string"
-            },
-            {
-              "name": "attendeeEmail",
-              "description": "The customer's email address to look up their bookings",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {},
         "parametersHeaders": {
           "values": [
             {
@@ -514,24 +496,7 @@
               "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
             }
           ]
-        }
-      },
-      "id": "wp-tool-list-bookings",
-      "name": "list_bookings",
-      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
-      "typeVersion": 1.1,
-      "position": [
-        1400,
-        640
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "toolDescription": "Check available booking slots for a date range. Call this BEFORE creating or rescheduling a booking \u2014 never assume availability. Returns a list of available time slots.",
-        "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/availability",
-        "sendHeaders": true,
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"startDate\": \"{startDate}\",\n  \"endDate\": \"{endDate}\"\n}",
@@ -539,223 +504,32 @@
           "values": [
             {
               "name": "sessionId",
-              "description": "The session ID. ALWAYS use the exact value provided in the BOOKING ASSISTANT instructions. Do not make up a session ID.",
+              "description": "The session ID provided in the BOOKING ASSISTANT instructions. Use it exactly as given.",
               "type": "string"
             },
             {
               "name": "startDate",
-              "description": "Start of the date range to check availability (ISO 8601 format, e.g. 2026-04-01)",
+              "description": "Start of date range in ISO 8601 format (e.g. 2026-04-02T00:00:00)",
               "type": "string"
             },
             {
               "name": "endDate",
-              "description": "End of the date range to check availability (ISO 8601 format, e.g. 2026-04-07)",
+              "description": "End of date range in ISO 8601 format (e.g. 2026-04-02T23:59:59)",
               "type": "string"
             }
           ]
         },
-        "options": {},
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
-            }
-          ]
-        }
+        "optimizeResponse": true,
+        "dataField": "data"
       },
-      "id": "wp-tool-check-availability",
+      "id": "wp-tool-check-avail",
       "name": "check_availability",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
       "position": [
-        1560,
+        1400,
         640
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "toolDescription": "Create a new booking for a customer. Only call this AFTER checking availability and confirming all details with the customer. Requires start time, attendee name, and attendee email.",
-        "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/create",
-        "sendHeaders": true,
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"idempotencyKey\": \"{idempotencyKey}\",\n  \"startTime\": \"{startTime}\",\n  \"attendee\": {\n    \"name\": \"{attendeeName}\",\n    \"email\": \"{attendeeEmail}\"\n  },\n  \"notes\": \"{notes}\"\n}",
-        "placeholderDefinitions": {
-          "values": [
-            {
-              "name": "sessionId",
-              "description": "The session ID. ALWAYS use the exact value provided in the BOOKING ASSISTANT instructions. Do not make up a session ID.",
-              "type": "string"
-            },
-            {
-              "name": "idempotencyKey",
-              "description": "A unique key to prevent duplicate bookings (e.g. sessionId + timestamp)",
-              "type": "string"
-            },
-            {
-              "name": "startTime",
-              "description": "The selected start time for the booking (ISO 8601 format, e.g. 2026-04-03T10:00:00)",
-              "type": "string"
-            },
-            {
-              "name": "attendeeName",
-              "description": "The customer's full name",
-              "type": "string"
-            },
-            {
-              "name": "attendeeEmail",
-              "description": "The customer's email address",
-              "type": "string"
-            },
-            {
-              "name": "notes",
-              "description": "Optional notes or reason for the appointment",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {},
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
-            }
-          ]
-        }
-      },
-      "id": "wp-tool-create-booking",
-      "name": "create_booking",
-      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
-      "typeVersion": 1.1,
-      "position": [
-        1720,
-        640
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "toolDescription": "Reschedule an existing booking to a new time. Only call this AFTER finding the booking with list_bookings, checking availability for the new date, and confirming the new time with the customer.",
-        "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/reschedule",
-        "sendHeaders": true,
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"newStartTime\": \"{newStartTime}\"\n}",
-        "placeholderDefinitions": {
-          "values": [
-            {
-              "name": "sessionId",
-              "description": "The session ID. ALWAYS use the exact value provided in the BOOKING ASSISTANT instructions. Do not make up a session ID.",
-              "type": "string"
-            },
-            {
-              "name": "bookingId",
-              "description": "The ID of the booking to reschedule (obtained from list_bookings)",
-              "type": "string"
-            },
-            {
-              "name": "newStartTime",
-              "description": "The new start time for the booking (ISO 8601 format, e.g. 2026-04-05T14:00:00)",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {},
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
-            }
-          ]
-        }
-      },
-      "id": "wp-tool-reschedule-booking",
-      "name": "reschedule_booking",
-      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
-      "typeVersion": 1.1,
-      "position": [
-        1880,
-        640
-      ],
-      "onError": "continueRegularOutput"
-    },
-    {
-      "parameters": {
-        "toolDescription": "Cancel an existing booking. Only call this AFTER finding the booking with list_bookings and confirming the cancellation with the customer.",
-        "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/booking/cancel",
-        "sendHeaders": true,
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"reason\": \"{reason}\"\n}",
-        "placeholderDefinitions": {
-          "values": [
-            {
-              "name": "sessionId",
-              "description": "The session ID. ALWAYS use the exact value provided in the BOOKING ASSISTANT instructions. Do not make up a session ID.",
-              "type": "string"
-            },
-            {
-              "name": "bookingId",
-              "description": "The ID of the booking to cancel (obtained from list_bookings)",
-              "type": "string"
-            },
-            {
-              "name": "reason",
-              "description": "Optional reason for cancellation",
-              "type": "string"
-            }
-          ]
-        },
-        "options": {},
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer {{ $env.RAG_INTERNAL_SECRET }}"
-            }
-          ]
-        }
-      },
-      "id": "wp-tool-cancel-booking",
-      "name": "cancel_booking",
-      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
-      "typeVersion": 1.1,
-      "position": [
-        2040,
-        640
-      ],
-      "onError": "continueRegularOutput"
+      ]
     }
   ],
   "connections": {
@@ -877,61 +651,6 @@
         ]
       ]
     },
-    "list_bookings": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "check_availability": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "create_booking": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "reschedule_booking": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "cancel_booking": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Detect Escalation": {
       "main": [
         [
@@ -1011,6 +730,17 @@
           {
             "node": "Send Typing Stop (Normal)",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
             "index": 0
           }
         ]

@@ -479,7 +479,55 @@
     },
     {
       "parameters": {
-        "toolDescription": "Check available appointment time slots for a given date. Call this when the customer wants to book an appointment. Returns available time slots.",
+        "toolDescription": "List existing bookings for a customer by email. Call this before reschedule or cancel to find the booking ID.",
+        "method": "POST",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/list",
+        "parametersHeaders": {
+          "values": [
+            {
+              "name": "Content-Type",
+              "valueProvider": "fieldValue",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "valueProvider": "fieldValue",
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"attendeeEmail\": \"{attendeeEmail}\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "sessionId",
+              "description": "The session ID. ALWAYS use the exact value from BOOKING ASSISTANT instructions.",
+              "type": "string"
+            },
+            {
+              "name": "attendeeEmail",
+              "description": "The customer's email address to look up bookings",
+              "type": "string"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "data"
+      },
+      "id": "wp-tool-list-bookings",
+      "name": "list_bookings",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        1400,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Check available appointment time slots for a given date. Call this BEFORE suggesting any time to the customer.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/availability",
         "parametersHeaders": {
@@ -503,17 +551,17 @@
           "values": [
             {
               "name": "sessionId",
-              "description": "The session ID provided in the BOOKING ASSISTANT instructions. Use it exactly as given.",
+              "description": "The session ID. ALWAYS use the exact value from BOOKING ASSISTANT instructions.",
               "type": "string"
             },
             {
               "name": "startDate",
-              "description": "Start of date range in ISO 8601 format (e.g. 2026-04-02T00:00:00)",
+              "description": "Start of date range in ISO 8601 (e.g. 2026-04-02T00:00:00)",
               "type": "string"
             },
             {
               "name": "endDate",
-              "description": "End of date range in ISO 8601 format (e.g. 2026-04-02T23:59:59)",
+              "description": "End of date range in ISO 8601 (e.g. 2026-04-02T23:59:59)",
               "type": "string"
             }
           ]
@@ -521,13 +569,187 @@
         "optimizeResponse": true,
         "dataField": "data"
       },
-      "id": "wp-tool-check-avail",
+      "id": "wp-tool-check-availability",
       "name": "check_availability",
       "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
       "typeVersion": 1.1,
       "position": [
-        1400,
-        640
+        1560,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Create a new booking. Only call AFTER checking availability and confirming all details with the customer.",
+        "method": "POST",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/create",
+        "parametersHeaders": {
+          "values": [
+            {
+              "name": "Content-Type",
+              "valueProvider": "fieldValue",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "valueProvider": "fieldValue",
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"idempotencyKey\": \"{idempotencyKey}\",\n  \"startTime\": \"{startTime}\",\n  \"attendee\": {\n    \"name\": \"{attendeeName}\",\n    \"email\": \"{attendeeEmail}\"\n  },\n  \"notes\": \"{notes}\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "sessionId",
+              "description": "The session ID. ALWAYS use the exact value from BOOKING ASSISTANT instructions.",
+              "type": "string"
+            },
+            {
+              "name": "idempotencyKey",
+              "description": "Unique key to prevent duplicates (use sessionId + startTime)",
+              "type": "string"
+            },
+            {
+              "name": "startTime",
+              "description": "Selected start time in ISO 8601 (e.g. 2026-04-02T10:00:00)",
+              "type": "string"
+            },
+            {
+              "name": "attendeeName",
+              "description": "Customer's full name",
+              "type": "string"
+            },
+            {
+              "name": "attendeeEmail",
+              "description": "Customer's email address",
+              "type": "string"
+            },
+            {
+              "name": "notes",
+              "description": "Optional appointment notes or reason",
+              "type": "string"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "data"
+      },
+      "id": "wp-tool-create-booking",
+      "name": "create_booking",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        1720,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Reschedule an existing booking to a new time. Call list_bookings first to get the booking ID.",
+        "method": "POST",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/reschedule",
+        "parametersHeaders": {
+          "values": [
+            {
+              "name": "Content-Type",
+              "valueProvider": "fieldValue",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "valueProvider": "fieldValue",
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"newStartTime\": \"{newStartTime}\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "sessionId",
+              "description": "The session ID. ALWAYS use the exact value from BOOKING ASSISTANT instructions.",
+              "type": "string"
+            },
+            {
+              "name": "bookingId",
+              "description": "The booking ID from list_bookings",
+              "type": "string"
+            },
+            {
+              "name": "newStartTime",
+              "description": "New start time in ISO 8601",
+              "type": "string"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "data"
+      },
+      "id": "wp-tool-reschedule-booking",
+      "name": "reschedule_booking",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        1880,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "toolDescription": "Cancel an existing booking. Call list_bookings first to get the booking ID. Confirm with customer before cancelling.",
+        "method": "POST",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/cancel",
+        "parametersHeaders": {
+          "values": [
+            {
+              "name": "Content-Type",
+              "valueProvider": "fieldValue",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "valueProvider": "fieldValue",
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"reason\": \"{reason}\"\n}",
+        "placeholderDefinitions": {
+          "values": [
+            {
+              "name": "sessionId",
+              "description": "The session ID. ALWAYS use the exact value from BOOKING ASSISTANT instructions.",
+              "type": "string"
+            },
+            {
+              "name": "bookingId",
+              "description": "The booking ID from list_bookings",
+              "type": "string"
+            },
+            {
+              "name": "reason",
+              "description": "Reason for cancellation",
+              "type": "string"
+            }
+          ]
+        },
+        "optimizeResponse": true,
+        "dataField": "data"
+      },
+      "id": "wp-tool-cancel-booking",
+      "name": "cancel_booking",
+      "type": "@n8n/n8n-nodes-langchain.toolHttpRequest",
+      "typeVersion": 1.1,
+      "position": [
+        2040,
+        440
       ]
     }
   ],
@@ -734,7 +956,51 @@
         ]
       ]
     },
+    "list_bookings": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "check_availability": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reschedule_booking": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cancel_booking": {
       "ai_tool": [
         [
           {

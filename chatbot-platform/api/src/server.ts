@@ -46,6 +46,7 @@ import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 import { createWebhookModule } from './n8n';
 import { initializeForwarding } from './services/message-forwarding.service';
 import ragSearchRoutes from './n8n/rag-search.routes';
+import bookingRoutes from './n8n/booking.routes';
 import { EventEmitter } from './utils/event-emitter';
 
 // Channel integrations
@@ -244,6 +245,9 @@ async function startServer(): Promise<void> {
 
     // Internal RAG search endpoint for n8n (independent of webhook module)
     apiRouter.use('/internal/rag', ragSearchRoutes);
+
+    // Internal booking endpoints for n8n
+    apiRouter.use('/internal/booking', bookingRoutes);
 
     initializeSocketIO(httpServer);
 

@@ -85,7 +85,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -95,7 +95,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },
@@ -153,7 +153,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/internal/rag/search",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/rag/search",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -163,7 +163,7 @@
             },
             {
               "name": "Authorization",
-              "value": "=Bearer {{ $env.RAG_INTERNAL_SECRET }}"
+              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
             }
           ]
         },
@@ -284,7 +284,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -294,7 +294,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },
@@ -344,7 +344,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -354,7 +354,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },
@@ -378,7 +378,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -388,7 +388,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },
@@ -412,7 +412,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -422,7 +422,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },
@@ -446,7 +446,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.API_URL || 'http://localhost:3000' }}/api/v1/webhooks/inbound",
+        "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/webhooks/inbound",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -456,7 +456,7 @@
             },
             {
               "name": "X-Webhook-Secret",
-              "value": "={{ $env.N8N_INBOUND_SECRET }}"
+              "value": "4f3fb17be1e8ae8990317c7d9a24a508a55a43f38f067bc31952df0dbc5ad5a2"
             }
           ]
         },

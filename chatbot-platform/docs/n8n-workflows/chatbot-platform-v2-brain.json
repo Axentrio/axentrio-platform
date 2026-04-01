@@ -482,23 +482,9 @@
         "toolDescription": "List existing bookings for a customer by email. Call this before reschedule or cancel to find the booking ID.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/list",
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"attendeeEmail\": \"{attendeeEmail}\"\n}",
+        "jsonBody": "{\n  \"_auth\": \"df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314\",\n  \"sessionId\": \"{sessionId}\",\n  \"attendeeEmail\": \"{attendeeEmail}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {
@@ -530,23 +516,9 @@
         "toolDescription": "Check available appointment time slots for a given date. Call this BEFORE suggesting any time to the customer.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/availability",
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"startDate\": \"{startDate}\",\n  \"endDate\": \"{endDate}\"\n}",
+        "jsonBody": "{\n  \"_auth\": \"df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314\",\n  \"sessionId\": \"{sessionId}\",\n  \"startDate\": \"{startDate}\",\n  \"endDate\": \"{endDate}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {
@@ -583,23 +555,9 @@
         "toolDescription": "Create a new booking. Only call AFTER checking availability and confirming all details with the customer.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/create",
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"idempotencyKey\": \"{idempotencyKey}\",\n  \"startTime\": \"{startTime}\",\n  \"attendee\": {\n    \"name\": \"{attendeeName}\",\n    \"email\": \"{attendeeEmail}\"\n  },\n  \"notes\": \"{notes}\"\n}",
+        "jsonBody": "{\n  \"_auth\": \"df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314\",\n  \"sessionId\": \"{sessionId}\",\n  \"idempotencyKey\": \"{idempotencyKey}\",\n  \"startTime\": \"{startTime}\",\n  \"attendee\": {\n    \"name\": \"{attendeeName}\",\n    \"email\": \"{attendeeEmail}\"\n  },\n  \"notes\": \"{notes}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {
@@ -651,23 +609,9 @@
         "toolDescription": "Reschedule an existing booking to a new time. Call list_bookings first to get the booking ID.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/reschedule",
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"newStartTime\": \"{newStartTime}\"\n}",
+        "jsonBody": "{\n  \"_auth\": \"df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314\",\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"newStartTime\": \"{newStartTime}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {
@@ -704,23 +648,9 @@
         "toolDescription": "Cancel an existing booking. Call list_bookings first to get the booking ID. Confirm with customer before cancelling.",
         "method": "POST",
         "url": "https://chatbot-api-production-37df.up.railway.app/api/v1/internal/booking/cancel",
-        "parametersHeaders": {
-          "values": [
-            {
-              "name": "Content-Type",
-              "valueProvider": "fieldValue",
-              "value": "application/json"
-            },
-            {
-              "name": "Authorization",
-              "valueProvider": "fieldValue",
-              "value": "Bearer df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"reason\": \"{reason}\"\n}",
+        "jsonBody": "{\n  \"_auth\": \"df1b0cb7c87eef17d1b61e2d6f8b94fd2223b3c1348159af5330583dfd575314\",\n  \"sessionId\": \"{sessionId}\",\n  \"bookingId\": \"{bookingId}\",\n  \"reason\": \"{reason}\"\n}",
         "placeholderDefinitions": {
           "values": [
             {

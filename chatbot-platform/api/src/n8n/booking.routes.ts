@@ -21,12 +21,22 @@ function verifyInternalAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
+  // Accept token via Authorization header OR _auth body field
+  // (n8n toolHttpRequest nodes cannot send custom headers)
   const authHeader = req.headers.authorization || '';
+  const bodyAuth = req.body?._auth ? `Bearer ${req.body._auth}` : '';
+  const token = authHeader || bodyAuth;
+
   const expected = `Bearer ${secret}`;
-  if (authHeader.length !== expected.length ||
-      !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))) {
+  if (token.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected))) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
+  }
+
+  // Remove _auth from body so downstream handlers don't see it
+  if (req.body?._auth) {
+    delete req.body._auth;
   }
 
   next();

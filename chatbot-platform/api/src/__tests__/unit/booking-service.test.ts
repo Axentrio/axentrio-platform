@@ -53,7 +53,7 @@ const mockAxiosDelete = vi.fn();
 vi.mock('axios', () => {
   const AxiosError = class AxiosError extends Error {
     response: any;
-    constructor(message: string, config?: any, code?: any, request?: any, response?: any) {
+    constructor(message: string, _config?: any, _code?: any, _request?: any, response?: any) {
       super(message);
       this.name = 'AxiosError';
       this.response = response;
@@ -173,7 +173,7 @@ describe('Booking Service', () => {
       mockBookingLogFindOne.mockResolvedValue(null);
 
       const axiosErr = new AxiosError('Conflict');
-      axiosErr.response = { status: 409 };
+      axiosErr.response = { status: 409, data: {}, statusText: 'Conflict', headers: {}, config: {} as any };
       mockAxiosPost.mockRejectedValue(axiosErr);
 
       try {
@@ -197,7 +197,7 @@ describe('Booking Service', () => {
       setupValidSession();
 
       const axiosErr = new AxiosError('Server Error');
-      axiosErr.response = { status: 500 };
+      axiosErr.response = { status: 500, data: {}, statusText: 'Internal Server Error', headers: {}, config: {} as any };
       mockAxiosGet.mockRejectedValue(axiosErr);
 
       try {

@@ -114,6 +114,15 @@ export interface KnowledgeBaseMetadata {
   documentCount: number;
 }
 
+export interface IntegrationsConfig {
+  calcom?: {
+    enabled: boolean;
+    language: string;
+    collectFields: string[];
+    timezone: string;
+  };
+}
+
 export interface OutboundMessage {
   event: MessageEvent;
   tenantId: string;
@@ -124,6 +133,7 @@ export interface OutboundMessage {
   context?: ChatContext;
   tenantConfig?: TenantAiConfig;
   knowledgeBase?: KnowledgeBaseMetadata;
+  integrations?: IntegrationsConfig;
 }
 
 // ============================================================================

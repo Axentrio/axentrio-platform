@@ -27,6 +27,7 @@ import { ChannelConnection } from './entities/ChannelConnection';
 import { ConversationBinding } from './entities/ConversationBinding';
 import { WebhookEventLog } from './entities/WebhookEventLog';
 import { MessageDelivery } from './entities/MessageDelivery';
+import { BookingLog } from './entities/BookingLog';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -59,6 +60,7 @@ export const AppDataSource = new DataSource({
     ConversationBinding,
     WebhookEventLog,
     MessageDelivery,
+    BookingLog,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

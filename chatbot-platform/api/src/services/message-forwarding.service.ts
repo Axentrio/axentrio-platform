@@ -14,7 +14,7 @@ import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
-import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata } from '../n8n/types';
+import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
 import { emitToTenantAgents } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { routeOutboundMessage } from '../channels/outbound-router';
@@ -94,6 +94,22 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
   } catch {
     return { enabled: false, documentCount: 0 };
   }
+}
+
+function buildIntegrationsConfig(tenant: Tenant): IntegrationsConfig | undefined {
+  const calcom = tenant.settings?.integrations?.calcom;
+  if (!calcom?.apiKey || !calcom?.eventTypeId) return undefined;
+
+  const timezone = tenant.settings?.businessHours?.timezone || 'UTC';
+
+  return {
+    calcom: {
+      enabled: true,
+      language: calcom.language || 'en',
+      collectFields: calcom.collectFields || ['name', 'email'],
+      timezone,
+    },
+  };
 }
 
 /**
@@ -227,6 +243,7 @@ export async function forwardMessageToN8n(
     },
     tenantConfig: buildTenantAiConfig(tenant),
     knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
+    integrations: buildIntegrationsConfig(tenant),
     context: {
       previousMessages: await getConversationHistoryForPayload(session.id),
     },

@@ -230,6 +230,22 @@ export const outboundMessageSchema: JSONSchema7 = {
         documentCount: { type: 'number' },
       },
     },
+    integrations: {
+      type: 'object',
+      additionalProperties: true,
+      properties: {
+        calcom: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            enabled: { type: 'boolean' },
+            language: { type: 'string' },
+            collectFields: { type: 'array', items: { type: 'string' } },
+            timezone: { type: 'string' },
+          },
+        },
+      },
+    },
   },
 };
 

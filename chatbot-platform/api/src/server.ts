@@ -38,6 +38,7 @@ import webhookAdminRoutes from './routes/webhook-admin.routes';
 import adminRoutes from './routes/admin.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
+import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
@@ -45,6 +46,7 @@ import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 import { createWebhookModule } from './n8n';
 import { initializeForwarding } from './services/message-forwarding.service';
 import ragSearchRoutes from './n8n/rag-search.routes';
+import bookingRoutes from './n8n/booking.routes';
 import { EventEmitter } from './utils/event-emitter';
 
 // Channel integrations
@@ -160,6 +162,7 @@ apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/knowledge', knowledgeRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/tenants/me', aiSettingsRoutes);
+apiRouter.use('/tenants/me', integrationsRoutes);
 
 app.use('/api/v1', apiRouter);
 
@@ -242,6 +245,9 @@ async function startServer(): Promise<void> {
 
     // Internal RAG search endpoint for n8n (independent of webhook module)
     apiRouter.use('/internal/rag', ragSearchRoutes);
+
+    // Internal booking endpoints for n8n
+    apiRouter.use('/internal/booking', bookingRoutes);
 
     initializeSocketIO(httpServer);
 

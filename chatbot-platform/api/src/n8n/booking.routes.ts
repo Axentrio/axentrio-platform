@@ -67,7 +67,7 @@ router.post('/list', verifyInternalAuth, [
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await listBookings(req.body.sessionId, req.body.attendeeEmail);
-    res.json(result);
+    res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
 
@@ -79,7 +79,7 @@ router.post('/availability', verifyInternalAuth, [
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await checkAvailability(req.body.sessionId, req.body.startDate, req.body.endDate);
-    res.json(result);
+    res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
 
@@ -95,7 +95,7 @@ router.post('/create', verifyInternalAuth, [
   try {
     const { sessionId, idempotencyKey, startTime, attendee, notes } = req.body;
     const result = await createBooking(sessionId, idempotencyKey, startTime, attendee, notes);
-    res.json(result);
+    res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
 
@@ -107,7 +107,7 @@ router.post('/reschedule', verifyInternalAuth, [
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await rescheduleBooking(req.body.sessionId, req.body.bookingId, req.body.newStartTime);
-    res.json(result);
+    res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
 
@@ -119,7 +119,7 @@ router.post('/cancel', verifyInternalAuth, [
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const result = await cancelBooking(req.body.sessionId, req.body.bookingId, req.body.reason);
-    res.json(result);
+    res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
 

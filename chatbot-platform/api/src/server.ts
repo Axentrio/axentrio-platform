@@ -38,6 +38,7 @@ import webhookAdminRoutes from './routes/webhook-admin.routes';
 import adminRoutes from './routes/admin.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
+import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
@@ -160,6 +161,7 @@ apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/knowledge', knowledgeRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/tenants/me', aiSettingsRoutes);
+apiRouter.use('/tenants/me', integrationsRoutes);
 
 app.use('/api/v1', apiRouter);
 

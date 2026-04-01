@@ -51,6 +51,10 @@ router.get(
       const { apiKey, ...aiRest } = settings.ai;
       settings.ai = { ...aiRest, hasApiKey: !!apiKey } as any;
     }
+    if (settings.integrations?.calcom) {
+      const { apiKey, ...calcomRest } = settings.integrations.calcom;
+      settings.integrations = { ...settings.integrations, calcom: { ...calcomRest, hasApiKey: !!apiKey } as any };
+    }
 
     res.json({
       success: true,
@@ -148,6 +152,10 @@ router.patch(
     if (responseSettings.ai) {
       const { apiKey: _k, ...aiRest } = responseSettings.ai;
       responseSettings.ai = { ...aiRest, hasApiKey: !!_k } as any;
+    }
+    if (responseSettings.integrations?.calcom) {
+      const { apiKey: _ck, ...calcomRest } = responseSettings.integrations.calcom;
+      responseSettings.integrations = { ...responseSettings.integrations, calcom: { ...calcomRest, hasApiKey: !!_ck } as any };
     }
 
     res.json({

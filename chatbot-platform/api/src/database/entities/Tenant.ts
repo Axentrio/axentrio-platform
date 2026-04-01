@@ -99,6 +99,14 @@ export class Tenant {
         offHoursMessage: string;
       };
     };
+    integrations?: {
+      calcom?: {
+        apiKey?: string | null;
+        eventTypeId?: number;
+        collectFields?: string[];
+        language?: 'en' | 'nl' | 'fr' | 'de';
+      };
+    };
   };
 
   @Column({ type: 'int', default: 100, name: 'max_sessions' })

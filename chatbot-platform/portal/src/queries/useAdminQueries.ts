@@ -27,7 +27,10 @@ export const adminOptions = {
   }),
   users: () => queryOptions({
     queryKey: queryKeys.admin.users(),
-    queryFn: () => api.get<Any[]>('/admin/users'),
+    queryFn: async () => {
+      const result = await api.get<Any>('/admin/users');
+      return (Array.isArray(result) ? result : result?.data ?? result) as Any[];
+    },
   }),
   analytics: () => queryOptions({
     queryKey: queryKeys.admin.analytics(),

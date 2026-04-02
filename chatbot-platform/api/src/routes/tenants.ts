@@ -9,6 +9,7 @@ import { Router, Request, Response } from 'express';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import { ChatSession } from '../database/entities/ChatSession';
 import { User } from '../database/entities/User';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
@@ -56,6 +57,15 @@ router.get(
       settings.integrations = { ...settings.integrations, calcom: { ...calcomRest, hasApiKey: !!apiKey } as any };
     }
 
+    // Check if tenant has any widget sessions (for onboarding status)
+    const sessionRepo = AppDataSource.getRepository(ChatSession);
+    const widgetUsed = await sessionRepo
+      .createQueryBuilder('s')
+      .where('s.tenant_id = :tenantId', { tenantId })
+      .andWhere('s.source = :source', { source: 'widget' })
+      .andWhere('s.deleted_at IS NULL')
+      .getExists();
+
     res.json({
       success: true,
       data: {
@@ -72,6 +82,9 @@ router.get(
         webhookSecret: tenant.webhookSecret,
         customDomain: tenant.customDomain,
         createdAt: tenant.createdAt,
+        onboarding: {
+          widgetUsed,
+        },
       },
     });
   })

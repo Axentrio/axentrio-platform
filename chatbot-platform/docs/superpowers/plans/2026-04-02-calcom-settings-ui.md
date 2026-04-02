@@ -47,6 +47,10 @@ vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('../../config/environment', () => ({
+  config: { n8n: { defaultWebhookUrl: 'https://test-webhook.example.com/webhook' } },
+}));
+
 import { connectCalcom } from '../../knowledge/integrations.controller';
 
 function buildApp() {
@@ -732,7 +736,7 @@ export const CalcomSettings: React.FC = () => {
                   >
                     <option value="en">English</option>
                     <option value="nl">Nederlands</option>
-                    <option value="fr">Fran&ccedil;ais</option>
+                    <option value="fr">Français</option>
                     <option value="de">Deutsch</option>
                   </select>
                 </div>

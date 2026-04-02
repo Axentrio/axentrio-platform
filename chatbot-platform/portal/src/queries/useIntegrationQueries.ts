@@ -51,6 +51,16 @@ export function useConnectCalcom() {
   });
 }
 
+export function useFetchCalcomEventTypes() {
+  return useMutation({
+    mutationFn: () => api.get<Any>('/tenants/me/integrations/calcom/event-types'),
+    onError: (err: Any) => {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to fetch event types';
+      toast.error(msg);
+    },
+  });
+}
+
 export function useUpdateIntegrations() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   useIntegrations,
   useConnectCalcom,
+  useFetchCalcomEventTypes,
   useUpdateIntegrations,
 } from '../../queries/useIntegrationQueries';
 
@@ -20,6 +21,7 @@ interface EventType {
 export const CalcomSettings: React.FC = () => {
   const { data: integrations, isLoading } = useIntegrations();
   const connectMutation = useConnectCalcom();
+  const fetchEventTypesMutation = useFetchCalcomEventTypes();
   const updateMutation = useUpdateIntegrations();
 
   const [state, setState] = useState<State>('idle');
@@ -200,13 +202,26 @@ export const CalcomSettings: React.FC = () => {
         <div className="space-y-3">
           <p className="text-sm text-text-muted">Cal.com is connected but no event type is selected yet.</p>
           <button
-            onClick={() => {
-              // Re-connect to fetch event types (key is already stored server-side)
-              setState('idle');
+            onClick={async () => {
+              setConnectError(null);
+              try {
+                const result = await fetchEventTypesMutation.mutateAsync();
+                const types = (result as any)?.eventTypes || (result as any)?.data?.eventTypes || [];
+                setEventTypes(types);
+                if (types.length === 1) setSelectedEventType(types[0].id);
+                setState('pick_event_type');
+              } catch {
+                setState('needs_event_type');
+              }
             }}
-            className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600"
+            disabled={fetchEventTypesMutation.isPending}
+            className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
           >
-            Complete Setup
+            {fetchEventTypesMutation.isPending ? (
+              <span className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading...</span>
+            ) : (
+              'Complete Setup'
+            )}
           </button>
         </div>
       )}

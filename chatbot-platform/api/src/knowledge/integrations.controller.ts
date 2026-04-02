@@ -153,3 +153,44 @@ export async function connectCalcom(req: Request, res: Response) {
 
   return res.json({ eventTypes });
 }
+
+export async function getCalcomEventTypes(req: Request, res: Response) {
+  const tenantId = req.tenantId!;
+  const tenantRepo = AppDataSource.getRepository(Tenant);
+  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+
+  const calcom = tenant.settings?.integrations?.calcom;
+  if (!calcom?.apiKey) {
+    return res.status(400).json({ error: 'Cal.com not connected' });
+  }
+
+  const { decrypt } = await import('../utils/encryption');
+  const decryptedKey = decrypt(calcom.apiKey);
+
+  try {
+    const response = await axios.get('https://api.cal.com/v2/event-types', {
+      headers: {
+        Authorization: `Bearer ${decryptedKey}`,
+        'cal-api-version': '2024-06-14',
+      },
+      timeout: 10000,
+    });
+
+    const responseData = response.data?.data;
+    const raw = Array.isArray(responseData) ? responseData : (responseData?.eventTypeGroups ?? []).flatMap((g: any) => g.eventTypes ?? []);
+
+    const eventTypes = raw.map((et: any) => ({
+      id: et.id,
+      title: et.title || et.slug,
+      length: et.lengthInMinutes ?? et.length ?? 0,
+      slug: et.slug,
+    }));
+
+    return res.json({ eventTypes });
+  } catch (err: any) {
+    if (err?.response?.status === 401) {
+      return res.status(400).json({ error: 'Cal.com API key is invalid or expired' });
+    }
+    return res.status(502).json({ error: 'Could not reach Cal.com' });
+  }
+}

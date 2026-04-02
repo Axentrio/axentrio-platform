@@ -14,5 +14,6 @@ router.get('/integrations', requireRole('admin', 'supervisor'), asyncHandler(ctr
 
 // Write: admin only
 router.patch('/integrations', requireRole('admin'), asyncHandler(ctrl.updateIntegrations));
+router.post('/integrations/calcom/connect', requireRole('admin'), asyncHandler(ctrl.connectCalcom));
 
 export default router;

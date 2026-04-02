@@ -8,7 +8,7 @@ import {
   useUpdateIntegrations,
 } from '../../queries/useIntegrationQueries';
 
-type State = 'idle' | 'connecting' | 'pick_event_type' | 'saving' | 'connected' | 'disconnecting';
+type State = 'idle' | 'connecting' | 'needs_event_type' | 'pick_event_type' | 'saving' | 'connected' | 'disconnecting';
 
 interface EventType {
   id: number;
@@ -43,8 +43,8 @@ export const CalcomSettings: React.FC = () => {
       setLanguage(calcom.language || 'en');
       setCollectFields(calcom.collectFields || ['name', 'email']);
     } else if (calcom?.hasApiKey && !calcom?.eventTypeId) {
-      // Key stored but no event type selected yet — need to reconnect to fetch types
-      setState('idle');
+      // Key stored but no event type selected yet — show partial connected state
+      setState('needs_event_type');
     } else {
       setState('idle');
     }
@@ -192,6 +192,22 @@ export const CalcomSettings: React.FC = () => {
         <div className="flex items-center gap-2 text-text-muted py-4">
           <Loader2 className="h-4 w-4 animate-spin" />
           Connecting to Cal.com...
+        </div>
+      )}
+
+      {/* Needs Event Type — key stored but no event type selected */}
+      {state === 'needs_event_type' && (
+        <div className="space-y-3">
+          <p className="text-sm text-text-muted">Cal.com is connected but no event type is selected yet.</p>
+          <button
+            onClick={() => {
+              // Re-connect to fetch event types (key is already stored server-side)
+              setState('idle');
+            }}
+            className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600"
+          >
+            Complete Setup
+          </button>
         </div>
       )}
 

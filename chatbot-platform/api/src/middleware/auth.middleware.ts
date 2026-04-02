@@ -81,7 +81,7 @@ export function generateWidgetToken(
       type: 'widget',
     },
     config.jwt.secret,
-    { expiresIn: '7d' } // Widget sessions last longer
+    { expiresIn: '7d', issuer: 'chatbot-platform', audience: 'chatbot-api' } // Widget sessions last longer
   );
 }
 

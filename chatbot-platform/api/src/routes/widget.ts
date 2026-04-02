@@ -95,8 +95,7 @@ router.get(
 router.post(
   '/init',
   widgetRateLimiter,
-  async (req: Request, res: Response): Promise<void> => {
-  try {
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { apiKey, visitorId, metadata } = req.body;
 
     if (!apiKey || !visitorId) {
@@ -224,11 +223,7 @@ router.post(
       token,
       isNew: true,
     });
-  } catch (err: any) {
-    logger.error('[Widget Init] Error', { error: err.message, stack: err.stack });
-    res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
-  }
-  }
+  })
 );
 
 /**

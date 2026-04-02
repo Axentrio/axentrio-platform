@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import axios from 'axios';
+import crypto from 'crypto';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { encrypt } from '../utils/encryption';
@@ -48,6 +49,15 @@ export async function updateIntegrations(req: Request, res: Response) {
   }
 
   tenant.settings = { ...tenant.settings, integrations: updated };
+
+  // Auto-set webhook URL if saving Cal.com with eventTypeId and webhook not configured
+  if (updated.calcom?.eventTypeId && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
+    if (!tenant.webhookSecret) {
+      tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+    }
+  }
+
   await tenantRepo.save(tenant);
 
   // Return redacted response

@@ -5,6 +5,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const mockFindOneOrFail = vi.fn();
 const mockSave = vi.fn();
 
+vi.mock('../../config/environment', () => ({
+  config: { n8n: { defaultWebhookUrl: 'https://test-webhook.example.com/webhook' } },
+}));
+
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: vi.fn(() => ({
@@ -167,6 +171,28 @@ describe('Integrations Controller', () => {
       const responseArg = res.json.mock.calls[0][0];
       expect(responseArg.calcom.apiKey).toBeUndefined();
       expect(responseArg.calcom.hasApiKey).toBe(true);
+    });
+
+    it('should auto-set webhookUrl when saving calcom with eventTypeId and webhookUrl is empty', async () => {
+      const tenant = {
+        id: 'tenant-123',
+        settings: { integrations: { calcom: { apiKey: 'encrypted:key' } } },
+        webhookUrl: null,
+        webhookSecret: null,
+      };
+      mockFindOneOrFail.mockResolvedValue(tenant);
+      mockSave.mockResolvedValue(tenant);
+
+      const req = mockReq({ calcom: { eventTypeId: 123 } }, 'tenant-123');
+      const res = mockRes();
+      await updateIntegrations(req, res);
+
+      expect(res.json).toHaveBeenCalled();
+      expect(mockSave).toHaveBeenCalledWith(
+        expect.objectContaining({
+          webhookUrl: expect.any(String),
+        })
+      );
     });
   });
 });

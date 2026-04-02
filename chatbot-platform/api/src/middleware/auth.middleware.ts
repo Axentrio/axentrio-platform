@@ -27,6 +27,7 @@ export interface AuthenticatedSocket extends Socket {
 // JWT payload interface
 interface JWTPayload {
   userId: string;
+  sessionId?: string;
   email: string;
   role: string;
   tenantId: string;

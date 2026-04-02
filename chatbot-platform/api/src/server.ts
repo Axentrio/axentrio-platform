@@ -87,6 +87,7 @@ app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' 
 // Serve widget.js — before all middleware (no auth, open CORS, cached)
 app.get('/widget.js', (_req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.setHeader('Content-Type', 'application/javascript');
   res.sendFile(path.resolve(__dirname, '../../widget/widget.js'));

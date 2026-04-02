@@ -21,8 +21,9 @@ function verifyInternalAuth(req: Request, res: Response, next: NextFunction): vo
     return;
   }
 
-  // Accept token via Authorization header OR _auth body field
-  // (n8n toolHttpRequest nodes cannot send custom headers)
+  // Accept token via Authorization header OR _auth body field.
+  // TODO: Remove _auth body fallback once n8n supports custom headers on toolHttpRequest nodes.
+  // This is a security trade-off: the secret appears in request bodies instead of headers only.
   const authHeader = req.headers.authorization || '';
   const bodyAuth = req.body?._auth ? `Bearer ${req.body._auth}` : '';
   const token = authHeader || bodyAuth;

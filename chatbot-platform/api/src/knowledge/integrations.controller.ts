@@ -9,7 +9,7 @@ import { updateIntegrationsSchema } from '../schemas/integrations.schema';
 import { config } from '../config/environment';
 
 export async function getIntegrations(req: Request, res: Response) {
-  const tenantId = (req as any).tenantId;
+  const tenantId = req.tenantId!;
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
@@ -25,7 +25,7 @@ export async function getIntegrations(req: Request, res: Response) {
 }
 
 export async function updateIntegrations(req: Request, res: Response) {
-  const tenantId = (req as any).tenantId;
+  const tenantId = req.tenantId!;
   const data = updateIntegrationsSchema.parse(req.body);
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
@@ -72,7 +72,7 @@ export async function updateIntegrations(req: Request, res: Response) {
 }
 
 export async function connectCalcom(req: Request, res: Response) {
-  const tenantId = (req as any).tenantId;
+  const tenantId = req.tenantId!;
   const { apiKey } = req.body;
 
   if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 256) {

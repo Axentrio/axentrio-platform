@@ -152,6 +152,7 @@ export const CalcomSettings: React.FC = () => {
               <div className="relative flex-1">
                 <input
                   type={showKey ? 'text' : 'password'}
+                  autoComplete="off"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder="cal_live_..."

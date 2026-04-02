@@ -16,7 +16,7 @@ export const OnboardingBanner: React.FC = () => {
   const { user } = useAppAuth();
 
   // Only show to admins — agents/supervisors can't configure AI or embed
-  if (isLoading || !tenant || user?.role !== 'admin') return null;
+  if (isLoading || !tenant || (user?.role !== 'admin' && user?.role !== 'super_admin')) return null;
 
   // tenant data is typed as any — settings.ai and onboarding are not in portal types
   const t = tenant as any;

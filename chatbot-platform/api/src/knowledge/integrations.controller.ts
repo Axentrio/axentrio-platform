@@ -85,13 +85,19 @@ export async function connectCalcom(req: Request, res: Response) {
     const response = await axios.get('https://api.cal.com/v2/event-types', {
       headers: {
         Authorization: `Bearer ${apiKey}`,
-        'cal-api-version': '2024-09-04',
+        'cal-api-version': '2024-06-14',
       },
       timeout: 10000,
     });
 
-    const groups: any[] = response.data?.data?.eventTypeGroups ?? [];
-    rawEventTypes = groups.flatMap((g: any) => g.eventTypes ?? []);
+    // Cal.com v2 returns event types in data.data[] (2024-06-14) or data.data.eventTypeGroups[] (2024-09-04)
+    const responseData = response.data?.data;
+    if (Array.isArray(responseData)) {
+      rawEventTypes = responseData;
+    } else {
+      const groups: any[] = responseData?.eventTypeGroups ?? [];
+      rawEventTypes = groups.flatMap((g: any) => g.eventTypes ?? []);
+    }
   } catch (err: any) {
     if (err?.response?.status === 401) {
       return res.status(400).json({ error: 'Invalid or expired API key' });

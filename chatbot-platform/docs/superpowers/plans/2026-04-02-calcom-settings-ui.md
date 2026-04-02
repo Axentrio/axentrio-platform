@@ -128,7 +128,7 @@ describe('POST /calcom/connect', () => {
     expect(res.status).toBe(200);
     expect(mockSave).toHaveBeenCalledWith(
       expect.objectContaining({
-        webhookUrl: 'https://n8n-production-4e9b.up.railway.app/webhook/chatbot-platform',
+        webhookUrl: expect.any(String),
       })
     );
   });
@@ -168,7 +168,7 @@ import crypto from 'crypto';
 
 // ... existing imports and functions ...
 
-const DEFAULT_WEBHOOK_URL = 'https://n8n-production-4e9b.up.railway.app/webhook/chatbot-platform';
+import { config } from '../config/environment';
 
 export async function connectCalcom(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
@@ -216,20 +216,23 @@ export async function connectCalcom(req: Request, res: Response) {
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
   const existing = tenant.settings?.integrations || {};
+  // Clear previous eventTypeId on reconnect — user must re-select
   tenant.settings = {
     ...tenant.settings,
     integrations: {
       ...existing,
       calcom: {
-        ...existing.calcom,
         apiKey: encrypt(apiKey),
+        // Preserve language/collectFields but clear eventTypeId
+        language: existing.calcom?.language,
+        collectFields: existing.calcom?.collectFields,
       },
     },
   };
 
-  // Auto-set webhook URL if empty
-  if (!tenant.webhookUrl) {
-    tenant.webhookUrl = DEFAULT_WEBHOOK_URL;
+  // Auto-set webhook URL if empty (use config, not hardcoded)
+  if (!tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
     if (!tenant.webhookSecret) {
       tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
     }
@@ -291,7 +294,7 @@ it('should auto-set webhookUrl when saving calcom with eventTypeId and webhookUr
   expect(res.status).toBe(200);
   expect(mockSave).toHaveBeenCalledWith(
     expect.objectContaining({
-      webhookUrl: 'https://n8n-production-4e9b.up.railway.app/webhook/chatbot-platform',
+      webhookUrl: expect.any(String),
     })
   );
 });
@@ -308,15 +311,15 @@ In `api/src/knowledge/integrations.controller.ts`, add to `updateIntegrations` a
 
 ```typescript
   // Auto-set webhook URL if saving Cal.com with eventTypeId and webhook not configured
-  if (updated.calcom?.eventTypeId && !tenant.webhookUrl) {
-    tenant.webhookUrl = DEFAULT_WEBHOOK_URL;
+  if (updated.calcom?.eventTypeId && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
     if (!tenant.webhookSecret) {
       tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
     }
   }
 ```
 
-Add this block right before `await tenantRepo.save(tenant);` in the `updateIntegrations` function. Make sure `crypto` is imported (it's already imported in the connect function from Task 1) and `DEFAULT_WEBHOOK_URL` is defined at module level.
+Add this block right before `await tenantRepo.save(tenant);` in the `updateIntegrations` function. `crypto` and `config` are already imported from Task 1.
 
 - [ ] **Step 4: Run tests and verify they pass**
 
@@ -383,8 +386,9 @@ export function useIntegrations() {
   return useQuery({
     queryKey: queryKeys.integrations.all(),
     queryFn: async () => {
+      // GET /integrations returns raw JSON (not enveloped), so no unwrapping needed
       const result = await api.get<Any>('/tenants/me/integrations');
-      return (result?.data ?? result) as IntegrationsData;
+      return result as IntegrationsData;
     },
   });
 }
@@ -419,10 +423,18 @@ export function useUpdateIntegrations() {
 }
 ```
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 3: Add export to queries index**
+
+Add to `portal/src/queries/index.ts`:
+
+```typescript
+export * from './useIntegrationQueries';
+```
+
+- [ ] **Step 4: Commit**
 
 ```bash
-git add portal/src/queries/queryKeys.ts portal/src/queries/useIntegrationQueries.ts
+git add portal/src/queries/queryKeys.ts portal/src/queries/useIntegrationQueries.ts portal/src/queries/index.ts
 git commit -m "feat: add integration query hooks for Cal.com settings"
 ```
 
@@ -511,6 +523,7 @@ export const CalcomSettings: React.FC = () => {
     if (!selectedEventType) return;
     setState('saving');
     try {
+      // Always send full payload to avoid partial-update defaults overwriting existing values
       await updateMutation.mutateAsync({
         calcom: {
           eventTypeId: selectedEventType,

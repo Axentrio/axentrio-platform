@@ -138,9 +138,15 @@ router.post(
 
     // Determine initial status based on AI settings
     const aiEnabled = tenant.settings?.ai?.enabled;
-    const kb = aiEnabled
-      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: tenant.id, status: 'active' } })
-      : null;
+    let kb = null;
+    if (aiEnabled) {
+      try {
+        kb = await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: tenant.id, status: 'active' } });
+      } catch {
+        // knowledge_bases table may not exist yet — fall back to waiting
+        logger.warn('KnowledgeBase query failed, defaulting to waiting status');
+      }
+    }
     const initialStatus = (aiEnabled && kb) ? 'bot' : 'waiting';
 
     // Create new session

@@ -27,6 +27,7 @@ import {
 } from 'recharts';
 import { Download, TrendingUp, Users, MessageSquare, Clock, Star, Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -279,6 +280,9 @@ const Analytics: React.FC = () => {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Onboarding */}
+      <OnboardingBanner />
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

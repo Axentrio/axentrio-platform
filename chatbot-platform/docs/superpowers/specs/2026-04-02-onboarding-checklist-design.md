@@ -8,8 +8,8 @@ A persistent banner on the dashboard that guides new tenants through the 2 steps
 
 | Step | Label | Description | Link | Complete when |
 |------|-------|-------------|------|---------------|
-| 1 | Set up AI | Configure your AI provider and API key | /ai | `tenant.settings.ai.enabled === true` AND `tenant.settings.ai.apiKey` is set |
-| 2 | Go live | Embed the widget on your website | /settings/widget | At least 1 `ChatSession` exists with `source: 'widget'` for this tenant |
+| 1 | Set up AI | Configure your AI provider and API key | /ai | `tenant.settings.ai.enabled === true` AND `tenant.settings.ai.apiKey` is set (returned as `hasApiKey` in API) |
+| 2 | Go live | Embed the chat widget on your website | /settings/widget | At least 1 `ChatSession` exists with `source: 'widget'` for this tenant |
 
 ## UI
 
@@ -31,6 +31,28 @@ Rendered at the top of the Analytics page (the landing page after login), above 
 - Progress: "0/2 complete", "1/2 complete"
 - When both complete: component returns `null` (not rendered)
 
+### Widget & Brand page — Embed snippet card
+
+The Widget & Brand page (`/settings/widget`) currently has logo, display name, brand color, and preview — but no embed instructions. Add a new card at the bottom:
+
+```
+┌──────────────────────────────────────────────────────┐
+│  Embed Widget                                        │
+│  Add this snippet to your website's HTML             │
+│                                                      │
+│  ┌────────────────────────────────────────────────┐  │
+│  │ <script src="https://chatbot-api-production-   │  │
+│  │   37df.up.railway.app/widget.js"               │  │
+│  │   data-api-key="a58e7f73..."></script>          │  │
+│  └────────────────────────────────────────────────┘  │
+│                                        [Copy] button │
+└──────────────────────────────────────────────────────┘
+```
+
+- Pre-fills the tenant's actual API key
+- Copy button copies the full snippet to clipboard
+- Toast: "Copied to clipboard"
+
 ### Design tokens
 
 Follow existing portal patterns:
@@ -39,68 +61,72 @@ Follow existing portal patterns:
 - Empty circle: `border-2 border-edge rounded-full`
 - Link: `text-primary-400 hover:text-primary-300`
 - Header: `text-sm font-semibold text-primary`
+- Code block: `bg-black/20 rounded-lg p-3 font-mono text-xs`
 
 ## Backend
 
-### New endpoint: `GET /api/v1/tenants/me/onboarding-status`
+### Modify existing endpoint: `GET /api/v1/tenants/me`
 
-**Route:** Add to existing `tenants.ts` routes (Clerk auth + tenant context already applied).
+Add an `onboarding` field to the response:
 
-**Response:**
 ```json
 {
-  "aiConfigured": true,
-  "widgetUsed": false,
-  "complete": false
+  "id": "...",
+  "name": "...",
+  "settings": { ... },
+  "onboarding": {
+    "widgetUsed": true
+  }
 }
 ```
 
-**Logic:**
-- `aiConfigured`: `!!tenant.settings?.ai?.enabled && !!tenant.settings?.ai?.apiKey`
-- `widgetUsed`: `EXISTS (SELECT 1 FROM chat_sessions WHERE tenant_id = ? AND source = 'widget' LIMIT 1)` — use EXISTS for performance, not COUNT
-- `complete`: both true
+**Logic for `widgetUsed`:**
+```sql
+EXISTS (SELECT 1 FROM chat_sessions WHERE tenant_id = $1 AND source = 'widget' LIMIT 1)
+```
 
-**Caching:** Once `widgetUsed` flips to true, it never goes back. Consider caching this flag on the tenant record (`settings.onboarding.widgetUsed`) after the first detection to avoid the query on subsequent loads. Update the flag opportunistically — check DB only if the cached flag is false.
+This is fast (indexed on `tenant_id`) and runs once per page load. No caching needed.
 
-### No new entities or migrations
+**`aiConfigured` is NOT returned from the backend** — the frontend derives it from existing `settings.ai.enabled` and `settings.ai.hasApiKey` fields already in the response.
 
-All data already exists in `tenants.settings` and `chat_sessions`.
+### No new endpoints, entities, or migrations
+
+All data already exists. Only change is adding the `onboarding` object to the existing `GET /tenants/me` response.
 
 ## Frontend
 
 ### New component: `portal/src/components/dashboard/OnboardingBanner.tsx`
 
-- Fetches `GET /tenants/me/onboarding-status` via `useOnboardingStatus()` hook
-- Renders the banner card with step states
-- Returns `null` if `complete === true` or if query is loading
-- Each incomplete step's "Set up" link uses `react-router-dom`'s `useNavigate`
+- Uses existing `useTenantSettings()` hook (already fetched on every page)
+- Derives `aiConfigured` from `tenant.settings.ai.enabled && tenant.settings.ai.hasApiKey`
+- Reads `widgetUsed` from `tenant.onboarding.widgetUsed`
+- Returns `null` if both are true
+- Each incomplete step's "Set up" link uses `react-router-dom`'s `Link`
 
-### New query hook: add to `portal/src/queries/useTenantQueries.ts`
+### Embed snippet card: add to `portal/src/pages/settings/WidgetBrandSettings.tsx`
 
-```
-useOnboardingStatus() — GET /tenants/me/onboarding-status
-  queryKey: [...queryKeys.tenants.me(), 'onboarding']
-  staleTime: 30000 (don't refetch too aggressively)
-```
+- New card section at the bottom of the page
+- Reads API key from tenant data (already available via `useTenantSettings`)
+- Copy button uses `navigator.clipboard.writeText()` + toast
 
-### Integration point: `portal/src/pages/Analytics.tsx` (or equivalent dashboard page)
+### Integration point
 
-Add `<OnboardingBanner />` at the top of the page content, before the existing analytics cards.
+Add `<OnboardingBanner />` at the top of the Analytics page content, before the existing stats cards.
 
 ## Edge Cases
 
-- **Tenant with no AI configured and no sessions:** Shows both steps incomplete (0/2)
-- **Tenant with AI configured but never embedded widget:** Shows 1/2, prompts to embed
-- **Tenant who embedded widget before configuring AI:** Shows AI step incomplete — widget sessions may exist from before AI was set up. Both steps are independent.
-- **Super admin viewing tenant:** Banner should use the current tenant context, not the admin's personal state
-- **New tenant auto-provisioned:** Both steps incomplete on first login
+- **Tenant with no AI and no sessions:** Shows 0/2 — both steps incomplete
+- **Tenant with AI but no widget sessions:** Shows 1/2 — prompts to embed
+- **Tenant who embedded before configuring AI:** Shows 1/2 — AI step incomplete. Both steps are independent.
+- **Super admin viewing tenant:** Banner uses the current tenant context from `useTenantSettings()`
+- **Widget URL:** Hardcode the production widget.js URL. In the future this could come from an env var or tenant config.
 
 ## What this does NOT include
 
 - No wizard/multi-step page
 - No dismissal button (disappears when complete)
 - No Cal.com setup step (discovered in Settings → Integrations)
-- No knowledge base step (optional feature)
+- No knowledge base step
 - No team invite step
 - No email reminders
-- No confetti animation on completion (tempting, but no)
+- No new API endpoint (uses existing GET /tenants/me)

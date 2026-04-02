@@ -1,6 +1,7 @@
 // portal/src/components/settings/CalcomSettings.tsx
 import React, { useState, useEffect } from 'react';
 import { Calendar, CheckCircle, Loader2, ChevronDown, Eye, EyeOff } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   useIntegrations,
   useConnectCalcom,
@@ -200,20 +201,22 @@ export const CalcomSettings: React.FC = () => {
           <div>
             <label className="text-xs font-medium text-secondary mb-1 block">Event Type</label>
             <p className="text-xs text-text-muted mb-2">Select which appointment type the chatbot should book</p>
-            <div className="relative">
-              <select
-                value={selectedEventType || ''}
-                onChange={(e) => setSelectedEventType(Number(e.target.value))}
-                className="w-full appearance-none rounded-lg border border-edge bg-transparent px-3 py-2 text-sm text-primary focus:border-primary-500 focus:outline-none pr-8"
+            <div>
+              <Select
+                value={selectedEventType?.toString() || ''}
+                onValueChange={(val) => setSelectedEventType(Number(val))}
               >
-                <option value="">Select an event type...</option>
-                {eventTypes.map((et) => (
-                  <option key={et.id} value={et.id}>
-                    {et.title} ({et.length} min)
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 h-4 w-4 text-text-muted pointer-events-none" />
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select an event type..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {eventTypes.map((et) => (
+                    <SelectItem key={et.id} value={et.id.toString()}>
+                      {et.title} ({et.length} min)
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <button
@@ -278,16 +281,17 @@ export const CalcomSettings: React.FC = () => {
               <div className="mt-3 space-y-3 pl-4 border-l border-edge">
                 <div>
                   <label className="text-xs font-medium text-secondary mb-1 block">Language</label>
-                  <select
-                    value={language}
-                    onChange={(e) => setLanguage(e.target.value)}
-                    className="rounded-lg border border-edge bg-transparent px-3 py-1.5 text-sm text-primary focus:border-primary-500 focus:outline-none"
-                  >
-                    <option value="en">English</option>
-                    <option value="nl">Nederlands</option>
-                    <option value="fr">Français</option>
-                    <option value="de">Deutsch</option>
-                  </select>
+                  <Select value={language} onValueChange={setLanguage}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="nl">Nederlands</SelectItem>
+                      <SelectItem value="fr">Français</SelectItem>
+                      <SelectItem value="de">Deutsch</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="text-xs font-medium text-secondary mb-1 block">Collect from customer</label>

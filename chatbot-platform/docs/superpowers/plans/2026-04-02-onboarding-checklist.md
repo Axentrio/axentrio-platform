@@ -100,7 +100,7 @@ Then inside the handler, after the tenant is fetched and settings are processed 
       .createQueryBuilder('s')
       .where('s.tenant_id = :tenantId', { tenantId })
       .andWhere('s.source = :source', { source: 'widget' })
-      .limit(1)
+      .andWhere('s.deleted_at IS NULL')
       .getExists();
 ```
 
@@ -139,6 +139,7 @@ git commit -m "feat: add onboarding.widgetUsed to GET /tenants/me response"
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle, Circle, Rocket } from 'lucide-react';
+import { useAuth } from '@clerk/clerk-react';
 import { useTenantSettings } from '../../queries/useTenantQueries';
 
 interface Step {
@@ -150,9 +151,12 @@ interface Step {
 
 export const OnboardingBanner: React.FC = () => {
   const { data: tenant, isLoading } = useTenantSettings();
+  const { orgRole } = useAuth();
 
-  if (isLoading || !tenant) return null;
+  // Only show to admins — agents/supervisors can't configure AI or embed
+  if (isLoading || !tenant || orgRole !== 'org:admin') return null;
 
+  // tenant data is typed as any — settings.ai and onboarding are not in portal types
   const t = tenant as any;
   const settings = t.settings || {};
 
@@ -274,28 +278,32 @@ Then after the Status card (after line 401 `</Card>`) and before the Save Button
           <p className="text-xs text-text-muted">Add this snippet to your website's HTML, just before the closing &lt;/body&gt; tag</p>
         </CardHeader>
         <CardContent>
-          <div className="relative">
-            <pre className="bg-black/20 rounded-lg p-3 font-mono text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all">
-{`<script src="https://chatbot-api-production-37df.up.railway.app/widget.js"
-  data-api-key="${tenant.apiKey}"></script>`}
-            </pre>
-            <button
-              onClick={() => {
-                const snippet = `<script src="https://chatbot-api-production-37df.up.railway.app/widget.js"\n  data-api-key="${tenant.apiKey}"></script>`;
-                navigator.clipboard.writeText(snippet);
-                toast.success('Copied to clipboard');
-              }}
-              className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
-              title="Copy snippet"
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          {(() => {
+            const apiUrl = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || window.location.origin;
+            const snippet = `<script src="${apiUrl}/widget.js"\n  data-api-key="${tenant.apiKey}"></script>`;
+            return (
+              <div className="relative">
+                <pre className="bg-black/20 rounded-lg p-3 font-mono text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all">
+                  {snippet}
+                </pre>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(snippet);
+                    toast.success('Copied to clipboard');
+                  }}
+                  className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
+                  title="Copy snippet"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 ```
 
-Note: `tenant.apiKey` is already available in this component — it's destructured from the tenant data earlier in the file.
+Note: `tenant.apiKey` is already available in this component — it's mapped from `rawTenant` at line 77. The widget URL is derived from `VITE_API_URL` (stripping `/api/v1`) to work in both dev and production.
 
 - [ ] **Step 2: Verify portal builds**
 

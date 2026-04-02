@@ -106,7 +106,7 @@ app.use(cors({
 
     // In development, also allow common localhost origins
     const devOrigins = config.server.isDevelopment
-      ? ['http://localhost:4080', 'http://localhost:3000', 'http://localhost:5173']
+      ? ['http://localhost:4080', 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:8888']
       : [];
 
     const allAllowed = [...allowed, ...devOrigins];

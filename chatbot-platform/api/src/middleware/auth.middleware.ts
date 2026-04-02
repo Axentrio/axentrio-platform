@@ -212,6 +212,13 @@ export async function authenticateWidget(
       type: 'widget',
     };
 
+    // Also set req.widget for widget-specific handlers
+    req.widget = {
+      sessionId: payload.userId, // widget tokens use userId = sessionId
+      tenantId: payload.tenantId,
+      visitorId: payload.userId,
+    };
+
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {

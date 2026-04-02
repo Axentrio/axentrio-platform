@@ -51,7 +51,6 @@ const router = Router();
  */
 router.get(
   '/config',
-  widgetRateLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const apiKey = req.query.apiKey as string;
 
@@ -94,7 +93,6 @@ router.get(
  */
 router.post(
   '/init',
-  widgetRateLimiter,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { apiKey, visitorId, metadata } = req.body;
 

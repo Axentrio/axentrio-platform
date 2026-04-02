@@ -66,4 +66,8 @@ export const queryKeys = {
     tenantAudit: (id: string) => [...queryKeys.admin.tenantDetail(id), 'audit'] as const,
     auditLogs: () => [...queryKeys.admin.all(), 'audit-logs'] as const,
   },
+  integrations: {
+    all: () => ['integrations'] as const,
+    calcom: () => [...queryKeys.integrations.all(), 'calcom'] as const,
+  },
 };

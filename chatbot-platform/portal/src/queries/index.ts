@@ -10,3 +10,4 @@ export * from './useWebhookQueries';
 export * from './useNotificationQueries';
 export * from './useAdminQueries';
 export * from './useAnalyticsQueries';
+export * from './useIntegrationQueries';

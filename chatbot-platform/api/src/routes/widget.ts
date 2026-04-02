@@ -93,17 +93,20 @@ router.get(
  */
 router.post(
   '/init',
-  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+  async (req: Request, res: Response): Promise<void> => {
+  try {
     const { apiKey, visitorId, metadata } = req.body;
 
     if (!apiKey || !visitorId) {
-      throw new ValidationError('API key and visitor ID are required');
+      res.status(400).json({ error: 'API key and visitor ID are required' });
+      return;
     }
 
     const result = await validateApiKey(apiKey);
 
     if (!result.valid || !result.tenant) {
-      throw new ValidationError(result.error || 'Invalid API key');
+      res.status(400).json({ error: result.error || 'Invalid API key' });
+      return;
     }
 
     const tenant = result.tenant;
@@ -227,7 +230,12 @@ router.post(
       token,
       isNew: true,
     });
-  })
+  } catch (err: any) {
+    logger.error('[Widget Init] Unhandled error', { message: err.message, stack: err.stack });
+    const msg = err.message || 'Unknown error';
+    res.status(500).json({ error: msg, type: err.constructor?.name });
+  }
+  }
 );
 
 /**

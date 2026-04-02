@@ -30,8 +30,8 @@
   // ==========================================================================
   const DEFAULT_CONFIG = {
     // API Configuration
-    apiUrl: 'https://api.chatbot-platform.com',
-    wsUrl: 'wss://api.chatbot-platform.com/ws',
+    apiUrl: '', // Auto-detected from script src
+    wsUrl: '',  // Auto-detected from apiUrl
     tenantId: null,
     botId: 'default',
     apiKey: null,
@@ -1447,7 +1447,17 @@
     if (script) {
       const config = {};
       
-      // Parse data attributes
+      // Auto-detect API URL from script src (e.g. https://api.example.com/widget.js → https://api.example.com)
+      if (script.src) {
+        try {
+          const scriptUrl = new URL(script.src);
+          config.apiUrl = scriptUrl.origin;
+          const wsProtocol = scriptUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+          config.wsUrl = `${wsProtocol}//${scriptUrl.host}`;
+        } catch (e) { /* ignore */ }
+      }
+
+      // Parse data attributes (overrides auto-detected values)
       Object.keys(DEFAULT_CONFIG).forEach(key => {
         const dataAttr = script.getAttribute('data-' + key.replace(/[A-Z]/g, m => '-' + m.toLowerCase()));
         if (dataAttr !== null) {
@@ -1459,7 +1469,7 @@
           }
         }
       });
-      
+
       // Initialize widget
       const widget = new ChatbotWidget(config);
       

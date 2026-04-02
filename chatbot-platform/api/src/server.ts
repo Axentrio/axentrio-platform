@@ -7,6 +7,7 @@ initSentry();
 
 import 'reflect-metadata';
 import express from 'express';
+import path from 'path';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -82,6 +83,14 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
+
+// Serve widget.js — before all middleware (no auth, open CORS, cached)
+app.get('/widget.js', (_req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Content-Type', 'application/javascript');
+  res.sendFile(path.resolve(__dirname, '../../widget/widget.js'));
+});
 
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);

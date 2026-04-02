@@ -85,12 +85,23 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
 
 // Serve widget.js — before all middleware (no auth, open CORS, cached)
+// Resolve widget.js: try api/public/ first (Docker build), then ../../widget/ (dev)
+const widgetPath = [
+  path.resolve(__dirname, '../public/widget.js'),  // prod: dist/../public = api/public
+  path.resolve(__dirname, '../../widget/widget.js'), // dev: src/../../widget
+].find(p => { try { require('fs').accessSync(p); return true; } catch { return false; } })
+  || path.resolve(__dirname, '../public/widget.js');
 app.get('/widget.js', (_req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.setHeader('Cache-Control', 'public, max-age=3600');
   res.setHeader('Content-Type', 'application/javascript');
-  res.sendFile(path.resolve(__dirname, '../../widget/widget.js'));
+  res.sendFile(widgetPath, (err) => {
+    if (err) {
+      logger.error('Failed to serve widget.js', { path: widgetPath, error: err.message });
+      res.status(404).send('// widget.js not found');
+    }
+  });
 });
 
 // Request ID — must come before all other middleware

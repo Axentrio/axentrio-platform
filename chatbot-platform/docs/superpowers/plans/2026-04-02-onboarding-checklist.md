@@ -16,74 +16,8 @@
 
 **Files:**
 - Modify: `api/src/routes/tenants.ts`
-- Create: `api/src/__tests__/unit/onboarding-status.test.ts`
 
-- [ ] **Step 1: Write the failing test**
-
-```typescript
-// api/src/__tests__/unit/onboarding-status.test.ts
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import express from 'express';
-import request from 'supertest';
-
-const mockTenantFindOne = vi.fn();
-const mockSessionExists = vi.fn();
-
-vi.mock('../../database/data-source', () => ({
-  AppDataSource: {
-    getRepository: (entity: any) => {
-      if (entity.name === 'ChatSession') {
-        return {
-          createQueryBuilder: () => ({
-            where: () => ({ andWhere: () => ({ getExists: mockSessionExists }) }),
-          }),
-        };
-      }
-      return { findOne: mockTenantFindOne };
-    },
-  },
-}));
-
-vi.mock('../../utils/logger', () => ({
-  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock('../../middleware/clerk.middleware', () => ({
-  requireClerkAuth: (_req: any, _res: any, next: any) => next(),
-  autoProvision: (_req: any, _res: any, next: any) => next(),
-}));
-
-vi.mock('../../middleware/super-admin.middleware', () => ({
-  resolveTenantContext: (_req: any, _res: any, next: any) => next(),
-}));
-
-describe('GET /tenants/me onboarding', () => {
-  it('should include onboarding.widgetUsed = false when no widget sessions', async () => {
-    mockTenantFindOne.mockResolvedValue({
-      id: 'tenant-1',
-      name: 'Test',
-      slug: 'test',
-      apiKey: 'key',
-      tier: 'free',
-      status: 'active',
-      settings: {},
-      maxSessions: 100,
-      currentSessions: 0,
-      createdAt: new Date(),
-    });
-    mockSessionExists.mockResolvedValue(false);
-
-    // This test validates the contract — the actual route test
-    // would require full Express app setup. For now, validate the
-    // EXISTS query logic is called and the response shape.
-    expect(mockSessionExists).toBeDefined();
-  });
-});
-```
-
-Note: Full route integration testing is complex due to Clerk middleware mocking. The key validation is that the `onboarding` field appears in the response. We'll verify this manually after deployment.
-
-- [ ] **Step 2: Modify the GET /me handler**
+- [ ] **Step 1: Modify the GET /me handler**
 
 In `api/src/routes/tenants.ts`, modify the `GET /me` handler. Add the ChatSession import at the top of the file:
 
@@ -112,15 +46,15 @@ Then in the `res.json` response object, after `createdAt: tenant.createdAt,` add
         },
 ```
 
-- [ ] **Step 3: Run backend tests to verify nothing broke**
+- [ ] **Step 2: Run backend tests to verify nothing broke**
 
 Run: `cd chatbot-platform/api && npx vitest run --no-coverage 2>&1 | grep -E "Test Files|Tests:" | tail -3`
 Expected: All existing tests still pass
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 3: Commit**
 
 ```bash
-git add api/src/routes/tenants.ts api/src/__tests__/unit/onboarding-status.test.ts
+git add api/src/routes/tenants.ts
 git commit -m "feat: add onboarding.widgetUsed to GET /tenants/me response"
 ```
 
@@ -139,7 +73,7 @@ git commit -m "feat: add onboarding.widgetUsed to GET /tenants/me response"
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle, Circle, Rocket } from 'lucide-react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from '../../auth/useAppAuth';
 import { useTenantSettings } from '../../queries/useTenantQueries';
 
 interface Step {
@@ -151,10 +85,10 @@ interface Step {
 
 export const OnboardingBanner: React.FC = () => {
   const { data: tenant, isLoading } = useTenantSettings();
-  const { orgRole } = useAuth();
+  const { user } = useAppAuth();
 
   // Only show to admins — agents/supervisors can't configure AI or embed
-  if (isLoading || !tenant || orgRole !== 'org:admin') return null;
+  if (isLoading || !tenant || user?.role !== 'admin') return null;
 
   // tenant data is typed as any — settings.ai and onboarding are not in portal types
   const t = tenant as any;
@@ -270,6 +204,15 @@ import { Camera, X, Loader2, Save, Check, Copy } from 'lucide-react';
 
 Then after the Status card (after line 401 `</Card>`) and before the Save Button section (`{/* Save Button */}`), add:
 
+First, compute the embed snippet. Find the component's return statement and add this above it (alongside other derived values like `isDirty`):
+
+```typescript
+  const apiUrl = (import.meta.env.VITE_API_URL || '').replace('/api/v1', '') || window.location.origin;
+  const embedSnippet = `<script src="${apiUrl}/widget.js"\n  data-api-key="${tenant.apiKey}"></script>`;
+```
+
+Then in the JSX, after the Status card and before the Save Button:
+
 ```tsx
       {/* Embed Widget */}
       <Card variant="glass">
@@ -278,27 +221,21 @@ Then after the Status card (after line 401 `</Card>`) and before the Save Button
           <p className="text-xs text-text-muted">Add this snippet to your website's HTML, just before the closing &lt;/body&gt; tag</p>
         </CardHeader>
         <CardContent>
-          {(() => {
-            const apiUrl = import.meta.env.VITE_API_URL?.replace('/api/v1', '') || window.location.origin;
-            const snippet = `<script src="${apiUrl}/widget.js"\n  data-api-key="${tenant.apiKey}"></script>`;
-            return (
-              <div className="relative">
-                <pre className="bg-black/20 rounded-lg p-3 font-mono text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all">
-                  {snippet}
-                </pre>
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(snippet);
-                    toast.success('Copied to clipboard');
-                  }}
-                  className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
-                  title="Copy snippet"
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            );
-          })()}
+          <div className="relative">
+            <pre className="bg-black/20 rounded-lg p-3 font-mono text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all">
+              {embedSnippet}
+            </pre>
+            <button
+              onClick={() => {
+                navigator.clipboard.writeText(embedSnippet);
+                toast.success('Copied to clipboard');
+              }}
+              className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
+              title="Copy snippet"
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </CardContent>
       </Card>
 ```

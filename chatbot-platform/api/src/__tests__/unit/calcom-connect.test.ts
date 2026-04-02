@@ -79,7 +79,7 @@ describe('connectCalcom', () => {
     await connectCalcom(req, res);
 
     expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({ error: 'apiKey is required' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'A valid API key is required' });
   });
 
   it('returns 400 if Cal.com rejects the key (401)', async () => {

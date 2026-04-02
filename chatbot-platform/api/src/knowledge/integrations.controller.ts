@@ -75,8 +75,8 @@ export async function connectCalcom(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const { apiKey } = req.body;
 
-  if (!apiKey) {
-    return res.status(400).json({ error: 'apiKey is required' });
+  if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 256) {
+    return res.status(400).json({ error: 'A valid API key is required' });
   }
 
   // Validate key against Cal.com and fetch event types
@@ -87,6 +87,7 @@ export async function connectCalcom(req: Request, res: Response) {
         Authorization: `Bearer ${apiKey}`,
         'cal-api-version': '2024-09-04',
       },
+      timeout: 10000,
     });
 
     const groups: any[] = response.data?.data?.eventTypeGroups ?? [];
@@ -95,7 +96,11 @@ export async function connectCalcom(req: Request, res: Response) {
     if (err?.response?.status === 401) {
       return res.status(400).json({ error: 'Invalid or expired API key' });
     }
-    throw err;
+    if (err?.response?.status === 429) {
+      return res.status(429).json({ error: 'Cal.com rate limit exceeded. Please try again later.' });
+    }
+    logger.error('Cal.com connect failed', { status: err?.response?.status, message: err?.message });
+    return res.status(502).json({ error: 'Could not reach Cal.com. Please try again later.' });
   }
 
   if (rawEventTypes.length === 0) {

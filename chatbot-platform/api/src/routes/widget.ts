@@ -17,6 +17,28 @@ import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 
+// Simple in-memory rate limiter for unauthenticated widget endpoints
+// (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
+const ipHits = new Map<string, { count: number; resetAt: number }>();
+function simpleRateLimit(maxRequests: number, windowMs: number) {
+  return (req: Request, res: Response, next: Function) => {
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const entry = ipHits.get(ip);
+    if (!entry || now > entry.resetAt) {
+      ipHits.set(ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    if (entry.count >= maxRequests) {
+      res.status(429).json({ error: 'Too many requests, please try again later' });
+      return;
+    }
+    entry.count++;
+    next();
+  };
+}
+const widgetInitRateLimit = simpleRateLimit(30, 60000); // 30 per minute
+
 // Inline API key validation (looks up tenant by apiKey in DB)
 interface ApiKeyValidationResult {
   valid: boolean;
@@ -51,6 +73,7 @@ const router = Router();
  */
 router.get(
   '/config',
+  widgetInitRateLimit,
   asyncHandler(async (req: Request, res: Response) => {
     const apiKey = req.query.apiKey as string;
 
@@ -93,6 +116,7 @@ router.get(
  */
 router.post(
   '/init',
+  widgetInitRateLimit,
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const { apiKey, visitorId, metadata } = req.body;
 

@@ -68,6 +68,5 @@ export const queryKeys = {
   },
   integrations: {
     all: () => ['integrations'] as const,
-    calcom: () => [...queryKeys.integrations.all(), 'calcom'] as const,
   },
 };

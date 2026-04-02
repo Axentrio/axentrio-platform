@@ -75,6 +75,7 @@ export function generateWidgetToken(
   return jwt.sign(
     {
       userId: userId || sessionId,
+      sessionId,
       email: `widget-${sessionId}@session.local`,
       role: 'widget',
       tenantId,
@@ -214,7 +215,7 @@ export async function authenticateWidget(
 
     // Also set req.widget for widget-specific handlers
     req.widget = {
-      sessionId: payload.userId, // widget tokens use userId = sessionId
+      sessionId: payload.sessionId || payload.userId,
       tenantId: payload.tenantId,
       visitorId: payload.userId,
     };

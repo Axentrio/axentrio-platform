@@ -155,9 +155,9 @@ describe('CreateBookingTool', () => {
     expect(tool.hasSideEffects).toBe(true);
   });
 
-  it('has preconditions requiring check_availability', () => {
+  it('has no hard preconditions (handled by skill instructions instead)', () => {
     const tool = new CreateBookingTool();
-    expect(tool.preconditions?.toolsCalled).toContain('check_availability');
+    expect(tool.preconditions).toBeUndefined();
   });
 
   it('generates idempotency key from runId', async () => {

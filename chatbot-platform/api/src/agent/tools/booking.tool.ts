@@ -45,7 +45,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
 
 export class CreateBookingTool implements ToolAdapter {
   name = 'create_booking';
-  description = 'Create an appointment booking for the customer.';
+  description = 'Create an appointment booking for the customer. You can call this directly if availability was already checked in a recent conversation turn.';
   parameters = {
     type: 'object',
     properties: {
@@ -69,7 +69,9 @@ export class CreateBookingTool implements ToolAdapter {
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
   hasSideEffects = true;
-  preconditions = { toolsCalled: ['check_availability'] };
+  // Precondition removed — the skill instructions tell the LLM to check availability first.
+  // Hard precondition caused issues: forced redundant re-checks that returned different results
+  // from Cal.com's API when using narrow vs full-day date ranges.
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {

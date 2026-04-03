@@ -8,6 +8,7 @@ import {
   CancelBookingTool,
 } from './tools/booking.tool';
 import { EscalationTool } from './tools/escalation.tool';
+import { CaptureLeadTool } from './tools/capture-lead.tool';
 import type { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
@@ -32,6 +33,7 @@ export class ToolRegistry {
     this.registerBuiltin(new RescheduleBookingTool());
     this.registerBuiltin(new CancelBookingTool());
     this.registerBuiltin(new EscalationTool());
+    this.registerBuiltin(new CaptureLeadTool());
   }
 
   private registerBuiltin(tool: ToolAdapter): void {
@@ -50,6 +52,9 @@ export class ToolRegistry {
 
     const escalation = this.builtinTools.get('escalate_to_human');
     if (escalation) tools.push(escalation);
+
+    const captureLead = this.builtinTools.get('capture_lead');
+    if (captureLead) tools.push(captureLead);
 
     const calcom = tenant.settings?.integrations?.calcom;
     if (calcom?.apiKey && calcom?.eventTypeId) {

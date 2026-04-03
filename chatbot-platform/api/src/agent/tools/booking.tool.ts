@@ -6,6 +6,9 @@ import {
   rescheduleBooking,
   cancelBooking,
 } from '../../n8n/booking.service';
+import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
+import { ChatSession } from '../../database/entities/ChatSession';
+import type { AppointmentBookedEvent, LeadCreatedEvent } from '../../webhooks/webhook.types';
 
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
@@ -78,6 +81,57 @@ export class CreateBookingTool implements ToolAdapter {
         { name: args.attendeeName as string, email: args.attendeeEmail as string },
         args.notes as string | undefined
       );
+
+      // Fire-and-forget: emit appointment.booked + lead.created webhook events
+      void (async () => {
+        try {
+          let session: ChatSession | null = null;
+          try {
+            session = await ctx.dataSource
+              .getRepository(ChatSession)
+              .findOne({ where: { id: ctx.sessionId } });
+          } catch {
+            // non-fatal
+          }
+
+          const sessionCtx = {
+            id: ctx.sessionId,
+            channel: session?.channel ?? 'widget',
+            visitorId: session?.visitorId ?? 'unknown',
+            startedAt: session?.startedAt?.toISOString() ?? new Date().toISOString(),
+            messageCount: session?.messageCount ?? 0,
+            tags: session?.tags,
+          };
+
+          const bookingData = result as Record<string, unknown>;
+          const appointmentEvent: AppointmentBookedEvent = {
+            ...buildEventBase('appointment.booked', ctx.tenantId, sessionCtx),
+            type: 'appointment.booked',
+            appointment: {
+              bookingId: (bookingData?.bookingId as string) ?? idempotencyKey,
+              startTime: args.startTime as string,
+              attendeeName: args.attendeeName as string,
+              attendeeEmail: args.attendeeEmail as string,
+              notes: args.notes as string | undefined,
+            },
+          };
+          emitWebhookEvent(appointmentEvent);
+
+          const leadEvent: LeadCreatedEvent = {
+            ...buildEventBase('lead.created', ctx.tenantId, sessionCtx),
+            type: 'lead.created',
+            lead: {
+              name: args.attendeeName as string,
+              email: args.attendeeEmail as string,
+              source: 'booking',
+            },
+          };
+          emitWebhookEvent(leadEvent);
+        } catch {
+          // non-fatal — booking succeeded, webhook emission is best-effort
+        }
+      })();
+
       return { success: true, data: result };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to create booking' };

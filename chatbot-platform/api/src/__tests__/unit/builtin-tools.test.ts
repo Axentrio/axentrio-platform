@@ -8,6 +8,17 @@ const mockListBookings = vi.fn();
 const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 
+vi.mock('../../webhooks/webhook.emitter', () => ({
+  emitWebhookEvent: vi.fn(),
+  buildEventBase: vi.fn().mockReturnValue({
+    id: 'evt-1',
+    tenantId: 'tenant-1',
+    sessionId: 'session-1',
+    timestamp: new Date().toISOString(),
+    session: { channel: 'widget', visitorId: 'v1', startedAt: new Date().toISOString(), messageCount: 0 },
+  }),
+}));
+
 vi.mock('../../n8n/booking.service', () => ({
   checkAvailability: (...args: unknown[]) => mockCheckAvailability(...args),
   createBooking: (...args: unknown[]) => mockCreateBooking(...args),

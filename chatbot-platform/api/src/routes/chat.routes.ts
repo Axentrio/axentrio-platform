@@ -5,6 +5,7 @@
  * GET /chat/:sessionId/status - Get session status
  * POST /chat/:sessionId/close - Close session
  */
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import { IsNull, DeepPartial } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
@@ -26,6 +27,7 @@ import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/erro
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
 import { sendMessageSchema, chatListQuerySchema } from '../schemas';
+import { emitWebhookEvent } from '../webhooks/webhook.emitter';
 
 /** Safely serialise a message for API responses, decrypting content if needed. */
 function serialiseMessage(m: Message) {
@@ -265,6 +267,27 @@ router.post(
     session.close();
     await sessionRepository.save(session);
 
+    // Fire conversation.ended webhook — non-blocking, errors handled internally
+    emitWebhookEvent({
+      id: crypto.randomUUID(),
+      type: 'conversation.ended',
+      tenantId: session.tenantId,
+      sessionId: session.id,
+      timestamp: new Date().toISOString(),
+      session: {
+        channel: session.channel || 'widget',
+        visitorId: session.visitorId,
+        startedAt: session.startedAt?.toISOString() || session.createdAt.toISOString(),
+        messageCount: session.messageCount || 0,
+      },
+      conversation: {
+        durationSeconds: session.durationSeconds || null,
+        messageCount: session.messageCount || 0,
+        finalStatus: 'closed',
+        assignedAgentId: session.assignedAgentId || undefined,
+      },
+    });
+
     // Add system message
     const systemMessage = messageRepository.create({
       sessionId,
@@ -494,6 +517,27 @@ router.post(
     session.status = 'closed';
     session.endedAt = new Date();
     await sessionRepository.save(session);
+
+    // Fire conversation.ended webhook — non-blocking, errors handled internally
+    emitWebhookEvent({
+      id: crypto.randomUUID(),
+      type: 'conversation.ended',
+      tenantId: session.tenantId,
+      sessionId: session.id,
+      timestamp: new Date().toISOString(),
+      session: {
+        channel: session.channel || 'widget',
+        visitorId: session.visitorId,
+        startedAt: session.startedAt?.toISOString() || session.createdAt.toISOString(),
+        messageCount: session.messageCount || 0,
+      },
+      conversation: {
+        durationSeconds: session.durationSeconds || null,
+        messageCount: session.messageCount || 0,
+        finalStatus: 'closed',
+        assignedAgentId: session.assignedAgentId || undefined,
+      },
+    });
 
     logger.info(`Session ${id} closed by agent`);
 

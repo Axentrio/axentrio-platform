@@ -22,6 +22,17 @@ vi.mock('../../n8n/booking.service', () => ({
   cancelBooking: vi.fn(),
 }));
 
+vi.mock('../../webhooks/webhook.emitter', () => ({
+  emitWebhookEvent: vi.fn(),
+  buildEventBase: vi.fn().mockReturnValue({
+    id: 'evt-1',
+    tenantId: 'tenant-1',
+    sessionId: 'session-1',
+    timestamp: new Date().toISOString(),
+    session: { channel: 'widget', visitorId: 'v1', startedAt: new Date().toISOString(), messageCount: 0 },
+  }),
+}));
+
 vi.mock('../../utils/logger', () => ({
   logger: {
     info: vi.fn(),
@@ -38,7 +49,7 @@ import { ToolRegistry } from '../../agent/tool-registry';
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ToolRegistry', () => {
-  it('registers all 7 built-in tools on construction', () => {
+  it('registers all 8 built-in tools on construction', () => {
     const registry = new ToolRegistry();
     const builtins = registry.getBuiltinToolNames();
     expect(builtins).toContain('kb_search');
@@ -48,7 +59,8 @@ describe('ToolRegistry', () => {
     expect(builtins).toContain('reschedule_booking');
     expect(builtins).toContain('cancel_booking');
     expect(builtins).toContain('escalate_to_human');
-    expect(builtins).toHaveLength(7);
+    expect(builtins).toContain('capture_lead');
+    expect(builtins).toHaveLength(8);
   });
 
   it('returns KB search + booking tools + escalation for tenant with calcom integration', async () => {
@@ -69,6 +81,7 @@ describe('ToolRegistry', () => {
     expect(toolNames).toContain('reschedule_booking');
     expect(toolNames).toContain('cancel_booking');
     expect(toolNames).toContain('escalate_to_human');
+    expect(toolNames).toContain('capture_lead');
   });
 
   it('excludes booking tools when tenant has no calcom integration', async () => {
@@ -78,6 +91,7 @@ describe('ToolRegistry', () => {
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('kb_search');
     expect(toolNames).toContain('escalate_to_human');
+    expect(toolNames).toContain('capture_lead');
     expect(toolNames).not.toContain('check_availability');
     expect(toolNames).not.toContain('create_booking');
     expect(toolNames).not.toContain('list_bookings');

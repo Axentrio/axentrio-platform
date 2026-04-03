@@ -720,10 +720,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     generateId: () => Math.random().toString(36).substr(2, 9),
     
     formatTime: (date) => {
+      const d = date instanceof Date ? date : new Date(date);
+      if (isNaN(d.getTime())) return '';
       return new Intl.DateTimeFormat('default', {
         hour: 'numeric',
         minute: 'numeric',
-      }).format(date);
+      }).format(d);
     },
     
     formatFileSize: (bytes) => {

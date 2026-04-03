@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HandsOff Widget Test</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 600px;
+      margin: 60px auto;
+      padding: 20px;
+      color: #333;
+    }
+    h1 { margin-bottom: 8px; }
+    p { color: #666; line-height: 1.6; }
+    .hint {
+      background: #f0f4ff;
+      border: 1px solid #d0d8f0;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 24px;
+      font-size: 14px;
+    }
+    .hint strong { color: #333; }
+    code {
+      background: #e8ecf4;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <h1>HandsOff Widget Test</h1>
+  <p>The chat widget should appear in the bottom-right corner.</p>
+
+  <div class="hint">
+    <strong>Try these messages:</strong><br><br>
+    <code>I want to book an appointment</code> — starts the booking flow<br>
+    <code>Next Monday please</code> — checks availability<br>
+    <code>10 AM, my name is Test User, email test@example.com</code> — provides details<br>
+    <code>Yes</code> — confirms the booking
+  </div>
+
+  <script src="https://chatbot-api-production-37df.up.railway.app/widget.js"
+    data-api-key="e4c062d1655fb179ccfdbe68af3e34a6713afc1d771c2979ae8b277170f442b0"
+    data-debug="true"></script>
+</body>
+</html>

@@ -859,6 +859,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       const { data } = await resp.json();
       this.sessionId = data.session.id;
       this.tenantId = data.session.tenantId || data.tenantId;
+
+      // Clear old messages from previous session
+      this.messages = [];
+      if (this.messagesContainer) {
+        while (this.messagesContainer.firstChild) {
+          this.messagesContainer.removeChild(this.messagesContainer.firstChild);
+        }
+      }
+
       this.log('New session created:', this.sessionId);
       this._saveSession();
     }

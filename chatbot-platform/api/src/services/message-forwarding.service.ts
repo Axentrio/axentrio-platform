@@ -165,7 +165,9 @@ export async function forwardMessageToN8n(
   const aiSettings = tenant.settings?.ai;
 
   // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants
-  const webhookUrl = tenant.webhookUrl || (aiSettings?.enabled ? config.n8n.defaultWebhookUrl : undefined);
+  // Ignore localhost URLs in production — leftover from dev setup
+  const tenantUrl = tenant.webhookUrl && !tenant.webhookUrl.includes('localhost') ? tenant.webhookUrl : undefined;
+  const webhookUrl = tenantUrl || (aiSettings?.enabled ? config.n8n.defaultWebhookUrl : undefined);
   if (!webhookUrl) {
     // No webhook configured and AI not enabled — session stays waiting, agent picks up
     return false;

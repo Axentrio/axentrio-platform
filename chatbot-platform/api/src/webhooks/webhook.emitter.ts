@@ -3,6 +3,7 @@ import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
 import { deliverWebhook } from './webhook.dispatcher';
+import { getAutomationEngine } from '../automations';
 import type { EventWebhookConfig, WebhookEvent, WebhookEventBase, WebhookEventType } from './webhook.types';
 
 type SessionContext = WebhookEventBase['session'] & { id: string; tenantId: string };
@@ -51,6 +52,17 @@ export function emitWebhookEvent(event: WebhookEvent): void {
       }
 
       await Promise.allSettled(matching.map((cfg) => deliverWebhook(cfg, event)));
+
+      const engine = getAutomationEngine();
+      if (engine) {
+        engine.process(event, tenant).catch((err) => {
+          logger.error('AutomationEngine.process failed', {
+            tenantId: event.tenantId,
+            eventId: event.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
     } catch (err) {
       logger.error('emitWebhookEvent: unexpected error', {
         tenantId: event.tenantId,

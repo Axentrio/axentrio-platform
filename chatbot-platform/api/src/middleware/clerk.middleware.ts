@@ -133,6 +133,28 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
             clerkOrgId,
             tier: 'pro',
             status: 'active',
+            settings: {
+              ai: {
+                enabled: true,
+                usePlatformAgent: true,
+                provider: 'openai',
+                model: 'gpt-4o-mini',
+                brandVoice: {
+                  name: `${orgName} Assistant`,
+                  tone: 'friendly',
+                  customInstructions: '',
+                },
+                guardrails: {
+                  topicsToAvoid: [],
+                  escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
+                  confidenceThreshold: 0.7,
+                  maxResponseLength: 500,
+                  greetingMessage: 'Welcome! How can I help you today?',
+                  fallbackMessage: 'Let me connect you with our team.',
+                  offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
+                },
+              },
+            },
           })
           .orIgnore() // ON CONFLICT DO NOTHING
           .execute();

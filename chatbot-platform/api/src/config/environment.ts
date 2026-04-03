@@ -144,6 +144,10 @@ const envSchema = z.object({
   CLAMAV_PORT: z.string().default('3310').transform(Number),
   CLAMAV_TIMEOUT: z.string().default('60000').transform(Number),
 
+  // Email (Resend)
+  RESEND_API_KEY: z.string().optional(),
+  EMAIL_FROM_ADDRESS: z.string().default('noreply@notifications.example.com'),
+
   // Meta (Messenger + Instagram)
   META_APP_ID: z.string().optional(),
   META_APP_SECRET: z.string().optional(),
@@ -350,6 +354,11 @@ export const config = {
     verifyToken: env.META_VERIFY_TOKEN || '',
     oauthRedirectUri: env.META_OAUTH_REDIRECT_URI || '',
     oauthJwtSecret: env.META_OAUTH_JWT_SECRET || '',
+  },
+
+  email: {
+    resendApiKey: env.RESEND_API_KEY,
+    fromAddress: env.EMAIL_FROM_ADDRESS,
   },
 
   api: {

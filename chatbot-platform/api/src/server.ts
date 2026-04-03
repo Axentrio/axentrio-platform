@@ -41,6 +41,8 @@ import knowledgeRoutes from './knowledge/knowledge.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
+import skillsRoutes from './routes/skills.routes';
+import automationsRoutes from './routes/automations.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
@@ -202,6 +204,8 @@ apiRouter.use('/knowledge', knowledgeRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/tenants/me', aiSettingsRoutes);
 apiRouter.use('/tenants/me', integrationsRoutes);
+apiRouter.use('/tenants', skillsRoutes);
+apiRouter.use('/tenants', automationsRoutes);
 
 app.use('/api/v1', apiRouter);
 
@@ -295,6 +299,15 @@ async function startServer(): Promise<void> {
       logger.info('Platform agent service initialized');
     } catch (err) {
       logger.warn('Platform agent initialization failed — agent path disabled', { error: err });
+    }
+
+    // Initialize automation engine
+    try {
+      const { initializeAutomations } = await import('./automations');
+      initializeAutomations();
+      logger.info('Automation engine initialized');
+    } catch (err) {
+      logger.warn('Automation engine initialization failed', { error: err });
     }
 
     // Internal RAG search endpoint for n8n (independent of webhook module)

@@ -848,4 +848,84 @@ router.delete(
   })
 );
 
+export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
+  const settings = tenant.settings || {};
+  const ai = settings.ai || {};
+  const integrations = settings.integrations || {};
+  const automations = settings.automations || {};
+
+  const steps = {
+    aiEnabled: !!(ai.enabled && ai.usePlatformAgent),
+    brandVoiceConfigured: !!(ai.brandVoice?.name && ai.brandVoice.name !== 'Organization Assistant'),
+    knowledgeBaseHasDocs: kbDocCount > 0,
+    calcomConnected: !!(integrations.calcom?.apiKey && integrations.calcom?.eventTypeId),
+    automationsConfigured: !!(
+      automations.emailNotifications?.bookingConfirmation?.enabled ||
+      automations.emailNotifications?.newLeadAlert?.enabled ||
+      automations.emailNotifications?.conversationSummary?.enabled
+    ),
+  };
+
+  const completedCount = Object.values(steps).filter(Boolean).length;
+
+  return {
+    complete: completedCount === 5,
+    completedCount,
+    totalCount: 5,
+    steps,
+  };
+}
+
+/**
+ * Get onboarding status
+ * GET /api/v1/tenants/me/onboarding-status
+ */
+router.get(
+  '/me/onboarding-status',
+  requireClerkAuth, autoProvision,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError('Tenant not found');
+
+    const kbResult = await AppDataSource.query(
+      `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
+      [tenantId]
+    ).catch(() => [{ count: 0 }]);
+
+    const status = computeOnboardingStatus(tenant, kbResult[0]?.count || 0);
+    res.json({ success: true, data: status });
+  })
+);
+
+/**
+ * Get available tools for the tenant
+ * GET /api/v1/tenants/me/available-tools
+ */
+router.get(
+  '/me/available-tools',
+  requireClerkAuth, autoProvision,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.user!.tenantId;
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError('Tenant not found');
+
+    const { ToolRegistry } = await import('../agent/tool-registry');
+    const registry = new ToolRegistry();
+    const tools = await registry.getToolsForTenant(tenant);
+
+    res.json({
+      success: true,
+      data: {
+        tools: tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          hasSideEffects: t.hasSideEffects,
+          category: ['kb_search', 'capture_lead', 'escalate_to_human'].includes(t.name) ? 'always' : 'booking',
+        })),
+      },
+    });
+  })
+);
+
 export { router as tenantRouter };

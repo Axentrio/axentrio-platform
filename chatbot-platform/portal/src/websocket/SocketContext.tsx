@@ -157,6 +157,19 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       handlersRef.current.forEach((handlers) => {
         handlers.onHandoffNew?.(handoff);
       });
+      // Play notification sound + show browser notification
+      try {
+        const audio = new Audio('/sounds/notification.mp3');
+        audio.volume = 0.5;
+        audio.play().catch(() => {});
+      } catch {}
+      // Browser desktop notification
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('New handoff request', {
+          body: `A visitor needs assistance (${handoff.reason || 'escalation'})`,
+          icon: '/favicon.ico',
+        });
+      }
     });
 
     socket.on(WS_EVENTS.HANDOFF_UPDATE, (handoff: HandoffRequest) => {

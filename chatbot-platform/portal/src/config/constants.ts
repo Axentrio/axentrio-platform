@@ -139,7 +139,7 @@ export const WS_EVENTS = {
   CHAT_TYPING_UPDATE: 'chat:typing:update',
   
   // Handoff Events
-  HANDOFF_NEW: 'handoff:new',
+  HANDOFF_NEW: 'handoff:requested',
   HANDOFF_UPDATE: 'handoff:update',
   HANDOFF_ACCEPT: 'handoff:accept',
   HANDOFF_DECLINE: 'handoff:decline',

@@ -5,17 +5,20 @@ import { queryKeys } from './queryKeys';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-interface OnboardingStep {
-  key: string;
-  complete: boolean;
-  [key: string]: Any;
+interface OnboardingSteps {
+  aiEnabled: boolean;
+  brandVoiceConfigured: boolean;
+  knowledgeBaseHasDocs: boolean;
+  calcomConnected: boolean;
+  automationsConfigured: boolean;
+  [key: string]: boolean;
 }
 
 interface OnboardingStatusResponse {
   complete: boolean;
   completedCount: number;
   totalCount: number;
-  steps: OnboardingStep[];
+  steps: OnboardingSteps;
 }
 
 interface AvailableToolsResponse {

@@ -13,11 +13,11 @@ interface ChecklistItem {
 }
 
 const CHECKLIST_ITEMS: ChecklistItem[] = [
-  { key: 'ai_enabled', label: 'AI Assistant enabled', link: '/ai?tab=settings' },
-  { key: 'brand_voice', label: 'Brand voice configured', link: '/ai?tab=settings' },
-  { key: 'knowledge_base', label: 'Upload knowledge base docs', link: '/ai?tab=knowledge' },
-  { key: 'booking_calendar', label: 'Connect booking calendar', link: '/settings/integrations' },
-  { key: 'automations', label: 'Set up automations', link: '/settings/automations' },
+  { key: 'aiEnabled', label: 'AI Assistant enabled', link: '/ai?tab=settings' },
+  { key: 'brandVoiceConfigured', label: 'Brand voice configured', link: '/ai?tab=settings' },
+  { key: 'knowledgeBaseHasDocs', label: 'Upload knowledge base docs', link: '/ai?tab=knowledge' },
+  { key: 'calcomConnected', label: 'Connect booking calendar', link: '/settings/integrations' },
+  { key: 'automationsConfigured', label: 'Set up automations', link: '/settings/automations' },
 ];
 
 export const OnboardingBanner: React.FC = () => {
@@ -33,9 +33,10 @@ export const OnboardingBanner: React.FC = () => {
   if (dismissed) return null;
   if (status.completedCount >= status.totalCount) return null;
 
-  // Map completed step keys from the API response
+  // Map completed step keys from the API response (steps is an object: { aiEnabled: true, ... })
+  const steps = status.steps;
   const completedKeys = new Set(
-    status.steps.filter((s) => s.complete).map((s) => s.key)
+    Object.entries(steps).filter(([, v]) => v).map(([k]) => k)
   );
 
   const handleDismiss = () => {

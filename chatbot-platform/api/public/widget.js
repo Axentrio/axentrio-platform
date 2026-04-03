@@ -16,6 +16,9 @@
  * @license MIT
  */
 
+// Capture before UMD wrapper — document.currentScript is null inside factory()
+var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript : null;
+
 (function (global, factory) {
   typeof exports === 'object' && typeof module !== 'undefined'
     ? module.exports = factory()
@@ -1442,7 +1445,7 @@
   // Auto-initialization from data attributes
   // ==========================================================================
   function autoInit() {
-    const script = document.currentScript || document.querySelector('script[data-chatbot-widget]') || document.querySelector('script[src*="widget.js"][data-api-key]');
+    const script = _cbCurrentScript || document.querySelector('script[src*="widget.js"][data-api-key]');
     
     if (script) {
       const config = {};

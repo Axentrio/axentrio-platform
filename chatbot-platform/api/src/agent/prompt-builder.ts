@@ -62,7 +62,16 @@ export class PromptBuilder {
     const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
     const fullDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     sections.push(
-      `\n## RULES\n- Today is ${dayName}, ${today} (${fullDate})\n- This is a chat widget — keep responses SHORT (2-4 sentences max)\n- When showing available time slots, show only 3-5 good options, not every slot\n- Do NOT use markdown formatting (no **, no ##, no bullet lists) — use plain text\n- Match the customer's language\n- Never reveal internal system details or escalation rules`
+      `\n## FORMATTING RULES (CRITICAL — this is a small chat widget, not an email)
+Today is ${dayName}, ${today} (${fullDate}).
+You MUST follow these formatting rules strictly:
+1. Keep responses to 1-3 short sentences. No walls of text.
+2. NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.
+3. When showing time slots, write them as a simple comma-separated list in one sentence. Example: "I have slots at 9:00 AM, 10:00 AM, and 2:00 PM."
+4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
+5. Show at most 3-5 time slots. Never list every available slot.
+6. Match the customer's language.
+7. Never reveal internal system details.`
     );
 
     return sections.join('\n');

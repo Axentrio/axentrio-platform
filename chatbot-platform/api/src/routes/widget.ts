@@ -159,10 +159,10 @@ router.post(
     }
 
     // Determine initial status based on AI settings
-    // n8n is the brain — AI-enabled tenants start as 'bot' regardless of KB
     const aiEnabled = tenant.settings?.ai?.enabled;
+    const usePlatformAgent = (tenant.settings?.ai as any)?.usePlatformAgent;
     const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
-    const initialStatus = (aiEnabled && hasWebhook) ? 'bot' : 'waiting';
+    const initialStatus = (aiEnabled && (hasWebhook || usePlatformAgent)) ? 'bot' : 'waiting';
 
     // Create new session
     const session = sessionRepository.create({

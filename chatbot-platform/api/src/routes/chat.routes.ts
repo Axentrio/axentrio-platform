@@ -149,11 +149,23 @@ router.post(
     const plainContent = content.trim();
     const messageContent = encrypt(plainContent);
 
+    // Resolve the participant ID — for widget users, look up by session
+    let resolvedParticipantId = user?.id || 'anonymous';
+    if (user?.type === 'widget') {
+      const participantRepo = AppDataSource.getRepository(Participant);
+      const userParticipant = await participantRepo.findOne({
+        where: { sessionId, type: 'user', isDeleted: false },
+      });
+      if (userParticipant) {
+        resolvedParticipantId = userParticipant.id;
+      }
+    }
+
     // Save message + update session in a single transaction
     const message = messageRepository.create({
       sessionId,
       tenantId: tenantId!,
-      participantId: user?.id || 'anonymous',
+      participantId: resolvedParticipantId,
       type,
       content: messageContent,
       contentEncrypted: true,

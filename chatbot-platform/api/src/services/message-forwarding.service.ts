@@ -19,6 +19,7 @@ import { emitToTenantAgents } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { config } from '../config/environment';
+import { AgentService, AgentResult } from '../agent/agent.service';
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
@@ -29,6 +30,7 @@ const handoffRepository = AppDataSource.getRepository(HandoffRequest);
 // Module-level service references, set via initialize()
 let outboundService: OutboundService | null = null;
 let fallbackServiceRef: FallbackService | null = null;
+let agentService: AgentService | null = null;
 
 /**
  * Initialize with n8n service references
@@ -40,6 +42,11 @@ export function initializeForwarding(
   outboundService = outbound;
   fallbackServiceRef = fallback;
   logger.info('Message forwarding service initialized');
+}
+
+export function initializeAgentService(agent: AgentService): void {
+  agentService = agent;
+  logger.info('Platform agent service initialized for message forwarding');
 }
 
 export function getFallbackService(): FallbackService | null {
@@ -226,6 +233,16 @@ export async function forwardMessageToN8n(
     }
   }
 
+  // ── Platform agent path (opted-in tenants without custom webhook) ─────
+  if (
+    !tenantUrl &&
+    aiSettings?.enabled &&
+    (aiSettings as any)?.usePlatformAgent &&
+    agentService
+  ) {
+    return platformAgentPath(session, savedMessage, tenant, aiSettings);
+  }
+
   // ── Build enriched outbound payload ────────────────────────────────────
   const webhookConfig = buildWebhookConfig(tenant);
   // Override URL with resolved webhook URL (may be global default)
@@ -320,6 +337,82 @@ export async function forwardMessageToN8n(
   }
 
   return true;
+}
+
+// ── Platform Agent Path ──────────────────────────────────────────────────
+
+async function platformAgentPath(
+  session: ChatSession,
+  savedMessage: Message,
+  tenant: Tenant,
+  aiSettings: NonNullable<Tenant['settings']>['ai'],
+): Promise<boolean> {
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+
+  // Decrypt message content
+  const messageContent = savedMessage.contentEncrypted
+    ? decrypt(savedMessage.content)
+    : savedMessage.content;
+
+  // Load conversation history for the agent loop
+  const history = await getConversationHistory(session.id);
+
+  try {
+    const result: AgentResult = await agentService!.run(
+      messageContent,
+      session,
+      tenant,
+      history,
+    );
+
+    switch (result.type) {
+      case 'response':
+        await sendBotMessage(session, botParticipant.id, result.content);
+        break;
+
+      case 'error':
+        logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
+        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+        await handleBotHandoff(session, botParticipant.id, 'bot_error');
+        break;
+
+      case 'budget_exceeded':
+        logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
+        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+        await handleBotHandoff(session, botParticipant.id, 'bot_error');
+        break;
+
+      case 'max_iterations':
+        logger.warn(`Platform agent max iterations for session ${session.id}`);
+        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+        await handleBotHandoff(session, botParticipant.id, 'bot_error');
+        break;
+
+      case 'awaiting_confirmation':
+        // Confirmation gate — just send the preview message, don't handoff
+        await sendBotMessage(session, botParticipant.id, result.message);
+        break;
+    }
+
+    // Transition waiting → bot on first message
+    if (session.status === 'waiting') {
+      await sessionRepository
+        .createQueryBuilder()
+        .update(ChatSession)
+        .set({ status: 'bot' })
+        .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
+        .execute();
+    }
+
+    return true;
+  } catch (error) {
+    logger.error(`Platform agent unexpected error for session ${session.id}`, error);
+    const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
+      "We're connecting you to an agent. Please hold on.";
+    await sendBotMessage(session, botParticipant.id, fallbackContent);
+    await handleBotHandoff(session, botParticipant.id, 'bot_error');
+    return true;
+  }
 }
 
 // ── RAG Helper Functions ──────────────────────────────────────────────────

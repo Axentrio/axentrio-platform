@@ -1,0 +1,87 @@
+import { describe, it, expect, vi } from 'vitest';
+
+// ── Mocks (must come before imports) ────────────────────────────────────────
+
+vi.mock('../../database/data-source', () => ({
+  AppDataSource: {
+    getRepository: vi.fn().mockReturnValue({
+      find: vi.fn().mockResolvedValue([]),
+    }),
+  },
+}));
+
+vi.mock('../../llm/rag.service', () => ({
+  searchKnowledge: vi.fn(),
+}));
+
+vi.mock('../../n8n/booking.service', () => ({
+  checkAvailability: vi.fn(),
+  createBooking: vi.fn(),
+  listBookings: vi.fn(),
+  rescheduleBooking: vi.fn(),
+  cancelBooking: vi.fn(),
+}));
+
+vi.mock('../../utils/logger', () => ({
+  logger: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+  },
+}));
+
+// ── Imports (after mocks) ───────────────────────────────────────────────────
+
+import { ToolRegistry } from '../../agent/tool-registry';
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+describe('ToolRegistry', () => {
+  it('registers all 7 built-in tools on construction', () => {
+    const registry = new ToolRegistry();
+    const builtins = registry.getBuiltinToolNames();
+    expect(builtins).toContain('kb_search');
+    expect(builtins).toContain('check_availability');
+    expect(builtins).toContain('create_booking');
+    expect(builtins).toContain('list_bookings');
+    expect(builtins).toContain('reschedule_booking');
+    expect(builtins).toContain('cancel_booking');
+    expect(builtins).toContain('escalate_to_human');
+    expect(builtins).toHaveLength(7);
+  });
+
+  it('returns KB search + booking tools + escalation for tenant with calcom integration', async () => {
+    const registry = new ToolRegistry();
+    const tenant = {
+      id: 'tenant-1',
+      settings: {
+        ai: { enabled: true },
+        integrations: { calcom: { apiKey: 'enc_key', eventTypeId: 1 } },
+      },
+    };
+    const tools = await registry.getToolsForTenant(tenant as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain('kb_search');
+    expect(toolNames).toContain('check_availability');
+    expect(toolNames).toContain('create_booking');
+    expect(toolNames).toContain('list_bookings');
+    expect(toolNames).toContain('reschedule_booking');
+    expect(toolNames).toContain('cancel_booking');
+    expect(toolNames).toContain('escalate_to_human');
+  });
+
+  it('excludes booking tools when tenant has no calcom integration', async () => {
+    const registry = new ToolRegistry();
+    const tenant = { id: 'tenant-2', settings: { ai: { enabled: true } } };
+    const tools = await registry.getToolsForTenant(tenant as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain('kb_search');
+    expect(toolNames).toContain('escalate_to_human');
+    expect(toolNames).not.toContain('check_availability');
+    expect(toolNames).not.toContain('create_booking');
+    expect(toolNames).not.toContain('list_bookings');
+    expect(toolNames).not.toContain('reschedule_booking');
+    expect(toolNames).not.toContain('cancel_booking');
+  });
+});

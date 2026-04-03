@@ -104,8 +104,16 @@ app.get('/widget.js', (_req, res) => {
   });
 });
 
-// Widget API — before restrictive CORS (widget is embedded on customer sites)
-app.use('/api/v1/widget', cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'] }), express.json(), widgetRoutes);
+// Widget API — open CORS for cross-origin embedding on customer sites
+// Must be before helmet/CSP which sets restrictive CORP headers
+app.use('/api/v1/widget', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+  next();
+}, express.json(), widgetRoutes);
 
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);

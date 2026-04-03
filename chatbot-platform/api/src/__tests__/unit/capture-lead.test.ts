@@ -17,12 +17,7 @@ import type { ToolContext } from '../../agent/tool-adapter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-const mockQueryBuilder = {
-  update: vi.fn().mockReturnThis(),
-  set: vi.fn().mockReturnThis(),
-  where: vi.fn().mockReturnThis(),
-  execute: vi.fn().mockResolvedValue({}),
-};
+const mockQuery = vi.fn().mockResolvedValue([]);
 
 const mockRepo = {
   findOne: vi.fn().mockResolvedValue(null),
@@ -35,7 +30,7 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
     runId: 'run-xyz',
     toolsCalledThisTurn: [],
     dataSource: {
-      createQueryBuilder: vi.fn().mockReturnValue(mockQueryBuilder),
+      query: mockQuery,
       getRepository: vi.fn().mockReturnValue(mockRepo),
     } as any,
     conversationHistory: [],
@@ -48,7 +43,7 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
 describe('CaptureLeadTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockQueryBuilder.execute.mockResolvedValue({});
+    mockQuery.mockResolvedValue([]);
     mockBuildEventBase.mockReturnValue({
       id: 'evt-1',
       tenantId: 'tenant-123',
@@ -88,16 +83,17 @@ describe('CaptureLeadTool', () => {
     expect((result.data as any).email).toBe('alice@example.com');
   });
 
-  it('execute calls dataSource.createQueryBuilder to persist lead to session metadata', async () => {
+  it('execute calls dataSource.query to persist lead to session metadata', async () => {
     const tool = new CaptureLeadTool();
     const ctx = makeCtx();
 
     await tool.execute({ name: 'Bob Jones', email: 'bob@example.com' }, ctx);
 
-    expect(ctx.dataSource.createQueryBuilder).toHaveBeenCalled();
-    expect(mockQueryBuilder.update).toHaveBeenCalledWith('chat_sessions');
-    expect(mockQueryBuilder.where).toHaveBeenCalledWith('id = :id', { id: 'session-abc' });
-    expect(mockQueryBuilder.execute).toHaveBeenCalled();
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+    const [sql, params] = mockQuery.mock.calls[0];
+    expect(sql).toContain('UPDATE chat_sessions');
+    expect(sql).toContain('jsonb_set');
+    expect(params[1]).toBe('session-abc');
   });
 
   it('execute calls emitWebhookEvent with a lead.created event', async () => {
@@ -128,12 +124,7 @@ describe('CaptureLeadTool', () => {
     const tool = new CaptureLeadTool();
     const ctx = makeCtx({
       dataSource: {
-        createQueryBuilder: vi.fn().mockReturnValue({
-          update: vi.fn().mockReturnThis(),
-          set: vi.fn().mockReturnThis(),
-          where: vi.fn().mockReturnThis(),
-          execute: vi.fn().mockRejectedValue(new Error('DB write failed')),
-        }),
+        query: vi.fn().mockRejectedValue(new Error('DB write failed')),
         getRepository: vi.fn().mockReturnValue(mockRepo),
       } as any,
     });

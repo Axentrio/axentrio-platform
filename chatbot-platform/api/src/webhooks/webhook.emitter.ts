@@ -47,11 +47,9 @@ export function emitWebhookEvent(event: WebhookEvent): void {
         (cfg) => cfg.enabled && cfg.events.includes(event.type)
       );
 
-      if (matching.length === 0) {
-        return;
+      if (matching.length > 0) {
+        await Promise.allSettled(matching.map((cfg) => deliverWebhook(cfg, event)));
       }
-
-      await Promise.allSettled(matching.map((cfg) => deliverWebhook(cfg, event)));
 
       const engine = getAutomationEngine();
       if (engine) {

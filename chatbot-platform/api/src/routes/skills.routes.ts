@@ -126,6 +126,11 @@ router.put(
     }
 
     const updated: Skill = { ...skills[index], ...req.body, name };
+
+    // Validate the full merged skill
+    const validation = validateSkill(updated);
+    if (!validation.valid) throw new ValidationError(validation.error!);
+
     skills[index] = updated;
     tenant.settings = { ...tenant.settings, skills } as any;
     await repo.save(tenant);

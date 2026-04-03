@@ -247,8 +247,13 @@ describe('Booking Flow — Full Agent Loop', () => {
     );
   });
 
-  it('enforces preconditions: blocks create_booking if check_availability not called first', async () => {
-    // LLM tries to skip straight to create_booking
+  it('allows create_booking directly (precondition removed, handled by skill instructions)', async () => {
+    // LLM calls create_booking directly — no hard precondition blocks it
+    mockCreateBooking.mockResolvedValueOnce({
+      success: true,
+      booking: { id: 'bk_direct', startTime: '2026-04-07T10:00:00', attendee: { name: 'John', email: 'john@test.com' } },
+    });
+
     mockChat
       .mockResolvedValueOnce(llmToolCallResponse([{
         id: 'call_book_direct',
@@ -259,9 +264,8 @@ describe('Booking Flow — Full Agent Loop', () => {
           attendeeEmail: 'john@test.com',
         },
       }]))
-      // LLM gets the error, corrects course
       .mockResolvedValueOnce(llmTextResponse(
-        "I need to check availability first. When would you like to schedule your appointment?"
+        "Your appointment is booked for tomorrow at 10am!"
       ));
 
     const result = await agent.run(
@@ -272,10 +276,8 @@ describe('Booking Flow — Full Agent Loop', () => {
     );
 
     expect(result.type).toBe('response');
-    // create_booking should NOT have been called
-    expect(mockCreateBooking).not.toHaveBeenCalled();
-    // LLM should have been called twice (tool call rejected, then text response)
-    expect(mockChat).toHaveBeenCalledTimes(2);
+    // create_booking SHOULD have been called (no precondition blocking it)
+    expect(mockCreateBooking).toHaveBeenCalled();
   });
 
   it('handles user going off-topic mid-booking flow', async () => {

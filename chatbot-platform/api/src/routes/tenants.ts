@@ -129,6 +129,20 @@ router.patch(
       return;
     }
 
+    if (settings?.skills !== undefined) {
+      res.status(400).json({
+        error: 'Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.',
+      });
+      return;
+    }
+
+    if (settings?.automations !== undefined) {
+      res.status(400).json({
+        error: 'Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.',
+      });
+      return;
+    }
+
     // Deep merge settings (preserve nested objects like theme, features)
     if (settings) {
       const existing = tenant.settings || {};

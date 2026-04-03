@@ -38,8 +38,8 @@ export class PromptBuilder {
     sections.push(`\n## GUARDRAILS\n${guardrailLines.join('\n')}`);
 
     // Escalation
-    if (tools.some((t) => t.name === 'escalate_to_agent')) {
-      sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_agent tool.');
+    if (tools.some((t) => t.name === 'escalate_to_human')) {
+      sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');
     }
 
     // Skills

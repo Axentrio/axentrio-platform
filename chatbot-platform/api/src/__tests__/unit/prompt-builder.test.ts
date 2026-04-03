@@ -20,7 +20,7 @@ describe('PromptBuilder', () => {
 
   const mockTools: ToolAdapter[] = [
     { name: 'kb_search', description: 'Search KB', parameters: {}, hasSideEffects: false, execute: async () => ({ success: true }) },
-    { name: 'escalate_to_agent', description: 'Escalate', parameters: {}, hasSideEffects: true, execute: async () => ({ success: true }) },
+    { name: 'escalate_to_human', description: 'Escalate', parameters: {}, hasSideEffects: true, execute: async () => ({ success: true }) },
   ];
 
   it('includes brand voice in system prompt', () => {
@@ -38,7 +38,7 @@ describe('PromptBuilder', () => {
 
   it('includes escalation instruction', () => {
     const prompt = builder.build(baseTenant, mockTools);
-    expect(prompt).toContain('escalate_to_agent');
+    expect(prompt).toContain('escalate_to_human');
   });
 
   it('includes skill instructions when skills are configured', () => {

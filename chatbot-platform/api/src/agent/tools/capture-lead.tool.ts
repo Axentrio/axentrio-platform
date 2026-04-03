@@ -25,15 +25,10 @@ export class CaptureLeadTool implements ToolAdapter {
 
     try {
       // Persist lead info into session metadata
-      await ctx.dataSource
-        .createQueryBuilder()
-        .update('chat_sessions')
-        .set({
-          metadata: () =>
-            `jsonb_set(metadata, '{lead}', '${JSON.stringify({ name, email, ...(phone ? { phone } : {}) })}'::jsonb, true)`,
-        })
-        .where('id = :id', { id: ctx.sessionId })
-        .execute();
+      await ctx.dataSource.query(
+        `UPDATE chat_sessions SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{lead}', $1::jsonb) WHERE id = $2`,
+        [JSON.stringify({ name, email, phone: phone ?? null, capturedAt: new Date().toISOString() }), ctx.sessionId]
+      );
 
       // Build and fire webhook event (fire-and-forget)
       let session: ChatSession | null = null;

@@ -75,13 +75,11 @@ export class AgentService {
 
         // Call LLM
         const startMs = Date.now();
-        const response = await provider.chat(messages, {
-          model,
-          maxTokens: 1000,
-          temperature: 0.3,
-          jsonMode: false,
-          tools: toolDefs,
-        });
+        const timeoutMs = 30000; // 30 seconds
+        const response = await Promise.race([
+          provider.chat(messages, { model, maxTokens: 1000, temperature: 0.3, jsonMode: false, tools: toolDefs }),
+          new Promise<never>((_, reject) => setTimeout(() => reject(new Error('LLM request timeout after 30s')), timeoutMs)),
+        ]);
         const latencyMs = Date.now() - startMs;
 
         // Record metering
@@ -141,9 +139,13 @@ export class AgentService {
           try {
             const result = await tool.execute(toolCall.arguments, ctx);
             toolsCalled.push(tool.name);
+            let resultJson = JSON.stringify(result.data ?? { error: result.error });
+            if (resultJson.length > 4000) {
+              resultJson = resultJson.substring(0, 4000) + '...[truncated]';
+            }
             messages.push({
               role: 'tool',
-              content: JSON.stringify(result.data ?? { error: result.error }),
+              content: resultJson,
               toolCallId: toolCall.id,
             });
             traceEntry.toolCalls.push({

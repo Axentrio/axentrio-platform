@@ -45,6 +45,14 @@ export function validateAutomationUpdate(
     }
   }
 
+  if (Array.isArray(body.recipients) && body.recipients.length > 0) {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const invalidEmails = body.recipients.filter((r: string) => !emailRegex.test(r));
+    if (invalidEmails.length > 0) {
+      return { valid: false, error: `Invalid email addresses: ${invalidEmails.join(', ')}` };
+    }
+  }
+
   return { valid: true };
 }
 

@@ -22,6 +22,14 @@ import { sendSuccess, sendCreated } from '../utils/response';
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
 const ipHits = new Map<string, { count: number; resetAt: number }>();
+
+// Sweep expired entries every 60 seconds to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, data] of ipHits) {
+    if (now > data.resetAt) ipHits.delete(ip);
+  }
+}, 60_000).unref(); // .unref() so it doesn't keep the process alive
 function simpleRateLimit(maxRequests: number, windowMs: number) {
   return (req: Request, res: Response, next: Function) => {
     const ip = req.ip || 'unknown';

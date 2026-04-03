@@ -7,7 +7,7 @@ export const sendMessageSchema = z.object({
 });
 
 export const chatListQuerySchema = z.object({
-  status: z.enum(['active', 'closed', 'waiting', 'handoff']).optional(),
+  status: z.enum(['active', 'closed', 'waiting', 'handoff', 'bot']).optional(),
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
 });

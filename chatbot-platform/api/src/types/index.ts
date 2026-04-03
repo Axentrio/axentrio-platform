@@ -135,7 +135,7 @@ export interface IAgent {
 // Chat Session Types
 // ============================================================================
 
-export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff';
+export type SessionStatus = 'active' | 'closed' | 'waiting' | 'handoff' | 'bot';
 export type ParticipantType = 'user' | 'agent' | 'bot' | 'system';
 
 export interface IChatSession {

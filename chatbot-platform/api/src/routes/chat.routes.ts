@@ -349,7 +349,7 @@ router.get(
       .leftJoinAndSelect('session.assignedAgent', 'agent')
       .where('session.tenantId = :tenantId', { tenantId });
 
-    if (status && ['active', 'closed', 'waiting', 'handoff'].includes(status)) {
+    if (status && ['active', 'closed', 'waiting', 'handoff', 'bot'].includes(status)) {
       qb.andWhere('session.status = :status', { status });
     }
 

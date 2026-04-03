@@ -19,8 +19,21 @@ import {
   Users,
   X,
   ArrowLeft,
+  Bot,
+  CheckCircle,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { ChatStream } from '@components/ChatStream';
 import { ChatWindow } from '@components/ChatWindow';
 import { ChatStatusBadge, PriorityBadge } from '@components/StatusBadge';
@@ -135,6 +148,7 @@ const Inbox: React.FC = () => {
   // Transfer modal
   const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   // Handoff queue data
   const { handoffs, pendingCount } = useHandoffsQuery('pending');
@@ -172,8 +186,10 @@ const Inbox: React.FC = () => {
       // Refresh chat data after takeover
       const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
       setSelectedChat(data.data);
+      toast.success('You are now handling this conversation');
     } catch (error) {
       console.error('Failed to takeover chat:', error);
+      toast.error('Failed to take over conversation');
     }
   };
 
@@ -182,8 +198,10 @@ const Inbox: React.FC = () => {
       await acceptHandoffMutation.mutateAsync(handoff.id);
       // After accepting, take over the chat and show it
       await handleTakeover(handoff.chatId);
+      toast.success('Handoff accepted');
     } catch (error) {
       console.error('Failed to accept handoff:', error);
+      toast.error('Failed to accept handoff');
     }
   };
 
@@ -192,6 +210,7 @@ const Inbox: React.FC = () => {
       await rejectHandoffMutation.mutateAsync({ handoffId, reason: 'Agent unavailable' });
     } catch (error) {
       console.error('Failed to decline handoff:', error);
+      toast.error('Failed to decline handoff');
     }
   };
 
@@ -203,6 +222,7 @@ const Inbox: React.FC = () => {
       setSelectedChat(null);
     } catch (error) {
       console.error('Failed to transfer chat:', error);
+      toast.error('Failed to transfer chat');
     }
   };
 
@@ -212,10 +232,24 @@ const Inbox: React.FC = () => {
     try {
       await api.post(`/chats/${selectedChat.id}/close`);
       setSelectedChat(null);
+      toast.success('Conversation closed');
     } catch (error) {
       console.error('Failed to close chat:', error);
+      toast.error('Failed to close conversation');
     } finally {
       setIsClosing(false);
+      setConfirmClose(false);
+    }
+  };
+
+  const handleReturnToBot = async () => {
+    if (!selectedChat) return;
+    try {
+      await api.post(`/chats/${selectedChat.id}/release`);
+      toast.success('Conversation returned to bot');
+      setSelectedChat(null);
+    } catch (err) {
+      toast.error('Failed to return to bot');
     }
   };
 
@@ -285,7 +319,13 @@ const Inbox: React.FC = () => {
           'w-full md:w-[400px] md:min-w-[400px] flex-shrink-0 border-r border-edge overflow-hidden flex flex-col',
           selectedChat && 'hidden md:flex'
         )}>
-          {activeTab === 'handsoff' && pendingCount > 0 ? (
+          {activeTab === 'handsoff' && pendingCount === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-text-muted">
+              <CheckCircle className="w-10 h-10 mb-3 text-green-500/50" />
+              <p className="text-sm font-medium">All caught up!</p>
+              <p className="text-xs mt-1">No pending handoff requests</p>
+            </div>
+          ) : activeTab === 'handsoff' && pendingCount > 0 ? (
             /* Handoff queue cards */
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <div className="text-sm text-text-muted mb-2">
@@ -451,9 +491,18 @@ const Inbox: React.FC = () => {
                         Transfer
                       </Button>
                       <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleReturnToBot}
+                        className="gap-1.5 rounded-xl"
+                      >
+                        <Bot className="w-3.5 h-3.5" />
+                        Return to Bot
+                      </Button>
+                      <Button
                         variant="destructive"
                         size="sm"
-                        onClick={handleCloseChat}
+                        onClick={() => setConfirmClose(true)}
                         disabled={isClosing}
                         className="gap-2 rounded-xl"
                       >
@@ -486,6 +535,20 @@ const Inbox: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Confirm Close Dialog */}
+      <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Close this conversation?</AlertDialogTitle>
+            <AlertDialogDescription>The visitor will be disconnected and the conversation will be marked as resolved.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCloseChat} className="bg-red-600 hover:bg-red-700">Close conversation</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Transfer Modal */}
       <Modal

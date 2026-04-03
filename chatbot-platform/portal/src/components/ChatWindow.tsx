@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Paperclip, MoreVertical, Phone, User } from 'lucide-react';
+import { Send, ArrowRightLeft, User, Mail, Globe } from 'lucide-react';
 import { useChatDetail } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
 import { SlashCommandDropdown, CannedResponsePickerButton } from './CannedResponsePicker';
@@ -206,16 +206,9 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
               title="Transfer chat"
             >
-              <Phone className="w-5 h-5" />
+              <ArrowRightLeft className="w-5 h-5" />
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
-          >
-            <MoreVertical className="w-5 h-5" />
-          </Button>
           {onClose && (
             <Button
               variant="ghost"
@@ -228,6 +221,24 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           )}
         </div>
       </div>
+
+      {/* Visitor info */}
+      {(chat?.userEmail || chat?.metadata?.pageUrl) ? (
+        <div className="px-4 py-2 border-b border-edge bg-surface-1/50 text-xs text-text-secondary space-y-1">
+          {chat.userEmail && (
+            <div className="flex items-center gap-1.5">
+              <Mail className="w-3 h-3" />
+              <span>{chat.userEmail}</span>
+            </div>
+          )}
+          {chat.metadata?.pageUrl && (
+            <div className="flex items-center gap-1.5">
+              <Globe className="w-3 h-3" />
+              <span className="truncate">{chat.metadata.pageUrl}</span>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-4 bg-surface-1">
@@ -254,14 +265,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       {/* Input area */}
       <div className="px-4 py-3 border-t border-edge bg-surface-2">
         <div className="flex items-end gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl flex-shrink-0"
-          >
-            <Paperclip className="w-5 h-5" />
-          </Button>
-
           <CannedResponsePickerButton onSelect={handleCannedResponseSelect} />
 
           <div className="flex-1 relative">

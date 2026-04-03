@@ -179,9 +179,10 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
             </button>
           </div>
         ) : chats.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 text-text-secondary">
-            <MessageSquare className="w-8 h-8 mb-2 text-text-muted" />
-            <p>No chats found</p>
+          <div className="flex flex-col items-center justify-center py-16 text-text-muted">
+            <MessageSquare className="w-8 h-8 mb-2 opacity-40" />
+            <p className="text-sm">No conversations yet</p>
+            <p className="text-xs mt-1 text-text-muted/70">Chats will appear here when visitors start chatting</p>
           </div>
         ) : (
           chats.map((chat) => (
@@ -202,7 +203,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                     <span className="font-medium text-text-primary truncate">
                       {chat.userName || 'Anonymous'}
                     </span>
-                    <ChatStatusBadge status={chat.status} size="sm" showLabel={false} />
+                    <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
                   </div>
 
                   {/* Last message */}

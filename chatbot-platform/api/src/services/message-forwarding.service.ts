@@ -339,6 +339,32 @@ export async function forwardMessageToN8n(
   return true;
 }
 
+// ── Per-Session Lock ────────────────────────────────────────────────────
+// Prevents concurrent agent runs on the same session.
+// Uses Redis SET NX with TTL. Falls back to no-lock if Redis is down.
+
+async function acquireSessionLock(sessionId: string, ttlMs: number = 60000): Promise<boolean> {
+  try {
+    const { getRedisClient } = await import('../config/redis');
+    const redis = getRedisClient();
+    if (!redis) return true; // no Redis = no lock (fail open)
+    const result = await redis.set(`agent:lock:${sessionId}`, '1', 'PX', ttlMs, 'NX');
+    return result === 'OK';
+  } catch {
+    return true; // fail open
+  }
+}
+
+async function releaseSessionLock(sessionId: string): Promise<void> {
+  try {
+    const { getRedisClient } = await import('../config/redis');
+    const redis = getRedisClient();
+    if (redis) await redis.del(`agent:lock:${sessionId}`);
+  } catch {
+    // ignore
+  }
+}
+
 // ── Platform Agent Path ──────────────────────────────────────────────────
 
 async function platformAgentPath(
@@ -347,6 +373,14 @@ async function platformAgentPath(
   tenant: Tenant,
   aiSettings: NonNullable<Tenant['settings']>['ai'],
 ): Promise<boolean> {
+  // Acquire per-session lock — prevents concurrent agent runs
+  const locked = await acquireSessionLock(session.id);
+  if (!locked) {
+    logger.info(`Agent already processing session ${session.id}, skipping duplicate`);
+    return true; // message is saved, agent will see it in history on current run
+  }
+
+  try {
   const botParticipant = await ensureBotParticipant(session, aiSettings);
 
   // Decrypt message content
@@ -357,7 +391,6 @@ async function platformAgentPath(
   // Load conversation history for the agent loop
   const history = await getConversationHistory(session.id);
 
-  try {
     const result: AgentResult = await agentService!.run(
       messageContent,
       session,
@@ -409,9 +442,12 @@ async function platformAgentPath(
     logger.error(`Platform agent unexpected error for session ${session.id}`, error);
     const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
       "We're connecting you to an agent. Please hold on.";
-    await sendBotMessage(session, botParticipant.id, fallbackContent);
-    await handleBotHandoff(session, botParticipant.id, 'bot_error');
+    const bp = await ensureBotParticipant(session, aiSettings);
+    await sendBotMessage(session, bp.id, fallbackContent);
+    await handleBotHandoff(session, bp.id, 'bot_error');
     return true;
+  } finally {
+    await releaseSessionLock(session.id);
   }
 }
 

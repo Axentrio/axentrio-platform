@@ -15,7 +15,7 @@ import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
 import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
-import { emitToTenantAgents } from '../websocket/socket.handler';
+import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { config } from '../config/environment';
@@ -383,6 +383,13 @@ async function platformAgentPath(
   try {
   const botParticipant = await ensureBotParticipant(session, aiSettings);
 
+  // Show typing indicator while AI processes
+  emitToTenantAgents(session.tenantId, 'typing:indicator', {
+    sessionId: session.id, isTyping: true, participantType: 'bot',
+  });
+  // Also emit to the session room so the widget sees it
+  emitToSession(session.tenantId, session.id, 'typing:start', {});
+
   // Decrypt message content
   const messageContent = savedMessage.contentEncrypted
     ? decrypt(savedMessage.content)
@@ -427,6 +434,9 @@ async function platformAgentPath(
         break;
     }
 
+    // Stop typing indicator
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+
     // Transition waiting → bot on first message
     if (session.status === 'waiting') {
       await sessionRepository
@@ -439,6 +449,7 @@ async function platformAgentPath(
 
     return true;
   } catch (error) {
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
     logger.error(`Platform agent unexpected error for session ${session.id}`, error);
     const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
       "We're connecting you to an agent. Please hold on.";

@@ -45,10 +45,17 @@ import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
 import { createWebhookModule } from './n8n';
-import { initializeForwarding } from './services/message-forwarding.service';
+import { initializeForwarding, initializeAgentService } from './services/message-forwarding.service';
 import ragSearchRoutes from './n8n/rag-search.routes';
 import bookingRoutes from './n8n/booking.routes';
 import { EventEmitter } from './utils/event-emitter';
+
+// Platform agent
+import { ToolRegistry } from './agent/tool-registry';
+import { PromptBuilder } from './agent/prompt-builder';
+import { MeteringService } from './agent/metering.service';
+import { TraceLogger } from './agent/trace-logger';
+import { AgentService } from './agent/agent.service';
 
 // Channel integrations
 import metaWebhookRoutes from './channels/meta/webhook.routes';
@@ -273,6 +280,21 @@ async function startServer(): Promise<void> {
       logger.info('Webhook integration module initialized');
     } catch (err) {
       logger.warn('Webhook module initialization failed — webhooks disabled', { error: err });
+    }
+
+    // Initialize platform agent service
+    try {
+      const { getRedisClient } = await import('./config/redis');
+      const redisClient = getRedisClient();
+      const toolRegistry = new ToolRegistry();
+      const promptBuilder = new PromptBuilder();
+      const metering = new MeteringService(redisClient as any);
+      const traceLogger = new TraceLogger();
+      const agentSvc = new AgentService(toolRegistry, promptBuilder, metering, traceLogger);
+      initializeAgentService(agentSvc);
+      logger.info('Platform agent service initialized');
+    } catch (err) {
+      logger.warn('Platform agent initialization failed — agent path disabled', { error: err });
     }
 
     // Internal RAG search endpoint for n8n (independent of webhook module)

@@ -35,6 +35,7 @@ interface ChatMessage {
   content: string;
   sender: 'visitor' | 'bot' | 'agent';
   timestamp: Date;
+  metadata?: { quickReplies?: string[] } | null;
 }
 
 interface LogEntry {
@@ -67,11 +68,12 @@ function logTime(d: Date): string {
 // Chat Widget
 // ==========================================================================
 function ChatWidget({
-  messages, input, setInput, onSend, onKeyDown, connected, sessionStatus,
+  messages, setMessages, input, setInput, onSend, onKeyDown, connected, sessionStatus,
   isTyping, messagesEndRef, isOpen, onToggle, onClose,
 }: {
-  messages: ChatMessage[]; input: string; setInput: (v: string) => void;
-  onSend: () => void; onKeyDown: (e: React.KeyboardEvent) => void;
+  messages: ChatMessage[]; setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  input: string; setInput: (v: string) => void;
+  onSend: (_e?: any, text?: string) => void; onKeyDown: (e: React.KeyboardEvent) => void;
   connected: boolean; sessionStatus: SessionStatus; isTyping: boolean;
   messagesEndRef: React.RefObject<HTMLDivElement>;
   isOpen: boolean; onToggle: () => void; onClose: () => void;
@@ -138,30 +140,51 @@ function ChatWidget({
             </div>
           )}
 
-          {messages.map((msg) => {
+          {messages.map((msg, idx) => {
             const isVisitor = msg.sender === 'visitor';
+            const quickReplies = (!isVisitor && msg.metadata?.quickReplies) || [];
+            const isLastBotMsg = !isVisitor && idx === messages.length - 1;
             return (
-              <div key={msg.id} className={cn('flex gap-2', isVisitor ? 'justify-end' : 'justify-start')}>
-                {!isVisitor && (
-                  <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#4338ca]/[0.08] flex items-center justify-center mt-0.5">
-                    {msg.sender === 'agent'
-                      ? <User size={11} className="text-[#4338ca]" strokeWidth={2.5} />
-                      : <Bot size={11} className="text-[#4338ca]" strokeWidth={2.5} />
-                    }
-                  </div>
-                )}
-                <div className={cn(
-                  'max-w-[78%] text-[13px] leading-[1.55] px-3.5 py-2.5',
-                  isVisitor
-                    ? 'bg-[#4338ca] text-white rounded-[14px] rounded-br-[4px]'
-                    : 'bg-[#f0ede6] text-[#2d2a23] rounded-[14px] rounded-bl-[4px]',
-                )}>
-                  {msg.content}
-                  <div className={cn('text-[10px] mt-1 leading-none', isVisitor ? 'text-white/50' : 'text-[#b5ae9e]')}>
-                    {timeStr(msg.timestamp)}
+              <React.Fragment key={msg.id}>
+                <div className={cn('flex gap-2', isVisitor ? 'justify-end' : 'justify-start')}>
+                  {!isVisitor && (
+                    <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-[#4338ca]/[0.08] flex items-center justify-center mt-0.5">
+                      {msg.sender === 'agent'
+                        ? <User size={11} className="text-[#4338ca]" strokeWidth={2.5} />
+                        : <Bot size={11} className="text-[#4338ca]" strokeWidth={2.5} />
+                      }
+                    </div>
+                  )}
+                  <div className={cn(
+                    'max-w-[78%] text-[13px] leading-[1.55] px-3.5 py-2.5 whitespace-pre-wrap',
+                    isVisitor
+                      ? 'bg-[#4338ca] text-white rounded-[14px] rounded-br-[4px]'
+                      : 'bg-[#f0ede6] text-[#2d2a23] rounded-[14px] rounded-bl-[4px]',
+                  )}>
+                    {msg.content}
+                    <div className={cn('text-[10px] mt-1 leading-none', isVisitor ? 'text-white/50' : 'text-[#b5ae9e]')}>
+                      {timeStr(msg.timestamp)}
+                    </div>
                   </div>
                 </div>
-              </div>
+                {isLastBotMsg && quickReplies.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pl-8 mt-1">
+                    {quickReplies.map((qr: string) => (
+                      <button
+                        key={qr}
+                        onClick={() => {
+                          // Remove quick replies after click
+                          setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, metadata: null } : m));
+                          onSend(null, qr);
+                        }}
+                        className="text-[12px] font-medium px-3 py-1.5 rounded-full border-[1.5px] border-[#4338ca] text-[#4338ca] bg-white hover:bg-[#4338ca] hover:text-white transition-colors cursor-pointer"
+                      >
+                        {qr}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </React.Fragment>
             );
           })}
 
@@ -492,6 +515,23 @@ const WidgetTest: React.FC = () => {
         setTenantId(tid ?? null);
         addLog('info', `Session created: ${sid?.slice(0, 8)}...`);
 
+        // Load existing messages (greeting + history)
+        try {
+          const { data: histResp } = await axios.get(`${API_BASE_URL}/widget/history/${sid}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const histMsgs = (histResp?.data ?? histResp ?? []) as Array<{ id: string; content: string; metadata?: any; createdAt: string; sender?: { type?: string } }>;
+          if (histMsgs.length > 0 && !cancelled) {
+            setMessages(histMsgs.map(m => ({
+              id: m.id,
+              content: m.content,
+              sender: (m.sender?.type === 'bot' ? 'bot' : m.sender?.type === 'user' ? 'visitor' : 'bot') as ChatMessage['sender'],
+              timestamp: new Date(m.createdAt),
+              metadata: m.metadata,
+            })));
+          }
+        } catch { /* history load failed, continue without */ }
+
         socket = io(WS_BASE_URL, {
           query: { apiKey, visitorId: visitorIdRef.current },
           transports: ['websocket', 'polling'],
@@ -516,13 +556,13 @@ const WidgetTest: React.FC = () => {
           if (!cancelled) { setConnected(false); addLog('socket', `Disconnected: ${reason}`); }
         });
 
-        socket.on('message:receive', (payload: { id?: string; content: string; sender?: string; senderType?: string }) => {
+        socket.on('message:receive', (payload: { id?: string; content: string; sender?: string; senderType?: string; metadata?: any }) => {
           if (cancelled) return;
           if (payload.senderType === 'user' || payload.sender === 'visitor') return;
           setIsTyping(false);
           const sender = (payload.sender as ChatMessage['sender']) || 'bot';
           addLog('receive', `${payload.content.slice(0, 60)}${payload.content.length > 60 ? '...' : ''}`);
-          setMessages((prev) => [...prev, { id: payload.id || uid(), content: payload.content, sender, timestamp: new Date() }]);
+          setMessages((prev) => [...prev, { id: payload.id || uid(), content: payload.content, sender, timestamp: new Date(), metadata: payload.metadata }]);
         });
 
         socket.on('typing:indicator', (p: { isTyping?: boolean }) => {
@@ -557,8 +597,8 @@ const WidgetTest: React.FC = () => {
     return () => { cancelled = true; if (socket) { socket.disconnect(); socketRef.current = null; } };
   }, [apiKey, addLog]);
 
-  const handleSend = useCallback(() => {
-    const trimmed = input.trim();
+  const handleSend = useCallback((_e?: any, overrideText?: string) => {
+    const trimmed = (overrideText || input).trim();
     if (!trimmed || !socketRef.current || !sessionId) return;
     setMessages((prev) => [...prev, { id: uid(), content: trimmed, sender: 'visitor', timestamp: new Date() }]);
     setIsTyping(true);
@@ -607,7 +647,7 @@ const WidgetTest: React.FC = () => {
 
         <div className="absolute bottom-6 right-6 z-10">
           <ChatWidget
-            messages={messages} input={input} setInput={setInput}
+            messages={messages} setMessages={setMessages} input={input} setInput={setInput}
             onSend={handleSend} onKeyDown={handleKeyDown}
             connected={connected} sessionStatus={sessionStatus}
             isTyping={isTyping} messagesEndRef={messagesEndRef}

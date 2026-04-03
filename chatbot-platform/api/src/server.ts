@@ -43,6 +43,7 @@ import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import skillsRoutes from './routes/skills.routes';
 import automationsRoutes from './routes/automations.routes';
+import sessionManagementRoutes from './routes/session-management.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
@@ -191,6 +192,7 @@ apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
 apiRouter.use(timeoutMiddleware(30000));
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/chats', chatRoutes);
+apiRouter.use('/chats', sessionManagementRoutes);
 apiRouter.use('/handoffs', handoffRoutes);
 apiRouter.use('/agents', agentRoutes);
 apiRouter.use('/users', userRoutes);
@@ -378,6 +380,43 @@ async function startServer(): Promise<void> {
     // Run cleanup after 10 seconds, then every 24 hours
     setTimeout(cleanupAuditLogs, 10_000);
     setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
+
+    // Auto-close stale sessions — sessions with no activity for 30 minutes
+    const autoCloseStaleSessions = async () => {
+      try {
+        const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
+        const result = await AppDataSource.query(
+          `UPDATE chat_sessions
+           SET status = 'closed', ended_at = NOW(), updated_at = NOW()
+           WHERE status IN ('bot', 'waiting')
+           AND last_activity_at < $1
+           AND last_activity_at IS NOT NULL
+           RETURNING id`,
+          [cutoff]
+        );
+        const count = result?.length || result?.[0]?.length || 0;
+        if (count > 0) {
+          logger.info(`Auto-closed ${count} stale sessions`);
+        }
+      } catch (error) {
+        logger.error('Stale session cleanup failed', { error });
+      }
+    };
+    setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
+
+    // Cleanup old agent traces (30-day retention)
+    const cleanupAgentTraces = async () => {
+      try {
+        const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        await AppDataSource.query(
+          `DELETE FROM agent_traces WHERE created_at < $1`,
+          [cutoff]
+        );
+      } catch (error) {
+        logger.error('Agent trace cleanup failed', { error });
+      }
+    };
+    setInterval(cleanupAgentTraces, 24 * 60 * 60 * 1000); // Daily
 
     const PORT = config.server.port;
     httpServer.listen(PORT, () => {

@@ -104,6 +104,9 @@ app.get('/widget.js', (_req, res) => {
   });
 });
 
+// Widget API — before restrictive CORS (widget is embedded on customer sites)
+app.use('/api/v1/widget', cors({ origin: '*', methods: ['GET', 'POST', 'OPTIONS'] }), express.json(), widgetRoutes);
+
 // Request ID — must come before all other middleware
 app.use(requestIdMiddleware);
 

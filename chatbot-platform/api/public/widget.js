@@ -766,29 +766,43 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // ==========================================================================
   // ChatbotWidget Class
   // ==========================================================================
+  // Socket.IO CDN URL
+  const SOCKET_IO_CDN = 'https://cdn.socket.io/4.7.5/socket.io.min.js';
+
+  // Load Socket.IO client from CDN (returns a promise)
+  function loadSocketIO() {
+    if (window.io) return Promise.resolve(window.io);
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = SOCKET_IO_CDN;
+      script.onload = () => resolve(window.io);
+      script.onerror = () => reject(new Error('Failed to load Socket.IO client'));
+      document.head.appendChild(script);
+    });
+  }
+
   class ChatbotWidget {
     constructor(config = {}) {
       this.config = { ...DEFAULT_CONFIG, ...config };
       this.isOpen = false;
       this.messages = [];
-      this.ws = null;
+      this.socket = null;
       this.reconnectAttempts = 0;
-      this.heartbeatInterval = null;
       this.typingTimeout = null;
       this.uploadQueue = [];
       this.sessionId = null;
-      
-      this.init();
-    }
-    
-    init() {
+      this.tenantId = null;
+      this.visitorId = null;
+      this._connected = false;
+
+      // Render immediately, connect async
       this.loadSession();
       this.createShadowDOM();
       this.render();
       this.attachEventListeners();
-      this.connectWebSocket();
-      
-      if (this.config.greetingMessage) {
+
+      // Show greeting only for new sessions (no cached messages)
+      if (this.config.greetingMessage && this.messages.length === 0) {
         this.addMessage({
           id: utils.generateId(),
           text: this.config.greetingMessage,
@@ -796,32 +810,170 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           timestamp: new Date(),
         });
       }
-      
+
       this.log('Widget initialized');
+
+      // Async: load Socket.IO → init session → connect
+      this._initConnection();
     }
-    
-    loadSession() {
-      const stored = localStorage.getItem('cb_session');
+
+    async _initConnection() {
+      try {
+        await loadSocketIO();
+        await this._initSession();
+        this._connectSocketIO();
+      } catch (err) {
+        this.log('Connection init failed:', err.message);
+      }
+    }
+
+    async _initSession() {
+      // Try to restore existing session
+      const stored = localStorage.getItem('cb_session_v2');
       if (stored) {
         try {
           const session = JSON.parse(stored);
-          this.sessionId = session.id;
+          if (session.sessionId && session.tenantId) {
+            this.sessionId = session.sessionId;
+            this.tenantId = session.tenantId;
+            this.visitorId = session.visitorId;
+            this.log('Restored session:', this.sessionId);
+            return;
+          }
+        } catch (e) { /* ignore corrupt data */ }
+      }
+
+      // Create new session via API
+      this.visitorId = 'widget-' + utils.generateId();
+      const resp = await fetch(`${this.config.apiUrl}/api/v1/widget/init`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiKey: this.config.apiKey,
+          visitorId: this.visitorId,
+        }),
+      });
+
+      if (!resp.ok) throw new Error(`Widget init failed: ${resp.status}`);
+
+      const { data } = await resp.json();
+      this.sessionId = data.session.id;
+      this.tenantId = data.session.tenantId || data.tenantId;
+      this.log('New session created:', this.sessionId);
+      this._saveSession();
+    }
+
+    _connectSocketIO() {
+      if (!window.io) {
+        this.log('Socket.IO not loaded');
+        return;
+      }
+
+      this.socket = window.io(this.config.apiUrl, {
+        transports: ['websocket', 'polling'],
+        query: {
+          apiKey: this.config.apiKey,
+          visitorId: this.visitorId,
+        },
+        reconnection: true,
+        reconnectionAttempts: this.config.reconnectAttempts,
+        reconnectionDelay: this.config.reconnectDelay,
+      });
+
+      this.socket.on('connect', () => {
+        this.log('Socket.IO connected');
+        this._connected = true;
+        this.emit('connected');
+
+        // Join session room
+        this.socket.emit('session:join', { sessionId: this.sessionId });
+      });
+
+      this.socket.on('session:joined', (data) => {
+        this.log('Joined session room:', data.sessionId);
+      });
+
+      this.socket.on('session:join:error', () => {
+        // Session expired — clear and re-init
+        this.log('Session expired, re-initializing...');
+        localStorage.removeItem('cb_session_v2');
+        this._initSession().then(() => {
+          this.socket.emit('session:join', { sessionId: this.sessionId });
+        });
+      });
+
+      this.socket.on('connection:ack', (data) => {
+        this.log('Connection acknowledged:', data);
+      });
+
+      this.socket.on('message:receive', (data) => {
+        this.log('Message received:', data);
+        // Only show messages from bot/agent, not our own echoes
+        if (data.senderType !== 'user') {
+          this.hideTypingIndicator();
+          this.addMessage({
+            id: data.id || utils.generateId(),
+            text: data.content,
+            sender: 'bot',
+            timestamp: new Date(data.timestamp || data.createdAt),
+          });
+        }
+      });
+
+      this.socket.on('typing:indicator', (data) => {
+        if (data.senderType !== 'user') {
+          if (data.isTyping) {
+            this.showTypingIndicator();
+          } else {
+            this.hideTypingIndicator();
+          }
+        }
+      });
+
+      this.socket.on('error', (data) => {
+        this.log('Server error:', data);
+        if (data.message) this.showError(data.message);
+      });
+
+      this.socket.on('disconnect', (reason) => {
+        this.log('Socket.IO disconnected:', reason);
+        this._connected = false;
+        this.emit('disconnected');
+      });
+
+      this.socket.on('connect_error', (err) => {
+        this.log('Socket.IO connect error:', err.message);
+      });
+    }
+
+    loadSession() {
+      const stored = localStorage.getItem('cb_session_v2');
+      if (stored) {
+        try {
+          const session = JSON.parse(stored);
+          this.sessionId = session.sessionId;
+          this.tenantId = session.tenantId;
+          this.visitorId = session.visitorId;
           this.messages = session.messages || [];
         } catch (e) {
-          this.sessionId = utils.generateId();
+          // corrupt — will be re-created in _initSession
         }
-      } else {
-        this.sessionId = utils.generateId();
       }
     }
-    
-    saveSession() {
+
+    _saveSession() {
       if (this.config.cacheMessages) {
-        localStorage.setItem('cb_session', JSON.stringify({
-          id: this.sessionId,
+        localStorage.setItem('cb_session_v2', JSON.stringify({
+          sessionId: this.sessionId,
+          tenantId: this.tenantId,
+          visitorId: this.visitorId,
           messages: this.messages.slice(-this.config.maxCachedMessages),
         }));
       }
+    }
+
+    saveSession() {
+      this._saveSession();
     }
     
     createShadowDOM() {
@@ -1063,31 +1215,29 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     sendMessage(text = null) {
       const messageText = text || this.input.value.trim();
       if (!messageText) return;
-      
+
       const message = {
         id: utils.generateId(),
         text: messageText,
         sender: 'user',
         timestamp: new Date(),
       };
-      
+
       this.addMessage(message);
       this.input.value = '';
       this.input.style.height = 'auto';
-      
-      // Send via WebSocket
-      this.sendToServer({
-        type: 'message',
-        data: {
+
+      // Send via Socket.IO
+      if (this.socket && this._connected) {
+        this.socket.emit('message:send', {
           sessionId: this.sessionId,
-          tenantId: this.config.tenantId,
-          botId: this.config.botId,
-          text: messageText,
-        },
-      });
-      
+          content: messageText,
+          type: 'text',
+        });
+      }
+
       this.showTypingIndicator();
-      
+
       this.emit('message', message);
     }
     
@@ -1264,126 +1414,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     
     // ========================================================================
-    // WebSocket
+    // Connection Management
     // ========================================================================
-    
-    connectWebSocket() {
-      if (!utils.supportsWebSocket()) {
-        this.log('WebSocket not supported');
-        return;
-      }
-      
-      try {
-        const wsUrl = new URL(this.config.wsUrl);
-        wsUrl.searchParams.set('sessionId', this.sessionId);
-        wsUrl.searchParams.set('tenantId', this.config.tenantId);
-        wsUrl.searchParams.set('botId', this.config.botId);
-        
-        this.ws = new WebSocket(wsUrl.toString());
-        
-        this.ws.addEventListener('open', () => {
-          this.log('WebSocket connected');
-          this.reconnectAttempts = 0;
-          this.startHeartbeat();
-          this.emit('connected');
-        });
-        
-        this.ws.addEventListener('message', (e) => {
-          this.handleServerMessage(JSON.parse(e.data));
-        });
-        
-        this.ws.addEventListener('close', () => {
-          this.log('WebSocket closed');
-          this.stopHeartbeat();
-          this.attemptReconnect();
-          this.emit('disconnected');
-        });
-        
-        this.ws.addEventListener('error', (error) => {
-          this.log('WebSocket error:', error);
-          this.emit('error', error);
-        });
-        
-      } catch (error) {
-        this.log('Failed to connect WebSocket:', error);
-      }
-    }
-    
+
     disconnectWebSocket() {
-      this.stopHeartbeat();
-      if (this.ws) {
-        this.ws.close();
-        this.ws = null;
+      if (this.socket) {
+        this.socket.disconnect();
+        this.socket = null;
       }
-    }
-    
-    attemptReconnect() {
-      if (this.reconnectAttempts >= this.config.reconnectAttempts) {
-        this.log('Max reconnection attempts reached');
-        return;
-      }
-      
-      this.reconnectAttempts++;
-      const delay = this.config.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-      
-      this.log(`Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-      
-      setTimeout(() => {
-        this.connectWebSocket();
-      }, delay);
-    }
-    
-    startHeartbeat() {
-      this.heartbeatInterval = setInterval(() => {
-        this.sendToServer({ type: 'ping' });
-      }, this.config.heartbeatInterval);
-    }
-    
-    stopHeartbeat() {
-      if (this.heartbeatInterval) {
-        clearInterval(this.heartbeatInterval);
-        this.heartbeatInterval = null;
-      }
-    }
-    
-    sendToServer(data) {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(JSON.stringify(data));
-      }
-    }
-    
-    handleServerMessage(message) {
-      this.log('Received:', message);
-      
-      switch (message.type) {
-        case 'message':
-          this.hideTypingIndicator();
-          this.addMessage({
-            id: utils.generateId(),
-            text: message.data.text,
-            sender: 'bot',
-            timestamp: new Date(),
-          });
-          break;
-          
-        case 'typing':
-          this.showTypingIndicator();
-          break;
-          
-        case 'stop_typing':
-          this.hideTypingIndicator();
-          break;
-          
-        case 'pong':
-          // Heartbeat response
-          break;
-          
-        case 'error':
-          this.showError(message.data.message);
-          break;
-      }
-      
-      this.emit('serverMessage', message);
+      this._connected = false;
     }
     
     // ========================================================================

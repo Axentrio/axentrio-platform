@@ -372,6 +372,7 @@
       font-size: 14px;
       line-height: 1.5;
       word-wrap: break-word;
+      white-space: pre-wrap;
       max-width: 100%;
     }
     

@@ -9,8 +9,8 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
-import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { generateWidgetToken } from '../middleware/auth.middleware';
@@ -159,17 +159,10 @@ router.post(
     }
 
     // Determine initial status based on AI settings
+    // n8n is the brain — AI-enabled tenants start as 'bot' regardless of KB
     const aiEnabled = tenant.settings?.ai?.enabled;
-    let kb = null;
-    if (aiEnabled) {
-      try {
-        kb = await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: tenant.id, status: 'active' } });
-      } catch {
-        // knowledge_bases table may not exist yet — fall back to waiting
-        logger.warn('KnowledgeBase query failed, defaulting to waiting status');
-      }
-    }
-    const initialStatus = (aiEnabled && kb) ? 'bot' : 'waiting';
+    const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
+    const initialStatus = (aiEnabled && hasWebhook) ? 'bot' : 'waiting';
 
     // Create new session
     const session = sessionRepository.create({

@@ -180,7 +180,7 @@ export async function forwardMessageToN8n(
       const tz = bh.timezone || 'UTC';
       const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' });
       const dayName = dayFormatter.format(now).toLowerCase();
-      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false });
+      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
       const parts = timeFormatter.formatToParts(now);
       const hour = parts.find(p => p.type === 'hour')!.value;
       const minute = parts.find(p => p.type === 'minute')!.value;

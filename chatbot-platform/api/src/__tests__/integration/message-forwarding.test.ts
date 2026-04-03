@@ -11,7 +11,7 @@
  *   - Outbound router (channel routing)
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
@@ -428,10 +428,12 @@ describe('forwardMessageToN8n', () => {
   // ── 5. Business hours ────────────────────────────────────────────────────
 
   describe('business hours handling', () => {
-    const today = (() => {
-      const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long' });
-      return f.format(new Date()).toLowerCase();
-    })();
+    // Pin time to Wednesday 2026-01-14 at 10:00 UTC for deterministic tests
+    const FIXED_DATE = new Date('2026-01-14T10:00:00Z');
+    const FIXED_DAY = 'wednesday';
+
+    beforeEach(() => { vi.useFakeTimers({ now: FIXED_DATE }); });
+    afterEach(() => { vi.useRealTimers(); });
 
     it('should send offHoursMessage when outside hours (1-min window)', async () => {
       const tenant = await createTestTenant({
@@ -443,9 +445,9 @@ describe('forwardMessageToN8n', () => {
           businessHours: {
             enabled: true,
             timezone: 'UTC',
-            // 1-minute window at midnight — will always be outside hours
+            // Open 08:00–09:00 — fixed time 10:00 is outside this window
             schedule: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
-              .map((day) => ({ day, open: '00:00', close: '00:01', closed: false })),
+              .map((day) => ({ day, open: '08:00', close: '09:00', closed: false })),
           },
         },
       });
@@ -466,7 +468,7 @@ describe('forwardMessageToN8n', () => {
           businessHours: {
             enabled: true,
             timezone: 'UTC',
-            schedule: [{ day: today, open: '09:00', close: '17:00', closed: true }],
+            schedule: [{ day: FIXED_DAY, open: '09:00', close: '17:00', closed: true }],
           },
         },
       });
@@ -486,7 +488,7 @@ describe('forwardMessageToN8n', () => {
           businessHours: {
             enabled: true,
             timezone: 'UTC',
-            schedule: [{ day: today, open: '00:00', close: '23:59', closed: false }],
+            schedule: [{ day: FIXED_DAY, open: '00:00', close: '23:59', closed: false }],
           },
         },
       });
@@ -544,7 +546,7 @@ describe('forwardMessageToN8n', () => {
           businessHours: {
             enabled: true,
             timezone: 'UTC',
-            schedule: [{ day: today, open: '00:00', close: '00:01', closed: false }],
+            schedule: [{ day: FIXED_DAY, open: '08:00', close: '09:00', closed: false }],
           },
         },
       });
@@ -565,7 +567,7 @@ describe('forwardMessageToN8n', () => {
           businessHours: {
             enabled: true,
             timezone: 'UTC',
-            schedule: [{ day: today, open: '00:00', close: '00:01', closed: false }],
+            schedule: [{ day: FIXED_DAY, open: '08:00', close: '09:00', closed: false }],
           },
         },
       });

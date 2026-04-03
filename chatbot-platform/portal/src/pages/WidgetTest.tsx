@@ -517,7 +517,7 @@ const WidgetTest: React.FC = () => {
 
         // Load existing messages (greeting + history)
         try {
-          const { data: histResp } = await axios.get(`${API_BASE_URL}/widget/history/${sid}`, {
+          const { data: histResp } = await axios.get(`${API_BASE_URL}/widget/history`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           const histMsgs = (histResp?.data ?? histResp ?? []) as Array<{ id: string; content: string; metadata?: any; createdAt: string; sender?: { type?: string } }>;

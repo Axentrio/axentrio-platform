@@ -8,7 +8,7 @@ import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
-import { decrypt } from '../utils/encryption';
+import { decrypt, encrypt } from '../utils/encryption';
 import { Tenant } from '../database/entities/Tenant';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
@@ -478,11 +478,15 @@ async function sendBotMessage(
     tenantId: session.tenantId,
     participantId: botParticipantId,
     type: 'text' as Message['type'],
-    content,
+    content: encrypt(content),
+    contentEncrypted: true,
     status: 'sent' as Message['status'],
     sentAt: new Date(),
   });
   const saved = await messageRepository.save(botMsg);
+
+  await sessionRepository.increment({ id: session.id }, 'messageCount', 1);
+  await sessionRepository.update(session.id, { lastActivityAt: new Date() });
 
   // Route through outbound router — handles both WebSocket and external channels
   await routeOutboundMessage(

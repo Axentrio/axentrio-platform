@@ -13,6 +13,8 @@ import { authenticateWidget, asyncHandler, ValidationError, NotFoundError } from
 import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
+import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
@@ -218,7 +220,8 @@ router.post(
           tenantId: tenant.id,
           participantId: botParticipant.id,
           type: 'text' as Message['type'],
-          content: greetingMessage,
+          content: encrypt(greetingMessage),
+          contentEncrypted: true,
           status: 'sent' as Message['status'],
           sentAt: new Date(),
         });
@@ -274,7 +277,7 @@ router.get(
     sendSuccess(res, messages.map((msg) => ({
       id: msg.id,
       type: msg.type,
-      content: msg.content,
+      content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
       sender: {
         id: msg.participantId,
         type: msg.participant?.type,
@@ -295,7 +298,8 @@ router.post(
   widgetRateLimiter,
   authenticateWidget,
   asyncHandler(async (req: Request, res: Response) => {
-    const { content, type = 'text', metadata } = req.body;
+    const { content: plainContent, type = 'text', metadata } = req.body;
+    const content = plainContent;
     const sessionId = req.widget!.sessionId;
     const tenantId = req.widget!.tenantId;
     void req.widget!.visitorId; // visitorId available but not needed here
@@ -347,7 +351,8 @@ router.post(
       tenantId,
       participantId: participant.id,
       type,
-      content,
+      content: encrypt(content),
+      contentEncrypted: true,
       metadata: metadata || {},
       status: 'sent',
       sentAt: new Date(),
@@ -359,22 +364,26 @@ router.post(
     session.incrementMessageCount();
     await sessionRepository.save(session);
 
-    // Emit to WebSocket
+    // Emit to WebSocket — use original plaintext content
     emitToSession(tenantId, sessionId, 'message:receive', {
       id: message.id,
       sessionId: message.sessionId,
       participantId: message.participantId,
       participantType: 'user',
       type: message.type,
-      content: message.content,
+      content,
       metadata: message.metadata,
       timestamp: message.createdAt.toISOString(),
+    });
+
+    forwardMessageToN8n(session, message).catch((err) => {
+      logger.error('Error in n8n message forwarding (widget):', err);
     });
 
     sendCreated(res, {
       message: {
         id: message.id,
-        content: message.content,
+        content,
         type: message.type,
         createdAt: message.createdAt,
       },

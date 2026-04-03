@@ -349,6 +349,11 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
       return;
     }
 
+    if (session.status === 'closed') {
+      socket.emit('error', { message: 'Session is closed' });
+      return;
+    }
+
     // Determine sender type
     const senderType = user?.type === 'agent' ? 'agent' : 'user';
     const senderId = socket.data.participantId || user?.id || socket.id;
@@ -369,7 +374,8 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
 
     const savedMessage = await messageRepository.save(message);
 
-    // Update session last activity
+    // Update session last activity and message count
+    session.messageCount = (session.messageCount || 0) + 1;
     session.updateActivity();
     await sessionRepository.save(session);
 

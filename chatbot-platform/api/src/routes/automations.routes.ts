@@ -81,7 +81,13 @@ router.patch(
     const emailNotifications = existing.emailNotifications || {};
     const current = emailNotifications[type] || {};
 
-    const updated = { ...current, ...req.body };
+    const { enabled, subject, body, recipients, delayHours } = req.body;
+    const updated = { ...current };
+    if (enabled !== undefined) updated.enabled = enabled;
+    if (subject !== undefined) updated.subject = subject;
+    if (body !== undefined) updated.body = body;
+    if (recipients !== undefined) updated.recipients = recipients;
+    if (delayHours !== undefined) updated.delayHours = delayHours;
     tenant.settings = {
       ...tenant.settings,
       automations: {

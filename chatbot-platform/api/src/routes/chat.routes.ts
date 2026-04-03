@@ -530,6 +530,12 @@ router.post(
     session.endedAt = new Date();
     await sessionRepository.save(session);
 
+    emitToSession(req.user?.tenantId!, id, 'session:closed', {
+      sessionId: id,
+      endedAt: session.endedAt,
+      closedBy: 'agent',
+    });
+
     // Fire conversation.ended webhook — non-blocking, errors handled internally
     emitWebhookEvent({
       id: crypto.randomUUID(),

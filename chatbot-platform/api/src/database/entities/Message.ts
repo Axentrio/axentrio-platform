@@ -63,6 +63,7 @@ export class Message {
     dimensions?: { width: number; height: number };
     edited?: boolean;
     editedAt?: Date;
+    quickReplies?: (string | { title: string; value?: string })[];
     customData?: Record<string, unknown>;
   };
 

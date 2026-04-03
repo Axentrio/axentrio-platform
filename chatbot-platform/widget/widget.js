@@ -472,7 +472,37 @@
       0%, 80%, 100% { transform: scale(0); }
       40% { transform: scale(1); }
     }
-    
+
+    /* Quick Replies */
+    .cb-quick-replies {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px 16px 12px 48px;
+    }
+
+    .cb-quick-reply {
+      background: var(--cb-bg);
+      border: 1.5px solid var(--cb-primary);
+      color: var(--cb-primary);
+      border-radius: 18px;
+      padding: 8px 16px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      line-height: 1.3;
+    }
+
+    .cb-quick-reply:hover {
+      background: var(--cb-primary);
+      color: white;
+    }
+
+    .cb-quick-reply:active {
+      transform: scale(0.96);
+    }
+
     /* Input Area */
     .cb-input-area {
       padding: 16px 20px;
@@ -952,7 +982,19 @@
       } else {
         content = `<div class="cb-message__bubble">${utils.escapeHtml(message.text)}</div>`;
       }
-      
+
+      let quickRepliesHtml = '';
+      if (!isUser && message.metadata?.quickReplies?.length) {
+        quickRepliesHtml = `
+          <div class="cb-quick-replies">
+            ${message.metadata.quickReplies.map(qr => {
+              const label = typeof qr === 'string' ? qr : (qr.title || qr);
+              return `<button class="cb-quick-reply" data-value="${utils.escapeHtml(String(label))}">${utils.escapeHtml(String(label))}</button>`;
+            }).join('')}
+          </div>
+        `;
+      }
+
       return `
         <div class="cb-message cb-message--${message.sender}" data-id="${message.id}">
           <div class="cb-message__avatar">${isUser ? ICONS.user : ICONS.bot}</div>
@@ -961,13 +1003,14 @@
             ${time ? `<span class="cb-message__time">${time}</span>` : ''}
           </div>
         </div>
+        ${quickRepliesHtml}
       `;
     }
-    
+
     attachEventListeners() {
       // Launcher click
       this.launcher.addEventListener('click', () => this.toggle());
-      
+
       // Send message
       this.sendBtn.addEventListener('click', () => this.sendMessage());
       this.input.addEventListener('keydown', (e) => {
@@ -976,35 +1019,47 @@
           this.sendMessage();
         }
       });
-      
+
       // Auto-resize textarea
       this.input.addEventListener('input', () => {
         this.input.style.height = 'auto';
         this.input.style.height = Math.min(this.input.scrollHeight, 120) + 'px';
       });
-      
+
       // File upload
       if (this.attachBtn) {
         this.attachBtn.addEventListener('click', () => this.openFilePicker());
       }
-      
+
       // Camera
       if (this.cameraBtn) {
         this.cameraBtn.addEventListener('click', () => this.openCamera());
       }
-      
+
       // Drag and drop
       this.chatWindow.addEventListener('dragover', (e) => this.handleDragOver(e));
       this.chatWindow.addEventListener('dragleave', (e) => this.handleDragLeave(e));
       this.chatWindow.addEventListener('drop', (e) => this.handleDrop(e));
-      
+
+      // Quick reply clicks
+      this.messagesContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('.cb-quick-reply');
+        if (btn) {
+          const value = btn.dataset.value;
+          if (value) {
+            this.messagesContainer.querySelectorAll('.cb-quick-replies').forEach(el => el.remove());
+            this.sendMessage(value);
+          }
+        }
+      });
+
       // Window resize
       window.addEventListener('resize', utils.debounce(() => {
         if (utils.isMobile() && this.isOpen && this.config.fullScreenOnMobile) {
           this.chatWindow.style.height = '100%';
         }
       }, 100));
-      
+
       // Before unload
       window.addEventListener('beforeunload', () => {
         this.saveSession();
@@ -1358,6 +1413,7 @@
             text: message.data.text,
             sender: 'bot',
             timestamp: new Date(),
+            metadata: message.data.metadata || null,
           });
           break;
           

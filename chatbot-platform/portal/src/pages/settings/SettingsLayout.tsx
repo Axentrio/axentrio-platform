@@ -17,14 +17,17 @@ interface SettingsNavItem {
 }
 
 const settingsNav: SettingsNavItem[] = [
+  // Account
   { path: '/settings/profile', label: 'Profile', icon: User, group: 'Account' },
   { path: '/settings/notifications', label: 'Notifications', icon: Bell, group: 'Account' },
   { path: '/settings/appearance', label: 'Appearance', icon: Paintbrush, group: 'Account' },
-  { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Workspace' },
-  { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Workspace' },
-  { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Workspace' },
-  { path: '/settings/skills', label: 'Skills', icon: Zap, group: 'Workspace' },
-  { path: '/settings/automations', label: 'Automations', icon: Mail, group: 'Workspace' },
+  // Bot Configuration
+  { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Bot' },
+  { path: '/settings/skills', label: 'Skills', icon: Zap, group: 'Bot' },
+  { path: '/settings/automations', label: 'Automations', icon: Mail, group: 'Bot' },
+  // Connections
+  { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Connections' },
+  { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Connections' },
 ];
 
 const SettingsLayout: React.FC = () => {
@@ -33,7 +36,7 @@ const SettingsLayout: React.FC = () => {
 
   const visibleNav = useMemo(() => {
     if (isRole(['admin', 'super_admin'])) return settingsNav;
-    return settingsNav.filter((item) => item.group !== 'Workspace');
+    return settingsNav.filter((item) => item.group === 'Account');
   }, [isRole]);
 
   if (location.pathname === '/settings') {

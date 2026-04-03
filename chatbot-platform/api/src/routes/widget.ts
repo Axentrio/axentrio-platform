@@ -232,6 +232,9 @@ router.post(
           contentEncrypted: true,
           status: 'sent' as Message['status'],
           sentAt: new Date(),
+          metadata: {
+            quickReplies: ['Book appointment', 'Our services', 'Pricing', 'Talk to someone'],
+          },
         });
         await messageRepository.save(greeting);
       }

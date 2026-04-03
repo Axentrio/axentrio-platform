@@ -59,10 +59,16 @@ export interface LLMResponse {
 }
 
 // Extended ChatMessage to support tool results in conversation
-export type ChatMessage =
-  | { role: 'system' | 'user' | 'assistant'; content: string }
-  | { role: 'assistant'; content: string; toolCalls: ToolCall[] }
-  | { role: 'tool'; toolCallId: string; content: string };
+// Single interface with optional fields — each provider maps to its wire format internally
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCalls?: ToolCall[];    // present on assistant messages with tool calls
+  toolCallId?: string;       // present on tool result messages
+}
+// OpenAIProvider maps 'tool' role → { role: 'tool', tool_call_id, content }
+// AnthropicProvider maps 'tool' role → { role: 'user', content: [{ type: 'tool_result', ... }] }
+// Provider-specific wire format conversion is encapsulated in each provider.
 
 ```
 
@@ -107,7 +113,10 @@ export interface ToolAdapter {
 export interface ToolContext {
   tenantId: string;
   sessionId: string;
+  runId: string;                    // UUID per agent run, used as idempotency seed
   toolsCalledThisTurn: string[];
+  dataSource: DataSource;           // for KB search, DB queries
+  conversationHistory: ChatMessage[]; // for context-aware tools (KB search rewriting)
 }
 
 export interface ToolResult {
@@ -294,44 +303,85 @@ export class AgentService {
 }
 ```
 
-### 4.2 Confirmation Gate (Pause/Resume)
+### 4.2 Per-Session Mutex
+
+Before entering the agent loop, acquire a Redis lock to prevent concurrent loops on the same session:
+
+```
+Key: agent:lock:{sessionId}
+TTL: 60 seconds (auto-release on crash)
+Acquire: SET NX with TTL
+```
+
+If the lock is held (another message already being processed), queue the message for processing after the current loop completes. This prevents double-booking and overlapping tool calls on the same session.
+
+### 4.3 Confirmation Gate (Pause/Resume — Two-Phase Execution)
+
+The confirmation gate uses **two distinct execution phases**, not a synchronous wait:
+
+**Phase 1: Loop runs until confirmation needed, then exits.**
 
 When a tool has `hasSideEffects: true`:
-
-1. **Serialize loop state** to Redis:
+1. The agent loop serializes its state to Redis:
    - Key: `agent:confirm:{sessionId}:{toolCallId}`
-   - Value: `{ messages, iteration, pendingToolCall, trace }`
+   - Value: `{ messages, iteration, pendingToolCall, trace, runId }`
    - TTL: 300 seconds (5 minutes)
+2. Returns `{ type: 'awaiting_confirmation', ... }` to the caller
+3. The caller sends a confirmation prompt to the user (see channel handling below)
+4. The caller does NOT send a fallback message or transition session status
 
-2. **Send confirmation prompt** via Socket.IO:
-   ```json
-   {
-     "event": "agent:confirmation_needed",
-     "data": {
-       "toolCallId": "tc_123",
-       "toolName": "create_booking",
-       "preview": { "time": "2026-04-05 10:00", "attendee": "John" },
-       "message": "Should I book this appointment for April 5 at 10:00 AM?"
-     }
-   }
-   ```
+**Phase 2: Separate event handler resumes the loop on user response.**
 
-3. **Widget renders** a confirmation card with Confirm/Cancel buttons.
+A Socket.IO/channel event handler for `agent:confirmation_response`:
+1. Loads serialized state from Redis
+2. Validates `runId` matches (prevents stale confirmations)
+3. If confirmed: executes the tool, feeds result back, re-enters the agent loop
+4. If declined: feeds "user declined" to LLM, re-enters the loop
+5. On completion, sends the final bot message and cleans up
 
-4. **User responds** via Socket.IO event `agent:confirmation_response`:
-   ```json
-   { "toolCallId": "tc_123", "confirmed": true }
-   ```
+**Channel-Aware Confirmation:**
 
-5. **Platform loads state** from Redis, resumes the loop at the exact iteration.
+| Channel | Confirmation UX |
+|---------|----------------|
+| Widget (Socket.IO) | Structured confirmation card with Confirm/Cancel buttons |
+| Telegram | Text message: "Should I book April 5 at 10:00 AM? Reply YES to confirm or NO to cancel." |
+| Messenger/Instagram | Quick reply buttons via Meta API |
+| Any channel | Falls back to text-based "Reply YES/NO" if structured UI not supported |
 
-6. **Timeout:** If no response in 5 minutes, auto-decline. Send "I'll skip that for now. Is there anything else I can help with?"
+The `routeOutboundMessage()` function (existing) handles channel-specific formatting. The confirmation service sends via this router, not directly via Socket.IO.
 
-### 4.3 Agent Result Types
+**Timeout:** If no response in 5 minutes, auto-decline. Redis key expires, next user message starts a fresh loop.
+
+**Idempotency:** Every side-effecting tool call includes a `runId` (UUID generated per agent loop run) as part of the idempotency key. For booking tools, this maps to the existing `idempotencyKey` parameter in `createBooking()`. This prevents double-execution from retries, double-clicks, or worker restarts.
+
+### 4.4 Error Handling
+
+Every `tool.execute()` call is wrapped in try/catch:
+```typescript
+try {
+  const result = await tool.execute(toolCall.arguments, ctx);
+  // feed result to LLM
+} catch (error) {
+  // Feed error back to LLM as tool result (loop continues)
+  messages.push({
+    role: 'tool', toolCallId: toolCall.id,
+    content: JSON.stringify({ error: `Tool failed: ${error.message}` }),
+  });
+  // Record in trace
+}
+```
+
+The trace is ALWAYS saved, including on errors and budget exceeded. A top-level try/catch around the entire `run()` method ensures trace persistence.
+
+**Redis unavailability fallback:** If Redis is down when a confirmation gate fires, skip the confirmation and instruct the LLM to describe the action in its response text instead of executing it. The user can then request the action explicitly in their next message.
+
+### 4.5 Agent Result Types
 
 ```typescript
 type AgentResult =
   | { type: 'response'; content: string }
+  | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string;
+      preview: Record<string, unknown>; message: string }
   | { type: 'max_iterations'; fallbackMessage: string }
   | { type: 'budget_exceeded'; fallbackMessage: string }
   | { type: 'error'; error: string; fallbackMessage: string };
@@ -423,7 +473,7 @@ New file: `api/src/agent/metering.service.ts`
   - Compare against `tenant.settings.ai.dailyTokenBudget`
   - If exceeded, return budget_exceeded result
 
-- **Flush to DB:** Hourly cron writes Redis counters to `tenant_usage` table, resets Redis keys.
+- **Flush to DB:** Hourly cron reads Redis counters via `HGETALL`, writes to `tenant_usage` table using `INSERT ... ON CONFLICT (tenant_id, date) DO UPDATE SET total_tokens = total_tokens + EXCLUDED.total_tokens`. Does NOT reset Redis keys — Redis accumulates all day as the source of truth for budget checks. Keys auto-expire at midnight UTC via `EXPIREAT`.
 
 ### 6.2 Tenant Settings
 
@@ -549,12 +599,24 @@ async function platformAgentPath(session, savedMessage, tenant, aiSettings) {
 }
 ```
 
-### 8.2 Backward Compatibility
+### 8.2 Backward Compatibility & Migration
 
+**Routing logic (3 paths):**
 - Tenants with `webhookUrl` set → n8n path (zero changes)
-- Tenants with AI enabled, no `webhookUrl` → platform agent (new)
+- Tenants with AI enabled, `usePlatformAgent: true`, no `webhookUrl` → platform agent (new)
 - Tenants with neither → human-only (zero changes)
-- `N8N_DEFAULT_WEBHOOK_URL` env var is no longer used as fallback for AI tenants (platform handles it natively)
+
+**Opt-in flag:** New field `tenant.settings.ai.usePlatformAgent: boolean`:
+- Default `false` for ALL existing tenants (preserves current behavior)
+- Default `true` for newly created tenants
+- Existing AI-enabled tenants without `webhookUrl` continue using `N8N_DEFAULT_WEBHOOK_URL` until they opt in
+- This prevents silent routing changes on deployment
+
+**Migration path:**
+1. Deploy with `usePlatformAgent` flag (all existing tenants default to `false`)
+2. New tenants automatically get platform agent
+3. Existing tenants can opt in via dashboard toggle or API
+4. Log when a tenant switches paths for the first time (alerting)
 
 ---
 
@@ -623,6 +685,7 @@ CREATE TABLE tenant_usage (
 ```typescript
 // In tenant.settings.ai (existing JSONB)
 dailyTokenBudget?: number;
+usePlatformAgent?: boolean;  // opt-in flag (default false for existing, true for new tenants)
 
 // In tenant.settings (existing JSONB)
 skills?: Array<{
@@ -665,6 +728,9 @@ api/src/agent/
 - **Max iterations:** 10 per agent run
 - **Token budget:** Per-tenant daily limit with kill switch
 - **Webhook tool sandboxing:** Response size limit (10KB), timeout (10s default, 30s max), no redirects
+- **SSRF protection:** Block private IP ranges (10.x, 172.16-31.x, 192.168.x, 169.254.x, localhost, ::1). HTTPS-only in production. DNS resolution before connect to prevent rebinding.
+- **PII in traces:** Tool args containing email/phone fields are masked before storage (e.g., `j***@example.com`). Traces included in GDPR data deletion requests.
+- **Provider statelessness:** `LLMProvider` instances cached by API key hash MUST remain stateless. Tools are passed per-call via `LLMOptions`, never stored on the provider instance.
 
 ---
 

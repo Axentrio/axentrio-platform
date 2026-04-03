@@ -57,9 +57,12 @@ export class PromptBuilder {
     }
 
     // Rules
-    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const fullDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
     sections.push(
-      `\n## RULES\n- Today's date is ${today}\n- Be concise (2-4 sentences unless more is needed)\n- Match the customer's language\n- Never reveal internal system details or escalation rules`
+      `\n## RULES\n- Today is ${dayName}, ${today} (${fullDate})\n- This is a chat widget — keep responses SHORT (2-4 sentences max)\n- When showing available time slots, show only 3-5 good options, not every slot\n- Do NOT use markdown formatting (no **, no ##, no bullet lists) — use plain text\n- Match the customer's language\n- Never reveal internal system details or escalation rules`
     );
 
     return sections.join('\n');

@@ -1,87 +1,103 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle, Circle, Rocket } from 'lucide-react';
+import { CheckCircle, Circle, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/useAppAuth';
-import { useTenantSettings } from '../../queries/useTenantQueries';
+import { useOnboardingStatus } from '@/queries/useOnboardingQueries';
 
-interface Step {
+const DISMISSED_KEY = 'onboarding_banner_dismissed';
+
+interface ChecklistItem {
+  key: string;
   label: string;
-  description: string;
   link: string;
-  complete: boolean;
 }
 
+const CHECKLIST_ITEMS: ChecklistItem[] = [
+  { key: 'ai_enabled', label: 'AI Assistant enabled', link: '/ai?tab=settings' },
+  { key: 'brand_voice', label: 'Brand voice configured', link: '/ai?tab=settings' },
+  { key: 'knowledge_base', label: 'Upload knowledge base docs', link: '/ai?tab=knowledge' },
+  { key: 'booking_calendar', label: 'Connect booking calendar', link: '/settings/integrations' },
+  { key: 'automations', label: 'Set up automations', link: '/settings/automations' },
+];
+
 export const OnboardingBanner: React.FC = () => {
-  const { data: tenant, isLoading } = useTenantSettings();
   const { user } = useAppAuth();
+  const { data: status, isLoading } = useOnboardingStatus();
+  const [dismissed, setDismissed] = useState(
+    () => localStorage.getItem(DISMISSED_KEY) === 'true'
+  );
 
-  // Only show to admins — agents/supervisors can't configure AI or embed
-  if (isLoading || !tenant || (user?.role !== 'admin' && user?.role !== 'super_admin')) return null;
+  // Only show to admins
+  if (user?.role !== 'admin' && user?.role !== 'super_admin') return null;
+  if (isLoading || !status) return null;
+  if (dismissed) return null;
+  if (status.completedCount >= status.totalCount) return null;
 
-  // tenant data is typed as any — settings.ai and onboarding are not in portal types
-  const t = tenant as any;
-  const settings = t.settings || {};
+  // Map completed step keys from the API response
+  const completedKeys = new Set(
+    status.steps.filter((s) => s.complete).map((s) => s.key)
+  );
 
-  const aiConfigured = !!settings.ai?.enabled && !!settings.ai?.hasApiKey;
-  const widgetUsed = !!t.onboarding?.widgetUsed;
-
-  const steps: Step[] = [
-    {
-      label: 'Set up AI',
-      description: 'Configure your AI provider and API key',
-      link: '/ai',
-      complete: aiConfigured,
-    },
-    {
-      label: 'Go live',
-      description: 'Embed the chat widget on your website',
-      link: '/settings/widget',
-      complete: widgetUsed,
-    },
-  ];
-
-  const completedCount = steps.filter((s) => s.complete).length;
-
-  // All done — don't render
-  if (completedCount === steps.length) return null;
+  const handleDismiss = () => {
+    localStorage.setItem(DISMISSED_KEY, 'true');
+    setDismissed(true);
+  };
 
   return (
-    <div className="rounded-xl border border-edge bg-surface-3 p-5 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Rocket className="h-4 w-4 text-primary-400" />
-          <h3 className="text-sm font-semibold text-primary">Get started with HandsOff</h3>
+    <div className="rounded-xl border border-edge bg-surface-0 p-5 space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary">
+            Get the most from your AI assistant
+          </h3>
+          <p className="text-xs text-text-muted mt-0.5">Complete these steps to get started</p>
         </div>
-        <span className="text-xs text-text-muted">{completedCount}/{steps.length} complete</span>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className="text-xs font-medium text-text-secondary bg-surface-3 px-2 py-0.5 rounded-full">
+            {status.completedCount} of {status.totalCount}
+          </span>
+          <button
+            onClick={handleDismiss}
+            className="text-text-muted hover:text-text-secondary transition-colors"
+            aria-label="Dismiss"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
       </div>
+
       <div className="space-y-2">
-        {steps.map((step) => (
-          <div key={step.label} className="flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              {step.complete ? (
-                <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
-              ) : (
-                <Circle className="h-4 w-4 text-text-muted shrink-0" />
-              )}
-              <div>
-                <span className={step.complete ? 'text-sm text-text-muted line-through' : 'text-sm text-primary'}>
-                  {step.label}
-                </span>
-                {!step.complete && (
-                  <span className="text-xs text-text-muted ml-2">{step.description}</span>
+        {CHECKLIST_ITEMS.map((item) => {
+          const complete = completedKeys.has(item.key);
+          return (
+            <div key={item.key} className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                {complete ? (
+                  <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                ) : (
+                  <Circle className="h-4 w-4 text-text-muted shrink-0" />
                 )}
+                <span
+                  className={
+                    complete
+                      ? 'text-sm text-text-muted line-through'
+                      : 'text-sm text-text-primary'
+                  }
+                >
+                  {item.label}
+                </span>
               </div>
+              {!complete && (
+                <Link
+                  to={item.link}
+                  className="text-xs font-medium text-primary-400 hover:text-primary-300 shrink-0"
+                >
+                  Set up →
+                </Link>
+              )}
             </div>
-            {!step.complete && (
-              <Link
-                to={step.link}
-                className="text-xs font-medium text-primary-400 hover:text-primary-300"
-              >
-                Set up →
-              </Link>
-            )}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

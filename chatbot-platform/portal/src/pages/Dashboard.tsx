@@ -23,6 +23,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DashboardMetrics } from '@app-types/index';
+import { OnboardingBanner } from '@components/dashboard/OnboardingBanner';
 
 interface DashboardApiResponse {
   dashboard: {
@@ -165,6 +166,9 @@ const Dashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Onboarding Checklist */}
+      <OnboardingBanner />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">

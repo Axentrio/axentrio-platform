@@ -69,4 +69,16 @@ export const queryKeys = {
   integrations: {
     all: () => ['integrations'] as const,
   },
+  skills: {
+    all: () => ['skills'] as const,
+    list: () => [...queryKeys.skills.all(), 'list'] as const,
+  },
+  automations: {
+    all: () => ['automations'] as const,
+    config: () => [...queryKeys.automations.all(), 'config'] as const,
+  },
+  onboarding: {
+    all: () => ['onboarding'] as const,
+    status: () => [...queryKeys.onboarding.all(), 'status'] as const,
+  },
 };

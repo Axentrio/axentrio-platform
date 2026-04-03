@@ -202,7 +202,8 @@ export async function createBooking(
     });
 
     const booking = response.data?.data || response.data;
-    const calBookingId = booking?.id?.toString() || booking?.uid || '';
+    // Cal.com v2 cancel/reschedule endpoints require the uid, not the numeric id
+    const calBookingId = booking?.uid || booking?.id?.toString() || '';
     const endTime = booking?.endTime || booking?.end || '';
 
     // Save to booking log
@@ -345,15 +346,17 @@ export async function cancelBooking(
   }
 
   try {
-    await axios.delete(`https://api.cal.com/v2/bookings/${bookingId}/cancel`, {
-      data: { cancellationReason: reason || 'Cancelled by customer' },
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${calConfig.apiKey}`,
-        'cal-api-version': '2024-08-13',
+    await axios.post(`https://api.cal.com/v2/bookings/${bookingId}/cancel`,
+      { cancellationReason: reason || 'Cancelled by customer' },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${calConfig.apiKey}`,
+          'cal-api-version': '2024-08-13',
+        },
+        timeout: 15000,
       },
-      timeout: 15000,
-    });
+    );
 
     // Log the cancellation
     const log = bookingLogRepo.create({

@@ -1442,7 +1442,7 @@
   // Auto-initialization from data attributes
   // ==========================================================================
   function autoInit() {
-    const script = document.currentScript || document.querySelector('script[data-chatbot-widget]');
+    const script = document.currentScript || document.querySelector('script[data-chatbot-widget]') || document.querySelector('script[src*="widget.js"][data-api-key]');
     
     if (script) {
       const config = {};

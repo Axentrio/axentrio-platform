@@ -9,6 +9,7 @@ import { Message } from '../database/entities/Message';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { Agent } from '../database/entities/Agent';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
+import { DEFAULT_SKILLS } from '../config/default-skills';
 import { requireSuperAdmin } from '../middleware/super-admin.middleware';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { logger } from '../utils/logger';
@@ -297,13 +298,17 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
 
   let tenant;
   try {
+    const mergedSettings = {
+      ...settings,
+      skills: settings?.skills ?? [...DEFAULT_SKILLS],
+    };
     tenant = repo.create({
       name,
       slug,
       apiKey,
       clerkOrgId: clerkOrg.id,
       tier: tier || 'free',
-      settings,
+      settings: mergedSettings,
     });
     await repo.save(tenant);
     await logAudit(req.userId!, 'tenant.created', 'tenant', tenant.id, tenant.id, { name, tier: tier || 'free' });

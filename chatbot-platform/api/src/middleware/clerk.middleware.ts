@@ -13,6 +13,7 @@ import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
+import { DEFAULT_SKILLS } from '../config/default-skills';
 import { logger } from '../utils/logger';
 import type { RequestUser, UserRole } from '../types';
 
@@ -154,6 +155,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
                   offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
                 },
               },
+              skills: [...DEFAULT_SKILLS],
             },
           })
           .orIgnore() // ON CONFLICT DO NOTHING

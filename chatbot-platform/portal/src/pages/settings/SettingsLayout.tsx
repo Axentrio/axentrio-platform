@@ -23,7 +23,7 @@ const settingsNav: SettingsNavItem[] = [
   { path: '/settings/appearance', label: 'Appearance', icon: Paintbrush, group: 'Account' },
   // Bot Configuration
   { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Bot' },
-  { path: '/settings/skills', label: 'Skills', icon: Zap, group: 'Bot' },
+  { path: '/settings/capabilities', label: 'Capabilities', icon: Zap, group: 'Bot' },
   { path: '/settings/automations', label: 'Automations', icon: Mail, group: 'Bot' },
   // Connections
   { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Connections' },

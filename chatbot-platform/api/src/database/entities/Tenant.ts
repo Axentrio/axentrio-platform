@@ -87,7 +87,7 @@ export class Tenant {
       apiKey?: string;
       brandVoice: {
         name: string;
-        tone: 'formal' | 'casual' | 'friendly' | 'professional';
+        tone: string;
         customInstructions: string;
       };
       guardrails: {

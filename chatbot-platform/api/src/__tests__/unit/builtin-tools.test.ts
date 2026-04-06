@@ -53,7 +53,7 @@ import {
   CancelBookingTool,
 } from '../../agent/tools/booking.tool';
 import { EscalationTool } from '../../agent/tools/escalation.tool';
-import type { ToolContext } from '../../agent/tool-adapter';
+import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -156,7 +156,7 @@ describe('CreateBookingTool', () => {
   });
 
   it('has no hard preconditions (handled by skill instructions instead)', () => {
-    const tool = new CreateBookingTool();
+    const tool = new CreateBookingTool() as ToolAdapter;
     expect(tool.preconditions).toBeUndefined();
   });
 

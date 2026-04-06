@@ -3,7 +3,7 @@ import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
 import { MeteringService } from './metering.service';
 import { TraceLogger, AgentTrace } from './trace-logger';
-import { ToolAdapter, ToolContext } from './tool-adapter';
+import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
 import { ChatMessage, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';

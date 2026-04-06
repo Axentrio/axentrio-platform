@@ -56,7 +56,7 @@ export class OpenAIProvider implements LLMProvider {
 
     let toolCalls: ToolCall[] | undefined;
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      toolCalls = choice.message.tool_calls.map((tc) => ({
+      toolCalls = choice.message.tool_calls.map((tc: any) => ({
         id: tc.id,
         name: tc.function.name,
         arguments: JSON.parse(tc.function.arguments) as Record<string, unknown>,

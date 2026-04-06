@@ -81,6 +81,7 @@ export class Tenant {
     };
     ai?: {
       enabled: boolean;
+      usePlatformAgent?: boolean;
       provider: 'openai' | 'anthropic';
       model: string;
       apiKey?: string;
@@ -107,6 +108,16 @@ export class Tenant {
         language?: 'en' | 'nl' | 'fr' | 'de';
       };
     };
+    skills?: Array<{
+      name: string;
+      displayName?: string;
+      description?: string;
+      trigger: string;
+      tools: string[];
+      instructions: string;
+      maxSteps: number;
+      enabled: boolean;
+    }>;
   };
 
   @Column({ type: 'int', default: 100, name: 'max_sessions' })

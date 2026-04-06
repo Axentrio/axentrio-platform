@@ -11,12 +11,9 @@ import 'dotenv/config';
 import crypto from 'crypto';
 import { PromptBuilder } from '../../agent/prompt-builder';
 import { MeteringService } from '../../agent/metering.service';
-import { TraceLogger, AgentTrace } from '../../agent/trace-logger';
 import { getProvider } from '../../llm/provider-factory';
-import type { ToolAdapter, ToolContext, ToolResult } from '../../agent/tool-adapter';
-import type { ChatMessage, LLMResponse, ToolDefinition, LLMOptions } from '../../llm/llm.types';
-import type { Tenant } from '../../database/entities/Tenant';
-import type { ChatSession } from '../../database/entities/ChatSession';
+import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
+import type { ChatMessage, ToolDefinition } from '../../llm/llm.types';
 
 // ── Inline Agent Loop (avoids import chain that pulls in AppDataSource) ──
 // This is a copy of AgentService.run() logic, self-contained for the live test.
@@ -147,7 +144,7 @@ const mockTools: ToolAdapter[] = [
     description: 'Search the clinic knowledge base for information about services, pricing, and policies.',
     parameters: { type: 'object', properties: { query: { type: 'string', description: 'Search query' } }, required: ['query'] },
     hasSideEffects: false,
-    async execute(args) {
+    async execute(args: Record<string, unknown>) {
       console.log(`  [TOOL] kb_search("${args.query}")`);
       return {
         success: true,
@@ -171,7 +168,7 @@ const mockTools: ToolAdapter[] = [
       required: ['startDate', 'endDate'],
     },
     hasSideEffects: false,
-    async execute(args) {
+    async execute(_args: Record<string, unknown>) {
       return { success: true, data: { slots: MOCK_SLOTS, timezone: 'Europe/Amsterdam' } };
     },
   },
@@ -190,7 +187,7 @@ const mockTools: ToolAdapter[] = [
     },
     hasSideEffects: true,
     preconditions: { toolsCalled: ['check_availability'] },
-    async execute(args) {
+    async execute(args: Record<string, unknown>) {
       return {
         success: true,
         data: {
@@ -209,7 +206,7 @@ const mockTools: ToolAdapter[] = [
     description: 'Transfer to a human agent when you cannot help or the patient requests it.',
     parameters: { type: 'object', properties: { reason: { type: 'string' } }, required: ['reason'] },
     hasSideEffects: true,
-    async execute(args) {
+    async execute(args: Record<string, unknown>) {
       return { success: true, data: { action: 'escalate', reason: args.reason } };
     },
   },

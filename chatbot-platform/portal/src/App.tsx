@@ -255,6 +255,7 @@ const App: React.FC = () => {
                       <Route path="/analytics" element={<Analytics />} />
                       <Route path="/settings" element={<SettingsLayout />}>
                         <Route index element={<Navigate to="/settings/profile" replace />} />
+                        <Route path="skills" element={<Navigate to="/settings/capabilities" replace />} />
                         <Route path="profile" element={<ProfileSettings />} />
                         <Route path="notifications" element={<NotificationSettings />} />
                         <Route path="appearance" element={<AppearanceSettings />} />

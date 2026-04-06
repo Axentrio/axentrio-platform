@@ -35,11 +35,15 @@ export function validateSkill(input: Partial<SkillInput>): { valid: boolean; err
   if (!input.name || !NAME_REGEX.test(input.name)) {
     return { valid: false, error: 'name must be 1-50 alphanumeric characters or underscores' };
   }
-  if (input.displayName !== undefined && input.displayName.length > 100) {
-    return { valid: false, error: 'displayName must be max 100 chars' };
+  if (input.displayName != null) {
+    if (typeof input.displayName !== 'string' || input.displayName.length > 100) {
+      return { valid: false, error: 'displayName must be a string with max 100 chars' };
+    }
   }
-  if (input.description !== undefined && input.description.length > 500) {
-    return { valid: false, error: 'description must be max 500 chars' };
+  if (input.description != null) {
+    if (typeof input.description !== 'string' || input.description.length > 500) {
+      return { valid: false, error: 'description must be a string with max 500 chars' };
+    }
   }
   if (!input.trigger || input.trigger.length > 500) {
     return { valid: false, error: 'trigger is required (max 500 chars)' };

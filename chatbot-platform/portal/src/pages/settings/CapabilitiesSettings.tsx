@@ -293,8 +293,22 @@ const NOTIFICATION_TYPES = [
 ] as const;
 
 const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
-  const { data: automationsData } = useGetAutomations();
+  const { data: automationsData, isLoading } = useGetAutomations();
   const updateAutomation = useUpdateAutomation();
+
+  if (isLoading || !automationsData) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+            <Bell className="w-5 h-5 text-primary-400" />
+            Team Notifications
+          </h2>
+          <p className="text-sm text-text-secondary mt-0.5">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   const automations: Any = (automationsData as Any)?.automations ?? {};
   const emailNotifications: Any = automations?.emailNotifications ?? {};
@@ -360,8 +374,8 @@ const NotificationCard: React.FC<{
 
   const handleSave = () => {
     const recipientList = recipients.split(',').map((r: string) => r.trim()).filter(Boolean);
+    if (enabled && recipientList.length === 0) return;
     onUpdate({ enabled, recipients: recipientList });
-    setDirty(false);
   };
 
   return (

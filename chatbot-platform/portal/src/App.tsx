@@ -41,7 +41,6 @@ import IntegrationSettings from '@pages/settings/IntegrationSettings';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import ChannelsSettings from '@pages/settings/ChannelsSettings';
 import CapabilitiesSettings from '@pages/settings/CapabilitiesSettings';
-import AutomationsSettings from '@pages/settings/AutomationsSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
@@ -263,7 +262,7 @@ const App: React.FC = () => {
                         <Route path="integrations" element={<IntegrationSettings />} />
                         <Route path="channels" element={<ChannelsSettings />} />
                         <Route path="capabilities" element={<CapabilitiesSettings />} />
-                        <Route path="automations" element={<AutomationsSettings />} />
+                        <Route path="automations" element={<Navigate to="/settings/capabilities" replace />} />
                       </Route>
                     </Route>
 

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Plus, Pencil, Trash2, Zap, Loader2, ToggleLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Plus, Pencil, Trash2, Zap, Loader2, ToggleLeft, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -19,6 +19,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { useGetSkills, useCreateSkill, useUpdateSkill, useDeleteSkill } from '@/queries/useSkillsQueries';
 import { useAvailableTools } from '@/queries/useOnboardingQueries';
+import { useGetAutomations, useUpdateAutomation } from '@/queries/useAutomationsQueries';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -276,6 +277,145 @@ function formatName(name: string): string {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+// ─── Team Notifications Section ─────────────────────────────────────
+
+const NOTIFICATION_TYPES = [
+  {
+    type: 'newLeadAlert',
+    title: 'New Lead Alert',
+    description: 'Notify your team when a new lead is captured via the chatbot.',
+  },
+  {
+    type: 'conversationSummary',
+    title: 'Conversation Summary',
+    description: 'Send a summary of each conversation to the team inbox when a session ends.',
+  },
+] as const;
+
+const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
+  const { data: automationsData } = useGetAutomations();
+  const updateAutomation = useUpdateAutomation();
+
+  const automations: Any = (automationsData as Any)?.automations ?? {};
+  const emailNotifications: Any = automations?.emailNotifications ?? {};
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <Bell className="w-5 h-5 text-primary-400" />
+          Team Notifications
+        </h2>
+        <p className="text-sm text-text-secondary mt-0.5">
+          Get notified when your chatbot captures leads or finishes conversations.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {NOTIFICATION_TYPES.map((def) => (
+          <NotificationCard
+            key={def.type}
+            definition={def}
+            serverData={emailNotifications[def.type] ?? null}
+            isAdmin={isAdmin}
+            onUpdate={(data) => updateAutomation.mutate({ type: def.type, data })}
+            isSaving={updateAutomation.isPending}
+          />
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const NotificationCard: React.FC<{
+  definition: { type: string; title: string; description: string };
+  serverData: Any;
+  isAdmin: boolean;
+  onUpdate: (data: Any) => void;
+  isSaving: boolean;
+}> = ({ definition, serverData, isAdmin, onUpdate, isSaving }) => {
+  const [enabled, setEnabled] = useState(false);
+  const [recipients, setRecipients] = useState('');
+  const [dirty, setDirty] = useState(false);
+
+  useEffect(() => {
+    if (serverData) {
+      setEnabled(serverData.enabled ?? false);
+      setRecipients(Array.isArray(serverData.recipients) ? serverData.recipients.join(', ') : '');
+      setDirty(false);
+    }
+  }, [serverData]);
+
+  const handleToggle = (checked: boolean) => {
+    if (!isAdmin) return;
+    setEnabled(checked);
+    const recipientList = recipients.split(',').map((r: string) => r.trim()).filter(Boolean);
+    onUpdate({ enabled: checked, recipients: recipientList });
+  };
+
+  const handleSave = () => {
+    const recipientList = recipients.split(',').map((r: string) => r.trim()).filter(Boolean);
+    onUpdate({ enabled, recipients: recipientList });
+    setDirty(false);
+  };
+
+  return (
+    <Card variant="glass">
+      <CardContent className="py-4">
+        <div className="flex items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary-600/10 mt-0.5">
+            <Bell className="h-4 w-4 text-primary-400" />
+          </div>
+
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <p className="font-medium text-text-primary">{definition.title}</p>
+                <p className="text-xs text-text-muted mt-0.5">{definition.description}</p>
+              </div>
+              <Switch
+                checked={enabled}
+                onCheckedChange={handleToggle}
+                disabled={!isAdmin || isSaving}
+              />
+            </div>
+
+            {enabled && (
+              <div className="mt-3 space-y-2">
+                <div className="space-y-1">
+                  <Label htmlFor={`${definition.type}-recipients`} className="text-xs">
+                    Recipients
+                    <span className="ml-1 text-text-muted font-normal">(comma-separated)</span>
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`${definition.type}-recipients`}
+                      value={recipients}
+                      onChange={(e) => { setRecipients(e.target.value); setDirty(true); }}
+                      placeholder="team@example.com, manager@example.com"
+                      disabled={!isAdmin}
+                      className="text-sm"
+                    />
+                    {dirty && (
+                      <Button
+                        size="sm"
+                        onClick={handleSave}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+};
+
 // ─── Main Component ──────────────────────────────────────────────────
 
 const CapabilitiesSettings: React.FC = () => {
@@ -390,6 +530,9 @@ const CapabilitiesSettings: React.FC = () => {
           isToggling={updateSkill.isPending}
         />
       )}
+
+      {/* Team Notifications */}
+      {isAdmin && <TeamNotificationsSection isAdmin={isAdmin} />}
 
       {/* Create / Edit Dialog — super_admin only */}
       {isSuperAdmin && (

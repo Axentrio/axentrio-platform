@@ -5,7 +5,7 @@
 
 import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
-import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap, Mail } from 'lucide-react';
+import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppAuth } from '@auth/useAppAuth';
 
@@ -24,7 +24,6 @@ const settingsNav: SettingsNavItem[] = [
   // Bot Configuration
   { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Bot' },
   { path: '/settings/capabilities', label: 'Capabilities', icon: Zap, group: 'Bot' },
-  { path: '/settings/automations', label: 'Automations', icon: Mail, group: 'Bot' },
   // Connections
   { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Connections' },
   { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Connections' },

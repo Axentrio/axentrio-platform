@@ -348,9 +348,14 @@ const NotificationCard: React.FC<{
 
   const handleToggle = (checked: boolean) => {
     if (!isAdmin) return;
-    setEnabled(checked);
-    const recipientList = recipients.split(',').map((r: string) => r.trim()).filter(Boolean);
-    onUpdate({ enabled: checked, recipients: recipientList });
+    if (!checked) {
+      setEnabled(false);
+      onUpdate({ enabled: false });
+    } else {
+      // Show the recipients field — don't send to backend until recipients are provided
+      setEnabled(true);
+      setDirty(true);
+    }
   };
 
   const handleSave = () => {

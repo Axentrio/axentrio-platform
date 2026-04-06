@@ -118,6 +118,14 @@ export class Tenant {
       maxSteps: number;
       enabled: boolean;
     }>;
+    automations?: {
+      emailNotifications?: Record<string, {
+        enabled?: boolean;
+        subject?: string;
+        body?: string;
+        recipients?: string[];
+      }>;
+    };
   };
 
   @Column({ type: 'int', default: 100, name: 'max_sessions' })

@@ -95,7 +95,7 @@ export class AnthropicProvider implements LLMProvider {
       }));
     }
 
-    const response = await this.client.messages.create(requestParams);
+    const response = await this.client.messages.create(requestParams) as Anthropic.Message;
 
     // Parse tool_use blocks
     const toolUseBlocks = response.content.filter(

@@ -1,6 +1,6 @@
 // api/src/__tests__/unit/llm-types.test.ts
 import { describe, it, expect } from 'vitest';
-import type { ChatMessage, ToolDefinition, ToolCall, LLMOptions, LLMResponse } from '../../llm/llm.types';
+import type { ChatMessage, ToolDefinition, LLMOptions, LLMResponse } from '../../llm/llm.types';
 
 describe('LLM Types', () => {
   it('ChatMessage supports system/user/assistant roles', () => {

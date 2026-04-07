@@ -14,6 +14,8 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 interface SkillInput {
   name: string;
+  displayName?: string;
+  description?: string;
   trigger: string;
   tools: string[];
   instructions: string;
@@ -32,6 +34,16 @@ const MAX_SKILLS = 20;
 export function validateSkill(input: Partial<SkillInput>): { valid: boolean; error?: string } {
   if (!input.name || !NAME_REGEX.test(input.name)) {
     return { valid: false, error: 'name must be 1-50 alphanumeric characters or underscores' };
+  }
+  if (input.displayName != null) {
+    if (typeof input.displayName !== 'string' || input.displayName.length > 100) {
+      return { valid: false, error: 'displayName must be a string with max 100 chars' };
+    }
+  }
+  if (input.description != null) {
+    if (typeof input.description !== 'string' || input.description.length > 500) {
+      return { valid: false, error: 'description must be a string with max 500 chars' };
+    }
   }
   if (!input.trigger || input.trigger.length > 500) {
     return { valid: false, error: 'trigger is required (max 500 chars)' };
@@ -90,6 +102,8 @@ router.post(
 
     const skill: Skill = {
       name: req.body.name,
+      displayName: req.body.displayName || undefined,
+      description: req.body.description || undefined,
       trigger: req.body.trigger,
       tools: req.body.tools,
       instructions: req.body.instructions,

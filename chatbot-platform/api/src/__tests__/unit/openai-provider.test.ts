@@ -18,10 +18,10 @@ vi.mock('openai', () => {
 });
 
 // Import after mock is set up
-const { OpenAIProvider } = await import('../../llm/openai.provider');
+import { OpenAIProvider } from '../../llm/openai.provider';
 
 describe('OpenAIProvider', () => {
-  let provider: InstanceType<typeof OpenAIProvider>;
+  let provider: OpenAIProvider;
 
   const baseOptions: LLMOptions = {
     model: 'gpt-4o',

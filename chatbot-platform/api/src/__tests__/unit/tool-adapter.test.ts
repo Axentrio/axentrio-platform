@@ -9,7 +9,7 @@ describe('ToolAdapter types', () => {
       description: 'A test tool',
       parameters: { type: 'object', properties: { input: { type: 'string' } } },
       hasSideEffects: false,
-      async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+      async execute(args: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> {
         return { success: true, data: { result: args.input } };
       },
     };

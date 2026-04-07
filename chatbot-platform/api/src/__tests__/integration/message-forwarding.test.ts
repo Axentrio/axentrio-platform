@@ -17,6 +17,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { Message } from '../../database/entities/Message';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { Tenant } from '../../database/entities/Tenant';
+import { decrypt } from '../../utils/encryption';
 import {
   createTestTenant,
   createTestSession,
@@ -119,7 +120,7 @@ async function getBotMessages(sessionId: string): Promise<string[]> {
     .andWhere('p.type = :type', { type: 'bot' })
     .orderBy('m.createdAt', 'ASC')
     .getMany();
-  return msgs.map((m) => m.content);
+  return msgs.map((m) => m.contentEncrypted ? decrypt(m.content) : m.content);
 }
 
 function ragSuccess(response: string, confidence = 0.9) {

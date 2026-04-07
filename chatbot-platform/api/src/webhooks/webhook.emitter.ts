@@ -6,8 +6,6 @@ import { deliverWebhook } from './webhook.dispatcher';
 import { getAutomationEngine } from '../automations';
 import type { EventWebhookConfig, WebhookEvent, WebhookEventBase, WebhookEventType } from './webhook.types';
 
-type SessionContext = WebhookEventBase['session'] & { id: string; tenantId: string };
-
 export function buildEventBase(
   type: WebhookEventType,
   tenantId: string,

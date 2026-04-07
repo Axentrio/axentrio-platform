@@ -7,7 +7,7 @@ export const updateAiSettingsSchema = z.object({
   apiKey: z.string().min(1).optional().nullable(),
   brandVoice: z.object({
     name: z.string().min(1).max(100),
-    tone: z.enum(['formal', 'casual', 'friendly', 'professional']),
+    tone: z.string().min(1).max(50),
     customInstructions: z.string().max(2000),
   }).optional(),
   guardrails: z.object({

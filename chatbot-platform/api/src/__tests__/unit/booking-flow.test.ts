@@ -7,12 +7,12 @@
  * Verifies: tool chaining, precondition enforcement, off-topic handling, trace logging.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AgentService, AgentResult } from '../../agent/agent.service';
+import { AgentService } from '../../agent/agent.service';
 import { ToolRegistry } from '../../agent/tool-registry';
 import { PromptBuilder } from '../../agent/prompt-builder';
 import { MeteringService } from '../../agent/metering.service';
 import { TraceLogger } from '../../agent/trace-logger';
-import type { ChatMessage, LLMResponse } from '../../llm/llm.types';
+import type { LLMResponse } from '../../llm/llm.types';
 import type { Tenant } from '../../database/entities/Tenant';
 import type { ChatSession } from '../../database/entities/ChatSession';
 

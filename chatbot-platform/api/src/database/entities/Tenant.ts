@@ -81,12 +81,13 @@ export class Tenant {
     };
     ai?: {
       enabled: boolean;
+      usePlatformAgent?: boolean;
       provider: 'openai' | 'anthropic';
       model: string;
       apiKey?: string;
       brandVoice: {
         name: string;
-        tone: 'formal' | 'casual' | 'friendly' | 'professional';
+        tone: string;
         customInstructions: string;
       };
       guardrails: {
@@ -106,6 +107,24 @@ export class Tenant {
         collectFields?: string[];
         language?: 'en' | 'nl' | 'fr' | 'de';
       };
+    };
+    skills?: Array<{
+      name: string;
+      displayName?: string;
+      description?: string;
+      trigger: string;
+      tools: string[];
+      instructions: string;
+      maxSteps: number;
+      enabled: boolean;
+    }>;
+    automations?: {
+      emailNotifications?: Record<string, {
+        enabled?: boolean;
+        subject?: string;
+        body?: string;
+        recipients?: string[];
+      }>;
     };
   };
 

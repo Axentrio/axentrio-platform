@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentService } from '../../agent/agent.service';
-import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
-import type { LLMProvider, ChatMessage, LLMOptions, LLMResponse } from '../../llm/llm.types';
+import type { ToolAdapter } from '../../agent/tool-adapter';
+import type { LLMProvider } from '../../llm/llm.types';
 
 // Create mock dependencies
 const mockProvider: LLMProvider = {

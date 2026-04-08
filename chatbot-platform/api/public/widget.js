@@ -150,6 +150,23 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     window.ChatbotWidgetAPI = chatbotWidgetApi;
   }
 
+  const LEGACY_STORAGE_KEY = 'cb_session_v2';
+  const STORAGE_KEY_PREFIX = 'cb_session_v3_';
+  const CONNECTION_STATUS = {
+    connecting: {
+      label: 'Connecting...',
+      dotClass: 'cb-header__status-dot--connecting',
+    },
+    connected: {
+      label: 'Online',
+      dotClass: 'cb-header__status-dot--connected',
+    },
+    offline: {
+      label: 'Offline',
+      dotClass: 'cb-header__status-dot--offline',
+    },
+  };
+
   // ==========================================================================
   // CSS Styles (Injected into Shadow DOM)
   // ==========================================================================
@@ -348,9 +365,22 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     .cb-header__status-dot {
       width: 8px;
       height: 8px;
-      background: var(--cb-secondary);
       border-radius: 50%;
+    }
+
+    .cb-header__status-dot--connecting {
+      background: #F59E0B;
       animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--connected {
+      background: var(--cb-secondary);
+      animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--offline {
+      background: #EF4444;
+      animation: none;
     }
     
     @keyframes pulse {
@@ -782,6 +812,17 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // ==========================================================================
   const utils = {
     generateId: () => Math.random().toString(36).substr(2, 9),
+
+    hashString: (value = '') => {
+      let hash = 0;
+
+      for (let i = 0; i < value.length; i++) {
+        hash = ((hash << 5) - hash) + value.charCodeAt(i);
+        hash |= 0;
+      }
+
+      return (hash >>> 0).toString(36);
+    },
     
     formatTime: (date) => {
       const d = date instanceof Date ? date : new Date(date);
@@ -857,6 +898,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.sessionId = null;
       this.tenantId = null;
       this.visitorId = null;
+      this.pendingMessages = [];
+      this.storageKey = this.getStorageKey();
       this._connected = false;
 
       // Render immediately, connect async
@@ -864,6 +907,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.createShadowDOM();
       this.render();
       this.attachEventListeners();
+      this.setConnectionState('connecting');
 
       // Show greeting only for new sessions (no cached messages)
       if (this.config.greetingMessage && this.messages.length === 0) {
@@ -881,30 +925,125 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this._initConnection();
     }
 
+    getStorageKey() {
+      const identity = [
+        this.config.apiUrl || 'default-api',
+        this.config.apiKey || 'public',
+        this.config.botId || 'default',
+      ].join('|');
+
+      return STORAGE_KEY_PREFIX + utils.hashString(identity);
+    }
+
+    readStoredSession() {
+      const storageKeys = [this.storageKey, LEGACY_STORAGE_KEY];
+
+      for (const key of storageKeys) {
+        try {
+          const stored = localStorage.getItem(key);
+          if (!stored) continue;
+
+          const session = JSON.parse(stored);
+          if (session && typeof session === 'object') {
+            return { key, session };
+          }
+        } catch (err) {
+          this.log('Failed to read cached session:', err.message);
+        }
+      }
+
+      return null;
+    }
+
+    writeStoredSession(sessionData) {
+      try {
+        localStorage.setItem(this.storageKey, JSON.stringify(sessionData));
+        return true;
+      } catch (err) {
+        this.log('Failed to persist session cache:', err.message);
+        return false;
+      }
+    }
+
+    clearStoredSession() {
+      try {
+        localStorage.removeItem(this.storageKey);
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch (err) {
+        this.log('Failed to clear cached session:', err.message);
+      }
+    }
+
+    setConnectionState(state) {
+      const nextState = CONNECTION_STATUS[state] || CONNECTION_STATUS.connecting;
+
+      if (!this.statusDot || !this.statusText) return;
+
+      this.statusDot.classList.remove(
+        CONNECTION_STATUS.connecting.dotClass,
+        CONNECTION_STATUS.connected.dotClass,
+        CONNECTION_STATUS.offline.dotClass,
+      );
+      this.statusDot.classList.add(nextState.dotClass);
+      this.statusText.textContent = nextState.label;
+    }
+
+    canSendMessages() {
+      return Boolean(this.sessionId && this.socket && this._connected);
+    }
+
+    emitOutboundMessage(message) {
+      if (!this.canSendMessages()) return false;
+
+      this.socket.emit('message:send', {
+        sessionId: this.sessionId,
+        content: message.text,
+        type: 'text',
+      });
+
+      return true;
+    }
+
+    flushPendingMessages() {
+      if (!this.canSendMessages() || this.pendingMessages.length === 0) return;
+
+      const queuedMessages = this.pendingMessages.slice();
+      this.pendingMessages = [];
+
+      queuedMessages.forEach(message => this.emitOutboundMessage(message));
+      this.showTypingIndicator();
+      this.log('Flushed queued messages:', queuedMessages.length);
+    }
+
     async _initConnection() {
       try {
         await loadSocketIO();
         await this._initSession();
         this._connectSocketIO();
       } catch (err) {
+        this.setConnectionState('offline');
         this.log('Connection init failed:', err.message);
       }
     }
 
     async _initSession() {
       // Try to restore existing session
-      const stored = localStorage.getItem('cb_session_v2');
-      if (stored) {
-        try {
-          const session = JSON.parse(stored);
-          if (session.sessionId && session.tenantId) {
-            this.sessionId = session.sessionId;
-            this.tenantId = session.tenantId;
-            this.visitorId = session.visitorId;
-            this.log('Restored session:', this.sessionId);
-            return;
+      const storedSession = this.readStoredSession();
+      if (storedSession) {
+        const { key, session } = storedSession;
+
+        if (session.sessionId && session.tenantId) {
+          this.sessionId = session.sessionId;
+          this.tenantId = session.tenantId;
+          this.visitorId = session.visitorId;
+
+          if (key !== this.storageKey) {
+            this.writeStoredSession(session);
           }
-        } catch (e) { /* ignore corrupt data */ }
+
+          this.log('Restored session:', this.sessionId);
+          return;
+        }
       }
 
       // Create new session via API
@@ -934,6 +1073,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       this.log('New session created:', this.sessionId);
       this._saveSession();
+      this.flushPendingMessages();
     }
 
     _connectSocketIO() {
@@ -956,22 +1096,27 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.socket.on('connect', () => {
         this.log('Socket.IO connected');
         this._connected = true;
+        this.setConnectionState('connected');
         this.emit('connected');
 
         // Join session room
         this.socket.emit('session:join', { sessionId: this.sessionId });
+        this.flushPendingMessages();
       });
 
       this.socket.on('session:joined', (data) => {
         this.log('Joined session room:', data.sessionId);
+        this.flushPendingMessages();
       });
 
       this.socket.on('session:join:error', () => {
         // Session expired — clear and re-init
         this.log('Session expired, re-initializing...');
-        localStorage.removeItem('cb_session_v2');
+        this.clearStoredSession();
+        this.setConnectionState('connecting');
         this._initSession().then(() => {
           this.socket.emit('session:join', { sessionId: this.sessionId });
+          this.flushPendingMessages();
         });
       });
 
@@ -1011,37 +1156,40 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.socket.on('disconnect', (reason) => {
         this.log('Socket.IO disconnected:', reason);
         this._connected = false;
+        this.setConnectionState('connecting');
         this.emit('disconnected');
       });
 
       this.socket.on('connect_error', (err) => {
+        this.setConnectionState('connecting');
         this.log('Socket.IO connect error:', err.message);
       });
     }
 
     loadSession() {
-      const stored = localStorage.getItem('cb_session_v2');
-      if (stored) {
-        try {
-          const session = JSON.parse(stored);
-          this.sessionId = session.sessionId;
-          this.tenantId = session.tenantId;
-          this.visitorId = session.visitorId;
-          this.messages = session.messages || [];
-        } catch (e) {
-          // corrupt — will be re-created in _initSession
+      const storedSession = this.readStoredSession();
+      if (storedSession) {
+        const { key, session } = storedSession;
+
+        this.sessionId = session.sessionId;
+        this.tenantId = session.tenantId;
+        this.visitorId = session.visitorId;
+        this.messages = session.messages || [];
+
+        if (key !== this.storageKey) {
+          this.writeStoredSession(session);
         }
       }
     }
 
     _saveSession() {
       if (this.config.cacheMessages) {
-        localStorage.setItem('cb_session_v2', JSON.stringify({
+        this.writeStoredSession({
           sessionId: this.sessionId,
           tenantId: this.tenantId,
           visitorId: this.visitorId,
           messages: this.messages.slice(-this.config.maxCachedMessages),
-        }));
+        });
       }
     }
 
@@ -1090,7 +1238,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             </div>
             <div class="cb-header__status">
               <span class="cb-header__status-dot"></span>
-              <span>Online</span>
+              <span class="cb-header__status-text">Connecting...</span>
             </div>
           </header>
           
@@ -1157,6 +1305,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.uploadOverlay = this.container.querySelector('.cb-upload-overlay');
       this.progressBar = this.container.querySelector('.cb-progress');
       this.progressBarInner = this.container.querySelector('.cb-progress__bar');
+      this.statusDot = this.container.querySelector('.cb-header__status-dot');
+      this.statusText = this.container.querySelector('.cb-header__status-text');
     }
     
     renderMessage(message) {
@@ -1286,7 +1436,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     
     sendMessage(text = null) {
-      const messageText = text || this.input.value.trim();
+      const rawText = typeof text === 'string' ? text : this.input.value;
+      const messageText = rawText.trim();
       if (!messageText) return;
 
       const message = {
@@ -1300,16 +1451,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.input.value = '';
       this.input.style.height = 'auto';
 
-      // Send via Socket.IO
-      if (this.socket && this._connected) {
-        this.socket.emit('message:send', {
-          sessionId: this.sessionId,
-          content: messageText,
-          type: 'text',
-        });
+      if (this.emitOutboundMessage(message)) {
+        this.showTypingIndicator();
+      } else {
+        this.pendingMessages.push(message);
+        this.setConnectionState('connecting');
+        this.log('Queued message until chat connection is ready');
       }
-
-      this.showTypingIndicator();
 
       this.emit('message', message);
     }
@@ -1397,6 +1545,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     
     async uploadFile(file) {
+      const tenantId = this.tenantId || this.config.tenantId;
+      if (!this.sessionId || !tenantId) {
+        this.showError('Chat is still connecting. Please wait a moment and try again.');
+        return;
+      }
+
       this.showProgress(0);
       
       try {
@@ -1412,7 +1566,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             fileSize: file.size,
             mimeType: file.type,
             chatSessionId: this.sessionId,
-            tenantId: this.config.tenantId,
+            tenantId,
           }),
         });
         

@@ -147,6 +147,23 @@
     window.ChatbotWidgetAPI = chatbotWidgetApi;
   }
 
+  const LEGACY_STORAGE_KEY = 'cb_session_v2';
+  const STORAGE_KEY_PREFIX = 'cb_session_v3_';
+  const CONNECTION_STATUS = {
+    connecting: {
+      label: 'Connecting...',
+      dotClass: 'cb-header__status-dot--connecting',
+    },
+    connected: {
+      label: 'Online',
+      dotClass: 'cb-header__status-dot--connected',
+    },
+    offline: {
+      label: 'Offline',
+      dotClass: 'cb-header__status-dot--offline',
+    },
+  };
+
   // ==========================================================================
   // CSS Styles (Injected into Shadow DOM)
   // ==========================================================================
@@ -345,9 +362,22 @@
     .cb-header__status-dot {
       width: 8px;
       height: 8px;
-      background: var(--cb-secondary);
       border-radius: 50%;
+    }
+
+    .cb-header__status-dot--connecting {
+      background: #F59E0B;
       animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--connected {
+      background: var(--cb-secondary);
+      animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--offline {
+      background: #EF4444;
+      animation: none;
     }
     
     @keyframes pulse {
@@ -810,6 +840,17 @@
   // ==========================================================================
   const utils = {
     generateId: () => Math.random().toString(36).substr(2, 9),
+
+    hashString: (value = '') => {
+      let hash = 0;
+
+      for (let i = 0; i < value.length; i++) {
+        hash = ((hash << 5) - hash) + value.charCodeAt(i);
+        hash |= 0;
+      }
+
+      return (hash >>> 0).toString(36);
+    },
     
     formatTime: (date) => {
       if (!(date instanceof Date) || isNaN(date.getTime())) return '';
@@ -868,12 +909,15 @@
       this.typingTimeout = null;
       this.uploadQueue = [];
       this.sessionId = null;
+      this.pendingMessages = [];
+      this.storageKey = this.getStorageKey();
 
       // Constructor can't await — kick off async init chain
       this.initSession().then(() => {
         this.createShadowDOM();
         this.render();
         this.attachEventListeners();
+        this.setConnectionState('connecting');
         this.connectWebSocket();
         this._initDone();
       }).catch(err => {
@@ -882,8 +926,90 @@
         this.createShadowDOM();
         this.render();
         this.attachEventListeners();
+        this.setConnectionState('offline');
         this._initDone();
       });
+    }
+
+    getStorageKey() {
+      const identity = [
+        this.config.apiUrl || 'default-api',
+        this.config.apiKey || 'public',
+        this.config.botId || 'default',
+      ].join('|');
+
+      return STORAGE_KEY_PREFIX + utils.hashString(identity);
+    }
+
+    readStoredSession() {
+      const storageKeys = [this.storageKey, LEGACY_STORAGE_KEY];
+
+      for (const key of storageKeys) {
+        try {
+          const stored = localStorage.getItem(key);
+          if (!stored) continue;
+
+          const session = JSON.parse(stored);
+          if (session && typeof session === 'object') {
+            return { key, session };
+          }
+        } catch (err) {
+          this.log('Failed to read cached session:', err.message);
+        }
+      }
+
+      return null;
+    }
+
+    writeStoredSession(sessionData) {
+      try {
+        localStorage.setItem(this.storageKey, JSON.stringify(sessionData));
+        return true;
+      } catch (err) {
+        this.log('Failed to persist session cache:', err.message);
+        return false;
+      }
+    }
+
+    setConnectionState(state) {
+      const nextState = CONNECTION_STATUS[state] || CONNECTION_STATUS.connecting;
+
+      if (!this.statusDot || !this.statusText) return;
+
+      this.statusDot.classList.remove(
+        CONNECTION_STATUS.connecting.dotClass,
+        CONNECTION_STATUS.connected.dotClass,
+        CONNECTION_STATUS.offline.dotClass,
+      );
+      this.statusDot.classList.add(nextState.dotClass);
+      this.statusText.textContent = nextState.label;
+    }
+
+    canSendMessages() {
+      return Boolean(this.sessionId && this.ws && this.ws.connected);
+    }
+
+    emitOutboundMessage(message) {
+      if (!this.canSendMessages()) return false;
+
+      this.ws.emit('message:send', {
+        sessionId: this.sessionId,
+        content: message.text,
+        type: 'text',
+      });
+
+      return true;
+    }
+
+    flushPendingMessages() {
+      if (!this.canSendMessages() || this.pendingMessages.length === 0) return;
+
+      const queuedMessages = this.pendingMessages.slice();
+      this.pendingMessages = [];
+
+      queuedMessages.forEach(message => this.emitOutboundMessage(message));
+      this.showTypingIndicator();
+      this.log('Flushed queued messages:', queuedMessages.length);
     }
 
     _initDone() {
@@ -906,19 +1032,23 @@
 
     async initSession() {
       // Try to restore existing session
-      const stored = localStorage.getItem('cb_session_v2');
-      if (stored) {
-        try {
-          const session = JSON.parse(stored);
-          if (session.id && session.token) {
-            this.sessionId = session.id;
-            this.token = session.token;
-            this.config.tenantId = session.tenantId;
-            this.messages = session.messages || [];
-            this.log('Restored session:', this.sessionId);
-            return;
+      const storedSession = this.readStoredSession();
+      if (storedSession) {
+        const { key, session } = storedSession;
+
+        if (session.id && session.token) {
+          this.sessionId = session.id;
+          this.token = session.token;
+          this.config.tenantId = session.tenantId;
+          this.messages = session.messages || [];
+
+          if (key !== this.storageKey) {
+            this.writeStoredSession(session);
           }
-        } catch (e) { /* ignore */ }
+
+          this.log('Restored session:', this.sessionId);
+          return;
+        }
       }
 
       // Create new session via API
@@ -960,12 +1090,12 @@
     }
     
     saveSession() {
-      localStorage.setItem('cb_session_v2', JSON.stringify({
+      this.writeStoredSession({
         id: this.sessionId,
         token: this.token,
         tenantId: this.config.tenantId,
         messages: this.config.cacheMessages ? this.messages.slice(-this.config.maxCachedMessages) : [],
-      }));
+      });
     }
     
     createShadowDOM() {
@@ -1009,7 +1139,7 @@
             </div>
             <div class="cb-header__status">
               <span class="cb-header__status-dot"></span>
-              <span>Online</span>
+              <span class="cb-header__status-text">Connecting...</span>
             </div>
           </header>
           
@@ -1076,6 +1206,8 @@
       this.uploadOverlay = this.container.querySelector('.cb-upload-overlay');
       this.progressBar = this.container.querySelector('.cb-progress');
       this.progressBarInner = this.container.querySelector('.cb-progress__bar');
+      this.statusDot = this.container.querySelector('.cb-header__status-dot');
+      this.statusText = this.container.querySelector('.cb-header__status-text');
     }
     
     renderMessage(message) {
@@ -1230,7 +1362,8 @@
     }
     
     sendMessage(text = null) {
-      const messageText = text || this.input.value.trim();
+      const rawText = typeof text === 'string' ? text : this.input.value;
+      const messageText = rawText.trim();
       if (!messageText) return;
       
       const message = {
@@ -1244,17 +1377,14 @@
       this.input.value = '';
       this.input.style.height = 'auto';
       
-      // Send via Socket.IO (triggers n8n forwarding in socket handler)
-      if (this.ws && this.ws.connected) {
-        this.ws.emit('message:send', {
-          sessionId: this.sessionId,
-          content: messageText,
-          type: 'text',
-        });
+      if (this.emitOutboundMessage(message)) {
+        this.showTypingIndicator();
+      } else {
+        this.pendingMessages.push(message);
+        this.setConnectionState('connecting');
+        this.log('Queued message until chat connection is ready');
       }
-      
-      this.showTypingIndicator();
-      
+
       this.emit('message', message);
     }
     
@@ -1341,6 +1471,11 @@
     }
     
     async uploadFile(file) {
+      if (!this.sessionId || !this.config.tenantId) {
+        this.showError('Chat is still connecting. Please wait a moment and try again.');
+        return;
+      }
+
       this.showProgress(0);
       
       try {
@@ -1445,6 +1580,7 @@
           this._connectSocketIO();
         };
         script.onerror = () => {
+          this.setConnectionState('offline');
           this.log('Failed to load Socket.IO client');
         };
         document.head.appendChild(script);
@@ -1469,8 +1605,10 @@
         this.ws.on('connect', () => {
           this.log('Socket.IO connected');
           this.reconnectAttempts = 0;
+          this.setConnectionState('connected');
           // Join the session room
           this.ws.emit('session:join', { sessionId: this.sessionId });
+          this.flushPendingMessages();
           this.emit('connected');
         });
 
@@ -1495,15 +1633,18 @@
 
         this.ws.on('disconnect', (reason) => {
           this.log('Socket.IO disconnected:', reason);
+          this.setConnectionState('connecting');
           this.emit('disconnected');
         });
 
         this.ws.on('connect_error', (error) => {
+          this.setConnectionState('connecting');
           this.log('Socket.IO error:', error.message);
           this.emit('error', error);
         });
 
       } catch (error) {
+        this.setConnectionState('offline');
         this.log('Failed to connect Socket.IO:', error);
       }
     }

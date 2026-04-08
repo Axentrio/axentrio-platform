@@ -147,6 +147,23 @@
     window.ChatbotWidgetAPI = chatbotWidgetApi;
   }
 
+  const LEGACY_STORAGE_KEY = 'cb_session';
+  const STORAGE_KEY_PREFIX = 'cb_session_v3_';
+  const CONNECTION_STATUS = {
+    connecting: {
+      label: 'Connecting...',
+      dotClass: 'cb-header__status-dot--connecting',
+    },
+    connected: {
+      label: 'Online',
+      dotClass: 'cb-header__status-dot--connected',
+    },
+    offline: {
+      label: 'Offline',
+      dotClass: 'cb-header__status-dot--offline',
+    },
+  };
+
   // ==========================================================================
   // CSS Styles (Injected into Shadow DOM)
   // ==========================================================================
@@ -345,9 +362,22 @@
     .cb-header__status-dot {
       width: 8px;
       height: 8px;
-      background: var(--cb-secondary);
       border-radius: 50%;
+    }
+
+    .cb-header__status-dot--connecting {
+      background: #F59E0B;
       animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--connected {
+      background: var(--cb-secondary);
+      animation: pulse 2s infinite;
+    }
+
+    .cb-header__status-dot--offline {
+      background: #EF4444;
+      animation: none;
     }
     
     @keyframes pulse {
@@ -809,6 +839,17 @@
   // ==========================================================================
   const utils = {
     generateId: () => Math.random().toString(36).substr(2, 9),
+
+    hashString: (value = '') => {
+      let hash = 0;
+
+      for (let i = 0; i < value.length; i++) {
+        hash = ((hash << 5) - hash) + value.charCodeAt(i);
+        hash |= 0;
+      }
+
+      return (hash >>> 0).toString(36);
+    },
     
     formatTime: (date) => {
       return new Intl.DateTimeFormat('default', {
@@ -866,8 +907,90 @@
       this.typingTimeout = null;
       this.uploadQueue = [];
       this.sessionId = null;
+      this.pendingMessages = [];
+      this.storageKey = this.getStorageKey();
       
       this.init();
+    }
+
+    getStorageKey() {
+      const identity = [
+        this.config.apiUrl || 'default-api',
+        this.config.apiKey || 'public',
+        this.config.botId || 'default',
+      ].join('|');
+
+      return STORAGE_KEY_PREFIX + utils.hashString(identity);
+    }
+
+    readStoredSession() {
+      const storageKeys = [this.storageKey, LEGACY_STORAGE_KEY];
+
+      for (const key of storageKeys) {
+        try {
+          const stored = localStorage.getItem(key);
+          if (!stored) continue;
+
+          const session = JSON.parse(stored);
+          if (session && typeof session === 'object') {
+            return { key, session };
+          }
+        } catch (err) {
+          this.log('Failed to read cached session:', err.message);
+        }
+      }
+
+      return null;
+    }
+
+    writeStoredSession(sessionData) {
+      try {
+        localStorage.setItem(this.storageKey, JSON.stringify(sessionData));
+        return true;
+      } catch (err) {
+        this.log('Failed to persist session cache:', err.message);
+        return false;
+      }
+    }
+
+    setConnectionState(state) {
+      const nextState = CONNECTION_STATUS[state] || CONNECTION_STATUS.connecting;
+
+      if (!this.statusDot || !this.statusText) return;
+
+      this.statusDot.classList.remove(
+        CONNECTION_STATUS.connecting.dotClass,
+        CONNECTION_STATUS.connected.dotClass,
+        CONNECTION_STATUS.offline.dotClass,
+      );
+      this.statusDot.classList.add(nextState.dotClass);
+      this.statusText.textContent = nextState.label;
+    }
+
+    canSendMessages() {
+      return Boolean(this.sessionId && this.ws && this.ws.readyState === WebSocket.OPEN);
+    }
+
+    flushPendingMessages() {
+      if (!this.canSendMessages() || this.pendingMessages.length === 0) return;
+
+      const queuedMessages = this.pendingMessages.slice();
+      this.pendingMessages = [];
+
+      queuedMessages.forEach(message => {
+        this.sendToServer({
+          type: 'message',
+          data: {
+            sessionId: this.sessionId,
+            tenantId: this.config.tenantId,
+            botId: this.config.botId,
+            text: message.text,
+          },
+        });
+      });
+
+      this.showTypingIndicator();
+      this.log('Flushed queued messages:', queuedMessages.length);
     }
     
     init() {
@@ -875,6 +998,7 @@
       this.createShadowDOM();
       this.render();
       this.attachEventListeners();
+      this.setConnectionState('connecting');
       this.connectWebSocket();
       
       if (this.config.greetingMessage) {
@@ -890,26 +1014,28 @@
     }
     
     loadSession() {
-      const stored = localStorage.getItem('cb_session');
-      if (stored) {
-        try {
-          const session = JSON.parse(stored);
-          this.sessionId = session.id;
-          this.messages = session.messages || [];
-        } catch (e) {
-          this.sessionId = utils.generateId();
+      const storedSession = this.readStoredSession();
+      if (storedSession) {
+        const { key, session } = storedSession;
+
+        this.sessionId = session.id;
+        this.messages = session.messages || [];
+
+        if (key !== this.storageKey) {
+          this.writeStoredSession(session);
         }
-      } else {
-        this.sessionId = utils.generateId();
+        return;
       }
+
+      this.sessionId = utils.generateId();
     }
     
     saveSession() {
       if (this.config.cacheMessages) {
-        localStorage.setItem('cb_session', JSON.stringify({
+        this.writeStoredSession({
           id: this.sessionId,
           messages: this.messages.slice(-this.config.maxCachedMessages),
-        }));
+        });
       }
     }
     
@@ -954,7 +1080,7 @@
             </div>
             <div class="cb-header__status">
               <span class="cb-header__status-dot"></span>
-              <span>Online</span>
+              <span class="cb-header__status-text">Connecting...</span>
             </div>
           </header>
           
@@ -1021,6 +1147,8 @@
       this.uploadOverlay = this.container.querySelector('.cb-upload-overlay');
       this.progressBar = this.container.querySelector('.cb-progress');
       this.progressBarInner = this.container.querySelector('.cb-progress__bar');
+      this.statusDot = this.container.querySelector('.cb-header__status-dot');
+      this.statusText = this.container.querySelector('.cb-header__status-text');
     }
     
     renderMessage(message) {
@@ -1175,7 +1303,8 @@
     }
     
     sendMessage(text = null) {
-      const messageText = text || this.input.value.trim();
+      const rawText = typeof text === 'string' ? text : this.input.value;
+      const messageText = rawText.trim();
       if (!messageText) return;
       
       const message = {
@@ -1189,8 +1318,7 @@
       this.input.value = '';
       this.input.style.height = 'auto';
       
-      // Send via WebSocket
-      this.sendToServer({
+      if (this.sendToServer({
         type: 'message',
         data: {
           sessionId: this.sessionId,
@@ -1198,9 +1326,13 @@
           botId: this.config.botId,
           text: messageText,
         },
-      });
-      
-      this.showTypingIndicator();
+      })) {
+        this.showTypingIndicator();
+      } else {
+        this.pendingMessages.push(message);
+        this.setConnectionState('connecting');
+        this.log('Queued message until chat connection is ready');
+      }
       
       this.emit('message', message);
     }
@@ -1288,6 +1420,11 @@
     }
     
     async uploadFile(file) {
+      if (!this.sessionId || !this.config.tenantId) {
+        this.showError('Chat is still connecting. Please wait a moment and try again.');
+        return;
+      }
+
       this.showProgress(0);
       
       try {
@@ -1383,6 +1520,7 @@
     
     connectWebSocket() {
       if (!utils.supportsWebSocket()) {
+        this.setConnectionState('offline');
         this.log('WebSocket not supported');
         return;
       }
@@ -1398,7 +1536,9 @@
         this.ws.addEventListener('open', () => {
           this.log('WebSocket connected');
           this.reconnectAttempts = 0;
+          this.setConnectionState('connected');
           this.startHeartbeat();
+          this.flushPendingMessages();
           this.emit('connected');
         });
         
@@ -1409,16 +1549,19 @@
         this.ws.addEventListener('close', () => {
           this.log('WebSocket closed');
           this.stopHeartbeat();
+          this.setConnectionState('connecting');
           this.attemptReconnect();
           this.emit('disconnected');
         });
         
         this.ws.addEventListener('error', (error) => {
+          this.setConnectionState('connecting');
           this.log('WebSocket error:', error);
           this.emit('error', error);
         });
         
       } catch (error) {
+        this.setConnectionState('offline');
         this.log('Failed to connect WebSocket:', error);
       }
     }
@@ -1463,7 +1606,10 @@
     sendToServer(data) {
       if (this.ws && this.ws.readyState === WebSocket.OPEN) {
         this.ws.send(JSON.stringify(data));
+        return true;
       }
+
+      return false;
     }
     
     handleServerMessage(message) {

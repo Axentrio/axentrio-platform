@@ -141,6 +141,19 @@
     getInstance() {
       return widgetInstance;
     },
+
+    // Tear down the widget: disconnects, removes window listeners, detaches
+    // the host DOM, and resets the module-level instance reference so
+    // isReady() returns false and any later enqueued API calls queue up for
+    // a future widget instance instead of firing on the dead one.
+    destroy() {
+      if (!widgetInstance) return false;
+      const inst = widgetInstance;
+      widgetInstance = null;
+      pendingApiCalls.length = 0;
+      try { inst.destroy(); } catch (err) { /* best effort */ }
+      return true;
+    },
   };
 
   if (typeof window !== 'undefined') {
@@ -1292,13 +1305,14 @@
       this.chatWindow.addEventListener('dragleave', (e) => this.handleDragLeave(e));
       this.chatWindow.addEventListener('drop', (e) => this.handleDrop(e));
       
-      // Window resize
-      window.addEventListener('resize', utils.debounce(() => {
+      // Window resize — stored as a named ref so destroy() can remove it
+      this._onWindowResize = utils.debounce(() => {
         if (utils.isMobile() && this.isOpen && this.config.fullScreenOnMobile) {
           this.chatWindow.style.height = '100%';
         }
-      }, 100));
-      
+      }, 100);
+      window.addEventListener('resize', this._onWindowResize);
+
       // Quick reply clicks
       this.messagesContainer.addEventListener('click', (e) => {
         const btn = e.target.closest('.cb-quick-reply');
@@ -1311,11 +1325,12 @@
         }
       });
 
-      // Before unload
-      window.addEventListener('beforeunload', () => {
+      // Before unload — stored as a named ref so destroy() can remove it
+      this._onBeforeUnload = () => {
         this.saveSession();
         this.disconnectWebSocket();
-      });
+      };
+      window.addEventListener('beforeunload', this._onBeforeUnload);
     }
 
     // ========================================================================
@@ -1755,14 +1770,47 @@
     // ========================================================================
     
     destroy() {
+      // Idempotent — double-destroy must be a no-op
+      if (this._destroyed) return;
+      this._destroyed = true;
+
+      // 1. Timers
+      if (this.heartbeatInterval) {
+        clearInterval(this.heartbeatInterval);
+        this.heartbeatInterval = null;
+      }
+      if (this.typingTimeout) {
+        clearTimeout(this.typingTimeout);
+        this.typingTimeout = null;
+      }
+
+      // 2. Connection
       this.disconnectWebSocket();
-      this.saveSession();
-      
+
+      // 3. Window listeners — the whole point of the unmount pass.
+      //    These were added via addEventListener in attachEventListeners;
+      //    removing them here prevents leaks on SPAs that mount/unmount the widget.
+      if (this._onWindowResize) {
+        window.removeEventListener('resize', this._onWindowResize);
+        this._onWindowResize = null;
+      }
+      if (this._onBeforeUnload) {
+        window.removeEventListener('beforeunload', this._onBeforeUnload);
+        this._onBeforeUnload = null;
+      }
+
+      // 4. Persist any in-flight session state + notify subscribers before DOM removal
+      try { this.saveSession(); } catch (_) { /* ignore */ }
+      this.emit('destroy');
+
+      // 5. DOM teardown
       if (this.host && this.host.parentNode) {
         this.host.parentNode.removeChild(this.host);
       }
-      
-      this.emit('destroy');
+
+      // 6. Clear in-memory queues so stale references can be GC'd
+      this.pendingMessages = [];
+      this.messages = [];
     }
   }
 

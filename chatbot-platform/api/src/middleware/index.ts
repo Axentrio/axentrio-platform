@@ -58,42 +58,18 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
 
 export { requireSuperAdmin, resolveTenantContext } from './super-admin.middleware';
 
-// Async handler wrapper
-export function asyncHandler(fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
-
-// Error classes
-export class ValidationError extends Error {
-  statusCode = 400;
-  constructor(message: string) {
-    super(message);
-    this.name = 'ValidationError';
-  }
-}
-
-export class UnauthorizedError extends Error {
-  statusCode = 401;
-  constructor(message: string = 'Unauthorized') {
-    super(message);
-    this.name = 'UnauthorizedError';
-  }
-}
-
-export class NotFoundError extends Error {
-  statusCode = 404;
-  constructor(message: string = 'Not Found') {
-    super(message);
-    this.name = 'NotFoundError';
-  }
-}
-
-export class ForbiddenError extends Error {
-  statusCode = 403;
-  constructor(message: string = 'Forbidden') {
-    super(message);
-    this.name = 'ForbiddenError';
-  }
-}
+// Re-export error classes and asyncHandler from error-handler so there is a
+// single canonical class identity. Routes that import these from '../middleware'
+// get the same classes as routes that import from '../middleware/error-handler',
+// so `err instanceof ApiError` checks in the global error handler always match.
+export {
+  asyncHandler,
+  ApiError,
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  ValidationError,
+  RateLimitError,
+} from './error-handler';

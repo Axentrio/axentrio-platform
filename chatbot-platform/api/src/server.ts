@@ -94,6 +94,11 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
 
+// Request ID — must come before any routes so every response (including widget
+// routes mounted below and the /widget.js static serve) carries x-request-id
+// and req.requestId is available to handlers and the global error handler.
+app.use(requestIdMiddleware);
+
 // Serve widget.js — before all middleware (no auth, open CORS, cached)
 // Resolve widget.js: try api/public/ first (Docker build), then ../../widget/ (dev)
 const widgetPath = [
@@ -124,9 +129,6 @@ app.use('/api/v1/widget', (req, res, next) => {
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   next();
 }, express.json(), widgetRoutes);
-
-// Request ID — must come before all other middleware
-app.use(requestIdMiddleware);
 
 // Security middleware stack
 app.use(helmet({ contentSecurityPolicy: config.server.isProduction }));

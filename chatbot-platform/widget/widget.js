@@ -81,6 +81,14 @@
     reconnectAttempts: 5,
     reconnectDelay: 3000,
     heartbeatInterval: 30000,
+
+    // postMessage bridge — comma-separated list of origins that may control
+    // the widget via window.postMessage({source:'chatbot-widget',type:...}).
+    // The widget's own origin (window.location.origin) is always allowed;
+    // this list is for ADDITIONAL cross-origin callers (e.g., the parent
+    // page when the widget is embedded inside a cross-origin iframe).
+    // Set via data-postmessage-origins="https://acme.com,https://app.acme.com".
+    postmessageOrigins: [],
   };
 
   let widgetInstance = null;
@@ -158,6 +166,102 @@
 
   if (typeof window !== 'undefined') {
     window.ChatbotWidgetAPI = chatbotWidgetApi;
+  }
+
+  // ==========================================================================
+  // postMessage bridge — lets CTAs in iframe-separated window contexts control
+  // the widget via window.postMessage.
+  //
+  // Security model:
+  //   * event.origin MUST be in the allowlist (window.location.origin is
+  //     always allowed; additional origins come from config.postmessageOrigins)
+  //   * event.data MUST be an object with source === 'chatbot-widget'
+  //   * event.data.type MUST be one of a fixed whitelist
+  //
+  // Inbound message schema:
+  //   { source: 'chatbot-widget', type: 'open' | 'close' | 'toggle'
+  //                             | 'sendMessage' | 'destroy' | 'ping',
+  //     payload: { text?: string } }
+  //
+  // Response to 'ping' (posted back to event.source with targetOrigin =
+  //   event.origin):
+  //   { source: 'chatbot-widget', type: 'pong', isReady: boolean }
+  //
+  // On widget creation the bridge also broadcasts one ready event to
+  //   window.parent (targetOrigin '*') so a parent frame can enable its CTA
+  //   button: { source: 'chatbot-widget', type: 'ready' }
+  // ==========================================================================
+  const POSTMESSAGE_SOURCE = 'chatbot-widget';
+  const POSTMESSAGE_ALLOWED_TYPES = new Set([
+    'open', 'close', 'toggle', 'sendMessage', 'destroy', 'ping',
+  ]);
+  let postMessageBridgeInstalled = false;
+
+  function installPostMessageBridge() {
+    if (postMessageBridgeInstalled || typeof window === 'undefined') return;
+    postMessageBridgeInstalled = true;
+
+    window.addEventListener('message', (event) => {
+      const data = event.data;
+
+      // Shape check first (cheap) — ignore anything that isn't ours
+      if (!data || typeof data !== 'object' || data.source !== POSTMESSAGE_SOURCE) return;
+      if (!POSTMESSAGE_ALLOWED_TYPES.has(data.type)) return;
+
+      // Origin allowlist: window.location.origin is always allowed; any
+      // additional origins come from the live widget instance config.
+      const extra = (widgetInstance && Array.isArray(widgetInstance.config.postmessageOrigins))
+        ? widgetInstance.config.postmessageOrigins
+        : [];
+      const allowed = new Set([window.location.origin, ...extra]);
+      if (!allowed.has(event.origin)) {
+        // Silently ignore — don't log, don't respond. Probes get nothing.
+        return;
+      }
+
+      // Dispatch
+      switch (data.type) {
+        case 'open':
+          chatbotWidgetApi.open();
+          break;
+        case 'close':
+          chatbotWidgetApi.close();
+          break;
+        case 'toggle':
+          chatbotWidgetApi.toggle();
+          break;
+        case 'sendMessage':
+          if (data.payload && typeof data.payload.text === 'string') {
+            chatbotWidgetApi.sendMessage(data.payload.text);
+          }
+          break;
+        case 'destroy':
+          chatbotWidgetApi.destroy();
+          break;
+        case 'ping':
+          // Reply to the sender with current readiness. targetOrigin is the
+          // sender's own origin, which we just validated — safe.
+          if (event.source && typeof event.source.postMessage === 'function') {
+            try {
+              event.source.postMessage(
+                { source: POSTMESSAGE_SOURCE, type: 'pong', isReady: chatbotWidgetApi.isReady() },
+                event.origin,
+              );
+            } catch (_) { /* best effort */ }
+          }
+          break;
+      }
+    });
+  }
+
+  function broadcastReadyToParent() {
+    if (typeof window === 'undefined') return;
+    if (window.parent === window) return; // not in an iframe — nothing to tell
+    try {
+      // targetOrigin '*' is OK here because the payload contains no secrets;
+      // any listener matching our source marker is welcome to learn we're up.
+      window.parent.postMessage({ source: POSTMESSAGE_SOURCE, type: 'ready' }, '*');
+    } catch (_) { /* best effort */ }
   }
 
   const LEGACY_STORAGE_KEY = 'cb_session';
@@ -1784,6 +1888,19 @@
         }
       });
 
+      // postmessageOrigins is authored as a comma-separated list in the data
+      // attribute (data-postmessage-origins="https://a.com,https://b.com"),
+      // which isn't valid JSON. Normalise whatever the generic parser left
+      // behind into a real array of trimmed non-empty origin strings.
+      if (typeof config.postmessageOrigins === 'string') {
+        config.postmessageOrigins = config.postmessageOrigins
+          .split(',')
+          .map(s => s.trim())
+          .filter(Boolean);
+      } else if (!Array.isArray(config.postmessageOrigins)) {
+        config.postmessageOrigins = [];
+      }
+
       // Initialize widget
       const widget = new ChatbotWidget(config);
       widgetInstance = widget;
@@ -1792,7 +1909,13 @@
         api: chatbotWidgetApi,
         widget,
       });
-      
+
+      // Install the cross-window postMessage bridge and announce readiness
+      // to any parent frame that might be waiting to enable its CTA button.
+      installPostMessageBridge();
+      broadcastReadyToParent();
+
+
       // Expose to global for debugging
       if (config.debug) {
         window.chatbotWidget = widget;

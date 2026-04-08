@@ -43,9 +43,38 @@
     <code>Yes</code> — confirms the booking
   </div>
 
-  <script src="/chatbot-platform/api/public/widget.js"
-    data-api-url="https://chatbot-api-production-37df.up.railway.app"
-    data-api-key="e4c062d1655fb179ccfdbe68af3e34a6713afc1d771c2979ae8b277170f442b0"
-    data-debug="true"></script>
+  <div id="cb-test-setup" class="hint" style="display:none; background:#fff4e5; border-color:#f0c58d;">
+    <strong>Setup needed:</strong> set a tenant API key in localStorage before the widget can connect.
+    Open DevTools console and run:<br><br>
+    <code>localStorage.setItem('cb_test_api_key', 'YOUR_TENANT_API_KEY')</code><br>
+    <code>localStorage.setItem('cb_test_api_url', 'http://localhost:4081')</code> <em>(optional — defaults to Railway prod)</em><br>
+    <code>localStorage.setItem('cb_test_widget_src', '/chatbot-platform/api/public/widget.js')</code> <em>(optional — local file vs API-served)</em><br><br>
+    Then reload the page.
+  </div>
+
+  <script>
+    // Resolve widget config from localStorage so no live credentials are committed.
+    // Defaults preserve the original behaviour: local widget file served from this
+    // same origin (via python -m http.server at the repo root) pointed at Railway prod.
+    // Override cb_test_api_url to hit a local backend; override cb_test_widget_src to
+    // load the widget from the API's /widget.js route instead of the local file.
+    (function () {
+      var apiKey = localStorage.getItem('cb_test_api_key');
+      var apiUrl = localStorage.getItem('cb_test_api_url') || 'https://chatbot-api-production-37df.up.railway.app';
+      var widgetSrc = localStorage.getItem('cb_test_widget_src') || '/chatbot-platform/api/public/widget.js';
+
+      if (!apiKey) {
+        document.getElementById('cb-test-setup').style.display = 'block';
+        return;
+      }
+
+      var script = document.createElement('script');
+      script.src = widgetSrc;
+      script.setAttribute('data-api-url', apiUrl);
+      script.setAttribute('data-api-key', apiKey);
+      script.setAttribute('data-debug', 'true');
+      document.body.appendChild(script);
+    })();
+  </script>
 </body>
 </html>

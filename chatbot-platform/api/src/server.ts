@@ -99,13 +99,11 @@ app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' 
 // and req.requestId is available to handlers and the global error handler.
 app.use(requestIdMiddleware);
 
-// Serve widget.js — before all middleware (no auth, open CORS, cached)
-// Resolve widget.js: try api/public/ first (Docker build), then ../../widget/ (dev)
-const widgetPath = [
-  path.resolve(__dirname, '../public/widget.js'),  // prod: dist/../public = api/public
-  path.resolve(__dirname, '../../widget/widget.js'), // dev: src/../../widget
-].find(p => { try { require('fs').accessSync(p); return true; } catch { return false; } })
-  || path.resolve(__dirname, '../public/widget.js');
+// Serve widget.js — before all middleware (no auth, open CORS, cached).
+// Single canonical source: chatbot-platform/api/public/widget.js. The Docker
+// build copies it via `COPY api/ .` + `COPY /app/public ./public`, and local
+// dev (ts-node-dev) resolves the same path because __dirname is api/src.
+const widgetPath = path.resolve(__dirname, '../public/widget.js');
 app.get('/widget.js', (_req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');

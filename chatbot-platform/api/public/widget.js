@@ -86,6 +86,70 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     heartbeatInterval: 30000,
   };
 
+  let widgetInstance = null;
+  const pendingApiCalls = [];
+
+  function dispatchGlobalEvent(eventName, detail) {
+    const event = new CustomEvent(eventName, { detail });
+
+    if (typeof document !== 'undefined') {
+      document.dispatchEvent(event);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(eventName, { detail }));
+    }
+  }
+
+  function enqueueOrRun(action) {
+    if (widgetInstance) {
+      action(widgetInstance);
+      return true;
+    }
+
+    pendingApiCalls.push(action);
+    return false;
+  }
+
+  function flushPendingApiCalls() {
+    if (!widgetInstance || pendingApiCalls.length === 0) return;
+
+    while (pendingApiCalls.length > 0) {
+      const action = pendingApiCalls.shift();
+      action(widgetInstance);
+    }
+  }
+
+  const chatbotWidgetApi = {
+    open() {
+      return enqueueOrRun(widget => widget.open());
+    },
+
+    close() {
+      return enqueueOrRun(widget => widget.close());
+    },
+
+    toggle() {
+      return enqueueOrRun(widget => widget.toggle());
+    },
+
+    sendMessage(text) {
+      return enqueueOrRun(widget => widget.sendMessage(text));
+    },
+
+    isReady() {
+      return !!widgetInstance;
+    },
+
+    getInstance() {
+      return widgetInstance;
+    },
+  };
+
+  if (typeof window !== 'undefined') {
+    window.ChatbotWidgetAPI = chatbotWidgetApi;
+  }
+
   // ==========================================================================
   // CSS Styles (Injected into Shadow DOM)
   // ==========================================================================
@@ -1525,6 +1589,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       // Initialize widget
       const widget = new ChatbotWidget(config);
+      widgetInstance = widget;
+      flushPendingApiCalls();
+      dispatchGlobalEvent('chatbot:ready', {
+        api: chatbotWidgetApi,
+        widget,
+      });
       
       // Expose to global for debugging
       if (config.debug) {

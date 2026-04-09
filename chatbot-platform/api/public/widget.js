@@ -443,12 +443,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
        ============================================================ */
     .cb-header {
       position: relative;
-      padding: 14px 18px 13px;
+      padding: 14px 12px 13px 18px;
       background: var(--cb-paper-raised);
       display: grid;
-      grid-template-columns: auto 1fr auto;
+      grid-template-columns: auto 1fr auto auto;
       align-items: center;
-      column-gap: 12px;
+      column-gap: 10px;
       flex-shrink: 0;
     }
     .cb-header::after {
@@ -460,6 +460,39 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       height: 1px;
       background: var(--cb-hairline);
     }
+
+    /* Header close button — the primary dismiss affordance. Styled as a
+       neutral ghost button to match the other icon buttons in the input row;
+       uses the brand color only on focus-visible so it doesn't compete with
+       the send button for primary-action attention. */
+    .cb-header__close {
+      width: 34px;
+      height: 34px;
+      border: none;
+      background: transparent;
+      color: var(--cb-ink-muted);
+      border-radius: 9px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition:
+        background 180ms var(--cb-ease),
+        color 180ms var(--cb-ease),
+        transform 260ms var(--cb-ease);
+    }
+    .cb-header__close:hover {
+      background: var(--cb-paper-sunk);
+      color: var(--cb-ink);
+    }
+    .cb-header__close:active { transform: scale(0.96); }
+    .cb-header__close:focus-visible {
+      outline: 2px solid color-mix(in oklch, var(--cb-primary) 50%, transparent);
+      outline-offset: 2px;
+    }
+    .cb-header__close svg { width: 18px; height: 18px; }
+    .cb-header__close svg path { stroke-width: 1.75; }
 
     .cb-header__avatar {
       width: 36px;
@@ -859,7 +892,17 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
 
     /* ============================================================
-       Mobile
+       Narrow widths (small phones, tight embeds) — drop the status
+       label to keep the 4-column header from wrapping.
+       ============================================================ */
+    @media (max-width: 420px) {
+      .cb-header { column-gap: 8px; padding-right: 10px; }
+      .cb-header__status-text { display: none; }
+    }
+
+    /* ============================================================
+       Mobile — chat becomes full-screen; header close button is the
+       only way to dismiss (launcher is hidden in this state).
        ============================================================ */
     @media (max-width: 768px) {
       .cb-widget {
@@ -877,8 +920,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         border-radius: 0;
       }
       .cb-chat--open + .cb-launcher { display: none; }
-      .cb-header { padding: 14px 18px; }
-      .cb-header::after { left: 18px; right: 18px; }
+      .cb-header {
+        padding: 14px 12px 13px 16px;
+        /* Extra top padding on devices with a notch / dynamic island */
+        padding-top: max(14px, env(safe-area-inset-top));
+      }
+      .cb-header::after { left: 16px; right: 16px; }
       .cb-messages { padding: 18px 18px 6px; gap: 12px; }
       .cb-input-area {
         padding: 10px 14px;
@@ -1412,6 +1459,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
               <span class="cb-header__status-dot"></span>
               <span class="cb-header__status-text">Connecting...</span>
             </div>
+            <button class="cb-header__close" type="button" aria-label="Close chat" title="Close chat">
+              ${ICONS.close}
+            </button>
           </header>
           
           <div class="cb-messages" role="log" aria-live="polite" aria-label="Chat messages">
@@ -1468,6 +1518,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     cacheElements() {
       this.chatWindow = this.container.querySelector('.cb-chat');
       this.launcher = this.container.querySelector('.cb-launcher');
+      this.headerCloseBtn = this.container.querySelector('.cb-header__close');
       this.messagesContainer = this.container.querySelector('.cb-messages');
       this.input = this.container.querySelector('.cb-input');
       this.sendBtn = this.container.querySelector('.cb-btn--send');
@@ -1519,7 +1570,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     attachEventListeners() {
       // Launcher click
       this.launcher.addEventListener('click', () => this.toggle());
-      
+
+      // Header close button — primary dismiss affordance inside the chat
+      // window. The launcher also closes (it becomes an X when open) but on
+      // mobile the launcher is hidden while the chat is open, so this button
+      // is the only reliable way to dismiss on narrow viewports.
+      if (this.headerCloseBtn) {
+        this.headerCloseBtn.addEventListener('click', () => this.close());
+      }
+
       // Send message
       this.sendBtn.addEventListener('click', () => this.sendMessage());
       this.input.addEventListener('keydown', (e) => {

@@ -16,7 +16,9 @@ const RATE_LIMIT_MAX_REQUESTS = config.rateLimit.maxRequests;
 
 // In-memory fallback counter for when Redis rate limiter encounters errors.
 // This prevents completely failing open when the primary limiter breaks.
+// Capped at 50k entries to prevent OOM during sustained Redis outages.
 const fallbackCounters = new Map<string, { count: number; resetAt: number }>();
+const FALLBACK_MAX_ENTRIES = 50_000;
 const FALLBACK_CLEANUP_INTERVAL = 60_000;
 setInterval(() => {
   const now = Date.now();
@@ -29,6 +31,10 @@ function fallbackConsume(key: string, maxRequests: number, windowMs: number): bo
   const now = Date.now();
   let entry = fallbackCounters.get(key);
   if (!entry || entry.resetAt <= now) {
+    // Reject new keys when map is at capacity to prevent OOM
+    if (!entry && fallbackCounters.size >= FALLBACK_MAX_ENTRIES) {
+      return false;
+    }
     entry = { count: 0, resetAt: now + windowMs };
     fallbackCounters.set(key, entry);
   }

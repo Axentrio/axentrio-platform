@@ -384,21 +384,37 @@ async function startServer(): Promise<void> {
     setInterval(cleanupAuditLogs, 24 * 60 * 60 * 1000);
 
     // Auto-close stale sessions — sessions with no activity for 30 minutes
+    // Batched to avoid locking many rows at once under load.
+    const STALE_BATCH_SIZE = 200;
+    const STALE_MAX_BATCHES = 50; // Cap at 10k sessions per run
     const autoCloseStaleSessions = async () => {
       try {
         const cutoff = new Date(Date.now() - 30 * 60 * 1000); // 30 minutes
-        const result = await AppDataSource.query(
-          `UPDATE chat_sessions
-           SET status = 'closed', ended_at = NOW(), updated_at = NOW()
-           WHERE status IN ('bot', 'waiting')
-           AND last_activity_at < $1
-           AND last_activity_at IS NOT NULL
-           RETURNING id`,
-          [cutoff]
-        );
-        const count = result?.length || result?.[0]?.length || 0;
-        if (count > 0) {
-          logger.info(`Auto-closed ${count} stale sessions`);
+        let totalClosed = 0;
+        let batchClosed: number;
+        let batches = 0;
+        do {
+          const rows: Array<{ id: string }> = await AppDataSource.query(
+            `UPDATE chat_sessions
+             SET status = 'closed', ended_at = NOW(), updated_at = NOW()
+             WHERE id IN (
+               SELECT id FROM chat_sessions
+               WHERE status IN ('bot', 'waiting')
+               AND last_activity_at < $1
+               AND last_activity_at IS NOT NULL
+               LIMIT $2
+               FOR UPDATE SKIP LOCKED
+             )
+             RETURNING id`,
+            [cutoff, STALE_BATCH_SIZE]
+          );
+          batchClosed = Array.isArray(rows) ? rows.length : 0;
+          totalClosed += batchClosed;
+          batches++;
+        } while (batchClosed === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);
+
+        if (totalClosed > 0) {
+          logger.info(`Auto-closed ${totalClosed} stale sessions`);
         }
       } catch (error) {
         logger.error('Stale session cleanup failed', { error });

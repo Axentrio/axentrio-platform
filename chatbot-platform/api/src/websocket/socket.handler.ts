@@ -24,6 +24,21 @@ import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { encrypt } from '../utils/encryption';
 import { routeOutboundMessage } from '../channels/outbound-router';
 
+// Per-session mutex to serialise message saves and prevent race conditions
+// on messageCount increments and session updates.
+const sessionLocks = new Map<string, Promise<void>>();
+function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(sessionId) ?? Promise.resolve();
+  // Chain fn after previous work, swallowing prior errors so this fn still runs
+  const result = prev.then(() => fn(), () => fn());
+  // Track the void chain so the next caller waits for us
+  const done = result.then(() => {}, () => {});
+  sessionLocks.set(sessionId, done);
+  // Clean up when nothing else has chained after us
+  done.then(() => { if (sessionLocks.get(sessionId) === done) sessionLocks.delete(sessionId); });
+  return result;
+}
+
 // Socket event types
 interface MessageSendData {
   sessionId: string;
@@ -329,99 +344,102 @@ function handleAgentLeave(socket: TenantSocket, data: { sessionId: string }): vo
  * Handle message send event
  */
 async function handleMessageSend(socket: TenantSocket, data: MessageSendData): Promise<void> {
+  const { sessionId, content, type = 'text', metadata } = data;
+  const user = socket.data.user;
+  const tenantId = socket.data.tenantId;
+
+  if (!sessionId || !content) {
+    socket.emit('error', { message: 'Invalid message data' });
+    return;
+  }
+
   try {
-    const { sessionId, content, type = 'text', metadata } = data;
-    const user = socket.data.user;
-    const tenantId = socket.data.tenantId;
-
-    if (!sessionId || !content) {
-      socket.emit('error', { message: 'Invalid message data' });
-      return;
-    }
-
-    // Verify session exists and belongs to tenant
-    const session = await sessionRepository.findOne({
-      where: { id: sessionId, tenantId },
-    });
-
-    if (!session) {
-      socket.emit('error', { message: 'Session not found' });
-      return;
-    }
-
-    if (session.status === 'closed') {
-      socket.emit('error', { message: 'Session is closed' });
-      return;
-    }
-
-    // Determine sender type
-    const senderType = user?.type === 'agent' ? 'agent' : 'user';
-    const senderId = socket.data.participantId || user?.id || socket.id;
-
-    // Encrypt message content before saving
-    const encryptedContent = encrypt(content);
-
-    // Save message to database
-    const message = messageRepository.create({
-      sessionId,
-      tenantId: tenantId!,
-      participantId: senderId,
-      type,
-      content: encryptedContent,
-      contentEncrypted: true,
-      metadata: metadata || undefined,
-    } as DeepPartial<Message>);
-
-    const savedMessage = await messageRepository.save(message);
-
-    // Update session last activity and message count
-    session.messageCount = (session.messageCount || 0) + 1;
-    session.updateActivity();
-    await sessionRepository.save(session);
-
-    // Broadcast message to room — use original plain text
-    const roomName = `${tenantId}:${sessionId}`;
-    const messageData = {
-      id: savedMessage.id,
-      type: savedMessage.type,
-      content,
-      status: savedMessage.status,
-      createdAt: savedMessage.createdAt,
-      senderType,
-      timestamp: new Date().toISOString(),
-    };
-
-    // Emit to all clients in the room (including sender for confirmation)
-    io?.to(roomName).emit('message:receive', messageData);
-
-    // Also emit to tenant agents for notifications
-    io?.to(`agents:${tenantId}`).emit('message:new', {
-      sessionId,
-      message: messageData,
-    });
-
-    logger.debug(`Message sent in room ${roomName}`, {
-      messageId: savedMessage.id,
-      senderType,
-    });
-
-    // Forward visitor messages to n8n if applicable
-    if (senderType === 'user') {
-      forwardMessageToN8n(session, savedMessage).catch((err) => {
-        logger.error('Error in n8n message forwarding:', err);
+    // Serialise per-session to prevent concurrent messageCount races
+    await withSessionLock(sessionId, async () => {
+      // Verify session exists and belongs to tenant
+      const session = await sessionRepository.findOne({
+        where: { id: sessionId, tenantId },
       });
-    }
 
-    // Route agent replies to external channels (WebSocket already emitted above)
-    if (senderType === 'agent' && session.channel !== 'widget') {
-      routeOutboundMessage(
-        { type: 'text', content },
-        { sessionId, tenantId: session.tenantId, messageId: savedMessage.id },
-        undefined, // Skip WebSocket — already emitted above
-      ).catch((err) => {
-        logger.error('Error routing agent reply to external channel:', err);
+      if (!session) {
+        socket.emit('error', { message: 'Session not found' });
+        return;
+      }
+
+      if (session.status === 'closed') {
+        socket.emit('error', { message: 'Session is closed' });
+        return;
+      }
+
+      // Determine sender type
+      const senderType = user?.type === 'agent' ? 'agent' : 'user';
+      const senderId = socket.data.participantId || user?.id || socket.id;
+
+      // Encrypt message content before saving
+      const encryptedContent = encrypt(content);
+
+      // Save message to database
+      const message = messageRepository.create({
+        sessionId,
+        tenantId: tenantId!,
+        participantId: senderId,
+        type,
+        content: encryptedContent,
+        contentEncrypted: true,
+        metadata: metadata || undefined,
+      } as DeepPartial<Message>);
+
+      const savedMessage = await messageRepository.save(message);
+
+      // Update session last activity and message count
+      session.messageCount = (session.messageCount || 0) + 1;
+      session.updateActivity();
+      await sessionRepository.save(session);
+
+      // Broadcast message to room — use original plain text
+      const roomName = `${tenantId}:${sessionId}`;
+      const messageData = {
+        id: savedMessage.id,
+        type: savedMessage.type,
+        content,
+        status: savedMessage.status,
+        createdAt: savedMessage.createdAt,
+        senderType,
+        timestamp: new Date().toISOString(),
+      };
+
+      // Emit to all clients in the room (including sender for confirmation)
+      io?.to(roomName).emit('message:receive', messageData);
+
+      // Also emit to tenant agents for notifications
+      io?.to(`agents:${tenantId}`).emit('message:new', {
+        sessionId,
+        message: messageData,
       });
-    }
+
+      logger.debug(`Message sent in room ${roomName}`, {
+        messageId: savedMessage.id,
+        senderType,
+      });
+
+      // Forward visitor messages to n8n if applicable (fire-and-forget, outside lock scope)
+      if (senderType === 'user') {
+        forwardMessageToN8n(session, savedMessage).catch((err) => {
+          logger.error('Error in n8n message forwarding:', err);
+        });
+      }
+
+      // Route agent replies to external channels (WebSocket already emitted above)
+      if (senderType === 'agent' && session.channel !== 'widget') {
+        routeOutboundMessage(
+          { type: 'text', content },
+          { sessionId, tenantId: session.tenantId, messageId: savedMessage.id },
+          undefined, // Skip WebSocket — already emitted above
+        ).catch((err) => {
+          logger.error('Error routing agent reply to external channel:', err);
+        });
+      }
+    });
   } catch (error) {
     logger.error('Error handling message:send:', error);
     socket.emit('error', { message: 'Failed to send message' });

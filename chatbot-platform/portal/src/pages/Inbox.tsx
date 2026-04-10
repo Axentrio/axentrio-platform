@@ -161,7 +161,9 @@ const Inbox: React.FC = () => {
     if (initialChatId && !selectedChat) {
       api.get<{ data: Chat }>(`/chats/${initialChatId}`).then((res) => {
         setSelectedChat(res.data ?? (res as unknown as Chat));
-      }).catch(() => {});
+      }).catch(() => {
+        toast.error('Could not load the requested conversation');
+      });
     }
   }, [initialChatId]);
 
@@ -216,40 +218,51 @@ const Inbox: React.FC = () => {
 
   const handleTransfer = async (agentId: string) => {
     if (!selectedChat) return;
+    const prev = selectedChat;
+    // Optimistic: close modal and deselect immediately
+    setIsTransferModalOpen(false);
+    setSelectedChat(null);
     try {
-      await api.post(`/chats/${selectedChat.id}/transfer`, { agentId });
-      setIsTransferModalOpen(false);
-      setSelectedChat(null);
+      await api.post(`/chats/${prev.id}/transfer`, { agentId });
+      toast.success('Conversation transferred');
     } catch (error) {
       console.error('Failed to transfer chat:', error);
       toast.error('Failed to transfer chat');
+      setSelectedChat((current) => current === null ? prev : current);
     }
   };
 
   const handleCloseChat = async () => {
     if (!selectedChat) return;
+    const prev = selectedChat;
+    // Optimistic: deselect immediately
     setIsClosing(true);
+    setSelectedChat(null);
+    setConfirmClose(false);
     try {
-      await api.post(`/chats/${selectedChat.id}/close`);
-      setSelectedChat(null);
+      await api.post(`/chats/${prev.id}/close`);
       toast.success('Conversation closed');
     } catch (error) {
       console.error('Failed to close chat:', error);
       toast.error('Failed to close conversation');
+      setSelectedChat((current) => current === null ? prev : current);
     } finally {
       setIsClosing(false);
-      setConfirmClose(false);
     }
   };
 
   const handleReturnToBot = async () => {
     if (!selectedChat) return;
+    const prev = selectedChat;
+    // Optimistic: deselect immediately
+    setSelectedChat(null);
     try {
-      await api.post(`/chats/${selectedChat.id}/release`);
+      await api.post(`/chats/${prev.id}/release`);
       toast.success('Conversation returned to bot');
-      setSelectedChat(null);
-    } catch (err) {
+    } catch (error) {
+      console.error('Failed to return to bot:', error);
       toast.error('Failed to return to bot');
+      setSelectedChat((current) => current === null ? prev : current);
     }
   };
 

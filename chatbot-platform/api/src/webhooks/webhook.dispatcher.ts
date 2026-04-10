@@ -6,6 +6,37 @@ const TIMEOUT_MS = 10_000;
 const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1_000;
 
+// ---- Per-URL circuit breaker ----
+// After FAILURE_THRESHOLD consecutive failures, skip delivery for COOLDOWN_MS.
+const FAILURE_THRESHOLD = 5;
+const COOLDOWN_MS = 60_000; // 1 minute
+const circuits = new Map<string, { failures: number; openUntil: number }>();
+
+function isCircuitOpen(url: string): boolean {
+  const cb = circuits.get(url);
+  if (!cb) return false;
+  if (cb.failures < FAILURE_THRESHOLD) return false;
+  if (Date.now() >= cb.openUntil) {
+    // Half-open: allow one probe attempt
+    cb.failures = FAILURE_THRESHOLD - 1;
+    return false;
+  }
+  return true;
+}
+
+function recordSuccess(url: string): void {
+  circuits.delete(url);
+}
+
+function recordFailure(url: string): void {
+  const cb = circuits.get(url) ?? { failures: 0, openUntil: 0 };
+  cb.failures++;
+  if (cb.failures >= FAILURE_THRESHOLD) {
+    cb.openUntil = Date.now() + COOLDOWN_MS;
+  }
+  circuits.set(url, cb);
+}
+
 function signPayload(secret: string, body: string): string {
   return createHmac('sha256', secret).update(body).digest('hex');
 }
@@ -18,6 +49,12 @@ export async function deliverWebhook(
   config: EventWebhookConfig,
   event: WebhookEvent
 ): Promise<void> {
+  // Skip delivery if circuit is open (endpoint repeatedly failing)
+  if (isCircuitOpen(config.url)) {
+    logger.warn('Webhook circuit open, skipping delivery', { url: config.url, eventId: event.id });
+    return;
+  }
+
   const body = JSON.stringify(event);
   const signature = signPayload(config.secret, body);
 
@@ -48,12 +85,14 @@ export async function deliverWebhook(
       }
 
       if (response.ok) {
+        recordSuccess(config.url);
         logger.info('Webhook delivered', { url: config.url, eventId: event.id, status: response.status });
         return;
       }
 
-      // Don't retry on 4xx client errors
+      // Don't retry on 4xx client errors — endpoint responded, clear circuit
       if (response.status >= 400 && response.status < 500) {
+        recordSuccess(config.url);
         logger.warn('Webhook rejected by server (4xx), not retrying', {
           url: config.url,
           eventId: event.id,
@@ -79,5 +118,6 @@ export async function deliverWebhook(
     }
   }
 
+  recordFailure(config.url);
   logger.error('Webhook delivery exhausted all retries', { url: config.url, eventId: event.id });
 }

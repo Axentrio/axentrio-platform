@@ -466,8 +466,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
        uses the brand color only on focus-visible so it doesn't compete with
        the send button for primary-action attention. */
     .cb-header__close {
-      width: 34px;
-      height: 34px;
+      width: 44px;
+      height: 44px;
       border: none;
       background: transparent;
       color: var(--cb-ink-muted);
@@ -696,6 +696,73 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     .cb-message__image:hover { transform: scale(1.01); }
 
     /* ============================================================
+       Connection banner — slides in when disconnected / reconnecting
+       ============================================================ */
+    .cb-conn-banner {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-family: var(--cb-sans);
+      font-size: 12px;
+      font-weight: 500;
+      color: #92400E;
+      background: #FEF3C7;
+      border-bottom: 1px solid #FDE68A;
+      flex-shrink: 0;
+    }
+    .cb-conn-banner--visible { display: flex; }
+    .cb-conn-banner--offline { color: #991B1B; background: #FEE2E2; border-bottom-color: #FECACA; }
+    .cb-conn-banner__dot {
+      width: 6px; height: 6px; border-radius: 999px;
+      background: currentColor;
+      animation: cbPulseAmber 1800ms var(--cb-ease) infinite;
+    }
+    .cb-conn-banner--offline .cb-conn-banner__dot { animation: none; }
+
+    /* ============================================================
+       Loading spinner — shown while session initialises
+       ============================================================ */
+    .cb-loading {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      gap: 10px;
+      color: var(--cb-ink-muted);
+      font-family: var(--cb-sans);
+      font-size: 13px;
+    }
+    .cb-loading__spinner {
+      width: 28px; height: 28px;
+      border: 2.5px solid var(--cb-hairline);
+      border-top-color: var(--cb-primary);
+      border-radius: 999px;
+      animation: cbSpin 700ms linear infinite;
+    }
+    @keyframes cbSpin { to { transform: rotate(360deg); } }
+
+    /* ============================================================
+       Empty state — prompt to start chatting
+       ============================================================ */
+    .cb-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      gap: 6px;
+      padding: 24px;
+      text-align: center;
+      color: var(--cb-ink-muted);
+      font-family: var(--cb-sans);
+    }
+    .cb-empty__icon { opacity: 0.4; }
+    .cb-empty__text { font-size: 13px; font-weight: 500; }
+
+    /* ============================================================
        Typing indicator — classic three-dot pulse inside a bot bubble
        ============================================================ */
     .cb-typing {
@@ -800,8 +867,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       padding-left: 2px;
     }
     .cb-btn {
-      width: 34px;
-      height: 34px;
+      width: 44px;
+      height: 44px;
       border-radius: 9px;
       border: none;
       background: transparent;
@@ -1055,6 +1122,16 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   };
 
   // ==========================================================================
+  // Fetch with timeout helper
+  // ==========================================================================
+  function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    return fetch(url, { ...options, signal: controller.signal })
+      .finally(() => clearTimeout(timer));
+  }
+
+  // ==========================================================================
   // ChatbotWidget Class
   // ==========================================================================
   // Socket.IO CDN URL
@@ -1087,6 +1164,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.pendingMessages = [];
       this.storageKey = this.getStorageKey();
       this._connected = false;
+      this._hasEverConnected = false;
 
       // Render immediately, connect async
       this.loadSession();
@@ -1102,6 +1180,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           text: this.config.greetingMessage,
           sender: 'bot',
           timestamp: new Date(),
+          isGreeting: true,
         });
       }
 
@@ -1172,6 +1251,48 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       );
       this.statusDot.classList.add(nextState.dotClass);
       this.statusText.textContent = nextState.label;
+
+      // Connection banner: only show after a prior successful connection (not on cold open)
+      if (this.connBanner) {
+        if (state === 'connected') {
+          this._hasEverConnected = true;
+          this.connBanner.classList.remove('cb-conn-banner--visible', 'cb-conn-banner--offline');
+        } else if (this._hasEverConnected) {
+          this.connBanner.classList.add('cb-conn-banner--visible');
+          this.connBanner.classList.toggle('cb-conn-banner--offline', state === 'offline');
+          if (this.connBannerText) {
+            this.connBannerText.textContent = state === 'offline' ? 'Connection lost' : 'Reconnecting…';
+          }
+        }
+      }
+
+      // Swap loading spinner once connection settles
+      if (this.loadingEl) {
+        const onlyGreeting = this.messages.length === 0 ||
+          (this.messages.length === 1 && this.messages[0].isGreeting);
+
+        if (state === 'connected' && onlyGreeting) {
+          // Connected with no real messages — show empty-state prompt
+          this.loadingEl.outerHTML = `
+            <div class="cb-empty">
+              <span class="cb-empty__icon">${ICONS.chat}</span>
+              <span class="cb-empty__text">Ask us anything</span>
+            </div>`;
+          this.loadingEl = null;
+        } else if (state === 'connected') {
+          // Connected with cached messages already rendered — just remove spinner
+          this.loadingEl.remove();
+          this.loadingEl = null;
+        } else if (state === 'offline') {
+          // Never connected — swap spinner for a "can't connect" message
+          this.loadingEl.outerHTML = `
+            <div class="cb-empty">
+              <span class="cb-empty__icon">${ICONS.bot}</span>
+              <span class="cb-empty__text">Unable to connect — please try again later</span>
+            </div>`;
+          this.loadingEl = null;
+        }
+      }
     }
 
     canSendMessages() {
@@ -1234,14 +1355,14 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       // Create new session via API
       this.visitorId = 'widget-' + utils.generateId();
-      const resp = await fetch(`${this.config.apiUrl}/api/v1/widget/init`, {
+      const resp = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/init`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           apiKey: this.config.apiKey,
           visitorId: this.visitorId,
         }),
-      });
+      }, 15000);
 
       if (!resp.ok) throw new Error(`Widget init failed: ${resp.status}`);
 
@@ -1303,6 +1424,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         this._initSession().then(() => {
           this.socket.emit('session:join', { sessionId: this.sessionId });
           this.flushPendingMessages();
+        }).catch((err) => {
+          this.log('Session re-init failed:', err.message);
+          this.setConnectionState('offline');
         });
       });
 
@@ -1463,9 +1587,19 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
               ${ICONS.close}
             </button>
           </header>
-          
+
+          <div class="cb-conn-banner" role="status" aria-live="polite">
+            <span class="cb-conn-banner__dot"></span>
+            <span class="cb-conn-banner__text">Reconnecting…</span>
+          </div>
+
           <div class="cb-messages" role="log" aria-live="polite" aria-label="Chat messages">
-            ${this.messages.map(msg => this.renderMessage(msg)).join('')}
+            ${this.messages.length === 0 ? `
+              <div class="cb-loading">
+                <div class="cb-loading__spinner"></div>
+                <span>Starting chat…</span>
+              </div>
+            ` : this.messages.map(msg => this.renderMessage(msg)).join('')}
           </div>
           
           <div class="cb-typing" style="display: none;" aria-hidden="true">
@@ -1530,6 +1664,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.progressBarInner = this.container.querySelector('.cb-progress__bar');
       this.statusDot = this.container.querySelector('.cb-header__status-dot');
       this.statusText = this.container.querySelector('.cb-header__status-text');
+      this.connBanner = this.container.querySelector('.cb-conn-banner');
+      this.connBannerText = this.container.querySelector('.cb-conn-banner__text');
+      this.loadingEl = this.container.querySelector('.cb-loading');
     }
     
     renderMessage(message) {
@@ -1609,6 +1746,37 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.chatWindow.addEventListener('dragleave', (e) => this.handleDragLeave(e));
       this.chatWindow.addEventListener('drop', (e) => this.handleDrop(e));
       
+      // ESC to close dialog + focus trap (Tab/Shift+Tab stays inside widget)
+      this._onKeyDown = (e) => {
+        if (!this.isOpen) return;
+
+        if (e.key === 'Escape') {
+          if (e.isComposing) return; // let IME dismiss first
+          e.preventDefault();
+          this.close();
+          this.launcher.focus();
+          return;
+        }
+
+        if (e.key === 'Tab') {
+          const focusable = this.chatWindow.querySelectorAll(
+            'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+          );
+          if (focusable.length === 0) return;
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+
+          if (e.shiftKey && this.shadow.activeElement === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && this.shadow.activeElement === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      };
+      this.shadow.addEventListener('keydown', this._onKeyDown);
+
       // Window resize — stored as a named ref so destroy() can remove it
       this._onWindowResize = utils.debounce(() => {
         if (utils.isMobile() && this.isOpen && this.config.fullScreenOnMobile) {
@@ -1697,11 +1865,16 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     
     addMessage(message) {
       this.messages.push(message);
-      
+
+      // Clear loading spinner or empty state on first message
+      if (this.loadingEl) { this.loadingEl.remove(); this.loadingEl = null; }
+      const emptyEl = this.messagesContainer?.querySelector('.cb-empty');
+      if (emptyEl) emptyEl.remove();
+
       const messageEl = document.createElement('div');
       messageEl.innerHTML = this.renderMessage(message);
       this.messagesContainer.appendChild(messageEl.firstElementChild);
-      
+
       this.scrollToBottom();
       this.saveSession();
     }
@@ -1788,7 +1961,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       
       try {
         // Get upload URL from server
-        const response = await fetch(`${this.config.apiUrl}/api/v1/uploads/presigned-url`, {
+        const response = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/uploads/presigned-url`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1801,7 +1974,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             chatSessionId: this.sessionId,
             tenantId,
           }),
-        });
+        }, 15000);
         
         if (!response.ok) throw new Error('Failed to get upload URL');
         
@@ -1958,6 +2131,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       if (this._onBeforeUnload) {
         window.removeEventListener('beforeunload', this._onBeforeUnload);
         this._onBeforeUnload = null;
+      }
+      if (this._onKeyDown && this.shadow) {
+        this.shadow.removeEventListener('keydown', this._onKeyDown);
+        this._onKeyDown = null;
       }
 
       // 4. Persist any in-flight session state + notify subscribers before DOM removal

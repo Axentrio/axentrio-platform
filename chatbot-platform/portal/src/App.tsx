@@ -12,7 +12,7 @@ import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 
 // Context Providers
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
-import { SocketProvider } from '@websocket/SocketContext';
+import { SocketProvider, useSocket } from '@websocket/SocketContext';
 
 // Auth
 import { OrganizationRequired } from '@auth/OrganizationRequired';
@@ -20,6 +20,7 @@ import { AppAuthProvider } from '@auth/AppAuthProvider';
 import { ProtectedRoute, SupervisorRoute, SuperAdminRoute } from '@auth/ProtectedRoute';
 
 // Layout
+import { ErrorBoundary } from '@components/ui/error-boundary';
 import { Sidebar } from '@components/Sidebar';
 import { TenantCommandPalette } from '@components/admin/TenantCommandPalette';
 import { TenantImpersonationBanner } from '@components/admin/TenantImpersonationBanner';
@@ -51,6 +52,34 @@ const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // Create Query Client
 const queryClient = createQueryClient();
+
+// Connection status banner — shown when socket is disconnected
+const ConnectionBanner: React.FC = () => {
+  const { isConnected, isConnecting } = useSocket();
+  const [show, setShow] = React.useState(false);
+
+  // Only show after a brief delay to avoid flashing on page load
+  React.useEffect(() => {
+    if (isConnected) {
+      setShow(false);
+      return;
+    }
+    const timer = setTimeout(() => setShow(true), 2000);
+    return () => clearTimeout(timer);
+  }, [isConnected]);
+
+  if (!show) return null;
+
+  return (
+    <div className="flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border-b border-amber-200 dark:border-amber-800">
+      <span className="relative flex h-2 w-2">
+        {isConnecting && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />}
+        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+      </span>
+      {isConnecting ? 'Reconnecting to live updates…' : 'Live updates disconnected'}
+    </div>
+  );
+};
 
 // Layout wrapper for authenticated pages
 const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -111,6 +140,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
           </div>
         </div>
         <TenantImpersonationBanner />
+        <ConnectionBanner />
         <main className="flex-1 overflow-hidden">
           {children}
         </main>
@@ -244,6 +274,7 @@ const App: React.FC = () => {
           <AppAuthProvider>
             <BrowserRouter>
               <SocketProvider>
+              <ErrorBoundary>
               <AuthenticatedLayout>
                 <OrganizationRequired>
                   <Routes>
@@ -293,6 +324,7 @@ const App: React.FC = () => {
                   </Routes>
                 </OrganizationRequired>
               </AuthenticatedLayout>
+              </ErrorBoundary>
               </SocketProvider>
             </BrowserRouter>
           </AppAuthProvider>

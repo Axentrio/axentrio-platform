@@ -238,31 +238,35 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     handlersRef.current.delete(handlerId);
   }, []);
 
-  // Join a chat room
+  // Join a chat room — backend expects { sessionId }
   const joinChat = useCallback((chatId: string) => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.CHAT_JOIN, { chatId, agentId: user?.id });
+      socketRef.current.emit(WS_EVENTS.CHAT_JOIN, { sessionId: chatId, agentId: user?.id });
     }
   }, [isConnected, user?.id]);
 
-  // Leave a chat room
+  // Leave a chat room — backend expects { sessionId }
   const leaveChat = useCallback((chatId: string) => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.CHAT_LEAVE, { chatId, agentId: user?.id });
+      socketRef.current.emit(WS_EVENTS.CHAT_LEAVE, { sessionId: chatId, agentId: user?.id });
     }
   }, [isConnected, user?.id]);
 
-  // Send a message
+  // Send a message — backend expects { sessionId, content, type }
   const sendMessage = useCallback((chatId: string, message: Partial<Message>) => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.CHAT_MESSAGE, { chatId, message });
+      socketRef.current.emit(WS_EVENTS.CHAT_MESSAGE, {
+        sessionId: chatId,
+        content: message.content,
+        type: message.type || 'text',
+      });
     }
   }, [isConnected]);
 
-  // Send typing indicator
+  // Send typing indicator — backend expects { sessionId, isTyping }
   const sendTyping = useCallback((chatId: string, isTyping: boolean) => {
     if (socketRef.current && isConnected) {
-      socketRef.current.emit(WS_EVENTS.CHAT_TYPING, { chatId, isTyping });
+      socketRef.current.emit(WS_EVENTS.CHAT_TYPING, { sessionId: chatId, isTyping });
     }
   }, [isConnected]);
 

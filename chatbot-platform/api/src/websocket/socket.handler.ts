@@ -94,7 +94,8 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
       if (dbIds) {
         socket.data.user = {
           id: dbIds.agentId,
-          email: '',
+          name: dbIds.userName || '',
+          email: dbIds.email || '',
           tenantId: dbIds.tenantId,
           role: dbIds.userRole,
           type: 'agent',
@@ -117,6 +118,7 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
 
     socket.data.user = {
       id: agent.id,
+      name: user.name || user.email?.split('@')[0] || '',
       email: user.email || '',
       tenantId: user.tenantId,
       role: user.role,
@@ -314,6 +316,7 @@ async function handleAgentJoin(socket: TenantSocket, data: { sessionId: string }
 
   io?.to(roomName).emit('agent:joined', {
     agentId: socket.data.user?.id,
+    agentName: socket.data.user?.name || 'Agent',
     sessionId: data.sessionId,
     timestamp: new Date().toISOString(),
   });
@@ -333,6 +336,7 @@ function handleAgentLeave(socket: TenantSocket, data: { sessionId: string }): vo
 
   io?.to(roomName).emit('agent:left', {
     agentId: socket.data.user?.id,
+    agentName: socket.data.user?.name || 'Agent',
     sessionId: data.sessionId,
     timestamp: new Date().toISOString(),
   });
@@ -400,10 +404,13 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
       const roomName = `${tenantId}:${sessionId}`;
       const messageData = {
         id: savedMessage.id,
+        sessionId,
+        chatId: sessionId,
         type: savedMessage.type,
         content,
         status: savedMessage.status,
         createdAt: savedMessage.createdAt,
+        sender: senderType,
         senderType,
         timestamp: new Date().toISOString(),
       };
@@ -666,9 +673,9 @@ async function handleSessionJoin(
     // Store session ID in socket data
     socket.data.sessionId = sessionId;
 
-    // For widget users, resolve the participant ID so messages can be saved
+    // Resolve or create a participant so messages can be saved with a valid participantId
+    const participantRepo = AppDataSource.getRepository(Participant);
     if (socket.data.user?.type === 'widget') {
-      const participantRepo = AppDataSource.getRepository(Participant);
       const participant = await participantRepo.findOne({
         where: { sessionId, type: 'user' },
         order: { joinedAt: 'DESC' },
@@ -676,6 +683,21 @@ async function handleSessionJoin(
       if (participant) {
         socket.data.participantId = participant.id;
       }
+    } else if (socket.data.user?.type === 'agent') {
+      // Find or create an agent participant for this session
+      let participant = await participantRepo.findOne({
+        where: { sessionId, type: 'agent', name: socket.data.user.name || socket.data.user.email },
+      });
+      if (!participant) {
+        participant = participantRepo.create({
+          sessionId,
+          type: 'agent',
+          name: socket.data.user.name || socket.data.user.email || 'Agent',
+          joinedAt: new Date(),
+        });
+        participant = await participantRepo.save(participant);
+      }
+      socket.data.participantId = participant.id;
     }
 
     // Notify room about user joining

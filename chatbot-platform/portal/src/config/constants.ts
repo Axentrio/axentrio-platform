@@ -128,15 +128,15 @@ export const WS_EVENTS = {
   AGENT_STATUS: 'agent:status',
   AGENT_UPDATE: 'agent:update',
   
-  // Chat Events
+  // Chat Events — names must match backend socket.handler.ts
   CHAT_NEW: 'chat:new',
   CHAT_UPDATE: 'chat:update',
-  CHAT_JOIN: 'chat:join',
-  CHAT_LEAVE: 'chat:leave',
-  CHAT_MESSAGE: 'chat:message',
-  CHAT_MESSAGE_RECEIVED: 'chat:message:received',
-  CHAT_TYPING: 'chat:typing',
-  CHAT_TYPING_UPDATE: 'chat:typing:update',
+  CHAT_JOIN: 'session:join',
+  CHAT_LEAVE: 'session:leave',
+  CHAT_MESSAGE: 'message:send',
+  CHAT_MESSAGE_RECEIVED: 'message:receive',
+  CHAT_TYPING: 'typing:indicator',
+  CHAT_TYPING_UPDATE: 'typing:indicator',
   
   // Handoff Events
   HANDOFF_NEW: 'handoff:requested',

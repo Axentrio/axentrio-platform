@@ -113,13 +113,14 @@ export const chatOptions = {
     });
   },
 
-  /** Single chat with embedded messages */
+  /** Single chat with embedded messages — longer staleTime since socket events keep it fresh */
   detail: (chatId: string) =>
     queryOptions({
       queryKey: queryKeys.chats.detail(chatId),
       queryFn: () =>
         api.get<Any>(`/chats/${chatId}`) as Promise<ChatDetailResponse>,
       enabled: !!chatId,
+      staleTime: 5 * 60 * 1000,
     }),
 };
 

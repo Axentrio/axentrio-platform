@@ -35,6 +35,7 @@ interface CachedIds {
   userId: string;
   agentId: string;
   userRole: UserRole;
+  userName: string;
   tenantName: string;
   email: string;
   cachedAt: number;
@@ -323,6 +324,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       userId: user.id,
       agentId: agent.id,
       userRole: user.role,
+      userName: user.name || user.email?.split('@')[0] || '',
       tenantName: tenant.name,
       email: user.email,
     };
@@ -398,6 +400,7 @@ export async function resolveClerkIds(clerkUserId: string, clerkOrgId: string): 
     userId: user.id,
     agentId: agent.id,
     userRole: user.role,
+    userName: user.name || user.email?.split('@')[0] || '',
     tenantName: tenant.name,
     email: user.email,
   };

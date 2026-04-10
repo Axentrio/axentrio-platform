@@ -763,6 +763,27 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     .cb-empty__text { font-size: 13px; font-weight: 500; }
 
     /* ============================================================
+       System messages — agent joined/left notifications
+       ============================================================ */
+    .cb-system-msg {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 6px 0;
+      font-family: var(--cb-sans);
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--cb-ink-muted);
+    }
+    .cb-system-msg__dot {
+      width: 5px; height: 5px;
+      border-radius: 999px;
+    }
+    .cb-system-msg__dot--joined { background: var(--cb-secondary); }
+    .cb-system-msg__dot--left { background: var(--cb-ink-faint); }
+
+    /* ============================================================
        Typing indicator — classic three-dot pulse inside a bot bubble
        ============================================================ */
     .cb-typing {
@@ -1165,6 +1186,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.storageKey = this.getStorageKey();
       this._connected = false;
       this._hasEverConnected = false;
+      this._agent = null; // { name, lastActive }
+      this._agentActivityTimer = null;
 
       // Render immediately, connect async
       this.loadSession();
@@ -1455,7 +1478,29 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           } else {
             this.hideTypingIndicator();
           }
+          // Track agent activity
+          if (this._agent) {
+            this._agent.lastActive = Date.now();
+            this.updateAgentPresence();
+          }
         }
+      });
+
+      this.socket.on('agent:joined', (data) => {
+        this.log('Agent joined:', data);
+        this._agent = { name: data.agentName || 'Agent', lastActive: Date.now() };
+        this.addSystemMessage(`${this._agent.name} joined the conversation`);
+        this.updateAgentPresence();
+        this.startAgentActivityTimer();
+      });
+
+      this.socket.on('agent:left', (data) => {
+        this.log('Agent left:', data);
+        const name = this._agent?.name || data.agentName || 'Agent';
+        this._agent = null;
+        this.addSystemMessage(`${name} left the conversation`);
+        this.updateAgentPresence();
+        this.stopAgentActivityTimer();
       });
 
       this.socket.on('error', (data) => {
@@ -1877,8 +1922,52 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       this.scrollToBottom();
       this.saveSession();
+
+      // Also track agent activity from incoming messages
+      if (message.sender !== 'user' && this._agent) {
+        this._agent.lastActive = Date.now();
+        this.updateAgentPresence();
+      }
     }
-    
+
+    addSystemMessage(text) {
+      const el = document.createElement('div');
+      const isJoined = text.includes('joined');
+      el.innerHTML = `<div class="cb-system-msg">
+        <span class="cb-system-msg__dot cb-system-msg__dot--${isJoined ? 'joined' : 'left'}"></span>
+        ${utils.escapeHtml(text)}
+      </div>`;
+      this.messagesContainer.appendChild(el.firstElementChild);
+      this.scrollToBottom();
+    }
+
+    updateAgentPresence() {
+      if (!this.statusText) return;
+      if (!this._agent) {
+        this.statusText.textContent = this._connected ? 'Online' : 'Connecting...';
+        return;
+      }
+      const elapsed = Date.now() - this._agent.lastActive;
+      if (elapsed < 60_000) {
+        this.statusText.textContent = `Chatting with ${this._agent.name}`;
+      } else {
+        const mins = Math.floor(elapsed / 60_000);
+        this.statusText.textContent = `${this._agent.name} · ${mins}m ago`;
+      }
+    }
+
+    startAgentActivityTimer() {
+      this.stopAgentActivityTimer();
+      this._agentActivityTimer = setInterval(() => this.updateAgentPresence(), 30_000);
+    }
+
+    stopAgentActivityTimer() {
+      if (this._agentActivityTimer) {
+        clearInterval(this._agentActivityTimer);
+        this._agentActivityTimer = null;
+      }
+    }
+
     showTypingIndicator() {
       this.typingIndicator.style.display = 'flex';
       this.scrollToBottom();
@@ -2118,7 +2207,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         this.typingTimeout = null;
       }
 
-      // 2. Connection
+      // 2. Agent presence timer
+      this.stopAgentActivityTimer();
+
+      // 3. Connection
       this.disconnectWebSocket();
 
       // 3. Window listeners — the whole point of the unmount pass.

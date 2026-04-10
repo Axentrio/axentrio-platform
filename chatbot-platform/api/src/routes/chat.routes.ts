@@ -417,22 +417,26 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
 
-    const session = await sessionRepository.findOne({
-      where: { id, tenantId: req.user?.tenantId },
-      relations: ['assignedAgent'],
-    });
+    const tenantId = req.user?.tenantId;
+
+    // Run session + messages queries in parallel to halve latency
+    const [session, messages] = await Promise.all([
+      sessionRepository.findOne({
+        where: { id, tenantId },
+        relations: ['assignedAgent'],
+      }),
+      messageRepository
+        .createQueryBuilder('m')
+        .leftJoinAndSelect('m.participant', 'p')
+        .where('m.sessionId = :id', { id })
+        .orderBy('m.createdAt', 'DESC')
+        .take(50)
+        .getMany(),
+    ]);
 
     if (!session) {
       throw new NotFoundError('Session not found');
     }
-
-    // Get recent messages with participant info for sender identity
-    const messages = await messageRepository.find({
-      where: { sessionId: id },
-      relations: ['participant'],
-      order: { createdAt: 'DESC' },
-      take: 50,
-    });
 
     sendSuccess(res, {
       id: session.id,

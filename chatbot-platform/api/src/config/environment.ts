@@ -180,6 +180,9 @@ if (env.NODE_ENV === 'production') {
   if (env.CLERK_SECRET_KEY === 'clerk-dev-key-set-in-production') {
     throw new Error('CLERK_SECRET_KEY must be set in production');
   }
+  if (env.WIDGET_API_KEY === 'widget-dev-key') {
+    throw new Error('WIDGET_API_KEY must be set in production');
+  }
 }
 
 // Parse DATABASE_URL if present

@@ -7,12 +7,22 @@
 import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { rateLimit } from 'express-rate-limit';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { searchKnowledge } from '../llm/rag.service';
 
 const router = Router();
+
+// Rate limit: 60 requests per minute for internal endpoints
+const internalRateLimiter = rateLimit({
+  windowMs: 60000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+router.use(internalRateLimiter);
 
 function verifyInternalAuth(req: Request, res: Response, next: NextFunction): void {
   const secret = config.n8n.ragInternalSecret;

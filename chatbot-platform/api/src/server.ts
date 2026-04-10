@@ -16,7 +16,7 @@ import { clerkMiddleware } from '@clerk/express';
 import { config } from './config/environment';
 import { logger } from './utils/logger';
 import { AppDataSource } from './database/data-source';
-import { initializeRedis, closeRedis } from './config/redis';
+import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis';
 import { initializeSocketIO } from './websocket/socket.handler';
 
 // Security middleware
@@ -83,7 +83,6 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    env: config.server.env,
   });
 });
 
@@ -237,6 +236,9 @@ async function startServer(): Promise<void> {
     }
 
     await initializeRedis();
+    if (config.server.isProduction && !isRedisAvailable()) {
+      throw new Error('Redis is required in production but failed to connect');
+    }
 
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)
     try {
@@ -264,9 +266,9 @@ async function startServer(): Promise<void> {
       const webhookModule = createWebhookModule({
         redisUrl: config.redis.url || `redis://${config.redis.host}:${config.redis.port}`,
         circuitBreaker: {
-          failureThreshold: 5,
-          successThreshold: 3,
-          timeout: 30000,
+          failureThreshold: parseInt(process.env.N8N_CIRCUIT_BREAKER_THRESHOLD || '5'),
+          successThreshold: parseInt(process.env.N8N_CIRCUIT_BREAKER_SUCCESS || '3'),
+          timeout: parseInt(process.env.N8N_CIRCUIT_BREAKER_TIMEOUT || '30000'),
         },
         retry: {
           maxRetries: config.queue.maxAttempts || 3,
@@ -430,17 +432,32 @@ async function startServer(): Promise<void> {
 }
 
 // Graceful shutdown
+let isShuttingDown = false;
 async function shutdown(signal: string): Promise<void> {
-  logger.info(`Received ${signal}. Shutting down...`);
-  httpServer.close();
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+  // Force exit after 30s if graceful shutdown stalls
+  const forceExit = setTimeout(() => {
+    logger.error('Graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, 30000);
+
+  httpServer.close(() => {
+    logger.info('HTTP server stopped accepting new connections');
+  });
 
   try {
     if (AppDataSource.isInitialized) await AppDataSource.destroy();
     await closeRedis();
+    clearTimeout(forceExit);
     logger.info('Graceful shutdown completed');
     process.exit(0);
   } catch (error) {
     logger.error('Error during shutdown:', error);
+    clearTimeout(forceExit);
     process.exit(1);
   }
 }
@@ -453,6 +470,7 @@ process.on('uncaughtException', (err) => {
 });
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection:', reason);
+  shutdown('unhandledRejection');
 });
 
 // Only start the server when running directly (not when imported by tests)

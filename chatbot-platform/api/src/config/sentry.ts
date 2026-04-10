@@ -12,7 +12,7 @@ export function initSentry(): void {
     dsn,
     environment: process.env.SENTRY_ENVIRONMENT || config.server.env,
     release: process.env.RAILWAY_GIT_COMMIT_SHA || undefined,
-    sendDefaultPii: true,
+    sendDefaultPii: false,
     tracesSampleRate: config.server.isProduction ? 0.2 : 1.0,
     integrations: [
       Sentry.expressIntegration(),

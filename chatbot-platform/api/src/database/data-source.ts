@@ -37,7 +37,9 @@ export const AppDataSource = new DataSource({
   username: config.database.user,
   password: config.database.password,
   database: config.database.name,
-  ssl: config.database.ssl ? { rejectUnauthorized: false } : false,
+  ssl: config.database.ssl ? {
+    rejectUnauthorized: process.env.DB_SSL_REJECT_UNAUTHORIZED !== 'false',
+  } : false,
 
   // Entity configuration
   entities: [
@@ -66,7 +68,7 @@ export const AppDataSource = new DataSource({
   // Migration configuration (disabled in test — tests use synchronize from entities)
   migrations: config.server.isTest ? [] : [__dirname + '/migrations/*.ts'],
   migrationsTableName: 'migrations',
-  migrationsRun: false,
+  migrationsRun: process.env.NODE_ENV !== 'test',
 
   // Connection pool settings
   extra: {

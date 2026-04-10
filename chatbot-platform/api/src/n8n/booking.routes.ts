@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
+import { rateLimit } from 'express-rate-limit';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import {
@@ -13,6 +14,15 @@ import {
 } from './booking.service';
 
 const router = Router();
+
+// Rate limit: 30 requests per minute for booking endpoints
+const bookingRateLimiter = rateLimit({
+  windowMs: 60000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+router.use(bookingRateLimiter);
 
 function verifyInternalAuth(req: Request, res: Response, next: NextFunction): void {
   const secret = config.n8n.ragInternalSecret;

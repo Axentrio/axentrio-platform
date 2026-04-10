@@ -3,11 +3,13 @@
  * Express routes for n8n webhook endpoints
  */
 
+import crypto from 'crypto';
 import { Router, Request, Response, NextFunction, json } from 'express';
 import { WebhookController } from './webhook.controller';
 import { rateLimit } from 'express-rate-limit';
 import { body, validationResult } from 'express-validator';
 import { logger } from '../utils/logger';
+import { config as envConfig } from '../config/environment';
 
 export interface WebhookRoutesConfig {
   webhookController: WebhookController;
@@ -116,36 +118,52 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
   router.get('/health', controller.healthCheck);
 
   // ============================================================================
-  // Admin/Monitoring Endpoints
+  // Admin/Monitoring Endpoints (require internal secret)
   // ============================================================================
+
+  const requireInternalAuth = (req: Request, res: Response, next: NextFunction): void => {
+    const secret = envConfig.n8n.inboundSecret || envConfig.n8n.ragInternalSecret;
+    if (!secret) {
+      res.status(503).json({ error: 'Admin endpoints not configured' });
+      return;
+    }
+    const authHeader = req.headers.authorization || '';
+    const expected = `Bearer ${secret}`;
+    if (authHeader.length !== expected.length ||
+        !crypto.timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected))) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    next();
+  };
 
   /**
    * @route   GET /api/v1/n8n/webhook/circuit-status
    * @desc    Get circuit breaker current status
-   * @access  Admin
+   * @access  Admin (requires Bearer token)
    */
-  router.get('/circuit-status', controller.getCircuitStatus);
+  router.get('/circuit-status', requireInternalAuth, controller.getCircuitStatus);
 
   /**
    * @route   POST /api/v1/n8n/webhook/circuit-reset
    * @desc    Manually reset circuit breaker
-   * @access  Admin
+   * @access  Admin (requires Bearer token)
    */
-  router.post('/circuit-reset', controller.resetCircuitBreaker);
+  router.post('/circuit-reset', requireInternalAuth, controller.resetCircuitBreaker);
 
   /**
    * @route   GET /api/v1/n8n/webhook/queue-status
    * @desc    Get message queue status
-   * @access  Admin
+   * @access  Admin (requires Bearer token)
    */
-  router.get('/queue-status', controller.getQueueStatus);
+  router.get('/queue-status', requireInternalAuth, controller.getQueueStatus);
 
   /**
    * @route   POST /api/v1/n8n/webhook/retry/:messageId
    * @desc    Retry a specific failed message
-   * @access  Admin
+   * @access  Admin (requires Bearer token)
    */
-  router.post('/retry/:messageId', controller.retryMessage);
+  router.post('/retry/:messageId', requireInternalAuth, controller.retryMessage);
 
   // ============================================================================
   // Webhook Events Endpoint (For testing)

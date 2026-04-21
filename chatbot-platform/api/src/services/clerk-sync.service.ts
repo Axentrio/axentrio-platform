@@ -43,7 +43,6 @@ export async function revokeAndResendClerkInvitation(
   inviterClerkUserId?: string
 ): Promise<boolean> {
   try {
-    // Find and revoke existing pending invitation for this email
     const invitations = await clerkClient.organizations.getOrganizationInvitationList({
       organizationId: clerkOrgId,
       status: ['pending'],
@@ -53,16 +52,19 @@ export async function revokeAndResendClerkInvitation(
       (inv: any) => inv.emailAddress.toLowerCase() === email.toLowerCase()
     );
 
-    if (existing) {
-      await clerkClient.organizations.revokeOrganizationInvitation({
-        organizationId: clerkOrgId,
-        invitationId: existing.id,
-        requestingUserId: inviterClerkUserId || '',
-      });
-      logger.info('Revoked existing Clerk invite before resend', { clerkOrgId, email, invitationId: existing.id });
+    if (existing && inviterClerkUserId) {
+      try {
+        await clerkClient.organizations.revokeOrganizationInvitation({
+          organizationId: clerkOrgId,
+          invitationId: existing.id,
+          requestingUserId: inviterClerkUserId,
+        });
+        logger.info('Revoked existing Clerk invite before resend', { clerkOrgId, email, invitationId: existing.id });
+      } catch (revokeErr) {
+        logger.warn('Could not revoke existing invite, will try creating anyway', { revokeErr, clerkOrgId, email });
+      }
     }
 
-    // Create a fresh invitation
     await clerkClient.organizations.createOrganizationInvitation({
       organizationId: clerkOrgId,
       emailAddress: email,
@@ -71,8 +73,14 @@ export async function revokeAndResendClerkInvitation(
     });
     logger.info('Resent Clerk organization invite', { clerkOrgId, email });
     return true;
-  } catch (error) {
-    logger.error('Failed to revoke/resend Clerk invite', { error, clerkOrgId, email });
+  } catch (error: any) {
+    logger.error('Failed to revoke/resend Clerk invite', {
+      error: error?.message || error,
+      status: error?.status,
+      clerkErrors: error?.errors,
+      clerkOrgId,
+      email,
+    });
     return false;
   }
 }

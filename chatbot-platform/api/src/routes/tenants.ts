@@ -817,13 +817,20 @@ router.post(
       return;
     }
 
-    const sent = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
-    if (!sent) {
-      res.status(502).json({ error: 'Failed to resend Clerk invitation' });
+    const result = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+
+    if (!result.ok && result.code === 'already_member') {
+      await inviteRepo.remove(invite);
+      await logAudit(req.userId!, 'invite.cleaned', 'invite', invite.id, tenantId, { email: invite.email, reason: 'already_member' });
+      res.json({ success: true, message: 'User has already joined — stale invite removed' });
       return;
     }
 
-    // Reset expiry
+    if (!result.ok) {
+      res.status(502).json({ error: result.message });
+      return;
+    }
+
     invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     await inviteRepo.save(invite);
 

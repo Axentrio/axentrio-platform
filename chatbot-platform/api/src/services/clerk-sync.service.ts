@@ -37,11 +37,13 @@ export async function inviteToClerkOrganization(
   }
 }
 
+export type ResendResult = { ok: true } | { ok: false; code: 'already_member' | 'error'; message: string };
+
 export async function revokeAndResendClerkInvitation(
   clerkOrgId: string,
   email: string,
   inviterClerkUserId?: string
-): Promise<boolean> {
+): Promise<ResendResult> {
   try {
     const invitations = await clerkClient.organizations.getOrganizationInvitationList({
       organizationId: clerkOrgId,
@@ -72,8 +74,13 @@ export async function revokeAndResendClerkInvitation(
       inviterUserId: inviterClerkUserId || undefined,
     });
     logger.info('Resent Clerk organization invite', { clerkOrgId, email });
-    return true;
+    return { ok: true };
   } catch (error: any) {
+    const clerkCode = error?.errors?.[0]?.code;
+    if (clerkCode === 'already_a_member_in_organization') {
+      logger.info('User is already a Clerk org member, cleaning up stale invite', { clerkOrgId, email });
+      return { ok: false, code: 'already_member', message: 'User has already joined the organization' };
+    }
     logger.error('Failed to revoke/resend Clerk invite', {
       error: error?.message || error,
       status: error?.status,
@@ -81,7 +88,7 @@ export async function revokeAndResendClerkInvitation(
       clerkOrgId,
       email,
     });
-    return false;
+    return { ok: false, code: 'error', message: 'Failed to resend Clerk invitation' };
   }
 }
 

@@ -14,7 +14,7 @@ import { User } from '../database/entities/User';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
+import { inviteToClerkOrganization, revokeAndResendClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -817,7 +817,7 @@ router.post(
       return;
     }
 
-    const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+    const sent = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
     if (!sent) {
       res.status(502).json({ error: 'Failed to resend Clerk invitation' });
       return;

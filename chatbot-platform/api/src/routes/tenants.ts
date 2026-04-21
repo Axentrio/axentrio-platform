@@ -7,10 +7,12 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { Router, Request, Response } from 'express';
 import { IsNull } from 'typeorm';
+import { clerkClient } from '@clerk/express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { ChatSession } from '../database/entities/ChatSession';
 import { User } from '../database/entities/User';
+import { Agent } from '../database/entities/Agent';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
@@ -820,9 +822,60 @@ router.post(
     const result = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
 
     if (!result.ok && result.code === 'already_member') {
+      // Provision the user in our DB since they're already in Clerk org
+      const userRepo = AppDataSource.getRepository(User);
+      const agentRepo = AppDataSource.getRepository(Agent);
+      const existingUser = await userRepo.findOne({ where: { email: invite.email, tenantId } });
+
+      if (!existingUser) {
+        try {
+          // Find their Clerk userId from org membership
+          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+            organizationId: tenant.clerkOrgId!,
+            limit: 100,
+          });
+          const membership = memberships.data?.find(
+            (m: any) => m.publicUserData?.identifier?.toLowerCase() === invite.email.toLowerCase()
+          );
+
+          if (membership?.publicUserData?.userId) {
+            const clerkUserId = membership.publicUserData.userId;
+            let name = invite.email.split('@')[0];
+            try {
+              const clerkUser = await clerkClient.users.getUser(clerkUserId);
+              name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
+            } catch { /* use fallback name */ }
+
+            await userRepo.createQueryBuilder().insert().into(User).values({
+              tenantId,
+              clerkUserId,
+              email: invite.email,
+              name,
+              role: invite.role as any,
+              isActive: true,
+            }).orIgnore().execute();
+
+            const newUser = await userRepo.findOne({ where: { clerkUserId } });
+            if (newUser) {
+              await agentRepo.createQueryBuilder().insert().into(Agent).values({
+                tenantId,
+                userId: newUser.id,
+                status: 'offline',
+                maxConcurrentChats: 5,
+                skills: [],
+                languages: ['en'],
+              }).orIgnore().execute();
+              logger.info('Provisioned already-member user from stale invite', { email: invite.email, userId: newUser.id });
+            }
+          }
+        } catch (provisionErr: any) {
+          logger.warn('Could not auto-provision already-member user', { error: provisionErr?.message, email: invite.email });
+        }
+      }
+
       await inviteRepo.remove(invite);
       await logAudit(req.userId!, 'invite.cleaned', 'invite', invite.id, tenantId, { email: invite.email, reason: 'already_member' });
-      res.json({ success: true, message: 'User has already joined — stale invite removed' });
+      res.json({ success: true, message: 'User has already joined — synced to members list' });
       return;
     }
 

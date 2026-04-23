@@ -2,13 +2,14 @@ import { z } from 'zod';
 
 export const updateAiSettingsSchema = z.object({
   enabled: z.boolean().optional(),
-  provider: z.enum(['openai', 'anthropic']).optional(),
-  model: z.string().min(1).optional(),
+  provider: z.enum(['openai', 'anthropic']).optional().nullable(),
+  model: z.string().min(1).optional().nullable(),
   apiKey: z.string().min(1).optional().nullable(),
+  supportEmail: z.string().email().max(200).optional().nullable().or(z.literal('')),
   brandVoice: z.object({
     name: z.string().min(1).max(100),
     tone: z.string().min(1).max(50),
-    customInstructions: z.string().max(2000),
+    customInstructions: z.string().max(10000),
   }).optional(),
   guardrails: z.object({
     topicsToAvoid: z.array(z.string()).max(50),
@@ -19,13 +20,6 @@ export const updateAiSettingsSchema = z.object({
     fallbackMessage: z.string().max(1000),
     offHoursMessage: z.string().max(1000),
   }).optional(),
-});
-
-export const testAiSettingsSchema = z.object({
-  question: z.string().min(1).max(1000),
-  provider: z.enum(['openai', 'anthropic']).optional(),
-  model: z.string().min(1).optional(),
-  apiKey: z.string().min(1).optional(),
 });
 
 export const testChatSchema = z.object({

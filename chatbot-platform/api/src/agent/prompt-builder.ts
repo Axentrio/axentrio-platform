@@ -1,5 +1,6 @@
 import { Tenant } from '../database/entities/Tenant';
 import { ToolAdapter } from './tool-adapter';
+import { substituteVariables } from '../llm/prompt-builder';
 
 interface SkillConfig {
   name: string;
@@ -22,8 +23,8 @@ export class PromptBuilder {
     // Brand voice
     sections.push(`You are ${brandVoice?.name || tenant.name}.`);
     sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);
-    if (brandVoice?.customInstructions) {
-      sections.push(brandVoice.customInstructions);
+    if (ai && brandVoice?.customInstructions) {
+      sections.push(substituteVariables(brandVoice.customInstructions, ai, { businessName: tenant.name }));
     }
 
     // Guardrails

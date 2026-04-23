@@ -5,11 +5,14 @@ import { getProvider } from './provider-factory';
 import { ChatMessage } from './llm.types';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
+import { buildSystemPrompt } from './prompt-builder';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from './defaults';
 
 interface TenantAiSettings {
-  provider: 'openai' | 'anthropic';
-  model: string;
-  apiKey?: string;
+  provider?: 'openai' | 'anthropic' | null;
+  model?: string | null;
+  apiKey?: string | null;
+  supportEmail?: string | null;
   brandVoice: {
     name: string;
     tone: string;
@@ -17,9 +20,12 @@ interface TenantAiSettings {
   };
   guardrails: {
     topicsToAvoid: string[];
+    escalationKeywords?: string[];
     confidenceThreshold: number;
     maxResponseLength: number;
+    greetingMessage?: string;
     fallbackMessage: string;
+    offHoursMessage?: string;
   };
 }
 
@@ -180,14 +186,11 @@ export async function generateResponse(
     .map((m) => `${m.role === 'user' ? 'Customer' : 'Assistant'}: ${m.content}`)
     .join('\n');
 
-  const systemPrompt = `You are ${aiSettings.brandVoice.name}.
-Tone: ${aiSettings.brandVoice.tone}
-${aiSettings.brandVoice.customInstructions}
+  const basePrompt = buildSystemPrompt(aiSettings as any);
+  const systemPrompt = `${basePrompt}
 
-Rules:
+RAG Rules (enforced by the system):
 - Only answer using the provided knowledge context
-- Never discuss: ${aiSettings.guardrails.topicsToAvoid.join(', ') || 'N/A'}
-- Max response: ${aiSettings.guardrails.maxResponseLength} characters
 - If unsure, say so honestly
 
 You MUST respond in this exact JSON format:
@@ -208,9 +211,9 @@ ${knowledgeContext}`;
 
   messages.push({ role: 'user', content: customerMessage });
 
-  const provider = getProvider(aiSettings.provider, aiSettings.apiKey);
+  const provider = getProvider(aiSettings.provider || DEFAULT_PROVIDER, aiSettings.apiKey ?? undefined);
   const llmResponse = await provider.chat(messages, {
-    model: aiSettings.model,
+    model: aiSettings.model || DEFAULT_MODEL,
     maxTokens: 1000,
     temperature: 0.3,
     jsonMode: true,

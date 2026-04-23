@@ -125,12 +125,18 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
 
         {/* KB Toggle */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-edge bg-surface-1">
-          <span className="text-xs text-text-muted">Use Knowledge Base</span>
+          <span className={`text-xs ${hasIndexedDocs ? 'text-text-muted' : 'text-text-muted/60'}`}>
+            Use Knowledge Base
+          </span>
           <div className="flex items-center gap-2">
-            {!hasIndexedDocs && useKB && (
+            {!hasIndexedDocs && (
               <span className="text-xs text-amber-400">No indexed docs</span>
             )}
-            <Switch checked={useKB} onCheckedChange={setUseKB} />
+            <Switch
+              checked={useKB && hasIndexedDocs}
+              onCheckedChange={setUseKB}
+              disabled={!hasIndexedDocs}
+            />
           </div>
         </div>
 

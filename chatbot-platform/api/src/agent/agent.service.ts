@@ -5,6 +5,7 @@ import { MeteringService } from './metering.service';
 import { TraceLogger, AgentTrace } from './trace-logger';
 import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
@@ -46,8 +47,8 @@ export class AgentService {
     try {
       const tools = await this.toolRegistry.getToolsForTenant(tenant);
       const systemPrompt = this.promptBuilder.build(tenant, tools);
-      const provider = getProvider(aiSettings!.provider, aiSettings!.apiKey);
-      const model = aiSettings!.model;
+      const provider = getProvider(aiSettings!.provider || DEFAULT_PROVIDER, aiSettings!.apiKey ?? undefined);
+      const model = aiSettings!.model || DEFAULT_MODEL;
 
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },

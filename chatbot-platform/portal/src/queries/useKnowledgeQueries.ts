@@ -9,10 +9,6 @@ type Any = any;
 // --- Query Options ---
 
 export const knowledgeOptions = {
-  base: () => queryOptions({
-    queryKey: queryKeys.knowledge.base(),
-    queryFn: () => api.get<Any>('/knowledge/base'),
-  }),
   documents: () => queryOptions({
     queryKey: queryKeys.knowledge.documents(),
     queryFn: async () => {
@@ -27,10 +23,6 @@ export const knowledgeOptions = {
 };
 
 // --- Query Hooks ---
-
-export function useKnowledgeBase() {
-  return useQuery(knowledgeOptions.base());
-}
 
 export function useKnowledgeDocuments() {
   return useQuery({
@@ -132,18 +124,11 @@ export function useUpdateAiSettings() {
   });
 }
 
-export function useGetAiSettings() {
+export function useGetAiSettings(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: [...queryKeys.tenants.me(), 'ai-settings'] as const,
     queryFn: () => api.get<Any>('/tenants/me/ai-settings'),
-  });
-}
-
-export function useTestAiSettings() {
-  return useMutation({
-    mutationFn: (data: { question: string; provider?: string; model?: string; apiKey?: string }) =>
-      api.post<{ response: string; provider: string; model: string }>('/tenants/me/ai-settings/test', data),
-    onError: () => toast.error('Test failed'),
+    enabled: options?.enabled ?? true,
   });
 }
 

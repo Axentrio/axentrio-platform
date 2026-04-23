@@ -47,7 +47,6 @@ export const queryKeys = {
   },
   knowledge: {
     all: () => ['knowledge'] as const,
-    base: () => [...queryKeys.knowledge.all(), 'base'] as const,
     documents: () => [...queryKeys.knowledge.all(), 'documents'] as const,
     stats: () => [...queryKeys.knowledge.all(), 'stats'] as const,
   },

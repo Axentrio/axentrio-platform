@@ -82,9 +82,10 @@ export class Tenant {
     ai?: {
       enabled: boolean;
       usePlatformAgent?: boolean;
-      provider: 'openai' | 'anthropic';
-      model: string;
-      apiKey?: string;
+      provider?: 'openai' | 'anthropic' | null;
+      model?: string | null;
+      apiKey?: string | null;
+      supportEmail?: string | null;
       brandVoice: {
         name: string;
         tone: string;

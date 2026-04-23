@@ -14,8 +14,10 @@ import {
   updateDocumentSchema,
   listDocumentsSchema,
 } from '../schemas/knowledge.schema';
-import { updateAiSettingsSchema, testAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
+import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
+import { buildSystemPrompt } from '../llm/prompt-builder';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 
 let knowledgeService: KnowledgeService;
 
@@ -192,10 +194,13 @@ export async function updateAiSettings(req: Request, res: Response) {
   const updatedAi: any = { ...existingAi };
 
   if (data.enabled !== undefined) updatedAi.enabled = data.enabled;
-  if (data.provider) updatedAi.provider = data.provider;
-  if (data.model) updatedAi.model = data.model;
+  if (data.provider !== undefined) updatedAi.provider = data.provider ?? null;
+  if (data.model !== undefined) updatedAi.model = data.model ?? null;
   if (data.apiKey !== undefined) {
     updatedAi.apiKey = data.apiKey ? encrypt(data.apiKey) : null;
+  }
+  if (data.supportEmail !== undefined) {
+    updatedAi.supportEmail = data.supportEmail || null;
   }
   if (data.brandVoice) updatedAi.brandVoice = { ...existingAi.brandVoice, ...data.brandVoice };
   if (data.guardrails) updatedAi.guardrails = { ...existingAi.guardrails, ...data.guardrails };
@@ -219,45 +224,6 @@ export async function updateAiSettings(req: Request, res: Response) {
   res.json({ ...rest, hasApiKey: !!apiKey });
 }
 
-export async function testAiSettings(req: Request, res: Response) {
-  const tenantId = (req as any).tenantId;
-  const { question, provider: inlineProvider, model: inlineModel, apiKey: inlineApiKey } = testAiSettingsSchema.parse(req.body);
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-
-  const ai = tenant.settings?.ai;
-
-  // Use inline values from the form, fall back to saved settings
-  const testProvider = inlineProvider || ai?.provider;
-  const testModel = inlineModel || ai?.model;
-  const testApiKey = inlineApiKey || ai?.apiKey;
-
-  if (!testProvider || !testModel) {
-    res.status(400).json({ error: 'Provider and model are required' });
-    return;
-  }
-
-  // Simple LLM ping — just test that the API key and model work
-  const { getProvider } = await import('../llm/provider-factory');
-  // If an inline (unencrypted) API key is provided, pass it directly; otherwise use saved encrypted key
-  const provider = inlineApiKey
-    ? getProvider(testProvider, undefined, inlineApiKey)
-    : getProvider(testProvider, testApiKey);
-  const response = await provider.chat(
-    [
-      { role: 'system', content: 'You are a helpful assistant. Reply briefly.' },
-      { role: 'user', content: question },
-    ],
-    { model: testModel, maxTokens: 200, temperature: 0.3, jsonMode: false }
-  );
-
-  res.json({
-    response: response.content,
-    provider: testProvider,
-    model: testModel,
-  });
-}
-
 export async function testChat(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const { message, history, useKnowledgeBase } = testChatSchema.parse(req.body);
@@ -269,18 +235,21 @@ export async function testChat(req: Request, res: Response) {
     res.status(400).json({ error: 'AI is not enabled. Save your AI settings first.' });
     return;
   }
-  if (!ai.provider || !ai.model || !ai.brandVoice?.name) {
-    res.status(400).json({ error: 'Incomplete AI settings. Configure provider, model, and brand voice first.' });
+  if (!ai.brandVoice?.name) {
+    res.status(400).json({ error: 'Incomplete AI settings. Set a chatbot name first.' });
     return;
   }
+
+  const provider = ai.provider || DEFAULT_PROVIDER;
+  const model = ai.model || DEFAULT_MODEL;
 
   if (useKnowledgeBase) {
     try {
       const result = await generateResponse(AppDataSource, tenantId, ai, message, history);
       res.json({
         response: result.response || ai.guardrails?.fallbackMessage || 'I could not find an answer in the knowledge base.',
-        provider: ai.provider,
-        model: ai.model,
+        provider,
+        model,
         confidence: result.confidence,
         chunksUsed: result.chunks.length,
       });
@@ -295,16 +264,9 @@ export async function testChat(req: Request, res: Response) {
     }
   } else {
     const { getProvider } = await import('../llm/provider-factory');
-    const provider = getProvider(ai.provider, ai.apiKey);
+    const llm = getProvider(provider, ai.apiKey ?? undefined);
 
-    const systemPrompt = `You are ${ai.brandVoice.name}.
-Tone: ${ai.brandVoice.tone}
-${ai.brandVoice.customInstructions}
-
-Rules:
-- Never discuss: ${ai.guardrails.topicsToAvoid.join(', ') || 'N/A'}
-- Max response: ${ai.guardrails.maxResponseLength} characters
-- If you cannot help, say: "${ai.guardrails.fallbackMessage}"`;
+    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name });
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
@@ -313,8 +275,8 @@ Rules:
     ];
 
     try {
-      const response = await provider.chat(messages, {
-        model: ai.model,
+      const response = await llm.chat(messages, {
+        model,
         maxTokens: 1000,
         temperature: 0.3,
         jsonMode: false,
@@ -322,8 +284,8 @@ Rules:
 
       res.json({
         response: response.content,
-        provider: ai.provider,
-        model: ai.model,
+        provider,
+        model,
       });
     } catch (err) {
       logger.error('Test chat LLM call failed', err);

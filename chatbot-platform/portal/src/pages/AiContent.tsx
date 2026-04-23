@@ -1,76 +1,53 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MessageSquareText, Settings2, MessageSquare, Bot, MoreVertical, X } from 'lucide-react';
+import { MessageSquareText, MessageSquare, Bot, BookOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useKnowledgeStats, useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
+import { useGetAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
 import DocumentsTab from './knowledge/DocumentsTab';
-import AiSettingsTab from './knowledge/AiSettingsTab';
+import AiBotForm from './knowledge/AiBotForm';
 import TestChatPanel from './knowledge/TestChatPanel';
-import AddDocumentModal from './knowledge/AddDocumentModal';
 import { CannedResponsesContent } from './CannedResponses';
 
-type Tab = 'bot' | 'canned';
+type Tab = 'bot' | 'knowledge' | 'canned';
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'bot', label: 'AI Bot', icon: Bot },
+  { key: 'knowledge', label: 'Knowledge Base', icon: BookOpen },
   { key: 'canned', label: 'Canned Responses', icon: MessageSquareText },
 ];
 
+const PARAM_TO_TAB: Record<string, Tab> = {
+  bot: 'bot',
+  knowledge: 'knowledge',
+  canned: 'canned',
+};
+
 const AiContent: React.FC = () => {
   const { isRole } = useAppAuth();
-  const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get('tab');
-  // Map old redirect values: 'knowledge' maps to 'bot' tab, 'canned' stays 'canned'
-  const resolvedTab: Tab = initialTab === 'canned' ? 'canned' : 'bot';
-  const [activeTab, setActiveTab] = useState<Tab>(resolvedTab);
-  const [isSettingsPanelOpen, setIsSettingsPanelOpen] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [activeFilter, setActiveFilter] = useState<string | undefined>();
-  const [showAddDoc, setShowAddDoc] = useState(false);
-  const [skipInlineSetup, setSkipInlineSetup] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: stats, isLoading: statsLoading } = useKnowledgeStats() as { data: any; isLoading: boolean };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: aiSettings, isLoading: aiLoading } = useGetAiSettings() as { data: any; isLoading: boolean };
-  const updateSettings = useUpdateAiSettings();
-
-  const documents = stats?.documents || {};
-  const indexed = parseInt(documents.indexed || '0');
-  const processing = parseInt(documents.processing || '0');
-  const failed = parseInt(documents.failed || '0');
-  const pending = parseInt(documents.pending || '0');
-  const total = indexed + processing + failed + pending;
-
-  const hasAiConfigured = aiSettings?.enabled && aiSettings?.hasApiKey;
-  const queriesReady = !statsLoading && !aiLoading;
-  const hasIndexedDocs = indexed > 0;
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
 
-  // When AI is not configured and no documents: show inline setup as primary content
-  const showInlineSetup = !skipInlineSetup && queriesReady && !hasAiConfigured && isAdmin;
+  // Derive active tab directly from the URL so browser back/forward works.
+  const activeTab: Tab = PARAM_TO_TAB[searchParams.get('tab') ?? ''] ?? 'bot';
+  const setActiveTab = (tab: Tab) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('tab', tab);
+    setSearchParams(next, { replace: true });
+  };
 
-  const providerLabel = aiSettings?.provider === 'anthropic' ? 'Anthropic' : 'OpenAI';
-  const modelLabel = aiSettings?.model || 'Not set';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: aiSettings } = useGetAiSettings({ enabled: isAdminOrSupervisor }) as { data: any };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: stats } = useKnowledgeStats() as { data: any };
+  const indexed = parseInt(stats?.documents?.indexed || '0');
+  const hasIndexedDocs = indexed > 0;
+
+  const goToKnowledge = () => setActiveTab('knowledge');
 
   return (
     <div className="h-full overflow-y-auto">
@@ -82,26 +59,22 @@ const AiContent: React.FC = () => {
               <Bot className="w-5 h-5 text-primary-400" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-text-primary">AI & Content</h1>
+              <h1 className="text-lg font-semibold text-text-primary">AI &amp; Content</h1>
               <p className="text-xs text-text-muted">Knowledge base, canned responses, and AI configuration</p>
             </div>
           </div>
-          {isAdminOrSupervisor && (
-            <div className="flex items-center gap-2">
-              {isAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsTestChatOpen(true)}
-                  disabled={!aiSettings?.enabled}
-                  title={!aiSettings?.enabled ? 'Enable AI bot first' : 'Test your AI bot'}
-                  className="gap-1.5"
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  Test Chat
-                </Button>
-              )}
-            </div>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsTestChatOpen(true)}
+              disabled={!aiSettings?.enabled}
+              title={!aiSettings?.enabled ? 'Enable AI bot first' : 'Test your AI bot'}
+              className="gap-1.5"
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Test Chat
+            </Button>
           )}
         </div>
       </div>
@@ -131,162 +104,24 @@ const AiContent: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      <div className="px-6 py-4">
+      <div className="px-6 py-6">
         {activeTab === 'bot' && (
-          <div className="space-y-4">
-            {showInlineSetup && total === 0 ? (
-              /* ── Not configured + no documents: inline setup form ── */
-              <div className="max-w-2xl">
-                <div className="mb-6">
-                  <h2 className="text-base font-semibold text-text-primary">Configure your AI bot</h2>
-                  <p className="text-sm text-text-muted mt-1">
-                    Set up a provider and add documents to start answering visitors automatically.
-                  </p>
-                </div>
-                <AiSettingsTab />
-                <div className="mt-4 pt-4 border-t border-edge">
-                  <button
-                    onClick={() => setSkipInlineSetup(true)}
-                    className="text-xs text-text-muted hover:text-text-secondary transition-colors"
-                  >
-                    Skip to documents →
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* ── Normal view: status bar + documents ── */
-              <>
-                {/* AI Status Bar — compact, clickable to open slide-over */}
-                {isAdminOrSupervisor && (
-                  <button
-                    onClick={() => setIsSettingsPanelOpen(true)}
-                    className="w-full flex items-center justify-between px-4 py-2.5 rounded-xl bg-surface-2 hover:bg-surface-3 transition-colors group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Settings2 className="w-4 h-4 text-text-muted" />
-                      {hasAiConfigured ? (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-status-online" />
-                            <span className="text-sm text-text-primary">{providerLabel}</span>
-                          </div>
-                          <span className="text-xs text-text-muted">{modelLabel}</span>
-                          {aiSettings?.brandVoice?.name && aiSettings.brandVoice.name !== 'AI Assistant' && (
-                            <>
-                              <span className="text-text-muted">·</span>
-                              <span className="text-xs text-text-muted">{aiSettings.brandVoice.name}</span>
-                            </>
-                          )}
-                        </>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-accent-400" />
-                            <span className="text-sm text-text-secondary">AI not configured</span>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                    <span className="text-xs text-text-muted group-hover:text-primary-400 transition-colors">
-                      Configure →
-                    </span>
-                  </button>
-                )}
+          <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
+        )}
 
-                {/* Knowledge Base documents */}
-                <DocumentsTab
-                  initialFilter={activeFilter}
-                  onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
-                  showAiBanner={queriesReady && total > 0 && !hasAiConfigured && isAdminOrSupervisor}
-                  onConfigureAi={() => setIsSettingsPanelOpen(true)}
-                />
-              </>
-            )}
-          </div>
+        {activeTab === 'knowledge' && (
+          <DocumentsTab
+            initialFilter={activeFilter}
+            onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
+            showAiBanner={isAdminOrSupervisor && !aiSettings?.enabled}
+            onConfigureAi={() => setActiveTab('bot')}
+          />
         )}
 
         {activeTab === 'canned' && (
           <CannedResponsesContent />
         )}
       </div>
-
-      {/* AI Settings Slide-over Panel */}
-      {isSettingsPanelOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end">
-          <div
-            className="absolute inset-0 bg-black/40"
-            onClick={() => setIsSettingsPanelOpen(false)}
-          />
-          <div className="relative w-full max-w-lg bg-surface-0 border-l border-edge shadow-2xl flex flex-col overflow-hidden">
-            {/* Panel header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-edge flex-shrink-0">
-              <div className="flex items-center gap-2">
-                <Settings2 className="w-4 h-4 text-text-muted" />
-                <h2 className="text-sm font-semibold text-text-primary">AI Settings</h2>
-              </div>
-              <div className="flex items-center gap-1">
-                {isAdmin && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-7 w-7">
-                        <MoreVertical className="w-4 h-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setShowResetConfirm(true)} className="text-red-400">
-                        Reset AI Settings
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsSettingsPanelOpen(false)}>
-                  <X className="w-4 h-4" />
-                </Button>
-              </div>
-            </div>
-            {/* Panel body */}
-            <div className="flex-1 overflow-y-auto px-5 py-4">
-              <AiSettingsTab />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Reset Confirmation */}
-      <AlertDialog open={showResetConfirm} onOpenChange={setShowResetConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reset AI Settings</AlertDialogTitle>
-            <AlertDialogDescription>
-              This will disable the AI bot and clear all configuration. This cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-red-500 hover:bg-red-600"
-              onClick={() => {
-                updateSettings.mutate({
-                  enabled: false,
-                  apiKey: null,
-                  brandVoice: { name: 'AI Assistant', tone: 'friendly', customInstructions: '' },
-                  guardrails: { greetingMessage: '', confidenceThreshold: 0.7, maxResponseLength: 500, escalationKeywords: [], topicsToAvoid: [], fallbackMessage: '', offHoursMessage: '' },
-                });
-                setShowResetConfirm(false);
-                setIsSettingsPanelOpen(false);
-              }}
-            >
-              Reset
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Add Document Modal */}
-      <AddDocumentModal
-        isOpen={showAddDoc}
-        onClose={() => setShowAddDoc(false)}
-      />
 
       {/* Test Chat Panel */}
       {isAdmin && (
@@ -295,7 +130,7 @@ const AiContent: React.FC = () => {
           onClose={() => setIsTestChatOpen(false)}
           botName={aiSettings?.brandVoice?.name || 'AI Assistant'}
           provider={aiSettings?.provider || 'openai'}
-          model={aiSettings?.model || ''}
+          model={aiSettings?.model || 'gpt-4o-mini'}
           hasIndexedDocs={hasIndexedDocs}
         />
       )}

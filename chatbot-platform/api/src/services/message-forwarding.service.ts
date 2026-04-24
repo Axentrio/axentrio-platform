@@ -13,7 +13,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
-import { buildSystemPrompt } from '../llm/prompt-builder';
+import { substituteVariables } from '../llm/prompt-builder';
 import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
@@ -81,7 +81,14 @@ export function buildTenantAiConfig(tenant: Tenant): TenantAiConfig | undefined 
   return {
     brandName: ai.brandVoice?.name || tenant.name,
     brandTone: ai.brandVoice?.tone || 'professional',
-    systemPrompt: buildSystemPrompt(ai, { businessName: tenant.name }),
+    // n8n has its own prompt handling — pass the tenant's template through
+    // with {placeholders} resolved, but without injecting a legacy fallback
+    // (empty customInstructions → empty systemPrompt).
+    systemPrompt: substituteVariables(
+      ai.brandVoice?.customInstructions || '',
+      ai,
+      { businessName: tenant.name }
+    ),
     guardrails: {
       topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
       confidenceThreshold: ai.guardrails?.confidenceThreshold ?? 0.7,

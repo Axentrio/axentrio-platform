@@ -31,6 +31,28 @@ const TONE_PRESETS = [
   { value: 'formal', label: 'Formal' },
 ] as const;
 
+type FormSnapshot = {
+  enabled: boolean;
+  botName: string;
+  supportEmail: string;
+  effectiveTone: string;
+  systemPrompt: string;
+  greetingMessage: string;
+  fallbackMessage: string;
+  offHoursMessage: string;
+  confidenceThreshold: number;
+  maxResponseLength: number;
+  escalationKeywords: string[];
+  topicsToAvoid: string[];
+};
+
+const snapshotKey = (s: FormSnapshot): string => JSON.stringify(s);
+
+const computeEffectiveTone = (tone: string, customTone: string): string => {
+  const isCustom = !TONE_PRESETS.some((p) => p.value === tone);
+  return isCustom ? (customTone.trim() || 'custom') : tone;
+};
+
 const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin');
@@ -58,33 +80,60 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const [maxResponseLength, setMaxResponseLength] = useState(500);
   const [escalationKeywords, setEscalationKeywords] = useState<string[]>([]);
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
+  // Snapshot of the form at last hydrate / successful save.
+  // null until hydration runs — prevents false dirty signal during initial load.
+  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
   // Hydrate from server once
   useEffect(() => {
     if (!aiSettings) return;
-    setEnabled(aiSettings.enabled ?? false);
-    setBotName(aiSettings.brandVoice?.name ?? '');
-    setSupportEmail(aiSettings.supportEmail ?? '');
+    const hEnabled = aiSettings.enabled ?? false;
+    const hBotName = aiSettings.brandVoice?.name ?? '';
+    const hSupportEmail = aiSettings.supportEmail ?? '';
     const serverTone: string = aiSettings.brandVoice?.tone ?? 'friendly';
-    if (TONE_PRESETS.some((p) => p.value === serverTone)) {
-      setTone(serverTone);
-      setCustomTone('');
-    } else {
-      setTone(serverTone);
-      setCustomTone(serverTone);
-    }
-    const loadedInstructions = aiSettings.brandVoice?.customInstructions ?? '';
-    setSystemPrompt(loadedInstructions);
-    setLastAppliedBody(loadedInstructions);
-    setGreetingMessage(aiSettings.guardrails?.greetingMessage ?? '');
-    setFallbackMessage(aiSettings.guardrails?.fallbackMessage ?? '');
-    setOffHoursMessage(aiSettings.guardrails?.offHoursMessage ?? '');
-    setConfidenceThreshold(aiSettings.guardrails?.confidenceThreshold ?? 0.7);
-    setMaxResponseLength(aiSettings.guardrails?.maxResponseLength ?? 500);
-    setEscalationKeywords(aiSettings.guardrails?.escalationKeywords ?? []);
-    setTopicsToAvoid(aiSettings.guardrails?.topicsToAvoid ?? []);
+    const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
+    const hTone = serverTone;
+    const hCustomTone = isPreset ? '' : serverTone;
+    const hSystemPrompt = aiSettings.brandVoice?.customInstructions ?? '';
+    const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
+    const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
+    const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
+    const hConfidence = aiSettings.guardrails?.confidenceThreshold ?? 0.7;
+    const hMaxLen = aiSettings.guardrails?.maxResponseLength ?? 500;
+    const hEscalation = aiSettings.guardrails?.escalationKeywords ?? [];
+    const hTopics = aiSettings.guardrails?.topicsToAvoid ?? [];
+
+    setEnabled(hEnabled);
+    setBotName(hBotName);
+    setSupportEmail(hSupportEmail);
+    setTone(hTone);
+    setCustomTone(hCustomTone);
+    setSystemPrompt(hSystemPrompt);
+    setLastAppliedBody(hSystemPrompt);
+    setGreetingMessage(hGreeting);
+    setFallbackMessage(hFallback);
+    setOffHoursMessage(hOffHours);
+    setConfidenceThreshold(hConfidence);
+    setMaxResponseLength(hMaxLen);
+    setEscalationKeywords(hEscalation);
+    setTopicsToAvoid(hTopics);
+
+    setSavedSnapshot(snapshotKey({
+      enabled: hEnabled,
+      botName: hBotName,
+      supportEmail: hSupportEmail,
+      effectiveTone: computeEffectiveTone(hTone, hCustomTone),
+      systemPrompt: hSystemPrompt,
+      greetingMessage: hGreeting,
+      fallbackMessage: hFallback,
+      offHoursMessage: hOffHours,
+      confidenceThreshold: hConfidence,
+      maxResponseLength: hMaxLen,
+      escalationKeywords: hEscalation,
+      topicsToAvoid: hTopics,
+    }));
   }, [aiSettings]);
 
   const handleTemplateChange = (id: string) => {
@@ -121,25 +170,57 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
 
+  const currentSnapshotKey = snapshotKey({
+    enabled,
+    botName,
+    supportEmail,
+    effectiveTone,
+    systemPrompt,
+    greetingMessage,
+    fallbackMessage,
+    offHoursMessage,
+    confidenceThreshold,
+    maxResponseLength,
+    escalationKeywords,
+    topicsToAvoid,
+  });
+  const isDirty = savedSnapshot !== null && currentSnapshotKey !== savedSnapshot;
+
+  const handleGoToKnowledgeBase = () => {
+    if (isDirty) {
+      const ok = window.confirm(
+        'You have unsaved changes. Go to Knowledge Base without saving?'
+      );
+      if (!ok) return;
+    }
+    onGoToKnowledgeBase();
+  };
+
   const handleSave = () => {
-    updateSettings.mutate({
-      enabled,
-      supportEmail: supportEmail || null,
-      brandVoice: {
-        name: botName || 'AI Assistant',
-        tone: effectiveTone,
-        customInstructions: systemPrompt,
+    const snapshotAtSave = currentSnapshotKey;
+    updateSettings.mutate(
+      {
+        enabled,
+        supportEmail: supportEmail || null,
+        brandVoice: {
+          name: botName || 'AI Assistant',
+          tone: effectiveTone,
+          customInstructions: systemPrompt,
+        },
+        guardrails: {
+          greetingMessage,
+          fallbackMessage,
+          offHoursMessage,
+          confidenceThreshold,
+          maxResponseLength,
+          escalationKeywords,
+          topicsToAvoid,
+        },
       },
-      guardrails: {
-        greetingMessage,
-        fallbackMessage,
-        offHoursMessage,
-        confidenceThreshold,
-        maxResponseLength,
-        escalationKeywords,
-        topicsToAvoid,
-      },
-    });
+      {
+        onSuccess: () => setSavedSnapshot(snapshotAtSave),
+      }
+    );
   };
 
   const readOnly = !isAdmin;
@@ -396,7 +477,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       {/* Save + Go to KB */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-edge">
         <Button
-          onClick={onGoToKnowledgeBase}
+          onClick={handleGoToKnowledgeBase}
           size="lg"
           className="bg-primary-600 hover:bg-primary-500 text-white"
         >

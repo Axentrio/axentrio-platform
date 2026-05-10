@@ -48,6 +48,9 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const [customTone, setCustomTone] = useState('');
   const [templateId, setTemplateId] = useState<string>('blank');
   const [systemPrompt, setSystemPrompt] = useState('');
+  // Body that was applied last time a template was selected (or hydrated from server).
+  // Compared against systemPrompt to detect unsaved edits before replacing.
+  const [lastAppliedBody, setLastAppliedBody] = useState('');
   const [greetingMessage, setGreetingMessage] = useState('');
   const [fallbackMessage, setFallbackMessage] = useState('');
   const [offHoursMessage, setOffHoursMessage] = useState('');
@@ -72,7 +75,9 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       setTone(serverTone);
       setCustomTone(serverTone);
     }
-    setSystemPrompt(aiSettings.brandVoice?.customInstructions ?? '');
+    const loadedInstructions = aiSettings.brandVoice?.customInstructions ?? '';
+    setSystemPrompt(loadedInstructions);
+    setLastAppliedBody(loadedInstructions);
     setGreetingMessage(aiSettings.guardrails?.greetingMessage ?? '');
     setFallbackMessage(aiSettings.guardrails?.fallbackMessage ?? '');
     setOffHoursMessage(aiSettings.guardrails?.offHoursMessage ?? '');
@@ -83,18 +88,26 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   }, [aiSettings]);
 
   const handleTemplateChange = (id: string) => {
-    setTemplateId(id);
-    const tpl = findTemplate(id);
-    if (tpl && tpl.id !== 'blank') {
-      setSystemPrompt(tpl.body);
-    } else if (id === 'blank') {
-      setSystemPrompt('');
+    if (id === templateId) return;
+    const hasUnsavedEdits = systemPrompt.trim() !== lastAppliedBody.trim();
+    if (hasUnsavedEdits) {
+      const ok = window.confirm(
+        'You have edited the bot instructions. Switching templates will replace your changes. Continue?'
+      );
+      if (!ok) return;
     }
+    const tpl = findTemplate(id);
+    const nextBody = tpl?.body ?? '';
+    setTemplateId(id);
+    setSystemPrompt(nextBody);
+    setLastAppliedBody(nextBody);
   };
 
   const handleResetPrompt = () => {
     const tpl = findTemplate(templateId);
-    if (tpl) setSystemPrompt(tpl.body);
+    if (!tpl) return;
+    setSystemPrompt(tpl.body);
+    setLastAppliedBody(tpl.body);
   };
 
   const handleToneChipClick = (value: string) => {

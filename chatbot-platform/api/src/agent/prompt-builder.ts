@@ -1,6 +1,7 @@
 import { Tenant } from '../database/entities/Tenant';
 import { ToolAdapter } from './tool-adapter';
 import { substituteVariables } from '../llm/prompt-builder';
+import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from '../llm/platform-rules';
 
 interface SkillConfig {
   name: string;
@@ -37,6 +38,9 @@ export class PromptBuilder {
     }
     guardrailLines.push('- If unsure, say so honestly');
     sections.push(`\n## GUARDRAILS\n${guardrailLines.join('\n')}`);
+
+    // Shared platform safety rules (non-negotiable, applied to every flow).
+    sections.push(`\n${PLATFORM_RULES_HEADING}\n${platformSafetyPreambleLines().join('\n')}`);
 
     // Escalation
     if (tools.some((t) => t.name === 'escalate_to_human')) {

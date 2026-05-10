@@ -13,6 +13,16 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -88,6 +98,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   // Snapshot of the form at last hydrate / successful save.
   // null until hydration runs — prevents false dirty signal during initial load.
   const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  // Pending template ID awaiting confirmation when switching templates over edited instructions.
+  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
+  // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
+  const [showLeaveDialog, setShowLeaveDialog] = useState(false);
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
@@ -146,20 +160,24 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     }));
   }, [aiSettings, tenantId]);
 
-  const handleTemplateChange = (id: string) => {
-    if (id === templateId) return;
-    const hasUnsavedEdits = systemPrompt.trim() !== lastAppliedBody.trim();
-    if (hasUnsavedEdits) {
-      const ok = window.confirm(
-        'You have edited the bot instructions. Switching templates will replace your changes. Continue?'
-      );
-      if (!ok) return;
-    }
+  const applyTemplate = (id: string) => {
     const tpl = findTemplate(id);
     const nextBody = tpl?.body ?? '';
     setTemplateId(id);
     setSystemPrompt(nextBody);
     setLastAppliedBody(nextBody);
+  };
+
+  const handleTemplateChange = (id: string) => {
+    if (id === templateId) return;
+    const hasUnsavedEdits = systemPrompt.trim() !== lastAppliedBody.trim();
+    if (hasUnsavedEdits) {
+      // Defer the actual switch until the user confirms in the dialog.
+      // Leaving templateId unchanged keeps the Radix Select on its prior value.
+      setPendingTemplateId(id);
+      return;
+    }
+    applyTemplate(id);
   };
 
   const handleResetPrompt = () => {
@@ -198,12 +216,20 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
 
   const handleGoToKnowledgeBase = () => {
     if (isDirty) {
-      const ok = window.confirm(
-        'You have unsaved changes. Go to Knowledge Base without saving?'
-      );
-      if (!ok) return;
+      setShowLeaveDialog(true);
+      return;
     }
     onGoToKnowledgeBase();
+  };
+
+  const confirmLeave = () => {
+    setShowLeaveDialog(false);
+    onGoToKnowledgeBase();
+  };
+
+  const confirmTemplateSwitch = () => {
+    if (pendingTemplateId) applyTemplate(pendingTemplateId);
+    setPendingTemplateId(null);
   };
 
   const handleSave = () => {
@@ -501,6 +527,39 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           </Button>
         )}
       </div>
+
+      <AlertDialog
+        open={pendingTemplateId !== null}
+        onOpenChange={(open) => { if (!open) setPendingTemplateId(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Replace edited instructions?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Switching templates will replace your current bot instructions. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep editing</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmTemplateSwitch}>Replace</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogDescription>
+              You have unsaved changes. Go to Knowledge Base without saving?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Stay here</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmLeave}>Leave anyway</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

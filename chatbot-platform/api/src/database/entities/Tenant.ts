@@ -90,6 +90,7 @@ export class Tenant {
         name: string;
         tone: string;
         customInstructions: string;
+        templateId?: string | null;
       };
       guardrails: {
         topicsToAvoid: string[];

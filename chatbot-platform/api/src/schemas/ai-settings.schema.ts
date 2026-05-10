@@ -10,6 +10,7 @@ export const updateAiSettingsSchema = z.object({
     name: z.string().min(1).max(100),
     tone: z.string().min(1).max(50),
     customInstructions: z.string().max(10000),
+    templateId: z.string().max(100).optional().nullable(),
   }).optional(),
   guardrails: z.object({
     topicsToAvoid: z.array(z.string()).max(50),

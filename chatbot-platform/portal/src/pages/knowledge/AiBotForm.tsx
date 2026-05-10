@@ -46,6 +46,7 @@ type FormSnapshot = {
   botName: string;
   supportEmail: string;
   effectiveTone: string;
+  templateId: string;
   systemPrompt: string;
   greetingMessage: string;
   fallbackMessage: string;
@@ -121,6 +122,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     const hTone = serverTone;
     const hCustomTone = isPreset ? '' : serverTone;
     const hSystemPrompt = aiSettings.brandVoice?.customInstructions ?? '';
+    // Treat the saved instruction text as the source of truth: if the saved
+    // templateId no longer matches a known template (renamed/removed since
+    // last save), fall back to 'blank' rather than confusing the dropdown.
+    const savedTemplateId: string | null | undefined = aiSettings.brandVoice?.templateId;
+    const hTemplateId = savedTemplateId && findTemplate(savedTemplateId)
+      ? savedTemplateId
+      : 'blank';
     const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
     const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
     const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
@@ -134,6 +142,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     setSupportEmail(hSupportEmail);
     setTone(hTone);
     setCustomTone(hCustomTone);
+    setTemplateId(hTemplateId);
     setSystemPrompt(hSystemPrompt);
     setLastAppliedBody(hSystemPrompt);
     setGreetingMessage(hGreeting);
@@ -149,6 +158,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       botName: hBotName,
       supportEmail: hSupportEmail,
       effectiveTone: computeEffectiveTone(hTone, hCustomTone),
+      templateId: hTemplateId,
       systemPrompt: hSystemPrompt,
       greetingMessage: hGreeting,
       fallbackMessage: hFallback,
@@ -203,6 +213,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     botName,
     supportEmail,
     effectiveTone,
+    templateId,
     systemPrompt,
     greetingMessage,
     fallbackMessage,
@@ -242,6 +253,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           name: botName || 'AI Assistant',
           tone: effectiveTone,
           customInstructions: systemPrompt,
+          templateId: templateId === 'blank' ? null : templateId,
         },
         guardrails: {
           greetingMessage,

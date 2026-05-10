@@ -98,13 +98,13 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChan
       {showAiBanner && onConfigureAi && (
         <div className="flex items-center justify-between p-3 rounded-lg bg-amber-400/5 border border-amber-400/10">
           <p className="text-xs text-amber-400/80">
-            AI bot is not configured — documents won't be used for responses until you set up a provider.
+            AI Bot is not enabled yet. Turn it on so these documents can be used in visitor replies.
           </p>
           <button
             onClick={onConfigureAi}
             className="text-xs font-medium text-amber-400 hover:text-amber-300 flex-shrink-0 ml-3"
           >
-            Configure AI →
+            Configure AI Bot
           </button>
         </div>
       )}
@@ -173,7 +173,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChan
               <h3 className="text-base font-medium text-text-primary">No documents yet</h3>
               <p className="text-xs text-text-muted mt-1.5 max-w-xs leading-relaxed">
                 {isAdmin
-                  ? 'Upload PDFs, paste text, or add FAQs to train your AI bot.'
+                  ? 'Upload PDFs, paste text, or add FAQs so your AI bot can answer from your business information.'
                   : 'No documents have been added to the knowledge base yet.'}
               </p>
               {isAdmin && (

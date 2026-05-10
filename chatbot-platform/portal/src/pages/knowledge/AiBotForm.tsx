@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RotateCcw, HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -54,9 +54,14 @@ const computeEffectiveTone = (tone: string, customTone: string): string => {
 };
 
 const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
-  const { isRole } = useAppAuth();
+  const { isRole, tenantId } = useAppAuth();
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
+
+  // Track which tenant's settings have already populated the form. Refetches /
+  // query invalidations for the same tenant must not clobber in-flight edits;
+  // a tenant switch should re-hydrate from the new tenant's data.
+  const hydratedTenantRef = useRef<string | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: aiSettings, isLoading, error } = useGetAiSettings({ enabled: isAdminOrSupervisor }) as { data: any; isLoading: boolean; error: any };
@@ -86,9 +91,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
-  // Hydrate from server once
+  // Hydrate from server once per tenant. Skips on refetches/invalidations
+  // for the already-loaded tenant so the user's in-progress edits survive.
   useEffect(() => {
     if (!aiSettings) return;
+    if (!tenantId) return;
+    if (hydratedTenantRef.current === tenantId) return;
+    hydratedTenantRef.current = tenantId;
+
     const hEnabled = aiSettings.enabled ?? false;
     const hBotName = aiSettings.brandVoice?.name ?? '';
     const hSupportEmail = aiSettings.supportEmail ?? '';
@@ -134,7 +144,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       escalationKeywords: hEscalation,
       topicsToAvoid: hTopics,
     }));
-  }, [aiSettings]);
+  }, [aiSettings, tenantId]);
 
   const handleTemplateChange = (id: string) => {
     if (id === templateId) return;

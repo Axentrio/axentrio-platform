@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MessageSquareText, MessageSquare, Bot, BookOpen } from 'lucide-react';
+import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2, SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useGetAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
@@ -9,18 +9,40 @@ import AiBotForm from './knowledge/AiBotForm';
 import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
 
-type Tab = 'bot' | 'knowledge' | 'canned';
+type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social' | 'extra';
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'bot', label: 'AI Bot', icon: Bot },
-  { key: 'knowledge', label: 'Knowledge Base', icon: BookOpen },
-  { key: 'canned', label: 'Canned Responses', icon: MessageSquareText },
+  { key: 'knowledge', label: 'Knowledge base', icon: BookOpen },
+  { key: 'canned', label: 'Custom Responses', icon: MessageSquareText },
+  { key: 'appearances', label: 'Chatbot Appearances', icon: Palette },
+  { key: 'social', label: 'Social Media Integrations', icon: Share2 },
+  { key: 'extra', label: 'Extra Settings', icon: SlidersHorizontal },
 ];
+
+type ComingSoonProps = {
+  icon: React.ElementType;
+  title: string;
+  description: string;
+};
+
+const ComingSoonPanel: React.FC<ComingSoonProps> = ({ icon: Icon, title, description }) => (
+  <div className="flex flex-col items-center justify-center py-20 text-center">
+    <div className="p-4 rounded-2xl bg-primary-500/10 mb-4">
+      <Icon className="w-8 h-8 text-primary-400" />
+    </div>
+    <h2 className="text-base font-semibold text-text-primary mb-1">{title}</h2>
+    <p className="text-sm text-text-muted max-w-md">{description}</p>
+  </div>
+);
 
 const PARAM_TO_TAB: Record<string, Tab> = {
   bot: 'bot',
   knowledge: 'knowledge',
   canned: 'canned',
+  appearances: 'appearances',
+  social: 'social',
+  extra: 'extra',
 };
 
 const AiContent: React.FC = () => {
@@ -120,6 +142,30 @@ const AiContent: React.FC = () => {
 
         {activeTab === 'canned' && (
           <CannedResponsesContent />
+        )}
+
+        {activeTab === 'appearances' && (
+          <ComingSoonPanel
+            icon={Palette}
+            title="Chatbot Appearances"
+            description="Customize widget colors, position, avatar, and launcher styling. Coming soon."
+          />
+        )}
+
+        {activeTab === 'social' && (
+          <ComingSoonPanel
+            icon={Share2}
+            title="Social Media Integrations"
+            description="Connect Messenger, Instagram, WhatsApp, and other channels. Coming soon."
+          />
+        )}
+
+        {activeTab === 'extra' && (
+          <ComingSoonPanel
+            icon={SlidersHorizontal}
+            title="Extra Settings"
+            description="Workspace-level preferences and account-wide AI defaults. Coming soon."
+          />
         )}
       </div>
 

@@ -176,7 +176,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 placeholder="e.g. Ava"
                 disabled={readOnly}
               />
-              <p className="text-[10px] text-text-muted mt-1">Shown in the widget header</p>
+              <p className="text-[10px] text-text-muted mt-1">Chatbot display name for users to see on the website.</p>
             </div>
             <div>
               <Label className="mb-1 text-text-secondary">Support Email</Label>
@@ -240,13 +240,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
         <section className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-text-primary">Base System Prompt</h3>
-              <p className="text-xs text-text-muted mt-0.5">The core instructions your bot follows in every conversation</p>
+              <h3 className="text-sm font-semibold text-text-primary">Bot Instructions</h3>
+              <p className="text-xs text-text-muted mt-0.5">Tell the chatbot how it should answer visitors. You can start from a template and edit it.</p>
             </div>
             <div className="flex items-center gap-2">
               <Select value={templateId} onValueChange={handleTemplateChange} disabled={readOnly}>
-                <SelectTrigger className="h-9 w-56">
-                  <SelectValue placeholder="Select a template" />
+                <SelectTrigger className="h-9 w-56" aria-label="Choose a starter prompt">
+                  <SelectValue placeholder="Choose a starter prompt" />
                 </SelectTrigger>
                 <SelectContent>
                   {promptTemplates.map((t) => (

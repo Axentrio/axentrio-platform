@@ -1062,6 +1062,36 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     @media print {
       .cb-widget { display: none !important; }
     }
+
+    /* ============================================================
+       Appearance overrides (additive — applied only when config sets them)
+       ============================================================ */
+    .cb-launcher--bottom-left {
+      left: 24px;
+      right: auto;
+    }
+    .cb-launcher--pill {
+      width: auto;
+      height: auto;
+      padding: 10px 16px;
+      border-radius: 999px;
+      gap: 8px;
+    }
+    .cb-launcher__text {
+      font-size: 14px;
+      font-weight: 500;
+      color: white;
+      max-width: 200px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .cb-bot-avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      border-radius: 50%;
+    }
   `;
 
   // ==========================================================================
@@ -1143,6 +1173,21 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   };
 
   // ==========================================================================
+  // Bot avatar render helper
+  // ==========================================================================
+  function botAvatarHtml(avatarUrl) {
+    if (avatarUrl) {
+      const safe = String(avatarUrl)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+      return `<img src="${safe}" alt="" loading="lazy" class="cb-bot-avatar-img" />`;
+    }
+    return ICONS.bot;
+  }
+
+  // ==========================================================================
   // Fetch with timeout helper
   // ==========================================================================
   function fetchWithTimeout(url, options = {}, timeoutMs = 15000) {
@@ -1188,6 +1233,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this._hasEverConnected = false;
       this._agent = null; // { name, lastActive }
       this._agentActivityTimer = null;
+      this.appearance = (this.config && this.config.appearance) || {};
 
       // Render immediately, connect async
       this.loadSession();
@@ -1618,7 +1664,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           
           <header class="cb-header">
             <div class="cb-header__avatar">
-              ${ICONS.bot}
+              ${botAvatarHtml(this.appearance.avatarUrl)}
             </div>
             <div class="cb-header__info">
               <h3 class="cb-header__title">${utils.escapeHtml(this.config.title)}</h3>
@@ -1688,6 +1734,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         <button class="cb-launcher" type="button" aria-label="Open chat" aria-expanded="false">
           <span class="cb-launcher__icon cb-launcher__icon--open" aria-hidden="true">${ICONS.chat}</span>
           <span class="cb-launcher__icon cb-launcher__icon--close" aria-hidden="true">${ICONS.close}</span>
+          <span class="cb-launcher__text"></span>
         </button>
       `;
       
@@ -1697,6 +1744,16 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     cacheElements() {
       this.chatWindow = this.container.querySelector('.cb-chat');
       this.launcher = this.container.querySelector('.cb-launcher');
+      if (this.launcher && this.appearance.launcherPosition === 'bottom-left') {
+        this.launcher.classList.add('cb-launcher--bottom-left');
+      }
+      if (this.launcher && this.appearance.launcherLabel) {
+        this.launcher.classList.add('cb-launcher--pill');
+        const textEl = this.launcher.querySelector('.cb-launcher__text');
+        if (textEl) {
+          textEl.textContent = this.appearance.launcherLabel;
+        }
+      }
       this.headerCloseBtn = this.container.querySelector('.cb-header__close');
       this.messagesContainer = this.container.querySelector('.cb-messages');
       this.input = this.container.querySelector('.cb-input');
@@ -1740,7 +1797,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       
       return `
         <div class="cb-message cb-message--${message.sender}" data-id="${message.id}">
-          <div class="cb-message__avatar">${isUser ? ICONS.user : ICONS.bot}</div>
+          <div class="cb-message__avatar">${isUser ? ICONS.user : botAvatarHtml(this.appearance.avatarUrl)}</div>
           <div class="cb-message__content">
             ${content}
             ${time ? `<span class="cb-message__time">${time}</span>` : ''}

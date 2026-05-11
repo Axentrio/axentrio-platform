@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 export const updateWidgetAppearanceSchema = z.object({
+  // primaryColor: required to be a valid 6-digit hex when present.
+  // Cannot be cleared via '' or null — omit the field to leave it unchanged.
   primaryColor: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/, 'primaryColor must be a 6-digit hex like #6366f1')

@@ -38,6 +38,11 @@ describe('updateWidgetAppearanceSchema', () => {
     expect(result.success).toBe(false);
   });
 
+  it('rejects primaryColor as empty string (cannot be cleared)', () => {
+    const result = updateWidgetAppearanceSchema.safeParse({ primaryColor: '' });
+    expect(result.success).toBe(false);
+  });
+
   it('rejects non-URL avatarUrl values', () => {
     const result = updateWidgetAppearanceSchema.safeParse({ avatarUrl: 'not-a-url' });
     expect(result.success).toBe(false);

@@ -1258,6 +1258,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
       // Async: load Socket.IO → init session → connect
       this._initConnection();
+
+      // Async: load tenant-configured appearance (color, avatar, launcher).
+      // Fire-and-forget; falls back to defaults on failure/timeout.
+      // Note: this causes a brief flash if appearance differs from defaults —
+      // the launcher renders synchronously with script-tag config, then this
+      // fetch re-applies the saved appearance once it resolves. MVP tradeoff.
+      this._loadAppearanceConfig();
     }
 
     getStorageKey() {
@@ -1390,6 +1397,51 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       queuedMessages.forEach(message => this.emitOutboundMessage(message));
       this.showTypingIndicator();
       this.log('Flushed queued messages:', queuedMessages.length);
+    }
+
+    async _loadAppearanceConfig() {
+      if (!this.config.apiKey || !this.config.apiUrl) return;
+      try {
+        const url = `${this.config.apiUrl}/api/v1/widget/config?apiKey=${encodeURIComponent(this.config.apiKey)}`;
+        const resp = await fetchWithTimeout(url, { method: 'GET' }, 5000);
+        if (!resp.ok) {
+          this.log('Appearance config fetch returned status', resp.status);
+          return;
+        }
+        const body = await resp.json();
+        const data = body && body.data ? body.data : body;
+        if (!data || typeof data !== 'object') return;
+        if (data.appearance && typeof data.appearance === 'object') {
+          this.appearance = data.appearance;
+          this._applyAppearance();
+        }
+      } catch (err) {
+        this.log('Appearance config fetch failed:', err && err.message);
+      }
+    }
+
+    _applyAppearance() {
+      if (!this.launcher) return;
+      // Launcher position
+      const isBottomLeft = this.appearance.launcherPosition === 'bottom-left';
+      this.launcher.classList.toggle('cb-launcher--bottom-left', isBottomLeft);
+      // Launcher label / pill mode
+      const hasLabel = !!this.appearance.launcherLabel;
+      this.launcher.classList.toggle('cb-launcher--pill', hasLabel);
+      const textEl = this.launcher.querySelector('.cb-launcher__text');
+      if (textEl) {
+        textEl.textContent = hasLabel ? this.appearance.launcherLabel : '';
+      }
+      // Header avatar (eager-load — visible the moment the panel opens)
+      if (this.shadow) {
+        const headerAvatar = this.shadow.querySelector('.cb-header__avatar');
+        if (headerAvatar) {
+          headerAvatar.innerHTML = botAvatarHtml(this.appearance.avatarUrl, { eager: true });
+        }
+      }
+      // Note: already-rendered message-bubble avatars keep their original
+      // render. New bot messages pick up this.appearance.avatarUrl via the
+      // message template (line ~1801).
     }
 
     async _initConnection() {

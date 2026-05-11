@@ -1066,10 +1066,6 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     /* ============================================================
        Appearance overrides (additive — applied only when config sets them)
        ============================================================ */
-    .cb-launcher--bottom-left {
-      left: 24px;
-      right: auto;
-    }
     .cb-launcher--pill {
       width: auto;
       height: auto;
@@ -1422,9 +1418,14 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
     _applyAppearance() {
       if (!this.launcher) return;
-      // Launcher position
-      const isBottomLeft = this.appearance.launcherPosition === 'bottom-left';
-      this.launcher.classList.toggle('cb-launcher--bottom-left', isBottomLeft);
+      // Launcher position — toggle the wrapper class. The .cb-widget wrapper
+      // owns the fixed-positioning; .cb-launcher itself is position:static
+      // inside the wrapper, so a class on the launcher cannot move it.
+      if (this.container) {
+        const isBottomLeft = this.appearance.launcherPosition === 'bottom-left';
+        this.container.classList.toggle('cb-widget--left', isBottomLeft);
+        this.container.classList.toggle('cb-widget--right', !isBottomLeft);
+      }
       // Launcher label / pill mode
       const hasLabel = !!this.appearance.launcherLabel;
       this.launcher.classList.toggle('cb-launcher--pill', hasLabel);

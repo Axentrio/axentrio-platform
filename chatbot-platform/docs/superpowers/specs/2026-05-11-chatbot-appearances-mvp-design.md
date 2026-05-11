@@ -14,12 +14,20 @@ Turn the placeholder `Chatbot Appearances` tab under `/ai` into a working settin
 
 ## 2. Scope
 
+### Recon finding (2026-05-11) — fields the spec assumed are dead in production
+
+- `Tenant.settings.theme.logoUrl` is declared in entity types but **no code ever writes to it**, and `widget.js` does not read it. Treat it as a dead field for this MVP — do not reference it in any fallback chain.
+- The only "logo upload" in the portal goes through Clerk's `organization.setLogo()` — Clerk-side org logo, single slot, not reusable for a second image. There is no shared file-upload helper for portal images.
+- The Clerk org logo IS available cheaply on the portal via `useOrganization().organization.imageUrl` (already consumed by `WidgetBrandSettings`). Server-side access from the public `/widget/config` route would require new Clerk SDK plumbing and is out of MVP scope.
+
+**Consequence**: the bot avatar is a URL text input in the MVP. Portal preview uses Clerk org logo as visual fallback (free). Production widget falls back directly to `ICONS.bot` when `widget.avatarUrl` is empty. The Clerk-org-logo production fallback is documented as a follow-up.
+
 ### In scope
 
 | Capability | Surface |
 |---|---|
 | Primary color | Migrated into Appearances tab |
-| Bot avatar (optional override) | New field, falls back to company logo |
+| Bot avatar URL (optional override) | New URL text input, falls back to Clerk org logo in portal preview |
 | Launcher position (bottom-right / bottom-left) | New field |
 | Launcher label (optional pill text) | New field |
 | Welcome message (first-message-only) | New field |
@@ -34,7 +42,9 @@ Turn the placeholder `Chatbot Appearances` tab under `/ai` into a working settin
 - Top-corner launcher positions
 - Tooltip-only launcher labels
 - `WidgetTest.tsx` modifications — reused as-is via "Open full widget test" link
-- Removal of old `WidgetBrandSettings` page — kept for tenant identity (name, logo, API key, install snippet)
+- Removal of old `WidgetBrandSettings` page — kept for tenant identity (name, Clerk-managed org logo, API key, install snippet)
+- New server-side image upload endpoint (deferred until there's a clear product need for tenant-managed image assets)
+- Server-side Clerk org logo resolution inside `/widget/config` (deferred — needs Clerk SDK plumbing on a public route)
 - Multi-tenant feature flagging on `widget.js` — new fields are strictly additive and fall back to today's behavior when absent
 - Automated tests for `widget.js` itself — no test infrastructure exists for it today
 
@@ -43,7 +53,7 @@ Turn the placeholder `Chatbot Appearances` tab under `/ai` into a working settin
 | Decision | Choice | Rationale |
 |---|---|---|
 | Tab overlap with `WidgetBrandSettings` | **Consolidate.** Appearances owns customer-facing widget visuals. `WidgetBrandSettings` retains tenant identity (name, company logo, API key, install snippet). | One editable home per field; avoid duplicate UX. |
-| Bot avatar field model | **One uploader with optional override.** `settings.widget.avatarUrl` falls back to `settings.theme.logoUrl` then bot SVG. | Single uploader in UI; advanced override available. |
+| Bot avatar field model | **URL text input only** (no file upload in MVP — see Recon finding below). `settings.widget.avatarUrl` is the override; production widget falls back to `ICONS.bot` SVG; portal preview falls back to Clerk org logo (`organization.imageUrl`) for closer visual fidelity. | No reusable server upload exists; Clerk logo upload is org-only and can't be reused for a second image. Adding a real upload endpoint is out of scope. |
 | Welcome message behavior | **First message only.** Seeded into the open panel when no prior history exists. No pre-open bubble. | MVP signal-to-noise; bubble is a separate engagement product. |
 | Launcher position values | **`bottom-right` (default) and `bottom-left`.** No top corners. No offset. | Covers ~99% of deployments; minimal `widget.js` layout logic. |
 | Launcher label behavior | **Optional pill text.** Empty → today's icon-only circle. Set → rounded pill with icon + text. | Modern chatbot pattern; doesn't compete with deferred attention-bubble work. |
@@ -62,10 +72,12 @@ Location: `chatbot-platform/api/src/database/entities/Tenant.ts:61-131`
 ```ts
 theme?: {
   primaryColor?: string;   // primary source of truth for widget color
-  logoUrl?: string;        // company logo, fallback for bot avatar
+  logoUrl?: string;        // DEAD FIELD in current codebase — not written, not read; ignored by this MVP
   customCss?: string;      // not used by this MVP
 }
 ```
+
+Only `theme.primaryColor` is consumed. Do not add references to `theme.logoUrl` in this MVP's code paths.
 
 ### New — `Tenant.settings.widget`
 
@@ -82,13 +94,17 @@ widget?: {
 
 **Migration:** none. `settings` is already a JSONB column. The TypeScript type gains an optional `widget` key. Existing tenants read as `widget: undefined`; all fallback logic handles absent values.
 
-**DB stays sparse:** defaults are applied at read time (server-side in `/widget/config` and portal hydration), not written speculatively. The Zod schema (Section 5.1) uses `preprocess` to coerce empty strings to `null` **before** field validation runs — otherwise `avatarUrl: ""` would fail URL validation before normalization could rescue it. After preprocess, reads can use truthy fallbacks safely:
+**DB stays sparse:** defaults are applied at read time (server-side in `/widget/config` and portal hydration), not written speculatively. The Zod schema (Section 5.1) accepts empty strings via `.or(z.literal(''))` to match the existing codebase convention (see `ai-settings.schema.ts:8`), and the controller normalizes `''` to `null` before write. After normalization, reads use truthy fallbacks:
 
 ```ts
-appearance.avatarUrl      = widget.avatarUrl   || theme.logoUrl || null;
-appearance.launcherLabel  = widget.launcherLabel  || null;
-appearance.welcomeMessage = widget.welcomeMessage || null;
+// /widget/config server-side:
+appearance.avatarUrl       = widget.avatarUrl    || null;   // theme.logoUrl is dead; do not include
+appearance.launcherLabel   = widget.launcherLabel  || null;
+appearance.welcomeMessage  = widget.welcomeMessage || null;
+appearance.launcherPosition = widget.launcherPosition || 'bottom-right';
 ```
+
+The portal preview applies an additional fallback for visual fidelity only: if `formState.avatarUrl` is empty, use `useOrganization().organization?.imageUrl` (already imported in `WidgetBrandSettings`). This makes the preview match what a fresh tenant would expect ("I haven't set a custom avatar, so it shows my org logo"), even though the production widget will render `ICONS.bot` in the same condition.
 
 ## 5. API
 
@@ -113,21 +129,31 @@ appearance.welcomeMessage = widget.welcomeMessage || null;
 }
 ```
 
-**Zod validation** (empty-string normalization runs via `preprocess` so it happens **before** field validation — critical for `avatarUrl: ""` which would otherwise fail URL validation):
-- `primaryColor`: optional, `/^#[0-9a-fA-F]{6}$/`
-- `avatarUrl`: optional, `z.preprocess(v => v === '' ? null : v, …)` → nullable URL, max 2KB when non-null
-- `launcherPosition`: optional, enum
-- `launcherLabel`: optional, `z.preprocess(v => v === '' ? null : v, …)` → nullable string, max length 30
-- `welcomeMessage`: optional, `z.preprocess(v => v === '' ? null : v, …)` → nullable string, max length 280
+**Zod validation** (mirrors `ai-settings.schema.ts` convention: allow empty string via `.or(z.literal(''))`, controller normalizes to `null` before write — avoids `URL` validation rejecting `""`):
+
+```ts
+import { z } from 'zod';
+
+export const updateWidgetAppearanceSchema = z.object({
+  primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  avatarUrl: z.string().url().max(2048).optional().nullable().or(z.literal('')),
+  launcherPosition: z.enum(['bottom-right', 'bottom-left']).optional(),
+  launcherLabel: z.string().max(30).optional().nullable().or(z.literal('')),
+  welcomeMessage: z.string().max(280).optional().nullable().or(z.literal('')),
+});
+
+export type UpdateWidgetAppearanceInput = z.infer<typeof updateWidgetAppearanceSchema>;
+```
 
 **Controller logic** (mirrors `chatbot-platform/api/src/knowledge/knowledge.controller.ts:187-225`):
-1. Resolve tenant from auth context.
-2. Validate body with Zod (preprocess has already normalized empty strings to `null` by the time field validators run).
-3. Read tenant, deep-merge:
+1. Resolve tenant from auth context (`(req as any).tenantId`).
+2. Validate body with `updateWidgetAppearanceSchema.parse(req.body)`.
+3. Normalize empty strings → `null` for `avatarUrl`, `launcherLabel`, `welcomeMessage` (e.g., `const avatarUrl = data.avatarUrl === '' ? null : data.avatarUrl;`).
+4. Read tenant, deep-merge:
    - `primaryColor` → `tenant.settings.theme.primaryColor` (only if key present in body)
    - other four → `tenant.settings.widget.*` (only if keys present)
-4. `tenantRepo.save(tenant)`.
-5. Respond with the saved subset (Section 5.2 shape).
+5. `tenantRepo.save(tenant)`.
+6. Respond with the saved subset (Section 5.2 shape).
 
 **Errors:** 400 on Zod, 401/403 from Clerk, 500 on DB write. Single save — no partial writes.
 
@@ -161,7 +187,7 @@ File touched: `chatbot-platform/api/src/routes/widget.ts:81-121`.
 
   // NEW
   appearance: {
-    avatarUrl: string | null,                             // server resolves: widget.avatarUrl || theme.logoUrl || null
+    avatarUrl: string | null,                             // raw widget.avatarUrl ?? null (no theme.logoUrl, no Clerk lookup)
     launcherPosition: 'bottom-right' | 'bottom-left',     // server defaults to 'bottom-right'
     launcherLabel: string | null,
     welcomeMessage: string | null,
@@ -169,7 +195,7 @@ File touched: `chatbot-platform/api/src/routes/widget.ts:81-121`.
 }
 ```
 
-Server-side default resolution lives next to the existing `theme` / `features` derivations.
+Server-side default resolution lives next to the existing `theme` / `features` derivations. The avatar fallback to Clerk's org logo is deliberately **not** done here (would require Clerk SDK plumbing on a public, rate-limited route). When `widget.avatarUrl` is null, the production widget renders `ICONS.bot` — same as today.
 
 ## 6. Portal UI
 
@@ -182,7 +208,6 @@ Server-side default resolution lives next to the existing `theme` / `features` d
 | New preview component | `chatbot-platform/portal/src/pages/knowledge/ChatbotAppearancesPreview.tsx` |
 | New query hooks | `chatbot-platform/portal/src/queries/useWidgetAppearance.ts` |
 | Remove color picker, add banner | `chatbot-platform/portal/src/pages/settings/WidgetBrandSettings.tsx` |
-| Extract minimal upload helper | from `WidgetBrandSettings`, only if obviously reusable — no broad upload abstraction |
 
 ### 6.2 Layout
 
@@ -190,7 +215,7 @@ Two-column inside the tab:
 
 - **Left (~55%) — form:**
   - Primary color (color picker + hex input)
-  - Bot avatar (single uploader, helper text "Defaults to your company logo when no custom avatar is set.", "Remove custom avatar" action only when an override exists)
+  - Bot avatar URL (URL text input, helper text "Optional image URL for the chatbot avatar. If empty, the widget uses your company logo when available.", "Clear" button when a value exists)
   - Launcher position (segmented radio: Bottom right / Bottom left)
   - Launcher label (text input, max 30, helper text)
   - Welcome message (textarea, max 280, placeholder `Hi! How can I help you today?`)
@@ -212,7 +237,7 @@ Two-column inside the tab:
 
 - Pure React; no widget.js coupling.
 - Takes unsaved form state as props.
-- Avatar resolution mirrors server-side logic: `formState.avatarUrl || tenant.settings.theme?.logoUrl || null`. Null renders the same generic bot SVG used by the real widget.
+- Avatar resolution for preview ONLY: `formState.avatarUrl || organization?.imageUrl || null`. The `organization` comes from Clerk's `useOrganization()` hook — same source `WidgetBrandSettings` already uses (`pages/settings/WidgetBrandSettings.tsx:72`). Null renders the same generic bot SVG used by the real widget. (Note: this differs from the production widget — the production widget does NOT consult Clerk and falls back directly to `ICONS.bot`. The preview shows a richer fallback for design intent; deliberate, documented.)
 - Welcome message renders as the first chat bubble; empty input → no bubble (matches real widget behavior).
 - Inline-styled with the same color/position values the form holds — no `widget.js` import.
 
@@ -220,14 +245,14 @@ Two-column inside the tab:
 
 Keeps:
 - Tenant name
-- Company logo (`settings.theme.logoUrl`) — still editable here
+- Org logo upload (via Clerk's `organization.setLogo()` — unchanged)
 - API key + install snippet
 - Cross-link banner: "Widget appearance is now configured under AI & Content → Chatbot Appearances"
 
 Removes from the visible UI:
 - Primary color picker (moved to Appearances)
 
-Does **not** remove or redirect the route — bookmarks and existing nav stay valid.
+Does **not** remove or redirect the route — bookmarks and existing nav stay valid. Does **not** modify the Clerk logo upload flow.
 
 ## 7. Widget runtime (`api/public/widget.js`)
 
@@ -299,7 +324,7 @@ function renderBotAvatar(container, src) {
   container.replaceChildren();
   if (src) {
     const img = document.createElement('img');
-    img.src = src;          // server already resolved widget.avatarUrl || theme.logoUrl || null
+    img.src = src;          // server passed raw widget.avatarUrl || null
     img.alt = '';
     img.loading = 'lazy';
     container.appendChild(img);
@@ -312,6 +337,8 @@ Called at: widget header avatar slot and the assistant-message avatar slot. Same
 
 `document.createElement('img')` + `img.src = …` is preferred over `innerHTML` string concatenation to avoid HTML-escaping bugs on the URL.
 
+**Production fallback chain in widget.js**: `widget.avatarUrl → ICONS.bot`. No Clerk lookup. The portal preview's richer fallback (`→ org logo → ICONS.bot`) is preview-only.
+
 ### 7.6 Manual smoke checklist (deploy gate)
 
 Run against the deployed environment after commit 6 lands. Per `reference_railway_deploy`, this repo's `main` branch deploys directly to production — there is no staging. Run the smoke checklist immediately post-deploy:
@@ -321,11 +348,10 @@ Run against the deployed environment after commit 6 lands. Per `reference_railwa
 3. `launcherLabel: 'Chat with us'`: launcher renders as pill with text + icon; long labels truncate.
 4. `launcherLabel: null`: launcher is the circular icon-only button.
 5. `avatarUrl` set on `widget`: header and assistant-message avatars show that image.
-6. `avatarUrl` null, `theme.logoUrl` set: header and assistant-message avatars show the company logo.
-7. `avatarUrl` and `logoUrl` both null: avatars show `ICONS.bot`.
+6. `avatarUrl` null: header and assistant-message avatars show `ICONS.bot` (production widget does not consult Clerk org logo — preview does, but the embed does not).
 8. `welcomeMessage: 'Hello!'`, fresh session: first message in panel is "Hello!".
 9. `welcomeMessage` set, returning session with prior messages restored: welcome is NOT re-injected.
-10. Concurrency: two tenant sites side by side with different appearance settings — no cross-contamination.
+9b. Concurrency: two tenant sites side by side with different appearance settings — no cross-contamination.
 
 ### 7.7 Rollback playbook
 
@@ -369,12 +395,20 @@ Six scoped commits, each independently revertable, in dependency order:
 
 ## 10. Open questions for implementation
 
-None blocking. Four small things to verify when writing the plan:
+None blocking. Two small things to verify when writing the plan:
 
-1. **Exact middleware chain for admin gate in `ai-settings.routes.ts`** — mirror it on the new route. Do not broaden permission model.
-2. **Existing upload flow in `WidgetBrandSettings`** — read it, extract the smallest reusable helper if duplication is obvious, otherwise inline. Same storage/upload endpoint either way.
-3. **Sequencing of history restore vs welcome seed in `widget.js`** — confirm restore is synchronous or wrap the seed in the restore-completion callback. The `messages.length === 0` guard is only correct after restore completes.
-4. **Source of `tenant.apiKey` for the "Open full widget test" link** — verify the portal already has the tenant's `apiKey` available in the same context as the Appearances form (e.g., via `useTenantSettings()`). The existing `WidgetTest.tsx` page expects `?apiKey=…`; confirm the value is reachable without an extra fetch.
+1. **Sequencing of history restore vs welcome seed in `widget.js`** — confirm restore is synchronous or wrap the seed in the restore-completion callback. The `messages.length === 0` guard is only correct after restore completes.
+2. **Source of `tenant.apiKey` for the "Open full widget test" link** — the portal already has it via `useTenantSettings()` (used by `WidgetBrandSettings:75`). Confirm the same hook is callable from the new Appearances form without re-plumbing.
+
+### 10a. Resolved during recon
+
+- **Admin middleware chain**: `ai-settings.routes.ts` uses `requireClerkAuth, autoProvision, resolveTenantContext` at the router level, then `requireRole('admin')` per-route for writes. Mirror this exactly.
+- **Upload reuse**: not possible — Clerk's `organization.setLogo()` is the only existing upload path and it's org-only. Avatar is a URL input.
+
+### 10b. Documented follow-ups (out of this MVP)
+
+- Server-side Clerk org logo resolution inside `/widget/config` so the production widget's avatar fallback matches the portal preview.
+- Generic tenant asset upload endpoint (would replace the URL input with a true file picker).
 
 ---
 

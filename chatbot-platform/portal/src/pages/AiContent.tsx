@@ -9,6 +9,7 @@ import AiBotForm from './knowledge/AiBotForm';
 import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
 import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
+import { SocialChannelsContent } from '@/components/channels/SocialChannelsContent';
 
 type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social' | 'extra';
 
@@ -147,13 +148,7 @@ const AiContent: React.FC = () => {
 
         {activeTab === 'appearances' && <ChatbotAppearancesForm />}
 
-        {activeTab === 'social' && (
-          <ComingSoonPanel
-            icon={Share2}
-            title="Social Media Integrations"
-            description="Connect Messenger, Instagram, WhatsApp, and other channels. Coming soon."
-          />
-        )}
+        {activeTab === 'social' && <SocialChannelsContent />}
 
         {activeTab === 'extra' && (
           <ComingSoonPanel

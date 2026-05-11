@@ -8,6 +8,7 @@ import DocumentsTab from './knowledge/DocumentsTab';
 import AiBotForm from './knowledge/AiBotForm';
 import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
+import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
 
 type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social' | 'extra';
 
@@ -144,13 +145,7 @@ const AiContent: React.FC = () => {
           <CannedResponsesContent />
         )}
 
-        {activeTab === 'appearances' && (
-          <ComingSoonPanel
-            icon={Palette}
-            title="Chatbot Appearances"
-            description="Customize widget colors, position, avatar, and launcher styling. Coming soon."
-          />
-        )}
+        {activeTab === 'appearances' && <ChatbotAppearancesForm />}
 
         {activeTab === 'social' && (
           <ComingSoonPanel

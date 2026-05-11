@@ -3,22 +3,31 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ChatbotAppearancesForm from './ChatbotAppearancesForm';
 
-const { mockMutate } = vi.hoisted(() => ({ mockMutate: vi.fn() }));
+type AppearanceData = {
+  primaryColor: string | null;
+  avatarUrl: string | null;
+  launcherPosition: 'bottom-right' | 'bottom-left';
+  launcherLabel: string | null;
+} | undefined;
+
+const DEFAULT_APPEARANCE: AppearanceData = {
+  primaryColor: '#6366f1',
+  avatarUrl: null,
+  launcherPosition: 'bottom-right',
+  launcherLabel: null,
+};
+
+const { mockMutate, appearanceRef } = vi.hoisted(() => ({
+  mockMutate: vi.fn(),
+  appearanceRef: { current: undefined as unknown },
+}));
 
 vi.mock('@clerk/clerk-react', () => ({
   useOrganization: () => ({ organization: { imageUrl: 'https://clerk.example/org.png', name: 'Acme' } }),
 }));
 
 vi.mock('@/queries/useWidgetAppearance', () => ({
-  useGetWidgetAppearance: () => ({
-    data: {
-      primaryColor: '#6366f1',
-      avatarUrl: null,
-      launcherPosition: 'bottom-right',
-      launcherLabel: null,
-    },
-    isLoading: false,
-  }),
+  useGetWidgetAppearance: () => ({ data: appearanceRef.current, isLoading: false }),
   useUpdateWidgetAppearance: () => ({ mutate: mockMutate, isPending: false }),
 }));
 
@@ -35,6 +44,7 @@ vi.mock('@/queries/useTenantQueries', () => ({
 
 beforeEach(() => {
   mockMutate.mockReset();
+  appearanceRef.current = DEFAULT_APPEARANCE;
 });
 
 describe('ChatbotAppearancesForm', () => {
@@ -79,5 +89,20 @@ describe('ChatbotAppearancesForm', () => {
       'href',
       expect.stringContaining('apiKey=fake-api-key'),
     );
+  });
+
+  it('still renders a usable form when the appearance query returns no data', async () => {
+    appearanceRef.current = undefined;
+    const user = userEvent.setup();
+    render(<ChatbotAppearancesForm />);
+
+    // Form fields hydrated from defaults — not stuck behind the loading state.
+    expect(screen.getByLabelText(/primary color/i)).toHaveValue('#6366f1');
+    const save = screen.getByRole('button', { name: /save/i });
+
+    // Save starts disabled (clean baseline) but becomes enabled once the user edits.
+    expect(save).toBeDisabled();
+    await user.type(screen.getByLabelText(/launcher label/i), 'Hi');
+    expect(save).toBeEnabled();
   });
 });

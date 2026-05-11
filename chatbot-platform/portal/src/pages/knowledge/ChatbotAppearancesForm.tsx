@@ -35,17 +35,20 @@ const ChatbotAppearancesForm: React.FC = () => {
   const hydratedRef = useRef(false);
 
   useEffect(() => {
-    if (!appearance || hydratedRef.current) return;
+    if (hydratedRef.current) return;
+    if (isLoading) return;
     hydratedRef.current = true;
-    const hydrated: FormState = {
-      primaryColor: appearance.primaryColor ?? '#6366f1',
-      avatarUrl: appearance.avatarUrl ?? '',
-      launcherPosition: appearance.launcherPosition,
-      launcherLabel: appearance.launcherLabel ?? '',
-    };
+    const hydrated: FormState = appearance
+      ? {
+          primaryColor: appearance.primaryColor ?? '#6366f1',
+          avatarUrl: appearance.avatarUrl ?? '',
+          launcherPosition: appearance.launcherPosition,
+          launcherLabel: appearance.launcherLabel ?? '',
+        }
+      : form;
     setForm(hydrated);
     setSavedSnapshot(JSON.stringify(hydrated));
-  }, [appearance]);
+  }, [appearance, isLoading]);
 
   const greeting = (aiSettings as { guardrails?: { greetingMessage?: string } } | undefined)
     ?.guardrails?.greetingMessage ?? '';

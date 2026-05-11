@@ -65,6 +65,11 @@ export class Tenant {
       logoUrl?: string;
       customCss?: string;
     };
+    widget?: {
+      avatarUrl?: string | null;
+      launcherPosition?: 'bottom-right' | 'bottom-left';
+      launcherLabel?: string | null;
+    };
     features?: {
       fileUploadEnabled: boolean;
       handoffEnabled: boolean;

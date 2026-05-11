@@ -108,7 +108,7 @@ The portal preview applies an additional fallback for visual fidelity only: if `
 
 ## 5. API
 
-### 5.1 `PATCH /api/v1/widget/appearance` — new, authenticated
+### 5.1 `PATCH /api/v1/tenants/me/widget-appearance` — new, authenticated
 
 - **Auth:** Clerk session middleware + admin role check matching `chatbot-platform/api/src/knowledge/ai-settings.routes.ts` (verify exact middleware chain at implementation; do not broaden).
 - **New files:**
@@ -155,7 +155,7 @@ export type UpdateWidgetAppearanceInput = z.infer<typeof updateWidgetAppearanceS
 
 **Errors:** 400 on Zod, 401/403 from Clerk, 500 on DB write. Single save — no partial writes.
 
-### 5.2 `GET /api/v1/widget/appearance` — new, authenticated
+### 5.2 `GET /api/v1/tenants/me/widget-appearance` — new, authenticated
 
 Same auth as PATCH. Returns the currently-saved appearance subset (used for portal hydration):
 
@@ -223,7 +223,7 @@ Two-column inside the tab:
 
 ### 6.3 Form behavior (mirrors AI Bot MVP)
 
-- Hydrate editable fields from `GET /api/v1/widget/appearance`.
+- Hydrate editable fields from `GET /api/v1/tenants/me/widget-appearance`.
 - Hydrate the read-only greeting display from `useGetAiSettings()` — same hook the AI Bot Form uses.
 - Dirty tracking via shallow comparison (only the four editable fields participate; the greeting is informational).
 - Unsaved-change confirmation dialog on tab navigation, matching the pattern shipped in `ecdfca1`.

@@ -1077,7 +1077,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       border-radius: 999px;
       gap: 8px;
     }
-    .cb-launcher__text {
+    .cb-launcher--pill .cb-launcher__text {
       font-size: 14px;
       font-weight: 500;
       color: white;
@@ -1175,14 +1175,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // ==========================================================================
   // Bot avatar render helper
   // ==========================================================================
-  function botAvatarHtml(avatarUrl) {
+  function botAvatarHtml(avatarUrl, { eager = false } = {}) {
     if (avatarUrl) {
       const safe = String(avatarUrl)
         .replace(/&/g, '&amp;')
         .replace(/"/g, '&quot;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      return `<img src="${safe}" alt="" loading="lazy" class="cb-bot-avatar-img" />`;
+      const loading = eager ? 'eager' : 'lazy';
+      return `<img src="${safe}" alt="" loading="${loading}" class="cb-bot-avatar-img" />`;
     }
     return ICONS.bot;
   }
@@ -1664,7 +1665,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           
           <header class="cb-header">
             <div class="cb-header__avatar">
-              ${botAvatarHtml(this.appearance.avatarUrl)}
+              ${botAvatarHtml(this.appearance.avatarUrl, { eager: true })}
             </div>
             <div class="cb-header__info">
               <h3 class="cb-header__title">${utils.escapeHtml(this.config.title)}</h3>

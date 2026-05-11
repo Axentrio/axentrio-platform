@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { Camera, X, Loader2, Save, Check, Copy } from 'lucide-react';
 import { useOrganization } from '@clerk/clerk-react';
 import { toast } from 'sonner';
@@ -35,7 +36,12 @@ interface TenantApiData {
   createdAt: string;
 }
 
-/** Map the API response into the frontend Tenant shape */
+/** Map the API response into the frontend Tenant shape.
+ * Note: `primaryColor` and `secondaryColor` are required by the shared `Tenant`
+ * type but are not rendered on this page — color is edited under
+ * `/ai?tab=appearances`. The mapping is retained to satisfy the type contract
+ * for consumers that still read these fields elsewhere.
+ */
 function mapApiToTenant(data: TenantApiData): Tenant {
   return {
     id: data.id,
@@ -157,15 +163,15 @@ const WidgetBrandSettings: React.FC = () => {
       <div>
         <h2 className="text-xl font-semibold text-text-primary">Widget & Brand</h2>
         <p className="text-sm text-text-secondary">
-          Customize how your chat widget appears to visitors
+          Manage your logo, display name, and embed snippet
         </p>
       </div>
 
       <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
         Widget appearance (color, avatar, launcher) is now configured under{' '}
-        <a href="/ai?tab=appearances" className="underline">
+        <Link to="/ai?tab=appearances" className="underline">
           AI & Content → Chatbot Appearances
-        </a>
+        </Link>
         .
       </div>
 

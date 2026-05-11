@@ -99,6 +99,17 @@ router.get(
 
     const tenant = result.tenant;
 
+    const widgetSettings = (tenant.settings?.widget ?? {}) as {
+      avatarUrl?: string | null;
+      launcherPosition?: 'bottom-right' | 'bottom-left';
+      launcherLabel?: string | null;
+    };
+    const appearance = {
+      avatarUrl: widgetSettings.avatarUrl || null,
+      launcherPosition: widgetSettings.launcherPosition || 'bottom-right',
+      launcherLabel: widgetSettings.launcherLabel || null,
+    };
+
     sendSuccess(res, {
       tenantId: tenant.id,
       name: tenant.name,
@@ -116,6 +127,7 @@ router.get(
         enabled: false,
         timezone: 'UTC',
       },
+      appearance,
     });
   })
 );

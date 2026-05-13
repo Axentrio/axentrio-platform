@@ -141,6 +141,13 @@ export class Tenant {
   @Column({ type: 'int', default: 0, name: 'current_sessions' })
   currentSessions!: number;
 
+  /**
+   * Per-tenant daily LLM call cap. NULL means "use env default LLM_DAILY_LIMIT_PER_TENANT".
+   * Enforced in src/llm/llm-rate-limit.ts.
+   */
+  @Column({ type: 'int', nullable: true, name: 'daily_llm_call_limit' })
+  dailyLlmCallLimit?: number | null;
+
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'custom_domain' })
   customDomain?: string;
 

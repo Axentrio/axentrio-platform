@@ -211,7 +211,18 @@ ${knowledgeContext}`;
 
   messages.push({ role: 'user', content: customerMessage });
 
-  const provider = getProvider(aiSettings.provider || DEFAULT_PROVIDER, aiSettings.apiKey ?? undefined);
+  // Read per-tenant cap override (nullable). One indexed PK lookup; cheap.
+  // If row missing or column null, the wrapper falls back to the env default
+  // LLM_DAILY_LIMIT_PER_TENANT.
+  const tenantOverride = await fetchTenantLimitOverride(dataSource, tenantId);
+  const provider = getProvider(
+    aiSettings.provider || DEFAULT_PROVIDER,
+    aiSettings.apiKey ?? undefined,
+    undefined,
+    tenantId,
+    tenantOverride,
+  );
+  // chat() will throw LlmRateLimitError → HTTP 429 if the daily cap is reached.
   const llmResponse = await provider.chat(messages, {
     model: aiSettings.model || DEFAULT_MODEL,
     maxTokens: 1000,
@@ -242,4 +253,25 @@ ${knowledgeContext}`;
     handoffReason: shouldHandoff ? 'bot_confidence_low' : undefined,
     chunks,
   };
+}
+
+/**
+ * Lightweight lookup of the per-tenant LLM call cap override.
+ * Returns the column value (number) or null. Never throws — falls back to
+ * null on any DB error so the env default applies.
+ */
+async function fetchTenantLimitOverride(
+  dataSource: DataSource,
+  tenantId: string,
+): Promise<number | null> {
+  try {
+    const rows: Array<{ daily_llm_call_limit: number | null }> = await dataSource.query(
+      'SELECT daily_llm_call_limit FROM tenants WHERE id = $1 LIMIT 1',
+      [tenantId],
+    );
+    return rows[0]?.daily_llm_call_limit ?? null;
+  } catch (err) {
+    logger.warn('[RAG] Failed to read tenant LLM limit override, using env default', err);
+    return null;
+  }
 }

@@ -1,4 +1,5 @@
 import { AppDataSource } from '../database/data-source';
+import { AgentTrace as AgentTraceEntity } from '../database/entities/AgentTrace';
 import { logger } from '../utils/logger';
 
 export interface AgentTrace {
@@ -58,7 +59,7 @@ export class TraceLogger {
         })),
       };
 
-      const repo = AppDataSource.getRepository('agent_traces');
+      const repo = AppDataSource.getRepository(AgentTraceEntity);
       await repo.save(
         repo.create({
           tenantId: trace.tenantId,

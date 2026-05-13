@@ -18,6 +18,7 @@ import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
+import { widgetVersionHash } from '../widget/widget-version';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -128,6 +129,7 @@ router.get(
         timezone: 'UTC',
       },
       appearance,
+      widgetVersion: widgetVersionHash,
     });
   })
 );

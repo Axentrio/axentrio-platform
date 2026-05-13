@@ -7,7 +7,6 @@ initSentry();
 
 import 'reflect-metadata';
 import express from 'express';
-import path from 'path';
 import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -40,6 +39,7 @@ import adminRoutes from './routes/admin.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
+import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
 import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import skillsRoutes from './routes/skills.routes';
@@ -103,15 +103,30 @@ app.use(requestIdMiddleware);
 // Single canonical source: chatbot-platform/api/public/widget.js. The Docker
 // build copies it via `COPY api/ .` + `COPY /app/public ./public`, and local
 // dev (ts-node-dev) resolves the same path because __dirname is api/src.
-const widgetPath = path.resolve(__dirname, '../public/widget.js');
-app.get('/widget.js', (_req, res) => {
+//
+// Cache strategy: short max-age + ETag derived from a SHA-256 of the file
+// bytes computed at boot. Browsers revalidate every 5 minutes; on an unchanged
+// deploy the ETag matches and the response is 304 (no payload). On a real
+// edit the hash changes, so embeds pick up the new bytes within 5 minutes
+// instead of the old 1-hour stale window. Customers who want strict
+// cache-busting can embed `<script src=".../widget.js?v=<widgetVersion>">`
+// — the query string is informational; same file is served either way.
+const widgetEtag = `"${widgetVersionHash}"`;
+app.get('/widget.js', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.setHeader('Cache-Control', 'public, max-age=300, must-revalidate');
+  res.setHeader('ETag', widgetEtag);
   res.setHeader('Content-Type', 'application/javascript');
-  res.sendFile(widgetPath, (err) => {
+
+  if (req.headers['if-none-match'] === widgetEtag) {
+    res.status(304).end();
+    return;
+  }
+
+  res.sendFile(widgetJsPath, (err) => {
     if (err) {
-      logger.error('Failed to serve widget.js', { path: widgetPath, error: err.message });
+      logger.error('Failed to serve widget.js', { path: widgetJsPath, error: err.message });
       res.status(404).send('// widget.js not found');
     }
   });

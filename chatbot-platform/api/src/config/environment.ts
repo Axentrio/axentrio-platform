@@ -114,6 +114,8 @@ const envSchema = z.object({
   // LLM / RAG
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Per-tenant daily LLM call cap. Default 5000. Override per-tenant via Tenant.dailyLlmCallLimit.
+  LLM_DAILY_LIMIT_PER_TENANT: z.string().default('5000').transform(Number),
   RAG_DEFAULT_CHUNK_SIZE: z.string().default('500').transform(Number),
   RAG_DEFAULT_CHUNK_OVERLAP: z.string().default('100').transform(Number),
   RAG_MAX_CONTEXT_CHUNKS: z.string().default('5').transform(Number),
@@ -304,6 +306,11 @@ export const config = {
     forcePathStyle: env.S3_FORCE_PATH_STYLE,
     signedUrlExpiry: env.S3_SIGNED_URL_EXPIRY,
     cdnUrl: env.CDN_URL,
+  },
+
+  llmRateLimit: {
+    // Daily LLM call cap per tenant. Used when Tenant.dailyLlmCallLimit is null.
+    dailyLimitPerTenant: env.LLM_DAILY_LIMIT_PER_TENANT,
   },
 
   rag: {

@@ -6,6 +6,8 @@
 import { Router, Request, Response } from 'express';
 import { getRepository } from '../database/data-source';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
+import { WebhookEventLog } from '../database/entities/WebhookEventLog';
+import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
@@ -15,6 +17,7 @@ import {
   disconnectTelegramConnection,
 } from './telegram/setup.service';
 import { disconnectMetaConnection } from './meta/disconnect.service';
+import { runHealthCheck } from './health-check.service';
 
 const router = Router();
 
@@ -23,7 +26,8 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 /**
  * GET /connections
- * List all channel connections for the current tenant (no credentials exposed).
+ * List all channel connections for the current tenant. Includes derived
+ * activity timestamps (lastInboundAt, lastOutboundAt). No credentials exposed.
  */
 router.get(
   '/connections',
@@ -32,7 +36,7 @@ router.get(
     const tenantId = authReq.user?.tenantId;
 
     const repo = getRepository(ChannelConnection);
-    const connections = await repo.find({
+    const connections = (await repo.find({
       where: { tenantId },
       order: { createdAt: 'DESC' },
       select: [
@@ -48,9 +52,10 @@ router.get(
         'createdAt',
         'updatedAt',
       ],
-    });
+    })) as ChannelConnection[];
 
-    sendSuccess(res, connections);
+    const enriched = await enrichWithActivity(connections);
+    sendSuccess(res, enriched);
   }),
 );
 
@@ -83,6 +88,31 @@ router.post(
     const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;
 
     sendCreated(res, safeConnection);
+  }),
+);
+
+/**
+ * POST /:connectionId/health-check
+ * Run a health check against the platform for this connection.
+ * Verifies stored credentials are still valid; updates lastHealthCheckAt + lastError.
+ */
+router.post(
+  '/:connectionId/health-check',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    const { connectionId } = req.params;
+
+    const repo = getRepository(ChannelConnection);
+    const existing = await repo.findOne({ where: { id: connectionId, tenantId } });
+    if (!existing) {
+      throw new NotFoundError('Channel connection not found');
+    }
+
+    const updated = await runHealthCheck(connectionId);
+    const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = updated;
+
+    sendSuccess(res, safeConnection);
   }),
 );
 
@@ -124,5 +154,56 @@ router.delete(
     sendSuccess(res, safeConnection);
   }),
 );
+
+type ConnectionWithActivity = Record<string, unknown> & {
+  id: string;
+  lastInboundAt: Date | null;
+  lastOutboundAt: Date | null;
+};
+
+/**
+ * Enrich connection rows with derived `lastInboundAt` (max WebhookEventLog.createdAt)
+ * and `lastOutboundAt` (max MessageDelivery.createdAt). Single GROUP BY query per
+ * source so we stay efficient on tenants with lots of channels.
+ */
+async function enrichWithActivity(
+  connections: ChannelConnection[],
+): Promise<ConnectionWithActivity[]> {
+  if (connections.length === 0) return [];
+
+  const ids = connections.map((c) => c.id);
+
+  const inboundRows = await getRepository(WebhookEventLog)
+    .createQueryBuilder('w')
+    .select('w.channelConnectionId', 'connectionId')
+    .addSelect('MAX(w.createdAt)', 'lastAt')
+    .where('w.channelConnectionId IN (:...ids)', { ids })
+    .groupBy('w.channelConnectionId')
+    .getRawMany<{ connectionId: string; lastAt: Date | string }>();
+
+  const outboundRows = await getRepository(MessageDelivery)
+    .createQueryBuilder('m')
+    .select('m.channelConnectionId', 'connectionId')
+    .addSelect('MAX(m.createdAt)', 'lastAt')
+    .where('m.channelConnectionId IN (:...ids)', { ids })
+    .andWhere('m.status IN (:...statuses)', { statuses: ['sent', 'delivered', 'read'] })
+    .groupBy('m.channelConnectionId')
+    .getRawMany<{ connectionId: string; lastAt: Date | string }>();
+
+  const inboundByConn = new Map(inboundRows.map((r) => [r.connectionId, normalizeDate(r.lastAt)]));
+  const outboundByConn = new Map(outboundRows.map((r) => [r.connectionId, normalizeDate(r.lastAt)]));
+
+  return connections.map((c) => ({
+    ...(c as unknown as Record<string, unknown>),
+    id: c.id,
+    lastInboundAt: inboundByConn.get(c.id) ?? null,
+    lastOutboundAt: outboundByConn.get(c.id) ?? null,
+  }));
+}
+
+function normalizeDate(value: Date | string | null | undefined): Date | null {
+  if (!value) return null;
+  return value instanceof Date ? value : new Date(value);
+}
 
 export default router;

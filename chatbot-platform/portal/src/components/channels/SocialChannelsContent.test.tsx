@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { SocialChannelsContent } from './SocialChannelsContent';
 
@@ -13,12 +14,15 @@ type Connection = {
   config: Record<string, unknown>;
   lastHealthCheckAt: string | null;
   lastError: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
-const { connectionsRef } = vi.hoisted(() => ({
+const { connectionsRef, healthCheckMutate } = vi.hoisted(() => ({
   connectionsRef: { current: [] as Connection[] },
+  healthCheckMutate: vi.fn(),
 }));
 
 vi.mock('../../queries/useChannelQueries', () => ({
@@ -28,6 +32,11 @@ vi.mock('../../queries/useChannelQueries', () => ({
   useMetaOAuthPages: () => ({ data: undefined }),
   useConnectMeta: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisconnectChannel: () => ({ mutate: vi.fn() }),
+  useHealthCheckChannel: () => ({
+    mutate: healthCheckMutate,
+    isPending: false,
+    variables: undefined,
+  }),
 }));
 
 function renderUI() {
@@ -40,6 +49,7 @@ function renderUI() {
 
 beforeEach(() => {
   connectionsRef.current = [];
+  healthCheckMutate.mockReset();
 });
 
 describe('SocialChannelsContent', () => {
@@ -65,6 +75,8 @@ describe('SocialChannelsContent', () => {
         config: {},
         lastHealthCheckAt: null,
         lastError: null,
+        lastInboundAt: null,
+        lastOutboundAt: null,
         createdAt: '2026-05-12T00:00:00Z',
         updatedAt: '2026-05-12T00:00:00Z',
       },
@@ -75,5 +87,55 @@ describe('SocialChannelsContent', () => {
     expect(screen.getAllByText('Telegram').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText(/1 channel connected/i)).toBeInTheDocument();
+  });
+
+  it('renders activity timestamps when lastInboundAt and lastOutboundAt are present', () => {
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    connectionsRef.current = [
+      {
+        id: 'conn-1',
+        tenantId: 't-1',
+        channel: 'telegram',
+        status: 'active',
+        label: 'Support Bot',
+        platformAccountId: '12345',
+        config: {},
+        lastHealthCheckAt: null,
+        lastError: null,
+        lastInboundAt: oneHourAgo,
+        lastOutboundAt: tenMinAgo,
+        createdAt: '2026-05-12T00:00:00Z',
+        updatedAt: '2026-05-12T00:00:00Z',
+      },
+    ];
+    renderUI();
+    expect(screen.getByText(/Received\s+1h ago/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sent\s+10m ago/i)).toBeInTheDocument();
+  });
+
+  it('fires the health-check mutation when the refresh button is clicked', async () => {
+    const user = userEvent.setup();
+    connectionsRef.current = [
+      {
+        id: 'conn-1',
+        tenantId: 't-1',
+        channel: 'telegram',
+        status: 'active',
+        label: 'Support Bot',
+        platformAccountId: '12345',
+        config: {},
+        lastHealthCheckAt: null,
+        lastError: null,
+        lastInboundAt: null,
+        lastOutboundAt: null,
+        createdAt: '2026-05-12T00:00:00Z',
+        updatedAt: '2026-05-12T00:00:00Z',
+      },
+    ];
+    renderUI();
+    const checkBtn = screen.getByRole('button', { name: /check connection health/i });
+    await user.click(checkBtn);
+    expect(healthCheckMutate).toHaveBeenCalledWith('conn-1');
   });
 });

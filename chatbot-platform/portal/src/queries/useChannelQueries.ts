@@ -15,6 +15,8 @@ interface ChannelConnection {
   config: Record<string, Any>;
   lastHealthCheckAt: string | null;
   lastError: string | null;
+  lastInboundAt: string | null;
+  lastOutboundAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +99,29 @@ export function useDisconnectChannel() {
     },
     onError: (error: Any) => {
       toast.error(error?.response?.data?.error || 'Failed to disconnect');
+    },
+  });
+}
+
+export function useHealthCheckChannel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (connectionId: string) => {
+      return api.post<Any>(`/channels/${connectionId}/health-check`);
+    },
+    onSuccess: (res: Any) => {
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      const conn = res?.data ?? res;
+      if (conn?.status === 'active') {
+        toast.success('Channel is healthy');
+      } else if (conn?.lastError) {
+        toast.error(`Health check failed: ${conn.lastError}`);
+      } else {
+        toast.success('Health check complete');
+      }
+    },
+    onError: (error: Any) => {
+      toast.error(error?.response?.data?.error || 'Failed to run health check');
     },
   });
 }

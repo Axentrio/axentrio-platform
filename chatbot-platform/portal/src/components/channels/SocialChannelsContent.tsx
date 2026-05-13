@@ -6,7 +6,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle } from 'lucide-react';
+import {
+  MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle, RefreshCw,
+} from 'lucide-react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,7 +31,9 @@ import {
   useMetaOAuthPages,
   useConnectMeta,
   useDisconnectChannel,
+  useHealthCheckChannel,
 } from '../../queries/useChannelQueries';
+import { timeAgo } from '@/utils/timeAgo';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -57,6 +61,7 @@ export function SocialChannelsContent() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: connections, isLoading } = useChannelConnections();
   const disconnectMutation = useDisconnectChannel();
+  const healthCheckMutation = useHealthCheckChannel();
   const metaOAuthUrl = useMetaOAuthUrl();
   const connectMeta = useConnectMeta();
 
@@ -179,6 +184,11 @@ export function SocialChannelsContent() {
             <div className="space-y-2">
               {connections.map((conn) => {
                 const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
+                const activityParts: string[] = [];
+                if (conn.lastInboundAt) activityParts.push(`Received ${timeAgo(conn.lastInboundAt)}`);
+                if (conn.lastOutboundAt) activityParts.push(`Sent ${timeAgo(conn.lastOutboundAt)}`);
+                const checkingThis =
+                  healthCheckMutation.isPending && healthCheckMutation.variables === conn.id;
                 return (
                   <div
                     key={conn.id}
@@ -192,7 +202,15 @@ export function SocialChannelsContent() {
                         </p>
                         <p className="text-xs text-zinc-500">
                           {CHANNEL_LABELS[conn.channel] || conn.channel}
+                          {conn.lastHealthCheckAt && (
+                            <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
+                              · Checked {timeAgo(conn.lastHealthCheckAt)}
+                            </span>
+                          )}
                         </p>
+                        {activityParts.length > 0 && (
+                          <p className="text-xs text-zinc-600 mt-0.5">{activityParts.join(' · ')}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -205,6 +223,15 @@ export function SocialChannelsContent() {
                       <Badge variant="outline" className={STATUS_COLORS[conn.status] || ''}>
                         {conn.status}
                       </Badge>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        title="Check connection health"
+                        disabled={checkingThis}
+                        onClick={() => healthCheckMutation.mutate(conn.id)}
+                      >
+                        <RefreshCw className={`h-4 w-4 ${checkingThis ? 'animate-spin' : ''}`} />
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"

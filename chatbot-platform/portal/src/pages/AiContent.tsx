@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2, SlidersHorizontal } from 'lucide-react';
+import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useGetAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
+import { useChannelConnections } from '@/queries/useChannelQueries';
 import DocumentsTab from './knowledge/DocumentsTab';
 import AiBotForm from './knowledge/AiBotForm';
 import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
 import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
 import { SocialChannelsContent } from '@/components/channels/SocialChannelsContent';
+import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
 
-type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social' | 'extra';
+type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social';
 
 const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'bot', label: 'AI Bot', icon: Bot },
@@ -19,24 +21,7 @@ const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
   { key: 'canned', label: 'Custom Responses', icon: MessageSquareText },
   { key: 'appearances', label: 'Chatbot Appearances', icon: Palette },
   { key: 'social', label: 'Social Media Integrations', icon: Share2 },
-  { key: 'extra', label: 'Extra Settings', icon: SlidersHorizontal },
 ];
-
-type ComingSoonProps = {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-};
-
-const ComingSoonPanel: React.FC<ComingSoonProps> = ({ icon: Icon, title, description }) => (
-  <div className="flex flex-col items-center justify-center py-20 text-center">
-    <div className="p-4 rounded-2xl bg-primary-500/10 mb-4">
-      <Icon className="w-8 h-8 text-primary-400" />
-    </div>
-    <h2 className="text-base font-semibold text-text-primary mb-1">{title}</h2>
-    <p className="text-sm text-text-muted max-w-md">{description}</p>
-  </div>
-);
 
 const PARAM_TO_TAB: Record<string, Tab> = {
   bot: 'bot',
@@ -44,7 +29,6 @@ const PARAM_TO_TAB: Record<string, Tab> = {
   canned: 'canned',
   appearances: 'appearances',
   social: 'social',
-  extra: 'extra',
 };
 
 const AiContent: React.FC = () => {
@@ -68,10 +52,13 @@ const AiContent: React.FC = () => {
   const { data: aiSettings } = useGetAiSettings({ enabled: isAdminOrSupervisor }) as { data: any };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stats } = useKnowledgeStats() as { data: any };
+  const { data: channelConnections } = useChannelConnections();
   const indexed = parseInt(stats?.documents?.indexed || '0');
   const hasIndexedDocs = indexed > 0;
+  const hasConnectedChannel = (channelConnections?.length ?? 0) > 0;
 
   const goToKnowledge = () => setActiveTab('knowledge');
+  const goToSocial = () => setActiveTab('social');
 
   return (
     <div className="h-full overflow-y-auto">
@@ -84,7 +71,9 @@ const AiContent: React.FC = () => {
             </div>
             <div>
               <h1 className="text-lg font-semibold text-text-primary">AI &amp; Content</h1>
-              <p className="text-xs text-text-muted">Knowledge base, canned responses, and AI configuration</p>
+              <p className="text-xs text-text-muted">
+                AI bot, knowledge base, appearances, channels, and custom responses
+              </p>
             </div>
           </div>
           {isAdmin && (
@@ -130,7 +119,18 @@ const AiContent: React.FC = () => {
       {/* Tab Content */}
       <div className="px-6 py-6">
         {activeTab === 'bot' && (
-          <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
+          <>
+            {isAdminOrSupervisor && (
+              <OnboardingChecklist
+                botEnabled={!!aiSettings?.enabled}
+                hasIndexedDocs={hasIndexedDocs}
+                hasConnectedChannel={hasConnectedChannel}
+                onGoToKnowledge={goToKnowledge}
+                onGoToSocial={goToSocial}
+              />
+            )}
+            <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
+          </>
         )}
 
         {activeTab === 'knowledge' && (
@@ -149,14 +149,6 @@ const AiContent: React.FC = () => {
         {activeTab === 'appearances' && <ChatbotAppearancesForm />}
 
         {activeTab === 'social' && <SocialChannelsContent />}
-
-        {activeTab === 'extra' && (
-          <ComingSoonPanel
-            icon={SlidersHorizontal}
-            title="Extra Settings"
-            description="Workspace-level preferences and account-wide AI defaults. Coming soon."
-          />
-        )}
       </div>
 
       {/* Test Chat Panel */}

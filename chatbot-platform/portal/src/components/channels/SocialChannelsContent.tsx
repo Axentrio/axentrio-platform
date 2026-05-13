@@ -258,6 +258,33 @@ export function SocialChannelsContent() {
               Enter your bot token from @BotFather to connect a Telegram bot.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
+            <summary className="cursor-pointer select-none text-zinc-300">
+              Don&apos;t have a bot token yet?
+            </summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>
+                Open Telegram and message{' '}
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary-400 underline"
+                >
+                  @BotFather
+                </a>
+                .
+              </li>
+              <li>
+                Send <code className="rounded bg-white/10 px-1">/newbot</code> and follow the prompts to name your bot.
+              </li>
+              <li>
+                Copy the HTTP API token BotFather sends back (looks like{' '}
+                <code className="rounded bg-white/10 px-1">123456:ABC-DEF...</code>).
+              </li>
+              <li>Paste it below.</li>
+            </ol>
+          </details>
           <div className="py-4">
             <Label htmlFor="botToken">Bot Token</Label>
             <Input

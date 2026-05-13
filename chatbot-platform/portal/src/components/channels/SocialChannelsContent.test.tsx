@@ -114,6 +114,19 @@ describe('SocialChannelsContent', () => {
     expect(screen.getByText(/Sent\s+10m ago/i)).toBeInTheDocument();
   });
 
+  it('shows the BotFather quick-start help in the Telegram modal', async () => {
+    const user = userEvent.setup();
+    renderUI();
+    await user.click(screen.getByRole('button', { name: /telegram/i }));
+    // Disclosure summary is visible immediately.
+    expect(screen.getByText(/Don't have a bot token yet/i)).toBeInTheDocument();
+    // Link to BotFather is present and points at the right URL with safe rel.
+    const link = screen.getByRole('link', { name: /@BotFather/i });
+    expect(link).toHaveAttribute('href', 'https://t.me/BotFather');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel') ?? '').toMatch(/noopener/);
+  });
+
   it('fires the health-check mutation when the refresh button is clicked', async () => {
     const user = userEvent.setup();
     connectionsRef.current = [

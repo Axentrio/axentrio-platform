@@ -1446,6 +1446,19 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
 
     async _initConnection() {
+      if (!this.config.apiKey) {
+        if (!this._missingApiKeyWarned) {
+          this._missingApiKeyWarned = true;
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[handsoff-widget] Missing data-api-key attribute on the embed script. ' +
+            'The widget will render but cannot connect to the chat backend. ' +
+            'Add data-api-key="<your-tenant-api-key>" to your <script> tag.',
+          );
+        }
+        this.setConnectionState('offline');
+        return;
+      }
       try {
         await loadSocketIO();
         await this._initSession();

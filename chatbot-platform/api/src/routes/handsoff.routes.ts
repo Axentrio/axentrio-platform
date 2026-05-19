@@ -26,6 +26,7 @@ import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '..
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { requestHandoffSchema } from '../schemas';
+import { requireFeature } from '../billing/enforce';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -50,6 +51,12 @@ router.post(
     if (!sessionId) {
       throw new BadRequestError('Session ID is required');
     }
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+    // Plan-gate (step 10, feature 6). Throws 402 plan_limit_handoff when the
+    // tenant's tier doesn't include human handoff (currently Free).
+    await requireFeature(tenantId, 'handoff', 'plan_limit_handoff');
 
     // Find session
     const session = await sessionRepository.findOne({

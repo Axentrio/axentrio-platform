@@ -102,7 +102,10 @@ const AdminAuditLogs: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
 
   /* ---- Data ---- */
-  const { data: tenantsRaw, isLoading: isLoadingTenants } = useAdminTenantsAll();
+  // Audit-logs page genuinely needs the full tenant list (it's used as a
+  // filter dropdown), so opt in explicitly. Other pages should NOT do this —
+  // useAdminTenantsAll defaults to disabled to avoid surprise fetches.
+  const { data: tenantsRaw, isLoading: isLoadingTenants } = useAdminTenantsAll({ enabled: true });
   const tenants = (tenantsRaw as AdminTenant[] | undefined) ?? [];
 
   const params: Record<string, unknown> = { page, limit: PAGE_SIZE };

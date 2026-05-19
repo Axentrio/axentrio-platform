@@ -21,7 +21,13 @@ export const adminOptions = {
   }),
   tenantAudit: (id: string) => queryOptions({
     queryKey: queryKeys.admin.tenantAudit(id),
-    queryFn: () => api.get<Any>(`/admin/tenants/${id}/audit-logs?limit=20`),
+    // Endpoint returns the paginated envelope { data, meta }; the apiClient
+    // interceptor preserves that shape when meta is present. Unwrap to an
+    // array here so consumers can `.map()` without an extra defensive cast.
+    queryFn: async () => {
+      const res = await api.get<Any>(`/admin/tenants/${id}/audit-logs?limit=20`);
+      return Array.isArray(res) ? res : (res?.data ?? []);
+    },
     refetchInterval: 30_000,
     enabled: !!id,
   }),
@@ -42,7 +48,16 @@ export function useAdminTenants() {
   return useQuery(adminOptions.tenants());
 }
 
-export function useAdminTenantsAll() {
+/**
+ * Lazy variant of the all-tenants list, used by the super-admin command
+ * palette and audit-log filter dropdown. Pass `enabled: true` only when the
+ * UI that needs it actually mounts/opens — otherwise the 1000-row fetch
+ * fires on every page navigation, slowing every super-admin route.
+ *
+ * Default `enabled` is `false` so consumers must opt in explicitly. Cached
+ * for 60s so toggling the palette doesn't re-fetch on every open.
+ */
+export function useAdminTenantsAll(options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: [...queryKeys.admin.tenants(), 'all'],
     queryFn: async () => {
@@ -50,6 +65,8 @@ export function useAdminTenantsAll() {
       // Handle both { data, meta } shape and bare array
       return (Array.isArray(result) ? result : result?.data ?? result) as Any[];
     },
+    enabled: options.enabled ?? false,
+    staleTime: 60 * 1000,
   });
 }
 
@@ -129,6 +146,71 @@ export function useOptimisticSuspendTenant() {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
     },
   });
+}
+
+export type ManualTier = 'free' | 'pro' | 'premium' | 'enterprise';
+
+/**
+ * Super-admin "Set tier (manual)" — handles all four tiers via the unified
+ * `POST /admin/tenants/:id/set-tier` endpoint. Invalidates tenant detail,
+ * tenants list, and audit log so the badge / activity feed updates without
+ * a manual refresh.
+ *
+ * Backend writes a `tier.manual_override` billing_event + `tenant.tier_manual`
+ * audit log row.
+ */
+export function useSetTenantTier() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      id: string;
+      tier: ManualTier;
+      currentPeriodEnd?: string | null;
+      billingEmail?: string | null;
+    }) =>
+      api.post(`/admin/tenants/${input.id}/set-tier`, {
+        tier: input.tier,
+        currentPeriodEnd: input.currentPeriodEnd ?? null,
+        billingEmail: input.billingEmail ?? null,
+      }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(vars.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenants() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(vars.id) });
+      const label = vars.tier.charAt(0).toUpperCase() + vars.tier.slice(1);
+      toast.success(`Tenant tier set to ${label} (manual)`);
+    },
+    onError: (err: unknown) => {
+      const message =
+        err && typeof err === 'object' && 'message' in err
+          ? String((err as { message: string }).message)
+          : 'Failed to set tenant tier';
+      toast.error(message);
+    },
+  });
+}
+
+/**
+ * @deprecated Use {@link useSetTenantTier} with `tier: 'enterprise'` instead.
+ * Kept as a thin wrapper for backwards compatibility — calls the new
+ * /set-tier route under the hood.
+ */
+export function useSetTenantEnterprise() {
+  const setTier = useSetTenantTier();
+  return {
+    ...setTier,
+    mutate: (input: {
+      id: string;
+      currentPeriodEnd?: string | null;
+      billingEmail?: string | null;
+    }, options?: Parameters<typeof setTier.mutate>[1]) =>
+      setTier.mutate({ ...input, tier: 'enterprise' }, options),
+    mutateAsync: (input: {
+      id: string;
+      currentPeriodEnd?: string | null;
+      billingEmail?: string | null;
+    }) => setTier.mutateAsync({ ...input, tier: 'enterprise' }),
+  };
 }
 
 export function useOptimisticActivateTenant() {

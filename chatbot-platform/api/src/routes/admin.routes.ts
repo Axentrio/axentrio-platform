@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { IsNull } from 'typeorm';
 import { AppDataSource, runInTransaction } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
-import { seedTrialAccount } from '../billing/service';
+import { seedTrialAccount, setEnterpriseManual, setTierManual } from '../billing/service';
 import { scheduleTrialExpiry } from '../billing/trial-expiry-job';
 import { User } from '../database/entities/User';
 import { ChatSession } from '../database/entities/ChatSession';
@@ -180,6 +180,25 @@ router.get('/tenants/:id/audit-logs', asyncHandler(async (req: Request, res: Res
   sendSuccess(res, data, { pagination: result.meta });
 }));
 
+// GET /admin/tenants/:id/api-key/reveal — return the full (unmasked) API key.
+//
+// The detail endpoint only returns a masked key for the listing view. This
+// is a deliberate explicit-reveal action: a super-admin clicks the eye icon,
+// confirms they want to see it, and an audit row records the reveal. The
+// returned plaintext is intended to be shown once in the UI and not cached.
+router.get('/tenants/:id/api-key/reveal', asyncHandler(async (req: Request, res: Response) => {
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: req.params.id } });
+  if (!tenant) throw new NotFoundError('Tenant not found');
+
+  await logAudit(req.userId!, 'apikey.revealed', 'tenant', tenant.id, tenant.id);
+  logger.info('Super-admin revealed tenant API key', {
+    tenantId: tenant.id,
+    actorId: req.userId,
+  });
+
+  sendSuccess(res, { apiKey: tenant.apiKey });
+}));
+
 // POST /admin/tenants/:id/api-key/rotate — rotate API key for a tenant
 router.post('/tenants/:id/api-key/rotate', asyncHandler(async (req: Request, res: Response) => {
   const repo = AppDataSource.getRepository(Tenant);
@@ -204,38 +223,57 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
   if (!tenant) throw new NotFoundError('Tenant not found');
 
   const userRepo = AppDataSource.getRepository(User);
-  const userCount = await userRepo.count({ where: { tenantId: tenant.id } });
-  const users = await userRepo.find({
-    where: { tenantId: tenant.id },
-    order: { createdAt: 'DESC' },
-    take: 10,
-  });
 
-  const sessionCount = await AppDataSource.getRepository(ChatSession).count({
-    where: { tenantId: tenant.id },
-  });
+  // Independent queries — run in parallel. Previously serialized 6 round
+  // trips to a remote Postgres (~50-200ms each); parallel pipelines all of
+  // them in one go. Audit-actor lookup still happens after recentAuditLogs
+  // resolves because it depends on that result.
+  //
+  // messageCount uses SUM(chat_sessions.message_count) instead of the
+  // historical Message.count + session-join, which scans the full messages
+  // table. The per-session message_count column is already maintained on
+  // each message insert, so summing it is O(sessions) not O(messages).
+  const [
+    userCount,
+    users,
+    sessionCount,
+    messageCountRaw,
+    pendingInvites,
+    recentAuditLogs,
+  ] = await Promise.all([
+    userRepo.count({ where: { tenantId: tenant.id } }),
+    userRepo.find({
+      where: { tenantId: tenant.id },
+      order: { createdAt: 'DESC' },
+      take: 10,
+    }),
+    AppDataSource.getRepository(ChatSession).count({
+      where: { tenantId: tenant.id },
+    }),
+    AppDataSource.getRepository(ChatSession)
+      .createQueryBuilder('s')
+      .select('COALESCE(SUM(s.message_count), 0)', 'total')
+      .where('s.tenant_id = :tid', { tid: tenant.id })
+      .getRawOne<{ total: string }>(),
+    AppDataSource.getRepository(PendingInvite).find({
+      where: { tenantId: tenant.id },
+      order: { createdAt: 'DESC' },
+    }),
+    AppDataSource.getRepository(AuditLog).find({
+      where: { tenantId: tenant.id },
+      order: { createdAt: 'DESC' },
+      take: 20,
+    }),
+  ]);
 
-  const messageCount = await AppDataSource.getRepository(Message).count({
-    where: { session: { tenantId: tenant.id } },
-  });
-
-  const pendingInvites = await AppDataSource.getRepository(PendingInvite).find({
-    where: { tenantId: tenant.id },
-    order: { createdAt: 'DESC' },
-  });
+  // getRawOne returns numeric SUM as a string in node-postgres; coerce.
+  const messageCount = Number(messageCountRaw?.total ?? 0);
 
   // Mask API key: show first 3 + last 4 chars
   const ak = tenant.apiKey;
   const apiKeyMasked = ak.length > 7
     ? `${ak.slice(0, 3)}${'*'.repeat(ak.length - 7)}${ak.slice(-4)}`
     : '****';
-
-  const recentAuditLogs = await AppDataSource.getRepository(AuditLog)
-    .find({
-      where: { tenantId: tenant.id },
-      order: { createdAt: 'DESC' },
-      take: 20,
-    });
 
   // Resolve actor names for audit logs
   const actorIds = [...new Set(recentAuditLogs.map(l => l.actorId))];
@@ -376,6 +414,13 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
 }));
 
 // PATCH /admin/tenants/:id — update tenant
+//
+// NOTE: `tier` is intentionally NOT writable through this endpoint anymore
+// (plan step 12). All tier changes must go through the billing service so
+// that `tenant_billing_accounts` stays in sync and a `billing_events` audit
+// row is written. Use POST /admin/tenants/:id/set-enterprise for the
+// sales-led Enterprise move; Pro/Premium come from the tenant's own Stripe
+// flow; Free is reached via cancellation / trial expiry.
 router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
   const repo = AppDataSource.getRepository(Tenant);
   const tenant = await repo.findOne({ where: { id: req.params.id } });
@@ -383,8 +428,14 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
   if (!tenant) throw new NotFoundError('Tenant not found');
 
   const { name, tier, status, settings } = req.body;
+  // Reject tier changes here — closes the silent backdoor that bypassed
+  // the billing service (which would leave tenant_billing_accounts stale).
+  if (tier !== undefined) {
+    throw new BadRequestError(
+      'Tier cannot be changed via this endpoint. Use POST /admin/tenants/:id/set-enterprise for Enterprise; Pro/Premium changes happen through the tenant\'s Stripe checkout flow.',
+    );
+  }
   if (name) tenant.name = name;
-  if (tier) tenant.tier = tier;
   if (status) tenant.status = status;
   if (settings) tenant.settings = { ...tenant.settings, ...settings };
 
@@ -397,6 +448,104 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
   }
 
   sendSuccess(res, tenant);
+}));
+
+// POST /admin/tenants/:id/set-enterprise — sales-led move to Enterprise (manual)
+//
+// Plan step 12. Routes through `service.setEnterpriseManual` which atomically:
+//   1. Demotes any existing primary billing row.
+//   2. Upserts a manual primary row with status='active', plan='enterprise'.
+//   3. Sets Tenant.tier='enterprise'.
+//   4. Writes a `tier.manual_override` billing_event.
+//
+// If the tenant has an active Stripe subscription, this does NOT cancel it
+// in Stripe — that's a manual dashboard action for the super-admin (out of
+// scope per the plan). The existing Stripe row stays in our DB but is no
+// longer primary, so webhooks for it only update row-local state.
+// POST /admin/tenants/:id/set-tier — general manual tier override.
+//
+// Plan step 12 (broadened). Routes through `service.setTierManual` which
+// handles Free / Pro / Premium / Enterprise uniformly. Use cases:
+//   - Enterprise (sales-led) — same as the older /set-enterprise path.
+//   - Pro / Premium comp — give a tenant the tier without a Stripe sub.
+//   - Free — abuse/refund-driven manual downgrade.
+//
+// Caveat: if the tenant has an active Stripe subscription, this does NOT
+// cancel it. Super-admin must cancel manually in the Stripe dashboard to
+// stop further charges. The existing Stripe row is demoted to non-primary,
+// so its webhooks won't move Tenant.tier anymore (per § Primary-switch &
+// tier-cascade rules).
+const ALLOWED_TIERS = ['free', 'pro', 'premium', 'enterprise'] as const;
+type AllowedTier = (typeof ALLOWED_TIERS)[number];
+
+router.post('/tenants/:id/set-tier', asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.id;
+  const { tier, currentPeriodEnd, billingEmail } = (req.body ?? {}) as {
+    tier?: string;
+    currentPeriodEnd?: string | null;
+    billingEmail?: string | null;
+  };
+
+  if (!tier || !(ALLOWED_TIERS as readonly string[]).includes(tier)) {
+    throw new BadRequestError(`tier must be one of ${ALLOWED_TIERS.join(', ')}`);
+  }
+
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant) throw new NotFoundError('Tenant not found');
+
+  const result = await setTierManual(tenantId, tier as AllowedTier, {
+    currentPeriodEnd: currentPeriodEnd ? new Date(currentPeriodEnd) : undefined,
+    billingEmail: billingEmail ?? undefined,
+  });
+
+  await logAudit(req.userId!, 'tenant.tier_manual', 'tenant', tenantId, tenantId, {
+    previousTier: tenant.tier,
+    newTier: tier,
+    changed: result.changed,
+  });
+
+  logger.info('Super-admin set tenant tier (manual)', {
+    tenantId,
+    actorId: req.userId,
+    newTier: tier,
+    changed: result.changed,
+  });
+
+  sendSuccess(res, { tenantId, tier, changed: result.changed });
+}));
+
+// POST /admin/tenants/:id/set-enterprise — legacy Enterprise-specific path.
+// Kept for backwards compatibility. New clients should call /set-tier with
+// `{ tier: 'enterprise' }`. Internally routes through the same service.
+router.post('/tenants/:id/set-enterprise', asyncHandler(async (req: Request, res: Response) => {
+  const tenantId = req.params.id;
+  const { currentPeriodEnd, billingEmail } = (req.body ?? {}) as {
+    currentPeriodEnd?: string | null;
+    billingEmail?: string | null;
+  };
+
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant) throw new NotFoundError('Tenant not found');
+
+  const result = await setEnterpriseManual(tenantId, {
+    currentPeriodEnd: currentPeriodEnd ? new Date(currentPeriodEnd) : undefined,
+    billingEmail: billingEmail ?? undefined,
+  });
+
+  await logAudit(req.userId!, 'tenant.tier_enterprise', 'tenant', tenantId, tenantId, {
+    previousTier: tenant.tier,
+    changed: result.changed,
+    currentPeriodEnd: currentPeriodEnd ?? null,
+    billingEmail: billingEmail ?? null,
+  });
+
+  logger.info('Super-admin set tenant tier to enterprise', {
+    tenantId,
+    actorId: req.userId,
+    changed: result.changed,
+  });
+
+  sendSuccess(res, { tenantId, tier: 'enterprise', changed: result.changed });
 }));
 
 // POST /admin/tenants/:id/suspend

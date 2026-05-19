@@ -6,9 +6,17 @@
  * to a configurable daily call count.
  *
  * Storage: Redis INCR on `llm_rate:{tenantId}:{YYYY-MM-DD}` with a 24h TTL.
- * Limit source (in order):
- *   1. Tenant.dailyLlmCallLimit (per-tenant override, nullable column)
- *   2. config.llmRateLimit.dailyLimitPerTenant (env LLM_DAILY_LIMIT_PER_TENANT, default 5000)
+ *
+ * Limit source (in order — plan step 10, gate 1):
+ *   1. Caller-supplied `perTenantOverride` (explicit numeric override; used
+ *      by tests AND legacy callers that pre-resolved the cap themselves).
+ *   2. `getEntitlements(tenantId).limits.dailyLlmCalls` — the v1 source of
+ *      truth, which already merges Enterprise per-tenant overrides on top
+ *      of plan defaults (Free: 0 → BLOCK every call; Pro: 1000; Premium:
+ *      10000; Enterprise: null → unlimited unless override set).
+ *   3. `config.llmRateLimit.dailyLimitPerTenant` — final env fallback if the
+ *      DB lookup itself fails (e.g. transient connection drop). Keeps the
+ *      product from hard-locking when entitlements can't be read.
  *
  * Fail-open: if Redis is unreachable, we ALLOW the call (mirrors widget.routes
  * in-memory fallback precedent). We do not block a paying customer's chat just
@@ -23,6 +31,7 @@ import { getRedisClient, isRedisAvailable } from '../config/redis';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { ApiError } from '../middleware/error-handler';
+import { getEntitlements } from '../billing/entitlements';
 
 /**
  * Thrown when a tenant has consumed its daily LLM call budget.
@@ -73,14 +82,42 @@ function redisKey(tenantId: string, dateKey = todayUtcKey()): string {
 }
 
 /**
- * Resolve the effective daily cap for a tenant.
- * Override (column) wins over env default.
+ * Resolve the effective daily cap for a tenant (legacy sync path used by
+ * tests and callers that pre-resolved the override). Source: explicit
+ * override → env default. v1 production callers should prefer
+ * `resolveLimitFromEntitlements` so the cap tracks plan changes.
  */
 export function resolveLimit(perTenantOverride?: number | null): number {
   if (typeof perTenantOverride === 'number' && perTenantOverride > 0) {
     return perTenantOverride;
   }
   return config.llmRateLimit.dailyLimitPerTenant;
+}
+
+/**
+ * Resolve the effective daily cap for a tenant via the plan catalog.
+ * Returns:
+ *   - `null` when the tenant's plan has no cap (Enterprise unless override),
+ *   - a positive number when a finite cap applies,
+ *   - `0` to BLOCK every call (Free tier — no platform LLM access).
+ *
+ * Falls back to the env default if the entitlements lookup itself throws
+ * (e.g. transient DB outage) — fails open on infra issues, same precedent
+ * as the Redis fail-open path below.
+ */
+export async function resolveLimitFromEntitlements(
+  tenantId: string,
+): Promise<number | null> {
+  try {
+    const ent = await getEntitlements(tenantId);
+    return ent.limits.dailyLlmCalls; // null | 0 | positive
+  } catch (err) {
+    logger.warn('llm_rate_limit_entitlements_lookup_failed_fallback_to_env', {
+      tenantId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return config.llmRateLimit.dailyLimitPerTenant;
+  }
 }
 
 /**
@@ -97,8 +134,25 @@ export async function checkAndIncrement(
   tenantId: string,
   perTenantOverride?: number | null,
   deps?: { client?: Redis | null; available?: boolean }
-): Promise<{ allowed: true; limit: number; used: number }> {
-  const limit = resolveLimit(perTenantOverride);
+): Promise<{ allowed: true; limit: number | null; used: number }> {
+  // Limit resolution order:
+  //   - explicit numeric override wins (test seam + legacy pre-resolved cap)
+  //   - otherwise consult entitlements (DB lookup; tier + Enterprise override)
+  // Entitlements may return null (unlimited) — preserved through the return.
+  // Entitlements may return 0 (Free tier) — BLOCK every call without touching Redis.
+  let limit: number | null;
+  if (typeof perTenantOverride === 'number' && perTenantOverride > 0) {
+    limit = perTenantOverride;
+  } else {
+    limit = await resolveLimitFromEntitlements(tenantId);
+  }
+
+  if (limit === 0) {
+    // Tier doesn't include platform LLM access. No Redis spin needed.
+    logger.warn('llm_rate_limited_zero_quota', { tenantId });
+    throw new LlmRateLimitError(0, 0);
+  }
+
   const client = deps?.client !== undefined ? deps.client : getRedisClient();
   const available = deps?.available !== undefined ? deps.available : isRedisAvailable();
 
@@ -128,7 +182,7 @@ export async function checkAndIncrement(
     return { allowed: true, limit, used: 0 };
   }
 
-  if (used > limit) {
+  if (limit !== null && used > limit) {
     // Only log on breach — never on every call.
     logger.warn('llm_rate_limited', { tenantId, limit, used });
     throw new LlmRateLimitError(limit, used);

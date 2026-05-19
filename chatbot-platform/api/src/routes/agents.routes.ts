@@ -15,6 +15,7 @@ import { asyncHandler, BadRequestError, NotFoundError, ConflictError } from '../
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { createAgentSchema, updateAgentSchema, updateAgentStatusSchema } from '../schemas';
+import { enforceCountLimit } from '../billing/enforce';
 
 const router = Router();
 const agentRepository = AppDataSource.getRepository(Agent);
@@ -134,6 +135,9 @@ router.post(
     if (!userId) {
       throw new BadRequestError('userId is required');
     }
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
 
     // Verify user exists and belongs to tenant
     const user = await userRepository.findOne({
@@ -144,24 +148,36 @@ router.post(
       throw new NotFoundError('User not found');
     }
 
-    // Check if agent profile already exists
-    const existing = await agentRepository.findOne({
-      where: { userId },
+    // Plan-gate (step 10, count 3) + create in one tx so a concurrent create
+    // can't slip in past the count check. The enforceCountLimit helper takes
+    // the tenants-row lock; the count query runs against the same manager
+    // so it sees consistent state.
+    const saved = await AppDataSource.transaction(async (manager) => {
+      // Pre-check duplicate inside the tx (was outside; moved here so all
+      // create-side guards share the same locked view of the tenant).
+      const existing = await manager.findOne(Agent, { where: { userId } });
+      if (existing) {
+        throw new ConflictError('Agent profile already exists for this user');
+      }
+
+      await enforceCountLimit({
+        manager,
+        tenantId,
+        capability: 'agents',
+        errorCode: 'plan_limit_agents',
+        countQuery: (m) => m.count(Agent, { where: { tenantId } }),
+      });
+
+      const agent = manager.create(Agent, {
+        tenantId,
+        userId,
+        maxConcurrentChats: maxConcurrentChats || 5,
+        skills: skills || [],
+        languages: languages || ['en'],
+      });
+      return manager.save(Agent, agent);
     });
 
-    if (existing) {
-      throw new ConflictError('Agent profile already exists for this user');
-    }
-
-    const agent = agentRepository.create({
-      tenantId: tenantId!,
-      userId,
-      maxConcurrentChats: maxConcurrentChats || 5,
-      skills: skills || [],
-      languages: languages || ['en'],
-    });
-
-    const saved = await agentRepository.save(agent);
     await invalidate(`agents:${tenantId}`);
 
     logger.info('Agent created', { agentId: saved.id, userId });

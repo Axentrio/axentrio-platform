@@ -80,4 +80,8 @@ export const queryKeys = {
     all: () => ['onboarding'] as const,
     status: () => [...queryKeys.onboarding.all(), 'status'] as const,
   },
+  billing: {
+    all: () => ['billing'] as const,
+    state: () => [...queryKeys.billing.all(), 'state'] as const,
+  },
 };

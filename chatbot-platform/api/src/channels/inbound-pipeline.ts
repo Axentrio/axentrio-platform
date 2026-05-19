@@ -18,6 +18,8 @@ import { encrypt } from '../utils/encryption';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
+import { enforceCountLimit } from '../billing/enforce';
+import { Not } from 'typeorm';
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -220,6 +222,18 @@ async function findOrCreateConversation(
     return AppDataSource.transaction(async (manager: EntityManager) => {
       const now = new Date();
 
+      // Plan-gate (step 10, count 2): live COUNT on chat_sessions for cap.
+      await enforceCountLimit({
+        manager,
+        tenantId: connection.tenantId,
+        capability: 'sessions',
+        errorCode: 'plan_limit_sessions',
+        countQuery: (m) =>
+          m.count(ChatSession, {
+            where: { tenantId: connection.tenantId, status: Not('closed') },
+          }),
+      });
+
       const newSession = manager.create(ChatSession, {
         tenantId: connection.tenantId,
         visitorId: event.sender.externalUserId,
@@ -266,6 +280,18 @@ async function findOrCreateConversation(
   // No existing binding — create new session + participant + binding in a transaction
   return AppDataSource.transaction(async (manager: EntityManager) => {
     const now = new Date();
+
+    // Plan-gate (step 10, count 2): live COUNT on chat_sessions for cap.
+    await enforceCountLimit({
+      manager,
+      tenantId: connection.tenantId,
+      capability: 'sessions',
+      errorCode: 'plan_limit_sessions',
+      countQuery: (m) =>
+        m.count(ChatSession, {
+          where: { tenantId: connection.tenantId, status: Not('closed') },
+        }),
+    });
 
     const sessionData = manager.create(ChatSession, {
       tenantId: connection.tenantId,

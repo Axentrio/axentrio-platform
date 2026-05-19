@@ -18,6 +18,7 @@ import {
   EyeOff,
   RotateCw,
   X,
+  Crown,
 } from 'lucide-react';
 import { api } from '@services/apiClient';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -29,6 +30,8 @@ import {
   useOptimisticActivateTenant,
   useAdminResendInvite,
   useAdminCancelInvite,
+  useSetTenantTier,
+  type ManualTier,
 } from '../../queries/useAdminQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { Card } from '@/components/ui/card';
@@ -129,6 +132,8 @@ const AdminTenantDetail: React.FC = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [showRotateDialog, setShowRotateDialog] = useState(false);
   const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
+  const [showTierDialog, setShowTierDialog] = useState(false);
+  const [pendingTier, setPendingTier] = useState<ManualTier | null>(null);
 
   const { data, isLoading, isError } = useAdminTenantDetail(id ?? '');
   const { data: auditData } = useAdminTenantAudit(id ?? '');
@@ -137,6 +142,7 @@ const AdminTenantDetail: React.FC = () => {
   const activateMutation = useOptimisticActivateTenant();
   const resendInvite = useAdminResendInvite(id!);
   const cancelInvite = useAdminCancelInvite(id!);
+  const setTierMutation = useSetTenantTier();
 
   const rotateMutation = useMutation({
     mutationFn: () => api.post<{ apiKey: string }>(`/admin/tenants/${id}/api-key/rotate`),
@@ -149,6 +155,30 @@ const AdminTenantDetail: React.FC = () => {
     },
     onError: () => toast.error('Failed to rotate API key'),
   });
+
+  // Reveal the full (unmasked) API key. Server audits each reveal so the
+  // action is traceable. We cache the result in component state — clicking
+  // the eye after a reveal toggles visibility without re-fetching.
+  const revealMutation = useMutation({
+    mutationFn: () => api.get<{ apiKey: string }>(`/admin/tenants/${id}/api-key/reveal`),
+    onSuccess: (result) => {
+      setRevealedApiKey(result.apiKey);
+      setShowApiKey(true);
+    },
+    onError: () => toast.error('Failed to reveal API key'),
+  });
+
+  const handleToggleApiKey = () => {
+    if (showApiKey) {
+      setShowApiKey(false);
+      return;
+    }
+    if (revealedApiKey) {
+      setShowApiKey(true);
+      return;
+    }
+    revealMutation.mutate();
+  };
 
   const tenant = data as TenantDetailData | undefined;
   const auditLogs = (auditData as TenantDetailData['recentAuditLogs'] | undefined) ?? tenant?.recentAuditLogs ?? [];
@@ -187,6 +217,23 @@ const AdminTenantDetail: React.FC = () => {
             </Badge>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setPendingTier(null);
+                setShowTierDialog(true);
+              }}
+              disabled={setTierMutation.isPending}
+              className="text-accent-400 border-accent-500/30 hover:bg-accent-500/10"
+            >
+              {setTierMutation.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Crown className="w-3.5 h-3.5" />
+              )}
+              Set tier
+            </Button>
             {tenant.status === 'active' ? (
               <Button
                 size="sm"
@@ -263,10 +310,18 @@ const AdminTenantDetail: React.FC = () => {
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => { setShowApiKey(!showApiKey); if (!revealedApiKey) setShowApiKey(false); }}
+                  onClick={handleToggleApiKey}
+                  disabled={revealMutation.isPending}
                   className="h-6 w-6 text-text-muted hover:text-text-secondary"
+                  aria-label={showApiKey ? 'Hide API key' : 'Reveal API key'}
                 >
-                  {showApiKey ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  {revealMutation.isPending ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : showApiKey ? (
+                    <EyeOff className="w-3 h-3" />
+                  ) : (
+                    <Eye className="w-3 h-3" />
+                  )}
                 </Button>
                 <Button
                   variant="ghost"
@@ -428,6 +483,110 @@ const AdminTenantDetail: React.FC = () => {
           </Table>
         )}
       </Card>
+
+      {/* Set Tier (manual) Dialog */}
+      <AlertDialog
+        open={showTierDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowTierDialog(false);
+            setPendingTier(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <div className="relative">
+            <LoadingOverlay
+              isLoading={setTierMutation.isPending}
+              message="Updating tier..."
+            />
+            <AlertDialogHeader>
+              <AlertDialogTitle>Set tier (manual override)</AlertDialogTitle>
+              <AlertDialogDescription>
+                Pick a target tier for <strong>{tenant.name}</strong>. This is a manual
+                override — it bypasses Stripe and writes a manual primary billing row.
+                Use it for comps, sales-managed Enterprise, or refund-driven downgrades.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-2">
+                {(['free', 'pro', 'premium', 'enterprise'] as ManualTier[]).map((t) => {
+                  const isCurrent = tenant.tier === t;
+                  const isSelected = pendingTier === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => !isCurrent && setPendingTier(t)}
+                      disabled={isCurrent}
+                      className={`
+                        text-left rounded-lg border px-3 py-2.5 transition-colors
+                        ${isCurrent ? 'border-edge bg-surface-3 opacity-60 cursor-not-allowed' : ''}
+                        ${isSelected ? 'border-accent-500/60 bg-accent-500/10' : ''}
+                        ${!isCurrent && !isSelected ? 'border-edge hover:border-edge-strong hover:bg-surface-3' : ''}
+                      `}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-text-primary capitalize">{t}</span>
+                        {isCurrent && (
+                          <span className="text-xs text-text-muted">current</span>
+                        )}
+                        {isSelected && (
+                          <span className="text-xs text-accent-400">selected</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-text-muted mt-1">
+                        {t === 'free' && 'No plan — abuse / refund downgrade'}
+                        {t === 'pro' && 'Pro entitlements, comped (no Stripe)'}
+                        {t === 'premium' && 'Premium entitlements, comped'}
+                        {t === 'enterprise' && 'Sales-managed, unlimited'}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
+                <strong>Note:</strong> if this tenant has an active Stripe subscription,
+                this does <em>not</em> cancel it. Open the Stripe dashboard and cancel
+                the subscription there to stop further charges.
+              </div>
+            </div>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={setTierMutation.isPending}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!id || !pendingTier) return;
+                  setTierMutation.mutate(
+                    { id, tier: pendingTier },
+                    {
+                      onSuccess: () => {
+                        setShowTierDialog(false);
+                        setPendingTier(null);
+                      },
+                    },
+                  );
+                }}
+                disabled={!pendingTier || setTierMutation.isPending}
+                className="bg-accent-500 hover:bg-accent-500/90"
+              >
+                {setTierMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : pendingTier ? (
+                  `Set to ${pendingTier.charAt(0).toUpperCase() + pendingTier.slice(1)}`
+                ) : (
+                  'Pick a tier'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Rotate API Key Dialog */}
       <AlertDialog open={showRotateDialog} onOpenChange={(open) => !open && setShowRotateDialog(false)}>

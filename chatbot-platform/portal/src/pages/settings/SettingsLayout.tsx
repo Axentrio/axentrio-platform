@@ -5,7 +5,7 @@
 
 import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
-import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap } from 'lucide-react';
+import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppAuth } from '@auth/useAppAuth';
 
@@ -27,6 +27,8 @@ const settingsNav: SettingsNavItem[] = [
   // Connections
   { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Connections' },
   { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Connections' },
+  // Billing
+  { path: '/settings/billing', label: 'Billing', icon: CreditCard, group: 'Billing' },
 ];
 
 const SettingsLayout: React.FC = () => {

@@ -48,6 +48,45 @@ apiClient.interceptors.request.use(
   }
 );
 
+// Plan-limit (HTTP 402) → toast. Human-readable copy keyed off the lowercase
+// service error code (matches src/routes/billing.routes.ts and
+// src/billing/enforce.ts). Falls back to the server's message field when an
+// unknown code arrives.
+//
+// Imported lazily inside the interceptor so apiClient can be initialized
+// before sonner mounts (Toaster lives in App.tsx).
+const PLAN_LIMIT_COPY: Record<string, string> = {
+  plan_limit_agents: 'You\'ve reached your plan\'s agent limit. Upgrade to add more.',
+  plan_limit_sessions: 'You\'ve reached your plan\'s concurrent-session limit. Upgrade to handle more chats at once.',
+  plan_limit_channels: 'You\'ve reached your plan\'s channel limit. Upgrade to connect more channels.',
+  plan_limit_file_upload: 'File uploads aren\'t available on your current plan. Upgrade to enable them.',
+  plan_limit_handoff: 'Human handoff isn\'t available on your current plan. Upgrade to enable it.',
+  plan_limit_custom_branding: 'Custom branding isn\'t available on your current plan. Upgrade to enable it.',
+};
+
+function handlePlanLimit(error: AxiosError): void {
+  if (error.response?.status !== 402) return;
+  const body = error.response.data as
+    | { error?: { code?: string; message?: string; details?: { limit?: number } } }
+    | undefined;
+  const code = body?.error?.code ?? '';
+  const message =
+    PLAN_LIMIT_COPY[code] ??
+    body?.error?.message ??
+    'You\'ve reached a plan limit. Upgrade to continue.';
+  // Lazy import so this module stays decoupled from sonner's bundle init.
+  import('sonner').then(({ toast }) => {
+    toast.warning(message, {
+      action: {
+        label: 'View plans',
+        onClick: () => {
+          window.location.href = '/settings/billing';
+        },
+      },
+    });
+  });
+}
+
 // Response interceptor - unwrap { success, data } envelope + handle errors
 apiClient.interceptors.response.use(
   (response) => {
@@ -63,6 +102,7 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
+    handlePlanLimit(error);
     return Promise.reject(error);
   }
 );

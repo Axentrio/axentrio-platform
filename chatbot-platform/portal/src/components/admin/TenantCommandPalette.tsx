@@ -19,7 +19,12 @@ export function TenantCommandPalette() {
   const { activeTenant } = useTenantContextStore();
   const { tenantId: ownTenantId } = useAppAuth();
   const { switchTenant } = useTenantSwitch();
-  const { data: tenants, isLoading, isError, refetch } = useAdminTenantsAll();
+  // Only fetch when the palette is actually open — saves a 1000-row trip
+  // on every page navigation. Cached for 60s, so toggling open/close stays
+  // instant after the first open.
+  const { data: tenants, isLoading, isError, refetch } = useAdminTenantsAll({
+    enabled: isTenantPaletteOpen,
+  });
   const [search, setSearch] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
 

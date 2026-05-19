@@ -22,6 +22,7 @@ import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { releaseAgentSessions } from '../utils/releaseAgentSessions';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
+import { requireFeature } from '../billing/enforce';
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -143,6 +144,14 @@ router.patch(
         error: 'Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.',
       });
       return;
+    }
+
+    // Plan-gate (step 10, feature 7). Custom branding lives under
+    // `settings.theme` (primaryColor / logoUrl / customCss). Only enforce
+    // when the request actually touches those keys — leaving the rest of
+    // the settings update path open for all tiers.
+    if (settings?.theme !== undefined) {
+      await requireFeature(tenantId, 'customBranding', 'plan_limit_custom_branding');
     }
 
     // Deep merge settings (preserve nested objects like theme, features)

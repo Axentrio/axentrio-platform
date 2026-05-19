@@ -7,6 +7,7 @@ import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/erro
 import { sendSuccess } from '../utils/response';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
+import { requireFeature } from '../billing/enforce';
 
 const router = Router();
 
@@ -35,6 +36,14 @@ router.post(
     }
 
     const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+    // Plan-gate (step 10, feature 5). Throws 402 plan_limit_file_upload when
+    // the tenant's tier doesn't include file upload (currently Free).
+    await requireFeature(tenantId, 'fileUpload', 'plan_limit_file_upload');
+
     const { getUploadService } = await import('../file-handling/upload.service');
     const uploadService = getUploadService();
 
@@ -48,7 +57,7 @@ router.post(
       fileName,
       fileSize,
       mimeType,
-      tenantId: authReq.user?.tenantId || '',
+      tenantId,
       userId: authReq.user?.id || '',
       chatSessionId: sessionId || '',
     });

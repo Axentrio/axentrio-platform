@@ -19,6 +19,8 @@ import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
+import { enforceCountLimit } from '../billing/enforce';
+import { Not } from 'typeorm';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -188,24 +190,41 @@ router.post(
     const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
     const initialStatus = (aiEnabled && (hasWebhook || usePlatformAgent)) ? 'bot' : 'waiting';
 
-    // Create new session
-    const session = sessionRepository.create({
-      tenantId: tenant.id,
-      visitorId,
-      source: 'widget',
-      metadata: {
-        ...metadata,
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-        pageUrl: metadata?.pageUrl,
-        referrer: metadata?.referrer,
-      },
-      status: initialStatus,
-      startedAt: new Date(),
-      lastActivityAt: new Date(),
+    // Plan-gate (step 10, count 2). Wrap session create in a tx that locks
+    // the tenants row, counts non-closed sessions, throws 402 on cap.
+    // The plan calls for `tenants.current_sessions`, but that counter is
+    // not actually maintained anywhere in this codebase — we use a live
+    // COUNT(*) on chat_sessions filtered by tenant + non-closed status
+    // instead. Cost is one indexed count per widget /init (index on
+    // (tenant_id, status) already exists for other queries).
+    const session = await AppDataSource.transaction(async (manager) => {
+      await enforceCountLimit({
+        manager,
+        tenantId: tenant.id,
+        capability: 'sessions',
+        errorCode: 'plan_limit_sessions',
+        countQuery: (m) =>
+          m.count(ChatSession, {
+            where: { tenantId: tenant.id, status: Not('closed') },
+          }),
+      });
+      const draft = manager.create(ChatSession, {
+        tenantId: tenant.id,
+        visitorId,
+        source: 'widget',
+        metadata: {
+          ...metadata,
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent'),
+          pageUrl: metadata?.pageUrl,
+          referrer: metadata?.referrer,
+        },
+        status: initialStatus,
+        startedAt: new Date(),
+        lastActivityAt: new Date(),
+      });
+      return manager.save(ChatSession, draft);
     });
-
-    await sessionRepository.save(session);
 
     // Create participant
     const participantRepository = AppDataSource.getRepository(Participant);

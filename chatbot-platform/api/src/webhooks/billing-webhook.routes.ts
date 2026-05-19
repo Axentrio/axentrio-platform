@@ -105,11 +105,18 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
       const resolvedTenantId = matched?.tenantId ?? null;
 
       // 2. Idempotency-gated audit insert.
+      // The unique index on (provider, provider_event_id) is PARTIAL
+      // (WHERE provider_event_id IS NOT NULL) so Postgres requires the same
+      // WHERE predicate on ON CONFLICT to use it as the arbiter index.
+      // Without the WHERE, the INSERT fails with "no unique or exclusion
+      // constraint matching the ON CONFLICT specification" — even though
+      // provider_event_id is always non-null at this callsite.
       const inserted: Array<{ id: string }> = await manager.query(
         `INSERT INTO billing_events
            (tenant_id, provider, provider_event_id, event_type, payload, raw_payload)
          VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
-         ON CONFLICT (provider, provider_event_id) DO NOTHING
+         ON CONFLICT (provider, provider_event_id) WHERE provider_event_id IS NOT NULL
+         DO NOTHING
          RETURNING id`,
         [
           resolvedTenantId,

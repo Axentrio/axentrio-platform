@@ -38,23 +38,78 @@
     "agent": "Agent"
   },
   "settings": {
+    "header": {
+      "title": "Instellingen",
+      "subtitle": "Beheer je account en voorkeuren"
+    },
+    "groups": {
+      "Account": "Account",
+      "Bot": "Bot",
+      "Connections": "Verbindingen",
+      "Billing": "Facturatie"
+    },
+    "tabs": {
+      "profile": "Profiel",
+      "notifications": "Meldingen",
+      "appearance": "Weergave",
+      "widget": "Widget & merk",
+      "capabilities": "Functionaliteiten",
+      "integrations": "Integraties",
+      "channels": "Kanalen",
+      "billing": "Facturatie"
+    },
     "profile": {
       "title": "Profielgegevens",
       "firstName": "Voornaam",
       "lastName": "Achternaam",
       "email": "E-mail",
-      "emailManagedNote": "Je e-mailadres wordt beheerd door je authenticatieprovider.",
+      "emailCannotChange": "E-mailadres kan niet gewijzigd worden",
+      "validation": {
+        "firstNameRequired": "Voornaam is verplicht",
+        "lastNameRequired": "Achternaam is verplicht"
+      },
+      "saveFailed": "Profiel opslaan is mislukt. Probeer het opnieuw.",
       "preferences": {
         "title": "Voorkeuren",
         "language": {
           "label": "Taal",
           "helper": "Gebruikt voor e-mails en accountcommunicatie. Vertaling van de interface volgt binnenkort.",
+          "saveFailed": "Taalvoorkeur opslaan is mislukt.",
           "options": {
             "en": "English",
             "nl": "Nederlands",
             "fr": "Français"
           }
         }
+      },
+      "password": {
+        "title": "Wachtwoord",
+        "managedNote": "Je wachtwoord wordt beheerd door Clerk. Gebruik het Clerk-gebruikersmenu of bezoek je Clerk-accountinstellingen om je wachtwoord te wijzigen."
+      }
+    },
+    "notifications": {
+      "title": "Meldingsvoorkeuren",
+      "sound": {
+        "title": "Geluidsmeldingen",
+        "description": "Geluiden afspelen voor nieuwe berichten en overdrachten"
+      },
+      "volume": "Volume",
+      "desktop": {
+        "title": "Desktopmeldingen",
+        "description": "Browsermeldingen weergeven"
+      },
+      "handsoffOnly": {
+        "title": "Alleen overdrachtsmeldingen",
+        "description": "Alleen melden bij overdrachtsverzoeken"
+      }
+    },
+    "appearance": {
+      "title": "Thema",
+      "description": "Kies je voorkeursthema",
+      "options": {
+        "light": "Licht",
+        "dark": "Donker",
+        "system": "Systeem"
       }
     }
   }

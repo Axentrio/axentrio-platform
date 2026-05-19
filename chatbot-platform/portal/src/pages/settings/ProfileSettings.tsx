@@ -70,8 +70,8 @@ const ProfileSettings: React.FC = () => {
 
   const validate = (): boolean => {
     const next: Record<string, string> = {};
-    if (!profileData.firstName.trim()) next.firstName = 'First name is required';
-    if (!profileData.lastName.trim()) next.lastName = 'Last name is required';
+    if (!profileData.firstName.trim()) next.firstName = t('settings.profile.validation.firstNameRequired');
+    if (!profileData.lastName.trim()) next.lastName = t('settings.profile.validation.lastNameRequired');
     setErrors(next);
     return Object.keys(next).length === 0;
   };
@@ -89,7 +89,7 @@ const ProfileSettings: React.FC = () => {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch {
-      toast.error('Failed to save profile. Please try again.');
+      toast.error(t('settings.profile.saveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -107,7 +107,7 @@ const ProfileSettings: React.FC = () => {
       // Roll back local state if the server rejected the change.
       setLocale(previous);
       i18n.changeLanguage(previous);
-      toast.error('Failed to save language preference.');
+      toast.error(t('settings.profile.preferences.language.saveFailed'));
     } finally {
       setIsLocaleSaving(false);
     }
@@ -118,7 +118,7 @@ const ProfileSettings: React.FC = () => {
       {saveSuccess && (
         <div className="p-4 bg-status-online/10 border border-status-online/20 rounded-xl flex items-center gap-2 text-status-online">
           <Check className="w-5 h-5" />
-          Settings saved successfully!
+          {t('common.saved')}
         </div>
       )}
 
@@ -126,14 +126,14 @@ const ProfileSettings: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <User className="w-5 h-5" />
-            Profile Information
+            {t('settings.profile.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label htmlFor="firstName" className="text-text-secondary">First Name <span className="text-red-500">*</span></Label>
+                <Label htmlFor="firstName" className="text-text-secondary">{t('settings.profile.firstName')} <span className="text-red-500">*</span></Label>
                 <Input
                   id="firstName"
                   type="text"
@@ -145,7 +145,7 @@ const ProfileSettings: React.FC = () => {
                 {errors.firstName && <p className="text-xs text-red-500">{errors.firstName}</p>}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="lastName" className="text-text-secondary">Last Name <span className="text-red-500">*</span></Label>
+                <Label htmlFor="lastName" className="text-text-secondary">{t('settings.profile.lastName')} <span className="text-red-500">*</span></Label>
                 <Input
                   id="lastName"
                   type="text"
@@ -158,7 +158,7 @@ const ProfileSettings: React.FC = () => {
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="email" className="text-text-secondary">Email</Label>
+              <Label htmlFor="email" className="text-text-secondary">{t('settings.profile.email')}</Label>
               <div className="flex items-center gap-2">
                 <Mail className="w-5 h-5 text-text-muted" />
                 <Input
@@ -169,7 +169,7 @@ const ProfileSettings: React.FC = () => {
                   className="flex-1"
                 />
               </div>
-              <p className="text-xs text-text-muted">Email cannot be changed</p>
+              <p className="text-xs text-text-muted">{t('settings.profile.emailCannotChange')}</p>
             </div>
             <div className="flex justify-end">
               <Button onClick={handleSaveProfile} disabled={isSaving}>
@@ -178,7 +178,7 @@ const ProfileSettings: React.FC = () => {
                 ) : (
                   <Save className="w-4 h-4" />
                 )}
-                Save Changes
+                {t('common.save')}
               </Button>
             </div>
           </div>
@@ -220,12 +220,12 @@ const ProfileSettings: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Lock className="w-5 h-5" />
-            Password
+            {t('settings.profile.password.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-text-secondary">
-            Your password is managed by Clerk. To change your password, use the Clerk user menu or visit your Clerk account settings.
+            {t('settings.profile.password.managedNote')}
           </p>
         </CardContent>
       </Card>

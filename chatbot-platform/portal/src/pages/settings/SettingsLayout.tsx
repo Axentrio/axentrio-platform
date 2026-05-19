@@ -5,35 +5,39 @@
 
 import React, { useMemo } from 'react';
 import { NavLink, Outlet, Navigate, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { User, Bell, Paintbrush, Palette, Plug, MessageSquare, Zap, CreditCard } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAppAuth } from '@auth/useAppAuth';
 
 interface SettingsNavItem {
   path: string;
-  label: string;
+  /** Translation key under `settings.tabs.*` */
+  labelKey: string;
   icon: React.ElementType;
-  group: string;
+  /** Group identifier — also used as the translation key suffix under `settings.groups.*`. */
+  group: 'Account' | 'Bot' | 'Connections' | 'Billing';
 }
 
 const settingsNav: SettingsNavItem[] = [
   // Account
-  { path: '/settings/profile', label: 'Profile', icon: User, group: 'Account' },
-  { path: '/settings/notifications', label: 'Notifications', icon: Bell, group: 'Account' },
-  { path: '/settings/appearance', label: 'Appearance', icon: Paintbrush, group: 'Account' },
+  { path: '/settings/profile', labelKey: 'profile', icon: User, group: 'Account' },
+  { path: '/settings/notifications', labelKey: 'notifications', icon: Bell, group: 'Account' },
+  { path: '/settings/appearance', labelKey: 'appearance', icon: Paintbrush, group: 'Account' },
   // Bot Configuration
-  { path: '/settings/widget', label: 'Widget & Brand', icon: Palette, group: 'Bot' },
-  { path: '/settings/capabilities', label: 'Capabilities', icon: Zap, group: 'Bot' },
+  { path: '/settings/widget', labelKey: 'widget', icon: Palette, group: 'Bot' },
+  { path: '/settings/capabilities', labelKey: 'capabilities', icon: Zap, group: 'Bot' },
   // Connections
-  { path: '/settings/integrations', label: 'Integrations', icon: Plug, group: 'Connections' },
-  { path: '/settings/channels', label: 'Channels', icon: MessageSquare, group: 'Connections' },
+  { path: '/settings/integrations', labelKey: 'integrations', icon: Plug, group: 'Connections' },
+  { path: '/settings/channels', labelKey: 'channels', icon: MessageSquare, group: 'Connections' },
   // Billing
-  { path: '/settings/billing', label: 'Billing', icon: CreditCard, group: 'Billing' },
+  { path: '/settings/billing', labelKey: 'billing', icon: CreditCard, group: 'Billing' },
 ];
 
 const SettingsLayout: React.FC = () => {
   const location = useLocation();
   const { isRole } = useAppAuth();
+  const { t } = useTranslation();
 
   const visibleNav = useMemo(() => {
     if (isRole(['admin', 'super_admin'])) return settingsNav;
@@ -51,8 +55,8 @@ const SettingsLayout: React.FC = () => {
       <div className="max-w-5xl mx-auto p-6">
         {/* Header */}
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-text-primary">Settings</h1>
-          <p className="text-text-secondary">Manage your account and preferences</p>
+          <h1 className="text-2xl font-bold text-text-primary">{t('settings.header.title')}</h1>
+          <p className="text-text-secondary">{t('settings.header.subtitle')}</p>
         </div>
 
         {/* Mobile horizontal tabs */}
@@ -72,7 +76,7 @@ const SettingsLayout: React.FC = () => {
                 }
               >
                 <item.icon className="w-3.5 h-3.5" />
-                {item.label}
+                {t(`settings.tabs.${item.labelKey}`)}
               </NavLink>
             ))}
           </div>
@@ -84,7 +88,7 @@ const SettingsLayout: React.FC = () => {
             {groups.map((group) => (
               <div key={group} className="mb-4">
                 <span className="block px-3 mb-1 text-xs font-semibold text-text-muted uppercase tracking-wider">
-                  {group}
+                  {t(`settings.groups.${group}`)}
                 </span>
                 <ul className="space-y-0.5">
                   {visibleNav
@@ -103,7 +107,7 @@ const SettingsLayout: React.FC = () => {
                           }
                         >
                           <item.icon className="w-4 h-4" />
-                          {item.label}
+                          {t(`settings.tabs.${item.labelKey}`)}
                         </NavLink>
                       </li>
                     ))}

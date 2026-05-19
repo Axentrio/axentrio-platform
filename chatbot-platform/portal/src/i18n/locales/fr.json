@@ -38,23 +38,78 @@
     "agent": "Agent"
   },
   "settings": {
+    "header": {
+      "title": "Paramètres",
+      "subtitle": "Gérez votre compte et vos préférences"
+    },
+    "groups": {
+      "Account": "Compte",
+      "Bot": "Bot",
+      "Connections": "Connexions",
+      "Billing": "Facturation"
+    },
+    "tabs": {
+      "profile": "Profil",
+      "notifications": "Notifications",
+      "appearance": "Apparence",
+      "widget": "Widget & marque",
+      "capabilities": "Fonctionnalités",
+      "integrations": "Intégrations",
+      "channels": "Canaux",
+      "billing": "Facturation"
+    },
     "profile": {
       "title": "Informations du profil",
       "firstName": "Prénom",
       "lastName": "Nom",
       "email": "E-mail",
-      "emailManagedNote": "Votre e-mail est géré par votre fournisseur d'authentification.",
+      "emailCannotChange": "L'e-mail ne peut pas être modifié",
+      "validation": {
+        "firstNameRequired": "Le prénom est requis",
+        "lastNameRequired": "Le nom est requis"
+      },
+      "saveFailed": "Échec de l'enregistrement du profil. Veuillez réessayer.",
       "preferences": {
         "title": "Préférences",
         "language": {
           "label": "Langue",
           "helper": "Utilisé pour les e-mails et la communication du compte. La traduction de l'interface arrive bientôt.",
+          "saveFailed": "Échec de l'enregistrement de la préférence de langue.",
           "options": {
             "en": "English",
             "nl": "Nederlands",
             "fr": "Français"
           }
         }
+      },
+      "password": {
+        "title": "Mot de passe",
+        "managedNote": "Votre mot de passe est géré par Clerk. Pour le modifier, utilisez le menu utilisateur Clerk ou rendez-vous dans les paramètres de votre compte Clerk."
+      }
+    },
+    "notifications": {
+      "title": "Préférences de notification",
+      "sound": {
+        "title": "Notifications sonores",
+        "description": "Diffuser des sons pour les nouveaux messages et les transferts"
+      },
+      "volume": "Volume",
+      "desktop": {
+        "title": "Notifications de bureau",
+        "description": "Afficher les notifications du navigateur"
+      },
+      "handsoffOnly": {
+        "title": "Notifications de transfert uniquement",
+        "description": "Notifier uniquement pour les demandes de transfert"
+      }
+    },
+    "appearance": {
+      "title": "Thème",
+      "description": "Choisissez votre thème préféré",
+      "options": {
+        "light": "Clair",
+        "dark": "Sombre",
+        "system": "Système"
       }
     }
   }

@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Paintbrush } from 'lucide-react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { cn } from '@/lib/utils';
@@ -48,12 +49,9 @@ const ThemePreview: React.FC<{ mode: 'light' | 'dark' | 'system' }> = ({ mode })
 
 const AppearanceSettings: React.FC = () => {
   const { theme, setTheme } = useTheme();
+  const { t } = useTranslation();
 
-  const themeOptions: { mode: ThemeMode; label: string }[] = [
-    { mode: 'light', label: 'Light' },
-    { mode: 'dark', label: 'Dark' },
-    { mode: 'system', label: 'System' },
-  ];
+  const themeModes: ThemeMode[] = ['light', 'dark', 'system'];
 
   return (
     <div className="space-y-6">
@@ -62,13 +60,13 @@ const AppearanceSettings: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Paintbrush className="w-5 h-5" />
-            Theme
+            {t('settings.appearance.title')}
           </h2>
-          <p className="text-sm text-text-secondary">Choose your preferred theme</p>
+          <p className="text-sm text-text-secondary">{t('settings.appearance.description')}</p>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-3 gap-4">
-            {themeOptions.map(({ mode, label }) => (
+            {themeModes.map((mode) => (
               <button
                 key={mode}
                 onClick={() => setTheme(mode)}
@@ -80,7 +78,7 @@ const AppearanceSettings: React.FC = () => {
                 )}
               >
                 <ThemePreview mode={mode} />
-                <p className="mt-2 text-sm font-medium text-text-primary">{label}</p>
+                <p className="mt-2 text-sm font-medium text-text-primary">{t(`settings.appearance.options.${mode}`)}</p>
               </button>
             ))}
           </div>

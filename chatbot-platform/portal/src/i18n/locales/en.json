@@ -38,23 +38,78 @@
     "agent": "Agent"
   },
   "settings": {
+    "header": {
+      "title": "Settings",
+      "subtitle": "Manage your account and preferences"
+    },
+    "groups": {
+      "Account": "Account",
+      "Bot": "Bot",
+      "Connections": "Connections",
+      "Billing": "Billing"
+    },
+    "tabs": {
+      "profile": "Profile",
+      "notifications": "Notifications",
+      "appearance": "Appearance",
+      "widget": "Widget & Brand",
+      "capabilities": "Capabilities",
+      "integrations": "Integrations",
+      "channels": "Channels",
+      "billing": "Billing"
+    },
     "profile": {
       "title": "Profile Information",
       "firstName": "First Name",
       "lastName": "Last Name",
       "email": "Email",
-      "emailManagedNote": "Email is managed by your authentication provider.",
+      "emailCannotChange": "Email cannot be changed",
+      "validation": {
+        "firstNameRequired": "First name is required",
+        "lastNameRequired": "Last name is required"
+      },
+      "saveFailed": "Failed to save profile. Please try again.",
       "preferences": {
         "title": "Preferences",
         "language": {
           "label": "Language",
-          "helper": "Used for emails and account communications. UI translation coming soon.",
+          "helper": "Used for emails and account communications. UI translation in progress.",
+          "saveFailed": "Failed to save language preference.",
           "options": {
             "en": "English",
             "nl": "Nederlands",
             "fr": "Français"
           }
         }
+      },
+      "password": {
+        "title": "Password",
+        "managedNote": "Your password is managed by Clerk. To change your password, use the Clerk user menu or visit your Clerk account settings."
+      }
+    },
+    "notifications": {
+      "title": "Notification Preferences",
+      "sound": {
+        "title": "Sound Notifications",
+        "description": "Play sounds for new messages and handoffs"
+      },
+      "volume": "Volume",
+      "desktop": {
+        "title": "Desktop Notifications",
+        "description": "Show browser notifications"
+      },
+      "handsoffOnly": {
+        "title": "Handoff Notifications Only",
+        "description": "Only notify for handoff requests"
+      }
+    },
+    "appearance": {
+      "title": "Theme",
+      "description": "Choose your preferred theme",
+      "options": {
+        "light": "Light",
+        "dark": "Dark",
+        "system": "System"
       }
     }
   }

@@ -9,7 +9,7 @@ export interface FaqSection {
   items: FaqItem[];
 }
 
-export const FAQ_DOC_FILENAME = 'HandsOff_FAQ.docx';
+export const FAQ_DOC_FILENAME = 'HandsOff_FAQ.pdf';
 export const FAQ_DOC_PATH = `/${FAQ_DOC_FILENAME}`;
 
 export const faqSections: FaqSection[] = [

@@ -169,7 +169,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
           <a
             href={FAQ_DOC_PATH}
             download={FAQ_DOC_FILENAME}
-            title="Download the full FAQ document (.docx)"
+            title="Download the full FAQ document (PDF)"
           >
             <Download className="w-3.5 h-3.5" />
             Download FAQ

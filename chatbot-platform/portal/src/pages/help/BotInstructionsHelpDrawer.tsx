@@ -110,7 +110,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
           download={FAQ_DOC_FILENAME}
           className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors"
         >
-          <span>Download full FAQ (.docx)</span>
+          <span>Download full FAQ (PDF)</span>
           <Download className="w-3.5 h-3.5" />
         </a>
       </footer>

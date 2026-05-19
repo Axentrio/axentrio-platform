@@ -73,7 +73,7 @@
         "title": "Préférences",
         "language": {
           "label": "Langue",
-          "helper": "Utilisé pour les e-mails et la communication du compte. La traduction de l'interface arrive bientôt.",
+          "helper": "Utilisé pour les e-mails et la communication du compte. Traduction de l'interface en cours.",
           "saveFailed": "Échec de l'enregistrement de la préférence de langue.",
           "options": {
             "en": "English",
@@ -111,6 +111,370 @@
         "dark": "Sombre",
         "system": "Système"
       }
+    },
+    "widget": {
+      "title": "Widget & marque",
+      "description": "Gérez votre logo, votre nom d'affichage et votre extrait d'intégration",
+      "saveFailed": "Échec de l'enregistrement des paramètres de marque",
+      "loadFailed": "Échec du chargement des paramètres de marque.",
+      "appearanceNotice": {
+        "prefix": "L'apparence du widget (couleur, avatar, lanceur) est désormais configurée sous",
+        "linkText": "IA & Contenu → Apparence du chatbot",
+        "suffix": "."
+      },
+      "logo": {
+        "title": "Logo",
+        "description": "Le logo de votre organisation apparaît dans l'en-tête du widget de chat",
+        "uploadHint": "Cliquez pour télécharger un nouveau logo",
+        "recommended": "Recommandé : 256x256 px, PNG ou SVG",
+        "removeTitle": "Supprimer le logo",
+        "uploaded": "Logo de l'organisation mis à jour",
+        "uploadFailed": "Échec de la mise à jour du logo",
+        "removed": "Logo de l'organisation supprimé",
+        "removeFailed": "Échec de la suppression du logo"
+      },
+      "displayName": {
+        "title": "Nom d'affichage",
+        "description": "Le nom affiché dans l'en-tête du widget de chat",
+        "label": "Nom",
+        "placeholder": "Le nom de votre entreprise"
+      },
+      "status": {
+        "title": "Statut",
+        "activeSessions": "Sessions actives",
+        "maxSessions": "Sessions max.",
+        "active": "Actif",
+        "inactive": "Inactif"
+      },
+      "embed": {
+        "title": "Intégrer le widget",
+        "description": "Ajoutez cet extrait au HTML de votre site, juste avant la balise </body> de fermeture",
+        "copied": "Copié dans le presse-papiers",
+        "copyTitle": "Copier l'extrait"
+      }
+    },
+    "integrations": {
+      "copyFailed": "Échec de la copie dans le presse-papiers",
+      "apiKey": {
+        "title": "Clé API",
+        "label": "Votre clé API",
+        "copyTooltip": "Copier la clé API",
+        "copySuccess": "Clé API copiée dans le presse-papiers",
+        "rotateTooltip": "Régénérer la clé API",
+        "rotated": "Clé API régénérée avec succès",
+        "rotateFailed": "Échec de la régénération de la clé API",
+        "rotateConfirm": {
+          "title": "Régénérer la clé API ?",
+          "description": "Cela invalidera immédiatement votre clé API actuelle. Toute intégration utilisant l'ancienne clé cessera de fonctionner. Cette action est irréversible.",
+          "action": "Régénérer la clé"
+        }
+      },
+      "webhookUrl": {
+        "title": "URL du webhook",
+        "label": "URL du webhook sortant",
+        "testConnection": "Tester la connexion"
+      },
+      "health": {
+        "title": "État de la connexion",
+        "healthy": "Sain",
+        "unhealthy": "Défaillant",
+        "unknown": "Inconnu",
+        "lastDelivery": "Dernière livraison",
+        "lastSuccess": "Dernier succès"
+      },
+      "inbound": {
+        "title": "Point de terminaison entrant",
+        "label": "URL du point de terminaison (lecture seule)",
+        "copyTooltip": "Copier l'URL",
+        "copySuccess": "URL du webhook entrant copiée dans le presse-papiers",
+        "helper": "Configurez votre workflow d'automatisation pour envoyer des réponses à cette URL. Incluez votre ID de tenant dans le corps de la requête."
+      },
+      "webhookSecret": {
+        "title": "Secret du webhook",
+        "label": "Clé secrète",
+        "copyTooltip": "Copier le secret du webhook",
+        "copySuccess": "Secret du webhook copié dans le presse-papiers",
+        "regenerateTooltip": "Régénérer le secret du webhook",
+        "regenerated": "Secret du webhook régénéré",
+        "regenerateFailed": "Échec de la régénération du secret",
+        "regenerateConfirm": {
+          "title": "Régénérer le secret du webhook ?",
+          "description": "Cela invalidera immédiatement votre secret actuel. Vous devrez le mettre à jour dans vos workflows d'automatisation. Cette action est irréversible.",
+          "action": "Régénérer le secret"
+        }
+      },
+      "deliveries": {
+        "title": "Journal des livraisons",
+        "columns": {
+          "time": "Heure",
+          "direction": "Direction",
+          "event": "Événement",
+          "status": "Statut",
+          "http": "HTTP",
+          "duration": "Durée",
+          "error": "Erreur"
+        },
+        "direction": {
+          "inbound": "entrant",
+          "outbound": "sortant"
+        },
+        "status": {
+          "success": "succès",
+          "failed": "échec",
+          "retrying": "nouvelle tentative",
+          "dropped": "abandonné"
+        },
+        "page": "Page {{page}}",
+        "prev": "Précédent",
+        "next": "Suivant",
+        "empty": "Aucun journal de livraison pour le moment. Envoyez un webhook de test pour voir les entrées ici."
+      },
+      "calcom": {
+        "title": "Prise de rendez-vous",
+        "subtitle": "Connectez Cal.com pour que votre chatbot prenne des rendez-vous",
+        "connectedBadge": "Connecté",
+        "apiKeyLabel": "Clé API Cal.com",
+        "apiKeyHelper": "Trouvez votre clé API sur Cal.com → Settings → Developer → API Keys",
+        "connect": "Connecter",
+        "connectFailed": "Échec de la connexion",
+        "connecting": "Connexion à Cal.com…",
+        "needsEventType": {
+          "message": "Cal.com est connecté mais aucun type d'événement n'est encore sélectionné.",
+          "completeSetup": "Terminer la configuration"
+        },
+        "eventType": {
+          "label": "Type d'événement",
+          "helper": "Sélectionnez le type de rendez-vous que le chatbot doit réserver",
+          "placeholder": "Sélectionnez un type d'événement…",
+          "minutes": "{{count}} min"
+        },
+        "connected": {
+          "eventTypeFallback": "Type d'événement #{{id}}",
+          "change": "Modifier",
+          "disconnect": "Déconnecter"
+        },
+        "advanced": {
+          "toggle": "Paramètres avancés",
+          "language": "Langue",
+          "collectLabel": "Collecter auprès du client",
+          "fields": {
+            "name": "Nom",
+            "email": "E-mail",
+            "phone": "Téléphone",
+            "notes": "Notes"
+          },
+          "save": "Enregistrer les paramètres avancés"
+        },
+        "disconnectConfirm": {
+          "message": "Déconnecter Cal.com ? Votre chatbot ne pourra plus prendre de rendez-vous.",
+          "confirm": "Oui, déconnecter",
+          "disconnecting": "Déconnexion…"
+        }
+      }
+    },
+    "capabilities": {
+      "header": {
+        "title": "Fonctionnalités",
+        "descriptionSuperAdmin": "Configurez ce que le bot peut faire pour ce client.",
+        "descriptionAdmin": "Contrôlez quelles fonctionnalités sont actives pour votre chatbot.",
+        "addButton": "Ajouter une fonctionnalité"
+      },
+      "errors": {
+        "loadFailed": "Échec du chargement des fonctionnalités. Veuillez rafraîchir la page."
+      },
+      "tenantView": {
+        "emptyState": "Aucune fonctionnalité configurée pour le moment. Contactez votre gestionnaire de compte pour configurer les fonctionnalités du bot.",
+        "noDescription": "Aucune description disponible"
+      },
+      "superAdminView": {
+        "emptyState": "Aucune fonctionnalité configurée. Ajoutez-en une pour définir ce que le bot peut faire.",
+        "statusActive": "Actif",
+        "statusDisabled": "Désactivé",
+        "triggerPrefix": "Déclencheur :"
+      },
+      "deleteDialog": {
+        "title": "Supprimer « {{name}} » ?",
+        "description": "Cela supprimera définitivement la fonctionnalité. Cette action est irréversible.",
+        "deleting": "Suppression…"
+      },
+      "teamNotifications": {
+        "title": "Notifications de l'équipe",
+        "description": "Recevez des notifications lorsque votre chatbot capture des leads ou termine des conversations.",
+        "types": {
+          "newLeadAlert": {
+            "title": "Alerte nouveau lead",
+            "description": "Notifiez votre équipe lorsqu'un nouveau lead est capturé via le chatbot."
+          },
+          "conversationSummary": {
+            "title": "Résumé de conversation",
+            "description": "Envoyez un résumé de chaque conversation à la boîte de l'équipe à la fin d'une session."
+          }
+        },
+        "recipients": {
+          "label": "Destinataires",
+          "commaSeparated": "(séparés par des virgules)",
+          "placeholder": "team@example.com, manager@example.com"
+        }
+      },
+      "dialog": {
+        "editTitle": "Modifier la fonctionnalité",
+        "addTitle": "Ajouter une fonctionnalité",
+        "internalName": {
+          "label": "Nom interne",
+          "placeholder": "ex. book_appointment",
+          "helper": "Utilisé en interne. Non visible pour les administrateurs clients."
+        },
+        "displayName": {
+          "label": "Nom d'affichage",
+          "placeholder": "ex. Prise de rendez-vous",
+          "helper": "Nom convivial montré aux administrateurs clients."
+        },
+        "description": {
+          "label": "Description",
+          "placeholder": "ex. Permet au bot de vérifier la disponibilité et de prendre des rendez-vous pour les visiteurs.",
+          "helper": "Explique en langage clair ce que fait cette fonctionnalité."
+        },
+        "trigger": {
+          "label": "Description du déclencheur",
+          "placeholder": "Décrivez quand ce skill doit s'activer…"
+        },
+        "tools": {
+          "label": "Outils"
+        },
+        "instructions": {
+          "label": "Instructions",
+          "placeholder": "Instructions étape par étape pour le bot…"
+        },
+        "maxSteps": {
+          "label": "Étapes max."
+        },
+        "enabled": {
+          "title": "Activé",
+          "description": "Activer cette fonctionnalité pour le client"
+        },
+        "saving": "Enregistrement…",
+        "createCapability": "Créer la fonctionnalité"
+      },
+      "tools": {
+        "kb_search": "Base de connaissances",
+        "escalate_to_human": "Transfert humain",
+        "capture_lead": "Capture de lead",
+        "check_availability": "Vérifier la disponibilité",
+        "create_booking": "Créer une réservation",
+        "list_bookings": "Lister les réservations",
+        "reschedule_booking": "Reporter la réservation",
+        "cancel_booking": "Annuler la réservation"
+      }
+    },
+    "billing": {
+      "plans": {
+        "free": {
+          "name": "Gratuit",
+          "price": "0 $/mois",
+          "blurb": "Essayez les bases gratuitement.",
+          "features": {
+            "agents": "1 agent",
+            "sessions": "10 sessions simultanées",
+            "channels": "1 canal",
+            "byoLlm": "Clé LLM personnelle"
+          }
+        },
+        "pro": {
+          "name": "Pro",
+          "price": "49 $/mois",
+          "blurb": "Pour les équipes en croissance.",
+          "features": {
+            "agents": "3 agents",
+            "sessions": "100 sessions simultanées",
+            "llmCalls": "1 000 appels LLM plateforme/jour",
+            "channels": "3 canaux",
+            "uploadsHandoff": "Téléversements & transfert"
+          }
+        },
+        "premium": {
+          "name": "Premium",
+          "price": "199 $/mois",
+          "blurb": "Image de marque personnalisée + marge de croissance.",
+          "features": {
+            "agents": "10 agents",
+            "sessions": "500 sessions simultanées",
+            "llmCalls": "10 000 appels LLM plateforme/jour",
+            "channels": "Canaux illimités",
+            "branding": "Image de marque & domaine personnalisés",
+            "support": "Support prioritaire"
+          }
+        },
+        "enterprise": {
+          "name": "Enterprise",
+          "price": "Sur mesure",
+          "blurb": "Géré par les ventes, support SLA.",
+          "features": {
+            "unlimited": "Tout illimité",
+            "integrations": "Intégrations personnalisées",
+            "sla": "SLA + support dédié"
+          }
+        }
+      },
+      "status": {
+        "trialing": "Période d'essai",
+        "active": "Actif",
+        "pastDue": "Paiement en retard",
+        "cancelled": "Annulé",
+        "none": "Aucun plan"
+      },
+      "trial": {
+        "endsInDays_one": "Essai se termine {{date}} — {{count}} jour restant",
+        "endsInDays_other": "Essai se termine {{date}} — {{count}} jours restants"
+      },
+      "currentPlan": {
+        "title": "Plan actuel",
+        "renewsOn": "Renouvellement le {{date}}",
+        "cancellingOn": "Annulation le {{date}} — vous repasserez en Gratuit ensuite.",
+        "switchingTo": "Passage à {{plan}} le {{date}}",
+        "pastDueWarning": "Paiement échoué — mettez à jour votre moyen de paiement pour garder votre abonnement actif."
+      },
+      "manage": {
+        "title": "Gérer l'abonnement",
+        "upgradeToPremium": "Passer à Premium",
+        "downgradeToPro": "Revenir à Pro",
+        "cancelSubscription": "Résilier l'abonnement",
+        "resumeSubscription": "Reprendre l'abonnement",
+        "undoPendingChange": "Annuler le changement en attente",
+        "managePaymentMethod": "Gérer le moyen de paiement"
+      },
+      "enterprise": {
+        "title": "Plan Enterprise",
+        "description": "Votre compte est sur un plan Enterprise géré par les ventes. Pour toute modification de plan ou de facturation, contactez votre interlocuteur commercial.",
+        "contactSales": "Contacter les ventes"
+      },
+      "subscribe": {
+        "cta": "S'abonner à {{plan}}"
+      },
+      "email": {
+        "title": "E-mail de facturation",
+        "label": "Les factures et reçus sont envoyés ici",
+        "placeholder": "facturation@votre-entreprise.com"
+      },
+      "history": {
+        "title": "Historique",
+        "empty": "Aucune activité de facturation pour le moment.",
+        "viewInvoice": "Voir la facture",
+        "events": {
+          "trialCreated": "Essai démarré",
+          "trialExpired": "Essai expiré",
+          "subscriptionCreated": "Abonnement créé",
+          "subscriptionUpdated": "Abonnement mis à jour",
+          "subscriptionCancelled": "Abonnement annulé",
+          "invoicePaid": "Facture payée",
+          "invoicePaymentFailed": "Paiement échoué",
+          "refundRecorded": "Remboursement enregistré",
+          "billingEmailUpdated": "E-mail de facturation mis à jour",
+          "tierManualOverride": "Plan modifié par un administrateur"
+        }
+      },
+      "loadError": "Impossible de charger l'état de la facturation : {{error}}",
+      "unknownError": "erreur inconnue",
+      "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement."
     }
   }
 }

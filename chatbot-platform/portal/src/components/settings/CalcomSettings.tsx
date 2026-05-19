@@ -1,5 +1,6 @@
 // portal/src/components/settings/CalcomSettings.tsx
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Calendar, CheckCircle, Loader2, ChevronDown, Eye, EyeOff } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
@@ -19,6 +20,7 @@ interface EventType {
 }
 
 export const CalcomSettings: React.FC = () => {
+  const { t } = useTranslation();
   const { data: integrations, isLoading } = useIntegrations();
   const connectMutation = useConnectCalcom();
   const fetchEventTypesMutation = useFetchCalcomEventTypes();
@@ -68,7 +70,7 @@ export const CalcomSettings: React.FC = () => {
     } catch (err: unknown) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const anyErr = err as any;
-      const msg = anyErr?.response?.data?.error || anyErr?.message || 'Connection failed';
+      const msg = anyErr?.response?.data?.error || anyErr?.message || t('settings.integrations.calcom.connectFailed');
       setConnectError(msg);
       setState('idle');
     }
@@ -117,7 +119,7 @@ export const CalcomSettings: React.FC = () => {
       <div className="rounded-xl border border-edge bg-surface-3 p-6">
         <div className="flex items-center gap-2 text-text-muted">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Loading...
+          {t('common.loading')}
         </div>
       </div>
     );
@@ -134,14 +136,14 @@ export const CalcomSettings: React.FC = () => {
             <Calendar className="h-5 w-5 text-primary-400" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-primary">Appointment Booking</h3>
-            <p className="text-xs text-text-muted">Connect Cal.com to let your chatbot book appointments</p>
+            <h3 className="text-sm font-semibold text-primary">{t('settings.integrations.calcom.title')}</h3>
+            <p className="text-xs text-text-muted">{t('settings.integrations.calcom.subtitle')}</p>
           </div>
         </div>
         {state === 'connected' && (
           <span className="inline-flex items-center gap-1.5 rounded-full bg-green-500/10 px-2.5 py-1 text-xs font-medium text-green-500">
             <CheckCircle className="h-3 w-3" />
-            Connected
+            {t('settings.integrations.calcom.connectedBadge')}
           </span>
         )}
       </div>
@@ -150,7 +152,7 @@ export const CalcomSettings: React.FC = () => {
       {state === 'idle' && (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-secondary mb-1 block">Cal.com API Key</label>
+            <label className="text-xs font-medium text-secondary mb-1 block">{t('settings.integrations.calcom.apiKeyLabel')}</label>
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <input
@@ -174,11 +176,11 @@ export const CalcomSettings: React.FC = () => {
                 disabled={!apiKey.trim()}
                 className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Connect
+                {t('settings.integrations.calcom.connect')}
               </button>
             </div>
             <p className="text-xs text-text-muted mt-1">
-              Find your API key at Cal.com → Settings → Developer → API Keys
+              {t('settings.integrations.calcom.apiKeyHelper')}
             </p>
           </div>
           {connectError && (
@@ -193,14 +195,14 @@ export const CalcomSettings: React.FC = () => {
       {state === 'connecting' && (
         <div className="flex items-center gap-2 text-text-muted py-4">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Connecting to Cal.com...
+          {t('settings.integrations.calcom.connecting')}
         </div>
       )}
 
       {/* Needs Event Type — key stored but no event type selected */}
       {state === 'needs_event_type' && (
         <div className="space-y-3">
-          <p className="text-sm text-text-muted">Cal.com is connected but no event type is selected yet.</p>
+          <p className="text-sm text-text-muted">{t('settings.integrations.calcom.needsEventType.message')}</p>
           <button
             onClick={async () => {
               setConnectError(null);
@@ -218,9 +220,9 @@ export const CalcomSettings: React.FC = () => {
             className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50"
           >
             {fetchEventTypesMutation.isPending ? (
-              <span className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading...</span>
+              <span className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /> {t('common.loading')}</span>
             ) : (
-              'Complete Setup'
+              t('settings.integrations.calcom.needsEventType.completeSetup')
             )}
           </button>
         </div>
@@ -230,20 +232,20 @@ export const CalcomSettings: React.FC = () => {
       {state === 'pick_event_type' && (
         <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-secondary mb-1 block">Event Type</label>
-            <p className="text-xs text-text-muted mb-2">Select which appointment type the chatbot should book</p>
+            <label className="text-xs font-medium text-secondary mb-1 block">{t('settings.integrations.calcom.eventType.label')}</label>
+            <p className="text-xs text-text-muted mb-2">{t('settings.integrations.calcom.eventType.helper')}</p>
             <div>
               <Select
                 value={selectedEventType?.toString() || ''}
                 onValueChange={(val) => setSelectedEventType(Number(val))}
               >
                 <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select an event type..." />
+                  <SelectValue placeholder={t('settings.integrations.calcom.eventType.placeholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {eventTypes.map((et) => (
                     <SelectItem key={et.id} value={et.id.toString()}>
-                      {et.title} ({et.length} min)
+                      {et.title} ({t('settings.integrations.calcom.eventType.minutes', { count: et.length })})
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -255,7 +257,7 @@ export const CalcomSettings: React.FC = () => {
             disabled={!selectedEventType}
             className="rounded-lg bg-primary-500 px-4 py-2 text-sm font-medium text-white hover:bg-primary-600 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Save
+            {t('common.save')}
           </button>
         </div>
       )}
@@ -264,7 +266,7 @@ export const CalcomSettings: React.FC = () => {
       {state === 'saving' && (
         <div className="flex items-center gap-2 text-text-muted py-4">
           <Loader2 className="h-4 w-4 animate-spin" />
-          Saving...
+          {t('common.saving')}
         </div>
       )}
 
@@ -274,8 +276,8 @@ export const CalcomSettings: React.FC = () => {
           <div className="flex items-center justify-between rounded-lg border border-edge px-3 py-2">
             <div>
               <p className="text-sm text-primary">
-                {selectedType?.title || `Event Type #${selectedEventType}`}
-                {selectedType && <span className="text-text-muted ml-1">({selectedType.length} min)</span>}
+                {selectedType?.title || t('settings.integrations.calcom.connected.eventTypeFallback', { id: selectedEventType })}
+                {selectedType && <span className="text-text-muted ml-1">({t('settings.integrations.calcom.eventType.minutes', { count: selectedType.length })})</span>}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -288,13 +290,13 @@ export const CalcomSettings: React.FC = () => {
                 }}
                 className="text-xs text-primary-400 hover:text-primary-300"
               >
-                Change
+                {t('settings.integrations.calcom.connected.change')}
               </button>
               <button
                 onClick={() => setShowDisconnectConfirm(true)}
                 className="text-xs text-red-400 hover:text-red-300"
               >
-                Disconnect
+                {t('settings.integrations.calcom.connected.disconnect')}
               </button>
             </div>
           </div>
@@ -306,12 +308,12 @@ export const CalcomSettings: React.FC = () => {
               className="flex items-center gap-1 text-xs text-text-muted hover:text-secondary"
             >
               <ChevronDown className={`h-3 w-3 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
-              Advanced Settings
+              {t('settings.integrations.calcom.advanced.toggle')}
             </button>
             {showAdvanced && (
               <div className="mt-3 space-y-3 pl-4 border-l border-edge">
                 <div>
-                  <label className="text-xs font-medium text-secondary mb-1 block">Language</label>
+                  <label className="text-xs font-medium text-secondary mb-1 block">{t('settings.integrations.calcom.advanced.language')}</label>
                   <Select value={language} onValueChange={setLanguage}>
                     <SelectTrigger className="w-[180px]">
                       <SelectValue />
@@ -325,7 +327,7 @@ export const CalcomSettings: React.FC = () => {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-secondary mb-1 block">Collect from customer</label>
+                  <label className="text-xs font-medium text-secondary mb-1 block">{t('settings.integrations.calcom.advanced.collectLabel')}</label>
                   <div className="flex flex-wrap gap-2">
                     {['name', 'email', 'phone', 'notes'].map((field) => (
                       <label key={field} className="flex items-center gap-1.5 text-xs text-secondary">
@@ -336,7 +338,7 @@ export const CalcomSettings: React.FC = () => {
                           disabled={field === 'name' || field === 'email'}
                           className="rounded border-edge"
                         />
-                        {field.charAt(0).toUpperCase() + field.slice(1)}
+                        {t(`settings.integrations.calcom.advanced.fields.${field}`)}
                       </label>
                     ))}
                   </div>
@@ -345,7 +347,7 @@ export const CalcomSettings: React.FC = () => {
                   onClick={handleSaveEventType}
                   className="rounded-lg bg-primary-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-600"
                 >
-                  Save Advanced Settings
+                  {t('settings.integrations.calcom.advanced.save')}
                 </button>
               </div>
             )}
@@ -356,20 +358,20 @@ export const CalcomSettings: React.FC = () => {
       {/* Disconnect Confirmation */}
       {showDisconnectConfirm && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 space-y-2">
-          <p className="text-sm text-primary">Disconnect Cal.com? Your chatbot will no longer be able to book appointments.</p>
+          <p className="text-sm text-primary">{t('settings.integrations.calcom.disconnectConfirm.message')}</p>
           <div className="flex gap-2">
             <button
               onClick={handleDisconnect}
               disabled={state === 'disconnecting'}
               className="rounded-lg bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-50"
             >
-              {state === 'disconnecting' ? 'Disconnecting...' : 'Yes, Disconnect'}
+              {state === 'disconnecting' ? t('settings.integrations.calcom.disconnectConfirm.disconnecting') : t('settings.integrations.calcom.disconnectConfirm.confirm')}
             </button>
             <button
               onClick={() => setShowDisconnectConfirm(false)}
               className="rounded-lg border border-edge px-3 py-1.5 text-xs font-medium text-secondary hover:bg-surface-3"
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>

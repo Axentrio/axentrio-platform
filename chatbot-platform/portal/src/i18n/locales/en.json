@@ -111,6 +111,370 @@
         "dark": "Dark",
         "system": "System"
       }
+    },
+    "widget": {
+      "title": "Widget & Brand",
+      "description": "Manage your logo, display name, and embed snippet",
+      "saveFailed": "Failed to save branding settings",
+      "loadFailed": "Failed to load branding settings.",
+      "appearanceNotice": {
+        "prefix": "Widget appearance (color, avatar, launcher) is now configured under",
+        "linkText": "AI & Content → Chatbot Appearances",
+        "suffix": "."
+      },
+      "logo": {
+        "title": "Logo",
+        "description": "Your organization logo appears in the chat widget header",
+        "uploadHint": "Click to upload a new logo",
+        "recommended": "Recommended: 256x256px, PNG or SVG",
+        "removeTitle": "Remove logo",
+        "uploaded": "Organization logo updated",
+        "uploadFailed": "Failed to update logo",
+        "removed": "Organization logo removed",
+        "removeFailed": "Failed to remove logo"
+      },
+      "displayName": {
+        "title": "Display Name",
+        "description": "The name shown in the chat widget header",
+        "label": "Name",
+        "placeholder": "Your company name"
+      },
+      "status": {
+        "title": "Status",
+        "activeSessions": "Active Sessions",
+        "maxSessions": "Max Sessions",
+        "active": "Active",
+        "inactive": "Inactive"
+      },
+      "embed": {
+        "title": "Embed Widget",
+        "description": "Add this snippet to your website's HTML, just before the closing </body> tag",
+        "copied": "Copied to clipboard",
+        "copyTitle": "Copy snippet"
+      }
+    },
+    "integrations": {
+      "copyFailed": "Failed to copy to clipboard",
+      "apiKey": {
+        "title": "API Key",
+        "label": "Your API Key",
+        "copyTooltip": "Copy API key",
+        "copySuccess": "API key copied to clipboard",
+        "rotateTooltip": "Rotate API key",
+        "rotated": "API key rotated successfully",
+        "rotateFailed": "Failed to rotate API key",
+        "rotateConfirm": {
+          "title": "Rotate API Key?",
+          "description": "This will invalidate your current API key immediately. Any integrations using the old key will stop working. This action cannot be undone.",
+          "action": "Rotate Key"
+        }
+      },
+      "webhookUrl": {
+        "title": "Webhook URL",
+        "label": "Outbound Webhook URL",
+        "testConnection": "Test Connection"
+      },
+      "health": {
+        "title": "Connection Health",
+        "healthy": "Healthy",
+        "unhealthy": "Unhealthy",
+        "unknown": "Unknown",
+        "lastDelivery": "Last delivery",
+        "lastSuccess": "Last success"
+      },
+      "inbound": {
+        "title": "Inbound Webhook Endpoint",
+        "label": "Endpoint URL (read-only)",
+        "copyTooltip": "Copy URL",
+        "copySuccess": "Inbound webhook URL copied to clipboard",
+        "helper": "Configure your automation workflow to send responses to this URL. Include your tenant ID in the request body."
+      },
+      "webhookSecret": {
+        "title": "Webhook Secret",
+        "label": "Secret Key",
+        "copyTooltip": "Copy webhook secret",
+        "copySuccess": "Webhook secret copied to clipboard",
+        "regenerateTooltip": "Regenerate webhook secret",
+        "regenerated": "Webhook secret regenerated",
+        "regenerateFailed": "Failed to regenerate webhook secret",
+        "regenerateConfirm": {
+          "title": "Regenerate Webhook Secret?",
+          "description": "This will invalidate your current webhook secret immediately. You will need to update the secret in your automation workflows. This action cannot be undone.",
+          "action": "Regenerate Secret"
+        }
+      },
+      "deliveries": {
+        "title": "Delivery Log",
+        "columns": {
+          "time": "Time",
+          "direction": "Direction",
+          "event": "Event",
+          "status": "Status",
+          "http": "HTTP",
+          "duration": "Duration",
+          "error": "Error"
+        },
+        "direction": {
+          "inbound": "inbound",
+          "outbound": "outbound"
+        },
+        "status": {
+          "success": "success",
+          "failed": "failed",
+          "retrying": "retrying",
+          "dropped": "dropped"
+        },
+        "page": "Page {{page}}",
+        "prev": "Prev",
+        "next": "Next",
+        "empty": "No delivery logs yet. Send a test webhook to see entries here."
+      },
+      "calcom": {
+        "title": "Appointment Booking",
+        "subtitle": "Connect Cal.com to let your chatbot book appointments",
+        "connectedBadge": "Connected",
+        "apiKeyLabel": "Cal.com API Key",
+        "apiKeyHelper": "Find your API key at Cal.com → Settings → Developer → API Keys",
+        "connect": "Connect",
+        "connectFailed": "Connection failed",
+        "connecting": "Connecting to Cal.com…",
+        "needsEventType": {
+          "message": "Cal.com is connected but no event type is selected yet.",
+          "completeSetup": "Complete Setup"
+        },
+        "eventType": {
+          "label": "Event Type",
+          "helper": "Select which appointment type the chatbot should book",
+          "placeholder": "Select an event type…",
+          "minutes": "{{count}} min"
+        },
+        "connected": {
+          "eventTypeFallback": "Event Type #{{id}}",
+          "change": "Change",
+          "disconnect": "Disconnect"
+        },
+        "advanced": {
+          "toggle": "Advanced Settings",
+          "language": "Language",
+          "collectLabel": "Collect from customer",
+          "fields": {
+            "name": "Name",
+            "email": "Email",
+            "phone": "Phone",
+            "notes": "Notes"
+          },
+          "save": "Save Advanced Settings"
+        },
+        "disconnectConfirm": {
+          "message": "Disconnect Cal.com? Your chatbot will no longer be able to book appointments.",
+          "confirm": "Yes, Disconnect",
+          "disconnecting": "Disconnecting…"
+        }
+      }
+    },
+    "capabilities": {
+      "header": {
+        "title": "Capabilities",
+        "descriptionSuperAdmin": "Configure what the bot can do for this tenant.",
+        "descriptionAdmin": "Control which capabilities are active for your chatbot.",
+        "addButton": "Add Capability"
+      },
+      "errors": {
+        "loadFailed": "Failed to load capabilities. Please refresh the page."
+      },
+      "tenantView": {
+        "emptyState": "No capabilities configured yet. Contact your account manager to set up bot capabilities.",
+        "noDescription": "No description available"
+      },
+      "superAdminView": {
+        "emptyState": "No capabilities configured. Add one to define what the bot can do.",
+        "statusActive": "Active",
+        "statusDisabled": "Disabled",
+        "triggerPrefix": "Trigger:"
+      },
+      "deleteDialog": {
+        "title": "Delete “{{name}}”?",
+        "description": "This will permanently remove the capability. This action cannot be undone.",
+        "deleting": "Deleting…"
+      },
+      "teamNotifications": {
+        "title": "Team Notifications",
+        "description": "Get notified when your chatbot captures leads or finishes conversations.",
+        "types": {
+          "newLeadAlert": {
+            "title": "New Lead Alert",
+            "description": "Notify your team when a new lead is captured via the chatbot."
+          },
+          "conversationSummary": {
+            "title": "Conversation Summary",
+            "description": "Send a summary of each conversation to the team inbox when a session ends."
+          }
+        },
+        "recipients": {
+          "label": "Recipients",
+          "commaSeparated": "(comma-separated)",
+          "placeholder": "team@example.com, manager@example.com"
+        }
+      },
+      "dialog": {
+        "editTitle": "Edit Capability",
+        "addTitle": "Add Capability",
+        "internalName": {
+          "label": "Internal Name",
+          "placeholder": "e.g. book_appointment",
+          "helper": "Used internally. Not shown to tenant admins."
+        },
+        "displayName": {
+          "label": "Display Name",
+          "placeholder": "e.g. Appointment Booking",
+          "helper": "Friendly name shown to tenant admins."
+        },
+        "description": {
+          "label": "Description",
+          "placeholder": "e.g. Allows the bot to check availability and book appointments on behalf of visitors.",
+          "helper": "Explains what this capability does in plain language."
+        },
+        "trigger": {
+          "label": "Trigger description",
+          "placeholder": "Describe when this skill should activate…"
+        },
+        "tools": {
+          "label": "Tools"
+        },
+        "instructions": {
+          "label": "Instructions",
+          "placeholder": "Step-by-step instructions for the bot…"
+        },
+        "maxSteps": {
+          "label": "Max Steps"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "description": "Activate this capability for the tenant"
+        },
+        "saving": "Saving…",
+        "createCapability": "Create Capability"
+      },
+      "tools": {
+        "kb_search": "Knowledge Base",
+        "escalate_to_human": "Human Handoff",
+        "capture_lead": "Lead Capture",
+        "check_availability": "Check Availability",
+        "create_booking": "Create Booking",
+        "list_bookings": "List Bookings",
+        "reschedule_booking": "Reschedule Booking",
+        "cancel_booking": "Cancel Booking"
+      }
+    },
+    "billing": {
+      "plans": {
+        "free": {
+          "name": "Free",
+          "price": "$0/mo",
+          "blurb": "Try out the basics on the house.",
+          "features": {
+            "agents": "1 agent",
+            "sessions": "10 concurrent sessions",
+            "channels": "1 channel",
+            "byoLlm": "BYO LLM key"
+          }
+        },
+        "pro": {
+          "name": "Pro",
+          "price": "$49/mo",
+          "blurb": "For growing teams.",
+          "features": {
+            "agents": "3 agents",
+            "sessions": "100 concurrent sessions",
+            "llmCalls": "1,000 platform LLM calls/day",
+            "channels": "3 channels",
+            "uploadsHandoff": "File uploads & handoff"
+          }
+        },
+        "premium": {
+          "name": "Premium",
+          "price": "$199/mo",
+          "blurb": "Custom branding + room to grow.",
+          "features": {
+            "agents": "10 agents",
+            "sessions": "500 concurrent sessions",
+            "llmCalls": "10,000 platform LLM calls/day",
+            "channels": "Unlimited channels",
+            "branding": "Custom branding & domain",
+            "support": "Priority support"
+          }
+        },
+        "enterprise": {
+          "name": "Enterprise",
+          "price": "Custom",
+          "blurb": "Sales-managed, SLA support.",
+          "features": {
+            "unlimited": "Unlimited everything",
+            "integrations": "Custom integrations",
+            "sla": "SLA + dedicated support"
+          }
+        }
+      },
+      "status": {
+        "trialing": "Trialing",
+        "active": "Active",
+        "pastDue": "Past due",
+        "cancelled": "Cancelled",
+        "none": "No plan"
+      },
+      "trial": {
+        "endsInDays_one": "Trial ends {{date}} — {{count}} day left",
+        "endsInDays_other": "Trial ends {{date}} — {{count}} days left"
+      },
+      "currentPlan": {
+        "title": "Current plan",
+        "renewsOn": "Renews on {{date}}",
+        "cancellingOn": "Cancelling on {{date}} — you'll drop to Free after that.",
+        "switchingTo": "Switching to {{plan}} on {{date}}",
+        "pastDueWarning": "Payment failed — update your payment method to keep your subscription active."
+      },
+      "manage": {
+        "title": "Manage subscription",
+        "upgradeToPremium": "Upgrade to Premium",
+        "downgradeToPro": "Downgrade to Pro",
+        "cancelSubscription": "Cancel subscription",
+        "resumeSubscription": "Resume subscription",
+        "undoPendingChange": "Undo pending change",
+        "managePaymentMethod": "Manage payment method"
+      },
+      "enterprise": {
+        "title": "Enterprise plan",
+        "description": "Your account is on a sales-managed Enterprise plan. To make plan or billing changes, reach out to your account contact.",
+        "contactSales": "Contact sales"
+      },
+      "subscribe": {
+        "cta": "Subscribe to {{plan}}"
+      },
+      "email": {
+        "title": "Billing email",
+        "label": "Invoices and receipts go here",
+        "placeholder": "billing@your-company.com"
+      },
+      "history": {
+        "title": "History",
+        "empty": "No billing activity yet.",
+        "viewInvoice": "View invoice",
+        "events": {
+          "trialCreated": "Trial started",
+          "trialExpired": "Trial expired",
+          "subscriptionCreated": "Subscription created",
+          "subscriptionUpdated": "Subscription updated",
+          "subscriptionCancelled": "Subscription cancelled",
+          "invoicePaid": "Invoice paid",
+          "invoicePaymentFailed": "Payment failed",
+          "refundRecorded": "Refund recorded",
+          "billingEmailUpdated": "Billing email updated",
+          "tierManualOverride": "Tier changed by admin"
+        }
+      },
+      "loadError": "Couldn't load billing state: {{error}}",
+      "unknownError": "unknown error",
+      "subscribedJustNow": "Subscription received — waiting for Stripe to confirm. This page will update automatically."
     }
   }
 }

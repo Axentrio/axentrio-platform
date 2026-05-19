@@ -73,7 +73,7 @@
         "title": "Voorkeuren",
         "language": {
           "label": "Taal",
-          "helper": "Gebruikt voor e-mails en accountcommunicatie. Vertaling van de interface volgt binnenkort.",
+          "helper": "Gebruikt voor e-mails en accountcommunicatie. Vertaling van de interface is in uitvoering.",
           "saveFailed": "Taalvoorkeur opslaan is mislukt.",
           "options": {
             "en": "English",
@@ -111,6 +111,370 @@
         "dark": "Donker",
         "system": "Systeem"
       }
+    },
+    "widget": {
+      "title": "Widget & merk",
+      "description": "Beheer je logo, weergavenaam en insluitcode",
+      "saveFailed": "Brandingsinstellingen opslaan is mislukt",
+      "loadFailed": "Brandingsinstellingen laden is mislukt.",
+      "appearanceNotice": {
+        "prefix": "Widgetweergave (kleur, avatar, launcher) wordt nu geconfigureerd onder",
+        "linkText": "AI & Inhoud → Chatbot-weergave",
+        "suffix": "."
+      },
+      "logo": {
+        "title": "Logo",
+        "description": "Het logo van je organisatie verschijnt in de header van de chatwidget",
+        "uploadHint": "Klik om een nieuw logo te uploaden",
+        "recommended": "Aanbevolen: 256x256px, PNG of SVG",
+        "removeTitle": "Logo verwijderen",
+        "uploaded": "Organisatielogo bijgewerkt",
+        "uploadFailed": "Logo bijwerken is mislukt",
+        "removed": "Organisatielogo verwijderd",
+        "removeFailed": "Logo verwijderen is mislukt"
+      },
+      "displayName": {
+        "title": "Weergavenaam",
+        "description": "De naam die wordt weergegeven in de header van de chatwidget",
+        "label": "Naam",
+        "placeholder": "Je bedrijfsnaam"
+      },
+      "status": {
+        "title": "Status",
+        "activeSessions": "Actieve sessies",
+        "maxSessions": "Max. sessies",
+        "active": "Actief",
+        "inactive": "Inactief"
+      },
+      "embed": {
+        "title": "Widget insluiten",
+        "description": "Voeg dit codefragment toe aan de HTML van je website, vlak voor de afsluitende </body>-tag",
+        "copied": "Gekopieerd naar klembord",
+        "copyTitle": "Codefragment kopiëren"
+      }
+    },
+    "integrations": {
+      "copyFailed": "Kopiëren naar klembord is mislukt",
+      "apiKey": {
+        "title": "API-sleutel",
+        "label": "Je API-sleutel",
+        "copyTooltip": "API-sleutel kopiëren",
+        "copySuccess": "API-sleutel gekopieerd naar klembord",
+        "rotateTooltip": "API-sleutel vernieuwen",
+        "rotated": "API-sleutel met succes vernieuwd",
+        "rotateFailed": "API-sleutel vernieuwen is mislukt",
+        "rotateConfirm": {
+          "title": "API-sleutel vernieuwen?",
+          "description": "Hierdoor wordt je huidige API-sleutel onmiddellijk ongeldig. Integraties die de oude sleutel gebruiken, zullen niet meer werken. Deze actie kan niet ongedaan gemaakt worden.",
+          "action": "Sleutel vernieuwen"
+        }
+      },
+      "webhookUrl": {
+        "title": "Webhook-URL",
+        "label": "Uitgaande webhook-URL",
+        "testConnection": "Verbinding testen"
+      },
+      "health": {
+        "title": "Verbindingsstatus",
+        "healthy": "Gezond",
+        "unhealthy": "Ongezond",
+        "unknown": "Onbekend",
+        "lastDelivery": "Laatste levering",
+        "lastSuccess": "Laatste succes"
+      },
+      "inbound": {
+        "title": "Inkomend webhook-eindpunt",
+        "label": "Eindpunt-URL (alleen-lezen)",
+        "copyTooltip": "URL kopiëren",
+        "copySuccess": "Inkomende webhook-URL gekopieerd naar klembord",
+        "helper": "Configureer je automatiseringsworkflow om antwoorden naar deze URL te sturen. Voeg je tenant-ID toe aan de request body."
+      },
+      "webhookSecret": {
+        "title": "Webhook-geheim",
+        "label": "Geheime sleutel",
+        "copyTooltip": "Webhook-geheim kopiëren",
+        "copySuccess": "Webhook-geheim gekopieerd naar klembord",
+        "regenerateTooltip": "Webhook-geheim opnieuw genereren",
+        "regenerated": "Webhook-geheim opnieuw gegenereerd",
+        "regenerateFailed": "Webhook-geheim opnieuw genereren is mislukt",
+        "regenerateConfirm": {
+          "title": "Webhook-geheim opnieuw genereren?",
+          "description": "Hierdoor wordt je huidige webhook-geheim onmiddellijk ongeldig. Je moet het geheim bijwerken in je automatiseringsworkflows. Deze actie kan niet ongedaan gemaakt worden.",
+          "action": "Geheim opnieuw genereren"
+        }
+      },
+      "deliveries": {
+        "title": "Leveringslog",
+        "columns": {
+          "time": "Tijd",
+          "direction": "Richting",
+          "event": "Gebeurtenis",
+          "status": "Status",
+          "http": "HTTP",
+          "duration": "Duur",
+          "error": "Fout"
+        },
+        "direction": {
+          "inbound": "inkomend",
+          "outbound": "uitgaand"
+        },
+        "status": {
+          "success": "succes",
+          "failed": "mislukt",
+          "retrying": "opnieuw proberen",
+          "dropped": "verwijderd"
+        },
+        "page": "Pagina {{page}}",
+        "prev": "Vorige",
+        "next": "Volgende",
+        "empty": "Nog geen leveringslogs. Stuur een test-webhook om vermeldingen hier te zien."
+      },
+      "calcom": {
+        "title": "Afspraak boeken",
+        "subtitle": "Koppel Cal.com om je chatbot afspraken te laten boeken",
+        "connectedBadge": "Verbonden",
+        "apiKeyLabel": "Cal.com API-sleutel",
+        "apiKeyHelper": "Vind je API-sleutel op Cal.com → Instellingen → Developer → API Keys",
+        "connect": "Verbinden",
+        "connectFailed": "Verbinden mislukt",
+        "connecting": "Verbinden met Cal.com…",
+        "needsEventType": {
+          "message": "Cal.com is verbonden, maar er is nog geen gebeurtenistype geselecteerd.",
+          "completeSetup": "Setup voltooien"
+        },
+        "eventType": {
+          "label": "Gebeurtenistype",
+          "helper": "Selecteer welk type afspraak de chatbot moet boeken",
+          "placeholder": "Selecteer een gebeurtenistype…",
+          "minutes": "{{count}} min"
+        },
+        "connected": {
+          "eventTypeFallback": "Gebeurtenistype #{{id}}",
+          "change": "Wijzigen",
+          "disconnect": "Loskoppelen"
+        },
+        "advanced": {
+          "toggle": "Geavanceerde instellingen",
+          "language": "Taal",
+          "collectLabel": "Verzamelen van klant",
+          "fields": {
+            "name": "Naam",
+            "email": "E-mail",
+            "phone": "Telefoon",
+            "notes": "Notities"
+          },
+          "save": "Geavanceerde instellingen opslaan"
+        },
+        "disconnectConfirm": {
+          "message": "Cal.com loskoppelen? Je chatbot kan dan geen afspraken meer boeken.",
+          "confirm": "Ja, loskoppelen",
+          "disconnecting": "Loskoppelen…"
+        }
+      }
+    },
+    "capabilities": {
+      "header": {
+        "title": "Functionaliteiten",
+        "descriptionSuperAdmin": "Configureer wat de bot kan doen voor deze klant.",
+        "descriptionAdmin": "Bepaal welke functionaliteiten actief zijn voor je chatbot.",
+        "addButton": "Functionaliteit toevoegen"
+      },
+      "errors": {
+        "loadFailed": "Functionaliteiten laden is mislukt. Vernieuw de pagina."
+      },
+      "tenantView": {
+        "emptyState": "Nog geen functionaliteiten geconfigureerd. Neem contact op met je accountmanager om bot-functionaliteiten in te stellen.",
+        "noDescription": "Geen beschrijving beschikbaar"
+      },
+      "superAdminView": {
+        "emptyState": "Geen functionaliteiten geconfigureerd. Voeg er een toe om te bepalen wat de bot kan doen.",
+        "statusActive": "Actief",
+        "statusDisabled": "Uitgeschakeld",
+        "triggerPrefix": "Trigger:"
+      },
+      "deleteDialog": {
+        "title": "“{{name}}” verwijderen?",
+        "description": "Hiermee wordt de functionaliteit permanent verwijderd. Deze actie kan niet ongedaan gemaakt worden.",
+        "deleting": "Verwijderen…"
+      },
+      "teamNotifications": {
+        "title": "Teammeldingen",
+        "description": "Krijg meldingen wanneer je chatbot leads vastlegt of gesprekken afrondt.",
+        "types": {
+          "newLeadAlert": {
+            "title": "Nieuwe-leadmelding",
+            "description": "Stuur een melding naar je team wanneer een nieuwe lead via de chatbot wordt vastgelegd."
+          },
+          "conversationSummary": {
+            "title": "Gesprekssamenvatting",
+            "description": "Stuur een samenvatting van elk gesprek naar de team-inbox wanneer een sessie eindigt."
+          }
+        },
+        "recipients": {
+          "label": "Ontvangers",
+          "commaSeparated": "(door komma's gescheiden)",
+          "placeholder": "team@example.com, manager@example.com"
+        }
+      },
+      "dialog": {
+        "editTitle": "Functionaliteit bewerken",
+        "addTitle": "Functionaliteit toevoegen",
+        "internalName": {
+          "label": "Interne naam",
+          "placeholder": "bijv. book_appointment",
+          "helper": "Wordt intern gebruikt. Niet zichtbaar voor klantbeheerders."
+        },
+        "displayName": {
+          "label": "Weergavenaam",
+          "placeholder": "bijv. Afspraak boeken",
+          "helper": "Vriendelijke naam die getoond wordt aan klantbeheerders."
+        },
+        "description": {
+          "label": "Beschrijving",
+          "placeholder": "bijv. Laat de bot beschikbaarheid controleren en afspraken boeken namens bezoekers.",
+          "helper": "Legt in gewone taal uit wat deze functionaliteit doet."
+        },
+        "trigger": {
+          "label": "Triggerbeschrijving",
+          "placeholder": "Beschrijf wanneer deze skill geactiveerd moet worden…"
+        },
+        "tools": {
+          "label": "Tools"
+        },
+        "instructions": {
+          "label": "Instructies",
+          "placeholder": "Stap-voor-stap-instructies voor de bot…"
+        },
+        "maxSteps": {
+          "label": "Max. stappen"
+        },
+        "enabled": {
+          "title": "Ingeschakeld",
+          "description": "Activeer deze functionaliteit voor de klant"
+        },
+        "saving": "Opslaan…",
+        "createCapability": "Functionaliteit aanmaken"
+      },
+      "tools": {
+        "kb_search": "Kennisbank",
+        "escalate_to_human": "Overdracht naar mens",
+        "capture_lead": "Lead vastleggen",
+        "check_availability": "Beschikbaarheid controleren",
+        "create_booking": "Boeking aanmaken",
+        "list_bookings": "Boekingen tonen",
+        "reschedule_booking": "Boeking verzetten",
+        "cancel_booking": "Boeking annuleren"
+      }
+    },
+    "billing": {
+      "plans": {
+        "free": {
+          "name": "Gratis",
+          "price": "$0/maand",
+          "blurb": "Probeer de basis gratis uit.",
+          "features": {
+            "agents": "1 agent",
+            "sessions": "10 gelijktijdige sessies",
+            "channels": "1 kanaal",
+            "byoLlm": "Eigen LLM-sleutel"
+          }
+        },
+        "pro": {
+          "name": "Pro",
+          "price": "$49/maand",
+          "blurb": "Voor groeiende teams.",
+          "features": {
+            "agents": "3 agents",
+            "sessions": "100 gelijktijdige sessies",
+            "llmCalls": "1.000 platform-LLM-calls per dag",
+            "channels": "3 kanalen",
+            "uploadsHandoff": "Bestandsuploads & overdracht"
+          }
+        },
+        "premium": {
+          "name": "Premium",
+          "price": "$199/maand",
+          "blurb": "Eigen branding + ruimte om te groeien.",
+          "features": {
+            "agents": "10 agents",
+            "sessions": "500 gelijktijdige sessies",
+            "llmCalls": "10.000 platform-LLM-calls per dag",
+            "channels": "Onbeperkt aantal kanalen",
+            "branding": "Eigen branding & domein",
+            "support": "Prioriteitsondersteuning"
+          }
+        },
+        "enterprise": {
+          "name": "Enterprise",
+          "price": "Op maat",
+          "blurb": "Sales-beheerd, SLA-ondersteuning.",
+          "features": {
+            "unlimited": "Alles onbeperkt",
+            "integrations": "Aangepaste integraties",
+            "sla": "SLA + toegewijde ondersteuning"
+          }
+        }
+      },
+      "status": {
+        "trialing": "Proefperiode",
+        "active": "Actief",
+        "pastDue": "Achterstallig",
+        "cancelled": "Geannuleerd",
+        "none": "Geen abonnement"
+      },
+      "trial": {
+        "endsInDays_one": "Proefperiode eindigt {{date}} — nog {{count}} dag",
+        "endsInDays_other": "Proefperiode eindigt {{date}} — nog {{count}} dagen"
+      },
+      "currentPlan": {
+        "title": "Huidig abonnement",
+        "renewsOn": "Verlengt op {{date}}",
+        "cancellingOn": "Wordt geannuleerd op {{date}} — daarna val je terug op Gratis.",
+        "switchingTo": "Wisselt op {{date}} naar {{plan}}",
+        "pastDueWarning": "Betaling mislukt — werk je betaalmethode bij om je abonnement actief te houden."
+      },
+      "manage": {
+        "title": "Abonnement beheren",
+        "upgradeToPremium": "Upgraden naar Premium",
+        "downgradeToPro": "Downgraden naar Pro",
+        "cancelSubscription": "Abonnement opzeggen",
+        "resumeSubscription": "Abonnement hervatten",
+        "undoPendingChange": "Geplande wijziging ongedaan maken",
+        "managePaymentMethod": "Betaalmethode beheren"
+      },
+      "enterprise": {
+        "title": "Enterprise-abonnement",
+        "description": "Je account heeft een sales-beheerd Enterprise-abonnement. Neem contact op met je accountcontact om abonnements- of facturatiewijzigingen door te voeren.",
+        "contactSales": "Contact met sales"
+      },
+      "subscribe": {
+        "cta": "Abonneren op {{plan}}"
+      },
+      "email": {
+        "title": "Facturatie-e-mail",
+        "label": "Facturen en bewijzen gaan hierheen",
+        "placeholder": "facturatie@jouw-bedrijf.com"
+      },
+      "history": {
+        "title": "Geschiedenis",
+        "empty": "Nog geen facturatieactiviteit.",
+        "viewInvoice": "Factuur bekijken",
+        "events": {
+          "trialCreated": "Proefperiode gestart",
+          "trialExpired": "Proefperiode verlopen",
+          "subscriptionCreated": "Abonnement aangemaakt",
+          "subscriptionUpdated": "Abonnement bijgewerkt",
+          "subscriptionCancelled": "Abonnement geannuleerd",
+          "invoicePaid": "Factuur betaald",
+          "invoicePaymentFailed": "Betaling mislukt",
+          "refundRecorded": "Terugbetaling geregistreerd",
+          "billingEmailUpdated": "Facturatie-e-mail bijgewerkt",
+          "tierManualOverride": "Plan gewijzigd door beheerder"
+        }
+      },
+      "loadError": "Facturatiestatus kon niet geladen worden: {{error}}",
+      "unknownError": "onbekende fout",
+      "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt."
     }
   }
 }

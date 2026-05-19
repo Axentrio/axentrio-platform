@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Camera, X, Loader2, Save, Check, Copy } from 'lucide-react';
 import { useOrganization } from '@clerk/clerk-react';
@@ -67,6 +68,7 @@ function mapApiToTenant(data: TenantApiData): Tenant {
 }
 
 const WidgetBrandSettings: React.FC = () => {
+  const { t } = useTranslation();
   const { organization } = useOrganization();
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
@@ -103,7 +105,7 @@ const WidgetBrandSettings: React.FC = () => {
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);
     } catch {
-      toast.error('Failed to save branding settings');
+      toast.error(t('settings.widget.saveFailed'));
     } finally {
       setIsSaving(false);
     }
@@ -115,9 +117,9 @@ const WidgetBrandSettings: React.FC = () => {
     setIsUploadingLogo(true);
     try {
       await organization.setLogo({ file });
-      toast.success('Organization logo updated');
+      toast.success(t('settings.widget.logo.uploaded'));
     } catch {
-      toast.error('Failed to update logo');
+      toast.error(t('settings.widget.logo.uploadFailed'));
     } finally {
       setIsUploadingLogo(false);
       if (logoInputRef.current) logoInputRef.current.value = '';
@@ -129,9 +131,9 @@ const WidgetBrandSettings: React.FC = () => {
     setIsUploadingLogo(true);
     try {
       await organization.setLogo({ file: null });
-      toast.success('Organization logo removed');
+      toast.success(t('settings.widget.logo.removed'));
     } catch {
-      toast.error('Failed to remove logo');
+      toast.error(t('settings.widget.logo.removeFailed'));
     } finally {
       setIsUploadingLogo(false);
     }
@@ -151,7 +153,7 @@ const WidgetBrandSettings: React.FC = () => {
     return (
       <Card variant="glass" className="p-6">
         <p className="text-text-secondary">
-          {(error as Error)?.message || 'Failed to load branding settings.'}
+          {(error as Error)?.message || t('settings.widget.loadFailed')}
         </p>
       </Card>
     );
@@ -161,26 +163,26 @@ const WidgetBrandSettings: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h2 className="text-xl font-semibold text-text-primary">Widget & Brand</h2>
+        <h2 className="text-xl font-semibold text-text-primary">{t('settings.widget.title')}</h2>
         <p className="text-sm text-text-secondary">
-          Manage your logo, display name, and embed snippet
+          {t('settings.widget.description')}
         </p>
       </div>
 
       <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm">
-        Widget appearance (color, avatar, launcher) is now configured under{' '}
+        {t('settings.widget.appearanceNotice.prefix')}{' '}
         <Link to="/ai?tab=appearances" className="underline">
-          AI & Content → Chatbot Appearances
+          {t('settings.widget.appearanceNotice.linkText')}
         </Link>
-        .
+        {t('settings.widget.appearanceNotice.suffix')}
       </div>
 
       {/* Logo Section */}
       <Card variant="glass">
         <CardHeader>
-          <h3 className="font-medium text-text-primary">Logo</h3>
+          <h3 className="font-medium text-text-primary">{t('settings.widget.logo.title')}</h3>
           <p className="text-sm text-text-muted">
-            Your organization logo appears in the chat widget header
+            {t('settings.widget.logo.description')}
           </p>
         </CardHeader>
         <CardContent className="flex items-center gap-4">
@@ -228,15 +230,15 @@ const WidgetBrandSettings: React.FC = () => {
                 type="button"
                 onClick={(e) => { e.stopPropagation(); handleLogoRemove(); }}
                 className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-surface-3 border border-edge flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive hover:border-destructive text-text-muted hover:text-white"
-                title="Remove logo"
+                title={t('settings.widget.logo.removeTitle')}
               >
                 <X className="w-3 h-3" />
               </Button>
             )}
           </div>
           <div className="text-sm text-text-muted">
-            <p>Click to upload a new logo</p>
-            <p className="text-xs">Recommended: 256x256px, PNG or SVG</p>
+            <p>{t('settings.widget.logo.uploadHint')}</p>
+            <p className="text-xs">{t('settings.widget.logo.recommended')}</p>
           </div>
         </CardContent>
       </Card>
@@ -244,19 +246,19 @@ const WidgetBrandSettings: React.FC = () => {
       {/* Display Name */}
       <Card variant="glass">
         <CardHeader>
-          <h3 className="font-medium text-text-primary">Display Name</h3>
+          <h3 className="font-medium text-text-primary">{t('settings.widget.displayName.title')}</h3>
           <p className="text-sm text-text-muted">
-            The name shown in the chat widget header
+            {t('settings.widget.displayName.description')}
           </p>
         </CardHeader>
         <CardContent>
           <div className="max-w-sm space-y-2">
-            <Label htmlFor="display-name">Name</Label>
+            <Label htmlFor="display-name">{t('settings.widget.displayName.label')}</Label>
             <Input
               id="display-name"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your company name"
+              placeholder={t('settings.widget.displayName.placeholder')}
             />
           </div>
         </CardContent>
@@ -265,17 +267,17 @@ const WidgetBrandSettings: React.FC = () => {
       {/* Status */}
       <Card variant="glass">
         <CardHeader>
-          <h3 className="font-medium text-text-primary">Status</h3>
+          <h3 className="font-medium text-text-primary">{t('settings.widget.status.title')}</h3>
         </CardHeader>
         <CardContent>
           <div className="flex items-center gap-4">
             <div className="text-center">
               <p className="text-lg font-semibold text-text-primary">{tenant.currentAgents}</p>
-              <p className="text-xs text-text-muted">Active Sessions</p>
+              <p className="text-xs text-text-muted">{t('settings.widget.status.activeSessions')}</p>
             </div>
             <div className="text-center">
               <p className="text-lg font-semibold text-text-primary">{tenant.maxAgents}</p>
-              <p className="text-xs text-text-muted">Max Sessions</p>
+              <p className="text-xs text-text-muted">{t('settings.widget.status.maxSessions')}</p>
             </div>
             <div className="flex-1 text-right">
               <Badge
@@ -285,7 +287,7 @@ const WidgetBrandSettings: React.FC = () => {
                     : 'bg-surface-3 text-text-muted border-edge'
                 )}
               >
-                {tenant.isActive ? 'Active' : 'Inactive'}
+                {tenant.isActive ? t('settings.widget.status.active') : t('settings.widget.status.inactive')}
               </Badge>
             </div>
           </div>
@@ -295,8 +297,8 @@ const WidgetBrandSettings: React.FC = () => {
       {/* Embed Widget */}
       <Card variant="glass">
         <CardHeader>
-          <h3 className="font-medium text-text-primary">Embed Widget</h3>
-          <p className="text-xs text-text-muted">Add this snippet to your website's HTML, just before the closing &lt;/body&gt; tag</p>
+          <h3 className="font-medium text-text-primary">{t('settings.widget.embed.title')}</h3>
+          <p className="text-xs text-text-muted">{t('settings.widget.embed.description')}</p>
         </CardHeader>
         <CardContent>
           <div className="relative">
@@ -306,10 +308,10 @@ const WidgetBrandSettings: React.FC = () => {
             <button
               onClick={() => {
                 navigator.clipboard.writeText(embedSnippet);
-                toast.success('Copied to clipboard');
+                toast.success(t('settings.widget.embed.copied'));
               }}
               className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
-              title="Copy snippet"
+              title={t('settings.widget.embed.copyTitle')}
             >
               <Copy className="h-3.5 w-3.5" />
             </button>
@@ -323,17 +325,17 @@ const WidgetBrandSettings: React.FC = () => {
           {isSaving ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Saving...
+              {t('common.saving')}
             </>
           ) : saveSuccess ? (
             <>
               <Check className="w-4 h-4 mr-2" />
-              Saved
+              {t('common.saved')}
             </>
           ) : (
             <>
               <Save className="w-4 h-4 mr-2" />
-              Save Changes
+              {t('common.save')}
             </>
           )}
         </Button>

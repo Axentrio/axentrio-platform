@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Pencil, Trash2, Zap, Loader2, ToggleLeft, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,16 +25,16 @@ import { useGetAutomations, useUpdateAutomation } from '@/queries/useAutomations
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-// Friendly display names for internal tool identifiers
-const TOOL_LABELS: Record<string, string> = {
-  kb_search: 'Knowledge Base',
-  escalate_to_human: 'Human Handoff',
-  capture_lead: 'Lead Capture',
-  check_availability: 'Check Availability',
-  create_booking: 'Create Booking',
-  list_bookings: 'List Bookings',
-  reschedule_booking: 'Reschedule Booking',
-  cancel_booking: 'Cancel Booking',
+// Internal tool identifiers — mapped to i18n keys for friendly display names
+const TOOL_LABEL_KEYS: Record<string, string> = {
+  kb_search: 'settings.capabilities.tools.kb_search',
+  escalate_to_human: 'settings.capabilities.tools.escalate_to_human',
+  capture_lead: 'settings.capabilities.tools.capture_lead',
+  check_availability: 'settings.capabilities.tools.check_availability',
+  create_booking: 'settings.capabilities.tools.create_booking',
+  list_bookings: 'settings.capabilities.tools.list_bookings',
+  reschedule_booking: 'settings.capabilities.tools.reschedule_booking',
+  cancel_booking: 'settings.capabilities.tools.cancel_booking',
 };
 
 interface SkillFormState {
@@ -67,13 +68,15 @@ const TenantCapabilitiesView: React.FC<{
   onToggle: (skill: Any) => void;
   isToggling: boolean;
 }> = ({ skills, isAdmin, onToggle, isToggling }) => {
+  const { t } = useTranslation();
+
   if (skills.length === 0) {
     return (
       <Card variant="glass">
         <CardContent className="py-12 text-center">
           <ToggleLeft className="w-10 h-10 text-text-muted mx-auto mb-3" />
           <p className="text-text-secondary text-sm">
-            No capabilities configured yet. Contact your account manager to set up bot capabilities.
+            {t('settings.capabilities.tenantView.emptyState')}
           </p>
         </CardContent>
       </Card>
@@ -84,7 +87,7 @@ const TenantCapabilitiesView: React.FC<{
     <div className="grid gap-3 sm:grid-cols-2">
       {skills.map((skill: Any) => {
         const label = skill.displayName || formatName(skill.name);
-        const desc = skill.description || skill.trigger || 'No description available';
+        const desc = skill.description || skill.trigger || t('settings.capabilities.tenantView.noDescription');
 
         return (
           <Card key={skill.name} variant="glass">
@@ -108,9 +111,9 @@ const TenantCapabilitiesView: React.FC<{
                   </p>
                   {skill.tools?.length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-2">
-                      {skill.tools.map((t: string) => (
-                        <Badge key={t} variant="outline" className="text-xs">
-                          {TOOL_LABELS[t] || t}
+                      {skill.tools.map((toolName: string) => (
+                        <Badge key={toolName} variant="outline" className="text-xs">
+                          {TOOL_LABEL_KEYS[toolName] ? t(TOOL_LABEL_KEYS[toolName]) : toolName}
                         </Badge>
                       ))}
                     </div>
@@ -135,6 +138,7 @@ const SuperAdminSkillsView: React.FC<{
   onCreate: () => void;
   isToggling: boolean;
 }> = ({ skills, onToggle, onEdit, onCreate, isToggling }) => {
+  const { t } = useTranslation();
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const deleteSkill = useDeleteSkill();
 
@@ -149,11 +153,11 @@ const SuperAdminSkillsView: React.FC<{
           <CardContent className="py-12 text-center">
             <Zap className="w-10 h-10 text-text-muted mx-auto mb-3" />
             <p className="text-text-secondary text-sm">
-              No capabilities configured. Add one to define what the bot can do.
+              {t('settings.capabilities.superAdminView.emptyState')}
             </p>
             <Button onClick={onCreate} size="sm" className="mt-4 gap-1.5">
               <Plus className="w-4 h-4" />
-              Add Capability
+              {t('settings.capabilities.header.addButton')}
             </Button>
           </CardContent>
         </Card>
@@ -174,9 +178,9 @@ const SuperAdminSkillsView: React.FC<{
                         <p className="font-medium text-text-primary">{label}</p>
                         <span className="text-xs text-text-muted font-mono">({skill.name})</span>
                         {skill.enabled ? (
-                          <Badge variant="success">Active</Badge>
+                          <Badge variant="success">{t('settings.capabilities.superAdminView.statusActive')}</Badge>
                         ) : (
-                          <Badge variant="secondary">Disabled</Badge>
+                          <Badge variant="secondary">{t('settings.capabilities.superAdminView.statusDisabled')}</Badge>
                         )}
                       </div>
                       {skill.description && (
@@ -186,14 +190,14 @@ const SuperAdminSkillsView: React.FC<{
                       )}
                       {skill.trigger && (
                         <p className="text-xs text-text-muted mt-0.5 line-clamp-1">
-                          Trigger: {skill.trigger}
+                          {t('settings.capabilities.superAdminView.triggerPrefix')} {skill.trigger}
                         </p>
                       )}
                       {skill.tools?.length > 0 && (
                         <div className="flex flex-wrap gap-1 mt-2">
-                          {skill.tools.map((t: string) => (
-                            <Badge key={t} variant="outline" className="text-xs">
-                              {t}
+                          {skill.tools.map((toolName: string) => (
+                            <Badge key={toolName} variant="outline" className="text-xs">
+                              {toolName}
                             </Badge>
                           ))}
                         </div>
@@ -209,14 +213,14 @@ const SuperAdminSkillsView: React.FC<{
                       <button
                         onClick={() => onEdit(skill)}
                         className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
-                        title="Edit"
+                        title={t('common.edit')}
                       >
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
                         onClick={() => setDeleteConfirm(skill.name)}
                         className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                        title="Delete"
+                        title={t('common.delete')}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
@@ -233,9 +237,9 @@ const SuperAdminSkillsView: React.FC<{
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-0/80 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-edge bg-surface-1 p-6 shadow-lg space-y-4">
-            <p className="font-semibold text-text-primary">Delete &ldquo;{deleteConfirm}&rdquo;?</p>
+            <p className="font-semibold text-text-primary">{t('settings.capabilities.deleteDialog.title', { name: deleteConfirm })}</p>
             <p className="text-sm text-text-secondary">
-              This will permanently remove the capability. This action cannot be undone.
+              {t('settings.capabilities.deleteDialog.description')}
             </p>
             <div className="flex gap-2 justify-end">
               <Button
@@ -244,7 +248,7 @@ const SuperAdminSkillsView: React.FC<{
                 onClick={() => setDeleteConfirm(null)}
                 disabled={deleteSkill.isPending}
               >
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button
                 variant="destructive"
@@ -255,10 +259,10 @@ const SuperAdminSkillsView: React.FC<{
                 {deleteSkill.isPending ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    Deleting...
+                    {t('settings.capabilities.deleteDialog.deleting')}
                   </span>
                 ) : (
-                  'Delete'
+                  t('common.delete')
                 )}
               </Button>
             </div>
@@ -282,17 +286,18 @@ function formatName(name: string): string {
 const NOTIFICATION_TYPES = [
   {
     type: 'newLeadAlert',
-    title: 'New Lead Alert',
-    description: 'Notify your team when a new lead is captured via the chatbot.',
+    titleKey: 'settings.capabilities.teamNotifications.types.newLeadAlert.title',
+    descriptionKey: 'settings.capabilities.teamNotifications.types.newLeadAlert.description',
   },
   {
     type: 'conversationSummary',
-    title: 'Conversation Summary',
-    description: 'Send a summary of each conversation to the team inbox when a session ends.',
+    titleKey: 'settings.capabilities.teamNotifications.types.conversationSummary.title',
+    descriptionKey: 'settings.capabilities.teamNotifications.types.conversationSummary.description',
   },
 ] as const;
 
 const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) => {
+  const { t } = useTranslation();
   const { data: automationsData, isLoading } = useGetAutomations();
   const updateAutomation = useUpdateAutomation();
 
@@ -302,9 +307,9 @@ const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) =
         <div>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Bell className="w-5 h-5 text-primary-400" />
-            Team Notifications
+            {t('settings.capabilities.teamNotifications.title')}
           </h2>
-          <p className="text-sm text-text-secondary mt-0.5">Loading...</p>
+          <p className="text-sm text-text-secondary mt-0.5">{t('common.loading')}</p>
         </div>
       </div>
     );
@@ -318,10 +323,10 @@ const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) =
       <div>
         <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
           <Bell className="w-5 h-5 text-primary-400" />
-          Team Notifications
+          {t('settings.capabilities.teamNotifications.title')}
         </h2>
         <p className="text-sm text-text-secondary mt-0.5">
-          Get notified when your chatbot captures leads or finishes conversations.
+          {t('settings.capabilities.teamNotifications.description')}
         </p>
       </div>
 
@@ -342,12 +347,13 @@ const TeamNotificationsSection: React.FC<{ isAdmin: boolean }> = ({ isAdmin }) =
 };
 
 const NotificationCard: React.FC<{
-  definition: { type: string; title: string; description: string };
+  definition: { type: string; titleKey: string; descriptionKey: string };
   serverData: Any;
   isAdmin: boolean;
   onUpdate: (data: Any) => void;
   isSaving: boolean;
 }> = ({ definition, serverData, isAdmin, onUpdate, isSaving }) => {
+  const { t } = useTranslation();
   const [enabled, setEnabled] = useState(false);
   const [recipients, setRecipients] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -389,8 +395,8 @@ const NotificationCard: React.FC<{
           <div className="flex-1 min-w-0">
             <div className="flex items-center justify-between gap-2">
               <div>
-                <p className="font-medium text-text-primary">{definition.title}</p>
-                <p className="text-xs text-text-muted mt-0.5">{definition.description}</p>
+                <p className="font-medium text-text-primary">{t(definition.titleKey)}</p>
+                <p className="text-xs text-text-muted mt-0.5">{t(definition.descriptionKey)}</p>
               </div>
               <Switch
                 checked={enabled}
@@ -403,15 +409,15 @@ const NotificationCard: React.FC<{
               <div className="mt-3 space-y-2">
                 <div className="space-y-1">
                   <Label htmlFor={`${definition.type}-recipients`} className="text-xs">
-                    Recipients
-                    <span className="ml-1 text-text-muted font-normal">(comma-separated)</span>
+                    {t('settings.capabilities.teamNotifications.recipients.label')}
+                    <span className="ml-1 text-text-muted font-normal">{t('settings.capabilities.teamNotifications.recipients.commaSeparated')}</span>
                   </Label>
                   <div className="flex gap-2">
                     <Input
                       id={`${definition.type}-recipients`}
                       value={recipients}
                       onChange={(e) => { setRecipients(e.target.value); setDirty(true); }}
-                      placeholder="team@example.com, manager@example.com"
+                      placeholder={t('settings.capabilities.teamNotifications.recipients.placeholder')}
                       disabled={!isAdmin}
                       className="text-sm"
                     />
@@ -421,7 +427,7 @@ const NotificationCard: React.FC<{
                         onClick={handleSave}
                         disabled={isSaving}
                       >
-                        {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+                        {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : t('common.save')}
                       </Button>
                     )}
                   </div>
@@ -438,6 +444,7 @@ const NotificationCard: React.FC<{
 // ─── Main Component ──────────────────────────────────────────────────
 
 const CapabilitiesSettings: React.FC = () => {
+  const { t } = useTranslation();
   const { user, isRole } = useAppAuth();
   const isAdmin = isRole('admin');
   const isSuperAdmin = user?.role === 'super_admin';
@@ -496,7 +503,7 @@ const CapabilitiesSettings: React.FC = () => {
     setForm((prev) => ({
       ...prev,
       tools: prev.tools.includes(toolName)
-        ? prev.tools.filter((t) => t !== toolName)
+        ? prev.tools.filter((tn) => tn !== toolName)
         : [...prev.tools, toolName],
     }));
   };
@@ -512,24 +519,24 @@ const CapabilitiesSettings: React.FC = () => {
         <div>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Zap className="w-5 h-5 text-primary-400" />
-            Capabilities
+            {t('settings.capabilities.header.title')}
           </h2>
           <p className="text-sm text-text-secondary mt-0.5">
             {isSuperAdmin
-              ? 'Configure what the bot can do for this tenant.'
-              : 'Control which capabilities are active for your chatbot.'}
+              ? t('settings.capabilities.header.descriptionSuperAdmin')
+              : t('settings.capabilities.header.descriptionAdmin')}
           </p>
         </div>
         {isSuperAdmin && (
           <Button onClick={openCreate} size="sm" className="gap-1.5">
             <Plus className="w-4 h-4" />
-            Add Capability
+            {t('settings.capabilities.header.addButton')}
           </Button>
         )}
       </div>
 
       {error && (
-        <InlineError message="Failed to load capabilities. Please refresh the page." />
+        <InlineError message={t('settings.capabilities.errors.loadFailed')} />
       )}
 
       {/* Capabilities list — role-based view */}
@@ -558,59 +565,59 @@ const CapabilitiesSettings: React.FC = () => {
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>{editingName ? 'Edit Capability' : 'Add Capability'}</DialogTitle>
+              <DialogTitle>{editingName ? t('settings.capabilities.dialog.editTitle') : t('settings.capabilities.dialog.addTitle')}</DialogTitle>
             </DialogHeader>
 
             <div className="space-y-4 py-2">
               <div className="space-y-1.5">
-                <Label htmlFor="skill-name">Internal Name</Label>
+                <Label htmlFor="skill-name">{t('settings.capabilities.dialog.internalName.label')}</Label>
                 <Input
                   id="skill-name"
                   value={form.name}
                   onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                  placeholder="e.g. book_appointment"
+                  placeholder={t('settings.capabilities.dialog.internalName.placeholder')}
                   disabled={!!editingName}
                 />
-                <p className="text-xs text-text-muted">Used internally. Not shown to tenant admins.</p>
+                <p className="text-xs text-text-muted">{t('settings.capabilities.dialog.internalName.helper')}</p>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="skill-displayName">Display Name</Label>
+                <Label htmlFor="skill-displayName">{t('settings.capabilities.dialog.displayName.label')}</Label>
                 <Input
                   id="skill-displayName"
                   value={form.displayName}
                   onChange={(e) => setForm((p) => ({ ...p, displayName: e.target.value }))}
-                  placeholder="e.g. Appointment Booking"
+                  placeholder={t('settings.capabilities.dialog.displayName.placeholder')}
                 />
-                <p className="text-xs text-text-muted">Friendly name shown to tenant admins.</p>
+                <p className="text-xs text-text-muted">{t('settings.capabilities.dialog.displayName.helper')}</p>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="skill-description">Description</Label>
+                <Label htmlFor="skill-description">{t('settings.capabilities.dialog.description.label')}</Label>
                 <Textarea
                   id="skill-description"
                   value={form.description}
                   onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                  placeholder="e.g. Allows the bot to check availability and book appointments on behalf of visitors."
+                  placeholder={t('settings.capabilities.dialog.description.placeholder')}
                   rows={2}
                 />
-                <p className="text-xs text-text-muted">Explains what this capability does in plain language.</p>
+                <p className="text-xs text-text-muted">{t('settings.capabilities.dialog.description.helper')}</p>
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="skill-trigger">Trigger description</Label>
+                <Label htmlFor="skill-trigger">{t('settings.capabilities.dialog.trigger.label')}</Label>
                 <Textarea
                   id="skill-trigger"
                   value={form.trigger}
                   onChange={(e) => setForm((p) => ({ ...p, trigger: e.target.value }))}
-                  placeholder="Describe when this skill should activate..."
+                  placeholder={t('settings.capabilities.dialog.trigger.placeholder')}
                   rows={3}
                 />
               </div>
 
               {availableTools.length > 0 && (
                 <div className="space-y-1.5">
-                  <Label>Tools</Label>
+                  <Label>{t('settings.capabilities.dialog.tools.label')}</Label>
                   <div className="grid grid-cols-2 gap-2 p-3 rounded-lg border border-edge bg-surface-2">
                     {availableTools.map((tool: Any) => {
                       const toolName = tool.name ?? tool;
@@ -634,18 +641,18 @@ const CapabilitiesSettings: React.FC = () => {
               )}
 
               <div className="space-y-1.5">
-                <Label htmlFor="skill-instructions">Instructions</Label>
+                <Label htmlFor="skill-instructions">{t('settings.capabilities.dialog.instructions.label')}</Label>
                 <Textarea
                   id="skill-instructions"
                   value={form.instructions}
                   onChange={(e) => setForm((p) => ({ ...p, instructions: e.target.value }))}
-                  placeholder="Step-by-step instructions for the bot..."
+                  placeholder={t('settings.capabilities.dialog.instructions.placeholder')}
                   rows={4}
                 />
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="skill-maxsteps">Max Steps</Label>
+                <Label htmlFor="skill-maxsteps">{t('settings.capabilities.dialog.maxSteps.label')}</Label>
                 <Input
                   id="skill-maxsteps"
                   type="number"
@@ -660,8 +667,8 @@ const CapabilitiesSettings: React.FC = () => {
 
               <div className="flex items-center justify-between p-3 rounded-lg border border-edge bg-surface-2">
                 <div>
-                  <p className="text-sm font-medium text-text-primary">Enabled</p>
-                  <p className="text-xs text-text-muted">Activate this capability for the tenant</p>
+                  <p className="text-sm font-medium text-text-primary">{t('settings.capabilities.dialog.enabled.title')}</p>
+                  <p className="text-xs text-text-muted">{t('settings.capabilities.dialog.enabled.description')}</p>
                 </div>
                 <Switch
                   checked={form.enabled}
@@ -672,18 +679,18 @@ const CapabilitiesSettings: React.FC = () => {
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={isSaving}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button onClick={handleSubmit} disabled={isSaving || !form.name.trim()}>
                 {isSaving ? (
                   <span className="flex items-center gap-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Saving...
+                    {t('settings.capabilities.dialog.saving')}
                   </span>
                 ) : editingName ? (
-                  'Save Changes'
+                  t('common.save')
                 ) : (
-                  'Create Capability'
+                  t('settings.capabilities.dialog.createCapability')
                 )}
               </Button>
             </DialogFooter>

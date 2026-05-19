@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Key,
   Webhook,
@@ -83,12 +84,12 @@ function maskSecret(value: string | undefined): string {
   return `${value.slice(0, 8)}...${value.slice(-4)}`;
 }
 
-async function copyToClipboard(text: string, label: string) {
+async function copyToClipboard(text: string, successMessage: string, errorMessage: string) {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success(`${label} copied to clipboard`);
+    toast.success(successMessage);
   } catch {
-    toast.error('Failed to copy to clipboard');
+    toast.error(errorMessage);
   }
 }
 
@@ -105,6 +106,7 @@ function formatTimeAgo(dateStr: string): string {
 }
 
 export const IntegrationTab: React.FC = () => {
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
 
   // Tenant data
@@ -140,9 +142,9 @@ export const IntegrationTab: React.FC = () => {
     onSuccess: () => {
       refetchTenant();
       setShowRegenerateConfirm(false);
-      toast.success('Webhook secret regenerated');
+      toast.success(t('settings.integrations.webhookSecret.regenerated'));
     },
-    onError: () => toast.error('Failed to regenerate webhook secret'),
+    onError: () => toast.error(t('settings.integrations.webhookSecret.regenerateFailed')),
   });
 
   const handleRotateApiKey = async () => {
@@ -150,9 +152,9 @@ export const IntegrationTab: React.FC = () => {
     try {
       await api.post('/tenants/me/api-key/rotate');
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
-      toast.success('API key rotated successfully');
+      toast.success(t('settings.integrations.apiKey.rotated'));
     } catch {
-      toast.error('Failed to rotate API key');
+      toast.error(t('settings.integrations.apiKey.rotateFailed'));
     } finally {
       setIsRotatingKey(false);
       setShowRotateConfirm(false);
@@ -176,13 +178,13 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Key className="w-5 h-5" />
-            API Key
+            {t('settings.integrations.apiKey.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             <div>
-              <Label className="text-text-secondary mb-1 block">Your API Key</Label>
+              <Label className="text-text-secondary mb-1 block">{t('settings.integrations.apiKey.label')}</Label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
                   {maskSecret(tenantData?.apiKey)}
@@ -190,9 +192,9 @@ export const IntegrationTab: React.FC = () => {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => tenantData?.apiKey && copyToClipboard(tenantData.apiKey, 'API key')}
+                  onClick={() => tenantData?.apiKey && copyToClipboard(tenantData.apiKey, t('settings.integrations.apiKey.copySuccess'), t('settings.integrations.copyFailed'))}
                   disabled={!tenantData?.apiKey}
-                  title="Copy API key"
+                  title={t('settings.integrations.apiKey.copyTooltip')}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
@@ -201,7 +203,7 @@ export const IntegrationTab: React.FC = () => {
                   size="icon"
                   onClick={() => setShowRotateConfirm(true)}
                   disabled={isRotatingKey}
-                  title="Rotate API key"
+                  title={t('settings.integrations.apiKey.rotateTooltip')}
                 >
                   <RotateCw className={cn("w-4 h-4", isRotatingKey && "animate-spin")} />
                 </Button>
@@ -219,13 +221,13 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Webhook className="w-5 h-5" />
-            Webhook URL
+            {t('settings.integrations.webhookUrl.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             <div>
-              <Label className="text-text-secondary mb-1 block">Outbound Webhook URL</Label>
+              <Label className="text-text-secondary mb-1 block">{t('settings.integrations.webhookUrl.label')}</Label>
               <div className="flex items-center gap-2">
                 <Input
                   type="text"
@@ -247,7 +249,7 @@ export const IntegrationTab: React.FC = () => {
                 ) : (
                   <ExternalLink className="w-4 h-4" />
                 )}
-                Test Connection
+                {t('settings.integrations.webhookUrl.testConnection')}
               </Button>
               <Button
                 onClick={() => saveWebhookUrl.mutate(webhookUrlInput)}
@@ -258,7 +260,7 @@ export const IntegrationTab: React.FC = () => {
                 ) : (
                   <Save className="w-4 h-4" />
                 )}
-                Save
+                {t('common.save')}
               </Button>
             </div>
           </div>
@@ -270,7 +272,7 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Activity className="w-5 h-5" />
-            Connection Health
+            {t('settings.integrations.health.title')}
           </h2>
         </CardHeader>
         <CardContent>
@@ -278,18 +280,18 @@ export const IntegrationTab: React.FC = () => {
             <div className="flex items-center gap-2">
               <span className={cn("w-3 h-3 rounded-full", healthColor)} />
               <span className="text-sm text-text-primary font-medium capitalize">
-                {healthDot === 'green' ? 'Healthy' : healthDot === 'red' ? 'Unhealthy' : 'Unknown'}
+                {healthDot === 'green' ? t('settings.integrations.health.healthy') : healthDot === 'red' ? t('settings.integrations.health.unhealthy') : t('settings.integrations.health.unknown')}
               </span>
             </div>
             {statusDataTyped?.lastDelivery && (
               <div className="text-sm text-text-secondary">
-                Last delivery: {formatTimeAgo(statusDataTyped.lastDelivery.createdAt)}
+                {t('settings.integrations.health.lastDelivery')}: {formatTimeAgo(statusDataTyped.lastDelivery.createdAt)}
                 {' '}({statusDataTyped.lastDelivery.durationMs}ms)
               </div>
             )}
             {statusDataTyped?.lastSuccessAt && (
               <div className="text-sm text-text-secondary">
-                Last success: {formatTimeAgo(statusDataTyped.lastSuccessAt)}
+                {t('settings.integrations.health.lastSuccess')}: {formatTimeAgo(statusDataTyped.lastSuccessAt)}
               </div>
             )}
           </div>
@@ -301,13 +303,13 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <ExternalLink className="w-5 h-5" />
-            Inbound Webhook Endpoint
+            {t('settings.integrations.inbound.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             <div>
-              <Label className="text-text-secondary mb-1 block">Endpoint URL (read-only)</Label>
+              <Label className="text-text-secondary mb-1 block">{t('settings.integrations.inbound.label')}</Label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
                   {inboundWebhookUrl}
@@ -315,14 +317,14 @@ export const IntegrationTab: React.FC = () => {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => copyToClipboard(inboundWebhookUrl, 'Inbound webhook URL')}
-                  title="Copy URL"
+                  onClick={() => copyToClipboard(inboundWebhookUrl, t('settings.integrations.inbound.copySuccess'), t('settings.integrations.copyFailed'))}
+                  title={t('settings.integrations.inbound.copyTooltip')}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
               </div>
               <p className="text-xs text-text-muted mt-2">
-                Configure your automation workflow to send responses to this URL. Include your tenant ID in the request body.
+                {t('settings.integrations.inbound.helper')}
               </p>
             </div>
           </div>
@@ -334,13 +336,13 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Shield className="w-5 h-5" />
-            Webhook Secret
+            {t('settings.integrations.webhookSecret.title')}
           </h2>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
             <div>
-              <Label className="text-text-secondary mb-1 block">Secret Key</Label>
+              <Label className="text-text-secondary mb-1 block">{t('settings.integrations.webhookSecret.label')}</Label>
               <div className="flex items-center gap-2">
                 <code className="flex-1 px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary font-mono text-sm">
                   {maskSecret(tenantData?.webhookSecret)}
@@ -348,9 +350,9 @@ export const IntegrationTab: React.FC = () => {
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => tenantData?.webhookSecret && copyToClipboard(tenantData.webhookSecret, 'Webhook secret')}
+                  onClick={() => tenantData?.webhookSecret && copyToClipboard(tenantData.webhookSecret, t('settings.integrations.webhookSecret.copySuccess'), t('settings.integrations.copyFailed'))}
                   disabled={!tenantData?.webhookSecret}
-                  title="Copy webhook secret"
+                  title={t('settings.integrations.webhookSecret.copyTooltip')}
                 >
                   <Copy className="w-4 h-4" />
                 </Button>
@@ -359,7 +361,7 @@ export const IntegrationTab: React.FC = () => {
                   size="icon"
                   onClick={() => setShowRegenerateConfirm(true)}
                   disabled={regenerateSecret.isPending}
-                  title="Regenerate webhook secret"
+                  title={t('settings.integrations.webhookSecret.regenerateTooltip')}
                 >
                   <RotateCw className={cn("w-4 h-4", regenerateSecret.isPending && "animate-spin")} />
                 </Button>
@@ -374,7 +376,7 @@ export const IntegrationTab: React.FC = () => {
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <Activity className="w-5 h-5" />
-            Delivery Log
+            {t('settings.integrations.deliveries.title')}
           </h2>
         </CardHeader>
         <CardContent>
@@ -383,13 +385,13 @@ export const IntegrationTab: React.FC = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Direction</TableHead>
-                    <TableHead>Event</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>HTTP</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Error</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.time')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.direction')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.event')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.status')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.http')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.duration')}</TableHead>
+                    <TableHead>{t('settings.integrations.deliveries.columns.error')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -405,7 +407,7 @@ export const IntegrationTab: React.FC = () => {
                           ) : (
                             <ArrowUpRight className="w-3 h-3" />
                           )}
-                          {entry.direction}
+                          {t(`settings.integrations.deliveries.direction.${entry.direction}`)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs font-mono">{entry.event}</TableCell>
@@ -420,7 +422,7 @@ export const IntegrationTab: React.FC = () => {
                           )}
                           variant="outline"
                         >
-                          {entry.status}
+                          {t(`settings.integrations.deliveries.status.${entry.status}`)}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-xs">{entry.httpStatus || '-'}</TableCell>
@@ -437,7 +439,7 @@ export const IntegrationTab: React.FC = () => {
               {(page > 1 || (Array.isArray(deliveries) && deliveries.length === 20)) && (
                 <div className="flex items-center justify-between mt-4">
                   <span className="text-sm text-text-secondary">
-                    Page {page}
+                    {t('settings.integrations.deliveries.page', { page })}
                   </span>
                   <div className="flex items-center gap-2">
                     <Button
@@ -447,7 +449,7 @@ export const IntegrationTab: React.FC = () => {
                       disabled={page <= 1}
                     >
                       <ChevronLeft className="w-4 h-4" />
-                      Prev
+                      {t('settings.integrations.deliveries.prev')}
                     </Button>
                     <Button
                       variant="outline"
@@ -455,7 +457,7 @@ export const IntegrationTab: React.FC = () => {
                       onClick={() => setPage(p => p + 1)}
                       disabled={!Array.isArray(deliveries) || deliveries.length < 20}
                     >
-                      Next
+                      {t('settings.integrations.deliveries.next')}
                       <ChevronRight className="w-4 h-4" />
                     </Button>
                   </div>
@@ -464,7 +466,7 @@ export const IntegrationTab: React.FC = () => {
             </>
           ) : (
             <p className="text-sm text-text-muted text-center py-8">
-              No delivery logs yet. Send a test webhook to see entries here.
+              {t('settings.integrations.deliveries.empty')}
             </p>
           )}
         </CardContent>
@@ -474,13 +476,13 @@ export const IntegrationTab: React.FC = () => {
       <AlertDialog open={showRotateConfirm} onOpenChange={setShowRotateConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Rotate API Key?</AlertDialogTitle>
+            <AlertDialogTitle>{t('settings.integrations.apiKey.rotateConfirm.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will invalidate your current API key immediately. Any integrations using the old key will stop working. This action cannot be undone.
+              {t('settings.integrations.apiKey.rotateConfirm.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleRotateApiKey}
               disabled={isRotatingKey}
@@ -494,7 +496,7 @@ export const IntegrationTab: React.FC = () => {
               ) : (
                 <RotateCw className="w-4 h-4" />
               )}
-              Rotate Key
+              {t('settings.integrations.apiKey.rotateConfirm.action')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -504,13 +506,13 @@ export const IntegrationTab: React.FC = () => {
       <AlertDialog open={showRegenerateConfirm} onOpenChange={setShowRegenerateConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Regenerate Webhook Secret?</AlertDialogTitle>
+            <AlertDialogTitle>{t('settings.integrations.webhookSecret.regenerateConfirm.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will invalidate your current webhook secret immediately. You will need to update the secret in your automation workflows. This action cannot be undone.
+              {t('settings.integrations.webhookSecret.regenerateConfirm.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => regenerateSecret.mutate()}
               disabled={regenerateSecret.isPending}
@@ -524,7 +526,7 @@ export const IntegrationTab: React.FC = () => {
               ) : (
                 <RotateCw className="w-4 h-4" />
               )}
-              Regenerate Secret
+              {t('settings.integrations.webhookSecret.regenerateConfirm.action')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

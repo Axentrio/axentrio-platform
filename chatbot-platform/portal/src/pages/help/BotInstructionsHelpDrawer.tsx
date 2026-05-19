@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Download, X } from 'lucide-react';
 import {
@@ -44,13 +45,16 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
 
   if (!isOpen) return null;
 
-  return (
+  // Portal to <body> so the drawer escapes any ancestor that establishes a
+  // containing block for position: fixed (transform, filter, contain, etc.).
+  // Without this the drawer is offset and its h-full is wrong.
+  return createPortal(
     <aside
       role="dialog"
       aria-modal="false"
       aria-label="AI Bot — Frequently Asked Questions"
       className={cn(
-        'fixed top-0 right-0 h-full w-full sm:max-w-md z-40',
+        'fixed top-0 right-0 h-screen w-full sm:max-w-md z-40',
         'bg-surface-2 border-l border-edge shadow-2xl',
         'flex flex-col',
       )}
@@ -110,7 +114,8 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
           <Download className="w-3.5 h-3.5" />
         </a>
       </footer>
-    </aside>
+    </aside>,
+    document.body,
   );
 };
 

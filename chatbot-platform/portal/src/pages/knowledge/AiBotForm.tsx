@@ -29,6 +29,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
 import { promptTemplates, findTemplate, AI_PLACEHOLDERS } from './aiBotTemplates';
+import HelpFaqDialog from './HelpFaqDialog';
 
 interface AiBotFormProps {
   onGoToKnowledgeBase: () => void;
@@ -103,6 +104,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  const [isFaqOpen, setIsFaqOpen] = useState(false);
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
@@ -396,15 +398,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                   ))}
                 </SelectContent>
               </Select>
-              <a
-                href="https://platform.openai.com/docs/guides/prompt-engineering"
-                target="_blank"
-                rel="noreferrer"
+              <button
+                type="button"
+                onClick={() => setIsFaqOpen(true)}
                 className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
-                title="Prompt-writing tips"
+                title="Open the bot instructions FAQ"
               >
                 <HelpCircle className="w-3.5 h-3.5" /> FAQs
-              </a>
+              </button>
               <Button
                 type="button"
                 variant="ghost"
@@ -557,6 +558,12 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <HelpFaqDialog
+        isOpen={isFaqOpen}
+        onClose={() => setIsFaqOpen(false)}
+        defaultSectionId="ai-bot"
+      />
 
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <AlertDialogContent>

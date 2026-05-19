@@ -32,6 +32,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { ApiError, asyncHandler } from '../middleware/error-handler';
 import { autoProvision, requireClerkAuth } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
@@ -73,7 +74,16 @@ function requireBillingAdmin(req: Request, res: Response, next: NextFunction): v
   next();
 }
 
-router.use(requireClerkAuth, autoProvision, requireBillingAdmin);
+// resolveTenantContext respects the X-Tenant-Context header for super-admins
+// only — non-super-admin users always operate on their own tenant. This
+// matches the pattern used by agents/chat routes so the Cmd+K tenant switch
+// works for inspecting another tenant's billing.
+router.use(
+  requireClerkAuth,
+  autoProvision,
+  requireBillingAdmin,
+  resolveTenantContext,
+);
 
 /**
  * Map service-layer `BillingProviderError.code` → HTTP status. Codes outside

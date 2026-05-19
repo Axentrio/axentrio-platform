@@ -10,6 +10,7 @@ import { AuditLog } from '../../database/entities/AuditLog';
 import { PendingInvite } from '../../database/entities/PendingInvite';
 import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { CannedResponse } from '../../database/entities/CannedResponse';
+import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 
 export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise<Tenant> {
   const repo = AppDataSource.getRepository(Tenant);
@@ -180,6 +181,30 @@ export async function createTestCannedResponse(
       shortcut: `test-${crypto.randomBytes(4).toString('hex')}`,
       content: 'Hello {{customer_name}}, how can I help you?',
       scope: 'shared',
+      ...overrides,
+    }),
+  );
+}
+
+/**
+ * Create a tenant_billing_accounts row. Defaults to a manual + trialing-Pro
+ * row that mirrors what `seedTrialAccount` would create at tenant signup.
+ */
+export async function createTestBillingAccount(
+  tenantId: string,
+  overrides: Partial<TenantBillingAccount> = {},
+): Promise<TenantBillingAccount> {
+  const repo = AppDataSource.getRepository(TenantBillingAccount);
+  return repo.save(
+    repo.create({
+      tenantId,
+      provider: 'manual',
+      status: 'trialing',
+      currentPlanId: 'pro',
+      isPrimary: true,
+      cancelAtPeriodEnd: false,
+      rawProviderData: {},
+      trialEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       ...overrides,
     }),
   );

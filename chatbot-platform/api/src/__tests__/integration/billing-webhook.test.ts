@@ -372,6 +372,52 @@ describe('handleNormalizedEvent — audit-only paths', () => {
     expect(stripeRow.currentPlanId).toBe('pro');
   });
 
+  it('symmetric unknown-price: subscription.created with unknown price → unknown_price outcome (round-5 #7)', async () => {
+    // Set up a separate tenant in the canonical pre-checkout state (manual
+    // primary + pending Stripe row without subscription_id) so the lookup
+    // resolves via customer_id and would normally promote on a trialing/
+    // active event. With an unknown price, the unknown_price guard fires
+    // BEFORE the primary-switch — verifying parity with subscription.updated.
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'manual',
+      status: 'trialing',
+      currentPlanId: 'pro',
+      isPrimary: true,
+    });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      status: 'none',
+      currentPlanId: 'free',
+      isPrimary: false,
+      customerId: 'cus_unknown_price_created',
+      subscriptionId: null,
+    });
+
+    const event = makeSubscriptionEvent({
+      type: 'subscription.created',
+      subscriptionId: 'sub_unknown_price',
+      customerId: 'cus_unknown_price_created',
+      stripeStatus: 'trialing',
+      priceId: 'price_completely_unknown',
+    });
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('unknown_price');
+    });
+
+    // Manual is still primary; Stripe row never got promoted; tier untouched.
+    const rows = await loadBilling(tenant.id);
+    const manual = rows.find((r) => r.provider === 'manual')!;
+    const stripeRow = rows.find((r) => r.provider === 'stripe')!;
+    expect(manual.isPrimary).toBe(true);
+    expect(stripeRow.isPrimary).toBe(false);
+    expect(stripeRow.subscriptionId).toBeNull(); // not even persisted
+    expect(await loadTenantTier(tenant.id)).toBe('pro'); // untouched
+  });
+
   it('refund.recorded → audit_only_refund, no state mutation', async () => {
     const event: NormalizedEvent = {
       providerEventId: 'evt_refund_test',

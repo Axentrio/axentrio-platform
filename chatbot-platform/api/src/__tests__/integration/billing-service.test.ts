@@ -323,6 +323,140 @@ describe('changePlan validation chain', () => {
       code: 'pending_change_exists',
     });
   });
+
+  // ---- Upgrade item-ID resolution (round-5 #6) ----------------------------
+  it('upgrade path: reads sub.items.data[0].id and passes it to subscriptions.update', async () => {
+    const updateMock = vi.fn(async () => ({}));
+    installStripeStub({
+      subscriptionsRetrieve: vi.fn(async () => ({
+        id: 'sub_change',
+        status: 'active',
+        cancel_at_period_end: false,
+        current_period_end: 1_900_000_000,
+        trial_end: null,
+        schedule: null,
+        // Single item — the provider reads .items.data[0].id and threads
+        // it into the update call so Stripe knows WHICH line item to swap.
+        items: { data: [{ id: 'si_REAL_ID', price: { id: 'price_test_pro' } }] },
+      })),
+      subscriptionsUpdate: updateMock,
+    });
+
+    // Pro → Premium is an upgrade. We expect:
+    //   stripe.subscriptions.update(subId, {
+    //     items: [{ id: 'si_REAL_ID', price: <premium price> }],
+    //     proration_behavior: 'always_invoice',
+    //   })
+    await changePlan(tenantId, 'premium');
+    expect(updateMock).toHaveBeenCalledOnce();
+    const [subId, payload] = updateMock.mock.calls[0]!;
+    expect(subId).toBe('sub_change');
+    expect(payload).toMatchObject({
+      items: [{ id: 'si_REAL_ID', price: 'price_test_premium' }],
+      proration_behavior: 'always_invoice',
+    });
+  });
+
+  it('upgrade path: throws subscription_shape_unexpected when Stripe returns multi-item sub', async () => {
+    installStripeStub({
+      subscriptionsRetrieve: vi.fn(async () => ({
+        id: 'sub_change',
+        status: 'active',
+        cancel_at_period_end: false,
+        current_period_end: 1_900_000_000,
+        trial_end: null,
+        schedule: null,
+        // Multi-item — v1 never creates these; defensive guard fires.
+        items: {
+          data: [
+            { id: 'si_1', price: { id: 'price_test_pro' } },
+            { id: 'si_2', price: { id: 'price_test_premium' } },
+          ],
+        },
+      })),
+    });
+
+    await expect(changePlan(tenantId, 'premium')).rejects.toMatchObject({
+      code: 'subscription_shape_unexpected',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pre-call idempotency: cancelAtPeriodEnd + undoCancel skip Stripe when the
+// target state is already true.
+// ---------------------------------------------------------------------------
+
+describe('cancelAtPeriodEnd / undoCancel pre-call idempotency', () => {
+  let tenantId: string;
+  beforeEach(async () => {
+    const t = await createTestTenant({ tier: 'pro' });
+    tenantId = t.id;
+    await createTestBillingAccount(tenantId, {
+      provider: 'stripe',
+      status: 'active',
+      currentPlanId: 'pro',
+      isPrimary: true,
+      customerId: 'cus_idem',
+      subscriptionId: 'sub_idem',
+    });
+  });
+
+  it('cancelAtPeriodEnd skips Stripe call when cancelAtPeriodEnd is already true', async () => {
+    const stub = installStripeStub({
+      subscriptionsRetrieve: vi.fn(async () => ({
+        id: 'sub_idem',
+        status: 'active',
+        cancel_at_period_end: true, // already cancelling
+        current_period_end: 1_900_000_000,
+        trial_end: null,
+        schedule: null,
+        items: { data: [{ id: 'si_1', price: { id: 'price_test_pro' } }] },
+      })),
+    });
+
+    await cancelAtPeriodEnd(tenantId);
+    // getSubscription called; update NOT called.
+    expect(stub.subscriptionsRetrieve).toHaveBeenCalled();
+    expect(stub.subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('undoCancel skips Stripe call when cancelAtPeriodEnd is already false', async () => {
+    const stub = installStripeStub({
+      subscriptionsRetrieve: vi.fn(async () => ({
+        id: 'sub_idem',
+        status: 'active',
+        cancel_at_period_end: false, // nothing to undo
+        current_period_end: 1_900_000_000,
+        trial_end: null,
+        schedule: null,
+        items: { data: [{ id: 'si_1', price: { id: 'price_test_pro' } }] },
+      })),
+    });
+
+    await undoCancel(tenantId);
+    expect(stub.subscriptionsRetrieve).toHaveBeenCalled();
+    expect(stub.subscriptionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it('cancelAtPeriodEnd calls Stripe when not already cancelling', async () => {
+    const stub = installStripeStub({
+      subscriptionsRetrieve: vi.fn(async () => ({
+        id: 'sub_idem',
+        status: 'active',
+        cancel_at_period_end: false,
+        current_period_end: 1_900_000_000,
+        trial_end: null,
+        schedule: null,
+        items: { data: [{ id: 'si_1', price: { id: 'price_test_pro' } }] },
+      })),
+    });
+
+    await cancelAtPeriodEnd(tenantId);
+    expect(stub.subscriptionsUpdate).toHaveBeenCalledOnce();
+    const [_, payload] = stub.subscriptionsUpdate.mock.calls[0]!;
+    expect(payload).toMatchObject({ cancel_at_period_end: true });
+  });
 });
 
 describe('updateBillingEmail', () => {

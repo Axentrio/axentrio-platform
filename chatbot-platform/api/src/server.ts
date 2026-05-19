@@ -63,6 +63,7 @@ import { AgentService } from './agent/agent.service';
 
 // Channel integrations
 import metaWebhookRoutes from './channels/meta/webhook.routes';
+import { billingWebhookRoutes } from './webhooks/billing-webhook.routes';
 import channelWebhookRoutes from './channels/channel-webhook.routes';
 import channelManagementRoutes from './channels/channel-management.routes';
 import { registerChannelAdapter } from './channels/channel-registry';
@@ -93,6 +94,12 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
+
+// Billing webhooks — must use raw body parser for HMAC verification.
+// Mount BEFORE app-level express.json() so verifyWebhook receives the raw
+// Buffer intact. See § Webhook event handling middleware ordering invariant
+// in .scratch/plan-billing.md.
+app.use('/api/v1/webhooks/billing', express.raw({ type: 'application/json' }), billingWebhookRoutes);
 
 // Request ID — must come before any routes so every response (including widget
 // routes mounted below and the /widget.js static serve) carries x-request-id
@@ -276,6 +283,20 @@ async function startServer(): Promise<void> {
       logger.info('Knowledge ingestion processor registered');
     } catch (err) {
       logger.warn('Knowledge ingestion processor registration failed', { error: err });
+    }
+
+    // Register Stripe billing provider — boot env validation already
+    // guaranteed the secret/webhook/price IDs are present outside test.
+    try {
+      const { StripeBillingProvider } = await import('./billing/providers/stripe');
+      const { registerBillingProvider } = await import('./billing/provider-registry');
+      registerBillingProvider(new StripeBillingProvider());
+      logger.info('Stripe billing provider registered');
+    } catch (err) {
+      logger.error('Stripe billing provider registration failed', { error: err });
+      if (config.server.isProduction) {
+        throw err;
+      }
     }
 
     // Register billing trial-expiry processor + daily safety-net sweep.

@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { NavLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   MessageSquare,
   Users,
@@ -36,25 +37,26 @@ import type { UserRole } from '@app-types/index';
 
 interface MenuItem {
   path: string;
-  label: string;
+  /** Translation key under `nav.*` */
+  labelKey: string;
   icon: React.ElementType;
   roles: UserRole[];
   badge?: number;
 }
 
 const menuItems: MenuItem[] = [
-  { path: '/inbox', label: 'Inbox', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/ai', label: 'AI & Content', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/team', label: 'Team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
-  { path: '/settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/help', label: 'Help & FAQ', icon: HelpCircle, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/inbox', labelKey: 'nav.inbox', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/ai', labelKey: 'nav.aiContent', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/analytics', labelKey: 'nav.analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/team', labelKey: 'nav.team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
+  { path: '/settings', labelKey: 'nav.settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/help', labelKey: 'nav.helpFaq', icon: HelpCircle, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
 ];
 
 const adminMenuItems: MenuItem[] = [
-  { path: '/admin/tenants', label: 'All Tenants', icon: Shield, roles: ['super_admin'] },
-  { path: '/admin/users', label: 'All Users', icon: UserCog, roles: ['super_admin'] },
-  { path: '/admin/analytics', label: 'Platform Analytics', icon: TrendingUp, roles: ['super_admin'] },
+  { path: '/admin/tenants', labelKey: 'nav.allTenants', icon: Shield, roles: ['super_admin'] },
+  { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
+  { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
 ];
 
 interface SidebarProps {
@@ -64,6 +66,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   className = ''
 }) => {
+  const { t } = useTranslation();
   const { pendingCount } = useHandoffsQuery('pending');
   const { user } = useAppAuth();
   const { signOut } = useClerk();
@@ -131,14 +134,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
             'text-xs',
             isImpersonating ? 'text-orange-400 font-medium' : 'text-text-muted'
           )}>
-            {isImpersonating ? 'Impersonating' : 'HandsOff'}
+            {isImpersonating ? t('sidebar.impersonating') : 'HandsOff'}
           </p>
         </div>
         {isSuperAdmin && !isImpersonating && (
           <button
             onClick={openTenantPalette}
             className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
-            title="Switch tenant"
+            title={t('sidebar.switchTenant')}
           >
             <ChevronDown className="w-4 h-4" />
           </button>
@@ -148,7 +151,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             onClick={exitTenant}
             className="px-2 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors"
           >
-            Exit
+            {t('sidebar.exitImpersonation')}
           </button>
         )}
       </div>
@@ -175,10 +178,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <item.icon className="w-5 h-5 flex-shrink-0" />
                     </TooltipTrigger>
                     <TooltipContent side="right">
-                      {item.label}
+                      {t(item.labelKey)}
                     </TooltipContent>
                   </Tooltip>
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.labelKey)}</span>
                   {item.path === '/inbox' && pendingCount > 0 && (
                     <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full">
                       {pendingCount > 99 ? '99+' : pendingCount}
@@ -194,7 +197,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="my-3 mx-2 border-t border-edge" />
               <div className="px-3 mb-1">
                 <span className="text-xs font-semibold text-text-muted uppercase tracking-wider">
-                  Super Admin
+                  {t('nav.superAdmin')}
                 </span>
               </div>
               <ul className="space-y-1">
@@ -216,10 +219,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           <item.icon className="w-5 h-5 flex-shrink-0" />
                         </TooltipTrigger>
                         <TooltipContent side="right">
-                          {item.label}
+                          {t(item.labelKey)}
                         </TooltipContent>
                       </Tooltip>
-                      <span className="flex-1">{item.label}</span>
+                      <span className="flex-1">{t(item.labelKey)}</span>
                     </NavLink>
                   </li>
                 ))}
@@ -243,7 +246,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </p>
             <div className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-status-online shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              <p className="text-xs text-text-muted capitalize">{user?.role?.replace('_', ' ')}</p>
+              <p className="text-xs text-text-muted">{user?.role ? t(`roles.${user.role}`) : ''}</p>
             </div>
           </div>
         </div>
@@ -254,7 +257,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className="flex items-center gap-3 w-full px-3 py-2 text-sm font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary rounded-xl transition-colors justify-start"
         >
           <LogOut className="w-5 h-5" />
-          Sign Out
+          {t('sidebar.signOut')}
         </Button>
       </div>
     </aside>

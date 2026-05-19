@@ -2,7 +2,40 @@
   "common": {
     "save": "Wijzigingen opslaan",
     "saving": "Opslaan…",
-    "saved": "Instellingen opgeslagen!"
+    "saved": "Instellingen opgeslagen!",
+    "cancel": "Annuleren",
+    "close": "Sluiten",
+    "delete": "Verwijderen",
+    "edit": "Bewerken",
+    "loading": "Laden…",
+    "search": "Zoeken",
+    "yes": "Ja",
+    "no": "Nee",
+    "actionFailed": "Actie mislukt. Probeer het opnieuw."
+  },
+  "nav": {
+    "inbox": "Inbox",
+    "aiContent": "AI & Inhoud",
+    "analytics": "Analyses",
+    "team": "Team",
+    "settings": "Instellingen",
+    "helpFaq": "Help & FAQ",
+    "superAdmin": "Super Admin",
+    "allTenants": "Alle klanten",
+    "allUsers": "Alle gebruikers",
+    "platformAnalytics": "Platformanalyse"
+  },
+  "sidebar": {
+    "impersonating": "Personifiëren",
+    "switchTenant": "Klant wisselen",
+    "exitImpersonation": "Stoppen",
+    "signOut": "Afmelden"
+  },
+  "roles": {
+    "super_admin": "Super admin",
+    "admin": "Beheerder",
+    "supervisor": "Supervisor",
+    "agent": "Agent"
   },
   "settings": {
     "profile": {

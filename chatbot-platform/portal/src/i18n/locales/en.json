@@ -2,7 +2,40 @@
   "common": {
     "save": "Save Changes",
     "saving": "Saving…",
-    "saved": "Settings saved successfully!"
+    "saved": "Settings saved successfully!",
+    "cancel": "Cancel",
+    "close": "Close",
+    "delete": "Delete",
+    "edit": "Edit",
+    "loading": "Loading…",
+    "search": "Search",
+    "yes": "Yes",
+    "no": "No",
+    "actionFailed": "Action failed. Please try again."
+  },
+  "nav": {
+    "inbox": "Inbox",
+    "aiContent": "AI & Content",
+    "analytics": "Analytics",
+    "team": "Team",
+    "settings": "Settings",
+    "helpFaq": "Help & FAQ",
+    "superAdmin": "Super Admin",
+    "allTenants": "All Tenants",
+    "allUsers": "All Users",
+    "platformAnalytics": "Platform Analytics"
+  },
+  "sidebar": {
+    "impersonating": "Impersonating",
+    "switchTenant": "Switch tenant",
+    "exitImpersonation": "Exit",
+    "signOut": "Sign Out"
+  },
+  "roles": {
+    "super_admin": "Super Admin",
+    "admin": "Admin",
+    "supervisor": "Supervisor",
+    "agent": "Agent"
   },
   "settings": {
     "profile": {

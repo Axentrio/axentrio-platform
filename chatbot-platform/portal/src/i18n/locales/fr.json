@@ -2,7 +2,40 @@
   "common": {
     "save": "Enregistrer les modifications",
     "saving": "Enregistrement…",
-    "saved": "Paramètres enregistrés !"
+    "saved": "Paramètres enregistrés !",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "delete": "Supprimer",
+    "edit": "Modifier",
+    "loading": "Chargement…",
+    "search": "Rechercher",
+    "yes": "Oui",
+    "no": "Non",
+    "actionFailed": "Action échouée. Veuillez réessayer."
+  },
+  "nav": {
+    "inbox": "Boîte de réception",
+    "aiContent": "IA & Contenu",
+    "analytics": "Analyses",
+    "team": "Équipe",
+    "settings": "Paramètres",
+    "helpFaq": "Aide & FAQ",
+    "superAdmin": "Super administrateur",
+    "allTenants": "Tous les clients",
+    "allUsers": "Tous les utilisateurs",
+    "platformAnalytics": "Analyses de la plateforme"
+  },
+  "sidebar": {
+    "impersonating": "Emprunt d'identité",
+    "switchTenant": "Changer de client",
+    "exitImpersonation": "Quitter",
+    "signOut": "Se déconnecter"
+  },
+  "roles": {
+    "super_admin": "Super administrateur",
+    "admin": "Administrateur",
+    "supervisor": "Superviseur",
+    "agent": "Agent"
   },
   "settings": {
     "profile": {

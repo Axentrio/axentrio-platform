@@ -9,6 +9,7 @@ import type { User, UserRole } from '@app-types/index';
 import { API_CONFIG, ENDPOINTS } from '@config/api.config';
 import { setTokenProvider } from '@services/apiClient';
 import { useTenantContextStore } from '../stores/tenantContextStore';
+import i18n, { isSupportedLocale } from '../i18n';
 
 // Map Clerk org role to app role
 function mapClerkRole(clerkRole?: string): UserRole {
@@ -113,6 +114,12 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
             tenantName: data.tenantName,
             email: data.email,
           });
+          // Apply server-saved locale so users see their preferred language
+          // immediately after sign-in on any device. If no server locale is
+          // set, leave i18next on whatever the browser detector picked.
+          if (isSupportedLocale(data.locale) && data.locale !== i18n.language) {
+            i18n.changeLanguage(data.locale);
+          }
         }
       } catch (err: any) {
         if (!cancelled) {

@@ -10,6 +10,9 @@ import App from './App';
 // Styles
 import './styles/index.css';
 
+// i18n — must be imported before any component that uses translations
+import './i18n';
+
 // Initialize React
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement

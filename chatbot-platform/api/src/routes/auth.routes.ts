@@ -6,6 +6,7 @@
 import { Router, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
+import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { getTenantByApiKey } from '../middleware/tenant.middleware';
@@ -135,12 +136,23 @@ router.get(
   requireClerkAuth,
   autoProvision,
   asyncHandler(async (req: ProvisionedRequest, res: Response) => {
+    // Look up locale separately — req.user comes from a small cached struct
+    // (id/email/role/tenant) and does not carry user preferences.
+    const userId = req.userId;
+    const user = userId
+      ? await AppDataSource.getRepository(User).findOne({
+          where: { id: userId },
+          select: ['locale'],
+        })
+      : null;
+
     sendSuccess(res, {
       agentId: req.agentId,
       tenantId: req.tenantId,
       role: req.userRole,
       tenantName: req.tenantName,
       email: req.user?.email,
+      locale: user?.locale ?? null,
     });
   })
 );

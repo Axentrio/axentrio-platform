@@ -1,0 +1,28 @@
+{
+  "common": {
+    "save": "Save Changes",
+    "saving": "Saving…",
+    "saved": "Settings saved successfully!"
+  },
+  "settings": {
+    "profile": {
+      "title": "Profile Information",
+      "firstName": "First Name",
+      "lastName": "Last Name",
+      "email": "Email",
+      "emailManagedNote": "Email is managed by your authentication provider.",
+      "preferences": {
+        "title": "Preferences",
+        "language": {
+          "label": "Language",
+          "helper": "Used for emails and account communications. UI translation coming soon.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Français"
+          }
+        }
+      }
+    }
+  }
+}

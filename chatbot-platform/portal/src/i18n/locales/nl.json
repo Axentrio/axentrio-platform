@@ -1,0 +1,28 @@
+{
+  "common": {
+    "save": "Wijzigingen opslaan",
+    "saving": "Opslaan…",
+    "saved": "Instellingen opgeslagen!"
+  },
+  "settings": {
+    "profile": {
+      "title": "Profielgegevens",
+      "firstName": "Voornaam",
+      "lastName": "Achternaam",
+      "email": "E-mail",
+      "emailManagedNote": "Je e-mailadres wordt beheerd door je authenticatieprovider.",
+      "preferences": {
+        "title": "Voorkeuren",
+        "language": {
+          "label": "Taal",
+          "helper": "Gebruikt voor e-mails en accountcommunicatie. Vertaling van de interface volgt binnenkort.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Français"
+          }
+        }
+      }
+    }
+  }
+}

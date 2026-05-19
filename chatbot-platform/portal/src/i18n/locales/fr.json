@@ -1,0 +1,28 @@
+{
+  "common": {
+    "save": "Enregistrer les modifications",
+    "saving": "Enregistrement…",
+    "saved": "Paramètres enregistrés !"
+  },
+  "settings": {
+    "profile": {
+      "title": "Informations du profil",
+      "firstName": "Prénom",
+      "lastName": "Nom",
+      "email": "E-mail",
+      "emailManagedNote": "Votre e-mail est géré par votre fournisseur d'authentification.",
+      "preferences": {
+        "title": "Préférences",
+        "language": {
+          "label": "Langue",
+          "helper": "Utilisé pour les e-mails et la communication du compte. La traduction de l'interface arrive bientôt.",
+          "options": {
+            "en": "English",
+            "nl": "Nederlands",
+            "fr": "Français"
+          }
+        }
+      }
+    }
+  }
+}

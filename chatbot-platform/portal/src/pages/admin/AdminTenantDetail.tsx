@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -127,6 +128,7 @@ function formatAction(action: string): string {
 }
 
 const AdminTenantDetail: React.FC = () => {
+  const { t } = useTranslation();
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [showApiKey, setShowApiKey] = useState(false);
@@ -150,10 +152,10 @@ const AdminTenantDetail: React.FC = () => {
       setRevealedApiKey(result.apiKey);
       setShowApiKey(true);
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(id ?? '') });
-      toast.success('API key rotated');
+      toast.success(t('admin.tenantDetail.toast.apiKeyRotated'));
       setShowRotateDialog(false);
     },
-    onError: () => toast.error('Failed to rotate API key'),
+    onError: () => toast.error(t('admin.tenantDetail.toast.apiKeyRotateFailed')),
   });
 
   // Reveal the full (unmasked) API key. Server audits each reveal so the
@@ -165,7 +167,7 @@ const AdminTenantDetail: React.FC = () => {
       setRevealedApiKey(result.apiKey);
       setShowApiKey(true);
     },
-    onError: () => toast.error('Failed to reveal API key'),
+    onError: () => toast.error(t('admin.tenantDetail.toast.apiKeyRevealFailed')),
   });
 
   const handleToggleApiKey = () => {
@@ -190,9 +192,9 @@ const AdminTenantDetail: React.FC = () => {
   if (isError || !tenant) {
     return (
       <div className="p-6">
-        <p className="text-text-secondary">Failed to load tenant.</p>
+        <p className="text-text-secondary">{t('admin.tenantDetail.errors.loadFailed')}</p>
         <Link to="/admin/tenants" className="text-primary-400 hover:underline mt-2 inline-block">
-          Back to tenants
+          {t('admin.tenantDetail.backToTenants')}
         </Link>
       </div>
     );
@@ -204,7 +206,7 @@ const AdminTenantDetail: React.FC = () => {
       <div>
         <Link to="/admin/tenants" className="flex items-center gap-1 text-sm text-text-muted hover:text-text-secondary mb-3">
           <ArrowLeft className="w-4 h-4" />
-          All Tenants
+          {t('admin.tenantDetail.breadcrumb.allTenants')}
         </Link>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -232,7 +234,7 @@ const AdminTenantDetail: React.FC = () => {
               ) : (
                 <Crown className="w-3.5 h-3.5" />
               )}
-              Set tier
+              {t('admin.tenantDetail.actions.setTier')}
             </Button>
             {tenant.status === 'active' ? (
               <Button
@@ -242,7 +244,7 @@ const AdminTenantDetail: React.FC = () => {
                 disabled={suspendMutation.isPending}
                 className="text-status-busy border-status-busy/30 hover:bg-status-busy/10"
               >
-                Suspend
+                {t('admin.tenantDetail.actions.suspend')}
               </Button>
             ) : tenant.status === 'suspended' ? (
               <Button
@@ -252,13 +254,13 @@ const AdminTenantDetail: React.FC = () => {
                 disabled={activateMutation.isPending}
                 className="text-status-online border-status-online/30 hover:bg-status-online/10"
               >
-                Activate
+                {t('admin.tenantDetail.actions.activate')}
               </Button>
             ) : null}
           </div>
         </div>
         <p className="text-text-muted text-sm mt-1">
-          <span className="font-mono">{tenant.slug}</span> &middot; Created {formatDate(tenant.createdAt)}
+          <span className="font-mono">{tenant.slug}</span> &middot; {t('admin.tenantDetail.header.createdOn', { date: formatDate(tenant.createdAt) })}
         </p>
       </div>
 
@@ -271,7 +273,7 @@ const AdminTenantDetail: React.FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold font-mono text-text-primary">{tenant.userCount}</p>
-              <p className="text-xs text-text-muted">Users</p>
+              <p className="text-xs text-text-muted">{t('admin.tenantDetail.overview.users')}</p>
             </div>
           </div>
         </Card>
@@ -282,7 +284,7 @@ const AdminTenantDetail: React.FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold font-mono text-text-primary">{tenant.sessionCount}</p>
-              <p className="text-xs text-text-muted">Sessions</p>
+              <p className="text-xs text-text-muted">{t('admin.tenantDetail.overview.sessions')}</p>
             </div>
           </div>
         </Card>
@@ -293,7 +295,7 @@ const AdminTenantDetail: React.FC = () => {
             </div>
             <div>
               <p className="text-2xl font-bold font-mono text-text-primary">{tenant.messageCount}</p>
-              <p className="text-xs text-text-muted">Messages</p>
+              <p className="text-xs text-text-muted">{t('admin.tenantDetail.overview.messages')}</p>
             </div>
           </div>
         </Card>
@@ -313,7 +315,7 @@ const AdminTenantDetail: React.FC = () => {
                   onClick={handleToggleApiKey}
                   disabled={revealMutation.isPending}
                   className="h-6 w-6 text-text-muted hover:text-text-secondary"
-                  aria-label={showApiKey ? 'Hide API key' : 'Reveal API key'}
+                  aria-label={showApiKey ? t('admin.tenantDetail.apiKey.hide') : t('admin.tenantDetail.apiKey.reveal')}
                 >
                   {revealMutation.isPending ? (
                     <Loader2 className="w-3 h-3 animate-spin" />
@@ -341,25 +343,25 @@ const AdminTenantDetail: React.FC = () => {
       <Card variant="glass" className="overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
           <h3 className="font-semibold text-text-primary">
-            Members <span className="text-text-muted font-normal">({tenant.userCount})</span>
+            {t('admin.tenantDetail.members.title')} <span className="text-text-muted font-normal">({tenant.userCount})</span>
           </h3>
           {tenant.userCount > 10 && (
             <Link
               to={`/admin/users?tenantId=${tenant.id}`}
               className="text-sm text-primary-400 hover:underline"
             >
-              View all
+              {t('admin.tenantDetail.members.viewAll')}
             </Link>
           )}
         </div>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Last Login</TableHead>
+              <TableHead>{t('admin.tenantDetail.members.columns.name')}</TableHead>
+              <TableHead>{t('admin.tenantDetail.members.columns.email')}</TableHead>
+              <TableHead>{t('admin.tenantDetail.members.columns.role')}</TableHead>
+              <TableHead>{t('admin.tenantDetail.members.columns.status')}</TableHead>
+              <TableHead>{t('admin.tenantDetail.members.columns.lastLogin')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -375,7 +377,7 @@ const AdminTenantDetail: React.FC = () => {
                     ? 'bg-status-online/10 text-status-online border-status-online/20'
                     : 'bg-surface-3 text-text-muted border-edge'
                   }>
-                    {user.isActive ? 'Active' : 'Inactive'}
+                    {user.isActive ? t('admin.tenantDetail.status.active') : t('admin.tenantDetail.status.inactive')}
                   </Badge>
                 </TableCell>
                 <TableCell className="text-text-secondary text-sm">{formatDate(user.lastLoginAt)}</TableCell>
@@ -390,17 +392,17 @@ const AdminTenantDetail: React.FC = () => {
         <Card variant="glass" className="overflow-hidden">
           <div className="px-6 py-4 border-b border-edge">
             <h3 className="font-semibold text-text-primary">
-              Pending Invites <span className="text-text-muted font-normal">({tenant.pendingInvites.length})</span>
+              {t('admin.tenantDetail.invites.title')} <span className="text-text-muted font-normal">({tenant.pendingInvites.length})</span>
             </h3>
           </div>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Sent</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('admin.tenantDetail.invites.columns.email')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.invites.columns.role')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.invites.columns.sent')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.invites.columns.status')}</TableHead>
+                <TableHead className="text-right">{t('admin.tenantDetail.invites.columns.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -411,9 +413,9 @@ const AdminTenantDetail: React.FC = () => {
                   <TableCell className="text-text-secondary text-sm">{formatDate(inv.createdAt)}</TableCell>
                   <TableCell>
                     {inv.isExpired ? (
-                      <Badge className="bg-status-busy/10 text-status-busy border-status-busy/20">Expired</Badge>
+                      <Badge className="bg-status-busy/10 text-status-busy border-status-busy/20">{t('admin.tenantDetail.invites.status.expired')}</Badge>
                     ) : (
-                      <Badge className="bg-status-online/10 text-status-online border-status-online/20">Pending</Badge>
+                      <Badge className="bg-status-online/10 text-status-online border-status-online/20">{t('admin.tenantDetail.invites.status.pending')}</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-right">
@@ -423,7 +425,7 @@ const AdminTenantDetail: React.FC = () => {
                         size="sm"
                         onClick={() => resendInvite.mutate(inv.id)}
                         disabled={resendInvite.isPending}
-                        title="Resend invite"
+                        title={t('admin.tenantDetail.invites.actions.resend')}
                       >
                         <RotateCw className="w-4 h-4" />
                       </Button>
@@ -432,7 +434,7 @@ const AdminTenantDetail: React.FC = () => {
                         size="sm"
                         onClick={() => cancelInvite.mutate(inv.id)}
                         disabled={cancelInvite.isPending}
-                        title="Cancel invite"
+                        title={t('admin.tenantDetail.invites.actions.cancel')}
                       >
                         <X className="w-4 h-4" />
                       </Button>
@@ -448,18 +450,18 @@ const AdminTenantDetail: React.FC = () => {
       {/* Audit Log */}
       <Card variant="glass" className="overflow-hidden">
         <div className="px-6 py-4 border-b border-edge">
-          <h3 className="font-semibold text-text-primary">Recent Activity</h3>
+          <h3 className="font-semibold text-text-primary">{t('admin.tenantDetail.audit.title')}</h3>
         </div>
         {auditLogs.length === 0 ? (
-          <div className="px-6 py-8 text-text-muted text-center text-sm">No activity recorded yet.</div>
+          <div className="px-6 py-8 text-text-muted text-center text-sm">{t('admin.tenantDetail.audit.empty')}</div>
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Actor</TableHead>
-                <TableHead>Action</TableHead>
-                <TableHead>Details</TableHead>
+                <TableHead>{t('admin.tenantDetail.audit.columns.time')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.audit.columns.actor')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.audit.columns.action')}</TableHead>
+                <TableHead>{t('admin.tenantDetail.audit.columns.details')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -498,27 +500,25 @@ const AdminTenantDetail: React.FC = () => {
           <div className="relative">
             <LoadingOverlay
               isLoading={setTierMutation.isPending}
-              message="Updating tier..."
+              message={t('admin.tenantDetail.tierDialog.updating')}
             />
             <AlertDialogHeader>
-              <AlertDialogTitle>Set tier (manual override)</AlertDialogTitle>
+              <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
               <AlertDialogDescription>
-                Pick a target tier for <strong>{tenant.name}</strong>. This is a manual
-                override — it bypasses Stripe and writes a manual primary billing row.
-                Use it for comps, sales-managed Enterprise, or refund-driven downgrades.
+                {t('admin.tenantDetail.tierDialog.descriptionBefore')} <strong>{tenant.name}</strong>{t('admin.tenantDetail.tierDialog.descriptionAfter')}
               </AlertDialogDescription>
             </AlertDialogHeader>
 
             <div className="space-y-3 py-2">
               <div className="grid grid-cols-2 gap-2">
-                {(['free', 'pro', 'premium', 'enterprise'] as ManualTier[]).map((t) => {
-                  const isCurrent = tenant.tier === t;
-                  const isSelected = pendingTier === t;
+                {(['free', 'pro', 'premium', 'enterprise'] as ManualTier[]).map((tier) => {
+                  const isCurrent = tenant.tier === tier;
+                  const isSelected = pendingTier === tier;
                   return (
                     <button
-                      key={t}
+                      key={tier}
                       type="button"
-                      onClick={() => !isCurrent && setPendingTier(t)}
+                      onClick={() => !isCurrent && setPendingTier(tier)}
                       disabled={isCurrent}
                       className={`
                         text-left rounded-lg border px-3 py-2.5 transition-colors
@@ -528,19 +528,19 @@ const AdminTenantDetail: React.FC = () => {
                       `}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-medium text-text-primary capitalize">{t}</span>
+                        <span className="font-medium text-text-primary capitalize">{tier}</span>
                         {isCurrent && (
-                          <span className="text-xs text-text-muted">current</span>
+                          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
                         )}
                         {isSelected && (
-                          <span className="text-xs text-accent-400">selected</span>
+                          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
                         )}
                       </div>
                       <p className="text-xs text-text-muted mt-1">
-                        {t === 'free' && 'No plan — abuse / refund downgrade'}
-                        {t === 'pro' && 'Pro entitlements, comped (no Stripe)'}
-                        {t === 'premium' && 'Premium entitlements, comped'}
-                        {t === 'enterprise' && 'Sales-managed, unlimited'}
+                        {tier === 'free' && t('admin.tenantDetail.tierDialog.tierDescriptions.free')}
+                        {tier === 'pro' && t('admin.tenantDetail.tierDialog.tierDescriptions.pro')}
+                        {tier === 'premium' && t('admin.tenantDetail.tierDialog.tierDescriptions.premium')}
+                        {tier === 'enterprise' && t('admin.tenantDetail.tierDialog.tierDescriptions.enterprise')}
                       </p>
                     </button>
                   );
@@ -548,15 +548,13 @@ const AdminTenantDetail: React.FC = () => {
               </div>
 
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
-                <strong>Note:</strong> if this tenant has an active Stripe subscription,
-                this does <em>not</em> cancel it. Open the Stripe dashboard and cancel
-                the subscription there to stop further charges.
+                <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong> {t('admin.tenantDetail.tierDialog.stripeWarning')}
               </div>
             </div>
 
             <AlertDialogFooter>
               <AlertDialogCancel disabled={setTierMutation.isPending}>
-                Cancel
+                {t('common.cancel')}
               </AlertDialogCancel>
               <AlertDialogAction
                 onClick={(e) => {
@@ -578,9 +576,9 @@ const AdminTenantDetail: React.FC = () => {
                 {setTierMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : pendingTier ? (
-                  `Set to ${pendingTier.charAt(0).toUpperCase() + pendingTier.slice(1)}`
+                  t('admin.tenantDetail.tierDialog.setTo', { tier: pendingTier.charAt(0).toUpperCase() + pendingTier.slice(1) })
                 ) : (
-                  'Pick a tier'
+                  t('admin.tenantDetail.tierDialog.pickATier')
                 )}
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -592,21 +590,21 @@ const AdminTenantDetail: React.FC = () => {
       <AlertDialog open={showRotateDialog} onOpenChange={(open) => !open && setShowRotateDialog(false)}>
         <AlertDialogContent>
           <div className="relative">
-            <LoadingOverlay isLoading={rotateMutation.isPending} message="Rotating API key..." />
+            <LoadingOverlay isLoading={rotateMutation.isPending} message={t('admin.tenantDetail.rotateDialog.rotating')} />
             <AlertDialogHeader>
-              <AlertDialogTitle>Rotate API Key</AlertDialogTitle>
+              <AlertDialogTitle>{t('admin.tenantDetail.rotateDialog.title')}</AlertDialogTitle>
               <AlertDialogDescription>
-                This will invalidate the current API key immediately. Any integrations using it will break until updated with the new key.
+                {t('admin.tenantDetail.rotateDialog.description')}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={rotateMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={rotateMutation.isPending}>{t('common.cancel')}</AlertDialogCancel>
               <AlertDialogAction
                 onClick={(e) => { e.preventDefault(); rotateMutation.mutate(); }}
                 disabled={rotateMutation.isPending}
                 className="bg-status-busy hover:bg-status-busy/90"
               >
-                {rotateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Rotate Key'}
+                {rotateMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : t('admin.tenantDetail.rotateDialog.confirm')}
               </AlertDialogAction>
             </AlertDialogFooter>
           </div>

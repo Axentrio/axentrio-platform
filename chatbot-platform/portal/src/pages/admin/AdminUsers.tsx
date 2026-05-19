@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { Loader2, Search, ShieldCheck, ShieldOff, Trash2, UserX, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -84,10 +85,6 @@ function roleBadgeClass(role: UserRole): string {
   }
 }
 
-function roleLabel(role: UserRole): string {
-  return role === 'super_admin' ? 'Super Admin' : role.charAt(0).toUpperCase() + role.slice(1);
-}
-
 function formatDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-US', {
@@ -97,35 +94,15 @@ function formatDate(iso: string | null): string {
   });
 }
 
-const confirmDialogConfig: Record<
+const confirmDialogClassMap: Record<
   'promote' | 'demote' | 'deactivate' | 'reactivate' | 'delete',
-  { title: string; buttonLabel: string; buttonClass: string }
+  string
 > = {
-  promote: {
-    title: 'Promote to Super Admin',
-    buttonLabel: 'Promote',
-    buttonClass: 'bg-accent-500 hover:bg-accent-600',
-  },
-  demote: {
-    title: 'Demote from Super Admin',
-    buttonLabel: 'Demote',
-    buttonClass: 'bg-status-busy hover:bg-status-busy/90',
-  },
-  deactivate: {
-    title: 'Deactivate User',
-    buttonLabel: 'Deactivate',
-    buttonClass: 'bg-yellow-600 hover:bg-yellow-700',
-  },
-  reactivate: {
-    title: 'Reactivate User',
-    buttonLabel: 'Reactivate',
-    buttonClass: 'bg-green-600 hover:bg-green-700',
-  },
-  delete: {
-    title: 'Permanently Delete User',
-    buttonLabel: 'Delete Permanently',
-    buttonClass: 'bg-red-600 hover:bg-red-700',
-  },
+  promote: 'bg-accent-500 hover:bg-accent-600',
+  demote: 'bg-status-busy hover:bg-status-busy/90',
+  deactivate: 'bg-yellow-600 hover:bg-yellow-700',
+  reactivate: 'bg-green-600 hover:bg-green-700',
+  delete: 'bg-red-600 hover:bg-red-700',
 };
 
 /* ------------------------------------------------------------------ */
@@ -133,6 +110,7 @@ const confirmDialogConfig: Record<
 /* ------------------------------------------------------------------ */
 
 const AdminUsers: React.FC = () => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<UserRole | 'all'>('all');
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -199,8 +177,8 @@ const AdminUsers: React.FC = () => {
     <div className="h-full overflow-y-auto p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text-primary">Users</h1>
-        <p className="text-text-secondary mt-1">Manage all users across every tenant.</p>
+        <h1 className="text-2xl font-bold text-text-primary">{t('admin.users.header.title')}</h1>
+        <p className="text-text-secondary mt-1">{t('admin.users.header.subtitle')}</p>
       </div>
 
       {/* Filters */}
@@ -208,7 +186,7 @@ const AdminUsers: React.FC = () => {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           <Input
-            placeholder="Search by name, email, or tenant..."
+            placeholder={t('admin.users.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -217,14 +195,14 @@ const AdminUsers: React.FC = () => {
 
         <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as UserRole | 'all')}>
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Role" />
+            <SelectValue placeholder={t('admin.users.filters.rolePlaceholder')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Roles</SelectItem>
-            <SelectItem value="super_admin">Super Admin</SelectItem>
-            <SelectItem value="admin">Admin</SelectItem>
-            <SelectItem value="supervisor">Supervisor</SelectItem>
-            <SelectItem value="agent">Agent</SelectItem>
+            <SelectItem value="all">{t('admin.users.filters.allRoles')}</SelectItem>
+            <SelectItem value="super_admin">{t('roles.super_admin')}</SelectItem>
+            <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+            <SelectItem value="supervisor">{t('roles.supervisor')}</SelectItem>
+            <SelectItem value="agent">{t('roles.agent')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -235,21 +213,21 @@ const AdminUsers: React.FC = () => {
           {isLoading ? (
             <PageSkeleton variant="table" rows={5} />
           ) : isError ? (
-            <div className="p-6 text-text-secondary">Failed to load users.</div>
+            <div className="p-6 text-text-secondary">{t('admin.users.errorLoading')}</div>
           ) : filtered.length === 0 ? (
-            <div className="p-6 text-text-muted text-center">No users found.</div>
+            <div className="p-6 text-text-muted text-center">{t('admin.users.empty')}</div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Tenant</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Last Login</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t('admin.users.columns.name')}</TableHead>
+                  <TableHead>{t('admin.users.columns.email')}</TableHead>
+                  <TableHead>{t('admin.users.columns.role')}</TableHead>
+                  <TableHead>{t('admin.users.columns.tenant')}</TableHead>
+                  <TableHead>{t('admin.users.columns.status')}</TableHead>
+                  <TableHead>{t('admin.users.columns.lastLogin')}</TableHead>
+                  <TableHead>{t('admin.users.columns.created')}</TableHead>
+                  <TableHead className="text-right">{t('admin.users.columns.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -265,14 +243,14 @@ const AdminUsers: React.FC = () => {
                         {user.name}
                         {currentUser?.email === user.email && currentTenantId === user.tenantId && (
                           <Badge className="bg-primary-600/15 text-primary-400 border-primary-500/25 text-[10px] px-1.5 py-0">
-                            You
+                            {t('admin.users.youBadge')}
                           </Badge>
                         )}
                       </span>
                     </TableCell>
                     <TableCell className="text-text-secondary">{user.email}</TableCell>
                     <TableCell>
-                      <Badge className={roleBadgeClass(user.role)}>{roleLabel(user.role)}</Badge>
+                      <Badge className={roleBadgeClass(user.role)}>{t(`roles.${user.role}`)}</Badge>
                     </TableCell>
                     <TableCell className="text-text-secondary">{user.tenantName}</TableCell>
                     <TableCell>
@@ -283,7 +261,7 @@ const AdminUsers: React.FC = () => {
                             : 'bg-surface-3 text-text-muted border-edge'
                         }
                       >
-                        {user.isActive ? 'Active' : 'Inactive'}
+                        {user.isActive ? t('admin.users.status.active') : t('admin.users.status.inactive')}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-text-secondary">
@@ -303,7 +281,7 @@ const AdminUsers: React.FC = () => {
                             className="text-status-busy border-status-busy/30 hover:bg-status-busy/10 gap-1.5"
                           >
                             <ShieldOff className="w-3 h-3" />
-                            Demote
+                            {t('admin.users.actions.demote')}
                           </Button>
                         ) : (
                           <Button
@@ -314,7 +292,7 @@ const AdminUsers: React.FC = () => {
                             className="text-accent-400 border-accent-500/30 hover:bg-accent-500/10 gap-1.5"
                           >
                             <ShieldCheck className="w-3 h-3" />
-                            Promote
+                            {t('admin.users.actions.promote')}
                           </Button>
                         )}
                         {user.isActive ? (
@@ -327,7 +305,7 @@ const AdminUsers: React.FC = () => {
                               className="text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/10 gap-1.5"
                             >
                               <UserX className="w-3 h-3" />
-                              Deactivate
+                              {t('admin.users.actions.deactivate')}
                             </Button>
                           )
                         ) : (
@@ -340,7 +318,7 @@ const AdminUsers: React.FC = () => {
                               className="text-status-online border-status-online/30 hover:bg-status-online/10 gap-1.5"
                             >
                               <UserCheck className="w-3 h-3" />
-                              Reactivate
+                              {t('admin.users.actions.reactivate')}
                             </Button>
                             <Button
                               size="sm"
@@ -350,7 +328,7 @@ const AdminUsers: React.FC = () => {
                               className="text-red-400 border-red-500/30 hover:bg-red-500/10 gap-1.5"
                             >
                               <Trash2 className="w-3 h-3" />
-                              Delete
+                              {t('admin.users.actions.delete')}
                             </Button>
                           </>
                         )}
@@ -367,7 +345,11 @@ const AdminUsers: React.FC = () => {
       {/* Footer count */}
       {!isLoading && !isError && (
         <p className="text-sm text-text-muted mt-3">
-          Showing {filtered.length} of {users.length} user{users.length !== 1 ? 's' : ''}
+          {t('admin.users.footerCount', {
+            count: users.length,
+            shown: filtered.length,
+            total: users.length,
+          })}
         </p>
       )}
 
@@ -378,57 +360,28 @@ const AdminUsers: React.FC = () => {
             <LoadingOverlay isLoading={isMutating} />
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {confirmAction && confirmDialogConfig[confirmAction.type].title}
+                {confirmAction && t(`admin.users.confirmDialog.${confirmAction.type}.title`)}
               </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmAction?.type === 'promote' ? (
-                <>
-                  Are you sure you want to promote{' '}
-                  <span className="font-semibold text-text-primary">{confirmAction.user.name}</span>{' '}
-                  to Super Admin? They will gain full platform access.
-                </>
-              ) : confirmAction?.type === 'demote' ? (
-                <>
-                  Are you sure you want to demote{' '}
-                  <span className="font-semibold text-text-primary">
-                    {confirmAction?.user.name}
-                  </span>{' '}
-                  from Super Admin? They will lose platform-wide privileges.
-                </>
-              ) : confirmAction?.type === 'deactivate' ? (
-                <>
-                  Are you sure you want to deactivate{' '}
-                  <span className="font-semibold text-text-primary">
-                    {confirmAction?.user.name}
-                  </span>? They will be removed from their Clerk organization and lose access.
-                </>
-              ) : confirmAction?.type === 'reactivate' ? (
-                <>
-                  Are you sure you want to reactivate{' '}
-                  <span className="font-semibold text-text-primary">
-                    {confirmAction?.user.name}
-                  </span>? They will be re-invited to their Clerk organization.
-                </>
-              ) : (
-                <>
-                  This will anonymize{' '}
-                  <span className="font-semibold text-text-primary">
-                    {confirmAction?.user.name}
-                  </span>'s data and remove them permanently. This cannot be undone.
-                </>
+              {confirmAction && (
+                <Trans
+                  i18nKey={`admin.users.confirmDialog.${confirmAction.type}.description`}
+                  values={{ name: confirmAction.user.name }}
+                  components={{ strong: <span className="font-semibold text-text-primary" /> }}
+                />
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={isMutating}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isMutating}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => { e.preventDefault(); handleConfirm(); }}
               disabled={isMutating}
-              className={confirmAction ? confirmDialogConfig[confirmAction.type].buttonClass : ''}
+              className={confirmAction ? confirmDialogClassMap[confirmAction.type] : ''}
             >
               {isMutating ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : confirmAction ? confirmDialogConfig[confirmAction.type].buttonLabel : ''}
+              ) : confirmAction ? t(`admin.users.confirmDialog.${confirmAction.type}.button`) : ''}
             </AlertDialogAction>
           </AlertDialogFooter>
           </div>

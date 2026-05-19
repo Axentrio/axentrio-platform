@@ -1,5 +1,6 @@
 import React from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { HelpCircle } from 'lucide-react';
 import FaqContent from './FaqContent';
 import { faqSections } from './helpFaqData';
@@ -7,6 +8,7 @@ import { faqSections } from './helpFaqData';
 const DEFAULT_SECTION_ID = faqSections[0].id;
 
 const Help: React.FC = () => {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const sectionParam = searchParams.get('section') ?? '';
@@ -42,10 +44,8 @@ const Help: React.FC = () => {
           <HelpCircle className="w-5 h-5 text-primary-400" />
         </div>
         <div>
-          <h1 className="text-lg font-semibold text-text-primary">Help &amp; FAQ</h1>
-          <p className="text-xs text-text-muted">
-            Answers to common questions about HandsOff. Search or browse by section.
-          </p>
+          <h1 className="text-lg font-semibold text-text-primary">{t('help.page.title')}</h1>
+          <p className="text-xs text-text-muted">{t('help.page.subtitle')}</p>
         </div>
       </div>
 

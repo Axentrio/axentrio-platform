@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Download, Search, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,9 @@ import {
   faqSections,
   FAQ_DOC_PATH,
   FAQ_DOC_FILENAME,
+  sectionTitleKey,
+  itemQuestionKey,
+  itemAnswerKey,
   type FaqItem,
   type FaqSection,
 } from './helpFaqData';
@@ -41,6 +45,8 @@ interface SearchHit {
   section: FaqSection;
   item: FaqItem;
   index: number;
+  qText: string;
+  aText: string;
 }
 
 const HIGHLIGHT_STYLE: React.CSSProperties = {
@@ -81,6 +87,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
   autoFocusSearch = false,
   className,
 }) => {
+  const { t } = useTranslation();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const trimmedQuery = query.trim();
   const tokens = useMemo(
@@ -99,14 +106,16 @@ export const FaqContent: React.FC<FaqContentProps> = ({
     const hits: SearchHit[] = [];
     for (const section of faqSections) {
       section.items.forEach((item, index) => {
-        const haystack = `${item.q} ${item.a}`.toLowerCase();
-        if (tokens.every((t) => haystack.includes(t))) {
-          hits.push({ section, item, index });
+        const qText = t(itemQuestionKey(section.id, item.id));
+        const aText = t(itemAnswerKey(section.id, item.id));
+        const haystack = `${qText} ${aText}`.toLowerCase();
+        if (tokens.every((tok) => haystack.includes(tok))) {
+          hits.push({ section, item, index, qText, aText });
         }
       });
     }
     return hits;
-  }, [isSearching, tokens]);
+  }, [isSearching, tokens, t]);
 
   const matchesBySection = useMemo<Record<string, number>>(() => {
     if (!isSearching) return {};
@@ -126,8 +135,8 @@ export const FaqContent: React.FC<FaqContentProps> = ({
   useEffect(() => {
     if (autoFocusSearch && searchInputRef.current) {
       // Defer so it runs after any dialog/portal mount transitions.
-      const t = window.setTimeout(() => searchInputRef.current?.focus(), 0);
-      return () => window.clearTimeout(t);
+      const ms = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+      return () => window.clearTimeout(ms);
     }
   }, [autoFocusSearch]);
 
@@ -150,8 +159,8 @@ export const FaqContent: React.FC<FaqContentProps> = ({
             type="search"
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
-            placeholder="Search all FAQs…"
-            aria-label="Search FAQs"
+            placeholder={t('help.search.placeholder')}
+            aria-label={t('help.search.ariaLabel')}
             className="pl-9 pr-9"
           />
           {isSearching && (
@@ -159,7 +168,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
               type="button"
               onClick={() => onQueryChange('')}
               className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded text-text-muted hover:text-text-primary hover:bg-surface-3"
-              aria-label="Clear search"
+              aria-label={t('help.search.clearAriaLabel')}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -169,10 +178,10 @@ export const FaqContent: React.FC<FaqContentProps> = ({
           <a
             href={FAQ_DOC_PATH}
             download={FAQ_DOC_FILENAME}
-            title="Download the full FAQ document (PDF)"
+            title={t('help.download.title')}
           >
             <Download className="w-3.5 h-3.5" />
-            Download FAQ
+            {t('help.download.button')}
           </a>
         </Button>
       </div>
@@ -199,7 +208,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
                         dim && 'opacity-50',
                       )}
                     >
-                      <span className="truncate text-left">{s.title}</span>
+                      <span className="truncate text-left">{t(sectionTitleKey(s.id))}</span>
                       {isSearching && count ? (
                         <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-400">
                           {count}
@@ -219,13 +228,13 @@ export const FaqContent: React.FC<FaqContentProps> = ({
           {!isSearching && (
             <div className="md:hidden p-4 border-b border-edge">
               <Select value={activeSection.id} onValueChange={onSectionChange}>
-                <SelectTrigger aria-label="Choose a section">
+                <SelectTrigger aria-label={t('help.mobile.chooseSection')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {faqSections.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.title}
+                      {t(sectionTitleKey(s.id))}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -249,36 +258,39 @@ export const FaqContent: React.FC<FaqContentProps> = ({
   );
 };
 
-const SectionPane: React.FC<{ section: FaqSection }> = ({ section }) => (
-  <>
-    <div className="px-6 pt-5 pb-3 border-b border-edge">
-      <h3 className="text-sm font-semibold text-text-primary truncate">
-        {section.title}
-      </h3>
-      <p className="text-xs text-text-muted mt-0.5">
-        {section.items.length} question{section.items.length === 1 ? '' : 's'}
-      </p>
-    </div>
-    <div className="flex-1 overflow-y-auto px-6 py-4">
-      <Accordion type="single" collapsible className="w-full">
-        {section.items.map((item, i) => (
-          <AccordionItem
-            key={`${section.id}-${i}`}
-            value={`${section.id}-${i}`}
-            className="border-edge last:border-b-0"
-          >
-            <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
-              {item.q}
-            </AccordionTrigger>
-            <AccordionContent className="text-sm text-text-secondary leading-relaxed">
-              {item.a}
-            </AccordionContent>
-          </AccordionItem>
-        ))}
-      </Accordion>
-    </div>
-  </>
-);
+const SectionPane: React.FC<{ section: FaqSection }> = ({ section }) => {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="px-6 pt-5 pb-3 border-b border-edge">
+        <h3 className="text-sm font-semibold text-text-primary truncate">
+          {t(sectionTitleKey(section.id))}
+        </h3>
+        <p className="text-xs text-text-muted mt-0.5">
+          {t('help.section.questionCount', { count: section.items.length })}
+        </p>
+      </div>
+      <div className="flex-1 overflow-y-auto px-6 py-4">
+        <Accordion type="single" collapsible className="w-full">
+          {section.items.map((item) => (
+            <AccordionItem
+              key={`${section.id}-${item.id}`}
+              value={`${section.id}-${item.id}`}
+              className="border-edge last:border-b-0"
+            >
+              <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
+                {t(itemQuestionKey(section.id, item.id))}
+              </AccordionTrigger>
+              <AccordionContent className="text-sm text-text-secondary leading-relaxed">
+                {t(itemAnswerKey(section.id, item.id))}
+              </AccordionContent>
+            </AccordionItem>
+          ))}
+        </Accordion>
+      </div>
+    </>
+  );
+};
 
 interface SearchResultsPaneProps {
   hits: SearchHit[];
@@ -293,25 +305,23 @@ const SearchResultsPane: React.FC<SearchResultsPaneProps> = ({
   query,
   expandedKeys,
 }) => {
-  // Key the Accordion off the query so a new search resets it to the
-  // auto-expanded state, while still allowing the user to collapse
-  // individual items by interacting with them.
+  const { t } = useTranslation();
   return (
     <>
       <div className="px-6 pt-5 pb-3 border-b border-edge">
         <h3 className="text-sm font-semibold text-text-primary truncate">
-          Search results
+          {t('help.search.title')}
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
           {hits.length === 0
-            ? `No matches for "${query}"`
-            : `${hits.length} match${hits.length === 1 ? '' : 'es'} for "${query}"`}
+            ? t('help.search.noMatches', { query })
+            : t('help.search.matches', { count: hits.length, query })}
         </p>
       </div>
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {hits.length === 0 ? (
           <div className="text-sm text-text-muted py-8 text-center">
-            Try a different keyword, or download the full FAQ document.
+            {t('help.search.tryDifferent')}
           </div>
         ) : (
           <Accordion
@@ -329,15 +339,15 @@ const SearchResultsPane: React.FC<SearchResultsPaneProps> = ({
                 <AccordionTrigger className="text-sm text-left hover:no-underline py-3">
                   <div className="flex-1 min-w-0 pr-3">
                     <div className="text-[10px] uppercase tracking-wide text-text-muted mb-0.5">
-                      {hit.section.title}
+                      {t(sectionTitleKey(hit.section.id))}
                     </div>
                     <div className="text-text-primary">
-                      <HighlightedText text={hit.item.q} tokens={tokens} />
+                      <HighlightedText text={hit.qText} tokens={tokens} />
                     </div>
                   </div>
                 </AccordionTrigger>
                 <AccordionContent className="text-sm text-text-secondary leading-relaxed">
-                  <HighlightedText text={hit.item.a} tokens={tokens} />
+                  <HighlightedText text={hit.aText} tokens={tokens} />
                 </AccordionContent>
               </AccordionItem>
             ))}

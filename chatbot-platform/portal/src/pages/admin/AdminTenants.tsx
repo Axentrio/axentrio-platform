@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Loader2, Search, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -101,6 +102,7 @@ function formatDate(iso: string): string {
 /* ------------------------------------------------------------------ */
 
 const AdminTenants: React.FC = () => {
+  const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<TenantTier | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<TenantStatus | 'all'>('all');
@@ -146,12 +148,12 @@ const AdminTenants: React.FC = () => {
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Tenants</h1>
-          <p className="text-text-secondary mt-1">Manage all tenants across the platform.</p>
+          <h1 className="text-2xl font-bold text-text-primary">{t('admin.tenants.header.title')}</h1>
+          <p className="text-text-secondary mt-1">{t('admin.tenants.header.subtitle')}</p>
         </div>
         <Button onClick={() => setShowCreate(true)} className="gap-1.5">
           <Plus className="w-4 h-4" />
-          Create Tenant
+          {t('admin.tenants.actions.createTenant')}
         </Button>
       </div>
 
@@ -160,7 +162,7 @@ const AdminTenants: React.FC = () => {
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           <Input
-            placeholder="Search by name or slug..."
+            placeholder={t('admin.tenants.filters.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -169,13 +171,13 @@ const AdminTenants: React.FC = () => {
 
         <Select value={tierFilter} onValueChange={(v) => setTierFilter(v as TenantTier | 'all')}>
           <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Tier" />
+            <SelectValue placeholder={t('admin.tenants.filters.tierPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Tiers</SelectItem>
-            <SelectItem value="free">Free</SelectItem>
-            <SelectItem value="pro">Pro</SelectItem>
-            <SelectItem value="enterprise">Enterprise</SelectItem>
+            <SelectItem value="all">{t('admin.tenants.filters.allTiers')}</SelectItem>
+            <SelectItem value="free">{t('admin.tenants.tiers.free')}</SelectItem>
+            <SelectItem value="pro">{t('admin.tenants.tiers.pro')}</SelectItem>
+            <SelectItem value="enterprise">{t('admin.tenants.tiers.enterprise')}</SelectItem>
           </SelectContent>
         </Select>
 
@@ -184,13 +186,13 @@ const AdminTenants: React.FC = () => {
           onValueChange={(v) => setStatusFilter(v as TenantStatus | 'all')}
         >
           <SelectTrigger className="w-[150px]">
-            <SelectValue placeholder="Status" />
+            <SelectValue placeholder={t('admin.tenants.filters.statusPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="suspended">Suspended</SelectItem>
-            <SelectItem value="cancelled">Cancelled</SelectItem>
+            <SelectItem value="all">{t('admin.tenants.filters.allStatuses')}</SelectItem>
+            <SelectItem value="active">{t('admin.tenants.statuses.active')}</SelectItem>
+            <SelectItem value="suspended">{t('admin.tenants.statuses.suspended')}</SelectItem>
+            <SelectItem value="cancelled">{t('admin.tenants.statuses.cancelled')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -201,19 +203,19 @@ const AdminTenants: React.FC = () => {
           {isLoading ? (
             <PageSkeleton variant="table" rows={5} />
           ) : isError ? (
-            <div className="p-6 text-text-secondary">Failed to load tenants.</div>
+            <div className="p-6 text-text-secondary">{t('admin.tenants.loadError')}</div>
           ) : filtered.length === 0 ? (
-            <div className="p-6 text-text-muted text-center">No tenants found.</div>
+            <div className="p-6 text-text-muted text-center">{t('admin.tenants.empty')}</div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Slug</TableHead>
-                  <TableHead>Tier</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
+                  <TableHead>{t('admin.tenants.columns.name')}</TableHead>
+                  <TableHead>{t('admin.tenants.columns.slug')}</TableHead>
+                  <TableHead>{t('admin.tenants.columns.tier')}</TableHead>
+                  <TableHead>{t('admin.tenants.columns.status')}</TableHead>
+                  <TableHead>{t('admin.tenants.columns.created')}</TableHead>
+                  <TableHead className="text-right">{t('admin.tenants.columns.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -234,12 +236,12 @@ const AdminTenants: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Badge className={tierBadgeClass(tenant.tier)}>
-                        {tenant.tier.charAt(0).toUpperCase() + tenant.tier.slice(1)}
+                        {t(`admin.tenants.tiers.${tenant.tier}`)}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge className={statusBadgeClass(tenant.status)}>
-                        {tenant.status.charAt(0).toUpperCase() + tenant.status.slice(1)}
+                        {t(`admin.tenants.statuses.${tenant.status}`)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-text-secondary">
@@ -262,7 +264,7 @@ const AdminTenants: React.FC = () => {
                           {suspendMutation.isPending ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
                           ) : (
-                            'Suspend'
+                            t('admin.tenants.actions.suspend')
                           )}
                         </Button>
                       ) : tenant.status === 'suspended' ? (
@@ -281,7 +283,7 @@ const AdminTenants: React.FC = () => {
                           {activateMutation.isPending ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
                           ) : (
-                            'Activate'
+                            t('admin.tenants.actions.activate')
                           )}
                         </Button>
                       ) : (
@@ -299,7 +301,11 @@ const AdminTenants: React.FC = () => {
       {/* Footer count */}
       {!isLoading && !isError && (
         <p className="text-sm text-text-muted mt-3">
-          Showing {filtered.length} of {tenants.length} tenant{tenants.length !== 1 ? 's' : ''}
+          {t('admin.tenants.footerCount', {
+            count: tenants.length,
+            shown: filtered.length,
+            total: tenants.length,
+          })}
         </p>
       )}
 
@@ -307,27 +313,27 @@ const AdminTenants: React.FC = () => {
       <AlertDialog open={showCreate} onOpenChange={(open) => !open && setShowCreate(false)}>
         <AlertDialogContent>
           <div className="relative">
-            <LoadingOverlay isLoading={createMutation.isPending} message="Creating tenant..." />
+            <LoadingOverlay isLoading={createMutation.isPending} message={t('admin.tenants.create.loading')} />
             <AlertDialogHeader>
-              <AlertDialogTitle>Create New Tenant</AlertDialogTitle>
+              <AlertDialogTitle>{t('admin.tenants.create.title')}</AlertDialogTitle>
               <AlertDialogDescription>
-                Create a new tenant organization. A Clerk organization will be created automatically.
+                {t('admin.tenants.create.description')}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="space-y-4 py-2">
               <div>
                 <label className="text-sm font-medium text-text-secondary mb-1 block">
-                  Tenant Name *
+                  {t('admin.tenants.create.nameLabel')}
                 </label>
                 <Input
-                  placeholder="e.g. Acme Corp"
+                  placeholder={t('admin.tenants.create.namePlaceholder')}
                   value={newTenant.name}
                   onChange={(e) => setNewTenant((s) => ({ ...s, name: e.target.value }))}
                   disabled={createMutation.isPending}
                 />
               </div>
               <div>
-                <label className="text-sm font-medium text-text-secondary mb-1 block">Tier</label>
+                <label className="text-sm font-medium text-text-secondary mb-1 block">{t('admin.tenants.create.tierLabel')}</label>
                 <Select
                   value={newTenant.tier}
                   onValueChange={(v) => setNewTenant((s) => ({ ...s, tier: v as TenantTier }))}
@@ -337,31 +343,31 @@ const AdminTenants: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="free">Free</SelectItem>
-                    <SelectItem value="pro">Pro</SelectItem>
-                    <SelectItem value="enterprise">Enterprise</SelectItem>
+                    <SelectItem value="free">{t('admin.tenants.tiers.free')}</SelectItem>
+                    <SelectItem value="pro">{t('admin.tenants.tiers.pro')}</SelectItem>
+                    <SelectItem value="enterprise">{t('admin.tenants.tiers.enterprise')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <label className="text-sm font-medium text-text-secondary mb-1 block">
-                  Admin Email (optional)
+                  {t('admin.tenants.create.adminEmailLabel')}
                 </label>
                 <Input
                   type="email"
-                  placeholder="admin@example.com"
+                  placeholder={t('admin.tenants.create.adminEmailPlaceholder')}
                   value={newTenant.adminEmail}
                   onChange={(e) => setNewTenant((s) => ({ ...s, adminEmail: e.target.value }))}
                   disabled={createMutation.isPending}
                 />
                 <p className="text-xs text-text-muted mt-1">
-                  If provided, this user will be invited as the tenant admin.
+                  {t('admin.tenants.create.adminEmailHelp')}
                 </p>
               </div>
             </div>
             <InlineError message={createError} className="mt-2" />
             <AlertDialogFooter>
-              <AlertDialogCancel disabled={createMutation.isPending}>Cancel</AlertDialogCancel>
+              <AlertDialogCancel disabled={createMutation.isPending}>{t('common.cancel')}</AlertDialogCancel>
               <AlertDialogAction
                 disabled={!newTenant.name.trim() || createMutation.isPending}
                 onClick={(e) => {
@@ -384,7 +390,7 @@ const AdminTenants: React.FC = () => {
                           error?.response?.data?.error?.message
                           || error?.response?.data?.error
                           || error?.message
-                          || 'Failed to create tenant'
+                          || t('admin.tenants.create.errorFallback')
                         );
                       },
                     }
@@ -394,7 +400,7 @@ const AdminTenants: React.FC = () => {
                 {createMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  'Create'
+                  t('admin.tenants.create.submit')
                 )}
               </AlertDialogAction>
             </AlertDialogFooter>

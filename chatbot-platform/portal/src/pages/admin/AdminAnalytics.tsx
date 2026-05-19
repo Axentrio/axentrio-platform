@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAdminAnalytics } from '../../queries/useAdminQueries';
 import { Loader2, Building2, Users, Activity, MessageSquare } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -89,6 +90,7 @@ const StatCard: React.FC<StatCardProps> = ({ label, value, icon: Icon, iconColor
 /* ------------------------------------------------------------------ */
 
 const AdminAnalytics: React.FC = () => {
+  const { t } = useTranslation();
   const { data, isLoading, isError } = useAdminAnalytics();
 
   const analytics = data as AdminAnalyticsData | undefined;
@@ -97,28 +99,28 @@ const AdminAnalytics: React.FC = () => {
   const stats: StatCardProps[] = analytics
     ? [
         {
-          label: 'Total Tenants',
+          label: t('admin.analytics.metrics.totalTenants'),
           value: analytics.totalTenants,
           icon: Building2,
           iconColor: 'text-primary-400',
           iconBg: 'bg-primary-600/10',
         },
         {
-          label: 'Total Users',
+          label: t('admin.analytics.metrics.totalUsers'),
           value: analytics.totalUsers,
           icon: Users,
           iconColor: 'text-status-online',
           iconBg: 'bg-status-online/10',
         },
         {
-          label: 'Active Sessions',
+          label: t('admin.analytics.metrics.activeSessions'),
           value: analytics.activeSessions,
           icon: Activity,
           iconColor: 'text-accent-400',
           iconBg: 'bg-accent-500/10',
         },
         {
-          label: 'Messages Today',
+          label: t('admin.analytics.metrics.messagesToday'),
           value: analytics.messagesToday,
           icon: MessageSquare,
           iconColor: 'text-chat-bot',
@@ -132,15 +134,15 @@ const AdminAnalytics: React.FC = () => {
     <div className="h-full overflow-y-auto p-6">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-text-primary">Platform Analytics</h1>
-        <p className="text-text-secondary mt-1">Platform-wide metrics and tenant breakdown.</p>
+        <h1 className="text-2xl font-bold text-text-primary">{t('admin.analytics.header.title')}</h1>
+        <p className="text-text-secondary mt-1">{t('admin.analytics.header.subtitle')}</p>
       </div>
 
       {/* Loading state */}
       {isLoading && (
         <div className="flex items-center justify-center h-48">
           <Loader2 className="w-6 h-6 animate-spin text-text-muted" />
-          <span className="ml-2 text-text-secondary">Loading analytics...</span>
+          <span className="ml-2 text-text-secondary">{t('admin.analytics.loading')}</span>
         </div>
       )}
 
@@ -148,7 +150,7 @@ const AdminAnalytics: React.FC = () => {
       {isError && (
         <Card variant="glass">
           <CardContent className="p-6 text-text-secondary">
-            Failed to load analytics data.
+            {t('admin.analytics.errorLoading')}
           </CardContent>
         </Card>
       )}
@@ -166,19 +168,19 @@ const AdminAnalytics: React.FC = () => {
           {/* Tenant breakdown table */}
           <Card variant="glass" className="overflow-hidden">
             <CardHeader className="border-b border-edge px-6 py-4">
-              <h2 className="text-lg font-semibold text-text-primary">Tenant Breakdown</h2>
+              <h2 className="text-lg font-semibold text-text-primary">{t('admin.analytics.breakdown.title')}</h2>
             </CardHeader>
             <CardContent className="p-0">
               {analytics.tenantBreakdown.length === 0 ? (
-                <div className="p-6 text-text-muted text-center">No tenant data available.</div>
+                <div className="p-6 text-text-muted text-center">{t('admin.analytics.breakdown.empty')}</div>
               ) : (
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Tenant</TableHead>
-                      <TableHead>Tier</TableHead>
-                      <TableHead className="text-right">Users</TableHead>
-                      <TableHead className="text-right">Sessions</TableHead>
+                      <TableHead>{t('admin.analytics.breakdown.columns.tenant')}</TableHead>
+                      <TableHead>{t('admin.analytics.breakdown.columns.tier')}</TableHead>
+                      <TableHead className="text-right">{t('admin.analytics.breakdown.columns.users')}</TableHead>
+                      <TableHead className="text-right">{t('admin.analytics.breakdown.columns.sessions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -187,7 +189,9 @@ const AdminAnalytics: React.FC = () => {
                         <TableCell className="font-medium text-text-primary">{row.name}</TableCell>
                         <TableCell>
                           <Badge className={tierBadgeClass(row.tier)}>
-                            {row.tier.charAt(0).toUpperCase() + row.tier.slice(1)}
+                            {t(`admin.analytics.tiers.${row.tier.toLowerCase()}`, {
+                              defaultValue: row.tier.charAt(0).toUpperCase() + row.tier.slice(1),
+                            })}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right text-text-secondary font-mono">
@@ -206,8 +210,10 @@ const AdminAnalytics: React.FC = () => {
 
           {/* Totals footer */}
           <p className="text-sm text-text-muted mt-3">
-            {analytics.tenantBreakdown.length} tenant
-            {analytics.tenantBreakdown.length !== 1 ? 's' : ''} &middot; {analytics.totalSessions.toLocaleString()} total sessions
+            {t('admin.analytics.breakdown.footer', {
+              count: analytics.tenantBreakdown.length,
+              sessions: analytics.totalSessions.toLocaleString(),
+            })}
           </p>
         </>
       )}

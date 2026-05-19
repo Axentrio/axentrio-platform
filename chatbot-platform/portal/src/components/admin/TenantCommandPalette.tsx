@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Search } from 'lucide-react';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import {
@@ -15,6 +16,7 @@ import { useAppAuth } from '../../auth/useAppAuth';
 import { cn } from '@/lib/utils';
 
 export function TenantCommandPalette() {
+  const { t } = useTranslation();
   const { isTenantPaletteOpen, closeTenantPalette } = useUiStore();
   const { activeTenant } = useTenantContextStore();
   const { tenantId: ownTenantId } = useAppAuth();
@@ -65,7 +67,7 @@ export function TenantCommandPalette() {
     <Dialog open={isTenantPaletteOpen} onOpenChange={(open) => !open && closeTenantPalette()}>
       <DialogContent className="p-0 gap-0 max-w-md">
         <VisuallyHidden>
-          <DialogTitle>Switch tenant</DialogTitle>
+          <DialogTitle>{t('admin.tenantPalette.title')}</DialogTitle>
         </VisuallyHidden>
 
         {/* Search input */}
@@ -75,7 +77,7 @@ export function TenantCommandPalette() {
             ref={inputRef}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search tenants..."
+            placeholder={t('admin.tenantPalette.placeholder')}
             className="flex h-11 w-full bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-muted"
           />
         </div>
@@ -92,19 +94,19 @@ export function TenantCommandPalette() {
 
           {isError && (
             <div className="py-6 text-center">
-              <p className="text-sm text-text-muted mb-2">Failed to load tenants</p>
+              <p className="text-sm text-text-muted mb-2">{t('admin.tenantPalette.errorLoading')}</p>
               <button
                 onClick={() => refetch()}
                 className="text-sm text-primary-400 hover:text-primary-300 underline"
               >
-                Retry
+                {t('admin.tenantPalette.retry')}
               </button>
             </div>
           )}
 
           {!isLoading && !isError && sortedTenants.length === 0 && (
             <div className="py-6 text-center text-sm text-text-muted">
-              No tenants match your search
+              {t('admin.tenantPalette.empty')}
             </div>
           )}
 
@@ -136,7 +138,7 @@ export function TenantCommandPalette() {
                 <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                   {isActive && (
                     <Badge variant="success" className="text-xs">
-                      Active
+                      {t('admin.tenantPalette.badge.active')}
                     </Badge>
                   )}
                   {isInactive && (

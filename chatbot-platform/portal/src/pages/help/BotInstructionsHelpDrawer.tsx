@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, Download, X } from 'lucide-react';
 import {
   Accordion,
@@ -9,7 +10,13 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
-import { faqSections, FAQ_DOC_PATH, FAQ_DOC_FILENAME } from './helpFaqData';
+import {
+  faqSections,
+  FAQ_DOC_PATH,
+  FAQ_DOC_FILENAME,
+  itemQuestionKey,
+  itemAnswerKey,
+} from './helpFaqData';
 
 interface BotInstructionsHelpDrawerProps {
   isOpen: boolean;
@@ -22,6 +29,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
   isOpen,
   onClose,
 }) => {
+  const { t } = useTranslation();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const section = faqSections.find((s) => s.id === SECTION_ID) ?? faqSections[0];
 
@@ -52,7 +60,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
     <aside
       role="dialog"
       aria-modal="false"
-      aria-label="AI Bot — Frequently Asked Questions"
+      aria-label={t('help.drawer.ariaLabel')}
       className={cn(
         'fixed top-0 right-0 h-screen w-full sm:max-w-md z-40',
         'bg-surface-2 border-l border-edge shadow-2xl',
@@ -61,17 +69,15 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
     >
       <header className="flex items-center justify-between px-5 py-4 border-b border-edge">
         <div>
-          <h2 className="text-sm font-semibold text-text-primary">AI Bot — FAQ</h2>
-          <p className="text-[11px] text-text-muted mt-0.5">
-            Common questions about bot instructions and behaviour
-          </p>
+          <h2 className="text-sm font-semibold text-text-primary">{t('help.drawer.title')}</h2>
+          <p className="text-[11px] text-text-muted mt-0.5">{t('help.drawer.subtitle')}</p>
         </div>
         <button
           ref={closeButtonRef}
           type="button"
           onClick={onClose}
           className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-          aria-label="Close FAQ"
+          aria-label={t('help.drawer.closeLabel')}
         >
           <X className="w-4 h-4" />
         </button>
@@ -79,17 +85,17 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
 
       <div className="flex-1 overflow-y-auto px-5 py-3">
         <Accordion type="single" collapsible className="w-full">
-          {section.items.map((item, i) => (
+          {section.items.map((item) => (
             <AccordionItem
-              key={`${section.id}-${i}`}
-              value={`${section.id}-${i}`}
+              key={`${section.id}-${item.id}`}
+              value={`${section.id}-${item.id}`}
               className="border-edge last:border-b-0"
             >
               <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
-                {item.q}
+                {t(itemQuestionKey(section.id, item.id))}
               </AccordionTrigger>
               <AccordionContent className="text-sm text-text-secondary leading-relaxed">
-                {item.a}
+                {t(itemAnswerKey(section.id, item.id))}
               </AccordionContent>
             </AccordionItem>
           ))}
@@ -102,7 +108,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
           onClick={onClose}
           className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10 transition-colors"
         >
-          <span>Browse all FAQs</span>
+          <span>{t('help.drawer.browseAll')}</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </Link>
         <a
@@ -110,7 +116,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
           download={FAQ_DOC_FILENAME}
           className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors"
         >
-          <span>Download full FAQ (PDF)</span>
+          <span>{t('help.drawer.downloadPdf')}</span>
           <Download className="w-3.5 h-3.5" />
         </a>
       </footer>

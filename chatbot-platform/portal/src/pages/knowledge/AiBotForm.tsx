@@ -29,7 +29,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
 import { promptTemplates, findTemplate, AI_PLACEHOLDERS } from './aiBotTemplates';
-import HelpFaqDialog from '@/pages/help/HelpFaqDialog';
+import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
 
 interface AiBotFormProps {
   onGoToKnowledgeBase: () => void;
@@ -104,7 +104,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
-  const [isFaqOpen, setIsFaqOpen] = useState(false);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
@@ -400,9 +400,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
               </Select>
               <button
                 type="button"
-                onClick={() => setIsFaqOpen(true)}
+                onClick={() => setIsHelpOpen(true)}
                 className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
                 title="Open the bot instructions FAQ"
+                aria-expanded={isHelpOpen}
               >
                 <HelpCircle className="w-3.5 h-3.5" /> FAQs
               </button>
@@ -559,10 +560,9 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
         </AlertDialogContent>
       </AlertDialog>
 
-      <HelpFaqDialog
-        isOpen={isFaqOpen}
-        onClose={() => setIsFaqOpen(false)}
-        defaultSectionId="ai-bot"
+      <BotInstructionsHelpDrawer
+        isOpen={isHelpOpen}
+        onClose={() => setIsHelpOpen(false)}
       />
 
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>

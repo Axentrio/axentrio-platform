@@ -12,3 +12,10 @@ export { Message, MessageType, MessageStatus } from './Message';
 export { FileUpload, FileUploadStatus } from './FileUpload';
 export { HandoffRequest, HandoffStatus, HandoffReason } from './HandoffRequest';
 export { PendingInvite } from './PendingInvite';
+export {
+  TenantBillingAccount,
+  BillingProviderName,
+  BillingStatus,
+  BillingPlanId,
+} from './TenantBillingAccount';
+export { BillingEvent, BillingEventProvider } from './BillingEvent';

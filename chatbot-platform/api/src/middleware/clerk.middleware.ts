@@ -7,8 +7,10 @@ import { Request, Response, NextFunction } from 'express';
 import { getAuth } from '@clerk/express';
 import { clerkClient } from '@clerk/express';
 import crypto from 'crypto';
-import { AppDataSource } from '../database/data-source';
+import { AppDataSource, runInTransaction } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import { seedTrialAccount } from '../billing/service';
+import { scheduleTrialExpiry } from '../billing/trial-expiry-job';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { PendingInvite } from '../database/entities/PendingInvite';
@@ -122,56 +124,94 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
       const slug = await ensureUniqueSlug(orgName, tenantRepo);
       const apiKey = crypto.randomBytes(32).toString('hex');
 
-      // Upsert to handle race conditions
+      // Wrap tenant insert + billing seed in a single transaction. If
+      // seedTrialAccount throws, both the tenant insert and any seed work
+      // roll back together — the next provision attempt will retry cleanly
+      // rather than leaving an orphaned tenant with no billing row.
+      // Race-safe: ON CONFLICT(clerk_org_id) DO NOTHING handles concurrent
+      // autoProvision requests. The seed is also idempotent via its own
+      // ON CONFLICT.
+      // Plan: .scratch/plan-billing.md § Reverse-trial signup flow.
+      let scheduleTrialEnd: Date | null = null;
       try {
-        await tenantRepo
-          .createQueryBuilder()
-          .insert()
-          .into(Tenant)
-          .values({
-            name: orgName,
-            slug,
-            apiKey,
-            clerkOrgId,
-            tier: 'pro',
-            status: 'active',
-            settings: {
-              ai: {
-                enabled: true,
-                usePlatformAgent: true,
-                provider: 'openai',
-                model: 'gpt-4o-mini',
-                brandVoice: {
-                  name: `${orgName} Assistant`,
-                  tone: 'friendly',
-                  customInstructions: '',
+        const result = await runInTransaction(async (manager) => {
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(Tenant)
+            .values({
+              name: orgName,
+              slug,
+              apiKey,
+              clerkOrgId,
+              tier: 'pro',
+              status: 'active',
+              settings: {
+                ai: {
+                  enabled: true,
+                  usePlatformAgent: true,
+                  provider: 'openai',
+                  model: 'gpt-4o-mini',
+                  brandVoice: {
+                    name: `${orgName} Assistant`,
+                    tone: 'friendly',
+                    customInstructions: '',
+                  },
+                  guardrails: {
+                    topicsToAvoid: [],
+                    escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
+                    confidenceThreshold: 0.7,
+                    maxResponseLength: 500,
+                    greetingMessage: 'Welcome! How can I help you today?',
+                    fallbackMessage: 'Let me connect you with our team.',
+                    offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
+                  },
                 },
-                guardrails: {
-                  topicsToAvoid: [],
-                  escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
-                  confidenceThreshold: 0.7,
-                  maxResponseLength: 500,
-                  greetingMessage: 'Welcome! How can I help you today?',
-                  fallbackMessage: 'Let me connect you with our team.',
-                  offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
-                },
+                skills: [...DEFAULT_SKILLS],
               },
-              skills: [...DEFAULT_SKILLS],
-            },
-          })
-          .orIgnore() // ON CONFLICT DO NOTHING
-          .execute();
-        logger.info('[AutoProvision] Tenant insert executed');
-      } catch (insertErr: any) {
-        logger.error('[AutoProvision] Tenant insert FAILED', { error: insertErr?.message });
-      }
+            })
+            .orIgnore() // ON CONFLICT (clerk_org_id) DO NOTHING — race-safe
+            .execute();
 
-      tenant = await tenantRepo.findOne({ where: { clerkOrgId } });
-      if (!tenant) {
+          // Re-read under the same tx so we see the winning row whether we
+          // inserted it or someone else did.
+          const t = await manager.findOne(Tenant, { where: { clerkOrgId } });
+          if (!t) {
+            throw new Error('autoProvision: tenant not found after insert');
+          }
+          const seed = await seedTrialAccount(t.id, manager);
+          return { tenant: t, trialEnd: seed?.trialEnd ?? null };
+        });
+        tenant = result.tenant;
+        scheduleTrialEnd = result.trialEnd;
+        logger.info('[AutoProvision] Tenant + billing seed committed', { tenantId: tenant.id });
+      } catch (provisionErr: any) {
+        logger.error('[AutoProvision] Tenant provisioning tx FAILED', {
+          clerkOrgId,
+          error: provisionErr?.message,
+        });
         res.status(500).json({ error: 'Failed to provision tenant' });
         return;
       }
+
       logger.info('Auto-provisioned tenant', { tenantId: tenant.id, orgName });
+
+      // Schedule the delayed expiry job after the tx commits. Only when this
+      // caller's seed actually inserted the billing row (concurrent caller
+      // returned null). Bull failures fall back to the daily sweep.
+      if (scheduleTrialEnd) {
+        try {
+          await scheduleTrialExpiry(tenant.id, scheduleTrialEnd);
+        } catch (scheduleErr) {
+          logger.error(
+            '[AutoProvision] Failed to schedule trial-expiry job; daily sweep will recover',
+            {
+              tenantId: tenant.id,
+              error: scheduleErr instanceof Error ? scheduleErr.message : String(scheduleErr),
+            },
+          );
+        }
+      }
     }
 
     // --- Block suspended tenants ---

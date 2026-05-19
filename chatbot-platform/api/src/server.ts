@@ -278,6 +278,30 @@ async function startServer(): Promise<void> {
       logger.warn('Knowledge ingestion processor registration failed', { error: err });
     }
 
+    // Register billing trial-expiry processor + daily safety-net sweep.
+    // The sweep is the *authoritative* recovery path for trial expiry; the
+    // per-tenant delayed job is just a latency optimization. If the sweep
+    // can't be registered in production, the system is silently broken —
+    // fail startup so deploys catch it immediately.
+    // Plan: .scratch/plan-billing.md § Implementation outline step 5.
+    try {
+      const { registerTrialExpiryProcessor, scheduleDailySweep } = await import(
+        './billing/trial-expiry-job'
+      );
+      registerTrialExpiryProcessor();
+      await scheduleDailySweep();
+      logger.info('Billing trial-expiry processor + daily sweep registered');
+    } catch (err) {
+      logger.error('Billing trial-expiry registration failed', { error: err });
+      if (config.server.isProduction) {
+        throw new Error(
+          `Billing trial-expiry sweep failed to register: ${
+            err instanceof Error ? err.message : String(err)
+          }. Sweep is the authoritative recovery path; refusing to start in production.`,
+        );
+      }
+    }
+
     // Initialize webhook integration module
     try {
       const webhookModule = createWebhookModule({

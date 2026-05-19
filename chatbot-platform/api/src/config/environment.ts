@@ -156,6 +156,13 @@ const envSchema = z.object({
   META_VERIFY_TOKEN: z.string().optional(),
   META_OAUTH_REDIRECT_URI: z.string().optional(),
   META_OAUTH_JWT_SECRET: z.string().optional(),
+
+  // Billing — Stripe (required in non-test environments; validated below)
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_PRICE_PRO_USD_MONTHLY: z.string().optional(),
+  STRIPE_PRICE_PREMIUM_USD_MONTHLY: z.string().optional(),
+  BILLING_TRIAL_DAYS: z.string().default('7').transform(Number),
 });
 
 // Parse and validate environment variables
@@ -184,6 +191,23 @@ if (env.NODE_ENV === 'production') {
   }
   if (env.WIDGET_API_KEY === 'widget-dev-key') {
     throw new Error('WIDGET_API_KEY must be set in production');
+  }
+}
+
+// Billing fail-fast — Stripe is required outside of test runs (plan step 2).
+// Plan: "fail-fast on boot if any of [secret, webhook secret, both price IDs] is missing or empty."
+if (env.NODE_ENV !== 'test') {
+  const missing: string[] = [];
+  if (!env.STRIPE_SECRET_KEY) missing.push('STRIPE_SECRET_KEY');
+  if (!env.STRIPE_WEBHOOK_SECRET) missing.push('STRIPE_WEBHOOK_SECRET');
+  if (!env.STRIPE_PRICE_PRO_USD_MONTHLY) missing.push('STRIPE_PRICE_PRO_USD_MONTHLY');
+  if (!env.STRIPE_PRICE_PREMIUM_USD_MONTHLY) missing.push('STRIPE_PRICE_PREMIUM_USD_MONTHLY');
+  if (missing.length > 0) {
+    console.error(
+      `Billing configuration error: required Stripe env vars are missing: ${missing.join(', ')}. ` +
+      `Set them or run with NODE_ENV=test to skip this check.`,
+    );
+    process.exit(1);
   }
 }
 
@@ -373,6 +397,16 @@ export const config = {
 
   api: {
     url: env.API_URL,
+  },
+
+  billing: {
+    trialDays: env.BILLING_TRIAL_DAYS,
+    stripe: {
+      secretKey: env.STRIPE_SECRET_KEY ?? '',
+      webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
+      pricePro: env.STRIPE_PRICE_PRO_USD_MONTHLY ?? '',
+      pricePremium: env.STRIPE_PRICE_PREMIUM_USD_MONTHLY ?? '',
+    },
   },
 } as const;
 

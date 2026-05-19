@@ -29,6 +29,8 @@ import { WebhookEventLog } from './entities/WebhookEventLog';
 import { MessageDelivery } from './entities/MessageDelivery';
 import { BookingLog } from './entities/BookingLog';
 import { AgentTrace } from './entities/AgentTrace';
+import { TenantBillingAccount } from './entities/TenantBillingAccount';
+import { BillingEvent } from './entities/BillingEvent';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -65,6 +67,8 @@ export const AppDataSource = new DataSource({
     MessageDelivery,
     BookingLog,
     AgentTrace,
+    TenantBillingAccount,
+    BillingEvent,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

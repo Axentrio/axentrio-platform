@@ -58,7 +58,7 @@ declare global {
 // Tenant Types
 // ============================================================================
 
-export type TenantTier = 'free' | 'pro' | 'enterprise';
+export type TenantTier = 'free' | 'pro' | 'premium' | 'enterprise';
 export type TenantStatus = 'active' | 'suspended' | 'cancelled';
 
 export interface ITenant {

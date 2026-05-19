@@ -29,7 +29,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
 import { promptTemplates, findTemplate, AI_PLACEHOLDERS } from './aiBotTemplates';
-import HelpFaqDialog from './HelpFaqDialog';
+import HelpFaqDialog from '@/pages/help/HelpFaqDialog';
 
 interface AiBotFormProps {
   onGoToKnowledgeBase: () => void;

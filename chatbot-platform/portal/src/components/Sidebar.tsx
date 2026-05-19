@@ -15,6 +15,7 @@ import {
   UserCog,
   TrendingUp,
   BookOpen,
+  HelpCircle,
   ChevronDown,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
@@ -47,6 +48,7 @@ const menuItems: MenuItem[] = [
   { path: '/analytics', label: 'Analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
   { path: '/team', label: 'Team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
   { path: '/settings', label: 'Settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  { path: '/help', label: 'Help & FAQ', icon: HelpCircle, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
 ];
 
 const adminMenuItems: MenuItem[] = [

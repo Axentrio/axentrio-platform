@@ -42,11 +42,13 @@ import IntegrationSettings from '@pages/settings/IntegrationSettings';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import ChannelsSettings from '@pages/settings/ChannelsSettings';
 import CapabilitiesSettings from '@pages/settings/CapabilitiesSettings';
+import BillingSettings from '@pages/settings/BillingSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
 import AdminAnalytics from '@pages/admin/AdminAnalytics';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
+import Help from '@pages/help/Help';
 
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
@@ -283,6 +285,7 @@ const App: React.FC = () => {
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/ai" element={<AiContent />} />
                       <Route path="/analytics" element={<Analytics />} />
+                      <Route path="/help" element={<Help />} />
                       <Route path="/settings" element={<SettingsLayout />}>
                         <Route index element={<Navigate to="/settings/profile" replace />} />
                         <Route path="skills" element={<Navigate to="/settings/capabilities" replace />} />
@@ -293,6 +296,7 @@ const App: React.FC = () => {
                         <Route path="integrations" element={<IntegrationSettings />} />
                         <Route path="channels" element={<ChannelsSettings />} />
                         <Route path="capabilities" element={<CapabilitiesSettings />} />
+                        <Route path="billing" element={<BillingSettings />} />
                         <Route path="automations" element={<Navigate to="/settings/capabilities" replace />} />
                       </Route>
                     </Route>

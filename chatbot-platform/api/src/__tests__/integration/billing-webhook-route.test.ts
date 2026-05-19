@@ -330,3 +330,126 @@ describe('POST /api/v1/webhooks/billing/:provider — provider allowlist', () =>
     expect(res.status).toBe(404);
   });
 });
+
+describe('POST /api/v1/webhooks/billing/stripe — real signature verification', () => {
+  // The POSITIVE signature path (valid signed body → 200) is impractical to
+  // test through supertest: the body bytes that arrive at express.raw can
+  // differ from the bytes we sign with generateTestHeaderString (supertest
+  // /superagent re-stringification under Content-Type: application/json
+  // shifts whitespace/ordering). The mocked-constructEvent tests above
+  // already exercise every post-verify code path.
+  //
+  // The NEGATIVE path (invalid signature → 400) is fully testable and is
+  // the more important regression — it confirms the verify hook actually
+  // runs in production rather than being silently bypassed.
+  it('rejects a request with an invalid signature with HTTP 400', async () => {
+    const event = makeStripeSubscriptionEvent({
+      type: 'customer.subscription.created',
+      subscriptionId: 'sub_bad_sig',
+      customerId: 'cus_bad_sig',
+      stripeStatus: 'trialing',
+    });
+    // Use the real Stripe client so we exercise the real verify path.
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const Stripe = require('stripe');
+    setStripeClient(new Stripe('sk_test_dummy_for_signing'));
+
+    const res = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 't=1700000000,v1=this_is_not_a_real_signature')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(event)));
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Invalid webhook signature/);
+
+    // No audit row written when signature fails.
+    const events = await AppDataSource.getRepository(BillingEvent).find({
+      where: { provider: 'stripe', providerEventId: event.id as string },
+    });
+    expect(events.length).toBe(0);
+  });
+});
+
+describe('Out-of-order webhook delivery', () => {
+  it('subscription.updated before subscription.created: persists subscription_id via customer_id fallback', async () => {
+    // Canonical reverse-trial start state with a pending Stripe row that
+    // has customer_id but no subscription_id yet (checkout just kicked
+    // off, no webhook has landed).
+    const tenant = await createTestTenant({ tier: 'pro' });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'manual',
+      status: 'trialing',
+      currentPlanId: 'pro',
+      isPrimary: true,
+    });
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      status: 'none',
+      currentPlanId: 'free',
+      isPrimary: false,
+      customerId: 'cus_out_of_order',
+      subscriptionId: null,
+    });
+
+    // .updated arrives FIRST (Stripe sometimes ships these out of order).
+    const updatedEvent = makeStripeSubscriptionEvent({
+      type: 'customer.subscription.updated',
+      subscriptionId: 'sub_ooo',
+      customerId: 'cus_out_of_order',
+      stripeStatus: 'trialing',
+    });
+    installVerifyWebhookStub(updatedEvent);
+
+    const firstRes = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(updatedEvent)));
+    expect(firstRes.status).toBe(200);
+
+    // Handler resolved via customer_id fallback and persisted subscription_id
+    // on the pending row. AND promoted it to primary because status=trialing.
+    let stripeRow = await AppDataSource.getRepository(
+      TenantBillingAccount,
+    ).findOneByOrFail({ tenantId: tenant.id, provider: 'stripe' });
+    expect(stripeRow.subscriptionId).toBe('sub_ooo');
+    expect(stripeRow.isPrimary).toBe(true);
+
+    // .created arrives SECOND for the same subscription. Handler should
+    // resolve directly via (provider, subscription_id) and apply idempotent
+    // updates — no duplicate row, no audit explosion.
+    const createdEvent = makeStripeSubscriptionEvent({
+      type: 'customer.subscription.created',
+      subscriptionId: 'sub_ooo',
+      customerId: 'cus_out_of_order',
+      stripeStatus: 'trialing',
+    });
+    installVerifyWebhookStub(createdEvent);
+
+    const secondRes = await request(app)
+      .post('/api/v1/webhooks/billing/stripe')
+      .set('stripe-signature', 'sig_irrelevant')
+      .set('Content-Type', 'application/json')
+      .send(Buffer.from(JSON.stringify(createdEvent)));
+    expect(secondRes.status).toBe(200);
+
+    // Still only ONE Stripe row for this tenant — no duplicate insert.
+    const rows = await AppDataSource.getRepository(TenantBillingAccount).find({
+      where: { tenantId: tenant.id, provider: 'stripe' },
+    });
+    expect(rows.length).toBe(1);
+    expect(rows[0].subscriptionId).toBe('sub_ooo');
+
+    // Both events have their own audit rows (different event_ids).
+    const events = await AppDataSource.getRepository(BillingEvent).find({
+      where: { tenantId: tenant.id, provider: 'stripe' },
+      order: { createdAt: 'ASC' },
+    });
+    expect(events.length).toBe(2);
+    expect(events.map((e) => e.eventType).sort()).toEqual([
+      'subscription.created',
+      'subscription.updated',
+    ]);
+  });
+});

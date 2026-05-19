@@ -6,6 +6,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Check, Circle, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -35,29 +36,30 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
   onGoToSocial,
   onConfigureBot,
 }) => {
+  const { t } = useTranslation();
   const steps: Step[] = [
     {
       key: 'bot',
-      label: 'Configure your AI bot',
-      description: 'Name, identity, and safety rules so visitors get sensible answers.',
+      label: t('ai.onboarding.steps.enableBot.title'),
+      description: t('ai.onboarding.steps.enableBot.description'),
       done: botEnabled,
-      actionLabel: 'Configure',
+      actionLabel: t('ai.onboarding.steps.enableBot.action'),
       onAction: onConfigureBot,
     },
     {
       key: 'knowledge',
-      label: 'Add knowledge',
-      description: 'Upload docs, paste text, or add FAQs so the bot answers from your own info.',
+      label: t('ai.onboarding.steps.addKnowledge.title'),
+      description: t('ai.onboarding.steps.addKnowledge.description'),
       done: hasIndexedDocs,
-      actionLabel: 'Add knowledge',
+      actionLabel: t('ai.onboarding.steps.addKnowledge.action'),
       onAction: onGoToKnowledge,
     },
     {
       key: 'social',
-      label: 'Connect a channel',
-      description: 'Link Telegram or Facebook so the bot can talk to your visitors.',
+      label: t('ai.onboarding.steps.connectChannel.title'),
+      description: t('ai.onboarding.steps.connectChannel.description'),
       done: hasConnectedChannel,
-      actionLabel: 'Connect',
+      actionLabel: t('ai.onboarding.steps.connectChannel.action'),
       onAction: onGoToSocial,
     },
   ];
@@ -69,9 +71,9 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
   return (
     <div className="mb-6 rounded-2xl border border-edge bg-surface-1/60 p-5">
       <div className="mb-3">
-        <h2 className="text-sm font-semibold text-text-primary">Get started</h2>
+        <h2 className="text-sm font-semibold text-text-primary">{t('ai.onboarding.title')}</h2>
         <p className="text-xs text-text-muted">
-          Finish setup so your AI can help visitors.
+          {t('ai.onboarding.subtitle')}
         </p>
       </div>
       <ul className="space-y-2">
@@ -82,9 +84,9 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
           >
             <div className="flex min-w-0 items-center gap-3">
               {step.done ? (
-                <Check className="h-4 w-4 shrink-0 text-emerald-400" aria-label="done" />
+                <Check className="h-4 w-4 shrink-0 text-emerald-400" aria-label={t('ai.onboarding.stepDone')} />
               ) : (
-                <Circle className="h-4 w-4 shrink-0 text-text-muted" aria-label="not done" />
+                <Circle className="h-4 w-4 shrink-0 text-text-muted" aria-label={t('ai.onboarding.stepNotDone')} />
               )}
               <div className="min-w-0">
                 <p

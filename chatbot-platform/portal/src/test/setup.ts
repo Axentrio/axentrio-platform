@@ -2,6 +2,13 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
 import { cleanup } from '@testing-library/react';
 
+// Initialize the real i18n instance for tests so components render real
+// English strings rather than raw translation keys. We force the language
+// to 'en' explicitly — bypassing the browser language detector — to keep
+// test assertions deterministic regardless of host locale.
+import i18n from '../i18n';
+if (i18n.language !== 'en') i18n.changeLanguage('en');
+
 afterEach(() => {
   cleanup();
 });

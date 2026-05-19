@@ -75,11 +75,7 @@
           "label": "Language",
           "helper": "Used for emails and account communications. UI translation in progress.",
           "saveFailed": "Failed to save language preference.",
-          "options": {
-            "en": "English",
-            "nl": "Nederlands",
-            "fr": "Français"
-          }
+          "options": { "en": "English", "nl": "Nederlands", "fr": "Français" }
         }
       },
       "password": {
@@ -89,28 +85,15 @@
     },
     "notifications": {
       "title": "Notification Preferences",
-      "sound": {
-        "title": "Sound Notifications",
-        "description": "Play sounds for new messages and handoffs"
-      },
+      "sound": { "title": "Sound Notifications", "description": "Play sounds for new messages and handoffs" },
       "volume": "Volume",
-      "desktop": {
-        "title": "Desktop Notifications",
-        "description": "Show browser notifications"
-      },
-      "handsoffOnly": {
-        "title": "Handoff Notifications Only",
-        "description": "Only notify for handoff requests"
-      }
+      "desktop": { "title": "Desktop Notifications", "description": "Show browser notifications" },
+      "handsoffOnly": { "title": "Handoff Notifications Only", "description": "Only notify for handoff requests" }
     },
     "appearance": {
       "title": "Theme",
       "description": "Choose your preferred theme",
-      "options": {
-        "light": "Light",
-        "dark": "Dark",
-        "system": "System"
-      }
+      "options": { "light": "Light", "dark": "Dark", "system": "System" }
     },
     "widget": {
       "title": "Widget & Brand",
@@ -206,24 +189,11 @@
       "deliveries": {
         "title": "Delivery Log",
         "columns": {
-          "time": "Time",
-          "direction": "Direction",
-          "event": "Event",
-          "status": "Status",
-          "http": "HTTP",
-          "duration": "Duration",
-          "error": "Error"
+          "time": "Time", "direction": "Direction", "event": "Event",
+          "status": "Status", "http": "HTTP", "duration": "Duration", "error": "Error"
         },
-        "direction": {
-          "inbound": "inbound",
-          "outbound": "outbound"
-        },
-        "status": {
-          "success": "success",
-          "failed": "failed",
-          "retrying": "retrying",
-          "dropped": "dropped"
-        },
+        "direction": { "inbound": "inbound", "outbound": "outbound" },
+        "status": { "success": "success", "failed": "failed", "retrying": "retrying", "dropped": "dropped" },
         "page": "Page {{page}}",
         "prev": "Prev",
         "next": "Next",
@@ -257,12 +227,7 @@
           "toggle": "Advanced Settings",
           "language": "Language",
           "collectLabel": "Collect from customer",
-          "fields": {
-            "name": "Name",
-            "email": "Email",
-            "phone": "Phone",
-            "notes": "Notes"
-          },
+          "fields": { "name": "Name", "email": "Email", "phone": "Phone", "notes": "Notes" },
           "save": "Save Advanced Settings"
         },
         "disconnectConfirm": {
@@ -279,9 +244,7 @@
         "descriptionAdmin": "Control which capabilities are active for your chatbot.",
         "addButton": "Add Capability"
       },
-      "errors": {
-        "loadFailed": "Failed to load capabilities. Please refresh the page."
-      },
+      "errors": { "loadFailed": "Failed to load capabilities. Please refresh the page." },
       "tenantView": {
         "emptyState": "No capabilities configured yet. Contact your account manager to set up bot capabilities.",
         "noDescription": "No description available"
@@ -334,24 +297,11 @@
           "placeholder": "e.g. Allows the bot to check availability and book appointments on behalf of visitors.",
           "helper": "Explains what this capability does in plain language."
         },
-        "trigger": {
-          "label": "Trigger description",
-          "placeholder": "Describe when this skill should activate…"
-        },
-        "tools": {
-          "label": "Tools"
-        },
-        "instructions": {
-          "label": "Instructions",
-          "placeholder": "Step-by-step instructions for the bot…"
-        },
-        "maxSteps": {
-          "label": "Max Steps"
-        },
-        "enabled": {
-          "title": "Enabled",
-          "description": "Activate this capability for the tenant"
-        },
+        "trigger": { "label": "Trigger description", "placeholder": "Describe when this skill should activate…" },
+        "tools": { "label": "Tools" },
+        "instructions": { "label": "Instructions", "placeholder": "Step-by-step instructions for the bot…" },
+        "maxSteps": { "label": "Max Steps" },
+        "enabled": { "title": "Enabled", "description": "Activate this capability for the tenant" },
         "saving": "Saving…",
         "createCapability": "Create Capability"
       },
@@ -369,58 +319,24 @@
     "billing": {
       "plans": {
         "free": {
-          "name": "Free",
-          "price": "$0/mo",
-          "blurb": "Try out the basics on the house.",
-          "features": {
-            "agents": "1 agent",
-            "sessions": "10 concurrent sessions",
-            "channels": "1 channel",
-            "byoLlm": "BYO LLM key"
-          }
+          "name": "Free", "price": "$0/mo", "blurb": "Try out the basics on the house.",
+          "features": { "agents": "1 agent", "sessions": "10 concurrent sessions", "channels": "1 channel", "byoLlm": "BYO LLM key" }
         },
         "pro": {
-          "name": "Pro",
-          "price": "$49/mo",
-          "blurb": "For growing teams.",
-          "features": {
-            "agents": "3 agents",
-            "sessions": "100 concurrent sessions",
-            "llmCalls": "1,000 platform LLM calls/day",
-            "channels": "3 channels",
-            "uploadsHandoff": "File uploads & handoff"
-          }
+          "name": "Pro", "price": "$49/mo", "blurb": "For growing teams.",
+          "features": { "agents": "3 agents", "sessions": "100 concurrent sessions", "llmCalls": "1,000 platform LLM calls/day", "channels": "3 channels", "uploadsHandoff": "File uploads & handoff" }
         },
         "premium": {
-          "name": "Premium",
-          "price": "$199/mo",
-          "blurb": "Custom branding + room to grow.",
-          "features": {
-            "agents": "10 agents",
-            "sessions": "500 concurrent sessions",
-            "llmCalls": "10,000 platform LLM calls/day",
-            "channels": "Unlimited channels",
-            "branding": "Custom branding & domain",
-            "support": "Priority support"
-          }
+          "name": "Premium", "price": "$199/mo", "blurb": "Custom branding + room to grow.",
+          "features": { "agents": "10 agents", "sessions": "500 concurrent sessions", "llmCalls": "10,000 platform LLM calls/day", "channels": "Unlimited channels", "branding": "Custom branding & domain", "support": "Priority support" }
         },
         "enterprise": {
-          "name": "Enterprise",
-          "price": "Custom",
-          "blurb": "Sales-managed, SLA support.",
-          "features": {
-            "unlimited": "Unlimited everything",
-            "integrations": "Custom integrations",
-            "sla": "SLA + dedicated support"
-          }
+          "name": "Enterprise", "price": "Custom", "blurb": "Sales-managed, SLA support.",
+          "features": { "unlimited": "Unlimited everything", "integrations": "Custom integrations", "sla": "SLA + dedicated support" }
         }
       },
       "status": {
-        "trialing": "Trialing",
-        "active": "Active",
-        "pastDue": "Past due",
-        "cancelled": "Cancelled",
-        "none": "No plan"
+        "trialing": "Trialing", "active": "Active", "pastDue": "Past due", "cancelled": "Cancelled", "none": "No plan"
       },
       "trial": {
         "endsInDays_one": "Trial ends {{date}} — {{count}} day left",
@@ -447,9 +363,7 @@
         "description": "Your account is on a sales-managed Enterprise plan. To make plan or billing changes, reach out to your account contact.",
         "contactSales": "Contact sales"
       },
-      "subscribe": {
-        "cta": "Subscribe to {{plan}}"
-      },
+      "subscribe": { "cta": "Subscribe to {{plan}}" },
       "email": {
         "title": "Billing email",
         "label": "Invoices and receipts go here",
@@ -475,6 +389,358 @@
       "loadError": "Couldn't load billing state: {{error}}",
       "unknownError": "unknown error",
       "subscribedJustNow": "Subscription received — waiting for Stripe to confirm. This page will update automatically."
+    }
+  },
+  "ai": {
+    "header": {
+      "title": "AI & Content",
+      "subtitle": "AI bot, knowledge base, appearances, channels, and custom responses",
+      "testChat": "Test Chat",
+      "testChatTooltip": "Test your AI bot",
+      "testChatDisabledTooltip": "Enable AI bot first",
+      "defaultBotName": "AI Assistant"
+    },
+    "tabs": {
+      "bot": "AI Bot",
+      "knowledge": "Knowledge base",
+      "canned": "Custom Responses",
+      "appearances": "Chatbot Appearances",
+      "social": "Social Media Integrations"
+    },
+    "onboarding": {
+      "title": "Get started",
+      "subtitle": "Finish setup so your AI can help visitors.",
+      "stepDone": "done",
+      "stepNotDone": "not done",
+      "steps": {
+        "enableBot": {
+          "title": "Configure your AI bot",
+          "description": "Name, identity, and safety rules so visitors get sensible answers.",
+          "action": "Configure"
+        },
+        "addKnowledge": {
+          "title": "Add knowledge",
+          "description": "Upload docs, paste text, or add FAQs so the bot answers from your own info.",
+          "action": "Add knowledge"
+        },
+        "connectChannel": {
+          "title": "Connect a channel",
+          "description": "Link Telegram or Facebook so the bot can talk to your visitors.",
+          "action": "Connect"
+        }
+      }
+    },
+    "bot": {
+      "noPermission": "You don't have permission to view AI settings.",
+      "loadError": "Failed to load AI settings",
+      "enable": { "title": "AI Bot", "description": "Enable AI-powered responses for visitors" },
+      "identity": {
+        "title": "Bot Identity",
+        "description": "How your bot introduces itself to visitors",
+        "botName": {
+          "label": "Chatbot Name",
+          "placeholder": "e.g. Ava",
+          "helper": "Chatbot display name for users to see on the website."
+        },
+        "supportEmail": {
+          "label": "Support Email",
+          "placeholder": "support@yourcompany.com",
+          "helper": "Used for escalations and visible via {supportEmail}"
+        },
+        "voiceTone": { "label": "Voice Tone" },
+        "tones": {
+          "friendly": "Friendly",
+          "professional": "Professional",
+          "casual": "Casual",
+          "formal": "Formal",
+          "custom": "Custom"
+        },
+        "customTone": { "placeholder": "e.g. witty, concise, no emojis" }
+      },
+      "instructions": {
+        "title": "Bot Instructions",
+        "description": "Tell the chatbot how it should answer visitors. You can start from a template and edit it.",
+        "templateSelect": { "ariaLabel": "Choose a starter prompt", "placeholder": "Choose a starter prompt" },
+        "faqsTooltip": "Open the bot instructions FAQ",
+        "faqs": "FAQs",
+        "resetTooltip": "Reset to the selected template",
+        "reset": "Reset",
+        "promptPlaceholder": "Write your bot's instructions here, or pick a template above…",
+        "placeholders": "Placeholders:"
+      },
+      "advanced": {
+        "title": "Advanced Settings",
+        "description": "Guardrails, handoff behavior, and response limits",
+        "greeting": { "label": "Greeting Message", "placeholder": "Hi! How can I help you today?" },
+        "fallback": {
+          "label": "Fallback Message",
+          "placeholder": "I'm connecting you to a human agent…",
+          "helper": "Shown when the bot can't answer confidently"
+        },
+        "offHours": { "label": "Off-Hours Message", "placeholder": "We're currently outside business hours…" },
+        "confidence": { "label": "Confidence Threshold: {{value}}", "helper": "Below this, bot hands off to an agent" },
+        "maxResponseLength": { "label": "Max Response Length", "helper": "Characters" },
+        "escalationKeywords": {
+          "label": "Escalation Keywords",
+          "placeholder": "Type a keyword and press Enter…",
+          "helper": "Messages containing these trigger handoff"
+        },
+        "topicsToAvoid": { "label": "Topics to Avoid", "placeholder": "Type a topic and press Enter…" }
+      },
+      "actions": { "goToKnowledgeBase": "Go to Knowledge Base", "saveChanges": "Save Changes" },
+      "dialogs": {
+        "replaceInstructions": {
+          "title": "Replace edited instructions?",
+          "description": "Switching templates will replace your current bot instructions. This can't be undone.",
+          "cancel": "Keep editing",
+          "confirm": "Replace"
+        },
+        "leaveWithoutSaving": {
+          "title": "Leave without saving?",
+          "description": "You have unsaved changes. Go to Knowledge Base without saving?",
+          "cancel": "Stay here",
+          "confirm": "Leave anyway"
+        }
+      }
+    },
+    "knowledge": {
+      "list": {
+        "loadError": "Failed to load documents",
+        "banner": {
+          "aiDisabled": "AI Bot is not enabled yet. Turn it on so these documents can be used in visitor replies.",
+          "configureCta": "Configure AI Bot"
+        },
+        "filters": {
+          "all": "All", "indexed": "Indexed", "processing": "Processing", "failed": "Failed",
+          "pdf": "PDF", "docx": "DOCX", "text": "Text", "faq": "FAQ"
+        },
+        "searchPlaceholder": "Search documents…",
+        "addDocument": "Add Document",
+        "empty": {
+          "title": "No documents yet",
+          "descriptionAdmin": "Upload PDFs, paste text, or add FAQs so your AI bot can answer from your business information.",
+          "descriptionViewer": "No documents have been added to the knowledge base yet.",
+          "addFirst": "Add your first document"
+        },
+        "noMatches": {
+          "title": "No matching documents",
+          "description": "Try adjusting your search or filter.",
+          "clearFilters": "Clear filters"
+        },
+        "deleteConfirm": {
+          "title": "Delete Document",
+          "description": "This will permanently delete this document and all its indexed chunks. This action cannot be undone."
+        }
+      },
+      "docTypes": {
+        "text": { "label": "Text", "description": "Paste articles, guides, or policies" },
+        "faq": { "label": "FAQ", "description": "Question & answer pairs" },
+        "pdf": { "label": "PDF", "description": "Upload a PDF document" },
+        "docx": { "label": "DOCX", "description": "Upload a Word document" }
+      },
+      "modal": {
+        "add": { "title": "Add Document" },
+        "edit": { "title": "Edit Document" },
+        "errors": {
+          "fileTooLarge": "File exceeds 25MB limit",
+          "contentTooLong": "Content exceeds 500,000 character limit"
+        },
+        "fields": {
+          "docType": { "label": "Document Type" },
+          "title": {
+            "label": "Title",
+            "placeholder": {
+              "faq": "e.g. Shipping & Returns FAQ",
+              "pdf": "e.g. Product Manual 2026",
+              "default": "e.g. Company Refund Policy"
+            }
+          },
+          "file": {
+            "label": "File",
+            "reuploadUnsupported": "File re-upload is not supported. Delete and re-create to change the file.",
+            "dropPrompt": "Drop your {{type}} here or",
+            "browse": "browse",
+            "maxSize": "Up to 25 MB"
+          },
+          "content": {
+            "label": "Content",
+            "placeholder": {
+              "faq": "Q: How long does shipping take?\nA: Standard shipping takes 5-7 business days.\n\nQ: What is your return policy?\nA: You can return items within 30 days of purchase.",
+              "default": "Paste your document content here…"
+            }
+          }
+        },
+        "actions": { "saveChanges": "Save Changes", "addDocument": "Add Document" }
+      },
+      "card": {
+        "type": { "pdf": "PDF", "docx": "DOCX", "text": "TEXT", "faq": "FAQ" },
+        "status": { "indexed": "Indexed", "processing": "Processing", "pending": "Pending", "failed": "Failed" },
+        "quality": {
+          "excellent": "Excellent quality",
+          "good": "Good quality",
+          "fair": "Fair quality",
+          "poor": "Poor quality"
+        },
+        "chunks_one": "{{count}} chunk",
+        "chunks_other": "{{count}} chunks",
+        "actions": { "retry": "Retry", "retryProcessing": "Retry processing" }
+      }
+    },
+    "appearances": {
+      "color": { "label": "Primary color" },
+      "avatar": {
+        "label": "Bot avatar URL",
+        "placeholder": "https://example.com/avatar.png",
+        "helper": "Optional image URL for the chatbot avatar. If empty, the widget uses your company logo when available."
+      },
+      "launcher": {
+        "position": {
+          "label": "Launcher position",
+          "options": { "bottomRight": "Bottom right", "bottomLeft": "Bottom left" }
+        },
+        "label": {
+          "label": "Launcher label",
+          "placeholder": "Chat with us",
+          "helper": "Optional text shown next to the chat icon, such as \"Chat with us\"."
+        }
+      },
+      "welcome": {
+        "label": "Welcome message",
+        "empty": "No greeting set.",
+        "helper": "Welcome message is configured in AI Bot settings.",
+        "editLink": "Edit in AI Bot"
+      },
+      "openFullWidgetTest": "Open full widget test",
+      "preview": { "yourBrand": "Your Brand", "typeMessage": "Type a message…" }
+    },
+    "testChat": {
+      "defaultBotName": "AI Assistant",
+      "kb": { "useKnowledgeBase": "Use Knowledge Base", "noIndexedDocs": "No indexed docs" },
+      "empty": { "title": "Send a message to test your bot", "subtitle": "Using saved AI settings" },
+      "placeholder": "Type a message…",
+      "errors": {
+        "emptyResponse": "(No response — check your brand voice and guardrails configuration)",
+        "sendFailed": "Something went wrong. Check your API key and model configuration."
+      }
+    },
+    "social": {
+      "loading": "Loading channels…",
+      "header": {
+        "title": "Channels",
+        "description": "Connect messaging platforms to receive and respond to customer messages."
+      },
+      "metaPages": {
+        "title": "Select Pages to Connect",
+        "description": "Choose which Facebook Pages to connect for messaging.",
+        "connecting": "Connecting…",
+        "connectSelected": "Connect Selected"
+      },
+      "connected": {
+        "title": "Connected Channels",
+        "count_one": "{{count}} channel connected",
+        "count_other": "{{count}} channels connected"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "modal": {
+          "title": "Connect Telegram Bot",
+          "description": "Enter your bot token from @BotFather to connect a Telegram bot.",
+          "help": {
+            "summary": "Don't have a bot token yet?",
+            "step1": { "prefix": "Open Telegram and message", "suffix": "." },
+            "step2": { "prefix": "Send", "suffix": "and follow the prompts to name your bot." },
+            "step3": { "prefix": "Copy the HTTP API token BotFather sends back (looks like", "suffix": ")." },
+            "step4": "Paste it below."
+          },
+          "tokenLabel": "Bot Token",
+          "connecting": "Connecting…",
+          "connect": "Connect"
+        }
+      },
+      "facebook": { "title": "Facebook" },
+      "empty": {
+        "title": "No channels connected yet.",
+        "description": "Connect a Telegram bot or Facebook Page to get started."
+      },
+      "activity": {
+        "received": "Received {{time}}",
+        "sent": "Sent {{time}}",
+        "checked": "· Checked {{time}}"
+      },
+      "status": {
+        "active": "active",
+        "error": "error",
+        "disconnected": "disconnected",
+        "pending_setup": "pending setup"
+      },
+      "actions": { "checkHealth": "Check connection health" },
+      "disconnect": {
+        "title": "Disconnect Channel",
+        "description": "This will stop receiving messages from this channel. You can reconnect it later.",
+        "confirm": "Disconnect"
+      }
+    },
+    "canned": {
+      "page": {
+        "title": "Canned Responses",
+        "subtitle": "Pre-written message templates for quick replies"
+      },
+      "list": {
+        "loadError": "Failed to load canned responses",
+        "empty": "No canned responses yet",
+        "noMatches": "No responses match your filters",
+        "createFirst": "Create your first response"
+      },
+      "actions": {
+        "newResponse": "New Response",
+        "editAria": "Edit {{title}}",
+        "deleteAria": "Delete {{title}}"
+      },
+      "filters": {
+        "searchPlaceholder": "Search responses…",
+        "categoryPlaceholder": "Category",
+        "scopePlaceholder": "Scope",
+        "allCategories": "All Categories",
+        "allScopes": "All"
+      },
+      "columns": {
+        "title": "Title", "content": "Content", "shortcut": "Shortcut",
+        "category": "Category", "scope": "Scope", "used": "Used"
+      },
+      "scope": { "shared": "Shared", "personal": "Personal" },
+      "modal": {
+        "add": { "title": "New Canned Response" },
+        "edit": { "title": "Edit Canned Response" },
+        "save": "Save",
+        "create": "Create",
+        "saving": "Saving…"
+      },
+      "fields": {
+        "title": { "label": "Title", "placeholder": "e.g. Greeting" },
+        "shortcut": { "label": "Shortcut", "placeholder": "e.g. greet" },
+        "content": {
+          "label": "Content",
+          "placeholder": "Hello {{customer_name}}, how can I help?",
+          "helperPrefix": "Available variables:",
+          "helperSuffix": "— or add your own like"
+        },
+        "category": { "label": "Category", "placeholder": "e.g. General" },
+        "scope": { "label": "Scope" },
+        "tags": { "label": "Tags", "placeholder": "billing, refund, common (comma-separated)" }
+      },
+      "delete": {
+        "title": "Delete canned response?",
+        "description": "This will remove the response. This action cannot be undone.",
+        "descriptionWithTarget": "\"{{title}}\" (/{{shortcut}}) will be removed. This action cannot be undone."
+      },
+      "toast": {
+        "created": "Canned response created",
+        "updated": "Canned response updated",
+        "deleted": "Canned response deleted",
+        "createFailed": "Failed to create",
+        "updateFailed": "Failed to update",
+        "deleteFailed": "Failed to delete"
+      }
     }
   }
 }

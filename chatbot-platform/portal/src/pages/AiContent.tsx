@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
@@ -15,12 +16,12 @@ import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
 
 type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social';
 
-const tabs: { key: Tab; label: string; icon: React.ElementType }[] = [
-  { key: 'bot', label: 'AI Bot', icon: Bot },
-  { key: 'knowledge', label: 'Knowledge base', icon: BookOpen },
-  { key: 'canned', label: 'Custom Responses', icon: MessageSquareText },
-  { key: 'appearances', label: 'Chatbot Appearances', icon: Palette },
-  { key: 'social', label: 'Social Media Integrations', icon: Share2 },
+const tabs: { key: Tab; labelKey: string; icon: React.ElementType }[] = [
+  { key: 'bot', labelKey: 'ai.tabs.bot', icon: Bot },
+  { key: 'knowledge', labelKey: 'ai.tabs.knowledge', icon: BookOpen },
+  { key: 'canned', labelKey: 'ai.tabs.canned', icon: MessageSquareText },
+  { key: 'appearances', labelKey: 'ai.tabs.appearances', icon: Palette },
+  { key: 'social', labelKey: 'ai.tabs.social', icon: Share2 },
 ];
 
 const PARAM_TO_TAB: Record<string, Tab> = {
@@ -32,6 +33,7 @@ const PARAM_TO_TAB: Record<string, Tab> = {
 };
 
 const AiContent: React.FC = () => {
+  const { t } = useTranslation();
   const { isRole } = useAppAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [isTestChatOpen, setIsTestChatOpen] = useState(false);
@@ -70,9 +72,9 @@ const AiContent: React.FC = () => {
               <Bot className="w-5 h-5 text-primary-400" />
             </div>
             <div>
-              <h1 className="text-lg font-semibold text-text-primary">AI &amp; Content</h1>
+              <h1 className="text-lg font-semibold text-text-primary">{t('ai.header.title')}</h1>
               <p className="text-xs text-text-muted">
-                AI bot, knowledge base, appearances, channels, and custom responses
+                {t('ai.header.subtitle')}
               </p>
             </div>
           </div>
@@ -82,11 +84,11 @@ const AiContent: React.FC = () => {
               size="sm"
               onClick={() => setIsTestChatOpen(true)}
               disabled={!aiSettings?.enabled}
-              title={!aiSettings?.enabled ? 'Enable AI bot first' : 'Test your AI bot'}
+              title={!aiSettings?.enabled ? t('ai.header.testChatDisabledTooltip') : t('ai.header.testChatTooltip')}
               className="gap-1.5"
             >
               <MessageSquare className="w-3.5 h-3.5" />
-              Test Chat
+              {t('ai.header.testChat')}
             </Button>
           )}
         </div>
@@ -109,7 +111,7 @@ const AiContent: React.FC = () => {
                 }`}
               >
                 <Icon className="w-3.5 h-3.5" />
-                {tab.label}
+                {t(tab.labelKey)}
               </button>
             );
           })}
@@ -156,7 +158,7 @@ const AiContent: React.FC = () => {
         <TestChatPanel
           isOpen={isTestChatOpen}
           onClose={() => setIsTestChatOpen(false)}
-          botName={aiSettings?.brandVoice?.name || 'AI Assistant'}
+          botName={aiSettings?.brandVoice?.name || t('ai.header.defaultBotName')}
           provider={aiSettings?.provider || 'openai'}
           model={aiSettings?.model || 'gpt-4o-mini'}
           hasIndexedDocs={hasIndexedDocs}

@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@clerk/clerk-react';
 import { Bot } from 'lucide-react';
 
@@ -17,6 +18,7 @@ const ChatbotAppearancesPreview: React.FC<ChatbotAppearancesPreviewProps> = ({
   launcherLabel,
   greetingMessage,
 }) => {
+  const { t } = useTranslation();
   const { organization } = useOrganization();
   const effectivePrimary = primaryColor || '#6366f1';
   const effectiveAvatar = avatarUrl || organization?.imageUrl || null;
@@ -41,7 +43,7 @@ const ChatbotAppearancesPreview: React.FC<ChatbotAppearancesPreviewProps> = ({
                 <Bot className="h-4 w-4" />
               )}
             </div>
-            <div className="text-sm font-medium">{organization?.name ?? 'Your Brand'}</div>
+            <div className="text-sm font-medium">{organization?.name ?? t('ai.appearances.preview.yourBrand')}</div>
           </div>
           <div className="flex-1 px-4 py-3 space-y-2">
             {greetingMessage ? (
@@ -54,7 +56,7 @@ const ChatbotAppearancesPreview: React.FC<ChatbotAppearancesPreviewProps> = ({
             ) : null}
           </div>
           <div className="border-t border-border px-4 py-2 text-xs text-muted-foreground">
-            Type a message…
+            {t('ai.appearances.preview.typeMessage')}
           </div>
         </div>
 

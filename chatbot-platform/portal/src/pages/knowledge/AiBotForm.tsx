@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCcw, HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -36,10 +37,10 @@ interface AiBotFormProps {
 }
 
 const TONE_PRESETS = [
-  { value: 'friendly', label: 'Friendly' },
-  { value: 'professional', label: 'Professional' },
-  { value: 'casual', label: 'Casual' },
-  { value: 'formal', label: 'Formal' },
+  { value: 'friendly', labelKey: 'ai.bot.identity.tones.friendly' },
+  { value: 'professional', labelKey: 'ai.bot.identity.tones.professional' },
+  { value: 'casual', labelKey: 'ai.bot.identity.tones.casual' },
+  { value: 'formal', labelKey: 'ai.bot.identity.tones.formal' },
 ] as const;
 
 type FormSnapshot = {
@@ -66,6 +67,7 @@ const computeEffectiveTone = (tone: string, customTone: string): string => {
 };
 
 const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
+  const { t } = useTranslation();
   const { isRole, tenantId } = useAppAuth();
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
@@ -280,13 +282,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   if (!isAdminOrSupervisor) {
     return (
       <div className="py-16 text-center text-sm text-text-muted">
-        You don't have permission to view AI settings.
+        {t('ai.bot.noPermission')}
       </div>
     );
   }
 
   if (isLoading) return <PageSkeleton variant="cards" />;
-  if (error) return <InlineError message="Failed to load AI settings" />;
+  if (error) return <InlineError message={t('ai.bot.loadError')} />;
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -297,8 +299,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
             <Sparkles className="w-4 h-4 text-primary-400" />
           </div>
           <div>
-            <p className="text-sm font-medium text-text-primary">AI Bot</p>
-            <p className="text-xs text-text-muted">Enable AI-powered responses for visitors</p>
+            <p className="text-sm font-medium text-text-primary">{t('ai.bot.enable.title')}</p>
+            <p className="text-xs text-text-muted">{t('ai.bot.enable.description')}</p>
           </div>
         </div>
         <Switch checked={enabled} onCheckedChange={setEnabled} disabled={readOnly} />
@@ -308,34 +310,34 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
         {/* Bot Identity */}
         <section className="space-y-4">
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">Bot Identity</h3>
-            <p className="text-xs text-text-muted mt-0.5">How your bot introduces itself to visitors</p>
+            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.identity.title')}</h3>
+            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.identity.description')}</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <Label className="mb-1 text-text-secondary">Chatbot Name</Label>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.botName.label')}</Label>
               <Input
                 value={botName}
                 onChange={(e) => setBotName(e.target.value)}
-                placeholder="e.g. Ava"
+                placeholder={t('ai.bot.identity.botName.placeholder')}
                 disabled={readOnly}
               />
-              <p className="text-[10px] text-text-muted mt-1">Chatbot display name for users to see on the website.</p>
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.botName.helper')}</p>
             </div>
             <div>
-              <Label className="mb-1 text-text-secondary">Support Email</Label>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.supportEmail.label')}</Label>
               <Input
                 type="email"
                 value={supportEmail}
                 onChange={(e) => setSupportEmail(e.target.value)}
-                placeholder="support@yourcompany.com"
+                placeholder={t('ai.bot.identity.supportEmail.placeholder')}
                 disabled={readOnly}
               />
-              <p className="text-[10px] text-text-muted mt-1">Used for escalations and visible via {'{supportEmail}'}</p>
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
             </div>
           </div>
           <div>
-            <Label className="mb-2 text-text-secondary">Voice Tone</Label>
+            <Label className="mb-2 text-text-secondary">{t('ai.bot.identity.voiceTone.label')}</Label>
             <div className="flex flex-wrap gap-2">
               {TONE_PRESETS.map((p) => (
                 <button
@@ -349,7 +351,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                       : 'bg-surface-2 text-text-muted hover:text-text-secondary'
                   }`}
                 >
-                  {p.label}
+                  {t(p.labelKey)}
                 </button>
               ))}
               <button
@@ -362,7 +364,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                     : 'bg-surface-2 text-text-muted hover:text-text-secondary'
                 }`}
               >
-                Custom
+                {t('ai.bot.identity.tones.custom')}
               </button>
             </div>
             {isCustomTone && (
@@ -373,7 +375,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                   setCustomTone(e.target.value);
                   setTone(e.target.value || 'custom');
                 }}
-                placeholder="e.g. witty, concise, no emojis"
+                placeholder={t('ai.bot.identity.customTone.placeholder')}
                 disabled={readOnly}
               />
             )}
@@ -384,17 +386,17 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
         <section className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-text-primary">Bot Instructions</h3>
-              <p className="text-xs text-text-muted mt-0.5">Tell the chatbot how it should answer visitors. You can start from a template and edit it.</p>
+              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.instructions.title')}</h3>
+              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.instructions.description')}</p>
             </div>
             <div className="flex items-center gap-2">
               <Select value={templateId} onValueChange={handleTemplateChange} disabled={readOnly}>
-                <SelectTrigger className="h-9 w-56" aria-label="Choose a starter prompt">
-                  <SelectValue placeholder="Choose a starter prompt" />
+                <SelectTrigger className="h-9 w-56" aria-label={t('ai.bot.instructions.templateSelect.ariaLabel')}>
+                  <SelectValue placeholder={t('ai.bot.instructions.templateSelect.placeholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {promptTemplates.map((t) => (
-                    <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
+                  {promptTemplates.map((tpl) => (
+                    <SelectItem key={tpl.id} value={tpl.id}>{tpl.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -402,10 +404,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 type="button"
                 onClick={() => setIsHelpOpen(true)}
                 className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
-                title="Open the bot instructions FAQ"
+                title={t('ai.bot.instructions.faqsTooltip')}
                 aria-expanded={isHelpOpen}
               >
-                <HelpCircle className="w-3.5 h-3.5" /> FAQs
+                <HelpCircle className="w-3.5 h-3.5" /> {t('ai.bot.instructions.faqs')}
               </button>
               <Button
                 type="button"
@@ -414,61 +416,61 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 onClick={handleResetPrompt}
                 disabled={readOnly}
                 className="h-8 px-2 text-xs"
-                title="Reset to the selected template"
+                title={t('ai.bot.instructions.resetTooltip')}
               >
                 <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                Reset
+                {t('ai.bot.instructions.reset')}
               </Button>
             </div>
           </div>
           <Textarea
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder="Write your bot's instructions here, or pick a template above…"
+            placeholder={t('ai.bot.instructions.promptPlaceholder')}
             rows={14}
             disabled={readOnly}
             className="font-mono text-xs"
           />
           <p className="text-[10px] text-text-muted">
-            Placeholders: <code className="text-primary-400">{placeholderHint}</code>
+            {t('ai.bot.instructions.placeholders')} <code className="text-primary-400">{placeholderHint}</code>
           </p>
         </section>
 
         {/* Advanced Settings (flat — no accordion) */}
         <section className="space-y-4">
           <div>
-            <h3 className="text-sm font-semibold text-text-primary">Advanced Settings</h3>
-            <p className="text-xs text-text-muted mt-0.5">Guardrails, handoff behavior, and response limits</p>
+            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.advanced.title')}</h3>
+            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.advanced.description')}</p>
           </div>
 
           <div>
-            <Label className="mb-1 text-text-secondary">Greeting Message</Label>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.greeting.label')}</Label>
             <Input
               value={greetingMessage}
               onChange={(e) => setGreetingMessage(e.target.value)}
-              placeholder="Hi! How can I help you today?"
+              placeholder={t('ai.bot.advanced.greeting.placeholder')}
               disabled={readOnly}
             />
           </div>
 
           <div>
-            <Label className="mb-1 text-text-secondary">Fallback Message</Label>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.fallback.label')}</Label>
             <Textarea
               value={fallbackMessage}
               onChange={(e) => setFallbackMessage(e.target.value)}
-              placeholder="I'm connecting you to a human agent…"
+              placeholder={t('ai.bot.advanced.fallback.placeholder')}
               rows={2}
               disabled={readOnly}
             />
-            <p className="text-[10px] text-text-muted mt-1">Shown when the bot can't answer confidently</p>
+            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.fallback.helper')}</p>
           </div>
 
           <div>
-            <Label className="mb-1 text-text-secondary">Off-Hours Message</Label>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.offHours.label')}</Label>
             <Textarea
               value={offHoursMessage}
               onChange={(e) => setOffHoursMessage(e.target.value)}
-              placeholder="We're currently outside business hours…"
+              placeholder={t('ai.bot.advanced.offHours.placeholder')}
               rows={2}
               disabled={readOnly}
             />
@@ -477,7 +479,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label className="mb-2 text-text-secondary">
-                Confidence Threshold: {confidenceThreshold.toFixed(2)}
+                {t('ai.bot.advanced.confidence.label', { value: confidenceThreshold.toFixed(2) })}
               </Label>
               <Slider
                 value={[confidenceThreshold]}
@@ -487,37 +489,37 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 step={0.05}
                 disabled={readOnly}
               />
-              <p className="text-[10px] text-text-muted mt-1">Below this, bot hands off to an agent</p>
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.confidence.helper')}</p>
             </div>
             <div>
-              <Label className="mb-1 text-text-secondary">Max Response Length</Label>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.maxResponseLength.label')}</Label>
               <Input
                 type="number"
                 value={maxResponseLength}
                 onChange={(e) => setMaxResponseLength(parseInt(e.target.value) || 0)}
                 disabled={readOnly}
               />
-              <p className="text-[10px] text-text-muted mt-1">Characters</p>
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.maxResponseLength.helper')}</p>
             </div>
           </div>
 
           <div>
-            <Label className="mb-1 text-text-secondary">Escalation Keywords</Label>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.escalationKeywords.label')}</Label>
             <TagInput
               value={escalationKeywords}
               onChange={setEscalationKeywords}
-              placeholder="Type a keyword and press Enter…"
+              placeholder={t('ai.bot.advanced.escalationKeywords.placeholder')}
               disabled={readOnly}
             />
-            <p className="text-[10px] text-text-muted mt-1">Messages containing these trigger handoff</p>
+            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.escalationKeywords.helper')}</p>
           </div>
 
           <div>
-            <Label className="mb-1 text-text-secondary">Topics to Avoid</Label>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.topicsToAvoid.label')}</Label>
             <TagInput
               value={topicsToAvoid}
               onChange={setTopicsToAvoid}
-              placeholder="Type a topic and press Enter…"
+              placeholder={t('ai.bot.advanced.topicsToAvoid.placeholder')}
               disabled={readOnly}
             />
           </div>
@@ -531,13 +533,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           size="lg"
           className="bg-primary-600 hover:bg-primary-500 text-white"
         >
-          Go to Knowledge Base
+          {t('ai.bot.actions.goToKnowledgeBase')}
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
         {isAdmin && (
           <Button onClick={handleSave} disabled={updateSettings.isPending} size="lg" variant="outline">
             {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            Save Changes
+            {t('ai.bot.actions.saveChanges')}
           </Button>
         )}
       </div>
@@ -548,14 +550,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Replace edited instructions?</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.bot.dialogs.replaceInstructions.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Switching templates will replace your current bot instructions. This can't be undone.
+              {t('ai.bot.dialogs.replaceInstructions.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep editing</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmTemplateSwitch}>Replace</AlertDialogAction>
+            <AlertDialogCancel>{t('ai.bot.dialogs.replaceInstructions.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmTemplateSwitch}>{t('ai.bot.dialogs.replaceInstructions.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -568,14 +570,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Leave without saving?</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.bot.dialogs.leaveWithoutSaving.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              You have unsaved changes. Go to Knowledge Base without saving?
+              {t('ai.bot.dialogs.leaveWithoutSaving.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Stay here</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmLeave}>Leave anyway</AlertDialogAction>
+            <AlertDialogCancel>{t('ai.bot.dialogs.leaveWithoutSaving.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmLeave}>{t('ai.bot.dialogs.leaveWithoutSaving.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

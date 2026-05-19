@@ -1,4 +1,5 @@
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { Card } from '@/components/ui/card';
 import { FileText, FileEdit, HelpCircle, MoreVertical, RotateCcw } from 'lucide-react';
 import {
@@ -35,28 +36,29 @@ interface DocumentCardProps {
   onDelete: () => void;
 }
 
-const qualityConfig: Record<string, { color: string; label: string }> = {
-  excellent: { color: 'bg-emerald-400', label: 'Excellent quality' },
-  good: { color: 'bg-emerald-400', label: 'Good quality' },
-  fair: { color: 'bg-amber-400', label: 'Fair quality' },
-  poor: { color: 'bg-red-400', label: 'Poor quality' },
+const qualityConfig: Record<string, { color: string; labelKey: string }> = {
+  excellent: { color: 'bg-emerald-400', labelKey: 'ai.knowledge.card.quality.excellent' },
+  good: { color: 'bg-emerald-400', labelKey: 'ai.knowledge.card.quality.good' },
+  fair: { color: 'bg-amber-400', labelKey: 'ai.knowledge.card.quality.fair' },
+  poor: { color: 'bg-red-400', labelKey: 'ai.knowledge.card.quality.poor' },
 };
 
-const typeConfig: Record<string, { icon: React.ElementType; label: string; accent: string }> = {
-  pdf: { icon: FileText, label: 'PDF', accent: 'text-rose-400 bg-rose-400/10' },
-  docx: { icon: FileText, label: 'DOCX', accent: 'text-blue-400 bg-blue-400/10' },
-  text: { icon: FileEdit, label: 'TEXT', accent: 'text-violet-400 bg-violet-400/10' },
-  faq: { icon: HelpCircle, label: 'FAQ', accent: 'text-amber-400 bg-amber-400/10' },
+const typeConfig: Record<string, { icon: React.ElementType; labelKey: string; accent: string }> = {
+  pdf: { icon: FileText, labelKey: 'ai.knowledge.card.type.pdf', accent: 'text-rose-400 bg-rose-400/10' },
+  docx: { icon: FileText, labelKey: 'ai.knowledge.card.type.docx', accent: 'text-blue-400 bg-blue-400/10' },
+  text: { icon: FileEdit, labelKey: 'ai.knowledge.card.type.text', accent: 'text-violet-400 bg-violet-400/10' },
+  faq: { icon: HelpCircle, labelKey: 'ai.knowledge.card.type.faq', accent: 'text-amber-400 bg-amber-400/10' },
 };
 
-const statusConfig: Record<string, { dot: string; label: string; bg: string }> = {
-  indexed: { dot: 'bg-emerald-400', label: 'Indexed', bg: 'bg-emerald-400/10 text-emerald-400' },
-  processing: { dot: 'bg-amber-400 animate-pulse', label: 'Processing', bg: 'bg-amber-400/10 text-amber-400' },
-  pending: { dot: 'bg-text-muted', label: 'Pending', bg: 'bg-surface-3 text-text-muted' },
-  failed: { dot: 'bg-red-400', label: 'Failed', bg: 'bg-red-400/10 text-red-400' },
+const statusConfig: Record<string, { dot: string; labelKey: string; bg: string }> = {
+  indexed: { dot: 'bg-emerald-400', labelKey: 'ai.knowledge.card.status.indexed', bg: 'bg-emerald-400/10 text-emerald-400' },
+  processing: { dot: 'bg-amber-400 animate-pulse', labelKey: 'ai.knowledge.card.status.processing', bg: 'bg-amber-400/10 text-amber-400' },
+  pending: { dot: 'bg-text-muted', labelKey: 'ai.knowledge.card.status.pending', bg: 'bg-surface-3 text-text-muted' },
+  failed: { dot: 'bg-red-400', labelKey: 'ai.knowledge.card.status.failed', bg: 'bg-red-400/10 text-red-400' },
 };
 
 const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, onDelete }) => {
+  const { t } = useTranslation();
   const { isRole } = useAppAuth();
   const isAdmin = isRole('admin');
   const type = typeConfig[document.type] || typeConfig.text;
@@ -73,7 +75,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
         <div className="flex items-center gap-1.5">
           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${status.bg}`}>
             <span className={`w-1.5 h-1.5 rounded-full ${status.dot}`} />
-            {status.label}
+            {t(status.labelKey)}
           </span>
           {isAdmin && (
             <DropdownMenu>
@@ -83,12 +85,12 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={onEdit}>Edit</DropdownMenuItem>
+                <DropdownMenuItem onClick={onEdit}>{t('common.edit')}</DropdownMenuItem>
                 {document.status === 'failed' && (
-                  <DropdownMenuItem onClick={onRetry}>Retry</DropdownMenuItem>
+                  <DropdownMenuItem onClick={onRetry}>{t('ai.knowledge.card.actions.retry')}</DropdownMenuItem>
                 )}
                 <DropdownMenuItem onClick={onDelete} className="text-red-400">
-                  Delete
+                  {t('common.delete')}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -103,9 +105,9 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
 
       {/* Meta */}
       <div className="flex items-center gap-2 text-[11px] text-text-muted">
-        <span>{type.label}</span>
+        <span>{t(type.labelKey)}</span>
         <span className="w-0.5 h-0.5 rounded-full bg-text-muted" />
-        <span>{document.chunkCount} {document.chunkCount === 1 ? 'chunk' : 'chunks'}</span>
+        <span>{t('ai.knowledge.card.chunks', { count: document.chunkCount })}</span>
         <span className="w-0.5 h-0.5 rounded-full bg-text-muted" />
         <span>{timeAgo(document.updatedAt)}</span>
       </div>
@@ -117,7 +119,9 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
           <span className="text-[10px] text-text-muted truncate">
             {document.qualityReport.contentSummary
               ? document.qualityReport.contentSummary.slice(0, 60) + (document.qualityReport.contentSummary.length > 60 ? '...' : '')
-              : qualityConfig[document.qualityReport.qualityScore]?.label}
+              : qualityConfig[document.qualityReport.qualityScore]?.labelKey
+                ? t(qualityConfig[document.qualityReport.qualityScore].labelKey)
+                : ''}
           </span>
         </div>
       )}
@@ -144,7 +148,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
             <button
               onClick={onRetry}
               className="flex-shrink-0 p-1 rounded hover:bg-red-400/10 transition-colors"
-              title="Retry processing"
+              title={t('ai.knowledge.card.actions.retryProcessing')}
             >
               <RotateCcw className="w-3 h-3 text-red-400" />
             </button>

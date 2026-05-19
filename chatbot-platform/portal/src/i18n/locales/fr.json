@@ -43,20 +43,12 @@
       "subtitle": "Gérez votre compte et vos préférences"
     },
     "groups": {
-      "Account": "Compte",
-      "Bot": "Bot",
-      "Connections": "Connexions",
-      "Billing": "Facturation"
+      "Account": "Compte", "Bot": "Bot", "Connections": "Connexions", "Billing": "Facturation"
     },
     "tabs": {
-      "profile": "Profil",
-      "notifications": "Notifications",
-      "appearance": "Apparence",
-      "widget": "Widget & marque",
-      "capabilities": "Fonctionnalités",
-      "integrations": "Intégrations",
-      "channels": "Canaux",
-      "billing": "Facturation"
+      "profile": "Profil", "notifications": "Notifications", "appearance": "Apparence",
+      "widget": "Widget & marque", "capabilities": "Fonctionnalités",
+      "integrations": "Intégrations", "channels": "Canaux", "billing": "Facturation"
     },
     "profile": {
       "title": "Informations du profil",
@@ -75,11 +67,7 @@
           "label": "Langue",
           "helper": "Utilisé pour les e-mails et la communication du compte. Traduction de l'interface en cours.",
           "saveFailed": "Échec de l'enregistrement de la préférence de langue.",
-          "options": {
-            "en": "English",
-            "nl": "Nederlands",
-            "fr": "Français"
-          }
+          "options": { "en": "English", "nl": "Nederlands", "fr": "Français" }
         }
       },
       "password": {
@@ -89,28 +77,15 @@
     },
     "notifications": {
       "title": "Préférences de notification",
-      "sound": {
-        "title": "Notifications sonores",
-        "description": "Diffuser des sons pour les nouveaux messages et les transferts"
-      },
+      "sound": { "title": "Notifications sonores", "description": "Diffuser des sons pour les nouveaux messages et les transferts" },
       "volume": "Volume",
-      "desktop": {
-        "title": "Notifications de bureau",
-        "description": "Afficher les notifications du navigateur"
-      },
-      "handsoffOnly": {
-        "title": "Notifications de transfert uniquement",
-        "description": "Notifier uniquement pour les demandes de transfert"
-      }
+      "desktop": { "title": "Notifications de bureau", "description": "Afficher les notifications du navigateur" },
+      "handsoffOnly": { "title": "Notifications de transfert uniquement", "description": "Notifier uniquement pour les demandes de transfert" }
     },
     "appearance": {
       "title": "Thème",
       "description": "Choisissez votre thème préféré",
-      "options": {
-        "light": "Clair",
-        "dark": "Sombre",
-        "system": "Système"
-      }
+      "options": { "light": "Clair", "dark": "Sombre", "system": "Système" }
     },
     "widget": {
       "title": "Widget & marque",
@@ -140,11 +115,8 @@
         "placeholder": "Le nom de votre entreprise"
       },
       "status": {
-        "title": "Statut",
-        "activeSessions": "Sessions actives",
-        "maxSessions": "Sessions max.",
-        "active": "Actif",
-        "inactive": "Inactif"
+        "title": "Statut", "activeSessions": "Sessions actives", "maxSessions": "Sessions max.",
+        "active": "Actif", "inactive": "Inactif"
       },
       "embed": {
         "title": "Intégrer le widget",
@@ -176,11 +148,8 @@
       },
       "health": {
         "title": "État de la connexion",
-        "healthy": "Sain",
-        "unhealthy": "Défaillant",
-        "unknown": "Inconnu",
-        "lastDelivery": "Dernière livraison",
-        "lastSuccess": "Dernier succès"
+        "healthy": "Sain", "unhealthy": "Défaillant", "unknown": "Inconnu",
+        "lastDelivery": "Dernière livraison", "lastSuccess": "Dernier succès"
       },
       "inbound": {
         "title": "Point de terminaison entrant",
@@ -206,24 +175,11 @@
       "deliveries": {
         "title": "Journal des livraisons",
         "columns": {
-          "time": "Heure",
-          "direction": "Direction",
-          "event": "Événement",
-          "status": "Statut",
-          "http": "HTTP",
-          "duration": "Durée",
-          "error": "Erreur"
+          "time": "Heure", "direction": "Direction", "event": "Événement",
+          "status": "Statut", "http": "HTTP", "duration": "Durée", "error": "Erreur"
         },
-        "direction": {
-          "inbound": "entrant",
-          "outbound": "sortant"
-        },
-        "status": {
-          "success": "succès",
-          "failed": "échec",
-          "retrying": "nouvelle tentative",
-          "dropped": "abandonné"
-        },
+        "direction": { "inbound": "entrant", "outbound": "sortant" },
+        "status": { "success": "succès", "failed": "échec", "retrying": "nouvelle tentative", "dropped": "abandonné" },
         "page": "Page {{page}}",
         "prev": "Précédent",
         "next": "Suivant",
@@ -257,12 +213,7 @@
           "toggle": "Paramètres avancés",
           "language": "Langue",
           "collectLabel": "Collecter auprès du client",
-          "fields": {
-            "name": "Nom",
-            "email": "E-mail",
-            "phone": "Téléphone",
-            "notes": "Notes"
-          },
+          "fields": { "name": "Nom", "email": "E-mail", "phone": "Téléphone", "notes": "Notes" },
           "save": "Enregistrer les paramètres avancés"
         },
         "disconnectConfirm": {
@@ -279,9 +230,7 @@
         "descriptionAdmin": "Contrôlez quelles fonctionnalités sont actives pour votre chatbot.",
         "addButton": "Ajouter une fonctionnalité"
       },
-      "errors": {
-        "loadFailed": "Échec du chargement des fonctionnalités. Veuillez rafraîchir la page."
-      },
+      "errors": { "loadFailed": "Échec du chargement des fonctionnalités. Veuillez rafraîchir la page." },
       "tenantView": {
         "emptyState": "Aucune fonctionnalité configurée pour le moment. Contactez votre gestionnaire de compte pour configurer les fonctionnalités du bot.",
         "noDescription": "Aucune description disponible"
@@ -334,24 +283,11 @@
           "placeholder": "ex. Permet au bot de vérifier la disponibilité et de prendre des rendez-vous pour les visiteurs.",
           "helper": "Explique en langage clair ce que fait cette fonctionnalité."
         },
-        "trigger": {
-          "label": "Description du déclencheur",
-          "placeholder": "Décrivez quand ce skill doit s'activer…"
-        },
-        "tools": {
-          "label": "Outils"
-        },
-        "instructions": {
-          "label": "Instructions",
-          "placeholder": "Instructions étape par étape pour le bot…"
-        },
-        "maxSteps": {
-          "label": "Étapes max."
-        },
-        "enabled": {
-          "title": "Activé",
-          "description": "Activer cette fonctionnalité pour le client"
-        },
+        "trigger": { "label": "Description du déclencheur", "placeholder": "Décrivez quand ce skill doit s'activer…" },
+        "tools": { "label": "Outils" },
+        "instructions": { "label": "Instructions", "placeholder": "Instructions étape par étape pour le bot…" },
+        "maxSteps": { "label": "Étapes max." },
+        "enabled": { "title": "Activé", "description": "Activer cette fonctionnalité pour le client" },
         "saving": "Enregistrement…",
         "createCapability": "Créer la fonctionnalité"
       },
@@ -369,58 +305,25 @@
     "billing": {
       "plans": {
         "free": {
-          "name": "Gratuit",
-          "price": "0 $/mois",
-          "blurb": "Essayez les bases gratuitement.",
-          "features": {
-            "agents": "1 agent",
-            "sessions": "10 sessions simultanées",
-            "channels": "1 canal",
-            "byoLlm": "Clé LLM personnelle"
-          }
+          "name": "Gratuit", "price": "0 $/mois", "blurb": "Essayez les bases gratuitement.",
+          "features": { "agents": "1 agent", "sessions": "10 sessions simultanées", "channels": "1 canal", "byoLlm": "Clé LLM personnelle" }
         },
         "pro": {
-          "name": "Pro",
-          "price": "49 $/mois",
-          "blurb": "Pour les équipes en croissance.",
-          "features": {
-            "agents": "3 agents",
-            "sessions": "100 sessions simultanées",
-            "llmCalls": "1 000 appels LLM plateforme/jour",
-            "channels": "3 canaux",
-            "uploadsHandoff": "Téléversements & transfert"
-          }
+          "name": "Pro", "price": "49 $/mois", "blurb": "Pour les équipes en croissance.",
+          "features": { "agents": "3 agents", "sessions": "100 sessions simultanées", "llmCalls": "1 000 appels LLM plateforme/jour", "channels": "3 canaux", "uploadsHandoff": "Téléversements & transfert" }
         },
         "premium": {
-          "name": "Premium",
-          "price": "199 $/mois",
-          "blurb": "Image de marque personnalisée + marge de croissance.",
-          "features": {
-            "agents": "10 agents",
-            "sessions": "500 sessions simultanées",
-            "llmCalls": "10 000 appels LLM plateforme/jour",
-            "channels": "Canaux illimités",
-            "branding": "Image de marque & domaine personnalisés",
-            "support": "Support prioritaire"
-          }
+          "name": "Premium", "price": "199 $/mois", "blurb": "Image de marque personnalisée + marge de croissance.",
+          "features": { "agents": "10 agents", "sessions": "500 sessions simultanées", "llmCalls": "10 000 appels LLM plateforme/jour", "channels": "Canaux illimités", "branding": "Image de marque & domaine personnalisés", "support": "Support prioritaire" }
         },
         "enterprise": {
-          "name": "Enterprise",
-          "price": "Sur mesure",
-          "blurb": "Géré par les ventes, support SLA.",
-          "features": {
-            "unlimited": "Tout illimité",
-            "integrations": "Intégrations personnalisées",
-            "sla": "SLA + support dédié"
-          }
+          "name": "Enterprise", "price": "Sur mesure", "blurb": "Géré par les ventes, support SLA.",
+          "features": { "unlimited": "Tout illimité", "integrations": "Intégrations personnalisées", "sla": "SLA + support dédié" }
         }
       },
       "status": {
-        "trialing": "Période d'essai",
-        "active": "Actif",
-        "pastDue": "Paiement en retard",
-        "cancelled": "Annulé",
-        "none": "Aucun plan"
+        "trialing": "Période d'essai", "active": "Actif", "pastDue": "Paiement en retard",
+        "cancelled": "Annulé", "none": "Aucun plan"
       },
       "trial": {
         "endsInDays_one": "Essai se termine {{date}} — {{count}} jour restant",
@@ -447,9 +350,7 @@
         "description": "Votre compte est sur un plan Enterprise géré par les ventes. Pour toute modification de plan ou de facturation, contactez votre interlocuteur commercial.",
         "contactSales": "Contacter les ventes"
       },
-      "subscribe": {
-        "cta": "S'abonner à {{plan}}"
-      },
+      "subscribe": { "cta": "S'abonner à {{plan}}" },
       "email": {
         "title": "E-mail de facturation",
         "label": "Les factures et reçus sont envoyés ici",
@@ -475,6 +376,358 @@
       "loadError": "Impossible de charger l'état de la facturation : {{error}}",
       "unknownError": "erreur inconnue",
       "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement."
+    }
+  },
+  "ai": {
+    "header": {
+      "title": "IA & Contenu",
+      "subtitle": "Bot IA, base de connaissances, apparence, canaux et réponses personnalisées",
+      "testChat": "Chat de test",
+      "testChatTooltip": "Tester votre bot IA",
+      "testChatDisabledTooltip": "Activez d'abord le bot IA",
+      "defaultBotName": "Assistant IA"
+    },
+    "tabs": {
+      "bot": "Bot IA",
+      "knowledge": "Base de connaissances",
+      "canned": "Réponses personnalisées",
+      "appearances": "Apparence du chatbot",
+      "social": "Intégrations réseaux sociaux"
+    },
+    "onboarding": {
+      "title": "Commencer",
+      "subtitle": "Terminez la configuration pour que votre IA puisse aider les visiteurs.",
+      "stepDone": "fait",
+      "stepNotDone": "pas fait",
+      "steps": {
+        "enableBot": {
+          "title": "Configurez votre bot IA",
+          "description": "Nom, identité et règles de sécurité pour que les visiteurs reçoivent des réponses sensées.",
+          "action": "Configurer"
+        },
+        "addKnowledge": {
+          "title": "Ajouter des connaissances",
+          "description": "Téléversez des documents, collez du texte ou ajoutez des FAQ pour que le bot réponde à partir de vos propres informations.",
+          "action": "Ajouter des connaissances"
+        },
+        "connectChannel": {
+          "title": "Connecter un canal",
+          "description": "Reliez Telegram ou Facebook pour que le bot puisse parler à vos visiteurs.",
+          "action": "Connecter"
+        }
+      }
+    },
+    "bot": {
+      "noPermission": "Vous n'avez pas la permission de voir les paramètres IA.",
+      "loadError": "Échec du chargement des paramètres IA",
+      "enable": { "title": "Bot IA", "description": "Activer les réponses IA pour les visiteurs" },
+      "identity": {
+        "title": "Identité du bot",
+        "description": "Comment votre bot se présente aux visiteurs",
+        "botName": {
+          "label": "Nom du chatbot",
+          "placeholder": "ex. Ava",
+          "helper": "Nom d'affichage du chatbot, visible pour les visiteurs sur le site."
+        },
+        "supportEmail": {
+          "label": "E-mail de support",
+          "placeholder": "support@votreentreprise.com",
+          "helper": "Utilisé pour les escalades et visible via {supportEmail}"
+        },
+        "voiceTone": { "label": "Ton" },
+        "tones": {
+          "friendly": "Amical",
+          "professional": "Professionnel",
+          "casual": "Décontracté",
+          "formal": "Formel",
+          "custom": "Personnalisé"
+        },
+        "customTone": { "placeholder": "ex. spirituel, concis, sans emojis" }
+      },
+      "instructions": {
+        "title": "Instructions du bot",
+        "description": "Indiquez au chatbot comment répondre aux visiteurs. Vous pouvez partir d'un modèle et le modifier.",
+        "templateSelect": { "ariaLabel": "Choisir un modèle de départ", "placeholder": "Choisir un modèle de départ" },
+        "faqsTooltip": "Ouvrir la FAQ des instructions du bot",
+        "faqs": "FAQ",
+        "resetTooltip": "Réinitialiser au modèle sélectionné",
+        "reset": "Réinitialiser",
+        "promptPlaceholder": "Écrivez ici les instructions de votre bot, ou choisissez un modèle ci-dessus…",
+        "placeholders": "Placeholders :"
+      },
+      "advanced": {
+        "title": "Paramètres avancés",
+        "description": "Garde-fous, comportement de transfert et limites de réponse",
+        "greeting": { "label": "Message de bienvenue", "placeholder": "Bonjour ! Comment puis-je vous aider aujourd'hui ?" },
+        "fallback": {
+          "label": "Message de repli",
+          "placeholder": "Je vous mets en relation avec un agent humain…",
+          "helper": "Affiché lorsque le bot ne peut pas répondre avec confiance"
+        },
+        "offHours": { "label": "Message hors-heures", "placeholder": "Nous sommes actuellement hors des heures d'ouverture…" },
+        "confidence": { "label": "Seuil de confiance : {{value}}", "helper": "En-dessous de cette valeur, le bot transfère à un agent" },
+        "maxResponseLength": { "label": "Longueur maximale de la réponse", "helper": "Caractères" },
+        "escalationKeywords": {
+          "label": "Mots-clés d'escalade",
+          "placeholder": "Tapez un mot-clé puis Entrée…",
+          "helper": "Les messages contenant ces mots déclenchent un transfert"
+        },
+        "topicsToAvoid": { "label": "Sujets à éviter", "placeholder": "Tapez un sujet puis Entrée…" }
+      },
+      "actions": { "goToKnowledgeBase": "Aller à la base de connaissances", "saveChanges": "Enregistrer les modifications" },
+      "dialogs": {
+        "replaceInstructions": {
+          "title": "Remplacer les instructions modifiées ?",
+          "description": "Changer de modèle remplacera vos instructions actuelles. Cette action est irréversible.",
+          "cancel": "Continuer à modifier",
+          "confirm": "Remplacer"
+        },
+        "leaveWithoutSaving": {
+          "title": "Quitter sans enregistrer ?",
+          "description": "Vous avez des modifications non enregistrées. Aller à la base de connaissances sans enregistrer ?",
+          "cancel": "Rester ici",
+          "confirm": "Quitter quand même"
+        }
+      }
+    },
+    "knowledge": {
+      "list": {
+        "loadError": "Échec du chargement des documents",
+        "banner": {
+          "aiDisabled": "Le bot IA n'est pas encore activé. Activez-le pour que ces documents soient utilisés dans les réponses aux visiteurs.",
+          "configureCta": "Configurer le bot IA"
+        },
+        "filters": {
+          "all": "Tous", "indexed": "Indexé", "processing": "Traitement", "failed": "Échec",
+          "pdf": "PDF", "docx": "DOCX", "text": "Texte", "faq": "FAQ"
+        },
+        "searchPlaceholder": "Rechercher des documents…",
+        "addDocument": "Ajouter un document",
+        "empty": {
+          "title": "Aucun document pour le moment",
+          "descriptionAdmin": "Téléversez des PDF, collez du texte ou ajoutez des FAQ pour que votre bot IA réponde à partir de vos informations.",
+          "descriptionViewer": "Aucun document n'a encore été ajouté à la base de connaissances.",
+          "addFirst": "Ajouter votre premier document"
+        },
+        "noMatches": {
+          "title": "Aucun document correspondant",
+          "description": "Essayez d'ajuster votre recherche ou filtre.",
+          "clearFilters": "Effacer les filtres"
+        },
+        "deleteConfirm": {
+          "title": "Supprimer le document",
+          "description": "Ceci supprimera définitivement ce document et tous ses chunks indexés. Cette action est irréversible."
+        }
+      },
+      "docTypes": {
+        "text": { "label": "Texte", "description": "Collez des articles, guides ou politiques" },
+        "faq": { "label": "FAQ", "description": "Paires question / réponse" },
+        "pdf": { "label": "PDF", "description": "Téléverser un document PDF" },
+        "docx": { "label": "DOCX", "description": "Téléverser un document Word" }
+      },
+      "modal": {
+        "add": { "title": "Ajouter un document" },
+        "edit": { "title": "Modifier le document" },
+        "errors": {
+          "fileTooLarge": "Le fichier dépasse la limite de 25 Mo",
+          "contentTooLong": "Le contenu dépasse la limite de 500 000 caractères"
+        },
+        "fields": {
+          "docType": { "label": "Type de document" },
+          "title": {
+            "label": "Titre",
+            "placeholder": {
+              "faq": "ex. FAQ Livraison & Retours",
+              "pdf": "ex. Manuel produit 2026",
+              "default": "ex. Politique de remboursement de l'entreprise"
+            }
+          },
+          "file": {
+            "label": "Fichier",
+            "reuploadUnsupported": "Le re-téléversement n'est pas pris en charge. Supprimez et recréez pour changer le fichier.",
+            "dropPrompt": "Déposez votre {{type}} ici ou",
+            "browse": "parcourir",
+            "maxSize": "Jusqu'à 25 Mo"
+          },
+          "content": {
+            "label": "Contenu",
+            "placeholder": {
+              "faq": "Q : Combien de temps prend la livraison ?\nR : La livraison standard prend 5 à 7 jours ouvrables.\n\nQ : Quelle est votre politique de retour ?\nR : Vous pouvez retourner les articles dans les 30 jours suivant l'achat.",
+              "default": "Collez ici le contenu de votre document…"
+            }
+          }
+        },
+        "actions": { "saveChanges": "Enregistrer les modifications", "addDocument": "Ajouter un document" }
+      },
+      "card": {
+        "type": { "pdf": "PDF", "docx": "DOCX", "text": "TEXTE", "faq": "FAQ" },
+        "status": { "indexed": "Indexé", "processing": "Traitement", "pending": "En attente", "failed": "Échec" },
+        "quality": {
+          "excellent": "Excellente qualité",
+          "good": "Bonne qualité",
+          "fair": "Qualité moyenne",
+          "poor": "Faible qualité"
+        },
+        "chunks_one": "{{count}} chunk",
+        "chunks_other": "{{count}} chunks",
+        "actions": { "retry": "Réessayer", "retryProcessing": "Relancer le traitement" }
+      }
+    },
+    "appearances": {
+      "color": { "label": "Couleur principale" },
+      "avatar": {
+        "label": "URL de l'avatar du bot",
+        "placeholder": "https://example.com/avatar.png",
+        "helper": "URL d'image facultative pour l'avatar du chatbot. Si vide, le widget utilise le logo de votre entreprise lorsque disponible."
+      },
+      "launcher": {
+        "position": {
+          "label": "Position du lanceur",
+          "options": { "bottomRight": "En bas à droite", "bottomLeft": "En bas à gauche" }
+        },
+        "label": {
+          "label": "Libellé du lanceur",
+          "placeholder": "Discutez avec nous",
+          "helper": "Texte facultatif à côté de l'icône de chat, comme « Discutez avec nous »."
+        }
+      },
+      "welcome": {
+        "label": "Message de bienvenue",
+        "empty": "Aucun message de bienvenue défini.",
+        "helper": "Le message de bienvenue est configuré dans les paramètres du bot IA.",
+        "editLink": "Modifier dans Bot IA"
+      },
+      "openFullWidgetTest": "Ouvrir le test complet du widget",
+      "preview": { "yourBrand": "Votre marque", "typeMessage": "Tapez un message…" }
+    },
+    "testChat": {
+      "defaultBotName": "Assistant IA",
+      "kb": { "useKnowledgeBase": "Utiliser la base de connaissances", "noIndexedDocs": "Aucun document indexé" },
+      "empty": { "title": "Envoyez un message pour tester votre bot", "subtitle": "Utilise les paramètres IA enregistrés" },
+      "placeholder": "Tapez un message…",
+      "errors": {
+        "emptyResponse": "(Aucune réponse — vérifiez votre ton de marque et la configuration des garde-fous)",
+        "sendFailed": "Une erreur s'est produite. Vérifiez votre clé API et la configuration du modèle."
+      }
+    },
+    "social": {
+      "loading": "Chargement des canaux…",
+      "header": {
+        "title": "Canaux",
+        "description": "Connectez des plateformes de messagerie pour recevoir et répondre aux messages des clients."
+      },
+      "metaPages": {
+        "title": "Sélectionnez les pages à connecter",
+        "description": "Choisissez quelles pages Facebook connecter pour la messagerie.",
+        "connecting": "Connexion…",
+        "connectSelected": "Connecter la sélection"
+      },
+      "connected": {
+        "title": "Canaux connectés",
+        "count_one": "{{count}} canal connecté",
+        "count_other": "{{count}} canaux connectés"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "modal": {
+          "title": "Connecter un bot Telegram",
+          "description": "Saisissez votre token de bot depuis @BotFather pour connecter un bot Telegram.",
+          "help": {
+            "summary": "Vous n'avez pas encore de token de bot ?",
+            "step1": { "prefix": "Ouvrez Telegram et écrivez à", "suffix": "." },
+            "step2": { "prefix": "Envoyez", "suffix": "et suivez les instructions pour nommer votre bot." },
+            "step3": { "prefix": "Copiez le token HTTP API que BotFather renvoie (ressemble à", "suffix": ")." },
+            "step4": "Collez-le ci-dessous."
+          },
+          "tokenLabel": "Token du bot",
+          "connecting": "Connexion…",
+          "connect": "Connecter"
+        }
+      },
+      "facebook": { "title": "Facebook" },
+      "empty": {
+        "title": "Aucun canal connecté pour le moment.",
+        "description": "Connectez un bot Telegram ou une page Facebook pour commencer."
+      },
+      "activity": {
+        "received": "Reçu {{time}}",
+        "sent": "Envoyé {{time}}",
+        "checked": "· Vérifié {{time}}"
+      },
+      "status": {
+        "active": "actif",
+        "error": "erreur",
+        "disconnected": "déconnecté",
+        "pending_setup": "configuration en attente"
+      },
+      "actions": { "checkHealth": "Vérifier l'état de la connexion" },
+      "disconnect": {
+        "title": "Déconnecter le canal",
+        "description": "Cela arrêtera la réception de messages depuis ce canal. Vous pourrez le reconnecter plus tard.",
+        "confirm": "Déconnecter"
+      }
+    },
+    "canned": {
+      "page": {
+        "title": "Réponses prédéfinies",
+        "subtitle": "Modèles de messages pré-écrits pour des réponses rapides"
+      },
+      "list": {
+        "loadError": "Échec du chargement des réponses prédéfinies",
+        "empty": "Aucune réponse prédéfinie pour le moment",
+        "noMatches": "Aucune réponse ne correspond à vos filtres",
+        "createFirst": "Créer votre première réponse"
+      },
+      "actions": {
+        "newResponse": "Nouvelle réponse",
+        "editAria": "Modifier {{title}}",
+        "deleteAria": "Supprimer {{title}}"
+      },
+      "filters": {
+        "searchPlaceholder": "Rechercher des réponses…",
+        "categoryPlaceholder": "Catégorie",
+        "scopePlaceholder": "Portée",
+        "allCategories": "Toutes les catégories",
+        "allScopes": "Toutes"
+      },
+      "columns": {
+        "title": "Titre", "content": "Contenu", "shortcut": "Raccourci",
+        "category": "Catégorie", "scope": "Portée", "used": "Utilisé"
+      },
+      "scope": { "shared": "Partagé", "personal": "Personnel" },
+      "modal": {
+        "add": { "title": "Nouvelle réponse prédéfinie" },
+        "edit": { "title": "Modifier la réponse prédéfinie" },
+        "save": "Enregistrer",
+        "create": "Créer",
+        "saving": "Enregistrement…"
+      },
+      "fields": {
+        "title": { "label": "Titre", "placeholder": "ex. Salutation" },
+        "shortcut": { "label": "Raccourci", "placeholder": "ex. salut" },
+        "content": {
+          "label": "Contenu",
+          "placeholder": "Bonjour {{customer_name}}, comment puis-je vous aider ?",
+          "helperPrefix": "Variables disponibles :",
+          "helperSuffix": "— ou ajoutez les vôtres comme"
+        },
+        "category": { "label": "Catégorie", "placeholder": "ex. Général" },
+        "scope": { "label": "Portée" },
+        "tags": { "label": "Étiquettes", "placeholder": "facturation, remboursement, commun (séparés par des virgules)" }
+      },
+      "delete": {
+        "title": "Supprimer la réponse prédéfinie ?",
+        "description": "Ceci supprimera la réponse. Cette action est irréversible.",
+        "descriptionWithTarget": "\"{{title}}\" (/{{shortcut}}) sera supprimé. Cette action est irréversible."
+      },
+      "toast": {
+        "created": "Réponse prédéfinie créée",
+        "updated": "Réponse prédéfinie mise à jour",
+        "deleted": "Réponse prédéfinie supprimée",
+        "createFailed": "Échec de la création",
+        "updateFailed": "Échec de la mise à jour",
+        "deleteFailed": "Échec de la suppression"
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -23,14 +24,15 @@ interface AddDocumentModalProps {
   } | null;
 }
 
-const docTypes: { value: DocType; label: string; description: string; icon: React.ElementType; accent: string }[] = [
-  { value: 'text', label: 'Text', description: 'Paste articles, guides, or policies', icon: FileText, accent: 'border-violet-500/40 bg-violet-500/5 text-violet-400' },
-  { value: 'faq', label: 'FAQ', description: 'Question & answer pairs', icon: HelpCircle, accent: 'border-amber-500/40 bg-amber-500/5 text-amber-400' },
-  { value: 'pdf', label: 'PDF', description: 'Upload a PDF document', icon: FileType, accent: 'border-rose-500/40 bg-rose-500/5 text-rose-400' },
-  { value: 'docx', label: 'DOCX', description: 'Upload a Word document', icon: FileType, accent: 'border-blue-500/40 bg-blue-500/5 text-blue-400' },
+const docTypes: { value: DocType; labelKey: string; descriptionKey: string; icon: React.ElementType; accent: string }[] = [
+  { value: 'text', labelKey: 'ai.knowledge.docTypes.text.label', descriptionKey: 'ai.knowledge.docTypes.text.description', icon: FileText, accent: 'border-violet-500/40 bg-violet-500/5 text-violet-400' },
+  { value: 'faq', labelKey: 'ai.knowledge.docTypes.faq.label', descriptionKey: 'ai.knowledge.docTypes.faq.description', icon: HelpCircle, accent: 'border-amber-500/40 bg-amber-500/5 text-amber-400' },
+  { value: 'pdf', labelKey: 'ai.knowledge.docTypes.pdf.label', descriptionKey: 'ai.knowledge.docTypes.pdf.description', icon: FileType, accent: 'border-rose-500/40 bg-rose-500/5 text-rose-400' },
+  { value: 'docx', labelKey: 'ai.knowledge.docTypes.docx.label', descriptionKey: 'ai.knowledge.docTypes.docx.description', icon: FileType, accent: 'border-blue-500/40 bg-blue-500/5 text-blue-400' },
 ];
 
 const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, editingDocument }) => {
+  const { t } = useTranslation();
   const isEditing = !!editingDocument;
   const [docType, setDocType] = useState<DocType>('text');
   const [title, setTitle] = useState('');
@@ -68,11 +70,11 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
     e.preventDefault();
 
     if (isFileType && file && file.size > MAX_FILE_SIZE) {
-      toast.error('File exceeds 25MB limit');
+      toast.error(t('ai.knowledge.modal.errors.fileTooLarge'));
       return;
     }
     if (!isFileType && content.length > MAX_CONTENT_LENGTH) {
-      toast.error('Content exceeds 500,000 character limit');
+      toast.error(t('ai.knowledge.modal.errors.contentTooLong'));
       return;
     }
 
@@ -121,12 +123,12 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? 'Edit Document' : 'Add Document'} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEditing ? t('ai.knowledge.modal.edit.title') : t('ai.knowledge.modal.add.title')} size="md">
       <form onSubmit={handleSubmit} className="space-y-5">
         {/* Document Type Selector */}
         {!isEditing && (
           <div>
-            <Label className="mb-2.5 text-text-secondary text-xs">Document Type</Label>
+            <Label className="mb-2.5 text-text-secondary text-xs">{t('ai.knowledge.modal.fields.docType.label')}</Label>
             <div className="grid grid-cols-4 gap-2">
               {docTypes.map((type) => {
                 const Icon = type.icon;
@@ -144,25 +146,25 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
                     )}
                   >
                     <Icon className="w-5 h-5" />
-                    <span className="text-xs font-medium">{type.label}</span>
+                    <span className="text-xs font-medium">{t(type.labelKey)}</span>
                   </button>
                 );
               })}
             </div>
-            <p className="text-[10px] text-text-muted mt-1.5">{selectedType.description}</p>
+            <p className="text-[10px] text-text-muted mt-1.5">{t(selectedType.descriptionKey)}</p>
           </div>
         )}
 
         {/* Title */}
         <div>
-          <Label className="mb-1.5 text-text-secondary text-xs">Title</Label>
+          <Label className="mb-1.5 text-text-secondary text-xs">{t('ai.knowledge.modal.fields.title.label')}</Label>
           <Input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder={
-              docType === 'faq' ? 'e.g. Shipping & Returns FAQ'
-              : docType === 'pdf' ? 'e.g. Product Manual 2026'
-              : 'e.g. Company Refund Policy'
+              docType === 'faq' ? t('ai.knowledge.modal.fields.title.placeholder.faq')
+              : docType === 'pdf' ? t('ai.knowledge.modal.fields.title.placeholder.pdf')
+              : t('ai.knowledge.modal.fields.title.placeholder.default')
             }
             required
           />
@@ -171,11 +173,11 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
         {/* Content Area */}
         {isFileType && isEditing ? (
           <div className="p-4 rounded-xl bg-surface-2 border border-edge">
-            <p className="text-xs text-text-muted">File re-upload is not supported. Delete and re-create to change the file.</p>
+            <p className="text-xs text-text-muted">{t('ai.knowledge.modal.fields.file.reuploadUnsupported')}</p>
           </div>
         ) : isFileType ? (
           <div>
-            <Label className="mb-1.5 text-text-secondary text-xs">File</Label>
+            <Label className="mb-1.5 text-text-secondary text-xs">{t('ai.knowledge.modal.fields.file.label')}</Label>
             <div
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -213,9 +215,9 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
                     <Upload className="w-6 h-6 text-text-muted" />
                   </div>
                   <p className="text-sm text-text-secondary">
-                    Drop your {docType.toUpperCase()} here or <span className="text-primary-400 font-medium">browse</span>
+                    {t('ai.knowledge.modal.fields.file.dropPrompt', { type: docType.toUpperCase() })} <span className="text-primary-400 font-medium">{t('ai.knowledge.modal.fields.file.browse')}</span>
                   </p>
-                  <p className="text-[10px] text-text-muted mt-1">Up to 25 MB</p>
+                  <p className="text-[10px] text-text-muted mt-1">{t('ai.knowledge.modal.fields.file.maxSize')}</p>
                 </div>
               )}
               <input
@@ -229,14 +231,14 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
           </div>
         ) : (
           <div>
-            <Label className="mb-1.5 text-text-secondary text-xs">Content</Label>
+            <Label className="mb-1.5 text-text-secondary text-xs">{t('ai.knowledge.modal.fields.content.label')}</Label>
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               placeholder={
                 docType === 'faq'
-                  ? 'Q: How long does shipping take?\nA: Standard shipping takes 5-7 business days.\n\nQ: What is your return policy?\nA: You can return items within 30 days of purchase.'
-                  : 'Paste your document content here...'
+                  ? t('ai.knowledge.modal.fields.content.placeholder.faq')
+                  : t('ai.knowledge.modal.fields.content.placeholder.default')
               }
               rows={10}
               required
@@ -256,14 +258,14 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
         {/* Actions */}
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" onClick={onClose} disabled={isSubmitting}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button
             type="submit"
             disabled={isSubmitting || (!title.trim()) || (!isFileType && !content.trim()) || (isFileType && !file && !isEditing)}
           >
             {isSubmitting && <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />}
-            {isEditing ? 'Save Changes' : 'Add Document'}
+            {isEditing ? t('ai.knowledge.modal.actions.saveChanges') : t('ai.knowledge.modal.actions.addDocument')}
           </Button>
         </div>
       </form>

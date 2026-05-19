@@ -5,6 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
   MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle, RefreshCw,
@@ -58,6 +59,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export function SocialChannelsContent() {
+  const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data: connections, isLoading } = useChannelConnections();
   const disconnectMutation = useDisconnectChannel();
@@ -104,15 +106,17 @@ export function SocialChannelsContent() {
   };
 
   if (isLoading) {
-    return <div className="p-6 text-zinc-400">Loading channels...</div>;
+    return <div className="p-6 text-zinc-400">{t('ai.social.loading')}</div>;
   }
+
+  const connectionCount = connections?.length || 0;
 
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-lg font-semibold text-white">Channels</h2>
+        <h2 className="text-lg font-semibold text-white">{t('ai.social.header.title')}</h2>
         <p className="text-sm text-zinc-400">
-          Connect messaging platforms to receive and respond to customer messages.
+          {t('ai.social.header.description')}
         </p>
       </div>
 
@@ -120,8 +124,8 @@ export function SocialChannelsContent() {
       {metaPages && metaPages.length > 0 && (
         <Card variant="glass">
           <CardHeader>
-            <h3 className="text-sm font-medium text-white">Select Pages to Connect</h3>
-            <p className="text-xs text-zinc-400">Choose which Facebook Pages to connect for messaging.</p>
+            <h3 className="text-sm font-medium text-white">{t('ai.social.metaPages.title')}</h3>
+            <p className="text-xs text-zinc-400">{t('ai.social.metaPages.description')}</p>
           </CardHeader>
           <CardContent className="space-y-3">
             {metaPages.map((page: Any) => (
@@ -147,9 +151,9 @@ export function SocialChannelsContent() {
             ))}
             <div className="flex gap-2 pt-2">
               <Button onClick={handleConnectMetaPages} disabled={selectedPageIds.length === 0 || connectMeta.isPending}>
-                {connectMeta.isPending ? 'Connecting...' : 'Connect Selected'}
+                {connectMeta.isPending ? t('ai.social.metaPages.connecting') : t('ai.social.metaPages.connectSelected')}
               </Button>
-              <Button variant="ghost" onClick={() => setSearchParams({})}>Cancel</Button>
+              <Button variant="ghost" onClick={() => setSearchParams({})}>{t('common.cancel')}</Button>
             </div>
           </CardContent>
         </Card>
@@ -159,17 +163,17 @@ export function SocialChannelsContent() {
       <Card variant="glass">
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium text-white">Connected Channels</h3>
+            <h3 className="text-sm font-medium text-white">{t('ai.social.connected.title')}</h3>
             <p className="text-xs text-zinc-400">
-              {connections?.length || 0} channel{connections?.length !== 1 ? 's' : ''} connected
+              {t('ai.social.connected.count', { count: connectionCount })}
             </p>
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowTelegramModal(true)}>
-              <Bot className="h-4 w-4 mr-1" /> Telegram
+              <Bot className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
             </Button>
             <Button size="sm" variant="outline" onClick={handleConnectFacebook} disabled={metaOAuthUrl.isPending}>
-              <MessageCircle className="h-4 w-4 mr-1" /> Facebook
+              <MessageCircle className="h-4 w-4 mr-1" /> {t('ai.social.facebook.title')}
             </Button>
           </div>
         </CardHeader>
@@ -177,16 +181,16 @@ export function SocialChannelsContent() {
           {!connections || connections.length === 0 ? (
             <div className="text-center py-8 text-zinc-500">
               <MessageSquare className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p className="text-sm">No channels connected yet.</p>
-              <p className="text-xs mt-1">Connect a Telegram bot or Facebook Page to get started.</p>
+              <p className="text-sm">{t('ai.social.empty.title')}</p>
+              <p className="text-xs mt-1">{t('ai.social.empty.description')}</p>
             </div>
           ) : (
             <div className="space-y-2">
               {connections.map((conn) => {
                 const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
                 const activityParts: string[] = [];
-                if (conn.lastInboundAt) activityParts.push(`Received ${timeAgo(conn.lastInboundAt)}`);
-                if (conn.lastOutboundAt) activityParts.push(`Sent ${timeAgo(conn.lastOutboundAt)}`);
+                if (conn.lastInboundAt) activityParts.push(t('ai.social.activity.received', { time: timeAgo(conn.lastInboundAt) }));
+                if (conn.lastOutboundAt) activityParts.push(t('ai.social.activity.sent', { time: timeAgo(conn.lastOutboundAt) }));
                 const checkingThis =
                   healthCheckMutation.isPending && healthCheckMutation.variables === conn.id;
                 return (
@@ -204,7 +208,7 @@ export function SocialChannelsContent() {
                           {CHANNEL_LABELS[conn.channel] || conn.channel}
                           {conn.lastHealthCheckAt && (
                             <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
-                              · Checked {timeAgo(conn.lastHealthCheckAt)}
+                              {t('ai.social.activity.checked', { time: timeAgo(conn.lastHealthCheckAt) })}
                             </span>
                           )}
                         </p>
@@ -221,12 +225,12 @@ export function SocialChannelsContent() {
                         </span>
                       )}
                       <Badge variant="outline" className={STATUS_COLORS[conn.status] || ''}>
-                        {conn.status}
+                        {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
                       </Badge>
                       <Button
                         size="sm"
                         variant="ghost"
-                        title="Check connection health"
+                        title={t('ai.social.actions.checkHealth')}
                         disabled={checkingThis}
                         onClick={() => healthCheckMutation.mutate(conn.id)}
                       >
@@ -253,18 +257,18 @@ export function SocialChannelsContent() {
       <AlertDialog open={showTelegramModal} onOpenChange={setShowTelegramModal}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Connect Telegram Bot</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.social.telegram.modal.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Enter your bot token from @BotFather to connect a Telegram bot.
+              {t('ai.social.telegram.modal.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
             <summary className="cursor-pointer select-none text-zinc-300">
-              Don&apos;t have a bot token yet?
+              {t('ai.social.telegram.modal.help.summary')}
             </summary>
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               <li>
-                Open Telegram and message{' '}
+                {t('ai.social.telegram.modal.help.step1.prefix')}{' '}
                 <a
                   href="https://t.me/BotFather"
                   target="_blank"
@@ -273,20 +277,23 @@ export function SocialChannelsContent() {
                 >
                   @BotFather
                 </a>
-                .
+                {t('ai.social.telegram.modal.help.step1.suffix')}
               </li>
               <li>
-                Send <code className="rounded bg-white/10 px-1">/newbot</code> and follow the prompts to name your bot.
+                {t('ai.social.telegram.modal.help.step2.prefix')}{' '}
+                <code className="rounded bg-white/10 px-1">/newbot</code>{' '}
+                {t('ai.social.telegram.modal.help.step2.suffix')}
               </li>
               <li>
-                Copy the HTTP API token BotFather sends back (looks like{' '}
-                <code className="rounded bg-white/10 px-1">123456:ABC-DEF...</code>).
+                {t('ai.social.telegram.modal.help.step3.prefix')}{' '}
+                <code className="rounded bg-white/10 px-1">123456:ABC-DEF...</code>
+                {t('ai.social.telegram.modal.help.step3.suffix')}
               </li>
-              <li>Paste it below.</li>
+              <li>{t('ai.social.telegram.modal.help.step4')}</li>
             </ol>
           </details>
           <div className="py-4">
-            <Label htmlFor="botToken">Bot Token</Label>
+            <Label htmlFor="botToken">{t('ai.social.telegram.modal.tokenLabel')}</Label>
             <Input
               id="botToken"
               type="password"
@@ -296,9 +303,9 @@ export function SocialChannelsContent() {
             />
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConnectTelegram} disabled={!botToken.trim() || connectTelegram.isPending}>
-              {connectTelegram.isPending ? 'Connecting...' : 'Connect'}
+              {connectTelegram.isPending ? t('ai.social.telegram.modal.connecting') : t('ai.social.telegram.modal.connect')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -308,13 +315,13 @@ export function SocialChannelsContent() {
       <AlertDialog open={!!disconnectTarget} onOpenChange={() => setDisconnectTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Disconnect Channel</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.social.disconnect.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              This will stop receiving messages from this channel. You can reconnect it later.
+              {t('ai.social.disconnect.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700"
               onClick={() => {
@@ -324,7 +331,7 @@ export function SocialChannelsContent() {
                 }
               }}
             >
-              Disconnect
+              {t('ai.social.disconnect.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

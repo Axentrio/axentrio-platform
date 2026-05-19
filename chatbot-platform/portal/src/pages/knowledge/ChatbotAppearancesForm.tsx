@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ExternalLink, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,7 @@ type FormState = {
 };
 
 const ChatbotAppearancesForm: React.FC = () => {
+  const { t } = useTranslation();
   const { data: appearance, isLoading } = useGetWidgetAppearance();
   const { data: aiSettings } = useGetAiSettings();
   const { data: tenant } = useTenantSettings() as { data: { apiKey?: string } | undefined };
@@ -79,7 +81,7 @@ const ChatbotAppearancesForm: React.FC = () => {
     <div className="grid gap-6 lg:grid-cols-[1fr_minmax(280px,420px)]">
       <div className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="primaryColor">Primary color</Label>
+          <Label htmlFor="primaryColor">{t('ai.appearances.color.label')}</Label>
           <Input
             id="primaryColor"
             type="color"
@@ -90,21 +92,21 @@ const ChatbotAppearancesForm: React.FC = () => {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="avatarUrl">Bot avatar URL</Label>
+          <Label htmlFor="avatarUrl">{t('ai.appearances.avatar.label')}</Label>
           <Input
             id="avatarUrl"
             type="url"
-            placeholder="https://example.com/avatar.png"
+            placeholder={t('ai.appearances.avatar.placeholder')}
             value={form.avatarUrl}
             onChange={(e) => setForm((f) => ({ ...f, avatarUrl: e.target.value }))}
           />
           <p className="text-xs text-muted-foreground">
-            Optional image URL for the chatbot avatar. If empty, the widget uses your company logo when available.
+            {t('ai.appearances.avatar.helper')}
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label>Launcher position</Label>
+          <Label>{t('ai.appearances.launcher.position.label')}</Label>
           <div className="flex gap-2">
             {(['bottom-right', 'bottom-left'] as const).map((pos) => (
               <Button
@@ -113,35 +115,37 @@ const ChatbotAppearancesForm: React.FC = () => {
                 variant={form.launcherPosition === pos ? 'default' : 'outline'}
                 onClick={() => setForm((f) => ({ ...f, launcherPosition: pos }))}
               >
-                {pos === 'bottom-right' ? 'Bottom right' : 'Bottom left'}
+                {pos === 'bottom-right'
+                  ? t('ai.appearances.launcher.position.options.bottomRight')
+                  : t('ai.appearances.launcher.position.options.bottomLeft')}
               </Button>
             ))}
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="launcherLabel">Launcher label</Label>
+          <Label htmlFor="launcherLabel">{t('ai.appearances.launcher.label.label')}</Label>
           <Input
             id="launcherLabel"
             maxLength={30}
-            placeholder="Chat with us"
+            placeholder={t('ai.appearances.launcher.label.placeholder')}
             value={form.launcherLabel}
             onChange={(e) => setForm((f) => ({ ...f, launcherLabel: e.target.value }))}
           />
           <p className="text-xs text-muted-foreground">
-            Optional text shown next to the chat icon, such as "Chat with us".
+            {t('ai.appearances.launcher.label.helper')}
           </p>
         </div>
 
         <div className="space-y-1 rounded-lg border border-border bg-muted/30 p-3">
-          <Label>Welcome message</Label>
+          <Label>{t('ai.appearances.welcome.label')}</Label>
           <p className="text-sm text-foreground">
-            {greeting || <span className="text-muted-foreground italic">No greeting set.</span>}
+            {greeting || <span className="text-muted-foreground italic">{t('ai.appearances.welcome.empty')}</span>}
           </p>
           <p className="text-xs text-muted-foreground">
-            Welcome message is configured in AI Bot settings.{' '}
+            {t('ai.appearances.welcome.helper')}{' '}
             <a href="/ai?tab=bot" className="underline">
-              Edit in AI Bot
+              {t('ai.appearances.welcome.editLink')}
             </a>
           </p>
         </div>
@@ -149,7 +153,7 @@ const ChatbotAppearancesForm: React.FC = () => {
         <div className="flex items-center gap-3">
           <Button onClick={handleSave} disabled={!isDirty || update.isPending}>
             <Save className="mr-2 h-4 w-4" />
-            Save
+            {t('common.save')}
           </Button>
           <a
             href={widgetTestHref}
@@ -157,7 +161,7 @@ const ChatbotAppearancesForm: React.FC = () => {
             rel="noreferrer noopener"
             className="inline-flex items-center text-sm underline text-muted-foreground"
           >
-            Open full widget test
+            {t('ai.appearances.openFullWidgetTest')}
             <ExternalLink className="ml-1 h-3 w-3" />
           </a>
         </div>

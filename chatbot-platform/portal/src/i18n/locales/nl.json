@@ -43,20 +43,12 @@
       "subtitle": "Beheer je account en voorkeuren"
     },
     "groups": {
-      "Account": "Account",
-      "Bot": "Bot",
-      "Connections": "Verbindingen",
-      "Billing": "Facturatie"
+      "Account": "Account", "Bot": "Bot", "Connections": "Verbindingen", "Billing": "Facturatie"
     },
     "tabs": {
-      "profile": "Profiel",
-      "notifications": "Meldingen",
-      "appearance": "Weergave",
-      "widget": "Widget & merk",
-      "capabilities": "Functionaliteiten",
-      "integrations": "Integraties",
-      "channels": "Kanalen",
-      "billing": "Facturatie"
+      "profile": "Profiel", "notifications": "Meldingen", "appearance": "Weergave",
+      "widget": "Widget & merk", "capabilities": "Functionaliteiten",
+      "integrations": "Integraties", "channels": "Kanalen", "billing": "Facturatie"
     },
     "profile": {
       "title": "Profielgegevens",
@@ -75,11 +67,7 @@
           "label": "Taal",
           "helper": "Gebruikt voor e-mails en accountcommunicatie. Vertaling van de interface is in uitvoering.",
           "saveFailed": "Taalvoorkeur opslaan is mislukt.",
-          "options": {
-            "en": "English",
-            "nl": "Nederlands",
-            "fr": "Français"
-          }
+          "options": { "en": "English", "nl": "Nederlands", "fr": "Français" }
         }
       },
       "password": {
@@ -89,28 +77,15 @@
     },
     "notifications": {
       "title": "Meldingsvoorkeuren",
-      "sound": {
-        "title": "Geluidsmeldingen",
-        "description": "Geluiden afspelen voor nieuwe berichten en overdrachten"
-      },
+      "sound": { "title": "Geluidsmeldingen", "description": "Geluiden afspelen voor nieuwe berichten en overdrachten" },
       "volume": "Volume",
-      "desktop": {
-        "title": "Desktopmeldingen",
-        "description": "Browsermeldingen weergeven"
-      },
-      "handsoffOnly": {
-        "title": "Alleen overdrachtsmeldingen",
-        "description": "Alleen melden bij overdrachtsverzoeken"
-      }
+      "desktop": { "title": "Desktopmeldingen", "description": "Browsermeldingen weergeven" },
+      "handsoffOnly": { "title": "Alleen overdrachtsmeldingen", "description": "Alleen melden bij overdrachtsverzoeken" }
     },
     "appearance": {
       "title": "Thema",
       "description": "Kies je voorkeursthema",
-      "options": {
-        "light": "Licht",
-        "dark": "Donker",
-        "system": "Systeem"
-      }
+      "options": { "light": "Licht", "dark": "Donker", "system": "Systeem" }
     },
     "widget": {
       "title": "Widget & merk",
@@ -140,11 +115,8 @@
         "placeholder": "Je bedrijfsnaam"
       },
       "status": {
-        "title": "Status",
-        "activeSessions": "Actieve sessies",
-        "maxSessions": "Max. sessies",
-        "active": "Actief",
-        "inactive": "Inactief"
+        "title": "Status", "activeSessions": "Actieve sessies", "maxSessions": "Max. sessies",
+        "active": "Actief", "inactive": "Inactief"
       },
       "embed": {
         "title": "Widget insluiten",
@@ -176,11 +148,8 @@
       },
       "health": {
         "title": "Verbindingsstatus",
-        "healthy": "Gezond",
-        "unhealthy": "Ongezond",
-        "unknown": "Onbekend",
-        "lastDelivery": "Laatste levering",
-        "lastSuccess": "Laatste succes"
+        "healthy": "Gezond", "unhealthy": "Ongezond", "unknown": "Onbekend",
+        "lastDelivery": "Laatste levering", "lastSuccess": "Laatste succes"
       },
       "inbound": {
         "title": "Inkomend webhook-eindpunt",
@@ -206,24 +175,11 @@
       "deliveries": {
         "title": "Leveringslog",
         "columns": {
-          "time": "Tijd",
-          "direction": "Richting",
-          "event": "Gebeurtenis",
-          "status": "Status",
-          "http": "HTTP",
-          "duration": "Duur",
-          "error": "Fout"
+          "time": "Tijd", "direction": "Richting", "event": "Gebeurtenis",
+          "status": "Status", "http": "HTTP", "duration": "Duur", "error": "Fout"
         },
-        "direction": {
-          "inbound": "inkomend",
-          "outbound": "uitgaand"
-        },
-        "status": {
-          "success": "succes",
-          "failed": "mislukt",
-          "retrying": "opnieuw proberen",
-          "dropped": "verwijderd"
-        },
+        "direction": { "inbound": "inkomend", "outbound": "uitgaand" },
+        "status": { "success": "succes", "failed": "mislukt", "retrying": "opnieuw proberen", "dropped": "verwijderd" },
         "page": "Pagina {{page}}",
         "prev": "Vorige",
         "next": "Volgende",
@@ -257,12 +213,7 @@
           "toggle": "Geavanceerde instellingen",
           "language": "Taal",
           "collectLabel": "Verzamelen van klant",
-          "fields": {
-            "name": "Naam",
-            "email": "E-mail",
-            "phone": "Telefoon",
-            "notes": "Notities"
-          },
+          "fields": { "name": "Naam", "email": "E-mail", "phone": "Telefoon", "notes": "Notities" },
           "save": "Geavanceerde instellingen opslaan"
         },
         "disconnectConfirm": {
@@ -279,9 +230,7 @@
         "descriptionAdmin": "Bepaal welke functionaliteiten actief zijn voor je chatbot.",
         "addButton": "Functionaliteit toevoegen"
       },
-      "errors": {
-        "loadFailed": "Functionaliteiten laden is mislukt. Vernieuw de pagina."
-      },
+      "errors": { "loadFailed": "Functionaliteiten laden is mislukt. Vernieuw de pagina." },
       "tenantView": {
         "emptyState": "Nog geen functionaliteiten geconfigureerd. Neem contact op met je accountmanager om bot-functionaliteiten in te stellen.",
         "noDescription": "Geen beschrijving beschikbaar"
@@ -334,24 +283,11 @@
           "placeholder": "bijv. Laat de bot beschikbaarheid controleren en afspraken boeken namens bezoekers.",
           "helper": "Legt in gewone taal uit wat deze functionaliteit doet."
         },
-        "trigger": {
-          "label": "Triggerbeschrijving",
-          "placeholder": "Beschrijf wanneer deze skill geactiveerd moet worden…"
-        },
-        "tools": {
-          "label": "Tools"
-        },
-        "instructions": {
-          "label": "Instructies",
-          "placeholder": "Stap-voor-stap-instructies voor de bot…"
-        },
-        "maxSteps": {
-          "label": "Max. stappen"
-        },
-        "enabled": {
-          "title": "Ingeschakeld",
-          "description": "Activeer deze functionaliteit voor de klant"
-        },
+        "trigger": { "label": "Triggerbeschrijving", "placeholder": "Beschrijf wanneer deze skill geactiveerd moet worden…" },
+        "tools": { "label": "Tools" },
+        "instructions": { "label": "Instructies", "placeholder": "Stap-voor-stap-instructies voor de bot…" },
+        "maxSteps": { "label": "Max. stappen" },
+        "enabled": { "title": "Ingeschakeld", "description": "Activeer deze functionaliteit voor de klant" },
         "saving": "Opslaan…",
         "createCapability": "Functionaliteit aanmaken"
       },
@@ -369,58 +305,25 @@
     "billing": {
       "plans": {
         "free": {
-          "name": "Gratis",
-          "price": "$0/maand",
-          "blurb": "Probeer de basis gratis uit.",
-          "features": {
-            "agents": "1 agent",
-            "sessions": "10 gelijktijdige sessies",
-            "channels": "1 kanaal",
-            "byoLlm": "Eigen LLM-sleutel"
-          }
+          "name": "Gratis", "price": "$0/maand", "blurb": "Probeer de basis gratis uit.",
+          "features": { "agents": "1 agent", "sessions": "10 gelijktijdige sessies", "channels": "1 kanaal", "byoLlm": "Eigen LLM-sleutel" }
         },
         "pro": {
-          "name": "Pro",
-          "price": "$49/maand",
-          "blurb": "Voor groeiende teams.",
-          "features": {
-            "agents": "3 agents",
-            "sessions": "100 gelijktijdige sessies",
-            "llmCalls": "1.000 platform-LLM-calls per dag",
-            "channels": "3 kanalen",
-            "uploadsHandoff": "Bestandsuploads & overdracht"
-          }
+          "name": "Pro", "price": "$49/maand", "blurb": "Voor groeiende teams.",
+          "features": { "agents": "3 agents", "sessions": "100 gelijktijdige sessies", "llmCalls": "1.000 platform-LLM-calls per dag", "channels": "3 kanalen", "uploadsHandoff": "Bestandsuploads & overdracht" }
         },
         "premium": {
-          "name": "Premium",
-          "price": "$199/maand",
-          "blurb": "Eigen branding + ruimte om te groeien.",
-          "features": {
-            "agents": "10 agents",
-            "sessions": "500 gelijktijdige sessies",
-            "llmCalls": "10.000 platform-LLM-calls per dag",
-            "channels": "Onbeperkt aantal kanalen",
-            "branding": "Eigen branding & domein",
-            "support": "Prioriteitsondersteuning"
-          }
+          "name": "Premium", "price": "$199/maand", "blurb": "Eigen branding + ruimte om te groeien.",
+          "features": { "agents": "10 agents", "sessions": "500 gelijktijdige sessies", "llmCalls": "10.000 platform-LLM-calls per dag", "channels": "Onbeperkt aantal kanalen", "branding": "Eigen branding & domein", "support": "Prioriteitsondersteuning" }
         },
         "enterprise": {
-          "name": "Enterprise",
-          "price": "Op maat",
-          "blurb": "Sales-beheerd, SLA-ondersteuning.",
-          "features": {
-            "unlimited": "Alles onbeperkt",
-            "integrations": "Aangepaste integraties",
-            "sla": "SLA + toegewijde ondersteuning"
-          }
+          "name": "Enterprise", "price": "Op maat", "blurb": "Sales-beheerd, SLA-ondersteuning.",
+          "features": { "unlimited": "Alles onbeperkt", "integrations": "Aangepaste integraties", "sla": "SLA + toegewijde ondersteuning" }
         }
       },
       "status": {
-        "trialing": "Proefperiode",
-        "active": "Actief",
-        "pastDue": "Achterstallig",
-        "cancelled": "Geannuleerd",
-        "none": "Geen abonnement"
+        "trialing": "Proefperiode", "active": "Actief", "pastDue": "Achterstallig",
+        "cancelled": "Geannuleerd", "none": "Geen abonnement"
       },
       "trial": {
         "endsInDays_one": "Proefperiode eindigt {{date}} — nog {{count}} dag",
@@ -447,9 +350,7 @@
         "description": "Je account heeft een sales-beheerd Enterprise-abonnement. Neem contact op met je accountcontact om abonnements- of facturatiewijzigingen door te voeren.",
         "contactSales": "Contact met sales"
       },
-      "subscribe": {
-        "cta": "Abonneren op {{plan}}"
-      },
+      "subscribe": { "cta": "Abonneren op {{plan}}" },
       "email": {
         "title": "Facturatie-e-mail",
         "label": "Facturen en bewijzen gaan hierheen",
@@ -475,6 +376,358 @@
       "loadError": "Facturatiestatus kon niet geladen worden: {{error}}",
       "unknownError": "onbekende fout",
       "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt."
+    }
+  },
+  "ai": {
+    "header": {
+      "title": "AI & Inhoud",
+      "subtitle": "AI-bot, kennisbank, weergave, kanalen en aangepaste antwoorden",
+      "testChat": "Testchat",
+      "testChatTooltip": "Test je AI-bot",
+      "testChatDisabledTooltip": "Schakel AI-bot eerst in",
+      "defaultBotName": "AI-assistent"
+    },
+    "tabs": {
+      "bot": "AI-bot",
+      "knowledge": "Kennisbank",
+      "canned": "Aangepaste antwoorden",
+      "appearances": "Chatbot-weergave",
+      "social": "Social media integraties"
+    },
+    "onboarding": {
+      "title": "Aan de slag",
+      "subtitle": "Voltooi de setup zodat je AI bezoekers kan helpen.",
+      "stepDone": "klaar",
+      "stepNotDone": "niet klaar",
+      "steps": {
+        "enableBot": {
+          "title": "Configureer je AI-bot",
+          "description": "Naam, identiteit en veiligheidsregels zodat bezoekers zinvolle antwoorden krijgen.",
+          "action": "Configureren"
+        },
+        "addKnowledge": {
+          "title": "Kennis toevoegen",
+          "description": "Upload documenten, plak tekst of voeg FAQ's toe zodat de bot antwoordt op basis van je eigen informatie.",
+          "action": "Kennis toevoegen"
+        },
+        "connectChannel": {
+          "title": "Verbind een kanaal",
+          "description": "Koppel Telegram of Facebook zodat de bot met je bezoekers kan praten.",
+          "action": "Verbinden"
+        }
+      }
+    },
+    "bot": {
+      "noPermission": "Je hebt geen rechten om AI-instellingen te bekijken.",
+      "loadError": "AI-instellingen laden is mislukt",
+      "enable": { "title": "AI-bot", "description": "AI-aangedreven antwoorden voor bezoekers inschakelen" },
+      "identity": {
+        "title": "Bot-identiteit",
+        "description": "Hoe je bot zichzelf voorstelt aan bezoekers",
+        "botName": {
+          "label": "Chatbotnaam",
+          "placeholder": "bijv. Ava",
+          "helper": "Weergavenaam van de chatbot, zichtbaar voor bezoekers op de website."
+        },
+        "supportEmail": {
+          "label": "Support-e-mail",
+          "placeholder": "support@jouwbedrijf.com",
+          "helper": "Gebruikt voor escalaties en zichtbaar via {supportEmail}"
+        },
+        "voiceTone": { "label": "Toon" },
+        "tones": {
+          "friendly": "Vriendelijk",
+          "professional": "Professioneel",
+          "casual": "Informeel",
+          "formal": "Formeel",
+          "custom": "Aangepast"
+        },
+        "customTone": { "placeholder": "bijv. spits, beknopt, geen emoji's" }
+      },
+      "instructions": {
+        "title": "Bot-instructies",
+        "description": "Vertel de chatbot hoe hij bezoekers moet beantwoorden. Je kunt beginnen met een sjabloon en het bewerken.",
+        "templateSelect": { "ariaLabel": "Kies een startprompt", "placeholder": "Kies een startprompt" },
+        "faqsTooltip": "Open de FAQ van de bot-instructies",
+        "faqs": "FAQ",
+        "resetTooltip": "Terugzetten naar het geselecteerde sjabloon",
+        "reset": "Resetten",
+        "promptPlaceholder": "Schrijf hier de instructies voor je bot, of kies hierboven een sjabloon…",
+        "placeholders": "Placeholders:"
+      },
+      "advanced": {
+        "title": "Geavanceerde instellingen",
+        "description": "Vangrails, overdrachtsgedrag en antwoordlimieten",
+        "greeting": { "label": "Begroetingsbericht", "placeholder": "Hallo! Hoe kan ik je vandaag helpen?" },
+        "fallback": {
+          "label": "Terugvalbericht",
+          "placeholder": "Ik verbind je met een menselijke agent…",
+          "helper": "Wordt getoond wanneer de bot niet zeker kan antwoorden"
+        },
+        "offHours": { "label": "Bericht buiten kantooruren", "placeholder": "We zijn momenteel buiten kantooruren…" },
+        "confidence": { "label": "Vertrouwensdrempel: {{value}}", "helper": "Onder deze waarde draagt de bot over naar een agent" },
+        "maxResponseLength": { "label": "Maximale antwoordlengte", "helper": "Tekens" },
+        "escalationKeywords": {
+          "label": "Escalatie-trefwoorden",
+          "placeholder": "Typ een trefwoord en druk op Enter…",
+          "helper": "Berichten met deze woorden triggeren een overdracht"
+        },
+        "topicsToAvoid": { "label": "Onderwerpen om te vermijden", "placeholder": "Typ een onderwerp en druk op Enter…" }
+      },
+      "actions": { "goToKnowledgeBase": "Naar kennisbank", "saveChanges": "Wijzigingen opslaan" },
+      "dialogs": {
+        "replaceInstructions": {
+          "title": "Bewerkte instructies vervangen?",
+          "description": "Bij het wisselen van sjabloon worden je huidige bot-instructies vervangen. Dit kan niet ongedaan gemaakt worden.",
+          "cancel": "Verder bewerken",
+          "confirm": "Vervangen"
+        },
+        "leaveWithoutSaving": {
+          "title": "Verlaten zonder opslaan?",
+          "description": "Je hebt niet-opgeslagen wijzigingen. Naar Kennisbank gaan zonder opslaan?",
+          "cancel": "Blijven",
+          "confirm": "Toch verlaten"
+        }
+      }
+    },
+    "knowledge": {
+      "list": {
+        "loadError": "Documenten laden is mislukt",
+        "banner": {
+          "aiDisabled": "AI-bot is nog niet ingeschakeld. Schakel hem in zodat deze documenten gebruikt kunnen worden in antwoorden aan bezoekers.",
+          "configureCta": "AI-bot configureren"
+        },
+        "filters": {
+          "all": "Alles", "indexed": "Geïndexeerd", "processing": "Verwerken", "failed": "Mislukt",
+          "pdf": "PDF", "docx": "DOCX", "text": "Tekst", "faq": "FAQ"
+        },
+        "searchPlaceholder": "Zoek documenten…",
+        "addDocument": "Document toevoegen",
+        "empty": {
+          "title": "Nog geen documenten",
+          "descriptionAdmin": "Upload PDF's, plak tekst of voeg FAQ's toe zodat je AI-bot kan antwoorden op basis van je bedrijfsinformatie.",
+          "descriptionViewer": "Er zijn nog geen documenten toegevoegd aan de kennisbank.",
+          "addFirst": "Voeg je eerste document toe"
+        },
+        "noMatches": {
+          "title": "Geen overeenkomende documenten",
+          "description": "Pas je zoekopdracht of filter aan.",
+          "clearFilters": "Filters wissen"
+        },
+        "deleteConfirm": {
+          "title": "Document verwijderen",
+          "description": "Hierdoor worden dit document en alle bijbehorende geïndexeerde fragmenten permanent verwijderd. Deze actie kan niet ongedaan gemaakt worden."
+        }
+      },
+      "docTypes": {
+        "text": { "label": "Tekst", "description": "Plak artikelen, gidsen of beleidsdocumenten" },
+        "faq": { "label": "FAQ", "description": "Vraag-en-antwoordparen" },
+        "pdf": { "label": "PDF", "description": "Upload een PDF-document" },
+        "docx": { "label": "DOCX", "description": "Upload een Word-document" }
+      },
+      "modal": {
+        "add": { "title": "Document toevoegen" },
+        "edit": { "title": "Document bewerken" },
+        "errors": {
+          "fileTooLarge": "Bestand overschrijdt limiet van 25 MB",
+          "contentTooLong": "Inhoud overschrijdt limiet van 500.000 tekens"
+        },
+        "fields": {
+          "docType": { "label": "Documenttype" },
+          "title": {
+            "label": "Titel",
+            "placeholder": {
+              "faq": "bijv. FAQ Verzending & Retourneren",
+              "pdf": "bijv. Producthandleiding 2026",
+              "default": "bijv. Bedrijfsbeleid Terugbetalingen"
+            }
+          },
+          "file": {
+            "label": "Bestand",
+            "reuploadUnsupported": "Bestand opnieuw uploaden wordt niet ondersteund. Verwijder en maak opnieuw aan om het bestand te wijzigen.",
+            "dropPrompt": "Sleep hier je {{type}} naartoe of",
+            "browse": "blader",
+            "maxSize": "Tot 25 MB"
+          },
+          "content": {
+            "label": "Inhoud",
+            "placeholder": {
+              "faq": "V: Hoe lang duurt verzending?\nA: Standaardverzending duurt 5-7 werkdagen.\n\nV: Wat is jullie retourbeleid?\nA: Je kunt artikelen binnen 30 dagen na aankoop retourneren.",
+              "default": "Plak hier de inhoud van je document…"
+            }
+          }
+        },
+        "actions": { "saveChanges": "Wijzigingen opslaan", "addDocument": "Document toevoegen" }
+      },
+      "card": {
+        "type": { "pdf": "PDF", "docx": "DOCX", "text": "TEKST", "faq": "FAQ" },
+        "status": { "indexed": "Geïndexeerd", "processing": "Verwerken", "pending": "In afwachting", "failed": "Mislukt" },
+        "quality": {
+          "excellent": "Uitstekende kwaliteit",
+          "good": "Goede kwaliteit",
+          "fair": "Redelijke kwaliteit",
+          "poor": "Slechte kwaliteit"
+        },
+        "chunks_one": "{{count}} fragment",
+        "chunks_other": "{{count}} fragmenten",
+        "actions": { "retry": "Opnieuw proberen", "retryProcessing": "Verwerking opnieuw proberen" }
+      }
+    },
+    "appearances": {
+      "color": { "label": "Primaire kleur" },
+      "avatar": {
+        "label": "URL bot-avatar",
+        "placeholder": "https://example.com/avatar.png",
+        "helper": "Optionele afbeelding-URL voor de chatbot-avatar. Indien leeg, gebruikt de widget je bedrijfslogo wanneer beschikbaar."
+      },
+      "launcher": {
+        "position": {
+          "label": "Positie launcher",
+          "options": { "bottomRight": "Rechtsonder", "bottomLeft": "Linksonder" }
+        },
+        "label": {
+          "label": "Label launcher",
+          "placeholder": "Chat met ons",
+          "helper": "Optionele tekst naast het chaticoon, zoals \"Chat met ons\"."
+        }
+      },
+      "welcome": {
+        "label": "Welkomstbericht",
+        "empty": "Geen begroeting ingesteld.",
+        "helper": "Welkomstbericht wordt geconfigureerd in de AI-bot-instellingen.",
+        "editLink": "Bewerken in AI-bot"
+      },
+      "openFullWidgetTest": "Volledige widget-test openen",
+      "preview": { "yourBrand": "Je merk", "typeMessage": "Typ een bericht…" }
+    },
+    "testChat": {
+      "defaultBotName": "AI-assistent",
+      "kb": { "useKnowledgeBase": "Kennisbank gebruiken", "noIndexedDocs": "Geen geïndexeerde documenten" },
+      "empty": { "title": "Stuur een bericht om je bot te testen", "subtitle": "Met opgeslagen AI-instellingen" },
+      "placeholder": "Typ een bericht…",
+      "errors": {
+        "emptyResponse": "(Geen antwoord — controleer je merkstem en vangrail-configuratie)",
+        "sendFailed": "Er ging iets mis. Controleer je API-sleutel en modelconfiguratie."
+      }
+    },
+    "social": {
+      "loading": "Kanalen laden…",
+      "header": {
+        "title": "Kanalen",
+        "description": "Verbind berichtenplatforms om klantberichten te ontvangen en te beantwoorden."
+      },
+      "metaPages": {
+        "title": "Selecteer pagina's om te verbinden",
+        "description": "Kies welke Facebook-pagina's je wilt verbinden voor berichten.",
+        "connecting": "Verbinden…",
+        "connectSelected": "Geselecteerde verbinden"
+      },
+      "connected": {
+        "title": "Verbonden kanalen",
+        "count_one": "{{count}} kanaal verbonden",
+        "count_other": "{{count}} kanalen verbonden"
+      },
+      "telegram": {
+        "title": "Telegram",
+        "modal": {
+          "title": "Telegram-bot verbinden",
+          "description": "Voer je bot-token van @BotFather in om een Telegram-bot te verbinden.",
+          "help": {
+            "summary": "Nog geen bot-token?",
+            "step1": { "prefix": "Open Telegram en stuur een bericht naar", "suffix": "." },
+            "step2": { "prefix": "Verstuur", "suffix": "en volg de aanwijzingen om je bot een naam te geven." },
+            "step3": { "prefix": "Kopieer het HTTP API-token dat BotFather terugstuurt (ziet eruit als", "suffix": ")." },
+            "step4": "Plak het hieronder."
+          },
+          "tokenLabel": "Bot-token",
+          "connecting": "Verbinden…",
+          "connect": "Verbinden"
+        }
+      },
+      "facebook": { "title": "Facebook" },
+      "empty": {
+        "title": "Nog geen kanalen verbonden.",
+        "description": "Verbind een Telegram-bot of Facebook-pagina om te beginnen."
+      },
+      "activity": {
+        "received": "Ontvangen {{time}}",
+        "sent": "Verzonden {{time}}",
+        "checked": "· Gecontroleerd {{time}}"
+      },
+      "status": {
+        "active": "actief",
+        "error": "fout",
+        "disconnected": "losgekoppeld",
+        "pending_setup": "setup vereist"
+      },
+      "actions": { "checkHealth": "Verbindingsstatus controleren" },
+      "disconnect": {
+        "title": "Kanaal loskoppelen",
+        "description": "Hierdoor stoppen de berichten van dit kanaal. Je kunt het later opnieuw verbinden.",
+        "confirm": "Loskoppelen"
+      }
+    },
+    "canned": {
+      "page": {
+        "title": "Vooraf opgestelde antwoorden",
+        "subtitle": "Vooraf geschreven berichtsjablonen voor snelle antwoorden"
+      },
+      "list": {
+        "loadError": "Vooraf opgestelde antwoorden laden is mislukt",
+        "empty": "Nog geen vooraf opgestelde antwoorden",
+        "noMatches": "Geen antwoorden voldoen aan je filters",
+        "createFirst": "Maak je eerste antwoord aan"
+      },
+      "actions": {
+        "newResponse": "Nieuw antwoord",
+        "editAria": "{{title}} bewerken",
+        "deleteAria": "{{title}} verwijderen"
+      },
+      "filters": {
+        "searchPlaceholder": "Antwoorden zoeken…",
+        "categoryPlaceholder": "Categorie",
+        "scopePlaceholder": "Scope",
+        "allCategories": "Alle categorieën",
+        "allScopes": "Alles"
+      },
+      "columns": {
+        "title": "Titel", "content": "Inhoud", "shortcut": "Snelkoppeling",
+        "category": "Categorie", "scope": "Scope", "used": "Gebruikt"
+      },
+      "scope": { "shared": "Gedeeld", "personal": "Persoonlijk" },
+      "modal": {
+        "add": { "title": "Nieuw antwoord" },
+        "edit": { "title": "Antwoord bewerken" },
+        "save": "Opslaan",
+        "create": "Aanmaken",
+        "saving": "Opslaan…"
+      },
+      "fields": {
+        "title": { "label": "Titel", "placeholder": "bijv. Begroeting" },
+        "shortcut": { "label": "Snelkoppeling", "placeholder": "bijv. begroet" },
+        "content": {
+          "label": "Inhoud",
+          "placeholder": "Hallo {{customer_name}}, hoe kan ik helpen?",
+          "helperPrefix": "Beschikbare variabelen:",
+          "helperSuffix": "— of voeg je eigen toe zoals"
+        },
+        "category": { "label": "Categorie", "placeholder": "bijv. Algemeen" },
+        "scope": { "label": "Scope" },
+        "tags": { "label": "Labels", "placeholder": "facturatie, terugbetaling, algemeen (door komma's gescheiden)" }
+      },
+      "delete": {
+        "title": "Vooraf opgesteld antwoord verwijderen?",
+        "description": "Hiermee wordt het antwoord verwijderd. Deze actie kan niet ongedaan gemaakt worden.",
+        "descriptionWithTarget": "\"{{title}}\" (/{{shortcut}}) wordt verwijderd. Deze actie kan niet ongedaan gemaakt worden."
+      },
+      "toast": {
+        "created": "Antwoord aangemaakt",
+        "updated": "Antwoord bijgewerkt",
+        "deleted": "Antwoord verwijderd",
+        "createFailed": "Aanmaken is mislukt",
+        "updateFailed": "Bijwerken is mislukt",
+        "deleteFailed": "Verwijderen is mislukt"
+      }
     }
   }
 }

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { X, Send, Bot, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,6 +29,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
   model,
   hasIndexedDocs,
 }) => {
+  const { t } = useTranslation();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [useKB, setUseKB] = useState(hasIndexedDocs);
@@ -73,14 +75,14 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
       {
         onSuccess: (data) => {
           const resp = data as TestChatResponse;
-          const content = resp.response || '(No response — check your brand voice and guardrails configuration)';
+          const content = resp.response || t('ai.testChat.errors.emptyResponse');
           const botMsg: ChatMessage = { role: 'assistant', content };
           setMessages((prev) => [...prev, botMsg]);
         },
         onError: () => {
           const errMsg: ChatMessage = {
             role: 'system',
-            content: 'Something went wrong. Check your API key and model configuration.',
+            content: t('ai.testChat.errors.sendFailed'),
           };
           setMessages((prev) => [...prev, errMsg]);
         },
@@ -114,7 +116,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
               <Bot className="w-4 h-4 text-primary-400" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium text-text-primary truncate">{botName || 'AI Assistant'}</p>
+              <p className="text-sm font-medium text-text-primary truncate">{botName || t('ai.testChat.defaultBotName')}</p>
               <p className="text-xs text-text-muted">{provider} / {model}</p>
             </div>
           </div>
@@ -126,11 +128,11 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
         {/* KB Toggle */}
         <div className="flex items-center justify-between px-4 py-2 border-b border-edge bg-surface-1">
           <span className={`text-xs ${hasIndexedDocs ? 'text-text-muted' : 'text-text-muted/60'}`}>
-            Use Knowledge Base
+            {t('ai.testChat.kb.useKnowledgeBase')}
           </span>
           <div className="flex items-center gap-2">
             {!hasIndexedDocs && (
-              <span className="text-xs text-amber-400">No indexed docs</span>
+              <span className="text-xs text-amber-400">{t('ai.testChat.kb.noIndexedDocs')}</span>
             )}
             <Switch
               checked={useKB && hasIndexedDocs}
@@ -147,8 +149,8 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
               <div className="w-12 h-12 rounded-full bg-surface-2 flex items-center justify-center mb-3">
                 <Bot className="w-6 h-6 text-text-muted" />
               </div>
-              <p className="text-sm text-text-muted">Send a message to test your bot</p>
-              <p className="text-xs text-text-muted mt-1">Using saved AI settings</p>
+              <p className="text-sm text-text-muted">{t('ai.testChat.empty.title')}</p>
+              <p className="text-xs text-text-muted mt-1">{t('ai.testChat.empty.subtitle')}</p>
             </div>
           )}
 
@@ -204,7 +206,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
+              placeholder={t('ai.testChat.placeholder')}
               disabled={testChat.isPending}
               className="flex-1"
             />

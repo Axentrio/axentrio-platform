@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
@@ -68,6 +69,7 @@ const emptyForm: FormData = {
 };
 
 export const CannedResponsesContent: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAppAuth();
   const isAdmin = user && ['admin', 'supervisor', 'super_admin'].includes(user.role);
 
@@ -143,14 +145,14 @@ export const CannedResponsesContent: React.FC = () => {
     try {
       if (editingId) {
         await updateMutation.mutateAsync({ id: editingId, ...payload });
-        toast.success('Canned response updated');
+        toast.success(t('ai.canned.toast.updated'));
       } else {
         await createMutation.mutateAsync(payload);
-        toast.success('Canned response created');
+        toast.success(t('ai.canned.toast.created'));
       }
       setIsModalOpen(false);
     } catch {
-      toast.error(editingId ? 'Failed to update' : 'Failed to create');
+      toast.error(editingId ? t('ai.canned.toast.updateFailed') : t('ai.canned.toast.createFailed'));
     }
   };
 
@@ -158,15 +160,15 @@ export const CannedResponsesContent: React.FC = () => {
     if (!deletingId) return;
     try {
       await deleteMutation.mutateAsync(deletingId);
-      toast.success('Canned response deleted');
+      toast.success(t('ai.canned.toast.deleted'));
     } catch {
-      toast.error('Failed to delete');
+      toast.error(t('ai.canned.toast.deleteFailed'));
     }
     setDeletingId(null);
   };
 
   if (isLoading) return <PageSkeleton variant="list" rows={6} />;
-  if (error) return <InlineError message="Failed to load canned responses" />;
+  if (error) return <InlineError message={t('ai.canned.list.loadError')} />;
 
   return (
     <div className="space-y-6">
@@ -174,7 +176,7 @@ export const CannedResponsesContent: React.FC = () => {
       <div className="flex items-center justify-between">
         <div />
         <Button onClick={openCreate}>
-          <Plus className="w-4 h-4 mr-2" /> New Response
+          <Plus className="w-4 h-4 mr-2" /> {t('ai.canned.actions.newResponse')}
         </Button>
       </div>
 
@@ -183,7 +185,7 @@ export const CannedResponsesContent: React.FC = () => {
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted" />
           <Input
-            placeholder="Search responses..."
+            placeholder={t('ai.canned.filters.searchPlaceholder')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-9"
@@ -191,10 +193,10 @@ export const CannedResponsesContent: React.FC = () => {
         </div>
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-[160px]">
-            <SelectValue placeholder="Category" />
+            <SelectValue placeholder={t('ai.canned.filters.categoryPlaceholder')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="all">{t('ai.canned.filters.allCategories')}</SelectItem>
             {categories.map((c) => (
               <SelectItem key={c} value={c}>{c}</SelectItem>
             ))}
@@ -202,12 +204,12 @@ export const CannedResponsesContent: React.FC = () => {
         </Select>
         <Select value={scopeFilter} onValueChange={setScopeFilter}>
           <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Scope" />
+            <SelectValue placeholder={t('ai.canned.filters.scopePlaceholder')} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="shared">Shared</SelectItem>
-            <SelectItem value="personal">Personal</SelectItem>
+            <SelectItem value="all">{t('ai.canned.filters.allScopes')}</SelectItem>
+            <SelectItem value="shared">{t('ai.canned.scope.shared')}</SelectItem>
+            <SelectItem value="personal">{t('ai.canned.scope.personal')}</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -217,12 +219,12 @@ export const CannedResponsesContent: React.FC = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Title</TableHead>
-              <TableHead className="hidden md:table-cell">Content</TableHead>
-              <TableHead>Shortcut</TableHead>
-              <TableHead>Category</TableHead>
-              <TableHead>Scope</TableHead>
-              <TableHead className="text-right">Used</TableHead>
+              <TableHead>{t('ai.canned.columns.title')}</TableHead>
+              <TableHead className="hidden md:table-cell">{t('ai.canned.columns.content')}</TableHead>
+              <TableHead>{t('ai.canned.columns.shortcut')}</TableHead>
+              <TableHead>{t('ai.canned.columns.category')}</TableHead>
+              <TableHead>{t('ai.canned.columns.scope')}</TableHead>
+              <TableHead className="text-right">{t('ai.canned.columns.used')}</TableHead>
               <TableHead className="w-[100px]" />
             </TableRow>
           </TableHeader>
@@ -233,12 +235,12 @@ export const CannedResponsesContent: React.FC = () => {
                   <div className="flex flex-col items-center gap-3">
                     <p className="text-text-muted">
                       {responses.length === 0
-                        ? 'No canned responses yet'
-                        : 'No responses match your filters'}
+                        ? t('ai.canned.list.empty')
+                        : t('ai.canned.list.noMatches')}
                     </p>
                     {responses.length === 0 && (
                       <Button variant="outline" size="sm" onClick={openCreate}>
-                        <Plus className="w-4 h-4 mr-2" /> Create your first response
+                        <Plus className="w-4 h-4 mr-2" /> {t('ai.canned.list.createFirst')}
                       </Button>
                     )}
                   </div>
@@ -268,16 +270,16 @@ export const CannedResponsesContent: React.FC = () => {
                   <TableCell>{cr.category ?? '—'}</TableCell>
                   <TableCell>
                     <Badge variant={cr.scope === 'shared' ? 'default' : 'secondary'}>
-                      {cr.scope}
+                      {t(`ai.canned.scope.${cr.scope}`, { defaultValue: cr.scope })}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">{cr.usageCount}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1 justify-end">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(cr)} aria-label={`Edit ${cr.title}`}>
+                      <Button variant="ghost" size="icon" onClick={() => openEdit(cr)} aria-label={t('ai.canned.actions.editAria', { title: cr.title })}>
                         <Pencil className="w-4 h-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" onClick={() => setDeletingId(cr.id)} aria-label={`Delete ${cr.title}`}>
+                      <Button variant="ghost" size="icon" onClick={() => setDeletingId(cr.id)} aria-label={t('ai.canned.actions.deleteAria', { title: cr.title })}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -293,55 +295,55 @@ export const CannedResponsesContent: React.FC = () => {
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
-            <DialogTitle>{editingId ? 'Edit' : 'New'} Canned Response</DialogTitle>
+            <DialogTitle>{editingId ? t('ai.canned.modal.edit.title') : t('ai.canned.modal.add.title')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="title">Title</Label>
+              <Label htmlFor="title">{t('ai.canned.fields.title.label')}</Label>
               <Input
                 id="title"
                 value={form.title}
                 onChange={(e) => setForm({ ...form, title: e.target.value })}
-                placeholder="e.g. Greeting"
+                placeholder={t('ai.canned.fields.title.placeholder')}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="shortcut">Shortcut</Label>
+              <Label htmlFor="shortcut">{t('ai.canned.fields.shortcut.label')}</Label>
               <div className="flex items-center gap-2">
                 <span className="text-text-muted">/</span>
                 <Input
                   id="shortcut"
                   value={form.shortcut}
                   onChange={(e) => setForm({ ...form, shortcut: e.target.value })}
-                  placeholder="e.g. greet"
+                  placeholder={t('ai.canned.fields.shortcut.placeholder')}
                 />
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="content">Content</Label>
+              <Label htmlFor="content">{t('ai.canned.fields.content.label')}</Label>
               <Textarea
                 id="content"
                 value={form.content}
                 onChange={(e) => setForm({ ...form, content: e.target.value })}
-                placeholder="Hello {{customer_name}}, how can I help?"
+                placeholder={t('ai.canned.fields.content.placeholder')}
                 rows={4}
               />
               <p className="text-xs text-text-muted">
-                Available variables: <code className="bg-surface-3 px-1 rounded">{'{{agent_name}}'}</code> <code className="bg-surface-3 px-1 rounded">{'{{customer_name}}'}</code> — or add your own like <code className="bg-surface-3 px-1 rounded">{'{{order_id}}'}</code>
+                {t('ai.canned.fields.content.helperPrefix')} <code className="bg-surface-3 px-1 rounded">{'{{agent_name}}'}</code> <code className="bg-surface-3 px-1 rounded">{'{{customer_name}}'}</code> {t('ai.canned.fields.content.helperSuffix')} <code className="bg-surface-3 px-1 rounded">{'{{order_id}}'}</code>
               </p>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="category">Category</Label>
+                <Label htmlFor="category">{t('ai.canned.fields.category.label')}</Label>
                 <Input
                   id="category"
                   value={form.category}
                   onChange={(e) => setForm({ ...form, category: e.target.value })}
-                  placeholder="e.g. General"
+                  placeholder={t('ai.canned.fields.category.placeholder')}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="scope">Scope</Label>
+                <Label htmlFor="scope">{t('ai.canned.fields.scope.label')}</Label>
                 <Select
                   value={form.scope}
                   onValueChange={(v) => setForm({ ...form, scope: v as 'shared' | 'personal' })}
@@ -351,29 +353,33 @@ export const CannedResponsesContent: React.FC = () => {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {isAdmin && <SelectItem value="shared">Shared</SelectItem>}
-                    <SelectItem value="personal">Personal</SelectItem>
+                    {isAdmin && <SelectItem value="shared">{t('ai.canned.scope.shared')}</SelectItem>}
+                    <SelectItem value="personal">{t('ai.canned.scope.personal')}</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="tags">Tags</Label>
+              <Label htmlFor="tags">{t('ai.canned.fields.tags.label')}</Label>
               <Input
                 id="tags"
                 value={form.tags}
                 onChange={(e) => setForm({ ...form, tags: e.target.value })}
-                placeholder="billing, refund, common (comma-separated)"
+                placeholder={t('ai.canned.fields.tags.placeholder')}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsModalOpen(false)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setIsModalOpen(false)}>{t('common.cancel')}</Button>
             <Button
               onClick={handleSubmit}
               disabled={!form.title || !form.shortcut || !form.content || createMutation.isPending || updateMutation.isPending}
             >
-              {(createMutation.isPending || updateMutation.isPending) ? 'Saving...' : editingId ? 'Save' : 'Create'}
+              {(createMutation.isPending || updateMutation.isPending)
+                ? t('ai.canned.modal.saving')
+                : editingId
+                  ? t('ai.canned.modal.save')
+                  : t('ai.canned.modal.create')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -383,19 +389,19 @@ export const CannedResponsesContent: React.FC = () => {
       <AlertDialog open={!!deletingId} onOpenChange={() => setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete canned response?</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.canned.delete.title')}</AlertDialogTitle>
             <AlertDialogDescription>
               {(() => {
                 const target = responses.find((r) => r.id === deletingId);
                 return target
-                  ? `"${target.title}" (/${target.shortcut}) will be removed. This action cannot be undone.`
-                  : 'This will remove the response. This action cannot be undone.';
+                  ? t('ai.canned.delete.descriptionWithTarget', { title: target.title, shortcut: target.shortcut })
+                  : t('ai.canned.delete.description');
               })()}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Delete</AlertDialogAction>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('common.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -404,14 +410,15 @@ export const CannedResponsesContent: React.FC = () => {
 };
 
 const CannedResponses: React.FC = () => {
+  const { t } = useTranslation();
   return (
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Canned Responses</h1>
+          <h1 className="text-2xl font-bold text-text-primary">{t('ai.canned.page.title')}</h1>
           <p className="text-sm text-text-secondary mt-1">
-            Pre-written message templates for quick replies
+            {t('ai.canned.page.subtitle')}
           </p>
         </div>
       </div>

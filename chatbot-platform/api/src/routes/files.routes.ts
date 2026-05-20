@@ -132,7 +132,7 @@ router.get(
       throw new BadRequestError('Invalid file id');
     }
 
-    const session = uploadService.getSession(id);
+    const session = await uploadService.getSession(id);
     if (!session) {
       throw new NotFoundError('File not found');
     }
@@ -190,7 +190,7 @@ router.get(
       throw new BadRequestError('Invalid file id');
     }
 
-    const session = uploadService.getSession(id);
+    const session = await uploadService.getSession(id);
     if (!session) {
       throw new NotFoundError('File not found');
     }
@@ -268,7 +268,7 @@ router.post(
     const { getUploadService } = await import('../file-handling/upload.service');
     const uploadService = getUploadService();
 
-    const session = uploadService.getSession(sessionId);
+    const session = await uploadService.getSession(sessionId);
     if (!session) {
       throw new NotFoundError('Upload session not found');
     }

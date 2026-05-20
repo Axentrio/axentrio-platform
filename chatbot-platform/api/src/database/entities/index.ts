@@ -10,6 +10,11 @@ export { ChatSession, SessionStatus } from './ChatSession';
 export { Participant, ParticipantType } from './Participant';
 export { Message, MessageType, MessageStatus } from './Message';
 export { FileUpload, FileUploadStatus } from './FileUpload';
+export {
+  UploadSession,
+  type UploadSessionStatus,
+  type UploadSessionScanResult,
+} from './UploadSession';
 export { HandoffRequest, HandoffStatus, HandoffReason } from './HandoffRequest';
 export { PendingInvite } from './PendingInvite';
 export {

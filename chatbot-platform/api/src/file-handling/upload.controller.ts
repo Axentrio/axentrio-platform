@@ -314,7 +314,7 @@ router.get(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { sessionId } = req.params;
-      const session = uploadService.getSession(sessionId);
+      const session = await uploadService.getSession(sessionId);
 
       if (!session) {
         throw new NotFoundError('Upload session not found');
@@ -398,7 +398,7 @@ router.post(
         scannedAt: new Date(),
       };
 
-      const session = uploadService.updateSessionStatus(
+      const session = await uploadService.updateSessionStatus(
         sessionId,
         clean ? 'ready' : 'quarantined',
         scanResult

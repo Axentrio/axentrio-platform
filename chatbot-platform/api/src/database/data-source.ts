@@ -15,6 +15,7 @@ import { ChatSession } from './entities/ChatSession';
 import { Participant } from './entities/Participant';
 import { Message } from './entities/Message';
 import { FileUpload } from './entities/FileUpload';
+import { UploadSession } from './entities/UploadSession';
 import { HandoffRequest } from './entities/HandoffRequest';
 import { WebhookDeliveryLog } from './entities/WebhookDeliveryLog';
 import { PendingInvite } from './entities/PendingInvite';
@@ -53,6 +54,7 @@ export const AppDataSource = new DataSource({
     Participant,
     Message,
     FileUpload,
+    UploadSession,
     HandoffRequest,
     WebhookDeliveryLog,
     PendingInvite,

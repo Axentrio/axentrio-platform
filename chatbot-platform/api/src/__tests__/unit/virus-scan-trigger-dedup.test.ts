@@ -56,6 +56,18 @@ vi.mock('../../utils/audit', () => ({
 
 import { performScan } from '../../file-handling/virus-scan-trigger';
 
+/**
+ * Drain pending microtasks. Needed when an async caller's first yield
+ * happens *before* the side effect under test (e.g. an `await getSession`
+ * that yields before `scanFile` is called). A few setImmediate cycles
+ * ensure all chained microtasks have resolved.
+ */
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 4; i++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
 const SESSION_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
 const FILE_KEY = 'uploads/test/2026/05/20/hash.pdf';
 
@@ -97,6 +109,12 @@ describe('performScan — concurrent dedup (codex round PR1 #2)', () => {
     // in the same microtask tick.
     const result1Promise = performScan(SESSION_ID, FILE_KEY);
     const result2Promise = performScan(SESSION_ID, FILE_KEY);
+
+    // Drain microtasks so both calls progress past the async getSession
+    // boundary and land on scanFile. (Now that getSession is awaited, the
+    // first yield is *before* scanFile, so we can't assert in-flight state
+    // immediately after the call.)
+    await flushMicrotasks();
 
     // Both calls should be in-flight against the SAME inFlightScans entry.
     // scanFile must have been called exactly once at this point.
@@ -170,6 +188,7 @@ describe('performScan — concurrent dedup (codex round PR1 #2)', () => {
     const p1 = performScan(SESSION_ID, FILE_KEY);
     const p2 = performScan(SESSION_ID, FILE_KEY);
 
+    await flushMicrotasks();
     resolveScan({
       clean: false,
       threats: ['EICAR-Test-Signature'],

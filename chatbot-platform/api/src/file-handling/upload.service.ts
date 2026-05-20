@@ -122,13 +122,17 @@ export const DEFAULT_UPLOAD_CONFIG: UploadConfig = {
 export class UploadService {
   private s3Client: S3Client;
   private config: UploadConfig;
-  private uploadSessions: Map<string, UploadSession> = new Map();
+  // Upload sessions are persisted via the `UploadSession` entity so the two
+  // halves of an upload (presigned-URL request + scan-complete callback)
+  // survive replica switches and deploys. See
+  // `chatbot-platform/docs/widget-file-upload-status.md` codex #5 for the
+  // original bug report this fixes.
   private tenantQuotas: Map<string, TenantQuota> = new Map();
   private chunkedSessions: Map<string, ChunkedUploadSession> = new Map();
 
   constructor(config?: Partial<UploadConfig>) {
     this.config = { ...DEFAULT_UPLOAD_CONFIG, ...config };
-    
+
     this.s3Client = new S3Client({
       region: this.config.region,
       credentials: {
@@ -140,6 +144,21 @@ export class UploadService {
 
     // Start GDPR cleanup scheduler
     this.startGDPRCleanupScheduler();
+  }
+
+  /**
+   * UploadSession entity repository. Lazily resolved so the service can be
+   * constructed (e.g. during config validation) before TypeORM has its
+   * AppDataSource initialized.
+   */
+  private getUploadSessionRepo() {
+    // Local import keeps this file from cycling on a fresh boot when
+    // AppDataSource hasn't initialized yet.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { AppDataSource } = require('../database/data-source');
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { UploadSession: UploadSessionEntity } = require('../database/entities/UploadSession');
+    return AppDataSource.getRepository(UploadSessionEntity);
   }
 
   // ==========================================================================
@@ -207,12 +226,70 @@ export class UploadService {
       createdAt: new Date(),
     };
 
-    this.uploadSessions.set(sessionId, session);
+    // Persist to DB so /upload-complete on a different replica (or after a
+    // deploy) can still find the session.
+    await this.persistSession(session, request.chatSessionId);
 
     // Update tenant quota tracking
     await this.updateTenantQuota(request.tenantId, request.fileSize);
 
     return session;
+  }
+
+  /**
+   * Insert a new UploadSession row. Idempotent — re-running with the same
+   * sessionId is a no-op (orIgnore on the PK).
+   */
+  private async persistSession(
+    session: UploadSession,
+    chatSessionId: string,
+  ): Promise<void> {
+    const repo = this.getUploadSessionRepo();
+    await repo
+      .createQueryBuilder()
+      .insert()
+      .values({
+        sessionId: session.sessionId,
+        tenantId: session.tenantId,
+        chatSessionId,
+        userId: session.userId,
+        fileKey: session.fileKey,
+        fileHash: session.fileHash,
+        originalName: session.originalName,
+        fileSize: session.fileSize,
+        mimeType: session.mimeType,
+        uploadUrl: session.uploadUrl,
+        publicUrl: session.publicUrl,
+        status: session.status,
+        expiresAt: session.expiresAt,
+      })
+      .orIgnore()
+      .execute();
+  }
+
+  /**
+   * Hydrate an UploadSession (the in-memory interface) from a DB row.
+   * Keeps callers reading the same field shape as before.
+   */
+  private rowToSession(row: Record<string, unknown>): UploadSession {
+    return {
+      sessionId: row.sessionId as string,
+      uploadUrl: row.uploadUrl as string,
+      publicUrl: row.publicUrl as string,
+      expiresAt: row.expiresAt as Date,
+      fileKey: row.fileKey as string,
+      fileHash: row.fileHash as string,
+      status: row.status as UploadSession['status'],
+      tenantId: row.tenantId as string,
+      userId: row.userId as string,
+      originalName: row.originalName as string,
+      // bigint columns come back as strings from node-postgres — coerce.
+      fileSize: typeof row.fileSize === 'string' ? Number(row.fileSize) : (row.fileSize as number),
+      mimeType: row.mimeType as string,
+      createdAt: row.createdAt as Date,
+      scanResult: row.scanResult as UploadSession['scanResult'] | undefined,
+      thumbnailUrl: (row.thumbnailUrl as string | null) ?? undefined,
+    };
   }
 
   /**
@@ -298,7 +375,7 @@ export class UploadService {
       createdAt: new Date(),
     };
 
-    this.uploadSessions.set(sessionId, session);
+    await this.persistSession(session, request.chatSessionId);
     await this.updateTenantQuota(request.tenantId, request.fileSize);
 
     return { session, chunkUrls, uploadId };
@@ -318,7 +395,7 @@ export class UploadService {
       throw new Error('Chunked upload session not found');
     }
 
-    const session = this.uploadSessions.get(sessionId);
+    const session = await this.getSession(sessionId);
     if (!session) {
       throw new Error('Upload session not found');
     }
@@ -339,9 +416,8 @@ export class UploadService {
 
     chunkedSession.status = 'completed';
     chunkedSession.parts = sortedParts;
-    session.status = 'scanning';
-
-    return session;
+    const updated = await this.updateSessionStatus(sessionId, 'scanning');
+    return updated ?? session;
   }
 
   // ==========================================================================
@@ -539,45 +615,70 @@ export class UploadService {
   // ==========================================================================
 
   /**
-   * Get upload session by ID
+   * Get upload session by ID. Loads from DB so the lookup works across
+   * replicas and across deploys.
    */
-  getSession(sessionId: string): UploadSession | undefined {
-    return this.uploadSessions.get(sessionId);
+  async getSession(sessionId: string): Promise<UploadSession | undefined> {
+    const repo = this.getUploadSessionRepo();
+    const row = await repo.findOne({ where: { sessionId } });
+    return row ? this.rowToSession(row) : undefined;
   }
 
   /**
-   * Update upload session status
+   * Update upload session status. Persists to DB.
+   *
+   * NOTE: this is per-row UPDATE; concurrent callers across replicas could
+   * race (both write 'scanning' then both 'ready'). The shared
+   * `virus-scan-trigger` has a per-process in-flight Map that dedups inside
+   * one replica. Cross-replica dedup would need a SELECT FOR UPDATE
+   * advisory lock — out of scope for v1.
    */
-  updateSessionStatus(
+  async updateSessionStatus(
     sessionId: string,
     status: UploadSession['status'],
-    scanResult?: UploadSession['scanResult']
-  ): UploadSession | undefined {
-    const session = this.uploadSessions.get(sessionId);
-    if (session) {
-      session.status = status;
-      if (scanResult) {
-        session.scanResult = scanResult;
-      }
+    scanResult?: UploadSession['scanResult'],
+  ): Promise<UploadSession | undefined> {
+    const repo = this.getUploadSessionRepo();
+    const patch: Record<string, unknown> = { status };
+    if (scanResult) {
+      patch.scanResult = {
+        ...scanResult,
+        // Persist scannedAt as ISO string in JSONB to round-trip safely.
+        scannedAt:
+          scanResult.scannedAt instanceof Date
+            ? scanResult.scannedAt.toISOString()
+            : scanResult.scannedAt,
+      };
     }
-    return session;
+    const result = await repo
+      .createQueryBuilder()
+      .update()
+      .set(patch)
+      .where('session_id = :sessionId', { sessionId })
+      .returning('*')
+      .execute();
+
+    const row = (result.raw as Array<Record<string, unknown>>)?.[0];
+    return row ? this.rowToSession(row) : undefined;
   }
 
   /**
-   * Clean up expired sessions
+   * Clean up expired sessions. Single DELETE rather than per-row work.
+   * Keeps terminal-state rows (ready/quarantined) because they have audit
+   * value (a quarantined upload's row is the durable record of the
+   * security event).
    */
-  cleanupExpiredSessions(): number {
-    const now = new Date();
-    let cleaned = 0;
-
-    for (const [sessionId, session] of this.uploadSessions.entries()) {
-      if (session.expiresAt < now && session.status !== 'ready') {
-        this.uploadSessions.delete(sessionId);
-        cleaned++;
-      }
-    }
-
-    return cleaned;
+  async cleanupExpiredSessions(): Promise<number> {
+    const repo = this.getUploadSessionRepo();
+    const result = await repo
+      .createQueryBuilder()
+      .delete()
+      .where('expires_at < NOW()')
+      .andWhere('status IN (:...statuses)', {
+        statuses: ['pending', 'uploading', 'scanning', 'failed'],
+      })
+      .execute();
+    return result.affected ?? 0;
   }
 
   // ==========================================================================
@@ -763,13 +864,20 @@ export class UploadService {
   /**
    * Get service statistics
    */
-  getStats(): {
+  async getStats(): Promise<{
     activeSessions: number;
     chunkedSessions: number;
     tenantCount: number;
-  } {
+  }> {
+    const repo = this.getUploadSessionRepo();
+    const activeSessions = await repo
+      .createQueryBuilder()
+      .where('status IN (:...statuses)', {
+        statuses: ['pending', 'uploading', 'scanning'],
+      })
+      .getCount();
     return {
-      activeSessions: this.uploadSessions.size,
+      activeSessions,
       chunkedSessions: this.chunkedSessions.size,
       tenantCount: this.tenantQuotas.size,
     };

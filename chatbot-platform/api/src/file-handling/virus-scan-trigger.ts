@@ -78,17 +78,23 @@ export async function performScan(
   if (existing) return existing;
 
   const promise = (async () => {
+    // Track the timeout handle so we can clear it when doScan wins the
+    // race. Otherwise the setTimeout would leak per call — both wasteful
+    // and a real source of test hangs (vitest waits for all pending
+    // timers).
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         doScan(sessionId, fileKey),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
             () => reject(new Error('Scan timeout')),
             SYNC_SCAN_TIMEOUT_MS,
-          ),
-        ),
+          );
+        }),
       ]);
     } finally {
+      if (timer) clearTimeout(timer);
       inFlightScans.delete(sessionId);
     }
   })();
@@ -105,13 +111,13 @@ async function doScan(
   const virusScanService = getVirusScanService();
   const thumbnailService = getThumbnailService();
 
-  const session = uploadService.getSession(sessionId);
+  const session = await uploadService.getSession(sessionId);
   if (!session) {
     throw new Error(`Upload session ${sessionId} not found`);
   }
 
   // Move session into 'scanning' so a concurrent caller sees the state.
-  uploadService.updateSessionStatus(sessionId, 'scanning');
+  await uploadService.updateSessionStatus(sessionId, 'scanning');
 
   let scanResult: ScanResult;
   try {
@@ -119,13 +125,13 @@ async function doScan(
   } catch (error) {
     // Scanner failure — mark session 'failed' so the file is not promoted
     // to 'ready' and the client knows the scan was inconclusive.
-    uploadService.updateSessionStatus(sessionId, 'failed');
+    await uploadService.updateSessionStatus(sessionId, 'failed');
     logger.error('Virus scan threw', { sessionId, fileKey, error });
     throw error;
   }
 
   if (scanResult.clean) {
-    uploadService.updateSessionStatus(sessionId, 'ready', scanResult);
+    await uploadService.updateSessionStatus(sessionId, 'ready', scanResult);
     logAudit(
       session.userId,
       'FILE_SCAN_COMPLETED',
@@ -159,7 +165,7 @@ async function doScan(
       }
     }
   } else {
-    uploadService.updateSessionStatus(sessionId, 'quarantined', scanResult);
+    await uploadService.updateSessionStatus(sessionId, 'quarantined', scanResult);
     logAudit(
       session.userId,
       'FILE_QUARANTINED',
@@ -206,15 +212,16 @@ export function triggerScanAsync(sessionId: string, fileKey: string): void {
   // its own 60s timeout (more generous than the sync path's 25s — no
   // client is waiting on this response).
   void (async () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
         doScan(sessionId, fileKey),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
             () => reject(new Error('Virus scan timeout')),
             FIRE_AND_FORGET_TIMEOUT_MS,
-          ),
-        ),
+          );
+        }),
       ]);
     } catch (error) {
       logger.error('Virus scan failed (async path)', {
@@ -222,6 +229,8 @@ export function triggerScanAsync(sessionId: string, fileKey: string): void {
         fileKey,
         error: error instanceof Error ? error.message : String(error),
       });
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   })();
 }

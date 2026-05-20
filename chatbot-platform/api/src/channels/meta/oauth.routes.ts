@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { requireClerkAuth, autoProvision } from '../../middleware/clerk.middleware';
 import { logger } from '../../utils/logger';
 import { config } from '../../config/environment';
@@ -14,6 +14,14 @@ import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { enforceCountLimit } from '../../billing/enforce';
 import { Not } from 'typeorm';
+import {
+  ApiError,
+  asyncHandler,
+  BadRequestError,
+  UnauthorizedError,
+} from '../../middleware/error-handler';
+import { sendSuccess, sendCreated } from '../../utils/response';
+import { ERROR_CODES } from '../../middleware/error-codes';
 
 const router = Router();
 
@@ -24,19 +32,28 @@ export const metaOAuthCallbackRouter = Router();
  * GET /api/v1/channels/meta/oauth/url
  * Returns the Facebook Login URL for the authenticated tenant.
  */
-router.get('/url', requireClerkAuth, autoProvision, async (req: Request, res: Response) => {
-  const tenantId = (req as any).user?.tenantId;
-  if (!tenantId) {
-    return res.status(400).json({ error: 'Tenant context required' });
-  }
+router.get(
+  '/url',
+  requireClerkAuth,
+  autoProvision,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = (req as any).user?.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
 
-  if (!config.meta.appId || !config.meta.oauthRedirectUri) {
-    return res.status(503).json({ error: 'Meta integration not configured' });
-  }
+    if (!config.meta.appId || !config.meta.oauthRedirectUri) {
+      throw new ApiError(
+        'Meta integration not configured',
+        503,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
+    }
 
-  const url = buildOAuthUrl(tenantId);
-  return res.json({ url });
-});
+    const url = buildOAuthUrl(tenantId);
+    sendSuccess(res, { url });
+  }),
+);
 
 /**
  * GET /api/v1/channels/meta/oauth/callback
@@ -77,87 +94,104 @@ metaOAuthCallbackRouter.get('/callback', async (req: Request, res: Response) => 
  * Returns available Pages from the OAuth session.
  * On the callback router — no Clerk auth needed, session JWT is self-validating.
  */
-metaOAuthCallbackRouter.get('/pages', async (req: Request, res: Response) => {
-  const sessionToken = req.query.session as string;
-  if (!sessionToken) {
-    return res.status(400).json({ error: 'session token required' });
-  }
+metaOAuthCallbackRouter.get(
+  '/pages',
+  asyncHandler(async (req: Request, res: Response) => {
+    const sessionToken = req.query.session as string;
+    if (!sessionToken) {
+      throw new BadRequestError('session token required');
+    }
 
-  try {
-    const pages = getSessionPages(sessionToken);
-    return res.json({ pages });
-  } catch {
-    return res.status(401).json({ error: 'Invalid or expired session' });
-  }
-});
+    let pages;
+    try {
+      pages = getSessionPages(sessionToken);
+    } catch {
+      throw new UnauthorizedError('Invalid or expired session');
+    }
+    sendSuccess(res, { pages });
+  }),
+);
 
 /**
  * POST /api/v1/channels/meta/connect
  * Connect selected Pages/IG accounts for the tenant.
  */
-router.post('/connect', requireClerkAuth, autoProvision, async (req: Request, res: Response) => {
-  const tenantId = (req as any).user?.tenantId;
-  if (!tenantId) {
-    return res.status(400).json({ error: 'Tenant context required' });
-  }
-
-  const { pageIds, sessionToken } = req.body as { pageIds: string[]; sessionToken: string };
-
-  if (!sessionToken || typeof sessionToken !== 'string') {
-    return res.status(400).json({ error: 'sessionToken required' });
-  }
-
-  if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
-    return res.status(400).json({ error: 'pageIds required' });
-  }
-
-  try {
-    // Validate session and get page data
-    const pages = getSessionPages(sessionToken);
-
-    // Filter to selected pages and get their tokens from cache
-    const selectedPages = pages
-      .filter((p) => pageIds.includes(p.id))
-      .map((p) => ({
-        ...p,
-        accessToken: getCachedPageToken(p.id) || '',
-      }))
-      .filter((p) => p.accessToken);
-
-    if (selectedPages.length === 0) {
-      return res.status(400).json({ error: 'No valid pages found. OAuth session may have expired.' });
+router.post(
+  '/connect',
+  requireClerkAuth,
+  autoProvision,
+  asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
+    const tenantId = (req as any).user?.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
     }
 
-    // Plan-gate (step 10, count 4). Each selected Page becomes a separate
-    // ChannelConnection row, so the cap applies to "current connections +
-    // number this request will add." Throws 402 plan_limit_channels.
-    await AppDataSource.transaction(async (manager) => {
-      await enforceCountLimit({
-        manager,
-        tenantId,
-        capability: 'channels',
-        errorCode: 'plan_limit_channels',
-        countQuery: async (m) => {
-          const current = await m.count(ChannelConnection, {
-            where: { tenantId, status: Not('disconnected') },
-          });
-          // Pretend the new ones are already there minus 1, so the helper's
-          // `current >= limit` check accounts for additions in this request.
-          return current + selectedPages.length - 1;
-        },
+    const { pageIds, sessionToken } = req.body as { pageIds: string[]; sessionToken: string };
+
+    if (!sessionToken || typeof sessionToken !== 'string') {
+      throw new BadRequestError('sessionToken required');
+    }
+
+    if (!pageIds || !Array.isArray(pageIds) || pageIds.length === 0) {
+      throw new BadRequestError('pageIds required');
+    }
+
+    try {
+      // Validate session and get page data
+      const pages = getSessionPages(sessionToken);
+
+      // Filter to selected pages and get their tokens from cache
+      const selectedPages = pages
+        .filter((p) => pageIds.includes(p.id))
+        .map((p) => ({
+          ...p,
+          accessToken: getCachedPageToken(p.id) || '',
+        }))
+        .filter((p) => p.accessToken);
+
+      if (selectedPages.length === 0) {
+        throw new BadRequestError('No valid pages found. OAuth session may have expired.');
+      }
+
+      // Plan-gate (step 10, count 4). Each selected Page becomes a separate
+      // ChannelConnection row, so the cap applies to "current connections +
+      // number this request will add." Throws 402 plan_limit_channels.
+      await AppDataSource.transaction(async (manager) => {
+        await enforceCountLimit({
+          manager,
+          tenantId,
+          capability: 'channels',
+          errorCode: 'plan_limit_channels',
+          countQuery: async (m) => {
+            const current = await m.count(ChannelConnection, {
+              where: { tenantId, status: Not('disconnected') },
+            });
+            // Pretend the new ones are already there minus 1, so the helper's
+            // `current >= limit` check accounts for additions in this request.
+            return current + selectedPages.length - 1;
+          },
+        });
       });
-    });
 
-    // Create connections
-    const connections = await setupMetaConnections(tenantId, selectedPages);
+      // Create connections
+      const connections = await setupMetaConnections(tenantId, selectedPages);
 
-    return res.status(201).json({ connections });
-  } catch (error) {
-    logger.error('[meta-oauth] Connect error:', error);
-    const message = error instanceof Error ? error.message : 'Failed to connect';
-    return res.status(400).json({ error: message });
-  }
-});
+      sendCreated(res, { connections });
+    } catch (err) {
+      logger.error('[meta-oauth] Connect error:', err);
+      // If the underlying service threw a typed ApiError (plan-limit 402,
+      // upstream 502, etc.), propagate it so the global handler emits the
+      // correct status. Unknown errors fall back to today's legacy 400 envelope
+      // — this preserves the historical wire-shape contract for the portal
+      // Cmd+K integration that drives this endpoint.
+      if (err instanceof ApiError) {
+        return next(err);
+      }
+      const message = err instanceof Error ? err.message : 'Connect failed';
+      return next(new BadRequestError(message));
+    }
+  }),
+);
 
 function getPortalUrl(): string {
   // Derive portal URL from config

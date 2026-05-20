@@ -19,6 +19,9 @@ import { InboundMessage, WebhookResponse, HandoffPayload, FileRequestPayload } f
 import { validateJsonSchema } from '../utils/validation';
 import { MetricsService } from '../services/metrics.service';
 import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
+import { sendSuccess } from '../utils/response';
+import { ApiError, NotFoundError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 
 // logger imported from utils/logger
 
@@ -191,8 +194,8 @@ export class WebhookController {
   public getCircuitStatus = async (_req: Request, res: Response): Promise<void> => {
     const state = this.config.circuitBreaker.getState();
     const stats = this.config.circuitBreaker.getStats();
-    
-    res.status(200).json({
+
+    sendSuccess(res, {
       state: state.state,
       failures: state.failures,
       successCount: state.successCount,
@@ -211,19 +214,19 @@ export class WebhookController {
     try {
       this.config.circuitBreaker.reset();
       logger.info('Circuit breaker manually reset');
-      
-      res.status(200).json({
-        success: true,
-        message: 'Circuit breaker reset successfully',
-        timestamp: new Date().toISOString(),
-      });
     } catch (error) {
       logger.error('Failed to reset circuit breaker', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to reset circuit breaker',
-      });
+      throw new ApiError(
+        'Failed to reset circuit breaker',
+        500,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
     }
+
+    sendSuccess(res, {
+      message: 'Circuit breaker reset successfully',
+      timestamp: new Date().toISOString(),
+    });
   };
 
   /**
@@ -231,20 +234,19 @@ export class WebhookController {
    * GET /api/v1/n8n/webhook/queue-status
    */
   public getQueueStatus = async (_req: Request, res: Response): Promise<void> => {
+    let status;
     try {
-      const status = await this.config.retryService.getQueueStatus();
-      
-      res.status(200).json({
-        success: true,
-        queue: status,
-      });
+      status = await this.config.retryService.getQueueStatus();
     } catch (error) {
       logger.error('Failed to get queue status', error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to get queue status',
-      });
+      throw new ApiError(
+        'Failed to get queue status',
+        500,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
     }
+
+    sendSuccess(res, { queue: status });
   };
 
   /**
@@ -253,31 +255,27 @@ export class WebhookController {
    */
   public retryMessage = async (req: Request, res: Response): Promise<void> => {
     const { messageId } = req.params;
-    
+
+    let result;
     try {
-      const result = await this.config.retryService.retryMessage(messageId);
-      
-      if (result.success) {
-        res.status(200).json({
-          success: true,
-          message: 'Message retry initiated',
-          messageId,
-        });
-      } else {
-        res.status(404).json({
-          success: false,
-          error: result.error || 'Message not found',
-          messageId,
-        });
-      }
+      result = await this.config.retryService.retryMessage(messageId);
     } catch (error) {
       logger.error(`Failed to retry message ${messageId}`, error);
-      res.status(500).json({
-        success: false,
-        error: 'Failed to retry message',
-        messageId,
-      });
+      throw new ApiError(
+        'Failed to retry message',
+        500,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
     }
+
+    if (!result.success) {
+      throw new NotFoundError(result.error || 'Message not found');
+    }
+
+    sendSuccess(res, {
+      message: 'Message retry initiated',
+      messageId,
+    });
   };
 
   /**

@@ -22,6 +22,7 @@ export default defineConfig({
       'src/__tests__/integration/integrations-widget-appearance-wire.test.ts',
       'src/__tests__/integration/knowledge-controller-wire.test.ts',
       'src/__tests__/integration/phase6-channels-n8n-wire.test.ts',
+      'src/__tests__/integration/files-audit-logging.test.ts',
       'src/__tests__/unit/upload-controller-shapes.test.ts',
     ],
     testTimeout: 10000,

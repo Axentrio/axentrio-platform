@@ -184,7 +184,16 @@ export function createWebhookRouter(config: WebhookRoutesConfig): Router {
    * @desc    Get list of available webhook events
    * @access  Public
    */
-  router.get('/events', (_req: Request, res: Response) => {
+  router.get('/events', (req: Request, res: Response) => {
+    // Public discovery endpoint (`webhook-reference.md`) — no auth, no rate-limit.
+    // Debug-level on purpose: integrations may poll this; info would noise the
+    // log stream. We still want enough trail to answer "who polled /events when
+    // this incident happened?" via requestId / IP / user-agent correlation.
+    logger.debug('n8n /events polled (webhook discovery)', {
+      requestId: req.requestId,
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
     res.status(200).json({
       success: true,
       events: [

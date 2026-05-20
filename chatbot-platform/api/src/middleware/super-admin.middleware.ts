@@ -2,14 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
+import { ForbiddenError, NotFoundError } from './error-handler';
 
 /**
  * Requires the user to be a super admin. Returns 403 if not.
  */
-export function requireSuperAdmin(req: Request, res: Response, next: NextFunction): void {
+export function requireSuperAdmin(req: Request, _res: Response, next: NextFunction): void {
   if (!req.user || req.user.role !== 'super_admin') {
-    res.status(403).json({ error: 'Super admin access required' });
-    return;
+    return next(new ForbiddenError('Super admin access required'));
   }
   next();
 }
@@ -20,7 +20,7 @@ export function requireSuperAdmin(req: Request, res: Response, next: NextFunctio
  * Super admins without header: tenantId stays as their own.
  * Super admins with header: tenantId is set to the target tenant.
  */
-export async function resolveTenantContext(req: Request, res: Response, next: NextFunction): Promise<void> {
+export async function resolveTenantContext(req: Request, _res: Response, next: NextFunction): Promise<void> {
   const targetTenantId = req.headers['x-tenant-context'] as string | undefined;
 
   if (!targetTenantId || !req.user || req.user.role !== 'super_admin') {
@@ -33,13 +33,11 @@ export async function resolveTenantContext(req: Request, res: Response, next: Ne
     const tenant = await tenantRepo.findOne({ where: { id: targetTenantId } });
 
     if (!tenant) {
-      res.status(404).json({ error: 'Tenant not found' });
-      return;
+      return next(new NotFoundError('Tenant not found'));
     }
 
     if (tenant.status === 'suspended') {
-      res.status(403).json({ error: 'Tenant is suspended' });
-      return;
+      return next(new ForbiddenError('Tenant is suspended'));
     }
 
     req.tenantId = tenant.id;
@@ -51,7 +49,6 @@ export async function resolveTenantContext(req: Request, res: Response, next: Ne
 
     next();
   } catch (error) {
-    logger.error('Failed to resolve tenant context', { error });
-    res.status(500).json({ error: 'Internal server error' });
+    return next(error as Error);
   }
 }

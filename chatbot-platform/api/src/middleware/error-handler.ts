@@ -4,6 +4,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import { Sentry } from '../config/sentry';
 import { logger } from '../utils/logger';
 import { config } from '../config/environment';
@@ -76,7 +77,7 @@ export class RateLimitError extends ApiError {
 }
 
 // Error response interface
-interface ErrorResponse {
+export interface ErrorResponse {
   success: false;
   error: {
     code: string;
@@ -92,47 +93,18 @@ interface ErrorResponse {
 }
 
 /**
- * Global error handler middleware
+ * Build the standard error envelope.
+ *
+ * Pure function — does NOT log or capture in Sentry. Those side effects live
+ * in `errorHandler`. Exported so the async-timeout middleware (Phase 2,
+ * §6.1) can produce the same envelope inline when it cannot call
+ * `next(err)` (the original handler is still running).
  */
-export const errorHandler = (
-  err: Error | ApiError,
-  req: Request,
-  res: Response,
-  _next: NextFunction
-): void => {
-  // Determine if it's an operational error
+export function buildErrorResponse(err: Error | ApiError, req: Request): ErrorResponse {
   const isApiError = err instanceof ApiError;
-  const statusCode = isApiError ? err.statusCode : 500;
   const errorCode = isApiError ? err.code : 'INTERNAL_ERROR';
   const isOperational = isApiError ? err.isOperational : false;
 
-  // Log error
-  const logData = {
-    requestId: req.requestId,
-    statusCode,
-    errorCode,
-    message: err.message,
-    path: req.path,
-    method: req.method,
-    isOperational,
-    stack: err.stack,
-    userId: req.user?.id,
-    tenantId: req.tenant?.id || req.user?.tenantId,
-  };
-
-  if (statusCode >= 500) {
-    logger.error('Server error', logData);
-    Sentry.setContext('request', {
-      requestId: req.requestId,
-      userId: req.user?.id,
-      tenantId: req.tenant?.id || req.user?.tenantId,
-    });
-    Sentry.captureException(err);
-  } else if (statusCode >= 400) {
-    logger.warn('Client error', logData);
-  }
-
-  // Build error response
   const errorResponse: ErrorResponse = {
     success: false,
     error: {
@@ -158,7 +130,72 @@ export const errorHandler = (
     errorResponse.error.stack = err.stack;
   }
 
-  res.status(statusCode).json(errorResponse);
+  return errorResponse;
+}
+
+/**
+ * Global error handler middleware.
+ *
+ * Per plan §6.1: always log + Sentry-capture first (even when the response
+ * has already been sent by an inline writer like the timeout middleware) so
+ * post-write errors are not silently dropped. Then, if `res.headersSent`,
+ * delegate to Express's default finalizer via `next(err)` instead of trying
+ * to write a second body.
+ */
+export const errorHandler = (
+  err: Error | ApiError,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void => {
+  // Determine status / code / operational flag once for logging + response.
+  const isApiError = err instanceof ApiError;
+  const statusCode = isApiError ? err.statusCode : 500;
+  const errorCode = isApiError ? err.code : 'INTERNAL_ERROR';
+  const isOperational = isApiError ? err.isOperational : false;
+
+  const logData = {
+    requestId: req.requestId,
+    statusCode,
+    errorCode,
+    message: err.message,
+    path: req.path,
+    method: req.method,
+    isOperational,
+    stack: err.stack,
+    userId: req.user?.id,
+    tenantId: req.tenant?.id || req.user?.tenantId,
+  };
+
+  // 1. Always log (and Sentry-capture for 5xx) — even if headers are already
+  // sent. Otherwise post-timeout failures vanish from observability.
+  if (statusCode >= 500) {
+    logger.error(
+      res.headersSent ? 'Server error (response already sent)' : 'Server error',
+      logData,
+    );
+    Sentry.setContext('request', {
+      requestId: req.requestId,
+      userId: req.user?.id,
+      tenantId: req.tenant?.id || req.user?.tenantId,
+    });
+    Sentry.captureException(err);
+  } else if (statusCode >= 400) {
+    logger.warn(
+      res.headersSent ? 'Client error (response already sent)' : 'Client error',
+      logData,
+    );
+  }
+
+  // 2. If an earlier inline writer (e.g. timeout middleware) has already sent
+  // the response, do NOT write again. Express's default error handler will
+  // close the connection cleanly.
+  if (res.headersSent) {
+    return next(err);
+  }
+
+  // 3. Otherwise produce the envelope and write it.
+  res.status(statusCode).json(buildErrorResponse(err, req));
 };
 
 /**
@@ -187,13 +224,30 @@ export const notFoundHandler = (req: Request, res: Response): void => {
 
 /**
  * Async handler wrapper
- * Wraps async route handlers to catch errors
+ * Wraps async route handlers to catch errors.
+ *
+ * Per plan §4 Phase 0 (codex round 6 #9): a thrown `ZodError` (from
+ * `schema.parse(req.body|req.query)` call sites in `widget-appearance`,
+ * `knowledge`, and `integrations` controllers) is adapted to a
+ * `ValidationError` so the global handler emits 422 / `VALIDATION_ERROR`
+ * with the flattened Zod issues in `error.details` — instead of the default
+ * 500 / `INTERNAL_ERROR` it would otherwise become.
  */
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
 ) => {
   return (req: Request, res: Response, next: NextFunction): void => {
-    Promise.resolve(fn(req, res, next)).catch(next);
+    Promise.resolve(fn(req, res, next)).catch((err) => {
+      if (err instanceof ZodError) {
+        return next(
+          new ValidationError(
+            'Validation failed',
+            err.flatten() as unknown as Record<string, unknown>,
+          ),
+        );
+      }
+      next(err);
+    });
   };
 };
 

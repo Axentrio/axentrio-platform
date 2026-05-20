@@ -10,6 +10,7 @@ import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { Agent } from '../database/entities/Agent';
 import type { RequestUser, UserRole } from '../types';
+import { UnauthorizedError, ForbiddenError } from './error-handler';
 
 export interface AuthenticatedRequest extends Request {
   user?: RequestUser;
@@ -126,15 +127,14 @@ export function refreshTokenRotation(
  */
 export async function authenticateAgent(
   req: AuthenticatedRequest,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Unauthorized: No token provided' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: No token provided'));
     }
 
     const token = authHeader.substring(7);
@@ -142,8 +142,7 @@ export async function authenticateAgent(
 
     // Ensure it's an agent token
     if (payload.type !== 'agent') {
-      res.status(403).json({ error: 'Forbidden: Invalid token type' });
-      return;
+      return next(new ForbiddenError('Forbidden: Invalid token type'));
     }
 
     // Verify agent still exists and is active
@@ -152,8 +151,7 @@ export async function authenticateAgent(
     });
 
     if (!agent) {
-      res.status(401).json({ error: 'Unauthorized: Agent not found or inactive' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: Agent not found or inactive'));
     }
 
     // Attach user info to request
@@ -167,16 +165,16 @@ export async function authenticateAgent(
 
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({ error: 'Unauthorized: Invalid token' });
-      return;
-    }
+    // TokenExpiredError must be checked BEFORE JsonWebTokenError because
+    // TokenExpiredError extends JsonWebTokenError; reversing the order makes
+    // the expired branch unreachable. (codex round 1 #12)
     if (error instanceof jwt.TokenExpiredError) {
-      res.status(401).json({ error: 'Unauthorized: Token expired' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: Token expired'));
     }
-    logger.error('Authentication error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (error instanceof jwt.JsonWebTokenError) {
+      return next(new UnauthorizedError('Unauthorized: Invalid token'));
+    }
+    return next(error as Error);
   }
 }
 
@@ -185,15 +183,14 @@ export async function authenticateAgent(
  */
 export async function authenticateWidget(
   req: AuthenticatedRequest,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: 'Unauthorized: No token provided' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: No token provided'));
     }
 
     const token = authHeader.substring(7);
@@ -201,8 +198,7 @@ export async function authenticateWidget(
 
     // Ensure it's a widget token
     if (payload.type !== 'widget') {
-      res.status(403).json({ error: 'Forbidden: Invalid token type' });
-      return;
+      return next(new ForbiddenError('Forbidden: Invalid token type'));
     }
 
     // Attach user info to request
@@ -223,16 +219,16 @@ export async function authenticateWidget(
 
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      res.status(401).json({ error: 'Unauthorized: Invalid token' });
-      return;
-    }
+    // TokenExpiredError must be checked BEFORE JsonWebTokenError because
+    // TokenExpiredError extends JsonWebTokenError; reversing the order makes
+    // the expired branch unreachable. (codex round 1 #12)
     if (error instanceof jwt.TokenExpiredError) {
-      res.status(401).json({ error: 'Unauthorized: Token expired' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: Token expired'));
     }
-    logger.error('Widget authentication error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (error instanceof jwt.JsonWebTokenError) {
+      return next(new UnauthorizedError('Unauthorized: Invalid token'));
+    }
+    return next(error as Error);
   }
 }
 
@@ -275,11 +271,15 @@ export async function authenticateSocket(
     logger.debug(`Socket authenticated: ${payload.type} - ${payload.userId}`);
     next();
   } catch (error) {
-    if (error instanceof jwt.JsonWebTokenError) {
-      return next(new Error('Authentication error: Invalid token'));
-    }
+    // TokenExpiredError must be checked BEFORE JsonWebTokenError because
+    // TokenExpiredError extends JsonWebTokenError; reversing the order makes
+    // the expired branch unreachable. (codex round 1 #12)
+    // Socket.IO middleware contract: keep next(new Error(...)). (plan §6.3)
     if (error instanceof jwt.TokenExpiredError) {
       return next(new Error('Authentication error: Token expired'));
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      return next(new Error('Authentication error: Invalid token'));
     }
     logger.error('Socket authentication error:', error);
     next(new Error('Authentication error: Internal server error'));
@@ -290,16 +290,14 @@ export async function authenticateSocket(
  * Middleware: Require specific role
  */
 export function requireRole(...allowedRoles: string[]) {
-  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+  return (req: AuthenticatedRequest, _res: Response, next: NextFunction): void => {
     if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized: No user found' });
-      return;
+      return next(new UnauthorizedError('Unauthorized: No user found'));
     }
 
     // super_admin bypasses all role checks
     if (req.user.role !== 'super_admin' && !allowedRoles.includes(req.user.role)) {
-      res.status(403).json({ error: 'Forbidden: Insufficient permissions' });
-      return;
+      return next(new ForbiddenError('Forbidden: Insufficient permissions'));
     }
 
     next();

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
+import { api, extractApiErrorMessage } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 import { toast } from 'sonner';
 
@@ -33,7 +33,10 @@ export function useCreateSkill() {
       toast.success('Skill created');
     },
     onError: (err: Any) => {
-      const msg = err?.response?.data?.error || err?.message || 'Failed to create skill';
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to create skill';
       toast.error(msg);
     },
   });
@@ -49,7 +52,10 @@ export function useUpdateSkill() {
       toast.success('Skill updated');
     },
     onError: (err: Any) => {
-      const msg = err?.response?.data?.error || err?.message || 'Failed to update skill';
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to update skill';
       toast.error(msg);
     },
   });
@@ -64,7 +70,10 @@ export function useDeleteSkill() {
       toast.success('Skill deleted');
     },
     onError: (err: Any) => {
-      const msg = err?.response?.data?.error || err?.message || 'Failed to delete skill';
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to delete skill';
       toast.error(msg);
     },
   });

@@ -46,6 +46,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { extractApiErrorMessage } from '@services/apiClient';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                               */
@@ -387,10 +388,7 @@ const AdminTenants: React.FC = () => {
                       },
                       onError: (error: any) => {
                         setCreateError(
-                          error?.response?.data?.error?.message
-                          || error?.response?.data?.error
-                          || error?.message
-                          || t('admin.tenants.create.errorFallback')
+                          extractApiErrorMessage(error) ?? t('admin.tenants.create.errorFallback')
                         );
                       },
                     }

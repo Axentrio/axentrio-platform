@@ -8,6 +8,11 @@ import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import type { RequestTenant } from '../types';
 import { AuthenticatedRequest, AuthenticatedSocket } from './auth.middleware';
+import {
+  BadRequestError,
+  ForbiddenError,
+  NotFoundError,
+} from './error-handler';
 
 const tenantRepository = AppDataSource.getRepository(Tenant);
 
@@ -51,22 +56,20 @@ function extractTenantId(req: Request): string | null {
  */
 export async function validateTenant(
   req: TenantRequest,
-  res: Response,
+  _res: Response,
   next: NextFunction
 ): Promise<void> {
   try {
     const tenantId = extractTenantId(req);
 
     if (!tenantId) {
-      res.status(400).json({ error: 'Bad Request: Tenant ID required' });
-      return;
+      return next(new BadRequestError('Bad Request: Tenant ID required'));
     }
 
     // Validate UUID format
     const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!uuidRegex.test(tenantId)) {
-      res.status(400).json({ error: 'Bad Request: Invalid tenant ID format' });
-      return;
+      return next(new BadRequestError('Bad Request: Invalid tenant ID format'));
     }
 
     // Fetch tenant from database
@@ -75,22 +78,19 @@ export async function validateTenant(
     });
 
     if (!tenant) {
-      res.status(404).json({ error: 'Not Found: Tenant not found or inactive' });
-      return;
+      return next(new NotFoundError('Not Found: Tenant not found or inactive'));
     }
 
     // For authenticated requests, verify user belongs to tenant
     if (req.user && req.user.tenantId !== tenantId) {
-      res.status(403).json({ error: 'Forbidden: User does not belong to tenant' });
-      return;
+      return next(new ForbiddenError('Forbidden: User does not belong to tenant'));
     }
 
     // Attach tenant to request
     req.tenant = tenant;
     next();
   } catch (error) {
-    logger.error('Tenant validation error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return next(error as Error);
   }
 }
 

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
+import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,7 +46,7 @@ export function useConnectTelegram() {
       toast.success('Telegram bot connected');
     },
     onError: (error: Any) => {
-      toast.error(error?.response?.data?.error || 'Failed to connect Telegram bot');
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to connect Telegram bot');
     },
   });
 }
@@ -82,7 +82,7 @@ export function useConnectMeta() {
       toast.success('Facebook pages connected');
     },
     onError: (error: Any) => {
-      toast.error(error?.response?.data?.error || 'Failed to connect');
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to connect');
     },
   });
 }
@@ -98,7 +98,7 @@ export function useDisconnectChannel() {
       toast.success('Channel disconnected');
     },
     onError: (error: Any) => {
-      toast.error(error?.response?.data?.error || 'Failed to disconnect');
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to disconnect');
     },
   });
 }
@@ -121,7 +121,7 @@ export function useHealthCheckChannel() {
       }
     },
     onError: (error: Any) => {
-      toast.error(error?.response?.data?.error || 'Failed to run health check');
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to run health check');
     },
   });
 }

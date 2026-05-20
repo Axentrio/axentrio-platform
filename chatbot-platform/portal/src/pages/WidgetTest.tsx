@@ -26,6 +26,7 @@ import {
   Palette,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { extractApiErrorMessage } from '@services/apiClient';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 const WS_BASE_URL = import.meta.env.VITE_WS_URL || 'http://localhost:5000';
@@ -584,7 +585,10 @@ const WidgetTest: React.FC = () => {
         });
       } catch (err: any) {
         if (!cancelled) {
-          const msg = err?.response?.data?.message || err?.message || 'Failed to initialise.';
+          const msg =
+            extractApiErrorMessage(err) ??
+            (err instanceof Error ? err.message : undefined) ??
+            'Failed to initialise.';
           addLog('error', msg);
           setError(msg);
         }

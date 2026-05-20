@@ -9,6 +9,7 @@ import {
   useFetchCalcomEventTypes,
   useUpdateIntegrations,
 } from '../../queries/useIntegrationQueries';
+import { extractApiErrorMessage } from '../../services/apiClient';
 
 type State = 'idle' | 'connecting' | 'needs_event_type' | 'pick_event_type' | 'saving' | 'connected' | 'disconnecting';
 
@@ -68,9 +69,10 @@ export const CalcomSettings: React.FC = () => {
       setState('pick_event_type');
       setApiKey('');
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const anyErr = err as any;
-      const msg = anyErr?.response?.data?.error || anyErr?.message || t('settings.integrations.calcom.connectFailed');
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        t('settings.integrations.calcom.connectFailed');
       setConnectError(msg);
       setState('idle');
     }

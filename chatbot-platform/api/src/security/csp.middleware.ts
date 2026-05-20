@@ -13,6 +13,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { randomBytes } from 'crypto';
 import { logger } from '../utils/logger';
+import { BadRequestError } from '../middleware/error-handler';
 
 // ============================================================================
 // Types & Interfaces
@@ -424,12 +425,23 @@ export const reportOnlyCspMiddleware = createCSPMiddleware({
 // CSP Report Handler
 // ============================================================================
 
-export function handleCSPReport(req: Request, res: Response): void {
+/**
+ * CSP violation report endpoint.
+ *
+ * NOTE: This handler is currently UNMOUNTED — exported at module level and
+ * re-exported via the default export, but no `app.use(...)` / `router.post(...)`
+ * site in the codebase wires it up (see plan §3.1 row + round 6 #10). The
+ * signature change to `(req, res, next)` and the `next(new BadRequestError(...))`
+ * are preparatory: when CSP reporting is wired up later, the handler will
+ * already emit the new response envelope via the global error handler.
+ *
+ * Plan reference: api-response-standardization-plan.md §3.1.
+ */
+export function handleCSPReport(req: Request, res: Response, next: NextFunction): void {
   const report: CSPViolationReport = req.body;
 
   if (!report || !report['csp-report']) {
-    res.status(400).json({ error: 'Invalid CSP report' });
-    return;
+    return next(new BadRequestError('Invalid CSP report'));
   }
 
   const cspReport = report['csp-report'];

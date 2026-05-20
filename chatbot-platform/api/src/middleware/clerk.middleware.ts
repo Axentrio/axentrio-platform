@@ -18,6 +18,13 @@ import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
 import { logger } from '../utils/logger';
 import type { RequestUser, UserRole } from '../types';
+import {
+  ApiError,
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+} from './error-handler';
+import { ERROR_CODES } from './error-codes';
 
 export interface ProvisionedRequest extends Request {
   clerkUserId?: string;
@@ -60,7 +67,7 @@ function setCache(orgId: string, userId: string, ids: Omit<CachedIds, 'cachedAt'
 
 // --- Middleware: requireClerkAuth ---
 
-export function requireClerkAuth(req: Request, res: Response, next: NextFunction): void {
+export function requireClerkAuth(req: Request, _res: Response, next: NextFunction): void {
   const auth = getAuth(req);
   logger.debug('Clerk auth check', {
     hasAuth: !!auth,
@@ -70,19 +77,17 @@ export function requireClerkAuth(req: Request, res: Response, next: NextFunction
     hasAuthHeader: !!req.headers.authorization,
   });
   if (!auth?.userId) {
-    res.status(401).json({ error: 'Clerk: Unauthorized - no userId in auth' });
-    return;
+    return next(new UnauthorizedError('Clerk: Unauthorized - no userId in auth'));
   }
   if (!auth.orgId) {
-    res.status(403).json({ error: 'Organization required. Select an organization in the portal.' });
-    return;
+    return next(new ForbiddenError('Organization required. Select an organization in the portal.'));
   }
   next();
 }
 
 // --- Middleware: autoProvision ---
 
-export async function autoProvision(req: ProvisionedRequest, res: Response, next: NextFunction): Promise<void> {
+export async function autoProvision(req: ProvisionedRequest, _res: Response, next: NextFunction): Promise<void> {
   try {
     const auth = getAuth(req);
     const clerkUserId = auth.userId!;
@@ -92,8 +97,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
 
     if (!clerkOrgId) {
       logger.warn('[AutoProvision] No orgId in auth token — user may not have selected an organization');
-      res.status(400).json({ error: 'No organization selected. Please select or create an organization.' });
-      return;
+      return next(new BadRequestError('No organization selected. Please select or create an organization.'));
     }
 
     // Check cache first
@@ -190,8 +194,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
           clerkOrgId,
           error: provisionErr?.message,
         });
-        res.status(500).json({ error: 'Failed to provision tenant' });
-        return;
+        return next(new ApiError('Failed to provision tenant', 500, ERROR_CODES.PROVISIONING_FAILED));
       }
 
       logger.info('Auto-provisioned tenant', { tenantId: tenant.id, orgName });
@@ -216,11 +219,9 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
 
     // --- Block suspended tenants ---
     if (tenant.status === 'suspended') {
-      res.status(403).json({
-        error: 'Organization suspended',
-        code: 'TENANT_SUSPENDED',
-      });
-      return;
+      // Use ApiError (not ForbiddenError) because we need a custom `code`;
+      // ForbiddenError's constructor has no code parameter. (plan §2.2)
+      return next(new ApiError('Organization suspended', 403, ERROR_CODES.TENANT_SUSPENDED));
     }
 
     // --- Resolve User ---
@@ -300,8 +301,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
 
         user = await userRepo.findOne({ where: { clerkUserId } });
         if (!user) {
-          res.status(500).json({ error: 'Failed to provision user' });
-          return;
+          return next(new ApiError('Failed to provision user', 500, ERROR_CODES.PROVISIONING_FAILED));
         }
         logger.info('Auto-provisioned user', { userId: user.id, email, role });
       }
@@ -352,8 +352,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
 
       agent = await agentRepo.findOne({ where: { userId: user.id } });
       if (!agent) {
-        res.status(500).json({ error: 'Failed to provision agent' });
-        return;
+        return next(new ApiError('Failed to provision agent', 500, ERROR_CODES.PROVISIONING_FAILED));
       }
       logger.info('Auto-provisioned agent', { agentId: agent.id, userId: user.id });
     }
@@ -373,7 +372,7 @@ export async function autoProvision(req: ProvisionedRequest, res: Response, next
     next();
   } catch (error) {
     logger.error('Auto-provisioning error', { error });
-    res.status(500).json({ error: 'Internal server error' });
+    return next(error as Error);
   }
 }
 

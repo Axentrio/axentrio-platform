@@ -1,15 +1,14 @@
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query';
 import { AxiosError } from 'axios';
 import { toast } from 'sonner';
+import { extractApiErrorMessage } from '../services/apiClient';
 
 function extractErrorMessage(error: unknown): string {
-  if (error instanceof AxiosError) {
-    const data = error.response?.data;
-    if (data?.error?.message) return data.error.message;
-    if (typeof data?.error === 'string') return data.error;
-    return error.message;
-  }
-  return error instanceof Error ? error.message : 'An unexpected error occurred';
+  return (
+    extractApiErrorMessage(error) ??
+    (error instanceof Error ? error.message : undefined) ??
+    'An unexpected error occurred'
+  );
 }
 
 export function createQueryClient(): QueryClient {

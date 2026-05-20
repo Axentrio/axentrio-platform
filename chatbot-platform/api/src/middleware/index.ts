@@ -3,6 +3,7 @@
  * Export all middleware functions
  */
 import { Request, Response, NextFunction } from 'express';
+import { ForbiddenError } from './error-handler';
 
 export {
   authenticateAgent,
@@ -48,10 +49,9 @@ export { authenticateAgent as authenticateJwt } from './auth.middleware';
 export { rateLimitByIp as loginRateLimiter } from './rate-limit.middleware';
 
 // Alias for admin role check
-export function requireAdmin(req: Request, res: Response, next: NextFunction): void {
+export function requireAdmin(req: Request, _res: Response, next: NextFunction): void {
   if (!req.user || (req.user.role !== 'admin' && req.user.role !== 'super_admin')) {
-    res.status(403).json({ error: 'Forbidden: Admin access required' });
-    return;
+    return next(new ForbiddenError('Admin access required'));
   }
   next();
 }

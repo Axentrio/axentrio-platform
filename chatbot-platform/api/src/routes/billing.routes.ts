@@ -31,6 +31,7 @@
 
 import { NextFunction, Request, Response, Router } from 'express';
 import { ApiError, asyncHandler } from '../middleware/error-handler';
+import { BILLING_ERROR_STATUS } from '../middleware/error-codes';
 import { autoProvision, requireClerkAuth } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validate } from '../middleware/validate';
@@ -85,30 +86,11 @@ router.use(
   resolveTenantContext,
 );
 
-/**
- * Map service-layer `BillingProviderError.code` → HTTP status. Codes outside
- * the table fall through to 500 (a genuine unexpected provider failure).
- *
- * Conflict (409) is used for two cases where the client *can* recover by
- * looking at fresh state — there's an existing subscription, or a pending
- * change is already in flight. Everything else is 400 (precondition not
- * met, bad input).
- */
-const BILLING_ERROR_STATUS: Record<string, number> = {
-  no_stripe_subscription: 400,
-  no_active_account: 400,
-  past_due_block: 400,
-  checkout_plan_invalid: 400,
-  billing_email_unresolvable: 400,
-  no_op_plan_change: 400,
-  no_pending_change: 400,
-  subscription_shape_unexpected: 400,
-  subscription_exists: 409,
-  pending_change_exists: 409,
-};
-
 function billingErrorToApiError(err: BillingProviderError): ApiError {
-  const status = BILLING_ERROR_STATUS[err.code] ?? 500;
+  // Map service-layer BillingProviderError.code → HTTP status via the shared
+  // table in `middleware/error-codes.ts`. Codes outside the table fall
+  // through to 500 (a genuine unexpected provider failure).
+  const status = BILLING_ERROR_STATUS[err.code as keyof typeof BILLING_ERROR_STATUS] ?? 500;
   return new ApiError(err.message, status, err.code, {
     providerName: err.providerName,
     ...(err.meta ?? {}),

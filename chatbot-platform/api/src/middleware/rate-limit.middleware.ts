@@ -9,10 +9,39 @@ import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import type { AuthenticatedRequest as _AuthenticatedRequest } from './auth.middleware';
 import { TenantRequest } from './tenant.middleware';
+import { ApiError, RateLimitError } from './error-handler';
+import { ERROR_CODES } from './error-codes';
 
 // Rate limiter configurations
 const RATE_LIMIT_WINDOW_MS = config.rateLimit.windowMs;
 const RATE_LIMIT_MAX_REQUESTS = config.rateLimit.maxRequests;
+
+/**
+ * Paths that must keep the LEGACY 429 body shape
+ *   `{ error: 'Too Many Requests', retryAfter, message: '...' }`
+ * even after the response-envelope migration (plan §10, decision (a)).
+ *
+ * These middlewares front everything inside `apiRouter`, including OOS
+ * integration endpoints (n8n inbound, channel webhooks, RAG, booking). The
+ * carve-out changes ONLY the response body wire shape — rate limiting still
+ * enforces, `Retry-After` is still set. Match on `req.originalUrl` (NOT
+ * `req.path`) because these limiters run inside `apiRouter` (codex round 5 #3).
+ *
+ * See `timeout.middleware.ts` for the same list and per-path rationale.
+ */
+const LEGACY_ENVELOPE_PATHS = [
+  /^\/api\/v1\/webhooks\/inbound(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/health(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/events(\?|$|\/)/,
+  /^\/api\/v1\/internal\/rag(\?|$|\/)/,
+  /^\/api\/v1\/internal\/booking(\?|$|\/)/,
+  /^\/api\/v1\/channels\/[^/?]+\/webhook(\?|$|\/)/,
+] as const;
+
+function shouldUseLegacyEnvelope(req: Request): boolean {
+  const url = req.originalUrl;
+  return LEGACY_ENVELOPE_PATHS.some((re) => re.test(url));
+}
 
 // In-memory fallback counter for when Redis rate limiter encounters errors.
 // This prevents completely failing open when the primary limiter breaks.
@@ -97,6 +126,31 @@ function getClientIp(req: Request): string {
 }
 
 /**
+ * Emit the legacy 429 body shape for OOS integration endpoints. Preserves the
+ * `retryAfter` + `message` keys that downstream provider parsers (n8n,
+ * channel-webhook tooling) may key off. `Retry-After` header is still set by
+ * the caller when an estimate is available.
+ */
+function emitLegacy429(
+  res: Response,
+  message: string,
+  retryAfter?: number,
+): void {
+  if (typeof retryAfter === 'number') {
+    res.status(429).json({
+      error: 'Too Many Requests',
+      retryAfter,
+      message,
+    });
+    return;
+  }
+  res.status(429).json({
+    error: 'Too Many Requests',
+    message,
+  });
+}
+
+/**
  * HTTP Middleware: Rate limit by IP address
  */
 export function rateLimitByIp(
@@ -118,20 +172,28 @@ export function rateLimitByIp(
         if (fallbackConsume(`ip:${clientIp}`, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS)) {
           return next();
         }
-        res.status(429).json({
-          error: 'Too Many Requests',
-          message: 'Rate limit exceeded (fallback). Please try again later.',
-        });
-        return;
+        if (shouldUseLegacyEnvelope(req)) {
+          emitLegacy429(res, 'Rate limit exceeded (fallback). Please try again later.');
+          return;
+        }
+        return next(
+          new ApiError(
+            'Rate limit exceeded (fallback). Please try again later.',
+            429,
+            ERROR_CODES.RATE_LIMIT_FALLBACK,
+          ),
+        );
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
       res.setHeader('Retry-After', retryAfter.toString());
-      res.status(429).json({
-        error: 'Too Many Requests',
-        retryAfter,
-        message: 'Rate limit exceeded. Please try again later.',
-      });
+      if (shouldUseLegacyEnvelope(req)) {
+        emitLegacy429(res, 'Rate limit exceeded. Please try again later.', retryAfter);
+        return;
+      }
+      return next(
+        new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
+      );
     });
 }
 
@@ -162,20 +224,28 @@ export function rateLimitByTenant(
         if (fallbackConsume(`tenant:${tenantId}`, RATE_LIMIT_MAX_REQUESTS * 2, RATE_LIMIT_WINDOW_MS)) {
           return next();
         }
-        res.status(429).json({
-          error: 'Too Many Requests',
-          message: 'Tenant rate limit exceeded (fallback). Please try again later.',
-        });
-        return;
+        if (shouldUseLegacyEnvelope(req)) {
+          emitLegacy429(res, 'Tenant rate limit exceeded (fallback). Please try again later.');
+          return;
+        }
+        return next(
+          new ApiError(
+            'Rate limit exceeded (fallback). Please try again later.',
+            429,
+            ERROR_CODES.RATE_LIMIT_FALLBACK,
+          ),
+        );
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
       res.setHeader('Retry-After', retryAfter.toString());
-      res.status(429).json({
-        error: 'Too Many Requests',
-        retryAfter,
-        message: 'Tenant rate limit exceeded. Please try again later.',
-      });
+      if (shouldUseLegacyEnvelope(req)) {
+        emitLegacy429(res, 'Tenant rate limit exceeded. Please try again later.', retryAfter);
+        return;
+      }
+      return next(
+        new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
+      );
     });
 }
 
@@ -203,20 +273,28 @@ export function rateLimitWidget(
         if (fallbackConsume(`widget:${key}`, 50, RATE_LIMIT_WINDOW_MS)) {
           return next();
         }
-        res.status(429).json({
-          error: 'Too Many Requests',
-          message: 'Widget rate limit exceeded (fallback). Please try again later.',
-        });
-        return;
+        if (shouldUseLegacyEnvelope(req)) {
+          emitLegacy429(res, 'Widget rate limit exceeded (fallback). Please try again later.');
+          return;
+        }
+        return next(
+          new ApiError(
+            'Rate limit exceeded (fallback). Please try again later.',
+            429,
+            ERROR_CODES.RATE_LIMIT_FALLBACK,
+          ),
+        );
       }
 
       const retryAfter = Math.ceil(rateLimiterRes.msBeforeNext / 1000);
       res.setHeader('Retry-After', retryAfter.toString());
-      res.status(429).json({
-        error: 'Too Many Requests',
-        retryAfter,
-        message: 'Widget rate limit exceeded. Please try again later.',
-      });
+      if (shouldUseLegacyEnvelope(req)) {
+        emitLegacy429(res, 'Widget rate limit exceeded. Please try again later.', retryAfter);
+        return;
+      }
+      return next(
+        new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
+      );
     });
 }
 
@@ -256,20 +334,28 @@ export function rateLimit(
           if (fallbackConsume(fallbackKey, RATE_LIMIT_MAX_REQUESTS, RATE_LIMIT_WINDOW_MS)) {
             return next();
           }
-          res.status(429).json({
-            error: 'Too Many Requests',
-            message: 'Rate limit exceeded (fallback). Please try again later.',
-          });
-          return;
+          if (shouldUseLegacyEnvelope(req)) {
+            emitLegacy429(res, 'Rate limit exceeded (fallback). Please try again later.');
+            return;
+          }
+          return next(
+            new ApiError(
+              'Rate limit exceeded (fallback). Please try again later.',
+              429,
+              ERROR_CODES.RATE_LIMIT_FALLBACK,
+            ),
+          );
         }
 
         const retryAfter = Math.ceil(error.msBeforeNext / 1000);
         res.setHeader('Retry-After', retryAfter.toString());
-        res.status(429).json({
-          error: 'Too Many Requests',
-          retryAfter,
-          message: 'Rate limit exceeded. Please try again later.',
-        });
+        if (shouldUseLegacyEnvelope(req)) {
+          emitLegacy429(res, 'Rate limit exceeded. Please try again later.', retryAfter);
+          return;
+        }
+        return next(
+          new RateLimitError('Rate limit exceeded. Please try again later.', { retryAfter }),
+        );
       });
   };
 }

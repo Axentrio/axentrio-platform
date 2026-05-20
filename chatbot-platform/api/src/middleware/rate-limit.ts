@@ -7,11 +7,38 @@ import { Request, Response, NextFunction } from 'express';
 import { getRedisClient } from '../config/redis';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
+import { RateLimitError } from './error-handler';
 
 // Helper functions
 const redisKeys = {
   rateLimit: (key: string) => `rl:${key}`,
 };
+
+/**
+ * OOS body-shape carve-out (plan §10). See `rate-limit.middleware.ts` and
+ * `timeout.middleware.ts` for the same list and rationale. The limiters in
+ * THIS file are exported as named instances (`apiRateLimiter`,
+ * `widgetRateLimiter`, etc.) and applied per-route via `app.use(...)` /
+ * `router.use(...)`. They can also front OOS routes when wired that way, so
+ * we apply the same carve-out to keep behavior uniform across both rate-limit
+ * modules.
+ *
+ * Match on `req.originalUrl` — see codex round 5 #3 for the mount-relativity
+ * reasoning.
+ */
+const LEGACY_ENVELOPE_PATHS = [
+  /^\/api\/v1\/webhooks\/inbound(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/health(\?|$|\/)/,
+  /^\/api\/v1\/webhooks\/events(\?|$|\/)/,
+  /^\/api\/v1\/internal\/rag(\?|$|\/)/,
+  /^\/api\/v1\/internal\/booking(\?|$|\/)/,
+  /^\/api\/v1\/channels\/[^/?]+\/webhook(\?|$|\/)/,
+] as const;
+
+function shouldUseLegacyEnvelope(req: Request): boolean {
+  const url = req.originalUrl;
+  return LEGACY_ENVELOPE_PATHS.some((re) => re.test(url));
+}
 
 // Rate limit configuration interface
 interface RateLimitConfig {
@@ -62,17 +89,21 @@ const createRedisRateLimiter = (config: RateLimitConfig) => {
           count,
         });
 
-        res.status(429).json({
-          success: false,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Too many requests, please try again later',
-            details: {
-              retryAfter: ttl,
-            },
-          },
-        });
-        return;
+        if (shouldUseLegacyEnvelope(req)) {
+          // OOS carve-out: preserve legacy 429 body for provider-integration
+          // endpoints. `Retry-After` header is already set above (L54-equivalent).
+          res.status(429).json({
+            error: 'Too Many Requests',
+            retryAfter: ttl,
+            message: 'Rate limit exceeded. Please try again later.',
+          });
+          return;
+        }
+        return next(
+          new RateLimitError('Rate limit exceeded. Please try again later.', {
+            retryAfter: ttl,
+          }),
+        );
       }
 
       // Increment counter
@@ -205,20 +236,26 @@ export const slidingWindowLimiter = (maxRequests: number, windowMs: number) => {
       if (count >= maxRequests) {
         const oldest = await redis.zrange(key, 0, 0, 'WITHSCORES');
         const resetTime = parseInt(oldest[1], 10) + windowMs;
+        const retryAfter = Math.ceil((resetTime - now) / 1000);
 
-        res.setHeader('Retry-After', Math.ceil((resetTime - now) / 1000).toString());
+        res.setHeader('Retry-After', retryAfter.toString());
         res.setHeader('X-RateLimit-Limit', maxRequests.toString());
         res.setHeader('X-RateLimit-Remaining', '0');
         res.setHeader('X-RateLimit-Reset', resetTime.toString());
 
-        res.status(429).json({
-          success: false,
-          error: {
-            code: 'RATE_LIMIT_EXCEEDED',
-            message: 'Too many requests, please try again later',
-          },
-        });
-        return;
+        if (shouldUseLegacyEnvelope(req)) {
+          res.status(429).json({
+            error: 'Too Many Requests',
+            retryAfter,
+            message: 'Rate limit exceeded. Please try again later.',
+          });
+          return;
+        }
+        return next(
+          new RateLimitError('Rate limit exceeded. Please try again later.', {
+            retryAfter,
+          }),
+        );
       }
 
       // Add current request

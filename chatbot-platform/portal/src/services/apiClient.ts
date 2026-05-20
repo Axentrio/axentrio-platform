@@ -125,19 +125,44 @@ export const api = {
     apiClient.delete<T>(url, config).then((res) => res.data),
 };
 
+// Strictly extracts the server-side error string from an Axios response body. Returns
+// undefined for:
+//   - non-Axios errors (callers chain their own `err.message` / hardcoded fallback)
+//   - Axios errors without `response` (network/timeout — caller falls back to err.message,
+//     which axios sets to "Network Error" / "timeout of Xms exceeded")
+//   - Axios responses with no extractable string in the body (caller falls back)
+// Precedence inside the response body:
+//   1. data.error.message (new envelope) — most specific server message.
+//   2. data.message (legacy bodies that emit both `error: 'short'` and `message: 'detail'`,
+//      e.g. today's rate-limit body. Picking message before string-error gives the more
+//      useful copy "Rate limit exceeded. Please try again later." instead of "Too Many Requests".)
+//   3. data.error as string (legacy string-only error bodies).
+export function extractApiErrorMessage(error: unknown): string | undefined {
+  if (!axios.isAxiosError(error)) return undefined;
+  if (!error.response) return undefined; // network/timeout — caller falls back to err.message
+  const data = error.response.data as
+    | { error?: string | { message?: string; code?: string }; message?: string }
+    | undefined;
+  if (data?.error && typeof data.error === 'object' && typeof data.error.message === 'string') {
+    return data.error.message;
+  }
+  if (typeof data?.message === 'string') return data.message;
+  if (typeof data?.error === 'string') return data.error;
+  return undefined;
+}
+
 // Error handler
 export const handleApiError = (error: unknown): string => {
+  const serverMessage = extractApiErrorMessage(error);
+  if (serverMessage) return serverMessage;
   if (axios.isAxiosError(error)) {
-    const axiosError = error as AxiosError<{ message?: string; error?: string }>;
-
-    if (axiosError.response) {
-      const data = axiosError.response.data;
-      return data?.message || data?.error || `Error ${axiosError.response.status}: ${axiosError.response.statusText}`;
-    } else if (axiosError.request) {
+    if (error.response) {
+      return `Error ${error.response.status}: ${error.response.statusText}`;
+    }
+    if (error.request) {
       return 'Network error. Please check your connection.';
     }
   }
-
   return 'An unexpected error occurred.';
 };
 

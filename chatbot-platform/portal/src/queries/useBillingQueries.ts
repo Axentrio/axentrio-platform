@@ -10,7 +10,7 @@
 import { useMutation, useQuery, useQueryClient, queryOptions } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AxiosError } from 'axios';
-import { api } from '../services/apiClient';
+import { api, extractApiErrorMessage } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
 export type BillingTier = 'free' | 'pro' | 'premium' | 'enterprise';
@@ -58,11 +58,15 @@ export function useBillingState() {
 }
 
 function describeBillingError(err: unknown): string {
+  const serverMessage = extractApiErrorMessage(err);
+  if (serverMessage) return serverMessage;
   if (err instanceof AxiosError) {
+    // Fall back to the code (when the envelope omits a human message) before
+    // axios's generic "Network Error" / status-text string.
     const data = err.response?.data as
-      | { error?: { code?: string; message?: string } }
+      | { error?: { code?: string } }
       | undefined;
-    return data?.error?.message || data?.error?.code || err.message;
+    return data?.error?.code || err.message;
   }
   return err instanceof Error ? err.message : 'Unknown error';
 }

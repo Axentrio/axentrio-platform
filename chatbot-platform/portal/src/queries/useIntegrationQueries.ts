@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { api } from '../services/apiClient';
+import { api, extractApiErrorMessage } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 import { toast } from 'sonner';
 
@@ -45,7 +45,10 @@ export function useConnectCalcom() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
     },
     onError: (err: Any) => {
-      const msg = err?.response?.data?.error || err?.message || 'Failed to connect';
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to connect';
       toast.error(msg);
     },
   });
@@ -55,7 +58,10 @@ export function useFetchCalcomEventTypes() {
   return useMutation({
     mutationFn: () => api.get<Any>('/tenants/me/integrations/calcom/event-types'),
     onError: (err: Any) => {
-      const msg = err?.response?.data?.error || err?.message || 'Failed to fetch event types';
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to fetch event types';
       toast.error(msg);
     },
   });

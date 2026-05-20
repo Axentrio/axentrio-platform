@@ -55,7 +55,7 @@ export function timeoutMiddleware(timeoutMs: number = 30000) {
           // Preserve the legacy 503 body for OOS integration endpoints
           // (plan §10 carve-out). Same status, same Retry semantics — only the
           // body shape diverges from the new envelope to keep contracts intact.
-          res.status(503).json({ error: 'Request timeout' });
+          res.status(503).json({ error: 'Request timeout' }); // envelope-allow: OOS legacy 503 (plan §10)
           return;
         }
 

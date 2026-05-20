@@ -137,14 +137,14 @@ function emitLegacy429(
   retryAfter?: number,
 ): void {
   if (typeof retryAfter === 'number') {
-    res.status(429).json({
+    res.status(429).json({ // envelope-allow: OOS legacy 429 (plan §10)
       error: 'Too Many Requests',
       retryAfter,
       message,
     });
     return;
   }
-  res.status(429).json({
+  res.status(429).json({ // envelope-allow: OOS legacy 429 (plan §10)
     error: 'Too Many Requests',
     message,
   });

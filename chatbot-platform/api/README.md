@@ -130,6 +130,88 @@ Two non-obvious wiring rules that the billing layer depends on:
 
 2. **Boot-time fail-fast on missing Stripe config.** `src/config/environment.ts` validates the four Stripe variables on import and calls `process.exit(1)` if any is empty (outside `NODE_ENV=test`). This is by design — running with placeholder keys would silently break checkout, webhooks, and customer-portal flows. To run the API without real Stripe credentials (CI smoke tests, etc.), set `NODE_ENV=test`.
 
+## Response Envelope Convention
+
+Every portal-facing JSON endpoint emits one of two shapes. Handlers don't write `res.json(...)` directly — they call a helper from `utils/response.ts` or `throw` a typed error from `middleware/error-handler.ts`. The global `errorHandler` does the rest.
+
+### Success
+
+```ts
+import { sendSuccess, sendCreated, sendPaginated, sendNoContent } from '@/utils/response';
+
+sendSuccess(res, { agent });                                   // 200  { success, data }
+sendCreated(res, { agent });                                   //  201
+sendPaginated(res, items, { page, limit, total, totalPages }); // 200  { success, data, meta:{pagination} }
+sendNoContent(res);                                            // 204  empty body
+```
+
+Convention rules:
+- `sendSuccess(res, null)` is legal only for documented null-as-empty-state endpoints (e.g. `getAiSettings` when AI isn't configured). Confirm portal callers tolerate `null` before using.
+- `sendSuccess(res, undefined)` is forbidden — the portal interceptor unwraps to `undefined`, breaking caller destructuring. For handlers with no payload use `sendSuccess(res, { message: '...' })`.
+- Status preservation: 200 → `sendSuccess`, 201 → `sendCreated`, 204 → `sendNoContent`, paginated → `sendPaginated`.
+
+### Errors
+
+```ts
+import {
+  BadRequestError,
+  UnauthorizedError,
+  ForbiddenError,
+  NotFoundError,
+  ConflictError,
+  ValidationError,
+  RateLimitError,
+  ApiError,
+} from '@/middleware/error-handler';
+import { ERROR_CODES } from '@/middleware/error-codes';
+
+throw new BadRequestError('Tenant ID required');
+throw new NotFoundError('Widget not found');
+throw new RateLimitError('Too many requests', { retryAfter: 30 });
+
+// Custom code? `UnauthorizedError`/`ForbiddenError`/`NotFoundError`
+// constructors DO NOT accept details — use `ApiError`:
+throw new ApiError('Organization suspended', 403, ERROR_CODES.TENANT_SUSPENDED);
+throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
+```
+
+Async handlers must be wrapped in `asyncHandler` so thrown errors propagate. `asyncHandler` also converts a `ZodError` from `schema.parse(...)` into a `ValidationError` with the flattened issues in `error.details.fieldErrors` — bad input lands as `422 / VALIDATION_ERROR`, not 500.
+
+Every error response carries:
+
+```jsonc
+{
+  "success": false,
+  "error": { "code": "NOT_FOUND", "message": "...", "details": {…} },
+  "meta": { "timestamp": "…", "requestId": "req_…", "path": "/api/v1/…" }
+}
+```
+
+The `requestId` makes Sentry / log correlation a one-step lookup for support.
+
+### Out-of-scope endpoints (preserve legacy shapes)
+
+These intentionally do NOT emit the envelope — provider-integration contracts or browser flows:
+- Webhook receivers: `webhooks/billing-webhook.routes.ts`, `channels/meta/webhook.routes.ts`, `channels/channel-webhook.routes.ts`, n8n inbound + `/events`.
+- OAuth callback redirects: `channels/meta/oauth.routes.ts` `res.redirect(...?error=...)`.
+- `server.ts /health` Railway probe.
+- The unmounted `file-handling/upload.controller.ts` (Phase 5C cleanup-only).
+
+Rate-limit and timeout middlewares carry a `req.originalUrl` carve-out so 429/503 responses on the above paths keep their legacy body shape — the carve-out is body-shape only, not bypass.
+
+### Guardrail
+
+A grep-based pre-commit / CI check lives at:
+```bash
+chatbot-platform/api/scripts/check-envelope-conventions.sh
+```
+It bans `res.json({ error })`, `res.json({ success: true })`, and `res.status(N).json({ literal })` outside the allow-list. For legitimate carve-outs add an inline marker on the emit line:
+```ts
+res.status(429).json({ /* ... */ }); // envelope-allow: OOS legacy 429 (plan §10)
+```
+
+See [ADR 0011](../../docs/adr/0011-api-response-envelope.md) and [the migration plan](../docs/api-response-standardization-plan.md) for the full audit + the 6-round codex review that produced the contract.
+
 ## API Endpoints
 
 ### Authentication

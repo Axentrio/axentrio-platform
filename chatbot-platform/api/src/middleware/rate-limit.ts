@@ -92,7 +92,7 @@ const createRedisRateLimiter = (config: RateLimitConfig) => {
         if (shouldUseLegacyEnvelope(req)) {
           // OOS carve-out: preserve legacy 429 body for provider-integration
           // endpoints. `Retry-After` header is already set above (L54-equivalent).
-          res.status(429).json({
+          res.status(429).json({ // envelope-allow: OOS legacy 429 (plan §10)
             error: 'Too Many Requests',
             retryAfter: ttl,
             message: 'Rate limit exceeded. Please try again later.',
@@ -244,7 +244,7 @@ export const slidingWindowLimiter = (maxRequests: number, windowMs: number) => {
         res.setHeader('X-RateLimit-Reset', resetTime.toString());
 
         if (shouldUseLegacyEnvelope(req)) {
-          res.status(429).json({
+          res.status(429).json({ // envelope-allow: OOS legacy 429 (plan §10)
             error: 'Too Many Requests',
             retryAfter,
             message: 'Rate limit exceeded. Please try again later.',

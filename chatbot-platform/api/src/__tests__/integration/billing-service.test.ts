@@ -349,7 +349,7 @@ describe('changePlan validation chain', () => {
     //   })
     await changePlan(tenantId, 'premium');
     expect(updateMock).toHaveBeenCalledOnce();
-    const [subId, payload] = updateMock.mock.calls[0]!;
+    const [subId, payload] = updateMock.mock.calls[0]! as unknown as [string, unknown];
     expect(subId).toBe('sub_change');
     expect(payload).toMatchObject({
       items: [{ id: 'si_REAL_ID', price: 'price_test_premium' }],

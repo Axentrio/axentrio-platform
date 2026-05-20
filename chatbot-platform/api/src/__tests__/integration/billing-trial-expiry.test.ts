@@ -9,7 +9,7 @@
  *   - Daily sweep: orphaned trial → selects and downgrades.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';

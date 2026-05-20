@@ -31,7 +31,6 @@ function makeProvider() {
 }
 
 const PRO_PRICE = PLANS.pro.providerPriceIds.stripe.usd;
-const PREMIUM_PRICE = PLANS.premium.providerPriceIds.stripe.usd;
 
 interface StripeSubscriptionPayload {
   id: string;

@@ -21,7 +21,7 @@ import { Tenant } from '../../database/entities/Tenant';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 import { handleNormalizedEvent, resolveEventRow } from '../../billing/events';
 import { PLANS } from '../../billing/plans';
-import { NormalizedEvent } from '../../billing/types';
+import { NormalizedEvent, NormalizedStatus } from '../../billing/types';
 import {
   createTestTenant,
   createTestBillingAccount,
@@ -44,7 +44,7 @@ function makeSubscriptionEvent(opts: {
   cancelAtPeriodEnd?: boolean;
   currentPeriodEnd?: number;
 }): NormalizedEvent {
-  const normalizedStatusMap: Record<string, NormalizedEvent['subscription'] extends infer X ? X extends null ? never : NonNullable<X>['status'] : never> = {
+  const normalizedStatusMap: Record<string, NormalizedStatus> = {
     trialing: 'trialing',
     active: 'active',
     past_due: 'past_due',
@@ -53,7 +53,7 @@ function makeSubscriptionEvent(opts: {
     canceled: 'cancelled',
     incomplete: 'none',
     incomplete_expired: 'cancelled',
-  } as never;
+  };
   const status = normalizedStatusMap[opts.stripeStatus] ?? 'none';
   const priceId = opts.priceId ?? PRO_PRICE;
   const planId =

@@ -26,10 +26,8 @@ import { createTestTenant, createTestBillingAccount } from '../helpers/factories
 describe('Migration AddBillingTables', () => {
   it('down() throws — migration is irreversible by design', async () => {
     const migration = new AddBillingTables1780400000000();
-    // queryRunner argument is ignored — the throw happens before any work.
-    await expect(
-      migration.down(AppDataSource.createQueryRunner()),
-    ).rejects.toThrow(/irreversible/i);
+    // down() takes no args and throws unconditionally.
+    await expect(migration.down()).rejects.toThrow(/irreversible/i);
   });
 });
 

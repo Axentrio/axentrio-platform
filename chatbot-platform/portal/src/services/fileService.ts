@@ -1,106 +1,20 @@
 /**
  * File Service
- * API methods for file operations
+ *
+ * Display-side file utilities. The upload/download/preview methods that
+ * used to live here have been deleted because no portal code consumed
+ * them — the actual file-upload flow the portal supports goes through
+ * `useKnowledgeQueries.useUploadFile()` → `/knowledge/documents/upload`,
+ * not `/files/*`. The widget has its own (currently broken) upload path
+ * — see `chatbot-platform/docs/widget-file-upload-status.md` for the
+ * follow-up plan.
+ *
+ * Only `formatFileSize` remains because `FilePreview.tsx` uses it to
+ * render attachment metadata in the chat UI.
  */
 
-import apiClient, { api } from './apiClient';
-import { ENDPOINTS } from '@config/api.config';
-import type { ApiResponse } from '@app-types/index';
-
-interface UploadResponse {
-  fileId: string;
-  url: string;
-  name: string;
-  type: string;
-  size: number;
-}
-
-interface PreviewResponse {
-  url: string;
-  name: string;
-  type: string;
-  size: number;
-}
-
 export const fileService = {
-  // Upload file
-  uploadFile: async (file: File, onProgress?: (progress: number) => void): Promise<ApiResponse<UploadResponse>> => {
-    const formData = new FormData();
-    formData.append('file', file);
-
-    return api.post(ENDPOINTS.files.upload, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-      onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
-          onProgress(progress);
-        }
-      },
-    });
-  },
-
-  // Get file preview URL
-  getPreview: async (fileId: string): Promise<ApiResponse<PreviewResponse>> => {
-    return api.get(ENDPOINTS.files.preview(fileId));
-  },
-
-  // Download file
-  downloadFile: async (fileId: string, fileName?: string): Promise<void> => {
-    const response = await apiClient.get(ENDPOINTS.files.download(fileId), {
-      responseType: 'blob',
-    });
-
-    const blob = response.data as Blob;
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName || 'download';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  },
-
-  // Validate file
-  validateFile: (file: File, allowedTypes?: string[], maxSize?: number): { valid: boolean; error?: string } => {
-    // Check file size (default 10MB)
-    const maxFileSize = maxSize || 10 * 1024 * 1024;
-    if (file.size > maxFileSize) {
-      return { valid: false, error: `File size exceeds ${maxFileSize / 1024 / 1024}MB limit` };
-    }
-
-    // Check file type if specified
-    if (allowedTypes && allowedTypes.length > 0) {
-      const isAllowed = allowedTypes.some((type) => {
-        if (type.endsWith('/*')) {
-          return file.type.startsWith(type.replace('/*', ''));
-        }
-        return file.type === type;
-      });
-
-      if (!isAllowed) {
-        return { valid: false, error: 'File type not allowed' };
-      }
-    }
-
-    return { valid: true };
-  },
-
-  // Get file icon based on type
-  getFileIcon: (fileType: string): string => {
-    if (fileType.startsWith('image/')) return 'image';
-    if (fileType.startsWith('video/')) return 'video';
-    if (fileType.startsWith('audio/')) return 'audio';
-    if (fileType === 'application/pdf') return 'pdf';
-    if (fileType.includes('word')) return 'word';
-    if (fileType.includes('excel') || fileType.includes('spreadsheet')) return 'excel';
-    if (fileType.includes('powerpoint') || fileType.includes('presentation')) return 'powerpoint';
-    return 'file';
-  },
-
-  // Format file size
+  // Format file size for display.
   formatFileSize: (bytes: number): string => {
     if (bytes === 0) return '0 Bytes';
     const k = 1024;

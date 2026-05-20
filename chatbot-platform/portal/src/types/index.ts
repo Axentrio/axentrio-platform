@@ -381,9 +381,3 @@ export interface FileUpload {
   error?: string;
 }
 
-export interface FilePreview {
-  url: string;
-  name: string;
-  type: string;
-  size: number;
-}

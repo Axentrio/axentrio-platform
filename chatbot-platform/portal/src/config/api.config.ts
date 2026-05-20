@@ -94,13 +94,6 @@ export const ENDPOINTS = {
     export: '/analytics/export',
   },
   
-  // Files
-  files: {
-    upload: '/files/upload',
-    preview: (id: string) => `/files/${id}/preview`,
-    download: (id: string) => `/files/${id}/download`,
-  },
-  
   // Notifications
   notifications: {
     base: '/notifications',

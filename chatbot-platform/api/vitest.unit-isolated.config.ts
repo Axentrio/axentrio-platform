@@ -16,6 +16,7 @@ export default defineConfig({
       'src/__tests__/integration/rate-limit-wire.test.ts',
       'src/__tests__/integration/route-phase3a-wire.test.ts',
       'src/__tests__/integration/route-phase3b-wire.test.ts',
+      'src/__tests__/integration/route-phase4-tenants-wire.test.ts',
       'src/__tests__/integration/envelope-gap-coverage.test.ts',
       'src/__tests__/integration/envelope-dev-mode.test.ts',
     ],

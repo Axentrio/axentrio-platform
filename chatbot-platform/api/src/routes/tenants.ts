@@ -14,7 +14,9 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { PendingInvite } from '../database/entities/PendingInvite';
-import { requireAdmin, asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { requireAdmin, asyncHandler, ValidationError, NotFoundError, BadRequestError, ApiError } from '../middleware';
+import { ERROR_CODES } from '../middleware/error-codes';
+import { sendSuccess, sendCreated } from '../utils/response';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
 import { inviteToClerkOrganization, revokeAndResendClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
@@ -69,25 +71,22 @@ router.get(
       .andWhere('s.deleted_at IS NULL')
       .getExists();
 
-    res.json({
-      success: true,
-      data: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        apiKey: tenant.apiKey,
-        tier: tenant.tier,
-        status: tenant.status,
-        settings,
-        maxSessions: tenant.maxSessions,
-        currentSessions: tenant.currentSessions,
-        webhookUrl: tenant.webhookUrl,
-        webhookSecret: tenant.webhookSecret,
-        customDomain: tenant.customDomain,
-        createdAt: tenant.createdAt,
-        onboarding: {
-          widgetUsed,
-        },
+    sendSuccess(res, {
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      apiKey: tenant.apiKey,
+      tier: tenant.tier,
+      status: tenant.status,
+      settings,
+      maxSessions: tenant.maxSessions,
+      currentSessions: tenant.currentSessions,
+      webhookUrl: tenant.webhookUrl,
+      webhookSecret: tenant.webhookSecret,
+      customDomain: tenant.customDomain,
+      createdAt: tenant.createdAt,
+      onboarding: {
+        widgetUsed,
       },
     });
   })
@@ -126,24 +125,15 @@ router.patch(
 
     // Reject AI settings updates via this endpoint
     if (settings?.ai !== undefined) {
-      res.status(400).json({
-        error: 'AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.',
-      });
-      return;
+      throw new BadRequestError('AI settings cannot be updated via this endpoint. Use PATCH /tenants/me/ai-settings instead.');
     }
 
     if (settings?.skills !== undefined) {
-      res.status(400).json({
-        error: 'Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.',
-      });
-      return;
+      throw new BadRequestError('Skills cannot be updated via this endpoint. Use /tenants/me/skills instead.');
     }
 
     if (settings?.automations !== undefined) {
-      res.status(400).json({
-        error: 'Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.',
-      });
-      return;
+      throw new BadRequestError('Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.');
     }
 
     // Plan-gate (step 10, feature 7). Custom branding lives under
@@ -196,16 +186,13 @@ router.patch(
       responseSettings.integrations = { ...responseSettings.integrations, calcom: { ...calcomRest, hasApiKey: !!_ck } as any };
     }
 
-    res.json({
-      success: true,
-      data: {
-        id: tenant.id,
-        name: tenant.name,
-        settings: responseSettings,
-        webhookUrl: tenant.webhookUrl,
-        webhookSecret: tenant.webhookSecret,
-        updatedAt: tenant.updatedAt,
-      },
+    sendSuccess(res, {
+      id: tenant.id,
+      name: tenant.name,
+      settings: responseSettings,
+      webhookUrl: tenant.webhookUrl,
+      webhookSecret: tenant.webhookSecret,
+      updatedAt: tenant.updatedAt,
     });
   })
 );
@@ -235,11 +222,7 @@ router.get(
 
     const result = await applyPagination(qb, params);
 
-    res.json({
-      success: true,
-      data: result.data,
-      meta: result.meta,
-    });
+    sendSuccess(res, result.data, { pagination: result.meta });
   })
 );
 
@@ -289,16 +272,13 @@ router.post(
       role: user.role,
     });
 
-    res.status(201).json({
-      success: true,
-      data: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        isActive: user.isActive,
-        createdAt: user.createdAt,
-      },
+    sendCreated(res, {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
     });
   })
 );
@@ -331,12 +311,9 @@ router.post(
 
     logger.info('API key rotated', { tenantId });
 
-    res.json({
-      success: true,
-      data: {
-        apiKey: newApiKey,
-        message: 'API key rotated successfully. Store this key safely as it will not be shown again.',
-      },
+    sendSuccess(res, {
+      apiKey: newApiKey,
+      message: 'API key rotated successfully. Store this key safely as it will not be shown again.',
     });
   })
 );
@@ -388,24 +365,21 @@ router.get(
       [tenantId]
     );
 
-    res.json({
-      success: true,
-      data: {
-        sessions: {
-          total: parseInt(sessionStats[0].total_sessions, 10),
-          active: parseInt(sessionStats[0].active_sessions, 10),
-          closed: parseInt(sessionStats[0].closed_sessions, 10),
-          waiting: parseInt(sessionStats[0].waiting_sessions, 10),
-          today: parseInt(todaySessions[0].count, 10),
-          avgDuration: Math.round(sessionStats[0].avg_duration || 0),
-          avgSatisfaction: parseFloat(sessionStats[0].avg_satisfaction || 0),
-        },
-        messages: {
-          total: parseInt(messageStats[0].total_messages, 10),
-          text: parseInt(messageStats[0].text_messages, 10),
-          images: parseInt(messageStats[0].image_messages, 10),
-          files: parseInt(messageStats[0].file_messages, 10),
-        },
+    sendSuccess(res, {
+      sessions: {
+        total: parseInt(sessionStats[0].total_sessions, 10),
+        active: parseInt(sessionStats[0].active_sessions, 10),
+        closed: parseInt(sessionStats[0].closed_sessions, 10),
+        waiting: parseInt(sessionStats[0].waiting_sessions, 10),
+        today: parseInt(todaySessions[0].count, 10),
+        avgDuration: Math.round(sessionStats[0].avg_duration || 0),
+        avgSatisfaction: parseFloat(sessionStats[0].avg_satisfaction || 0),
+      },
+      messages: {
+        total: parseInt(messageStats[0].total_messages, 10),
+        text: parseInt(messageStats[0].text_messages, 10),
+        images: parseInt(messageStats[0].image_messages, 10),
+        files: parseInt(messageStats[0].file_messages, 10),
       },
     });
   })
@@ -432,8 +406,8 @@ router.post(
     }
 
     if (!tenant.webhookUrl) {
-      res.json({
-        success: false,
+      sendSuccess(res, {
+        testFailed: true,
         error: 'No webhook URL configured',
       });
       return;
@@ -443,8 +417,8 @@ router.post(
     try {
       new URL(tenant.webhookUrl);
     } catch {
-      res.json({
-        success: false,
+      sendSuccess(res, {
+        testFailed: true,
         error: 'Invalid webhook URL format',
       });
       return;
@@ -476,13 +450,12 @@ router.post(
       const responseTimeMs = Date.now() - startTime;
 
       if (response.status >= 200 && response.status < 300) {
-        res.json({
-          success: true,
+        sendSuccess(res, {
           responseTimeMs,
         });
       } else {
-        res.json({
-          success: false,
+        sendSuccess(res, {
+          testFailed: true,
           error: `Webhook returned status ${response.status}`,
           responseTimeMs,
         });
@@ -490,8 +463,8 @@ router.post(
     } catch (error: unknown) {
       const responseTimeMs = Date.now() - startTime;
       const err = error as { code?: string; message?: string };
-      res.json({
-        success: false,
+      sendSuccess(res, {
+        testFailed: true,
         error: err.code === 'ECONNABORTED'
           ? 'Webhook timed out (5s limit)'
           : err.message || 'Connection failed',
@@ -526,12 +499,9 @@ router.post(
 
     logger.info('Webhook secret regenerated', { tenantId });
 
-    res.json({
-      success: true,
-      data: {
-        webhookSecret: tenant.webhookSecret,
-        message: 'Webhook secret regenerated. Update your n8n workflow with the new secret.',
-      },
+    sendSuccess(res, {
+      webhookSecret: tenant.webhookSecret,
+      message: 'Webhook secret regenerated. Update your n8n workflow with the new secret.',
     });
   })
 );
@@ -568,8 +538,7 @@ router.post(
       req.user!.clerkUserId
     );
     if (!invited) {
-      res.status(502).json({ error: 'Failed to send invite' });
-      return;
+      throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
     }
 
     const inviteRepo = AppDataSource.getRepository(PendingInvite);
@@ -591,7 +560,7 @@ router.post(
     const savedInvite = await inviteRepo.findOne({ where: { tenantId: tenant.id, email: email.toLowerCase() } });
     await logAudit(req.userId!, 'invite.sent', 'invite', savedInvite?.id ?? tenant.id, tenantId, { email, role });
 
-    res.json({ success: true, message: 'Invitation sent' });
+    sendSuccess(res, { message: 'Invitation sent' });
   })
 );
 
@@ -634,7 +603,7 @@ router.patch(
     logger.info('Tenant admin changed user role', {
       userId: user.id, newRole: role, changedBy: req.userId,
     });
-    res.json({ success: true, data: { id: user.id, role: user.role } });
+    sendSuccess(res, { id: user.id, role: user.role });
   })
 );
 
@@ -652,21 +621,18 @@ router.post(
 
     // Cannot deactivate yourself
     if (userId === req.userId) {
-      res.status(400).json({ error: 'Cannot deactivate yourself' });
-      return;
+      throw new BadRequestError('Cannot deactivate yourself');
     }
 
     const userRepo = AppDataSource.getRepository(User);
     const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
 
     if (!user) {
-      res.status(404).json({ error: 'User not found in this tenant' });
-      return;
+      throw new NotFoundError('User not found in this tenant');
     }
 
     if (!user.isActive) {
-      res.status(400).json({ error: 'User is already deactivated' });
-      return;
+      throw new BadRequestError('User is already deactivated');
     }
 
     // Cannot deactivate the last active admin
@@ -675,8 +641,7 @@ router.post(
         where: { tenantId, role: 'admin' as const, isActive: true, deletedAt: IsNull() },
       });
       if (activeAdminCount <= 1) {
-        res.status(400).json({ error: 'Cannot deactivate the last active admin' });
-        return;
+        throw new BadRequestError('Cannot deactivate the last active admin');
       }
     }
 
@@ -714,7 +679,7 @@ router.post(
     }
 
     logger.info('Deactivated user', { userId: user.id, tenantId, deactivatedBy: req.userId });
-    res.json({ success: true });
+    sendSuccess(res, { message: 'User deactivated' });
   })
 );
 
@@ -734,13 +699,11 @@ router.post(
     const user = await userRepo.findOne({ where: { id: userId, tenantId, deletedAt: IsNull() } });
 
     if (!user) {
-      res.status(404).json({ error: 'User not found in this tenant' });
-      return;
+      throw new NotFoundError('User not found in this tenant');
     }
 
     if (user.isActive) {
-      res.status(400).json({ error: 'User is already active' });
-      return;
+      throw new BadRequestError('User is already active');
     }
 
     user.isActive = true;
@@ -757,7 +720,7 @@ router.post(
     await logAudit(req.userId!, 'user.reactivated', 'user', user.id, tenantId);
 
     logger.info('Reactivated user', { userId: user.id, tenantId, reactivatedBy: req.userId });
-    res.json({ success: true });
+    sendSuccess(res, { message: 'User reactivated' });
   })
 );
 
@@ -796,7 +759,7 @@ router.get(
       isExpired: new Date() > inv.expiresAt,
     }));
 
-    res.json({ success: true, data });
+    sendSuccess(res, data);
   })
 );
 
@@ -817,15 +780,13 @@ router.post(
     });
 
     if (!invite) {
-      res.status(404).json({ error: 'Invite not found' });
-      return;
+      throw new NotFoundError('Invite not found');
     }
 
     // Re-send Clerk invitation
     const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
     if (!tenant?.clerkOrgId) {
-      res.status(400).json({ error: 'Tenant has no Clerk organization linked' });
-      return;
+      throw new BadRequestError('Tenant has no Clerk organization linked');
     }
 
     const result = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
@@ -884,13 +845,12 @@ router.post(
 
       await inviteRepo.remove(invite);
       await logAudit(req.userId!, 'invite.cleaned', 'invite', invite.id, tenantId, { email: invite.email, reason: 'already_member' });
-      res.json({ success: true, message: 'User has already joined — synced to members list' });
+      sendSuccess(res, { message: 'User has already joined — synced to members list' });
       return;
     }
 
     if (!result.ok) {
-      res.status(502).json({ error: result.message });
-      return;
+      throw new ApiError(result.message, 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
     }
 
     invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -898,7 +858,7 @@ router.post(
 
     await logAudit(req.userId!, 'invite.resent', 'invite', invite.id, tenantId, { email: invite.email });
 
-    res.json({ success: true, message: 'Invite resent' });
+    sendSuccess(res, { message: 'Invite resent' });
   })
 );
 
@@ -919,15 +879,14 @@ router.delete(
     });
 
     if (!invite) {
-      res.status(404).json({ error: 'Invite not found' });
-      return;
+      throw new NotFoundError('Invite not found');
     }
 
     await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });
 
     await inviteRepo.remove(invite);
 
-    res.json({ success: true, message: 'Invite cancelled' });
+    sendSuccess(res, { message: 'Invite cancelled' });
   })
 );
 
@@ -977,7 +936,7 @@ router.get(
     ).catch(() => [{ count: 0 }]);
 
     const status = computeOnboardingStatus(tenant, kbResult[0]?.count || 0);
-    res.json({ success: true, data: status });
+    sendSuccess(res, status);
   })
 );
 
@@ -997,16 +956,13 @@ router.get(
     const registry = new ToolRegistry();
     const tools = await registry.getToolsForTenant(tenant);
 
-    res.json({
-      success: true,
-      data: {
-        tools: tools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          hasSideEffects: t.hasSideEffects,
-          category: ['kb_search', 'capture_lead', 'escalate_to_human'].includes(t.name) ? 'always' : 'booking',
-        })),
-      },
+    sendSuccess(res, {
+      tools: tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        hasSideEffects: t.hasSideEffects,
+        category: ['kb_search', 'capture_lead', 'escalate_to_human'].includes(t.name) ? 'always' : 'booking',
+      })),
     });
   })
 );

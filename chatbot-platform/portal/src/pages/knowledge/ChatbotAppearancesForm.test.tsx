@@ -56,7 +56,6 @@ describe('ChatbotAppearancesForm', () => {
 
   it('renders the read-only greeting from AI settings', () => {
     render(<ChatbotAppearancesForm />);
-    // Greeting renders in the form's read-only card AND in the preview bubble — both are expected.
     expect(screen.getAllByText(/Hello — how can we help you today\?/).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /edit in ai bot/i })).toHaveAttribute(
       'href',
@@ -64,23 +63,24 @@ describe('ChatbotAppearancesForm', () => {
     );
   });
 
-  it('disables Save when the form is clean and enables it when dirty', async () => {
+  it('auto-saves edits on blur with only the changed fields', async () => {
     const user = userEvent.setup();
     render(<ChatbotAppearancesForm />);
-    const save = screen.getByRole('button', { name: /save/i });
-    expect(save).toBeDisabled();
-    await user.type(screen.getByLabelText(/launcher label/i), 'Chat');
-    expect(save).toBeEnabled();
-  });
 
-  it('calls the update mutation with only changed fields when Save is clicked', async () => {
-    const user = userEvent.setup();
-    render(<ChatbotAppearancesForm />);
     await user.type(screen.getByLabelText(/launcher label/i), 'Chat');
-    await user.click(screen.getByRole('button', { name: /save/i }));
+    // Move focus elsewhere — wrapping onBlur triggers flush() → save fires immediately.
+    await user.tab();
+
     await waitFor(() => expect(mockMutate).toHaveBeenCalled());
     const arg = mockMutate.mock.calls[0][0];
     expect(arg).toEqual(expect.objectContaining({ launcherLabel: 'Chat' }));
+  });
+
+  it('does not auto-save when the form is untouched', async () => {
+    render(<ChatbotAppearancesForm />);
+    // No interaction → no save scheduled. Wait a tick to be sure.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockMutate).not.toHaveBeenCalled();
   });
 
   it('renders an "Open full widget test" link with the tenant apiKey', () => {
@@ -98,11 +98,10 @@ describe('ChatbotAppearancesForm', () => {
 
     // Form fields hydrated from defaults — not stuck behind the loading state.
     expect(screen.getByLabelText(/primary color/i)).toHaveValue('#6366f1');
-    const save = screen.getByRole('button', { name: /save/i });
 
-    // Save starts disabled (clean baseline) but becomes enabled once the user edits.
-    expect(save).toBeDisabled();
+    // User can still edit and trigger an auto-save.
     await user.type(screen.getByLabelText(/launcher label/i), 'Hi');
-    expect(save).toBeEnabled();
+    await user.tab();
+    await waitFor(() => expect(mockMutate).toHaveBeenCalled());
   });
 });

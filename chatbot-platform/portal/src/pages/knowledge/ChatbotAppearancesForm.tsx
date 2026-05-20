@@ -1,10 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink, Save } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
+import { AutoSaveStatusIndicator } from '@/components/ui/auto-save-status';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import {
   useGetWidgetAppearance,
   useUpdateWidgetAppearance,
@@ -33,7 +35,7 @@ const ChatbotAppearancesForm: React.FC = () => {
     launcherPosition: 'bottom-right',
     launcherLabel: '',
   });
-  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   const hydratedRef = useRef(false);
 
   useEffect(() => {
@@ -49,37 +51,46 @@ const ChatbotAppearancesForm: React.FC = () => {
         }
       : form;
     setForm(hydrated);
-    setSavedSnapshot(JSON.stringify(hydrated));
+    setInitialSnapshot(JSON.stringify(hydrated));
   }, [appearance, isLoading]);
 
   const greeting = (aiSettings as { guardrails?: { greetingMessage?: string } } | undefined)
     ?.guardrails?.greetingMessage ?? '';
 
   const currentSnapshot = JSON.stringify(form);
-  const isDirty = savedSnapshot !== null && currentSnapshot !== savedSnapshot;
 
   const widgetTestHref = useMemo(() => {
     const key = tenant?.apiKey;
     return key ? `/widget-test?apiKey=${encodeURIComponent(key)}` : '#';
   }, [tenant?.apiKey]);
 
-  const handleSave = () => {
-    const payload = {
-      primaryColor: form.primaryColor,
-      avatarUrl: form.avatarUrl === '' ? null : form.avatarUrl,
-      launcherPosition: form.launcherPosition,
-      launcherLabel: form.launcherLabel === '' ? null : form.launcherLabel,
-    };
-    update.mutate(payload, {
-      onSuccess: () => setSavedSnapshot(currentSnapshot),
-    });
-  };
+  const commitSave = useCallback(
+    ({ onSuccess, onError }: { onSuccess: () => void; onError: () => void }) => {
+      update.mutate(
+        {
+          primaryColor: form.primaryColor,
+          avatarUrl: form.avatarUrl === '' ? null : form.avatarUrl,
+          launcherPosition: form.launcherPosition,
+          launcherLabel: form.launcherLabel === '' ? null : form.launcherLabel,
+        },
+        { onSuccess, onError },
+      );
+    },
+    [update, form],
+  );
+
+  const { status, flush, retry } = useAutoSave({
+    snapshot: currentSnapshot,
+    initialSnapshot,
+    isValid: true,
+    save: commitSave,
+  });
 
   if (isLoading) return <PageSkeleton variant="list" rows={5} />;
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_minmax(280px,420px)]">
-      <div className="space-y-6">
+      <div className="space-y-6" onBlur={flush}>
         <div className="space-y-2">
           <Label htmlFor="primaryColor">{t('ai.appearances.color.label')}</Label>
           <Input
@@ -150,11 +161,8 @@ const ChatbotAppearancesForm: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button onClick={handleSave} disabled={!isDirty || update.isPending}>
-            <Save className="mr-2 h-4 w-4" />
-            {t('common.save')}
-          </Button>
+        <div className="flex items-center gap-4">
+          <AutoSaveStatusIndicator status={status} onRetry={retry} />
           <a
             href={widgetTestHref}
             target="_blank"

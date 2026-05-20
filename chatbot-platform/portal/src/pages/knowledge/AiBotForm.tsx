@@ -1,12 +1,14 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, RotateCcw, HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
+import { RotateCcw, HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
+import { AutoSaveStatusIndicator } from '@/components/ui/auto-save-status';
+import { useAutoSave } from '@/hooks/useAutoSave';
 import {
   Select,
   SelectTrigger,
@@ -99,9 +101,9 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const [maxResponseLength, setMaxResponseLength] = useState(500);
   const [escalationKeywords, setEscalationKeywords] = useState<string[]>([]);
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
-  // Snapshot of the form at last hydrate / successful save.
-  // null until hydration runs — prevents false dirty signal during initial load.
-  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(null);
+  // Baseline snapshot captured at hydration. Stays fixed until tenant change;
+  // useAutoSave maintains its own moving "last saved" baseline on top of this.
+  const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   // Pending template ID awaiting confirmation when switching templates over edited instructions.
   const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
@@ -157,7 +159,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     setEscalationKeywords(hEscalation);
     setTopicsToAvoid(hTopics);
 
-    setSavedSnapshot(snapshotKey({
+    setInitialSnapshot(snapshotKey({
       enabled: hEnabled,
       botName: hBotName,
       supportEmail: hSupportEmail,
@@ -227,10 +229,52 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
     escalationKeywords,
     topicsToAvoid,
   });
-  const isDirty = savedSnapshot !== null && currentSnapshotKey !== savedSnapshot;
+
+  // Inline validation. Auto-save skips while invalid so the backend never
+  // sees garbage; the leave dialog re-appears specifically for this case to
+  // warn the user before they navigate away with an unsaved invalid draft.
+  const isSupportEmailValid = !supportEmail || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(supportEmail);
+  const isMaxResponseLengthValid = maxResponseLength > 0;
+  const isValid = isSupportEmailValid && isMaxResponseLengthValid;
+
+  const commitSave = useCallback(
+    ({ onSuccess, onError }: { onSuccess: () => void; onError: () => void }) => {
+      updateSettings.mutate(
+        {
+          enabled,
+          supportEmail: supportEmail || null,
+          brandVoice: {
+            name: botName || 'AI Assistant',
+            tone: effectiveTone,
+            customInstructions: systemPrompt,
+            templateId: templateId === 'blank' ? null : templateId,
+          },
+          guardrails: {
+            greetingMessage,
+            fallbackMessage,
+            offHoursMessage,
+            confidenceThreshold,
+            maxResponseLength,
+            escalationKeywords,
+            topicsToAvoid,
+          },
+        },
+        { onSuccess, onError },
+      );
+    },
+    [updateSettings, enabled, supportEmail, botName, effectiveTone, systemPrompt, templateId, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
+  );
+
+  const { status, isDirty, flush, retry } = useAutoSave({
+    snapshot: currentSnapshotKey,
+    initialSnapshot,
+    isValid,
+    save: commitSave,
+  });
 
   const handleGoToKnowledgeBase = () => {
-    if (isDirty) {
+    flush();
+    if (isDirty && !isValid) {
       setShowLeaveDialog(true);
       return;
     }
@@ -245,34 +289,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   const confirmTemplateSwitch = () => {
     if (pendingTemplateId) applyTemplate(pendingTemplateId);
     setPendingTemplateId(null);
-  };
-
-  const handleSave = () => {
-    const snapshotAtSave = currentSnapshotKey;
-    updateSettings.mutate(
-      {
-        enabled,
-        supportEmail: supportEmail || null,
-        brandVoice: {
-          name: botName || 'AI Assistant',
-          tone: effectiveTone,
-          customInstructions: systemPrompt,
-          templateId: templateId === 'blank' ? null : templateId,
-        },
-        guardrails: {
-          greetingMessage,
-          fallbackMessage,
-          offHoursMessage,
-          confidenceThreshold,
-          maxResponseLength,
-          escalationKeywords,
-          topicsToAvoid,
-        },
-      },
-      {
-        onSuccess: () => setSavedSnapshot(snapshotAtSave),
-      }
-    );
   };
 
   const readOnly = !isAdmin;
@@ -291,7 +307,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   if (error) return <InlineError message={t('ai.bot.loadError')} />;
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="max-w-3xl space-y-8" onBlur={flush}>
       {/* Enable bar */}
       <div className="flex items-center justify-between p-4 rounded-xl bg-surface-2">
         <div className="flex items-center gap-3">
@@ -332,8 +348,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 onChange={(e) => setSupportEmail(e.target.value)}
                 placeholder={t('ai.bot.identity.supportEmail.placeholder')}
                 disabled={readOnly}
+                aria-invalid={!isSupportEmailValid}
               />
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
+              {isSupportEmailValid ? (
+                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.supportEmail.helper')}</p>
+              ) : (
+                <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
+              )}
             </div>
           </div>
           <div>
@@ -498,8 +519,13 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
                 value={maxResponseLength}
                 onChange={(e) => setMaxResponseLength(parseInt(e.target.value) || 0)}
                 disabled={readOnly}
+                aria-invalid={!isMaxResponseLengthValid}
               />
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.maxResponseLength.helper')}</p>
+              {isMaxResponseLengthValid ? (
+                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.maxResponseLength.helper')}</p>
+              ) : (
+                <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.advanced.maxResponseLength.invalid')}</p>
+              )}
             </div>
           </div>
 
@@ -526,7 +552,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
         </section>
       </div>
 
-      {/* Save + Go to KB */}
+      {/* Go to KB + auto-save status */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-4 border-t border-edge">
         <Button
           onClick={handleGoToKnowledgeBase}
@@ -536,12 +562,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
           {t('ai.bot.actions.goToKnowledgeBase')}
           <ArrowRight className="w-4 h-4 ml-2" />
         </Button>
-        {isAdmin && (
-          <Button onClick={handleSave} disabled={updateSettings.isPending} size="lg" variant="outline">
-            {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-            {t('ai.bot.actions.saveChanges')}
-          </Button>
-        )}
+        {isAdmin && <AutoSaveStatusIndicator status={status} onRetry={retry} />}
       </div>
 
       <AlertDialog
@@ -570,14 +591,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('ai.bot.dialogs.leaveWithoutSaving.title')}</AlertDialogTitle>
+            <AlertDialogTitle>{t('ai.bot.dialogs.leaveWithInvalid.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t('ai.bot.dialogs.leaveWithoutSaving.description')}
+              {t('ai.bot.dialogs.leaveWithInvalid.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('ai.bot.dialogs.leaveWithoutSaving.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmLeave}>{t('ai.bot.dialogs.leaveWithoutSaving.confirm')}</AlertDialogAction>
+            <AlertDialogCancel>{t('ai.bot.dialogs.leaveWithInvalid.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmLeave}>{t('ai.bot.dialogs.leaveWithInvalid.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

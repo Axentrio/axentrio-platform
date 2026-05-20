@@ -118,7 +118,6 @@ export function useUpdateAiSettings() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
       queryClient.invalidateQueries({ queryKey: [...queryKeys.tenants.me(), 'ai-settings'] });
-      toast.success('AI settings saved');
     },
     onError: () => toast.error('Failed to save AI settings'),
   });

@@ -13,6 +13,12 @@
     "no": "Non",
     "actionFailed": "Action échouée. Veuillez réessayer."
   },
+  "autoSave": {
+    "saving": "Enregistrement…",
+    "saved": "Enregistré",
+    "failed": "Échec de l'enregistrement",
+    "retry": "Réessayer"
+  },
   "nav": {
     "inbox": "Boîte de réception",
     "aiContent": "IA & Contenu",
@@ -534,7 +540,8 @@
         "supportEmail": {
           "label": "E-mail de support",
           "placeholder": "support@votreentreprise.com",
-          "helper": "Utilisé pour les escalades et visible via {supportEmail}"
+          "helper": "Utilisé pour les escalades et visible via {supportEmail}",
+          "invalid": "Saisissez une adresse e-mail valide."
         },
         "voiceTone": {
           "label": "Ton"
@@ -586,7 +593,8 @@
         },
         "maxResponseLength": {
           "label": "Longueur maximale de la réponse",
-          "helper": "Caractères"
+          "helper": "Caractères",
+          "invalid": "Doit être supérieur à zéro."
         },
         "escalationKeywords": {
           "label": "Mots-clés d'escalade",
@@ -599,8 +607,7 @@
         }
       },
       "actions": {
-        "goToKnowledgeBase": "Aller à la base de connaissances",
-        "saveChanges": "Enregistrer les modifications"
+        "goToKnowledgeBase": "Aller à la base de connaissances"
       },
       "dialogs": {
         "replaceInstructions": {
@@ -609,9 +616,9 @@
           "cancel": "Continuer à modifier",
           "confirm": "Remplacer"
         },
-        "leaveWithoutSaving": {
-          "title": "Quitter sans enregistrer ?",
-          "description": "Vous avez des modifications non enregistrées. Aller à la base de connaissances sans enregistrer ?",
+        "leaveWithInvalid": {
+          "title": "Quitter avec des modifications invalides ?",
+          "description": "Certains champs sont invalides et n'ont pas été enregistrés. Aller à la base de connaissances quand même ?",
           "cancel": "Rester ici",
           "confirm": "Quitter quand même"
         }

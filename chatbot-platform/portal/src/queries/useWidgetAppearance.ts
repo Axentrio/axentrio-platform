@@ -30,7 +30,6 @@ export function useUpdateWidgetAppearance() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
       queryClient.invalidateQueries({ queryKey: widgetAppearanceKey });
-      toast.success('Appearance saved');
     },
     onError: () => toast.error('Failed to save appearance'),
   });

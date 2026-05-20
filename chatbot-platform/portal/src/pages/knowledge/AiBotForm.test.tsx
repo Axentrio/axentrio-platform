@@ -54,7 +54,7 @@ const getInstructionsTextarea = () =>
 
 const getStarterCombobox = () => screen.getByRole('combobox', { name: /starter prompt/i });
 
-describe('AiBotForm — dirty-state flows', () => {
+describe('AiBotForm', () => {
   beforeEach(() => {
     mockMutate.mockReset();
   });
@@ -101,60 +101,48 @@ describe('AiBotForm — dirty-state flows', () => {
     expect(getStarterCombobox()).toHaveTextContent('Customer Support Assistant');
   });
 
-  it('cancels Go to Knowledge Base and preserves edits + stays on the form', async () => {
+  it('auto-saves on blur and Go to Knowledge Base navigates without a dialog', async () => {
     const { user, onGoToKnowledgeBase } = renderForm();
+
+    mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => {
+      options?.onSuccess?.();
+    });
 
     const ta = getInstructionsTextarea();
     await user.click(ta);
-    await user.keyboard('unsaved change');
+    await user.keyboard('about to save');
+
+    // Tabbing out of the textarea bubbles a blur event to the wrapping form,
+    // which calls flush() → save fires immediately without waiting for the debounce.
+    await user.tab();
+
+    await waitFor(() => {
+      expect(mockMutate).toHaveBeenCalled();
+    });
+
+    // After save, isDirty is false — Go to KB should navigate immediately without dialog.
+    await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {
+    const { user, onGoToKnowledgeBase } = renderForm();
+
+    // Force invalid: maxResponseLength = 0 fails validation, so auto-save is skipped.
+    const maxLen = screen.getByRole('spinbutton') as HTMLInputElement;
+    await user.clear(maxLen);
+    await user.type(maxLen, '0');
 
     await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
+
+    // Dialog appears warning about invalid changes.
     await user.click(await screen.findByRole('button', { name: 'Stay here' }));
 
     await waitFor(() => {
       expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     });
     expect(onGoToKnowledgeBase).not.toHaveBeenCalled();
-    expect(getInstructionsTextarea().value).toBe('unsaved change');
-  });
-
-  it('confirms Go to Knowledge Base and calls the navigation callback', async () => {
-    const { user, onGoToKnowledgeBase } = renderForm();
-
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
-    await user.keyboard('unsaved change');
-
-    await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
-    await user.click(await screen.findByRole('button', { name: 'Leave anyway' }));
-
-    await waitFor(() => {
-      expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('clears dirty state after a successful save', async () => {
-    const { user, onGoToKnowledgeBase } = renderForm();
-
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
-    await user.keyboard('about to save');
-
-    // Capture and immediately invoke onSuccess so savedSnapshot tracks the
-    // current values, mirroring the real mutation success path.
-    mockMutate.mockImplementationOnce((_vars: unknown, options?: { onSuccess?: () => void }) => {
-      options?.onSuccess?.();
-    });
-
-    await user.click(screen.getByRole('button', { name: /save changes/i }));
-    await waitFor(() => {
-      expect(mockMutate).toHaveBeenCalledTimes(1);
-    });
-
-    // After save the form is no longer dirty — clicking Go to KB should
-    // navigate immediately without opening the leave dialog.
-    await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
-    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
+    expect(mockMutate).not.toHaveBeenCalled();
   });
 });

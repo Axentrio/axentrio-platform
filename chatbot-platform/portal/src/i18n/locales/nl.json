@@ -13,6 +13,12 @@
     "no": "Nee",
     "actionFailed": "Actie mislukt. Probeer het opnieuw."
   },
+  "autoSave": {
+    "saving": "Opslaan…",
+    "saved": "Opgeslagen",
+    "failed": "Opslaan mislukt",
+    "retry": "Opnieuw proberen"
+  },
   "nav": {
     "inbox": "Inbox",
     "aiContent": "AI & Inhoud",
@@ -534,7 +540,8 @@
         "supportEmail": {
           "label": "Support-e-mail",
           "placeholder": "support@jouwbedrijf.com",
-          "helper": "Gebruikt voor escalaties en zichtbaar via {supportEmail}"
+          "helper": "Gebruikt voor escalaties en zichtbaar via {supportEmail}",
+          "invalid": "Geef een geldig e-mailadres op."
         },
         "voiceTone": {
           "label": "Toon"
@@ -586,7 +593,8 @@
         },
         "maxResponseLength": {
           "label": "Maximale antwoordlengte",
-          "helper": "Tekens"
+          "helper": "Tekens",
+          "invalid": "Moet groter zijn dan nul."
         },
         "escalationKeywords": {
           "label": "Escalatie-trefwoorden",
@@ -599,8 +607,7 @@
         }
       },
       "actions": {
-        "goToKnowledgeBase": "Naar kennisbank",
-        "saveChanges": "Wijzigingen opslaan"
+        "goToKnowledgeBase": "Naar kennisbank"
       },
       "dialogs": {
         "replaceInstructions": {
@@ -609,9 +616,9 @@
           "cancel": "Verder bewerken",
           "confirm": "Vervangen"
         },
-        "leaveWithoutSaving": {
-          "title": "Verlaten zonder opslaan?",
-          "description": "Je hebt niet-opgeslagen wijzigingen. Naar Kennisbank gaan zonder opslaan?",
+        "leaveWithInvalid": {
+          "title": "Verlaten met ongeldige wijzigingen?",
+          "description": "Sommige velden zijn ongeldig en werden niet opgeslagen. Toch naar Kennisbank gaan?",
           "cancel": "Blijven",
           "confirm": "Toch verlaten"
         }

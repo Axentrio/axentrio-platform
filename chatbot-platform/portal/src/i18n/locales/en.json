@@ -13,6 +13,12 @@
     "no": "No",
     "actionFailed": "Action failed. Please try again."
   },
+  "autoSave": {
+    "saving": "Saving…",
+    "saved": "Saved",
+    "failed": "Save failed",
+    "retry": "Retry"
+  },
   "nav": {
     "inbox": "Inbox",
     "aiContent": "AI & Content",
@@ -534,7 +540,8 @@
         "supportEmail": {
           "label": "Support Email",
           "placeholder": "support@yourcompany.com",
-          "helper": "Used for escalations and visible via {supportEmail}"
+          "helper": "Used for escalations and visible via {supportEmail}",
+          "invalid": "Enter a valid email address."
         },
         "voiceTone": {
           "label": "Voice Tone"
@@ -586,7 +593,8 @@
         },
         "maxResponseLength": {
           "label": "Max Response Length",
-          "helper": "Characters"
+          "helper": "Characters",
+          "invalid": "Must be greater than zero."
         },
         "escalationKeywords": {
           "label": "Escalation Keywords",
@@ -599,8 +607,7 @@
         }
       },
       "actions": {
-        "goToKnowledgeBase": "Go to Knowledge Base",
-        "saveChanges": "Save Changes"
+        "goToKnowledgeBase": "Go to Knowledge Base"
       },
       "dialogs": {
         "replaceInstructions": {
@@ -609,9 +616,9 @@
           "cancel": "Keep editing",
           "confirm": "Replace"
         },
-        "leaveWithoutSaving": {
-          "title": "Leave without saving?",
-          "description": "You have unsaved changes. Go to Knowledge Base without saving?",
+        "leaveWithInvalid": {
+          "title": "Leave with invalid changes?",
+          "description": "Some fields are invalid and weren't saved. Go to Knowledge Base anyway?",
           "cancel": "Stay here",
           "confirm": "Leave anyway"
         }

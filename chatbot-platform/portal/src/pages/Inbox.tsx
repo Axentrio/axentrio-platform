@@ -7,6 +7,7 @@
  */
 
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
   Headphones,
@@ -123,16 +124,21 @@ const getReasonIcon = (reason: HandoffRequest['reason']) => {
   }
 };
 
-const getReasonLabel = (reason: HandoffRequest['reason']) =>
-  reason.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 const Inbox: React.FC = () => {
+  const { t } = useTranslation();
   const { data: tenant } = useTenantSettings();
   const tenants = tenant ? [tenant] : [];
+
+  const getReasonLabel = (reason: HandoffRequest['reason']) => {
+    const key = `inbox.handoff.reason.${reason}`;
+    const translated = t(key);
+    if (translated !== key) return translated;
+    return reason.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  };
 
   // Query params for deep-linking from redirects
   const [searchParams] = useSearchParams();
@@ -162,7 +168,7 @@ const Inbox: React.FC = () => {
       api.get<{ data: Chat }>(`/chats/${initialChatId}`).then((res) => {
         setSelectedChat(res.data ?? (res as unknown as Chat));
       }).catch(() => {
-        toast.error('Could not load the requested conversation');
+        toast.error(t('inbox.toasts.loadFailed'));
       });
     }
   }, [initialChatId]);
@@ -188,10 +194,10 @@ const Inbox: React.FC = () => {
       // Refresh chat data after takeover
       const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
       setSelectedChat(data.data);
-      toast.success('You are now handling this conversation');
+      toast.success(t('inbox.toasts.takeoverSuccess'));
     } catch (error) {
       console.error('Failed to takeover chat:', error);
-      toast.error('Failed to take over conversation');
+      toast.error(t('inbox.toasts.takeoverFailed'));
     }
   };
 
@@ -200,10 +206,10 @@ const Inbox: React.FC = () => {
       await acceptHandoffMutation.mutateAsync(handoff.id);
       // After accepting, take over the chat and show it
       await handleTakeover(handoff.chatId);
-      toast.success('Handoff accepted');
+      toast.success(t('inbox.toasts.handoffAccepted'));
     } catch (error) {
       console.error('Failed to accept handoff:', error);
-      toast.error('Failed to accept handoff');
+      toast.error(t('inbox.toasts.handoffAcceptFailed'));
     }
   };
 
@@ -212,7 +218,7 @@ const Inbox: React.FC = () => {
       await rejectHandoffMutation.mutateAsync({ handoffId, reason: 'Agent unavailable' });
     } catch (error) {
       console.error('Failed to decline handoff:', error);
-      toast.error('Failed to decline handoff');
+      toast.error(t('inbox.toasts.handoffDeclineFailed'));
     }
   };
 
@@ -224,10 +230,10 @@ const Inbox: React.FC = () => {
     setSelectedChat(null);
     try {
       await api.post(`/chats/${prev.id}/transfer`, { agentId });
-      toast.success('Conversation transferred');
+      toast.success(t('inbox.toasts.transferSuccess'));
     } catch (error) {
       console.error('Failed to transfer chat:', error);
-      toast.error('Failed to transfer chat');
+      toast.error(t('inbox.toasts.transferFailed'));
       setSelectedChat((current) => current === null ? prev : current);
     }
   };
@@ -241,10 +247,10 @@ const Inbox: React.FC = () => {
     setConfirmClose(false);
     try {
       await api.post(`/chats/${prev.id}/close`);
-      toast.success('Conversation closed');
+      toast.success(t('inbox.toasts.closeSuccess'));
     } catch (error) {
       console.error('Failed to close chat:', error);
-      toast.error('Failed to close conversation');
+      toast.error(t('inbox.toasts.closeFailed'));
       setSelectedChat((current) => current === null ? prev : current);
     } finally {
       setIsClosing(false);
@@ -258,10 +264,10 @@ const Inbox: React.FC = () => {
     setSelectedChat(null);
     try {
       await api.post(`/chats/${prev.id}/release`);
-      toast.success('Conversation returned to bot');
+      toast.success(t('inbox.toasts.returnToBotSuccess'));
     } catch (error) {
       console.error('Failed to return to bot:', error);
-      toast.error('Failed to return to bot');
+      toast.error(t('inbox.toasts.returnToBotFailed'));
       setSelectedChat((current) => current === null ? prev : current);
     }
   };
@@ -271,10 +277,10 @@ const Inbox: React.FC = () => {
   // -----------------------------------------------------------------------
 
   const tabs: { key: InboxTab; label: string; badge?: number }[] = [
-    { key: 'all', label: 'All' },
-    { key: 'bot', label: 'Bot' },
-    { key: 'handsoff', label: 'Handoff', badge: pendingCount },
-    { key: 'human', label: 'Agent' },
+    { key: 'all', label: t('inbox.tabs.all') },
+    { key: 'bot', label: t('inbox.tabs.bot') },
+    { key: 'handsoff', label: t('inbox.tabs.handoff'), badge: pendingCount },
+    { key: 'human', label: t('inbox.tabs.agent') },
   ];
 
   // -----------------------------------------------------------------------
@@ -290,13 +296,13 @@ const Inbox: React.FC = () => {
       <div className="px-6 py-4 border-b border-edge bg-surface-2">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-text-primary">Inbox</h1>
-            <p className="text-text-secondary">Monitor and manage conversations</p>
+            <h1 className="text-2xl font-bold text-text-primary">{t('nav.inbox')}</h1>
+            <p className="text-text-secondary">{t('inbox.header.subtitle')}</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-sm text-text-muted">
               <span className="w-2 h-2 bg-status-online rounded-full animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.5)]" />
-              Live
+              {t('inbox.header.live')}
             </div>
           </div>
         </div>
@@ -335,14 +341,14 @@ const Inbox: React.FC = () => {
           {activeTab === 'handsoff' && pendingCount === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-text-muted">
               <CheckCircle className="w-10 h-10 mb-3 text-green-500/50" />
-              <p className="text-sm font-medium">All caught up!</p>
-              <p className="text-xs mt-1">No pending handoff requests</p>
+              <p className="text-sm font-medium">{t('inbox.handoff.empty.title')}</p>
+              <p className="text-xs mt-1">{t('inbox.handoff.empty.subtitle')}</p>
             </div>
           ) : activeTab === 'handsoff' && pendingCount > 0 ? (
             /* Handoff queue cards */
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               <div className="text-sm text-text-muted mb-2">
-                {pendingCount} pending handoff{pendingCount !== 1 ? 's' : ''}
+                {t('inbox.handoff.pendingCount', { count: pendingCount })}
               </div>
               {handoffs.map((handoff) => (
                 <Card
@@ -368,7 +374,7 @@ const Inbox: React.FC = () => {
                             handoff.priority === 'low' && 'text-text-secondary',
                           )} />
                           <span className="font-medium text-text-primary truncate">
-                            {handoff.userName || 'Anonymous User'}
+                            {handoff.userName || t('inbox.chat.anonymousUser')}
                           </span>
                           <PriorityBadge status={handoff.priority} size="sm" />
                         </div>
@@ -394,7 +400,7 @@ const Inbox: React.FC = () => {
                         >
                           {rejectHandoffMutation.isPending ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : 'Decline'}
+                          ) : t('inbox.handoff.decline')}
                         </Button>
                         <Button
                           size="sm"
@@ -407,7 +413,7 @@ const Inbox: React.FC = () => {
                         >
                           {acceptHandoffMutation.isPending ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : 'Accept'}
+                          ) : t('inbox.handoff.accept')}
                         </Button>
                       </div>
                     </div>
@@ -417,7 +423,7 @@ const Inbox: React.FC = () => {
 
               {/* Also show the ChatStream below for handsoff-status chats */}
               <div className="pt-2 border-t border-edge mt-4">
-                <p className="text-xs text-text-muted mb-2">Handoff chats</p>
+                <p className="text-xs text-text-muted mb-2">{t('inbox.handoff.handoffChats')}</p>
                 <ChatStream
                   tenants={tenants}
                   onChatSelect={handleChatSelect}
@@ -455,13 +461,13 @@ const Inbox: React.FC = () => {
                   <button
                     className="md:hidden p-1 rounded-lg hover:bg-surface-3 transition-colors"
                     onClick={() => setSelectedChat(null)}
-                    aria-label="Back to chat list"
+                    aria-label={t('inbox.window.backToList')}
                   >
                     <ArrowLeft className="w-5 h-5 text-text-secondary" />
                   </button>
                   <div>
                     <h2 className="font-semibold text-text-primary">
-                      {selectedChat.userName || 'Anonymous User'}
+                      {selectedChat.userName || t('inbox.chat.anonymousUser')}
                     </h2>
                     <div className="flex items-center gap-2 text-sm text-text-secondary">
                       <ChatStatusBadge status={selectedChat.status} size="sm" />
@@ -474,7 +480,7 @@ const Inbox: React.FC = () => {
                       {selectedChat.assignedAgentName && (
                         <>
                           <span>-</span>
-                          <span>Assigned to {selectedChat.assignedAgentName}</span>
+                          <span>{t('inbox.window.header.assignedTo', { name: selectedChat.assignedAgentName })}</span>
                         </>
                       )}
                     </div>
@@ -489,7 +495,7 @@ const Inbox: React.FC = () => {
                       className="gap-2 rounded-xl"
                     >
                       <UserCheck className="w-4 h-4" />
-                      Takeover
+                      {t('inbox.takeover.button')}
                     </Button>
                   )}
                   {isHuman && (
@@ -501,7 +507,7 @@ const Inbox: React.FC = () => {
                         className="gap-2 rounded-xl"
                       >
                         <Users className="w-4 h-4" />
-                        Transfer
+                        {t('inbox.actions.transfer')}
                       </Button>
                       <Button
                         variant="outline"
@@ -510,7 +516,7 @@ const Inbox: React.FC = () => {
                         className="gap-1.5 rounded-xl"
                       >
                         <Bot className="w-3.5 h-3.5" />
-                        Return to Bot
+                        {t('inbox.actions.returnToBot')}
                       </Button>
                       <Button
                         variant="destructive"
@@ -520,7 +526,7 @@ const Inbox: React.FC = () => {
                         className="gap-2 rounded-xl"
                       >
                         <X className="w-4 h-4" />
-                        {isClosing ? 'Closing...' : 'Close'}
+                        {isClosing ? t('inbox.actions.closing') : t('inbox.actions.close')}
                       </Button>
                     </>
                   )}
@@ -540,9 +546,9 @@ const Inbox: React.FC = () => {
             /* Empty state */
             <div className="flex-1 flex flex-col items-center justify-center text-text-secondary">
               <MessageSquare className="w-16 h-16 mb-4 text-text-muted" />
-              <p className="text-lg font-medium">Select a conversation</p>
+              <p className="text-lg font-medium">{t('inbox.detail.empty.title')}</p>
               <p className="text-sm text-text-muted mt-1">
-                Choose a chat from the left panel to view details
+                {t('inbox.detail.empty.subtitle')}
               </p>
             </div>
           )}
@@ -553,12 +559,12 @@ const Inbox: React.FC = () => {
       <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Close this conversation?</AlertDialogTitle>
-            <AlertDialogDescription>The visitor will be disconnected and the conversation will be marked as resolved.</AlertDialogDescription>
+            <AlertDialogTitle>{t('inbox.closeDialog.title')}</AlertDialogTitle>
+            <AlertDialogDescription>{t('inbox.closeDialog.description')}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleCloseChat} className="bg-red-600 hover:bg-red-700">Close conversation</AlertDialogAction>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleCloseChat} className="bg-red-600 hover:bg-red-700">{t('inbox.closeDialog.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -567,12 +573,12 @@ const Inbox: React.FC = () => {
       <Modal
         isOpen={isTransferModalOpen}
         onClose={() => setIsTransferModalOpen(false)}
-        title="Transfer Chat"
+        title={t('inbox.transferModal.title')}
         size="md"
       >
         <div className="space-y-4">
           <p className="text-text-secondary">
-            Select an agent to transfer this chat to:
+            {t('inbox.transferModal.prompt')}
           </p>
           {isLoadingAgents ? (
             <div className="flex items-center justify-center py-8">
@@ -580,7 +586,7 @@ const Inbox: React.FC = () => {
             </div>
           ) : agents.length === 0 ? (
             <p className="text-center text-text-secondary py-8">
-              No online agents available.
+              {t('inbox.transferModal.noAgents')}
             </p>
           ) : (
             <div className="space-y-2">
@@ -600,7 +606,7 @@ const Inbox: React.FC = () => {
                       {agent.firstName} {agent.lastName}
                     </p>
                     <p className="text-sm text-text-secondary">
-                      {agent.currentChats}/{agent.maxConcurrentChats} chats - {agent.status}
+                      {t('inbox.transferModal.agentStats', { current: agent.currentChats, max: agent.maxConcurrentChats, status: agent.status })}
                     </p>
                   </div>
                   <div className="flex gap-1">

@@ -1570,5 +1570,372 @@
         }
       }
     }
+  },
+  "inbox": {
+    "header": {
+      "subtitle": "Espace de travail unifié pour toutes les conversations",
+      "live": "En direct"
+    },
+    "tabs": {
+      "all": "Tous",
+      "bot": "Bot",
+      "handoff": "Transfert",
+      "agent": "Agent"
+    },
+    "chat": {
+      "anonymousUser": "Utilisateur anonyme",
+      "anonymous": "Anonyme"
+    },
+    "handoff": {
+      "empty": {
+        "title": "Aucun transfert en attente",
+        "subtitle": "Toutes les demandes de transfert ont été traitées"
+      },
+      "pendingCount_one": "{{count}} demande de transfert en attente",
+      "pendingCount_other": "{{count}} demandes de transfert en attente",
+      "handoffChats": "Conversations en transfert",
+      "decline": "Refuser",
+      "accept": "Accepter",
+      "reason": {
+        "user_request": "Demande de l'utilisateur",
+        "sentiment_drop": "Sentiment négatif détecté",
+        "bot_failure": "Le bot n'a pas pu aider",
+        "timeout": "Délai de conversation dépassé"
+      }
+    },
+    "window": {
+      "backToList": "Retour à la liste des conversations",
+      "header": {
+        "assignedTo": "Assignée à {{name}}"
+      },
+      "composer": {
+        "placeholder": "Écrivez un message…",
+        "send": "Envoyer le message"
+      },
+      "sender": {
+        "agent": "Agent",
+        "bot": "Bot",
+        "visitor": "Visiteur"
+      },
+      "message": {
+        "image": "Image",
+        "file": "Fichier"
+      },
+      "transferChat": "Transférer la conversation",
+      "empty": {
+        "title": "Aucun message pour le moment",
+        "subtitle": "Les messages s'afficheront ici dès le début de la conversation"
+      }
+    },
+    "takeover": {
+      "button": "Prendre en charge"
+    },
+    "actions": {
+      "transfer": "Transférer",
+      "returnToBot": "Rendre au bot",
+      "close": "Clôturer",
+      "closing": "Clôture en cours…"
+    },
+    "detail": {
+      "empty": {
+        "title": "Sélectionnez une conversation à afficher",
+        "subtitle": "Choisissez une conversation dans la liste pour commencer"
+      }
+    },
+    "closeDialog": {
+      "title": "Clôturer cette conversation ?",
+      "description": "La conversation sera marquée comme résolue et retirée de la liste active. Cette action est irréversible.",
+      "confirm": "Clôturer la conversation"
+    },
+    "transferModal": {
+      "title": "Transférer la conversation",
+      "prompt": "Sélectionnez un agent à qui transférer cette conversation :",
+      "noAgents": "Aucun agent en ligne actuellement",
+      "agentStats": "{{current}}/{{max}} conversations — {{status}}"
+    },
+    "toasts": {
+      "loadFailed": "Échec du chargement de la conversation",
+      "takeoverSuccess": "Conversation reprise avec succès",
+      "takeoverFailed": "Échec de la reprise de la conversation",
+      "handoffAccepted": "Transfert accepté",
+      "handoffAcceptFailed": "Échec de l'acceptation du transfert",
+      "handoffDeclineFailed": "Échec du refus du transfert",
+      "transferSuccess": "Conversation transférée",
+      "transferFailed": "Échec du transfert de la conversation",
+      "closeSuccess": "Conversation clôturée",
+      "closeFailed": "Échec de la clôture de la conversation",
+      "returnToBotSuccess": "Conversation rendue au bot",
+      "returnToBotFailed": "Échec du retour de la conversation au bot"
+    },
+    "stream": {
+      "title": "Conversations en direct",
+      "activeCount": "{{count}} actives",
+      "searchPlaceholder": "Rechercher des conversations…",
+      "errorLoading": "Échec du chargement des conversations",
+      "retry": "Réessayer",
+      "empty": {
+        "title": "Aucune conversation pour le moment",
+        "subtitle": "Les nouvelles conversations apparaîtront ici"
+      },
+      "filters": {
+        "status": {
+          "all": "Tous les statuts",
+          "bot": "Bot",
+          "handsoff": "Transfert",
+          "human": "Agent",
+          "closed": "Fermée"
+        },
+        "allTenants": "Tous les espaces"
+      },
+      "time": {
+        "justNow": "À l'instant",
+        "minutesAgo": "Il y a {{count}} min",
+        "hoursAgo": "Il y a {{count}} h"
+      }
+    },
+    "statusBadge": {
+      "bot": "Bot",
+      "human": "Agent",
+      "handsoff": "Transfert en attente",
+      "closed": "Fermée",
+      "pending": "En attente"
+    },
+    "userStatusBadge": {
+      "online": "En ligne",
+      "away": "Absent",
+      "offline": "Hors ligne",
+      "busy": "Occupé"
+    },
+    "priorityBadge": {
+      "low": "Faible",
+      "medium": "Moyenne",
+      "high": "Élevée",
+      "urgent": "Urgente"
+    }
+  },
+  "team": {
+    "header": {
+      "title": "Équipe",
+      "subtitle": "Gérez les agents, les shifts et les performances"
+    },
+    "tabs": {
+      "members": "Membres",
+      "agents": "Agents",
+      "shifts": "Shifts",
+      "performance": "Performances"
+    },
+    "stats": {
+      "totalAgents": {
+        "label": "Total des agents"
+      },
+      "onlineNow": {
+        "label": "En ligne maintenant"
+      },
+      "totalChatsMtd": {
+        "label": "Total des chats (MTD)"
+      },
+      "avgCsat": {
+        "label": "CSAT moyen"
+      }
+    },
+    "agents": {
+      "actions": {
+        "add": "Ajouter un agent",
+        "manageShifts": "Gérer les shifts"
+      },
+      "columns": {
+        "agent": "Agent",
+        "status": "Statut",
+        "role": "Rôle",
+        "skills": "Compétences",
+        "chats": "Chats",
+        "actions": "Actions"
+      },
+      "statuses": {
+        "online": "En ligne",
+        "away": "Absent",
+        "busy": "Occupé",
+        "offline": "Hors ligne"
+      }
+    },
+    "shifts": {
+      "weeklySchedule": "Planning hebdomadaire",
+      "days": {
+        "sun": "Dimanche",
+        "mon": "Lundi",
+        "tue": "Mardi",
+        "wed": "Mercredi",
+        "thu": "Jeudi",
+        "fri": "Vendredi",
+        "sat": "Samedi"
+      }
+    },
+    "performance": {
+      "columns": {
+        "agent": "Agent",
+        "totalChats": "Total des chats",
+        "avgResponse": "Réponse moyenne",
+        "csat": "CSAT",
+        "activeChats": "Chats actifs"
+      },
+      "responseSeconds": "{{count}}s"
+    },
+    "members": {
+      "title": "Membres de l'organisation",
+      "unknownName": "Inconnu",
+      "badges": {
+        "inactive": "Inactif"
+      },
+      "columns": {
+        "user": "Utilisateur",
+        "joined": "A rejoint le",
+        "role": "Rôle",
+        "actions": "Actions"
+      },
+      "actions": {
+        "invite": "Inviter un membre",
+        "reactivate": "Réactiver",
+        "deactivate": "Désactiver le membre"
+      }
+    },
+    "invites": {
+      "title": "Invitations en attente",
+      "columns": {
+        "email": "E-mail",
+        "role": "Rôle",
+        "invitedBy": "Invité par",
+        "expires": "Expire",
+        "actions": "Actions"
+      },
+      "actions": {
+        "resend": "Renvoyer"
+      },
+      "statuses": {
+        "expired": "Expirée"
+      },
+      "daysLeft_one": "{{count}} jour restant",
+      "daysLeft_other": "{{count}} jours restants"
+    },
+    "dialogs": {
+      "invite": {
+        "title": "Inviter un nouveau membre",
+        "emailLabel": "E-mail",
+        "emailPlaceholder": "collegue@entreprise.com",
+        "roleLabel": "Rôle",
+        "send": "Envoyer l'invitation",
+        "sending": "Envoi de l'invitation…",
+        "sendingShort": "Envoi…",
+        "errorFallback": "Échec de l'envoi de l'invitation. Veuillez réessayer."
+      },
+      "deactivate": {
+        "title": "Désactiver ce membre ?",
+        "description": "Cette personne perdra immédiatement l'accès à l'espace de travail. Vous pouvez la réactiver plus tard depuis la liste des membres.",
+        "confirm": "Désactiver"
+      },
+      "agent": {
+        "addTitle": "Ajouter un agent",
+        "editTitle": "Modifier l'agent",
+        "firstNameLabel": "Prénom",
+        "lastNameLabel": "Nom",
+        "emailLabel": "E-mail",
+        "roleLabel": "Rôle",
+        "maxConcurrentChatsLabel": "Chats simultanés maximum",
+        "skillsLabel": "Compétences",
+        "skillsPlaceholder": "Ajouter une compétence…",
+        "skillsAdd": "Ajouter",
+        "saveChanges": "Enregistrer les modifications",
+        "create": "Créer"
+      }
+    }
+  },
+  "analytics": {
+    "header": {
+      "title": "Analytique",
+      "subtitle": "Indicateurs de performance et analyses"
+    },
+    "timeRange": {
+      "placeholder": "Sélectionner une période",
+      "last24Hours": "Dernières 24 heures",
+      "last7Days": "7 derniers jours",
+      "last30Days": "30 derniers jours",
+      "last90Days": "90 derniers jours"
+    },
+    "export": {
+      "button": "Exporter",
+      "csv": "CSV",
+      "json": "JSON",
+      "excel": "Excel"
+    },
+    "kpis": {
+      "activeChats": "Conversations actives",
+      "pendingHandoffs": "Transferts en attente",
+      "onlineAgents": "Agents en ligne",
+      "avgResponseTime": "Temps de réponse moyen",
+      "csatScore": "Score CSAT",
+      "totalChats": "Total des conversations"
+    },
+    "tabs": {
+      "overview": "Vue d'ensemble",
+      "agents": "Agents",
+      "chats": "Conversations"
+    },
+    "agentRedirect": {
+      "goToInbox": "Aller à la boîte de réception",
+      "toManage": "pour gérer les conversations"
+    },
+    "charts": {
+      "chatVolume": {
+        "title": "Volume de conversations",
+        "legend": {
+          "bot": "Bot",
+          "human": "Humain",
+          "handoff": "Transfert"
+        }
+      },
+      "responseTime": {
+        "title": "Temps de réponse moyen",
+        "legend": {
+          "actual": "Réel (secondes)",
+          "target": "Objectif (secondes)"
+        }
+      },
+      "resolutionDistribution": {
+        "title": "Répartition des résolutions",
+        "botResolved": "Résolu par le bot",
+        "humanResolved": "Résolu par un humain"
+      },
+      "csatDistribution": {
+        "title": "Répartition CSAT"
+      }
+    },
+    "days": {
+      "mon": "Lun",
+      "tue": "Mar",
+      "wed": "Mer",
+      "thu": "Jeu",
+      "fri": "Ven",
+      "sat": "Sam",
+      "sun": "Dim"
+    },
+    "csat": {
+      "fiveStars": "5 étoiles",
+      "fourStars": "4 étoiles",
+      "threeStars": "3 étoiles",
+      "twoStars": "2 étoiles",
+      "oneStar": "1 étoile"
+    },
+    "agentPerformance": {
+      "title": "Performance des agents",
+      "columns": {
+        "agent": "Agent",
+        "chatsHandled": "Conversations traitées",
+        "avgResponseTime": "Temps de réponse moyen",
+        "csatScore": "Score CSAT"
+      }
+    },
+    "chatAnalysis": {
+      "title": "Analyse des conversations",
+      "comingSoon": "Analyse détaillée des conversations bientôt disponible…"
+    }
   }
 }

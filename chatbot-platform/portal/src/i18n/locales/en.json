@@ -1570,5 +1570,372 @@
       "message": "You are impersonating <strong>{{tenant}}</strong> — return to your own account when finished.",
       "exitButton": "Exit"
     }
+  },
+  "inbox": {
+    "header": {
+      "subtitle": "Unified workspace for all conversations",
+      "live": "Live"
+    },
+    "tabs": {
+      "all": "All",
+      "bot": "Bot",
+      "handoff": "Handoff",
+      "agent": "Agent"
+    },
+    "chat": {
+      "anonymousUser": "Anonymous User",
+      "anonymous": "Anonymous"
+    },
+    "handoff": {
+      "empty": {
+        "title": "No pending handoffs",
+        "subtitle": "All handoff requests have been handled"
+      },
+      "pendingCount_one": "{{count}} pending handoff request",
+      "pendingCount_other": "{{count}} pending handoff requests",
+      "handoffChats": "Handoff chats",
+      "decline": "Decline",
+      "accept": "Accept",
+      "reason": {
+        "user_request": "User requested agent",
+        "sentiment_drop": "Negative sentiment detected",
+        "bot_failure": "Bot was unable to help",
+        "timeout": "Conversation timeout"
+      }
+    },
+    "window": {
+      "backToList": "Back to chat list",
+      "header": {
+        "assignedTo": "Assigned to {{name}}"
+      },
+      "composer": {
+        "placeholder": "Type a message…",
+        "send": "Send message"
+      },
+      "sender": {
+        "agent": "Agent",
+        "bot": "Bot",
+        "visitor": "Visitor"
+      },
+      "message": {
+        "image": "Image",
+        "file": "File"
+      },
+      "transferChat": "Transfer chat",
+      "empty": {
+        "title": "No messages yet",
+        "subtitle": "Messages will appear here once the conversation starts"
+      }
+    },
+    "takeover": {
+      "button": "Take Over"
+    },
+    "actions": {
+      "transfer": "Transfer",
+      "returnToBot": "Return to Bot",
+      "close": "Close",
+      "closing": "Closing…"
+    },
+    "detail": {
+      "empty": {
+        "title": "Select a chat to view",
+        "subtitle": "Choose a conversation from the list to start"
+      }
+    },
+    "closeDialog": {
+      "title": "Close this chat?",
+      "description": "The conversation will be marked as resolved and removed from the active list. This action cannot be undone.",
+      "confirm": "Close chat"
+    },
+    "transferModal": {
+      "title": "Transfer chat",
+      "prompt": "Select an agent to transfer this conversation to:",
+      "noAgents": "No agents currently online",
+      "agentStats": "{{current}}/{{max}} chats — {{status}}"
+    },
+    "toasts": {
+      "loadFailed": "Failed to load chat",
+      "takeoverSuccess": "Chat taken over successfully",
+      "takeoverFailed": "Failed to take over chat",
+      "handoffAccepted": "Handoff accepted",
+      "handoffAcceptFailed": "Failed to accept handoff",
+      "handoffDeclineFailed": "Failed to decline handoff",
+      "transferSuccess": "Chat transferred",
+      "transferFailed": "Failed to transfer chat",
+      "closeSuccess": "Chat closed",
+      "closeFailed": "Failed to close chat",
+      "returnToBotSuccess": "Chat returned to bot",
+      "returnToBotFailed": "Failed to return chat to bot"
+    },
+    "stream": {
+      "title": "Live chats",
+      "activeCount": "{{count}} active",
+      "searchPlaceholder": "Search conversations…",
+      "errorLoading": "Failed to load chats",
+      "retry": "Retry",
+      "empty": {
+        "title": "No chats yet",
+        "subtitle": "New conversations will appear here"
+      },
+      "filters": {
+        "status": {
+          "all": "All statuses",
+          "bot": "Bot",
+          "handsoff": "Handoff",
+          "human": "Agent",
+          "closed": "Closed"
+        },
+        "allTenants": "All workspaces"
+      },
+      "time": {
+        "justNow": "Just now",
+        "minutesAgo": "{{count}}m ago",
+        "hoursAgo": "{{count}}h ago"
+      }
+    },
+    "statusBadge": {
+      "bot": "Bot",
+      "human": "Agent",
+      "handsoff": "Handoff pending",
+      "closed": "Closed",
+      "pending": "Pending"
+    },
+    "userStatusBadge": {
+      "online": "Online",
+      "away": "Away",
+      "offline": "Offline",
+      "busy": "Busy"
+    },
+    "priorityBadge": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "urgent": "Urgent"
+    }
+  },
+  "team": {
+    "header": {
+      "title": "Team",
+      "subtitle": "Manage agents, shifts, and performance"
+    },
+    "tabs": {
+      "members": "Members",
+      "agents": "Agents",
+      "shifts": "Shifts",
+      "performance": "Performance"
+    },
+    "stats": {
+      "totalAgents": {
+        "label": "Total Agents"
+      },
+      "onlineNow": {
+        "label": "Online Now"
+      },
+      "totalChatsMtd": {
+        "label": "Total Chats (MTD)"
+      },
+      "avgCsat": {
+        "label": "Avg CSAT"
+      }
+    },
+    "agents": {
+      "actions": {
+        "add": "Add Agent",
+        "manageShifts": "Manage shifts"
+      },
+      "columns": {
+        "agent": "Agent",
+        "status": "Status",
+        "role": "Role",
+        "skills": "Skills",
+        "chats": "Chats",
+        "actions": "Actions"
+      },
+      "statuses": {
+        "online": "Online",
+        "away": "Away",
+        "busy": "Busy",
+        "offline": "Offline"
+      }
+    },
+    "shifts": {
+      "weeklySchedule": "Weekly Schedule",
+      "days": {
+        "sun": "Sunday",
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday"
+      }
+    },
+    "performance": {
+      "columns": {
+        "agent": "Agent",
+        "totalChats": "Total Chats",
+        "avgResponse": "Avg Response",
+        "csat": "CSAT",
+        "activeChats": "Active Chats"
+      },
+      "responseSeconds": "{{count}}s"
+    },
+    "members": {
+      "title": "Organization Members",
+      "unknownName": "Unknown",
+      "badges": {
+        "inactive": "Inactive"
+      },
+      "columns": {
+        "user": "User",
+        "joined": "Joined",
+        "role": "Role",
+        "actions": "Actions"
+      },
+      "actions": {
+        "invite": "Invite Member",
+        "reactivate": "Reactivate",
+        "deactivate": "Deactivate member"
+      }
+    },
+    "invites": {
+      "title": "Pending Invites",
+      "columns": {
+        "email": "Email",
+        "role": "Role",
+        "invitedBy": "Invited By",
+        "expires": "Expires",
+        "actions": "Actions"
+      },
+      "actions": {
+        "resend": "Resend"
+      },
+      "statuses": {
+        "expired": "Expired"
+      },
+      "daysLeft_one": "{{count}} day left",
+      "daysLeft_other": "{{count}} days left"
+    },
+    "dialogs": {
+      "invite": {
+        "title": "Invite New Member",
+        "emailLabel": "Email",
+        "emailPlaceholder": "colleague@company.com",
+        "roleLabel": "Role",
+        "send": "Send Invite",
+        "sending": "Sending invite…",
+        "sendingShort": "Sending…",
+        "errorFallback": "Failed to send invite. Please try again."
+      },
+      "deactivate": {
+        "title": "Deactivate this member?",
+        "description": "They will lose access to the workspace immediately. You can reactivate them later from the members list.",
+        "confirm": "Deactivate"
+      },
+      "agent": {
+        "addTitle": "Add Agent",
+        "editTitle": "Edit Agent",
+        "firstNameLabel": "First Name",
+        "lastNameLabel": "Last Name",
+        "emailLabel": "Email",
+        "roleLabel": "Role",
+        "maxConcurrentChatsLabel": "Max Concurrent Chats",
+        "skillsLabel": "Skills",
+        "skillsPlaceholder": "Add a skill…",
+        "skillsAdd": "Add",
+        "saveChanges": "Save Changes",
+        "create": "Create"
+      }
+    }
+  },
+  "analytics": {
+    "header": {
+      "title": "Analytics",
+      "subtitle": "Performance metrics and insights"
+    },
+    "timeRange": {
+      "placeholder": "Select range",
+      "last24Hours": "Last 24 Hours",
+      "last7Days": "Last 7 Days",
+      "last30Days": "Last 30 Days",
+      "last90Days": "Last 90 Days"
+    },
+    "export": {
+      "button": "Export",
+      "csv": "CSV",
+      "json": "JSON",
+      "excel": "Excel"
+    },
+    "kpis": {
+      "activeChats": "Active Chats",
+      "pendingHandoffs": "Pending Handoffs",
+      "onlineAgents": "Online Agents",
+      "avgResponseTime": "Avg Response Time",
+      "csatScore": "CSAT Score",
+      "totalChats": "Total Chats"
+    },
+    "tabs": {
+      "overview": "Overview",
+      "agents": "Agents",
+      "chats": "Chats"
+    },
+    "agentRedirect": {
+      "goToInbox": "Go to Inbox",
+      "toManage": "to manage conversations"
+    },
+    "charts": {
+      "chatVolume": {
+        "title": "Chat Volume",
+        "legend": {
+          "bot": "Bot",
+          "human": "Human",
+          "handoff": "Handoff"
+        }
+      },
+      "responseTime": {
+        "title": "Average Response Time",
+        "legend": {
+          "actual": "Actual (seconds)",
+          "target": "Target (seconds)"
+        }
+      },
+      "resolutionDistribution": {
+        "title": "Resolution Distribution",
+        "botResolved": "Bot Resolved",
+        "humanResolved": "Human Resolved"
+      },
+      "csatDistribution": {
+        "title": "CSAT Distribution"
+      }
+    },
+    "days": {
+      "mon": "Mon",
+      "tue": "Tue",
+      "wed": "Wed",
+      "thu": "Thu",
+      "fri": "Fri",
+      "sat": "Sat",
+      "sun": "Sun"
+    },
+    "csat": {
+      "fiveStars": "5 Stars",
+      "fourStars": "4 Stars",
+      "threeStars": "3 Stars",
+      "twoStars": "2 Stars",
+      "oneStar": "1 Star"
+    },
+    "agentPerformance": {
+      "title": "Agent Performance",
+      "columns": {
+        "agent": "Agent",
+        "chatsHandled": "Chats Handled",
+        "avgResponseTime": "Avg Response Time",
+        "csatScore": "CSAT Score"
+      }
+    },
+    "chatAnalysis": {
+      "title": "Chat Analysis",
+      "comingSoon": "Detailed chat analysis coming soon…"
+    }
   }
 }

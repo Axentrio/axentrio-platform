@@ -1570,5 +1570,372 @@
         }
       }
     }
+  },
+  "inbox": {
+    "header": {
+      "subtitle": "Geünificeerde werkplek voor alle gesprekken",
+      "live": "Live"
+    },
+    "tabs": {
+      "all": "Alle",
+      "bot": "Bot",
+      "handoff": "Overdracht",
+      "agent": "Agent"
+    },
+    "chat": {
+      "anonymousUser": "Anonieme gebruiker",
+      "anonymous": "Anoniem"
+    },
+    "handoff": {
+      "empty": {
+        "title": "Geen openstaande overdrachten",
+        "subtitle": "Alle overdrachtverzoeken zijn afgehandeld"
+      },
+      "pendingCount_one": "{{count}} openstaand overdrachtverzoek",
+      "pendingCount_other": "{{count}} openstaande overdrachtverzoeken",
+      "handoffChats": "Overdrachtsgesprekken",
+      "decline": "Weigeren",
+      "accept": "Accepteren",
+      "reason": {
+        "user_request": "Gebruiker vroeg om een agent",
+        "sentiment_drop": "Negatief sentiment gedetecteerd",
+        "bot_failure": "Bot kon niet helpen",
+        "timeout": "Time-out van gesprek"
+      }
+    },
+    "window": {
+      "backToList": "Terug naar gesprekkenlijst",
+      "header": {
+        "assignedTo": "Toegewezen aan {{name}}"
+      },
+      "composer": {
+        "placeholder": "Typ een bericht…",
+        "send": "Bericht verzenden"
+      },
+      "sender": {
+        "agent": "Agent",
+        "bot": "Bot",
+        "visitor": "Bezoeker"
+      },
+      "message": {
+        "image": "Afbeelding",
+        "file": "Bestand"
+      },
+      "transferChat": "Chat overdragen",
+      "empty": {
+        "title": "Nog geen berichten",
+        "subtitle": "Berichten verschijnen hier zodra het gesprek begint"
+      }
+    },
+    "takeover": {
+      "button": "Overnemen"
+    },
+    "actions": {
+      "transfer": "Overdragen",
+      "returnToBot": "Terug naar bot",
+      "close": "Sluiten",
+      "closing": "Bezig met sluiten…"
+    },
+    "detail": {
+      "empty": {
+        "title": "Selecteer een gesprek om te bekijken",
+        "subtitle": "Kies een gesprek uit de lijst om te beginnen"
+      }
+    },
+    "closeDialog": {
+      "title": "Dit gesprek sluiten?",
+      "description": "Het gesprek wordt gemarkeerd als opgelost en uit de actieve lijst verwijderd. Deze actie kan niet ongedaan worden gemaakt.",
+      "confirm": "Gesprek sluiten"
+    },
+    "transferModal": {
+      "title": "Gesprek overdragen",
+      "prompt": "Selecteer een agent om dit gesprek aan over te dragen:",
+      "noAgents": "Geen agents momenteel online",
+      "agentStats": "{{current}}/{{max}} gesprekken — {{status}}"
+    },
+    "toasts": {
+      "loadFailed": "Gesprek laden mislukt",
+      "takeoverSuccess": "Gesprek succesvol overgenomen",
+      "takeoverFailed": "Gesprek overnemen mislukt",
+      "handoffAccepted": "Overdracht geaccepteerd",
+      "handoffAcceptFailed": "Overdracht accepteren mislukt",
+      "handoffDeclineFailed": "Overdracht weigeren mislukt",
+      "transferSuccess": "Gesprek overgedragen",
+      "transferFailed": "Gesprek overdragen mislukt",
+      "closeSuccess": "Gesprek gesloten",
+      "closeFailed": "Gesprek sluiten mislukt",
+      "returnToBotSuccess": "Gesprek terug naar bot",
+      "returnToBotFailed": "Terugzetten naar bot mislukt"
+    },
+    "stream": {
+      "title": "Live chats",
+      "activeCount": "{{count}} actief",
+      "searchPlaceholder": "Gesprekken zoeken…",
+      "errorLoading": "Chats laden mislukt",
+      "retry": "Opnieuw proberen",
+      "empty": {
+        "title": "Nog geen chats",
+        "subtitle": "Nieuwe gesprekken verschijnen hier"
+      },
+      "filters": {
+        "status": {
+          "all": "Alle statussen",
+          "bot": "Bot",
+          "handsoff": "Overdracht",
+          "human": "Agent",
+          "closed": "Gesloten"
+        },
+        "allTenants": "Alle workspaces"
+      },
+      "time": {
+        "justNow": "Zojuist",
+        "minutesAgo": "{{count}}m geleden",
+        "hoursAgo": "{{count}}u geleden"
+      }
+    },
+    "statusBadge": {
+      "bot": "Bot",
+      "human": "Agent",
+      "handsoff": "Overdracht in afwachting",
+      "closed": "Gesloten",
+      "pending": "In afwachting"
+    },
+    "userStatusBadge": {
+      "online": "Online",
+      "away": "Afwezig",
+      "offline": "Offline",
+      "busy": "Bezet"
+    },
+    "priorityBadge": {
+      "low": "Laag",
+      "medium": "Gemiddeld",
+      "high": "Hoog",
+      "urgent": "Urgent"
+    }
+  },
+  "team": {
+    "header": {
+      "title": "Team",
+      "subtitle": "Beheer agents, shifts en prestaties"
+    },
+    "tabs": {
+      "members": "Leden",
+      "agents": "Agents",
+      "shifts": "Shifts",
+      "performance": "Prestaties"
+    },
+    "stats": {
+      "totalAgents": {
+        "label": "Totaal agents"
+      },
+      "onlineNow": {
+        "label": "Nu online"
+      },
+      "totalChatsMtd": {
+        "label": "Totaal chats (MTD)"
+      },
+      "avgCsat": {
+        "label": "Gem. CSAT"
+      }
+    },
+    "agents": {
+      "actions": {
+        "add": "Agent toevoegen",
+        "manageShifts": "Shifts beheren"
+      },
+      "columns": {
+        "agent": "Agent",
+        "status": "Status",
+        "role": "Rol",
+        "skills": "Vaardigheden",
+        "chats": "Chats",
+        "actions": "Acties"
+      },
+      "statuses": {
+        "online": "Online",
+        "away": "Afwezig",
+        "busy": "Bezet",
+        "offline": "Offline"
+      }
+    },
+    "shifts": {
+      "weeklySchedule": "Weekrooster",
+      "days": {
+        "sun": "Zondag",
+        "mon": "Maandag",
+        "tue": "Dinsdag",
+        "wed": "Woensdag",
+        "thu": "Donderdag",
+        "fri": "Vrijdag",
+        "sat": "Zaterdag"
+      }
+    },
+    "performance": {
+      "columns": {
+        "agent": "Agent",
+        "totalChats": "Totaal chats",
+        "avgResponse": "Gem. reactietijd",
+        "csat": "CSAT",
+        "activeChats": "Actieve chats"
+      },
+      "responseSeconds": "{{count}}s"
+    },
+    "members": {
+      "title": "Organisatieleden",
+      "unknownName": "Onbekend",
+      "badges": {
+        "inactive": "Inactief"
+      },
+      "columns": {
+        "user": "Gebruiker",
+        "joined": "Toegetreden",
+        "role": "Rol",
+        "actions": "Acties"
+      },
+      "actions": {
+        "invite": "Lid uitnodigen",
+        "reactivate": "Heractiveren",
+        "deactivate": "Lid deactiveren"
+      }
+    },
+    "invites": {
+      "title": "Openstaande uitnodigingen",
+      "columns": {
+        "email": "E-mail",
+        "role": "Rol",
+        "invitedBy": "Uitgenodigd door",
+        "expires": "Verloopt",
+        "actions": "Acties"
+      },
+      "actions": {
+        "resend": "Opnieuw verzenden"
+      },
+      "statuses": {
+        "expired": "Verlopen"
+      },
+      "daysLeft_one": "Nog {{count}} dag",
+      "daysLeft_other": "Nog {{count}} dagen"
+    },
+    "dialogs": {
+      "invite": {
+        "title": "Nieuw lid uitnodigen",
+        "emailLabel": "E-mail",
+        "emailPlaceholder": "collega@bedrijf.com",
+        "roleLabel": "Rol",
+        "send": "Uitnodiging versturen",
+        "sending": "Uitnodiging versturen…",
+        "sendingShort": "Versturen…",
+        "errorFallback": "Uitnodiging versturen mislukt. Probeer het opnieuw."
+      },
+      "deactivate": {
+        "title": "Dit lid deactiveren?",
+        "description": "Ze verliezen onmiddellijk toegang tot de werkruimte. Je kunt ze later opnieuw activeren via de ledenlijst.",
+        "confirm": "Deactiveren"
+      },
+      "agent": {
+        "addTitle": "Agent toevoegen",
+        "editTitle": "Agent bewerken",
+        "firstNameLabel": "Voornaam",
+        "lastNameLabel": "Achternaam",
+        "emailLabel": "E-mail",
+        "roleLabel": "Rol",
+        "maxConcurrentChatsLabel": "Max. gelijktijdige chats",
+        "skillsLabel": "Vaardigheden",
+        "skillsPlaceholder": "Vaardigheid toevoegen…",
+        "skillsAdd": "Toevoegen",
+        "saveChanges": "Wijzigingen opslaan",
+        "create": "Aanmaken"
+      }
+    }
+  },
+  "analytics": {
+    "header": {
+      "title": "Analyse",
+      "subtitle": "Prestatiemetingen en inzichten"
+    },
+    "timeRange": {
+      "placeholder": "Selecteer periode",
+      "last24Hours": "Laatste 24 uur",
+      "last7Days": "Laatste 7 dagen",
+      "last30Days": "Laatste 30 dagen",
+      "last90Days": "Laatste 90 dagen"
+    },
+    "export": {
+      "button": "Exporteren",
+      "csv": "CSV",
+      "json": "JSON",
+      "excel": "Excel"
+    },
+    "kpis": {
+      "activeChats": "Actieve chats",
+      "pendingHandoffs": "Openstaande overdrachten",
+      "onlineAgents": "Online agents",
+      "avgResponseTime": "Gem. responstijd",
+      "csatScore": "CSAT-score",
+      "totalChats": "Totaal chats"
+    },
+    "tabs": {
+      "overview": "Overzicht",
+      "agents": "Agents",
+      "chats": "Chats"
+    },
+    "agentRedirect": {
+      "goToInbox": "Ga naar inbox",
+      "toManage": "om gesprekken te beheren"
+    },
+    "charts": {
+      "chatVolume": {
+        "title": "Chatvolume",
+        "legend": {
+          "bot": "Bot",
+          "human": "Mens",
+          "handoff": "Overdracht"
+        }
+      },
+      "responseTime": {
+        "title": "Gemiddelde responstijd",
+        "legend": {
+          "actual": "Werkelijk (seconden)",
+          "target": "Doel (seconden)"
+        }
+      },
+      "resolutionDistribution": {
+        "title": "Verdeling oplossingen",
+        "botResolved": "Door bot opgelost",
+        "humanResolved": "Door agent opgelost"
+      },
+      "csatDistribution": {
+        "title": "CSAT-verdeling"
+      }
+    },
+    "days": {
+      "mon": "Ma",
+      "tue": "Di",
+      "wed": "Wo",
+      "thu": "Do",
+      "fri": "Vr",
+      "sat": "Za",
+      "sun": "Zo"
+    },
+    "csat": {
+      "fiveStars": "5 sterren",
+      "fourStars": "4 sterren",
+      "threeStars": "3 sterren",
+      "twoStars": "2 sterren",
+      "oneStar": "1 ster"
+    },
+    "agentPerformance": {
+      "title": "Agentprestaties",
+      "columns": {
+        "agent": "Agent",
+        "chatsHandled": "Behandelde chats",
+        "avgResponseTime": "Gem. responstijd",
+        "csatScore": "CSAT-score"
+      }
+    },
+    "chatAnalysis": {
+      "title": "Chatanalyse",
+      "comingSoon": "Gedetailleerde chatanalyse binnenkort beschikbaar…"
+    }
   }
 }

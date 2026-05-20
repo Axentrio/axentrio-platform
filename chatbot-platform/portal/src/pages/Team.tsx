@@ -4,13 +4,14 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import { InlineError } from '@/components/ui/inline-error';
 import { useQuery } from '@tanstack/react-query';
-import { api } from '@services/apiClient';
+import { api, extractApiErrorMessage } from '@services/apiClient';
 import {
   useAgentList,
   useAgentShifts,
@@ -105,9 +106,10 @@ function mapApiAgent(a: ApiAgent): Agent {
   };
 }
 
-const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
 const Team: React.FC = () => {
+  const { t } = useTranslation();
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
   const [, setIsShiftModalOpen] = useState(false);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
@@ -199,31 +201,31 @@ const Team: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Team</h1>
-          <p className="text-text-secondary">Manage agents and schedules</p>
+          <h1 className="text-2xl font-bold text-text-primary">{t('team.header.title')}</h1>
+          <p className="text-text-secondary">{t('team.header.subtitle')}</p>
         </div>
         <Button onClick={handleCreateAgent}>
           <Plus className="w-4 h-4" />
-          Add Agent
+          {t('team.agents.actions.add')}
         </Button>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">Total Agents</p>
+          <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalAgents.label')}</p>
           <p className="text-2xl font-bold font-mono text-text-primary">{agents.length}</p>
         </Card>
         <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">Online Now</p>
+          <p className="text-sm font-medium text-text-secondary">{t('team.stats.onlineNow.label')}</p>
           <p className="text-2xl font-bold font-mono text-status-online">{onlineAgents}</p>
         </Card>
         <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">Total Chats (MTD)</p>
+          <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalChatsMtd.label')}</p>
           <p className="text-2xl font-bold font-mono text-text-primary">{totalChats}</p>
         </Card>
         <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">Avg CSAT</p>
+          <p className="text-sm font-medium text-text-secondary">{t('team.stats.avgCsat.label')}</p>
           <p className="text-2xl font-bold font-mono text-accent-400">{avgCsat.toFixed(1)}</p>
         </Card>
       </div>
@@ -231,10 +233,10 @@ const Team: React.FC = () => {
       {/* Tabs */}
       <Tabs defaultValue="members">
         <TabsList>
-          <TabsTrigger value="members">Members</TabsTrigger>
-          <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="shifts">Shifts</TabsTrigger>
-          <TabsTrigger value="performance">Performance</TabsTrigger>
+          <TabsTrigger value="members">{t('team.tabs.members')}</TabsTrigger>
+          <TabsTrigger value="agents">{t('team.tabs.agents')}</TabsTrigger>
+          <TabsTrigger value="shifts">{t('team.tabs.shifts')}</TabsTrigger>
+          <TabsTrigger value="performance">{t('team.tabs.performance')}</TabsTrigger>
         </TabsList>
 
         {/* Tab Content */}
@@ -247,12 +249,12 @@ const Team: React.FC = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Agent</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Skills</TableHead>
-                  <TableHead>Chats</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead>{t('team.agents.columns.agent')}</TableHead>
+                  <TableHead>{t('team.agents.columns.status')}</TableHead>
+                  <TableHead>{t('team.agents.columns.role')}</TableHead>
+                  <TableHead>{t('team.agents.columns.skills')}</TableHead>
+                  <TableHead>{t('team.agents.columns.chats')}</TableHead>
+                  <TableHead>{t('team.agents.columns.actions')}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -280,15 +282,15 @@ const Team: React.FC = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="online">Online</SelectItem>
-                          <SelectItem value="away">Away</SelectItem>
-                          <SelectItem value="busy">Busy</SelectItem>
-                          <SelectItem value="offline">Offline</SelectItem>
+                          <SelectItem value="online">{t('team.agents.statuses.online')}</SelectItem>
+                          <SelectItem value="away">{t('team.agents.statuses.away')}</SelectItem>
+                          <SelectItem value="busy">{t('team.agents.statuses.busy')}</SelectItem>
+                          <SelectItem value="offline">{t('team.agents.statuses.offline')}</SelectItem>
                         </SelectContent>
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <span className="capitalize text-text-secondary">{agent.role}</span>
+                      <span className="text-text-secondary">{t(`roles.${agent.role}`)}</span>
                     </TableCell>
                     <TableCell>
                       <div className="flex gap-1 flex-wrap">
@@ -310,7 +312,7 @@ const Team: React.FC = () => {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleManageShifts(agent)}
-                          title="Manage shifts"
+                          title={t('team.agents.actions.manageShifts')}
                         >
                           <Calendar className="w-4 h-4" />
                         </Button>
@@ -332,11 +334,11 @@ const Team: React.FC = () => {
 
         <TabsContent value="shifts">
           <Card variant="glass" className="p-6">
-            <h3 className="text-lg font-semibold text-text-primary mb-4">Weekly Schedule</h3>
+            <h3 className="text-lg font-semibold text-text-primary mb-4">{t('team.shifts.weeklySchedule')}</h3>
             <div className="grid grid-cols-7 gap-4">
-              {daysOfWeek.map((day, index) => (
-                <div key={day} className="border border-edge rounded-xl p-4">
-                  <h4 className="font-medium text-text-primary mb-3">{day}</h4>
+              {dayKeys.map((dayKey, index) => (
+                <div key={dayKey} className="border border-edge rounded-xl p-4">
+                  <h4 className="font-medium text-text-primary mb-3">{t(`team.shifts.days.${dayKey}`)}</h4>
                   <div className="space-y-2">
                     {shifts
                       .filter((s: AgentShift) => s.dayOfWeek === index)
@@ -361,20 +363,20 @@ const Team: React.FC = () => {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Agent</TableHead>
+                  <TableHead>{t('team.performance.columns.agent')}</TableHead>
                   <TableHead>
                     <MessageSquare className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
-                    Total Chats
+                    {t('team.performance.columns.totalChats')}
                   </TableHead>
                   <TableHead>
                     <Clock className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
-                    Avg Response
+                    {t('team.performance.columns.avgResponse')}
                   </TableHead>
                   <TableHead>
                     <Star className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
-                    CSAT
+                    {t('team.performance.columns.csat')}
                   </TableHead>
-                  <TableHead>Active Chats</TableHead>
+                  <TableHead>{t('team.performance.columns.activeChats')}</TableHead>
                   <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
@@ -387,7 +389,7 @@ const Team: React.FC = () => {
                         <p className="font-medium text-text-primary">{agent.firstName} {agent.lastName}</p>
                       </TableCell>
                       <TableCell className="text-text-secondary">{perf?.totalChatsHandled ?? 0}</TableCell>
-                      <TableCell className="text-text-secondary">{perf?.avgResponseTimeSeconds ?? 0}s</TableCell>
+                      <TableCell className="text-text-secondary">{t('team.performance.responseSeconds', { count: perf?.avgResponseTimeSeconds ?? 0 })}</TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
                           <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
@@ -442,6 +444,7 @@ interface PendingInviteItem {
 }
 
 const OrgMembersPanel: React.FC = () => {
+  const { t } = useTranslation();
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('agent');
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -483,10 +486,7 @@ const OrgMembersPanel: React.FC = () => {
       },
       onError: (error: any) => {
         setInviteError(
-          error?.response?.data?.error?.message
-          || error?.response?.data?.error
-          || error?.message
-          || 'Failed to send invite'
+          extractApiErrorMessage(error) ?? t('team.dialogs.invite.errorFallback')
         );
       },
     });
@@ -524,21 +524,21 @@ const OrgMembersPanel: React.FC = () => {
       {/* Invite form */}
       {showInviteForm && (
         <Card variant="glass" className="p-6 relative">
-          <LoadingOverlay isLoading={inviteMutation.isPending} message="Sending invite..." />
-          <h3 className="text-lg font-semibold text-text-primary mb-4">Invite Member</h3>
+          <LoadingOverlay isLoading={inviteMutation.isPending} message={t('team.dialogs.invite.sending')} />
+          <h3 className="text-lg font-semibold text-text-primary mb-4">{t('team.dialogs.invite.title')}</h3>
           <form onSubmit={handleInvite} className="flex items-end gap-3">
             <div className="flex-1">
-              <Label className="mb-1 text-text-secondary">Email</Label>
+              <Label className="mb-1 text-text-secondary">{t('team.dialogs.invite.emailLabel')}</Label>
               <Input
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="colleague@company.com"
+                placeholder={t('team.dialogs.invite.emailPlaceholder')}
                 required
               />
             </div>
             <div>
-              <Label className="mb-1 text-text-secondary">Role</Label>
+              <Label className="mb-1 text-text-secondary">{t('team.dialogs.invite.roleLabel')}</Label>
               <Select
                 value={inviteRole}
                 onValueChange={(value) => setInviteRole(value)}
@@ -547,14 +547,14 @@ const OrgMembersPanel: React.FC = () => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="supervisor">Supervisor</SelectItem>
-                  <SelectItem value="agent">Agent</SelectItem>
+                  <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+                  <SelectItem value="supervisor">{t('roles.supervisor')}</SelectItem>
+                  <SelectItem value="agent">{t('roles.agent')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <Button type="submit" disabled={inviteMutation.isPending}>
-              {inviteMutation.isPending ? 'Sending...' : 'Send Invite'}
+              {inviteMutation.isPending ? t('team.dialogs.invite.sendingShort') : t('team.dialogs.invite.send')}
             </Button>
             <Button
               type="button"
@@ -562,7 +562,7 @@ const OrgMembersPanel: React.FC = () => {
               onClick={() => setShowInviteForm(false)}
               disabled={inviteMutation.isPending}
             >
-              Cancel
+              {t('common.cancel')}
             </Button>
           </form>
           <InlineError message={inviteError} className="mt-2" />
@@ -573,22 +573,22 @@ const OrgMembersPanel: React.FC = () => {
       <Card variant="glass" className="overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-edge">
           <h3 className="font-semibold text-text-primary">
-            Members <span className="text-text-muted font-normal">({members.length})</span>
+            {t('team.members.title')} <span className="text-text-muted font-normal">({members.length})</span>
           </h3>
           {!showInviteForm && (
             <Button size="sm" onClick={() => setShowInviteForm(true)}>
               <Plus className="w-4 h-4" />
-              Invite
+              {t('team.members.actions.invite')}
             </Button>
           )}
         </div>
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>User</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead>{t('team.members.columns.user')}</TableHead>
+              <TableHead>{t('team.members.columns.joined')}</TableHead>
+              <TableHead>{t('team.members.columns.role')}</TableHead>
+              <TableHead>{t('team.members.columns.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -615,9 +615,9 @@ const OrgMembersPanel: React.FC = () => {
                       )}
                       <div>
                         <p className="font-medium text-text-primary">
-                          {member.name || 'Unknown'}
+                          {member.name || t('team.members.unknownName')}
                           {!member.isActive && (
-                            <Badge className="ml-2 bg-surface-3 text-text-muted border-edge text-xs">Inactive</Badge>
+                            <Badge className="ml-2 bg-surface-3 text-text-muted border-edge text-xs">{t('team.members.badges.inactive')}</Badge>
                           )}
                         </p>
                         <p className="text-sm text-text-muted">{member.email}</p>
@@ -627,7 +627,7 @@ const OrgMembersPanel: React.FC = () => {
                   <TableCell className="text-text-secondary text-sm">{joinedDate}</TableCell>
                   <TableCell>
                     {member.role === 'super_admin' ? (
-                      <span className="text-sm text-text-secondary capitalize">Super Admin</span>
+                      <span className="text-sm text-text-secondary">{t('roles.super_admin')}</span>
                     ) : (
                       <Select
                         value={member.role}
@@ -643,9 +643,9 @@ const OrgMembersPanel: React.FC = () => {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="admin">Admin</SelectItem>
-                          <SelectItem value="supervisor">Supervisor</SelectItem>
-                          <SelectItem value="agent">Agent</SelectItem>
+                          <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+                          <SelectItem value="supervisor">{t('roles.supervisor')}</SelectItem>
+                          <SelectItem value="agent">{t('roles.agent')}</SelectItem>
                         </SelectContent>
                       </Select>
                     )}
@@ -665,7 +665,7 @@ const OrgMembersPanel: React.FC = () => {
                           disabled={reactivateMutation.isPending || mutatingRowIds.has(member.id)}
                           className="text-status-online border-status-online/30 hover:bg-status-online/10"
                         >
-                          Reactivate
+                          {t('team.members.actions.reactivate')}
                         </Button>
                       ) : (
                         <Button
@@ -673,7 +673,7 @@ const OrgMembersPanel: React.FC = () => {
                           size="icon"
                           onClick={() => setRemoveMemberUserId(member.id)}
                           className="hover:text-red-400 hover:bg-red-500/10"
-                          title="Deactivate member"
+                          title={t('team.members.actions.deactivate')}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
@@ -692,17 +692,17 @@ const OrgMembersPanel: React.FC = () => {
         <Card variant="glass" className="overflow-hidden">
           <div className="px-6 py-4 border-b border-edge">
             <h3 className="font-semibold text-text-primary">
-              Pending Invites <span className="text-text-muted font-normal">({pendingInvites.length})</span>
+              {t('team.invites.title')} <span className="text-text-muted font-normal">({pendingInvites.length})</span>
             </h3>
           </div>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Email</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Invited By</TableHead>
-                <TableHead>Expires</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead>{t('team.invites.columns.email')}</TableHead>
+                <TableHead>{t('team.invites.columns.role')}</TableHead>
+                <TableHead>{t('team.invites.columns.invitedBy')}</TableHead>
+                <TableHead>{t('team.invites.columns.expires')}</TableHead>
+                <TableHead>{t('team.invites.columns.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -714,16 +714,16 @@ const OrgMembersPanel: React.FC = () => {
                   <TableRow key={invite.id}>
                     <TableCell className="text-text-primary">{invite.email}</TableCell>
                     <TableCell>
-                      <span className="capitalize text-text-secondary">{invite.role}</span>
+                      <span className="text-text-secondary">{t(`roles.${invite.role}`)}</span>
                     </TableCell>
                     <TableCell className="text-text-secondary text-sm">
                       {invite.invitedBy?.name ?? '\u2014'}
                     </TableCell>
                     <TableCell>
                       {invite.isExpired ? (
-                        <Badge className="bg-status-busy/10 text-status-busy border-status-busy/20">Expired</Badge>
+                        <Badge className="bg-status-busy/10 text-status-busy border-status-busy/20">{t('team.invites.statuses.expired')}</Badge>
                       ) : (
-                        <span className="text-text-secondary text-sm">{daysLeft}d left</span>
+                        <span className="text-text-secondary text-sm">{t('team.invites.daysLeft', { count: daysLeft })}</span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -735,7 +735,7 @@ const OrgMembersPanel: React.FC = () => {
                           disabled={resendMutation.isPending}
                           className="text-xs"
                         >
-                          Resend
+                          {t('team.invites.actions.resend')}
                         </Button>
                         <Button
                           size="sm"
@@ -744,7 +744,7 @@ const OrgMembersPanel: React.FC = () => {
                           disabled={cancelInviteMutation.isPending}
                           className="text-xs hover:text-red-400 hover:bg-red-500/10"
                         >
-                          Cancel
+                          {t('common.cancel')}
                         </Button>
                       </div>
                     </TableCell>
@@ -760,14 +760,14 @@ const OrgMembersPanel: React.FC = () => {
       <AlertDialog open={!!removeMemberUserId} onOpenChange={(open) => { if (!open) setRemoveMemberUserId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Deactivate Member</AlertDialogTitle>
+            <AlertDialogTitle>{t('team.dialogs.deactivate.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Deactivate this member? They will lose access to the organization. You can reactivate them later.
+              {t('team.dialogs.deactivate.description')}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmRemoveMember(); }}>Deactivate</AlertDialogAction>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); confirmRemoveMember(); }}>{t('team.dialogs.deactivate.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -784,6 +784,7 @@ interface AgentModalProps {
 }
 
 const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave }) => {
+  const { t } = useTranslation();
   const [formData, setFormData] = useState<Partial<Agent>>({
     firstName: agent?.firstName || '',
     lastName: agent?.lastName || '',
@@ -823,11 +824,11 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={agent ? 'Edit Agent' : 'Add Agent'} size="md">
+    <Modal isOpen={isOpen} onClose={onClose} title={agent ? t('team.dialogs.agent.editTitle') : t('team.dialogs.agent.addTitle')} size="md">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label className="mb-1 text-text-secondary">First Name</Label>
+            <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.firstNameLabel')}</Label>
             <Input
               type="text"
               value={formData.firstName}
@@ -836,7 +837,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
             />
           </div>
           <div>
-            <Label className="mb-1 text-text-secondary">Last Name</Label>
+            <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.lastNameLabel')}</Label>
             <Input
               type="text"
               value={formData.lastName}
@@ -847,7 +848,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
         </div>
 
         <div>
-          <Label className="mb-1 text-text-secondary">Email</Label>
+          <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.emailLabel')}</Label>
           <Input
             type="email"
             value={formData.email}
@@ -858,7 +859,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <Label className="mb-1 text-text-secondary">Role</Label>
+            <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.roleLabel')}</Label>
             <Select
               value={formData.role}
               onValueChange={(value) => setFormData({ ...formData, role: value as Agent['role'] })}
@@ -867,14 +868,14 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="agent">Agent</SelectItem>
-                <SelectItem value="supervisor">Supervisor</SelectItem>
-                <SelectItem value="admin">Admin</SelectItem>
+                <SelectItem value="agent">{t('roles.agent')}</SelectItem>
+                <SelectItem value="supervisor">{t('roles.supervisor')}</SelectItem>
+                <SelectItem value="admin">{t('roles.admin')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label className="mb-1 text-text-secondary">Max Concurrent Chats</Label>
+            <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.maxConcurrentChatsLabel')}</Label>
             <Input
               type="number"
               value={formData.maxConcurrentChats}
@@ -886,14 +887,14 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
         </div>
 
         <div>
-          <Label className="mb-1 text-text-secondary">Skills</Label>
+          <Label className="mb-1 text-text-secondary">{t('team.dialogs.agent.skillsLabel')}</Label>
           <div className="flex gap-2 mb-2">
             <Input
               type="text"
               value={skillInput}
               onChange={(e) => setSkillInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), handleAddSkill())}
-              placeholder="Add a skill..."
+              placeholder={t('team.dialogs.agent.skillsPlaceholder')}
               className="flex-1"
             />
             <Button
@@ -901,7 +902,7 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
               variant="outline"
               onClick={handleAddSkill}
             >
-              Add
+              {t('team.dialogs.agent.skillsAdd')}
             </Button>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -922,10 +923,10 @@ const AgentModal: React.FC<AgentModalProps> = ({ isOpen, onClose, agent, onSave 
             variant="outline"
             onClick={onClose}
           >
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button type="submit">
-            {agent ? 'Save Changes' : 'Create Agent'}
+            {agent ? t('team.dialogs.agent.saveChanges') : t('team.dialogs.agent.create')}
           </Button>
         </div>
       </form>

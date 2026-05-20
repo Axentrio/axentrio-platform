@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 import { CHAT_STATUS_COLORS, USER_STATUS_COLORS, PRIORITY_COLORS } from '@config/api.config';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
@@ -17,23 +18,23 @@ interface StatusBadgeProps {
   className?: string;
 }
 
-const statusLabels: Record<string, string> = {
+const statusLabelKeys: Record<string, string> = {
   // Chat statuses
-  bot: 'Bot',
-  human: 'Human',
-  handsoff: 'Handoff',
-  closed: 'Closed',
-  pending: 'Pending',
+  bot: 'inbox.statusBadge.bot',
+  human: 'inbox.statusBadge.human',
+  handsoff: 'inbox.statusBadge.handsoff',
+  closed: 'inbox.statusBadge.closed',
+  pending: 'inbox.statusBadge.pending',
   // User statuses
-  online: 'Online',
-  away: 'Away',
-  offline: 'Offline',
-  busy: 'Busy',
+  online: 'inbox.userStatusBadge.online',
+  away: 'inbox.userStatusBadge.away',
+  offline: 'inbox.userStatusBadge.offline',
+  busy: 'inbox.userStatusBadge.busy',
   // Priorities
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  urgent: 'Urgent',
+  low: 'inbox.priorityBadge.low',
+  medium: 'inbox.priorityBadge.medium',
+  high: 'inbox.priorityBadge.high',
+  urgent: 'inbox.priorityBadge.urgent',
 };
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({
@@ -43,6 +44,11 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   showLabel = true,
   className = '',
 }) => {
+  const { t } = useTranslation();
+  const getLabel = (s: string) => {
+    const key = statusLabelKeys[s];
+    return key ? t(key) : s;
+  };
   const getColorClass = () => {
     switch (type) {
       case 'chat':
@@ -89,7 +95,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
     return (
       <span
         className={cn('inline-block rounded-full', colorClass, sizeClass, className)}
-        title={statusLabels[status] || status}
+        title={getLabel(status)}
       />
     );
   }
@@ -99,7 +105,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
       <Badge
         className={cn('border-transparent font-medium', colorClass, sizeClass, className)}
       >
-        {statusLabels[status] || status}
+        {getLabel(status)}
       </Badge>
     );
   }
@@ -107,7 +113,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
       <span className={cn('inline-block rounded-full', colorClass, getDotSizeClass())} />
-      <span className="text-sm text-text-secondary">{statusLabels[status] || status}</span>
+      <span className="text-sm text-text-secondary">{getLabel(status)}</span>
     </span>
   );
 };

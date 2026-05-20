@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Search, MessageSquare, Clock, User } from 'lucide-react';
 import { useChatsQuery } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
@@ -30,12 +31,12 @@ interface ChatStreamProps {
   initialStatusFilter?: ChatStatus | 'all';
 }
 
-const statusFilters: { value: ChatStatus | 'all'; label: string }[] = [
-  { value: 'all', label: 'All Status' },
-  { value: 'bot', label: 'Bot' },
-  { value: 'handsoff', label: 'Handoff' },
-  { value: 'human', label: 'Human' },
-  { value: 'closed', label: 'Closed' },
+const statusFilters: { value: ChatStatus | 'all'; labelKey: string }[] = [
+  { value: 'all', labelKey: 'inbox.stream.filters.status.all' },
+  { value: 'bot', labelKey: 'inbox.stream.filters.status.bot' },
+  { value: 'handsoff', labelKey: 'inbox.stream.filters.status.handsoff' },
+  { value: 'human', labelKey: 'inbox.stream.filters.status.human' },
+  { value: 'closed', labelKey: 'inbox.stream.filters.status.closed' },
 ];
 
 export const ChatStream: React.FC<ChatStreamProps> = ({
@@ -46,6 +47,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
   className = '',
   initialStatusFilter = 'all',
 }) => {
+  const { t } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<ChatStatus | 'all'>(initialStatusFilter);
   const [tenantFilter, setTenantFilter] = useState<string | undefined>();
@@ -78,13 +80,13 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
     // Less than 1 hour
     if (diff < 3600000) {
       const minutes = Math.floor(diff / 60000);
-      return minutes < 1 ? 'Just now' : `${minutes}m ago`;
+      return minutes < 1 ? t('inbox.stream.time.justNow') : t('inbox.stream.time.minutesAgo', { count: minutes });
     }
 
     // Less than 24 hours
     if (diff < 86400000) {
       const hours = Math.floor(diff / 3600000);
-      return `${hours}h ago`;
+      return t('inbox.stream.time.hoursAgo', { count: hours });
     }
 
     return date.toLocaleDateString();
@@ -109,10 +111,10 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <MessageSquare className="w-5 h-5" />
-            Live Chats
+            {t('inbox.stream.title')}
           </h2>
           <span className="text-sm text-text-muted">
-            {chats.length} active
+            {t('inbox.stream.activeCount', { count: chats.length })}
           </span>
         </div>
 
@@ -125,7 +127,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search chats..."
+              placeholder={t('inbox.stream.searchPlaceholder')}
               className="pl-9 bg-surface-3 border-edge rounded-xl text-text-primary placeholder:text-text-muted focus-visible:border-primary-500 focus-visible:ring-primary-500/30"
             />
           </div>
@@ -138,12 +140,12 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                 onValueChange={(value) => setStatusFilter(value as ChatStatus | 'all')}
               >
                 <SelectTrigger className="flex-1 bg-surface-3 border-edge rounded-xl text-sm text-text-primary focus:border-primary-500 focus:ring-primary-500/30">
-                  <SelectValue placeholder="All Status" />
+                  <SelectValue placeholder={t('inbox.stream.filters.status.all')} />
                 </SelectTrigger>
                 <SelectContent>
                   {statusFilters.map((filter) => (
                     <SelectItem key={filter.value} value={filter.value}>
-                      {filter.label}
+                      {t(filter.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -154,7 +156,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
               tenants={tenants}
               selectedTenantId={tenantFilter}
               onSelect={setTenantFilter}
-              placeholder="All Tenants"
+              placeholder={t('inbox.stream.filters.allTenants')}
               showAllOption
               className="flex-1"
             />
@@ -170,19 +172,19 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
           </div>
         ) : error ? (
           <div className="flex flex-col items-center justify-center h-32 text-text-secondary">
-            <p>Error loading chats</p>
+            <p>{t('inbox.stream.errorLoading')}</p>
             <button
               onClick={refresh}
               className="mt-2 text-primary-400 hover:text-primary-300 text-sm"
             >
-              Retry
+              {t('inbox.stream.retry')}
             </button>
           </div>
         ) : chats.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-text-muted">
             <MessageSquare className="w-8 h-8 mb-2 opacity-40" />
-            <p className="text-sm">No conversations yet</p>
-            <p className="text-xs mt-1 text-text-muted/70">Chats will appear here when visitors start chatting</p>
+            <p className="text-sm">{t('inbox.stream.empty.title')}</p>
+            <p className="text-xs mt-1 text-text-muted/70">{t('inbox.stream.empty.subtitle')}</p>
           </div>
         ) : (
           chats.map((chat) => (
@@ -201,7 +203,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                   {/* User info */}
                   <div className="flex items-center gap-2 mb-1">
                     <span className="font-medium text-text-primary truncate">
-                      {chat.userName || 'Anonymous'}
+                      {chat.userName || t('inbox.chat.anonymous')}
                     </span>
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
                   </div>
@@ -246,7 +248,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                     }}
                     className="bg-primary-600 text-white text-xs font-medium rounded-xl hover:bg-primary-500 hover:shadow-glow-sm flex-shrink-0"
                   >
-                    Takeover
+                    {t('inbox.takeover.button')}
                   </Button>
                 )}
               </div>

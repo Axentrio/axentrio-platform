@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { useAnalyticsTimeseries, useAnalyticsChatMetrics, useAnalyticsAgents } from '../queries/useAnalyticsQueries';
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
@@ -113,23 +114,23 @@ const TableSkeleton: React.FC = () => (
 );
 
 // TODO: wire responseTimeData when daily breakdown API available
-const responseTimeData = [
-  { date: 'Mon', avg: 32, target: 30 },
-  { date: 'Tue', avg: 28, target: 30 },
-  { date: 'Wed', avg: 35, target: 30 },
-  { date: 'Thu', avg: 25, target: 30 },
-  { date: 'Fri', avg: 40, target: 30 },
-  { date: 'Sat', avg: 22, target: 30 },
-  { date: 'Sun', avg: 20, target: 30 },
+const responseTimeDataRaw = [
+  { dayKey: 'mon', avg: 32, target: 30 },
+  { dayKey: 'tue', avg: 28, target: 30 },
+  { dayKey: 'wed', avg: 35, target: 30 },
+  { dayKey: 'thu', avg: 25, target: 30 },
+  { dayKey: 'fri', avg: 40, target: 30 },
+  { dayKey: 'sat', avg: 22, target: 30 },
+  { dayKey: 'sun', avg: 20, target: 30 },
 ];
 
 // TODO: wire csatData when daily breakdown API available
-const csatData = [
-  { rating: '5 Stars', count: 145 },
-  { rating: '4 Stars', count: 68 },
-  { rating: '3 Stars', count: 23 },
-  { rating: '2 Stars', count: 12 },
-  { rating: '1 Star', count: 8 },
+const csatDataRaw = [
+  { ratingKey: 'fiveStars', count: 145 },
+  { ratingKey: 'fourStars', count: 68 },
+  { ratingKey: 'threeStars', count: 23 },
+  { ratingKey: 'twoStars', count: 12 },
+  { ratingKey: 'oneStar', count: 8 },
 ];
 
 const chartTooltipStyle = {
@@ -140,6 +141,7 @@ const chartTooltipStyle = {
 };
 
 const Analytics: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { user } = useAppAuth();
   const isAgent = user?.role === 'agent';
@@ -190,10 +192,22 @@ const Analytics: React.FC = () => {
     const botResolved = Math.max(metrics.closed - humanResolved, 0);
     const total = botResolved + humanResolved || 1;
     return [
-      { name: 'Bot Resolved', value: Math.round((botResolved / total) * 100), color: '#a78bfa' },
-      { name: 'Human Resolved', value: Math.round((humanResolved / total) * 100), color: '#34d399' },
+      { name: t('analytics.charts.resolutionDistribution.botResolved'), value: Math.round((botResolved / total) * 100), color: '#a78bfa' },
+      { name: t('analytics.charts.resolutionDistribution.humanResolved'), value: Math.round((humanResolved / total) * 100), color: '#34d399' },
     ];
-  }, [metrics]);
+  }, [metrics, t]);
+
+  // Localised response-time data (day labels for chart x-axis)
+  const responseTimeData = useMemo(
+    () => responseTimeDataRaw.map((p) => ({ ...p, date: t(`analytics.days.${p.dayKey}`) })),
+    [t],
+  );
+
+  // Localised CSAT data (rating labels for chart x-axis)
+  const csatData = useMemo(
+    () => csatDataRaw.map((p) => ({ ...p, rating: t(`analytics.csat.${p.ratingKey}`) })),
+    [t],
+  );
 
   // Agent table data mapped to the shape used by the table
   const agentPerformanceData = useMemo(
@@ -219,7 +233,7 @@ const Analytics: React.FC = () => {
     onClick?: () => void;
   }> = [
     {
-      label: 'Active Chats',
+      label: t('analytics.kpis.activeChats'),
       value: dashboard ? String((dashboard?.sessions?.active ?? 0) + (dashboard?.sessions?.bot ?? 0)) : '—',
       change: '',
       icon: MessageSquare,
@@ -228,7 +242,7 @@ const Analytics: React.FC = () => {
       onClick: () => navigate('/inbox'),
     },
     {
-      label: 'Pending Handoffs',
+      label: t('analytics.kpis.pendingHandoffs'),
       value: dashboard ? String(dashboard?.sessions?.handoff ?? 0) : '—',
       change: '',
       icon: Headphones,
@@ -237,7 +251,7 @@ const Analytics: React.FC = () => {
       onClick: () => navigate('/inbox'),
     },
     {
-      label: 'Online Agents',
+      label: t('analytics.kpis.onlineAgents'),
       value: dashboard ? `${dashboard?.agents?.online ?? 0}/${dashboard?.agents?.total ?? 0}` : '—',
       change: '',
       icon: Users,
@@ -245,7 +259,7 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-status-online/10',
     },
     {
-      label: 'Avg Response Time',
+      label: t('analytics.kpis.avgResponseTime'),
       value: dashboard ? `${dashboard?.avgResponseTimeSeconds ?? 0}s` : '—',
       change: '',
       icon: Clock,
@@ -253,7 +267,7 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-chat-bot/10',
     },
     {
-      label: 'CSAT Score',
+      label: t('analytics.kpis.csatScore'),
       value:
         dashboard?.csatScore != null
           ? `${dashboard.csatScore}/5`
@@ -264,7 +278,7 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-accent-500/10',
     },
     {
-      label: 'Total Chats',
+      label: t('analytics.kpis.totalChats'),
       value: metrics ? metrics.total.toLocaleString() : '—',
       change: '',
       icon: TrendingUp,
@@ -279,28 +293,28 @@ const Analytics: React.FC = () => {
   };
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="h-full overflow-y-auto p-6 space-y-6">
       {/* Onboarding */}
       <OnboardingBanner />
 
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-text-primary">Analytics</h1>
-          <p className="text-text-secondary">Performance metrics and insights</p>
+          <h1 className="text-2xl font-bold text-text-primary">{t('analytics.header.title')}</h1>
+          <p className="text-text-secondary">{t('analytics.header.subtitle')}</p>
         </div>
 
         <div className="flex items-center gap-4">
           {/* Date Range Selector */}
           <Select value={dateRange} onValueChange={setDateRange}>
             <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Select range" />
+              <SelectValue placeholder={t('analytics.timeRange.placeholder')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="24h">Last 24 Hours</SelectItem>
-              <SelectItem value="7d">Last 7 Days</SelectItem>
-              <SelectItem value="30d">Last 30 Days</SelectItem>
-              <SelectItem value="90d">Last 90 Days</SelectItem>
+              <SelectItem value="24h">{t('analytics.timeRange.last24Hours')}</SelectItem>
+              <SelectItem value="7d">{t('analytics.timeRange.last7Days')}</SelectItem>
+              <SelectItem value="30d">{t('analytics.timeRange.last30Days')}</SelectItem>
+              <SelectItem value="90d">{t('analytics.timeRange.last90Days')}</SelectItem>
             </SelectContent>
           </Select>
 
@@ -309,13 +323,13 @@ const Analytics: React.FC = () => {
             <DropdownMenuTrigger asChild>
               <Button variant="outline">
                 <Download className="w-4 h-4" />
-                Export
+                {t('analytics.export.button')}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport('csv')}>CSV</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('json')}>JSON</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('xlsx')}>Excel</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('csv')}>{t('analytics.export.csv')}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('json')}>{t('analytics.export.json')}</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleExport('xlsx')}>{t('analytics.export.excel')}</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -355,23 +369,23 @@ const Analytics: React.FC = () => {
       {isAgent ? (
         <div className="text-center py-12">
           <p className="text-text-secondary">
-            <Button variant="link" onClick={() => navigate('/inbox')}>Go to Inbox</Button>
-            {' '}to manage conversations
+            <Button variant="link" onClick={() => navigate('/inbox')}>{t('analytics.agentRedirect.goToInbox')}</Button>
+            {' '}{t('analytics.agentRedirect.toManage')}
           </p>
         </div>
       ) : (
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="agents">Agents</TabsTrigger>
-          <TabsTrigger value="chats">Chats</TabsTrigger>
+          <TabsTrigger value="overview">{t('analytics.tabs.overview')}</TabsTrigger>
+          <TabsTrigger value="agents">{t('analytics.tabs.agents')}</TabsTrigger>
+          <TabsTrigger value="chats">{t('analytics.tabs.chats')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
           {/* Chat Volume Chart */}
           <Card variant="glass">
             <CardHeader>
-              <h3 className="text-lg font-semibold text-text-primary">Chat Volume</h3>
+              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.chatVolume.title')}</h3>
             </CardHeader>
             <CardContent>
               {isLoadingTimeseries ? (
@@ -384,9 +398,9 @@ const Analytics: React.FC = () => {
                     <YAxis stroke="#6b7194" />
                     <Tooltip contentStyle={chartTooltipStyle} />
                     <Legend />
-                    <Area type="monotone" dataKey="bot" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.4} name="Bot" />
-                    <Area type="monotone" dataKey="human" stackId="1" stroke="#34d399" fill="#34d399" fillOpacity={0.4} name="Human" />
-                    <Area type="monotone" dataKey="handoff" stackId="1" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.4} name="Handoff" />
+                    <Area type="monotone" dataKey="bot" stackId="1" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.bot')} />
+                    <Area type="monotone" dataKey="human" stackId="1" stroke="#34d399" fill="#34d399" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.human')} />
+                    <Area type="monotone" dataKey="handoff" stackId="1" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.4} name={t('analytics.charts.chatVolume.legend.handoff')} />
                   </AreaChart>
                 </ResponsiveContainer>
               )}
@@ -397,7 +411,7 @@ const Analytics: React.FC = () => {
             {/* Response Time Chart */}
             <Card variant="glass">
               <CardHeader>
-                <h3 className="text-lg font-semibold text-text-primary">Average Response Time</h3>
+                <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.responseTime.title')}</h3>
               </CardHeader>
               <CardContent>
                 {/* TODO: wire when daily breakdown API available */}
@@ -408,8 +422,8 @@ const Analytics: React.FC = () => {
                     <YAxis stroke="#6b7194" />
                     <Tooltip contentStyle={chartTooltipStyle} />
                     <Legend />
-                    <Line type="monotone" dataKey="avg" stroke="#818cf8" strokeWidth={2} name="Actual (seconds)" />
-                    <Line type="monotone" dataKey="target" stroke="#34d399" strokeWidth={2} strokeDasharray="5 5" name="Target (seconds)" />
+                    <Line type="monotone" dataKey="avg" stroke="#818cf8" strokeWidth={2} name={t('analytics.charts.responseTime.legend.actual')} />
+                    <Line type="monotone" dataKey="target" stroke="#34d399" strokeWidth={2} strokeDasharray="5 5" name={t('analytics.charts.responseTime.legend.target')} />
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -418,7 +432,7 @@ const Analytics: React.FC = () => {
             {/* Resolution Distribution */}
             <Card variant="glass">
               <CardHeader>
-                <h3 className="text-lg font-semibold text-text-primary">Resolution Distribution</h3>
+                <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.resolutionDistribution.title')}</h3>
               </CardHeader>
               <CardContent>
                 {isLoadingMetrics ? (
@@ -451,7 +465,7 @@ const Analytics: React.FC = () => {
           {/* CSAT Distribution */}
           <Card variant="glass">
             <CardHeader>
-              <h3 className="text-lg font-semibold text-text-primary">CSAT Distribution</h3>
+              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.csatDistribution.title')}</h3>
             </CardHeader>
             <CardContent>
               {/* TODO: wire when daily breakdown API available */}
@@ -471,7 +485,7 @@ const Analytics: React.FC = () => {
         <TabsContent value="agents">
           <Card variant="glass" className="overflow-hidden">
             <CardHeader className="border-b border-edge">
-              <h3 className="text-lg font-semibold text-text-primary">Agent Performance</h3>
+              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.agentPerformance.title')}</h3>
             </CardHeader>
             <CardContent className="p-0">
               {isLoadingAgents ? (
@@ -480,10 +494,10 @@ const Analytics: React.FC = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Agent</TableHead>
-                      <TableHead>Chats Handled</TableHead>
-                      <TableHead>Avg Response Time</TableHead>
-                      <TableHead>CSAT Score</TableHead>
+                      <TableHead>{t('analytics.agentPerformance.columns.agent')}</TableHead>
+                      <TableHead>{t('analytics.agentPerformance.columns.chatsHandled')}</TableHead>
+                      <TableHead>{t('analytics.agentPerformance.columns.avgResponseTime')}</TableHead>
+                      <TableHead>{t('analytics.agentPerformance.columns.csatScore')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -510,8 +524,8 @@ const Analytics: React.FC = () => {
         <TabsContent value="chats">
           <Card variant="glass">
             <CardContent className="p-6">
-              <h3 className="text-lg font-semibold text-text-primary mb-4">Chat Analysis</h3>
-              <p className="text-text-secondary">Detailed chat analysis coming soon...</p>
+              <h3 className="text-lg font-semibold text-text-primary mb-4">{t('analytics.chatAnalysis.title')}</h3>
+              <p className="text-text-secondary">{t('analytics.chatAnalysis.comingSoon')}</p>
             </CardContent>
           </Card>
         </TabsContent>

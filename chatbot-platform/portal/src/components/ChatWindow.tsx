@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Send, ArrowRightLeft, User, Mail, Globe } from 'lucide-react';
 import { useChatDetail } from '../queries/useChatQueries';
 import { useNotificationSound } from '@websocket/notificationSound';
@@ -29,6 +30,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   onTransfer,
   className = '',
 }) => {
+  const { t } = useTranslation();
   const [messageInput, setMessageInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -132,7 +134,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           <div className={`flex flex-col ${isVisitor ? 'items-end' : 'items-start'}`}>
             {/* Sender name */}
             <span className="text-xs text-text-muted mb-1">
-              {message.senderName || (isAgent ? 'Agent' : isBot ? 'Bot' : 'Visitor')}
+              {message.senderName || (isAgent ? t('inbox.window.sender.agent') : isBot ? t('inbox.window.sender.bot') : t('inbox.window.sender.visitor'))}
             </span>
 
             {/* Message bubble */}
@@ -151,12 +153,12 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               ) : message.type === 'image' ? (
                 <img
                   src={message.fileUrl}
-                  alt={message.fileName || 'Image'}
+                  alt={message.fileName || t('inbox.window.message.image')}
                   className="max-w-48 max-h-48 rounded-lg object-cover"
                 />
               ) : (
                 <FileAttachment
-                  fileName={message.fileName || 'File'}
+                  fileName={message.fileName || t('inbox.window.message.file')}
                   fileType={message.fileType || 'application/octet-stream'}
                   fileSize={message.fileSize}
                   onClick={() => {
@@ -186,7 +188,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </div>
           <div>
             <h3 className="font-semibold text-text-primary">
-              {chat.userName || 'Anonymous User'}
+              {chat.userName || t('inbox.chat.anonymousUser')}
             </h3>
             <div className="flex items-center gap-2">
               <ChatStatusBadge status={chat.status} size="sm" />
@@ -204,7 +206,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               size="icon"
               onClick={() => onTransfer(chat.id)}
               className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
-              title="Transfer chat"
+              title={t('inbox.window.transferChat')}
             >
               <ArrowRightLeft className="w-5 h-5" />
             </Button>
@@ -215,6 +217,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
               size="icon"
               onClick={onClose}
               className="text-text-secondary hover:text-text-primary hover:bg-surface-3 rounded-xl"
+              aria-label={t('common.close')}
+              title={t('common.close')}
             >
               ×
             </Button>
@@ -255,8 +259,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
           </>
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-text-secondary">
-            <p>No messages yet</p>
-            <p className="text-sm text-text-muted">Start the conversation!</p>
+            <p>{t('inbox.window.empty.title')}</p>
+            <p className="text-sm text-text-muted">{t('inbox.window.empty.subtitle')}</p>
           </div>
         )}
         <div ref={messagesEndRef} />
@@ -283,7 +287,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
                 handleTextareaResize(e);
               }}
               onKeyDown={handleKeyPress}
-              placeholder="Type a message..."
+              placeholder={t('inbox.window.composer.placeholder')}
               rows={1}
               className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl resize-none focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/30 text-sm text-text-primary placeholder:text-text-muted min-h-[40px] max-h-[120px]"
               style={{ overflow: 'hidden' }}
@@ -295,6 +299,8 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
             disabled={!messageInput.trim()}
             className="p-2 bg-primary-600 text-white rounded-xl hover:bg-primary-500 hover:shadow-glow disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
             size="icon"
+            aria-label={t('inbox.window.composer.send')}
+            title={t('inbox.window.composer.send')}
           >
             <Send className="w-5 h-5" />
           </Button>

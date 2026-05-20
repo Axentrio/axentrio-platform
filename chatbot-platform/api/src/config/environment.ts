@@ -163,6 +163,10 @@ const envSchema = z.object({
   STRIPE_PRICE_PRO_USD_MONTHLY: z.string().optional(),
   STRIPE_PRICE_PREMIUM_USD_MONTHLY: z.string().optional(),
   BILLING_TRIAL_DAYS: z.string().default('7').transform(Number),
+  // Escape hatch: when 'true', boot proceeds without Stripe creds.
+  // Billing endpoints will fail at call time. Use only for environments
+  // that legitimately can't configure Stripe yet (early staging deploys).
+  SKIP_BILLING_BOOT_CHECK: z.string().optional(),
 });
 
 // Parse and validate environment variables
@@ -196,6 +200,9 @@ if (env.NODE_ENV === 'production') {
 
 // Billing fail-fast — Stripe is required outside of test runs (plan step 2).
 // Plan: "fail-fast on boot if any of [secret, webhook secret, both price IDs] is missing or empty."
+// SKIP_BILLING_BOOT_CHECK=true downgrades the check to a warning so the API
+// can boot without Stripe configured. Billing endpoints will then fail at
+// call time. Intended for early deploys / environments without billing yet.
 if (env.NODE_ENV !== 'test') {
   const missing: string[] = [];
   if (!env.STRIPE_SECRET_KEY) missing.push('STRIPE_SECRET_KEY');
@@ -203,11 +210,17 @@ if (env.NODE_ENV !== 'test') {
   if (!env.STRIPE_PRICE_PRO_USD_MONTHLY) missing.push('STRIPE_PRICE_PRO_USD_MONTHLY');
   if (!env.STRIPE_PRICE_PREMIUM_USD_MONTHLY) missing.push('STRIPE_PRICE_PREMIUM_USD_MONTHLY');
   if (missing.length > 0) {
-    console.error(
+    const message =
       `Billing configuration error: required Stripe env vars are missing: ${missing.join(', ')}. ` +
-      `Set them or run with NODE_ENV=test to skip this check.`,
-    );
-    process.exit(1);
+      `Set them or run with NODE_ENV=test to skip this check.`;
+    if (env.SKIP_BILLING_BOOT_CHECK === 'true') {
+      console.warn(
+        `[SKIP_BILLING_BOOT_CHECK=true] ${message} Billing endpoints will return errors until configured.`,
+      );
+    } else {
+      console.error(message);
+      process.exit(1);
+    }
   }
 }
 

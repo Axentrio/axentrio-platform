@@ -87,4 +87,15 @@ describe('Boot-time Stripe env validation', () => {
     const { status } = runBootCheck(overrides);
     expect(status).toBe(0);
   });
+
+  it('exits zero (with warning) when SKIP_BILLING_BOOT_CHECK=true even if vars are missing', () => {
+    // Clear all four required vars but flip the escape hatch.
+    const overrides: Record<string, string | undefined> = {
+      SKIP_BILLING_BOOT_CHECK: 'true',
+    };
+    for (const k of REQUIRED) overrides[k] = '';
+    const { status, stderr } = runBootCheck(overrides);
+    expect(status).toBe(0);
+    expect(stderr).toMatch(/SKIP_BILLING_BOOT_CHECK=true/);
+  });
 });

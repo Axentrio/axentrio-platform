@@ -3,7 +3,7 @@
  * Public endpoints for chat widget integration
  */
 
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Participant } from '../database/entities/Participant';
@@ -34,7 +34,7 @@ setInterval(() => {
   }
 }, 60_000).unref(); // .unref() so it doesn't keep the process alive
 function simpleRateLimit(maxRequests: number, windowMs: number) {
-  return (req: Request, _res: Response, next: Function) => {
+  return (req: Request, _res: Response, next: NextFunction) => {
     const ip = req.ip || 'unknown';
     const now = Date.now();
     const entry = ipHits.get(ip);
@@ -186,7 +186,7 @@ router.post(
 
     // Determine initial status based on AI settings
     const aiEnabled = tenant.settings?.ai?.enabled;
-    const usePlatformAgent = (tenant.settings?.ai as any)?.usePlatformAgent;
+    const usePlatformAgent = tenant.settings?.ai?.usePlatformAgent;
     const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
     const initialStatus = (aiEnabled && (hasWebhook || usePlatformAgent)) ? 'bot' : 'waiting';
 

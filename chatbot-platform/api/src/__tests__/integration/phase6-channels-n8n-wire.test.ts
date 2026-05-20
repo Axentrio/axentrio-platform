@@ -444,4 +444,97 @@ describe('n8n/webhook.controller — handleInboundWebhook contract preservation'
     expect(res.body).not.toHaveProperty('meta');
     expect(typeof res.body.error).toBe('string');
   });
+
+  it('POST /inbound with empty body keeps LEGACY shape (400) — `success:false, error:<string>`', async () => {
+    // Pin the legacy wire shape for the 400 path the same way the 401 case
+    // pins the bad-secret path. Whether the body triggers the controller's
+    // empty-body check (controller:60-65) or the express-validator failure
+    // (routes:47-55) is an implementation detail — what matters for n8n is
+    // that BOTH paths emit the legacy `{success:false, error:<string>}` shape
+    // and NOT the new envelope.
+    const app = express();
+    app.use(requestIdMiddleware);
+    app.use(express.json());
+    const controller = new WebhookController({
+      webhookService: {} as never,
+      circuitBreaker: {
+        getState: vi.fn().mockReturnValue({ state: 'closed', failures: 0 }),
+        getStats: vi.fn().mockReturnValue({}),
+        reset: vi.fn(),
+        isOpen: vi.fn().mockReturnValue(false),
+        recordSuccess: vi.fn(),
+        recordFailure: vi.fn(),
+      } as never,
+      retryService: { retryMessage: vi.fn(), getQueueStatus: vi.fn() } as never,
+      fallbackService: {} as never,
+      metricsService: {
+        incrementCounter: vi.fn(),
+        recordHistogram: vi.fn(),
+      } as never,
+    });
+    const router = createWebhookRouter({ webhookController: controller });
+    app.use('/n8n', router);
+    app.use(errorHandler);
+
+    const res = await request(app)
+      .post('/n8n/inbound')
+      .set('content-type', 'application/json')
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.error).toBe('string');
+    // Crucially NOT the new envelope shape — `meta` must be absent and `error`
+    // must NOT be a nested object.
+    expect(res.body).not.toHaveProperty('meta');
+    expect(typeof res.body.error).not.toBe('object');
+  });
+
+  it('POST /inbound with schema violation keeps LEGACY shape (400) — preserves `details` array', async () => {
+    // n8n parses `details` as an array of validator errors when the request
+    // fails express-validator's body checks (routes:47-55) — pin the array
+    // shape so a future migration can't silently flatten it into
+    // `error.details` (which would be the new envelope shape).
+    const app = express();
+    app.use(requestIdMiddleware);
+    app.use(express.json());
+    const controller = new WebhookController({
+      webhookService: {} as never,
+      circuitBreaker: {
+        getState: vi.fn().mockReturnValue({ state: 'closed', failures: 0 }),
+        getStats: vi.fn().mockReturnValue({}),
+        reset: vi.fn(),
+        isOpen: vi.fn().mockReturnValue(false),
+        recordSuccess: vi.fn(),
+        recordFailure: vi.fn(),
+      } as never,
+      retryService: { retryMessage: vi.fn(), getQueueStatus: vi.fn() } as never,
+      fallbackService: {} as never,
+      metricsService: {
+        incrementCounter: vi.fn(),
+        recordHistogram: vi.fn(),
+      } as never,
+    });
+    const router = createWebhookRouter({ webhookController: controller });
+    app.use('/n8n', router);
+    app.use(errorHandler);
+
+    const res = await request(app)
+      .post('/n8n/inbound')
+      .set('content-type', 'application/json')
+      // Missing required `action` + `sessionId` — guaranteed validation fail.
+      .send({ payload: { type: 'text', content: 'hi' } });
+
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.error).toBe('string');
+    // Whether the message says "Validation failed" or "Invalid message format"
+    // depends on which validator caught it — both are documented legacy
+    // contracts. Just assert the shape.
+    expect(res.body.error.length).toBeGreaterThan(0);
+    // n8n parses details as an array of field errors — legacy contract pin.
+    expect(Array.isArray(res.body.details)).toBe(true);
+    // Crucially NOT the new envelope.
+    expect(res.body).not.toHaveProperty('meta');
+  });
 });

@@ -572,9 +572,9 @@ One supertest per OOS endpoint in §5 asserting the exact body shape and status 
 
 ## 10. Open questions
 
-- **`channels/meta/oauth.routes.ts:158` 400-mapping behavior** (codex round 2 #8 — resolved with adapter in §3.3): adapter keeps current 400-for-unknown behavior; `ApiError`s propagate with their real status. Smoke-test the Meta connect flow before shipping Phase 6.
-- **`n8n/webhook.routes.ts:177-184` `/events` endpoint**: legacy/testing per file comment. Are there external consumers (older n8n flows, monitoring scripts)? Audit before migrating.
-- **`file-handling/upload.controller.ts` mount status** (codex round 3 #10): `uploadRouter` is exported but no `server.ts` use mounts it. Determine whether the router is pending mount, dead code, or already mounted indirectly (e.g. via a feature flag). If dead, delete after Phase 5. If pending, document the intended mount path.
+- ✅ **`channels/meta/oauth.routes.ts:158` 400-mapping behavior** (codex round 2 #8): **RESOLVED in Phase 6** (commit cdad261). Adapter ships at the catch-all keeping current 400-for-unknown behavior; `ApiError`s propagate with their real status. Wire test in `phase6-channels-n8n-wire.test.ts` pins both branches (ApiError 402 propagates; plain Error → 400 fallback).
+- **`n8n/webhook.routes.ts:177-184` `/events` endpoint**: legacy/testing per file comment. Are there external consumers (older n8n flows, monitoring scripts)? Audit before migrating. **Still open** — the endpoint stays as-is per plan §5 until the audit happens.
+- **`file-handling/upload.controller.ts` mount status** (codex round 3 #10): `uploadRouter` is exported but no `server.ts` use mounts it. **Phase 5C migrated the file as cleanup-only** (commit 7b89cdc) so it's wire-ready if someone mounts it. Decision **still open**: mount it at `/api/v1/uploads` or delete the file. Follow-up issue worth filing.
 - **Global middleware that fronts OOS routes** (codex rounds 3 #8 + 4 #1 — **expanded after re-grep**): the `server.ts` middleware order is:
   - L94/97/103: clerk/meta-inbound/billing webhook receivers — mounted **before** `rateLimitByIp` (L196), so unaffected.
   - L196: `app.use(rateLimitByIp)`.

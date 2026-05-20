@@ -59,10 +59,19 @@ export class LlmRateLimitError extends ApiError {
   }
 
   /**
-   * The exact response body shape required by the spec.
-   * Controllers that catch this directly can `res.status(429).json(err.toResponseBody())`.
-   * Otherwise the global errorHandler returns the standard ApiError envelope
-   * with the same `code`, `statusCode` and `details`.
+   * The exact response body shape required by the spec for endpoints that
+   * still consume the legacy shape.
+   *
+   * **Preferred pattern** (post-envelope-migration): let this error propagate
+   * to the global `errorHandler` — `LlmRateLimitError extends RateLimitError`,
+   * so it surfaces as the standard envelope with `error.code = 'RATE_LIMIT_EXCEEDED'`,
+   * `error.details = { limit, used }`, and `meta.requestId` on the response.
+   *
+   * `toResponseBody()` is kept only for the (currently-unused) legacy-shape
+   * path. New code should NOT call `res.status(429).json(err.toResponseBody())`
+   * — that bypasses the canonical envelope contract documented in
+   * `docs/adr/0011-api-response-envelope.md` and would trip the
+   * `check-envelope-conventions.sh` guardrail.
    */
   toResponseBody(): { error: string; limit: number; used: number } {
     return { error: 'daily_llm_limit_reached', limit: this.limit, used: this.used };

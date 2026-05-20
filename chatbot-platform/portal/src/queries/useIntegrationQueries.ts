@@ -76,6 +76,12 @@ export function useUpdateIntegrations() {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.me() });
       toast.success('Settings saved');
     },
-    onError: () => toast.error('Failed to save settings'),
+    onError: (err: Any) => {
+      const msg =
+        extractApiErrorMessage(err) ??
+        (err instanceof Error ? err.message : undefined) ??
+        'Failed to save settings';
+      toast.error(msg);
+    },
   });
 }

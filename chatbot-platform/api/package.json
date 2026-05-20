@@ -12,7 +12,8 @@
     "migration:generate": "npm run typeorm migration:generate -- -d src/database/data-source.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "check:envelope": "bash scripts/check-envelope-conventions.sh"
   },
   "keywords": [
     "chatbot",

@@ -13,10 +13,21 @@
 import { Request, Response, NextFunction, Router } from 'express';
 import { body, param, validationResult } from 'express-validator';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import { authenticateAgent as authenticateJWT } from '../security/auth.middleware';
 const requireTenantAccess = authenticateJWT; // alias
 import { logAudit } from '../utils/audit';
 import { logger } from '../utils/logger';
+import { sendSuccess } from '../utils/response';
+import {
+  ApiError,
+  ForbiddenError,
+  NotFoundError,
+  RateLimitError,
+  UnauthorizedError,
+  ValidationError,
+} from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 import {
   getUploadService,
   UploadRequest,
@@ -43,18 +54,35 @@ const validationService = getValidationService();
 // Rate Limiters
 // ============================================================================
 
+const computeRetryAfter = (req: Request): number | undefined => {
+  // express-rate-limit augments the request object with a `rateLimit` field
+  // (configurable via `requestPropertyName`) that includes `resetTime`.
+  // It does not extend the global Express `Request` type, so cast locally.
+  const resetTime = (req as Request & { rateLimit?: { resetTime?: Date } })
+    .rateLimit?.resetTime;
+  if (resetTime instanceof Date) {
+    return Math.ceil((resetTime.getTime() - Date.now()) / 1000);
+  }
+  return undefined;
+};
+
 const uploadRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 50, // 50 uploads per window
-  message: {
-    error: 'Rate limit exceeded',
-    retryAfter: '15 minutes',
-  },
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req: Request) => {
     // Rate limit by tenant + user
     return `${req.tenantId}:${req.userId}`;
+  },
+  handler: (req: Request, _res: Response, next: NextFunction) => {
+    const retryAfter = computeRetryAfter(req);
+    next(
+      new RateLimitError(
+        'Rate limit exceeded',
+        retryAfter !== undefined ? { retryAfter } : undefined,
+      ),
+    );
   },
 });
 
@@ -63,20 +91,27 @@ const statusCheckLimiter = rateLimit({
   max: 100, // 100 status checks per minute
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req: Request, _res: Response, next: NextFunction) => {
+    const retryAfter = computeRetryAfter(req);
+    next(
+      new RateLimitError(
+        'Rate limit exceeded',
+        retryAfter !== undefined ? { retryAfter } : undefined,
+      ),
+    );
+  },
 });
 
 // ============================================================================
 // Validation Middleware
 // ============================================================================
 
-const handleValidationErrors = (req: Request, res: Response, next: NextFunction): void => {
+const handleValidationErrors = (req: Request, _res: Response, next: NextFunction): void => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
-    res.status(400).json({
-      error: 'Validation failed',
-      details: errors.array(),
-    });
-    return;
+    return next(
+      new ValidationError('Validation failed', { fieldErrors: errors.array() }),
+    );
   }
   next();
 };
@@ -160,15 +195,12 @@ router.post(
         }
       })();
 
-      res.status(200).json({
-        success: true,
-        data: {
-          sessionId: session.sessionId,
-          uploadUrl: session.uploadUrl,
-          publicUrl: session.publicUrl,
-          expiresAt: session.expiresAt,
-          fileKey: session.fileKey,
-        },
+      sendSuccess(res, {
+        sessionId: session.sessionId,
+        uploadUrl: session.uploadUrl,
+        publicUrl: session.publicUrl,
+        expiresAt: session.expiresAt,
+        fileKey: session.fileKey,
       });
     } catch (error) {
       next(error);
@@ -221,16 +253,13 @@ router.post(
         chunkSize
       );
 
-      res.status(200).json({
-        success: true,
-        data: {
-          sessionId: session.sessionId,
-          uploadId,
-          chunkUrls,
-          totalChunks: chunkUrls.length,
-          chunkSize: chunkSize || 5 * 1024 * 1024,
-          expiresAt: session.expiresAt,
-        },
+      sendSuccess(res, {
+        sessionId: session.sessionId,
+        uploadId,
+        chunkUrls,
+        totalChunks: chunkUrls.length,
+        chunkSize: chunkSize || 5 * 1024 * 1024,
+        expiresAt: session.expiresAt,
       });
     } catch (error) {
       next(error);
@@ -286,13 +315,10 @@ router.post(
 
       logAudit(userId, 'CHUNKED_UPLOAD_COMPLETED', 'upload', sessionId, tenantId, { fileKey: session.fileKey, ip: req.ip });
 
-      res.status(200).json({
-        success: true,
-        data: {
-          sessionId: session.sessionId,
-          status: session.status,
-          publicUrl: session.publicUrl,
-        },
+      sendSuccess(res, {
+        sessionId: session.sessionId,
+        status: session.status,
+        publicUrl: session.publicUrl,
       });
     } catch (error) {
       next(error);
@@ -315,34 +341,25 @@ router.get(
       const session = uploadService.getSession(sessionId);
 
       if (!session) {
-        res.status(404).json({
-          error: 'Upload session not found',
-        });
-        return;
+        throw new NotFoundError('Upload session not found');
       }
 
       // Verify tenant access
       if (session.tenantId !== req.tenantId) {
-        res.status(403).json({
-          error: 'Access denied',
-        });
-        return;
+        throw new ForbiddenError('Access denied');
       }
 
-      res.status(200).json({
-        success: true,
-        data: {
-          sessionId: session.sessionId,
-          status: session.status,
-          fileKey: session.fileKey,
-          publicUrl: session.status === 'ready' ? session.publicUrl : null,
-          originalName: session.originalName,
-          fileSize: session.fileSize,
-          mimeType: session.mimeType,
-          createdAt: session.createdAt,
-          scanResult: session.scanResult,
-          thumbnailUrl: session.thumbnailUrl,
-        },
+      sendSuccess(res, {
+        sessionId: session.sessionId,
+        status: session.status,
+        fileKey: session.fileKey,
+        publicUrl: session.status === 'ready' ? session.publicUrl : null,
+        originalName: session.originalName,
+        fileSize: session.fileSize,
+        mimeType: session.mimeType,
+        createdAt: session.createdAt,
+        scanResult: session.scanResult,
+        thumbnailUrl: session.thumbnailUrl,
       });
     } catch (error) {
       next(error);
@@ -363,22 +380,19 @@ router.get(
       const tenantId = req.tenantId!;
       const quota = uploadService.getTenantQuota(tenantId);
 
-      res.status(200).json({
-        success: true,
-        data: {
-          tenantId: quota.tenantId,
-          maxStorageBytes: quota.maxStorageBytes,
-          maxFilesPerMonth: quota.maxFilesPerMonth,
-          currentStorageBytes: quota.currentStorageBytes,
-          currentFilesThisMonth: quota.currentFilesThisMonth,
-          storageUsedPercent: Math.round(
-            (quota.currentStorageBytes / quota.maxStorageBytes) * 100
-          ),
-          filesUsedPercent: Math.round(
-            (quota.currentFilesThisMonth / quota.maxFilesPerMonth) * 100
-          ),
-          lastResetDate: quota.lastResetDate,
-        },
+      sendSuccess(res, {
+        tenantId: quota.tenantId,
+        maxStorageBytes: quota.maxStorageBytes,
+        maxFilesPerMonth: quota.maxFilesPerMonth,
+        currentStorageBytes: quota.currentStorageBytes,
+        currentFilesThisMonth: quota.currentFilesThisMonth,
+        storageUsedPercent: Math.round(
+          (quota.currentStorageBytes / quota.maxStorageBytes) * 100
+        ),
+        filesUsedPercent: Math.round(
+          (quota.currentFilesThisMonth / quota.maxFilesPerMonth) * 100
+        ),
+        lastResetDate: quota.lastResetDate,
       });
     } catch (error) {
       next(error);
@@ -399,8 +413,7 @@ router.post(
       // Verify webhook secret
       const webhookSecret = req.headers['x-webhook-secret'];
       if (webhookSecret !== process.env.UPLOAD_WEBHOOK_SECRET) {
-        res.status(401).json({ error: 'Invalid webhook secret' });
-        return;
+        throw new UnauthorizedError('Invalid webhook secret');
       }
 
       const scanResult = {
@@ -439,7 +452,7 @@ router.post(
         await uploadService.deleteFile(fileKey);
       }
 
-      res.status(200).json({ success: true });
+      sendSuccess(res, { ok: true });
     } catch (error) {
       next(error);
     }
@@ -464,18 +477,14 @@ router.delete(
       // Verify file belongs to tenant
       const metadata = await uploadService.getFileMetadata(fileKey);
       if (!metadata || metadata['tenant-id'] !== tenantId) {
-        res.status(403).json({ error: 'Access denied' });
-        return;
+        throw new ForbiddenError('Access denied');
       }
 
       await uploadService.deleteFile(fileKey);
 
       logAudit(userId, 'FILE_DELETED', 'upload', fileKey, tenantId, { ip: req.ip });
 
-      res.status(200).json({
-        success: true,
-        message: 'File deleted successfully',
-      });
+      sendSuccess(res, { message: 'File deleted successfully' });
     } catch (error) {
       next(error);
     }
@@ -499,8 +508,7 @@ router.get(
       // Verify file belongs to tenant
       const metadata = await uploadService.getFileMetadata(fileKey);
       if (!metadata || metadata['tenant-id'] !== tenantId) {
-        res.status(403).json({ error: 'Access denied' });
-        return;
+        throw new ForbiddenError('Access denied');
       }
 
       const downloadUrl = await uploadService.generateDownloadUrl(
@@ -511,12 +519,9 @@ router.get(
 
       logAudit(req.userId!, 'FILE_DOWNLOAD_REQUESTED', 'upload', fileKey, tenantId, { ip: req.ip });
 
-      res.status(200).json({
-        success: true,
-        data: {
-          downloadUrl,
-          expiresIn: 300,
-        },
+      sendSuccess(res, {
+        downloadUrl,
+        expiresIn: 300,
       });
     } catch (error) {
       next(error);
@@ -570,41 +575,33 @@ async function performVirusScan(sessionId: string, fileKey: string): Promise<voi
 }
 
 // ============================================================================
-// Error Handler
+// Error Adapter
 // ============================================================================
-
-router.use((error: Error, req: Request, res: Response, _next: NextFunction): void => {
-  logger.error('Upload controller error', { error: error.message, stack: error.stack, ip: req.ip, tenantId: req.tenantId });
-
-  if (error instanceof FileValidationError) {
-    res.status(400).json({
-      error: 'File validation failed',
-      message: error.message,
-    });
-    return;
+//
+// Per plan §6.4: this is a thin adapter that converts framework / domain
+// errors into typed `ApiError`s so the global `errorHandler` produces the
+// canonical envelope. It must NOT write a response itself. Multer errors
+// (`MulterError.code` like `LIMIT_FILE_SIZE`) flow through with their code
+// preserved. Exported for unit testability.
+export const uploadErrorAdapter = (
+  err: Error,
+  _req: Request,
+  _res: Response,
+  next: NextFunction,
+): void => {
+  if (err instanceof FileValidationError) {
+    return next(new ApiError(err.message, 400, ERROR_CODES.FILE_VALIDATION_FAILED));
   }
-
-  if (error instanceof QuotaExceededError) {
-    res.status(429).json({
-      error: 'Quota exceeded',
-      message: error.message,
-    });
-    return;
+  if (err instanceof QuotaExceededError) {
+    return next(new ApiError(err.message, 429, ERROR_CODES.QUOTA_EXCEEDED));
   }
+  if (err instanceof multer.MulterError) {
+    return next(new ApiError(err.message, 400, err.code));
+  }
+  return next(err);
+};
 
-  // Log unexpected errors
-  logger.error('Unexpected upload error', { error: error.message, tenantId: req.tenantId, userId: req.userId, ip: req.ip });
-  logAudit(req.userId || 'unknown', 'UPLOAD_ERROR', 'upload', 'unknown', req.tenantId || 'unknown', {
-    error: error.message,
-    severity: 'HIGH',
-    ip: req.ip,
-  });
-
-  res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
-  });
-});
+router.use(uploadErrorAdapter);
 
 // ============================================================================
 // Exports

@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { updateWidgetAppearanceSchema } from '../schemas/widget-appearance.schema';
+import { sendSuccess } from '../utils/response';
 
 type AppearanceResponse = {
   primaryColor: string | null;
@@ -29,7 +30,7 @@ export async function getWidgetAppearance(req: Request, res: Response) {
   const tenantId = (req as any).tenantId as string;
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-  res.json(toResponse(tenant));
+  sendSuccess(res, toResponse(tenant));
 }
 
 export async function updateWidgetAppearance(req: Request, res: Response) {
@@ -66,5 +67,5 @@ export async function updateWidgetAppearance(req: Request, res: Response) {
 
   await tenantRepo.save(tenant);
 
-  res.json(toResponse(tenant));
+  sendSuccess(res, toResponse(tenant));
 }

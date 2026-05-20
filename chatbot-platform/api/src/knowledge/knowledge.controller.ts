@@ -18,6 +18,9 @@ import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.s
 import { Tenant } from '../database/entities/Tenant';
 import { buildSystemPrompt } from '../llm/prompt-builder';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
+import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
+import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 
 let knowledgeService: KnowledgeService;
 
@@ -31,7 +34,7 @@ function getService(): KnowledgeService {
 export async function getKnowledgeBase(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const kb = await getService().getOrCreateKnowledgeBase(tenantId);
-  res.json(kb);
+  sendSuccess(res, kb);
 }
 
 export async function updateKnowledgeBase(req: Request, res: Response) {
@@ -56,14 +59,14 @@ export async function updateKnowledgeBase(req: Request, res: Response) {
     }
   }
 
-  res.json(kb);
+  sendSuccess(res, kb);
 }
 
 export async function listDocuments(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const filters = listDocumentsSchema.parse(req.query);
   const result = await getService().listDocuments(tenantId, filters);
-  res.json(result);
+  sendSuccess(res, result);
 }
 
 export async function createDocument(req: Request, res: Response) {
@@ -82,17 +85,16 @@ export async function createDocument(req: Request, res: Response) {
     logger.warn('Failed to queue ingestion job, document stays pending', { error: err });
   }
 
-  res.status(201).json(doc);
+  sendCreated(res, doc);
 }
 
 export async function getDocument(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const doc = await getService().getDocument(tenantId, req.params.id);
   if (!doc) {
-    res.status(404).json({ error: 'Document not found' });
-    return;
+    throw new NotFoundError('Document not found');
   }
-  res.json(doc);
+  sendSuccess(res, doc);
 }
 
 export async function updateDocument(req: Request, res: Response) {
@@ -111,13 +113,13 @@ export async function updateDocument(req: Request, res: Response) {
     logger.warn('Failed to queue reprocessing job', { error: err });
   }
 
-  res.json(doc);
+  sendSuccess(res, doc);
 }
 
 export async function deleteDocument(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   await getService().deleteDocument(tenantId, req.params.id);
-  res.status(204).send();
+  sendNoContent(res);
 }
 
 export async function retryDocument(req: Request, res: Response) {
@@ -135,20 +137,18 @@ export async function retryDocument(req: Request, res: Response) {
     logger.warn('Failed to queue retry job', { error: err });
   }
 
-  res.json(doc);
+  sendSuccess(res, doc);
 }
 
 export async function uploadFile(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const file = (req as any).file;
   if (!file) {
-    res.status(400).json({ error: 'No file provided' });
-    return;
+    throw new BadRequestError('No file provided');
   }
 
   if (!config.s3?.bucket) {
-    res.status(503).json({ error: 'File storage is not configured' });
-    return;
+    throw new ApiError('File storage is not configured', 503, ERROR_CODES.FILE_SERVICE_UNAVAILABLE);
   }
 
   const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${file.originalname}`;
@@ -162,13 +162,13 @@ export async function uploadFile(req: Request, res: Response) {
   }));
 
   const token = getService().registerUploadToken(tenantId, key);
-  res.json({ uploadToken: token });
+  sendSuccess(res, { uploadToken: token });
 }
 
 export async function getStats(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const stats = await getService().getStats(tenantId);
-  res.json(stats);
+  sendSuccess(res, stats);
 }
 
 export async function getAiSettings(req: Request, res: Response) {
@@ -178,9 +178,12 @@ export async function getAiSettings(req: Request, res: Response) {
 
   if (ai) {
     const { apiKey, ...rest } = ai;
-    res.json({ ...rest, hasApiKey: !!apiKey });
+    sendSuccess(res, { ...rest, hasApiKey: !!apiKey });
   } else {
-    res.json(null);
+    // Portal-tolerance audit (plan §2.3): all `useGetAiSettings` callers in
+    // portal/src use optional chaining (`aiSettings?.enabled`) or explicit
+    // null checks (`if (!aiSettings) return`) — null unwrap is safe.
+    sendSuccess(res, null);
   }
 }
 
@@ -221,7 +224,7 @@ export async function updateAiSettings(req: Request, res: Response) {
   await tenantRepo.save(tenant);
 
   const { apiKey, ...rest } = updatedAi;
-  res.json({ ...rest, hasApiKey: !!apiKey });
+  sendSuccess(res, { ...rest, hasApiKey: !!apiKey });
 }
 
 export async function testChat(req: Request, res: Response) {
@@ -232,36 +235,43 @@ export async function testChat(req: Request, res: Response) {
 
   const ai = tenant.settings?.ai;
   if (!ai?.enabled) {
-    res.status(400).json({ error: 'AI is not enabled. Save your AI settings first.' });
-    return;
+    throw new BadRequestError('AI is not enabled. Save your AI settings first.');
   }
   if (!ai.brandVoice?.name) {
-    res.status(400).json({ error: 'Incomplete AI settings. Set a chatbot name first.' });
-    return;
+    throw new BadRequestError('Incomplete AI settings. Set a chatbot name first.');
   }
 
   const provider = ai.provider || DEFAULT_PROVIDER;
   const model = ai.model || DEFAULT_MODEL;
 
   if (useKnowledgeBase) {
+    let result;
     try {
-      const result = await generateResponse(AppDataSource, tenantId, ai, message, history);
-      res.json({
-        response: result.response || ai.guardrails?.fallbackMessage || 'I could not find an answer in the knowledge base.',
-        provider,
-        model,
-        confidence: result.confidence,
-        chunksUsed: result.chunks.length,
-      });
+      result = await generateResponse(AppDataSource, tenantId, ai, message, history);
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('OPENAI_API_KEY')) {
-        res.status(400).json({ error: 'Knowledge base requires OPENAI_API_KEY environment variable for embeddings.' });
-      } else {
-        logger.error('Test chat RAG failed', err);
-        res.status(500).json({ error: 'RAG pipeline failed. Check server logs.' });
+        throw new BadRequestError(
+          'Knowledge base requires OPENAI_API_KEY environment variable for embeddings.',
+        );
       }
+      logger.error('Test chat RAG failed', err);
+      throw new ApiError(
+        'RAG pipeline failed. Check server logs.',
+        500,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
     }
+    sendSuccess(res, {
+      response:
+        result.response ||
+        ai.guardrails?.fallbackMessage ||
+        'I could not find an answer in the knowledge base.',
+      provider,
+      model,
+      confidence: result.confidence,
+      chunksUsed: result.chunks.length,
+    });
   } else {
     const { getProvider } = await import('../llm/provider-factory');
     const llm = getProvider(provider, ai.apiKey ?? undefined);
@@ -274,22 +284,26 @@ export async function testChat(req: Request, res: Response) {
       { role: 'user' as const, content: message },
     ];
 
+    let response;
     try {
-      const response = await llm.chat(messages, {
+      response = await llm.chat(messages, {
         model,
         maxTokens: 1000,
         temperature: 0.3,
         jsonMode: false,
       });
-
-      res.json({
-        response: response.content,
-        provider,
-        model,
-      });
     } catch (err) {
       logger.error('Test chat LLM call failed', err);
-      res.status(500).json({ error: 'LLM call failed. Check your API key and model.' });
+      throw new ApiError(
+        'LLM call failed. Check your API key and model.',
+        500,
+        ERROR_CODES.UPSTREAM_FAILED,
+      );
     }
+    sendSuccess(res, {
+      response: response.content,
+      provider,
+      model,
+    });
   }
 }

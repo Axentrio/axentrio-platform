@@ -7,6 +7,9 @@ import { encrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
 import { updateIntegrationsSchema } from '../schemas/integrations.schema';
 import { config } from '../config/environment';
+import { sendSuccess } from '../utils/response';
+import { ApiError, BadRequestError, RateLimitError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 
 export async function getIntegrations(req: Request, res: Response) {
   const tenantId = req.tenantId!;
@@ -21,7 +24,7 @@ export async function getIntegrations(req: Request, res: Response) {
     result.calcom = { ...rest, hasApiKey: !!apiKey };
   }
 
-  res.json(result);
+  sendSuccess(res, result);
 }
 
 export async function updateIntegrations(req: Request, res: Response) {
@@ -68,7 +71,7 @@ export async function updateIntegrations(req: Request, res: Response) {
   }
 
   logger.info(`Integrations updated for tenant ${tenantId}`);
-  res.json(response);
+  sendSuccess(res, response);
 }
 
 export async function connectCalcom(req: Request, res: Response): Promise<void> {
@@ -76,8 +79,7 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
   const { apiKey } = req.body;
 
   if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 256) {
-    res.status(400).json({ error: 'A valid API key is required' });
-    return;
+    throw new BadRequestError('A valid API key is required');
   }
 
   // Validate key against Cal.com and fetch event types
@@ -100,21 +102,17 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
     }
   } catch (err: any) {
     if (err?.response?.status === 401) {
-      res.status(400).json({ error: 'Invalid or expired API key' });
-      return;
+      throw new BadRequestError('Invalid or expired API key');
     }
     if (err?.response?.status === 429) {
-      res.status(429).json({ error: 'Cal.com rate limit exceeded. Please try again later.' });
-      return;
+      throw new RateLimitError('Cal.com rate limit exceeded. Please try again later.');
     }
     logger.error('Cal.com connect failed', { status: err?.response?.status, message: err?.message });
-    res.status(502).json({ error: 'Could not reach Cal.com. Please try again later.' });
-    return;
+    throw new ApiError('Could not reach Cal.com. Please try again later.', 502, ERROR_CODES.UPSTREAM_FAILED);
   }
 
   if (rawEventTypes.length === 0) {
-    res.status(400).json({ error: 'No event types found. Create one in Cal.com first.' });
-    return;
+    throw new BadRequestError('No event types found. Create one in Cal.com first.');
   }
 
   // Persist: encrypt key, clear eventTypeId on reconnect, preserve other settings
@@ -155,7 +153,7 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
 
   logger.info(`Cal.com connected for tenant ${tenantId}: ${eventTypes.length} event types`);
 
-  res.json({ eventTypes });
+  sendSuccess(res, { eventTypes });
 }
 
 export async function getCalcomEventTypes(req: Request, res: Response): Promise<void> {
@@ -165,8 +163,7 @@ export async function getCalcomEventTypes(req: Request, res: Response): Promise<
 
   const calcom = tenant.settings?.integrations?.calcom;
   if (!calcom?.apiKey) {
-    res.status(400).json({ error: 'Cal.com not connected' });
-    return;
+    throw new BadRequestError('Cal.com not connected');
   }
 
   const { decrypt } = await import('../utils/encryption');
@@ -191,12 +188,11 @@ export async function getCalcomEventTypes(req: Request, res: Response): Promise<
       slug: et.slug,
     }));
 
-    res.json({ eventTypes });
+    sendSuccess(res, { eventTypes });
   } catch (err: any) {
     if (err?.response?.status === 401) {
-      res.status(400).json({ error: 'Cal.com API key is invalid or expired' });
-      return;
+      throw new BadRequestError('Cal.com API key is invalid or expired');
     }
-    res.status(502).json({ error: 'Could not reach Cal.com' });
+    throw new ApiError('Could not reach Cal.com', 502, ERROR_CODES.UPSTREAM_FAILED);
   }
 }

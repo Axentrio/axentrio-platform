@@ -1,6 +1,6 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
-import { asyncHandler } from '../middleware/error-handler';
+import { ApiError, asyncHandler } from '../middleware/error-handler';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
@@ -33,5 +33,16 @@ router.post('/documents', requireRole('admin'), asyncHandler(ctrl.createDocument
 router.put('/documents/:id', requireRole('admin'), asyncHandler(ctrl.updateDocument));
 router.delete('/documents/:id', requireRole('admin'), asyncHandler(ctrl.deleteDocument));
 router.post('/documents/:id/retry', requireRole('admin'), asyncHandler(ctrl.retryDocument));
+
+// Adapter: multer errors (e.g. LIMIT_FILE_SIZE) reach Express before the
+// controller runs, so they bypass asyncHandler's ZodError adapter. Convert
+// them to ApiError so the global handler emits the standard envelope with
+// the multer code preserved in error.code (e.g. LIMIT_FILE_SIZE).
+router.use((err: Error, _req: Request, _res: Response, next: NextFunction) => {
+  if (err instanceof multer.MulterError) {
+    return next(new ApiError(err.message, 400, err.code));
+  }
+  return next(err);
+});
 
 export default router;

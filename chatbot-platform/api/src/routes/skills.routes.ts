@@ -5,6 +5,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { requireRole } from '../middleware/auth.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { sendSuccess, sendCreated } from '../utils/response';
 import { ToolRegistry } from '../agent/tool-registry';
 
 const router = Router();
@@ -76,7 +77,7 @@ router.get(
     if (!tenant) throw new NotFoundError('Tenant not found');
 
     const skills: Skill[] = (tenant.settings as any)?.skills || [];
-    res.json({ success: true, data: { skills } });
+    sendSuccess(res, { skills });
   })
 );
 
@@ -115,7 +116,7 @@ router.post(
     tenant.settings = { ...tenant.settings, skills } as any;
     await repo.save(tenant);
 
-    res.status(201).json({ success: true, data: { skill } });
+    sendCreated(res, { skill });
   })
 );
 
@@ -149,7 +150,7 @@ router.put(
     tenant.settings = { ...tenant.settings, skills } as any;
     await repo.save(tenant);
 
-    res.json({ success: true, data: { skill: updated } });
+    sendSuccess(res, { skill: updated });
   })
 );
 
@@ -171,7 +172,7 @@ router.delete(
     tenant.settings = { ...tenant.settings, skills: filtered } as any;
     await repo.save(tenant);
 
-    res.json({ success: true });
+    sendSuccess(res, { message: 'Skill deleted' });
   })
 );
 

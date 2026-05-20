@@ -40,9 +40,16 @@ export function useSaveWebhookUrl() {
 
 export function useTestWebhook() {
   return useMutation({
-    mutationFn: () => api.post('/tenants/me/webhooks/test'),
-    onSuccess: () => {
-      toast.success('Test webhook sent');
+    mutationFn: () =>
+      api.post<{ testFailed?: boolean; error?: string; status?: number }>(
+        '/tenants/me/webhooks/test',
+      ),
+    onSuccess: (result) => {
+      if (result?.testFailed) {
+        toast.error(`Test failed${result.error ? `: ${result.error}` : ''}`);
+      } else {
+        toast.success('Test webhook sent');
+      }
     },
   });
 }

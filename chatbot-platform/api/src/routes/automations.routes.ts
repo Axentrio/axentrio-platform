@@ -5,6 +5,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { requireRole } from '../middleware/auth.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -66,7 +67,7 @@ router.get(
     if (!tenant) throw new NotFoundError('Tenant not found');
 
     const automations = (tenant.settings as any)?.automations || {};
-    res.json({ success: true, data: { automations } });
+    sendSuccess(res, { automations });
   })
 );
 
@@ -111,7 +112,7 @@ router.patch(
 
     logger.info('Automation updated', { tenantId, type });
 
-    res.json({ success: true, data: { type, automation: updated } });
+    sendSuccess(res, { type, automation: updated });
   })
 );
 
@@ -140,7 +141,7 @@ router.post(
     // Stub: in production this would trigger the actual email send
     logger.info('Test email sent', { tenantId, type });
 
-    res.json({ success: true, data: { message: `Test email sent for "${type}"` } });
+    sendSuccess(res, { message: `Test email sent for "${type}"` });
   })
 );
 

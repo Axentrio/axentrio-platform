@@ -129,13 +129,11 @@ router.post('/test', asyncHandler(async (req: Request, res: Response) => {
     }));
 
     // Return failure info (not an error — the test completed, webhook just failed)
-    res.json({
-      success: false,
-      data: {
-        status: axiosErr.response?.status || 0,
-        durationMs,
-        error: axiosErr.message,
-      },
+    sendSuccess(res, {
+      status: axiosErr.response?.status || 0,
+      durationMs,
+      error: axiosErr.message,
+      testFailed: true,
     });
   }
 }));

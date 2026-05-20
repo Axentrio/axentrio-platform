@@ -4,6 +4,7 @@ import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware'
 import { requireRole } from '../middleware/auth.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ValidationError } from '../middleware';
+import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -36,7 +37,7 @@ router.post('/bulk-close', requireRole('admin'), asyncHandler(async (req: Reques
 
   const count = Array.isArray(result) ? result.length : 0;
   logger.info(`Bulk closed ${count} sessions for tenant ${tenantId}`);
-  res.json({ success: true, data: { closedCount: count } });
+  sendSuccess(res, { closedCount: count });
 }));
 
 // DELETE /api/v1/chats/bulk-delete — permanently delete closed sessions + their messages
@@ -76,7 +77,7 @@ router.delete('/bulk-delete', requireRole('admin'), asyncHandler(async (req: Req
   };
 
   logger.info(`Bulk deleted sessions for tenant ${tenantId}`, stats);
-  res.json({ success: true, data: stats });
+  sendSuccess(res, stats);
 }));
 
 // GET /api/v1/chats/stats — session counts by status
@@ -93,7 +94,7 @@ router.get('/stats', requireRole('admin', 'supervisor'), asyncHandler(async (req
     byStatus[row.status] = row.count;
   }
 
-  res.json({ success: true, data: { byStatus, total: Object.values(byStatus).reduce((a, b) => a + b, 0) } });
+  sendSuccess(res, { byStatus, total: Object.values(byStatus).reduce((a, b) => a + b, 0) });
 }));
 
 export default router;

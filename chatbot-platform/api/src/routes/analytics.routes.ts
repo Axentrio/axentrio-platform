@@ -9,7 +9,8 @@ import { Agent } from '../database/entities/Agent';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
-import { asyncHandler } from '../middleware/error-handler';
+import { asyncHandler, ApiError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { analyticsQuerySchema } from '../schemas';
@@ -215,8 +216,8 @@ router.get(
  */
 router.post(
   '/export',
-  asyncHandler(async (_req: Request, res: Response) => {
-    res.status(501).json({ error: 'Analytics export not yet implemented' });
+  asyncHandler(async (_req: Request, _res: Response) => {
+    throw new ApiError('Analytics export not yet implemented', 501, ERROR_CODES.NOT_IMPLEMENTED);
   })
 );
 

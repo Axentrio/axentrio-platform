@@ -3,7 +3,8 @@
  * Upload, preview, and download endpoints
  */
 import { Router, Request, Response } from 'express';
-import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess } from '../utils/response';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
@@ -29,10 +30,11 @@ router.post(
   '/upload',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     if (!isS3Configured()) {
-      res.status(503).json({
-        error: 'File upload service is not configured. S3 credentials are required.',
-      });
-      return;
+      throw new ApiError(
+        'File upload service is not configured. S3 credentials are required.',
+        503,
+        ERROR_CODES.FILE_SERVICE_UNAVAILABLE
+      );
     }
 
     const authReq = req as ProvisionedRequest;
@@ -81,8 +83,11 @@ router.get(
   '/:id/preview',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     if (!isS3Configured()) {
-      res.status(503).json({ error: 'File service is not configured' });
-      return;
+      throw new ApiError(
+        'File service is not configured',
+        503,
+        ERROR_CODES.FILE_SERVICE_UNAVAILABLE
+      );
     }
 
     const { getUploadService } = await import('../file-handling/upload.service');
@@ -112,8 +117,11 @@ router.get(
   '/:id/download',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     if (!isS3Configured()) {
-      res.status(503).json({ error: 'File service is not configured' });
-      return;
+      throw new ApiError(
+        'File service is not configured',
+        503,
+        ERROR_CODES.FILE_SERVICE_UNAVAILABLE
+      );
     }
 
     const { getUploadService } = await import('../file-handling/upload.service');

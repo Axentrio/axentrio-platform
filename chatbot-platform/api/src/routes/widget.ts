@@ -9,7 +9,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
-import { authenticateWidget, asyncHandler, ValidationError, NotFoundError } from '../middleware';
+import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError } from '../middleware';
 import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
@@ -34,7 +34,7 @@ setInterval(() => {
   }
 }, 60_000).unref(); // .unref() so it doesn't keep the process alive
 function simpleRateLimit(maxRequests: number, windowMs: number) {
-  return (req: Request, res: Response, next: Function) => {
+  return (req: Request, _res: Response, next: Function) => {
     const ip = req.ip || 'unknown';
     const now = Date.now();
     const entry = ipHits.get(ip);
@@ -43,7 +43,7 @@ function simpleRateLimit(maxRequests: number, windowMs: number) {
       return next();
     }
     if (entry.count >= maxRequests) {
-      res.status(429).json({ error: 'Too many requests, please try again later' });
+      next(new RateLimitError('Too many requests, please try again later'));
       return;
     }
     entry.count++;

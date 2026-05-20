@@ -30,7 +30,7 @@
  */
 
 import { NextFunction, Request, Response, Router } from 'express';
-import { ApiError, asyncHandler } from '../middleware/error-handler';
+import { ApiError, ForbiddenError, asyncHandler } from '../middleware/error-handler';
 import { BILLING_ERROR_STATUS } from '../middleware/error-codes';
 import { autoProvision, requireClerkAuth } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
@@ -63,14 +63,10 @@ const router = Router();
  * `supervisor` can act on subscription state. Returns 403 with the standard
  * envelope (`error.code = 'FORBIDDEN'`).
  */
-function requireBillingAdmin(req: Request, res: Response, next: NextFunction): void {
+function requireBillingAdmin(req: Request, _res: Response, next: NextFunction): void {
   const role = req.user?.role;
   if (role !== 'admin' && role !== 'super_admin') {
-    res.status(403).json({
-      success: false,
-      error: { code: 'FORBIDDEN', message: 'Admin access required' },
-    });
-    return;
+    return next(new ForbiddenError('Admin access required'));
   }
   next();
 }

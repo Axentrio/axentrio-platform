@@ -25,7 +25,8 @@ import {
   deleteClerkOrganization,
   updateClerkOrganization,
 } from '../services/clerk-sync.service';
-import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { ApiError, asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { ERROR_CODES } from '../middleware/error-codes';
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { createTenantSchema, inviteMemberSchema } from '../schemas';
@@ -112,8 +113,7 @@ router.post('/tenants/:id/pending-invites/:inviteId/resend', asyncHandler(async 
 
   const sent = await inviteToClerkOrganization(tenant.clerkOrgId, invite.email);
   if (!sent) {
-    res.status(502).json({ error: 'Failed to resend Clerk invitation' });
-    return;
+    throw new ApiError('Failed to resend Clerk invitation', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
   }
 
   invite.expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -330,8 +330,7 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
   // Step 1: Create Clerk org first
   const clerkOrg = await createClerkOrganization(name);
   if (!clerkOrg) {
-    res.status(502).json({ success: false, error: { message: 'Failed to create organization in Clerk' } });
-    return;
+    throw new ApiError('Failed to create organization in Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
   }
 
   // Step 2: Create local Tenant record + seed trial billing account in one tx
@@ -702,8 +701,7 @@ router.post('/tenants/:id/invite', validate(inviteMemberSchema), asyncHandler(as
     req.user?.clerkUserId
   );
   if (!invited) {
-    res.status(502).json({ success: false, error: { message: 'Failed to send invite via Clerk' } });
-    return;
+    throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
   }
 
   // Create or upsert PendingInvite

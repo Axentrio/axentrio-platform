@@ -34,9 +34,9 @@ import {
   FileValidationError,
   QuotaExceededError,
 } from './upload.service';
-import { getVirusScanService } from './virus-scan.service';
 import { getThumbnailService } from './thumbnail.service';
 import { getValidationService } from './validation.service';
+import { triggerScanAsync } from './virus-scan-trigger';
 
 // ============================================================================
 // Router Setup
@@ -46,7 +46,6 @@ const router = Router();
 
 // Initialize services
 const uploadService = getUploadService();
-const virusScanService = getVirusScanService();
 const thumbnailService = getThumbnailService();
 const validationService = getValidationService();
 
@@ -176,24 +175,14 @@ router.post(
 
       const session = await uploadService.generateUploadUrl(uploadRequest);
 
-      // Virus scan with timeout protection (fire-and-forget)
-      (async () => {
-        try {
-          const VIRUS_SCAN_TIMEOUT_MS = 60000;
-          await Promise.race([
-            performVirusScan(session.sessionId, session.fileKey),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Virus scan timeout')), VIRUS_SCAN_TIMEOUT_MS)
-            ),
-          ]);
-        } catch (error) {
-          logger.error('Virus scan failed', {
-            sessionId: session.sessionId,
-            fileKey: session.fileKey,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      })();
+      // Opportunistic fire-and-forget scan trigger. This races with the
+      // client's S3 PUT and almost always loses (file not yet uploaded), so
+      // the real scan path is either the external `/webhook/scan-complete`
+      // (S3 → Lambda → POST) or the client-driven `/files/:id/upload-complete`
+      // endpoint in `routes/files.routes.ts`. Kept here for parity with the
+      // shared trigger module — when the trigger does succeed, the
+      // session/audit side-effects are identical to the other paths.
+      triggerScanAsync(session.sessionId, session.fileKey);
 
       sendSuccess(res, {
         sessionId: session.sessionId,
@@ -294,24 +283,11 @@ router.post(
 
       const session = await uploadService.completeChunkedUpload(sessionId, parts);
 
-      // Virus scan with timeout protection (fire-and-forget)
-      (async () => {
-        try {
-          const VIRUS_SCAN_TIMEOUT_MS = 60000;
-          await Promise.race([
-            performVirusScan(session.sessionId, session.fileKey),
-            new Promise<never>((_, reject) =>
-              setTimeout(() => reject(new Error('Virus scan timeout')), VIRUS_SCAN_TIMEOUT_MS)
-            ),
-          ]);
-        } catch (error) {
-          logger.error('Virus scan failed', {
-            sessionId: session.sessionId,
-            fileKey: session.fileKey,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      })();
+      // Chunked-upload completion is the one path where the file IS in S3
+      // when we get here (the client's last chunk just finished). The shared
+      // trigger swallows its own errors via the 60s timeout so the response
+      // isn't blocked, but the scan should actually find the file.
+      triggerScanAsync(session.sessionId, session.fileKey);
 
       logAudit(userId, 'CHUNKED_UPLOAD_COMPLETED', 'upload', sessionId, tenantId, { fileKey: session.fileKey, ip: req.ip });
 
@@ -528,51 +504,6 @@ router.get(
     }
   }
 );
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-async function performVirusScan(sessionId: string, fileKey: string): Promise<void> {
-  try {
-    const session = uploadService.getSession(sessionId);
-    if (!session) return;
-
-    // Update status to scanning
-    uploadService.updateSessionStatus(sessionId, 'scanning');
-
-    // Perform virus scan
-    const scanResult = await virusScanService.scanFile(fileKey);
-
-    // Update session with scan result
-    uploadService.updateSessionStatus(
-      sessionId,
-      scanResult.clean ? 'ready' : 'quarantined',
-      scanResult
-    );
-
-    if (scanResult.clean) {
-      // Generate thumbnail if applicable
-      if (thumbnailService.shouldGenerateThumbnail(session.mimeType)) {
-        try {
-          const thumbnailUrl = await thumbnailService.generateThumbnail(
-            fileKey,
-            session.mimeType
-          );
-          session.thumbnailUrl = thumbnailUrl;
-        } catch (error) {
-          logger.error('Thumbnail generation error', { error, fileKey, sessionId, mimeType: session.mimeType });
-        }
-      }
-    } else {
-      // Delete infected file
-      await uploadService.deleteFile(fileKey);
-    }
-  } catch (error) {
-    logger.error('Virus scan error', { error, sessionId, fileKey });
-    uploadService.updateSessionStatus(sessionId, 'failed');
-  }
-}
 
 // ============================================================================
 // Error Adapter

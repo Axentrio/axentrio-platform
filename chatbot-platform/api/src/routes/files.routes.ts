@@ -3,7 +3,7 @@
  * Upload, preview, and download endpoints
  */
 import { Router, Request, Response } from 'express';
-import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess } from '../utils/response';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
@@ -228,6 +228,96 @@ router.get(
       },
     );
   })
+);
+
+/**
+ * POST /files/:sessionId/upload-complete
+ *
+ * Client-driven scan trigger. The portal calls this AFTER the S3 PUT
+ * (presigned URL from POST /upload) completes — the API then:
+ *   1. Verifies the file actually landed in S3.
+ *   2. Calls the shared `performScan` helper (virus scan → status update →
+ *      audit log → thumbnail-if-clean / delete-if-infected).
+ *   3. Returns the scan result so the portal can show a clear UX:
+ *      `ready` → display/download enabled; `quarantined` → file removed,
+ *      show error toast.
+ *
+ * Idempotent: if the session is already in a terminal state (`ready` /
+ * `quarantined`), returns the cached result without re-scanning.
+ *
+ * Tenant-scoped: caller's effective tenant must match the file's tenant.
+ * Super-admin context-switch is honored via `req.tenantId`
+ * (resolveTenantContext) — see clerk.middleware.ts:381.
+ */
+router.post(
+  '/:sessionId/upload-complete',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    if (!isS3Configured()) {
+      throw new ApiError(
+        'File service is not configured',
+        503,
+        ERROR_CODES.FILE_SERVICE_UNAVAILABLE,
+      );
+    }
+
+    const { sessionId } = req.params;
+    if (!isUuid(sessionId)) {
+      throw new BadRequestError('Invalid sessionId');
+    }
+
+    const { getUploadService } = await import('../file-handling/upload.service');
+    const uploadService = getUploadService();
+
+    const session = uploadService.getSession(sessionId);
+    if (!session) {
+      throw new NotFoundError('Upload session not found');
+    }
+
+    // Tenant scoping. `req.tenantId` honors `resolveTenantContext` (so
+    // super-admins can complete uploads in a tenant they've switched into).
+    // For non-super-admins it equals their home tenant.
+    const authReq = req as ProvisionedRequest;
+    const callerTenantId = authReq.tenantId ?? authReq.user?.tenantId;
+    if (session.tenantId !== callerTenantId) {
+      throw new ForbiddenError('Access denied');
+    }
+
+    // Idempotency: if the session already reached a terminal state, return
+    // the cached result. Avoids re-scanning on portal retries / page
+    // refreshes and keeps the audit log clean (no duplicate scan-completed
+    // entries).
+    if (session.status === 'ready' || session.status === 'quarantined') {
+      sendSuccess(res, {
+        sessionId,
+        status: session.status,
+        scanResult: session.scanResult ?? null,
+      });
+      return;
+    }
+
+    // Verify the client actually uploaded. The presigned URL from
+    // POST /upload could be unused (client gave up, network failed). In
+    // that case `scanFile` would 404 against S3; check up front so the
+    // error message is clear.
+    const fileExists = await uploadService.fileExists(session.fileKey);
+    if (!fileExists) {
+      throw new NotFoundError('File not yet uploaded to S3');
+    }
+
+    // Awaited scan. Throws on scanner / S3 errors → reaches global error
+    // handler as 500 / INTERNAL_ERROR. On success, returns the canonical
+    // ScanResult. The shared trigger already emitted the audit log
+    // (FILE_SCAN_COMPLETED / FILE_QUARANTINED), updated the session
+    // status, and (if quarantined) deleted the infected file from S3.
+    const { performScan } = await import('../file-handling/virus-scan-trigger');
+    const scanResult = await performScan(sessionId, session.fileKey);
+
+    sendSuccess(res, {
+      sessionId,
+      status: scanResult.clean ? 'ready' : 'quarantined',
+      scanResult,
+    });
+  }),
 );
 
 export default router;

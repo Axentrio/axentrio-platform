@@ -43,6 +43,11 @@ const DialogContent = React.forwardRef<
         "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%]",
         "gap-4 border border-edge bg-surface-1 p-6 shadow-lg",
         "duration-200 sm:rounded-2xl",
+        // Grid items default to min-width: auto, so a child wider than the
+        // dialog (e.g. a padded form with a w-full input) expands the track
+        // past max-w-*. Force min-w-0 on children so the track honours the
+        // container's max-width.
+        "[&>*]:min-w-0",
         "data-[state=open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",

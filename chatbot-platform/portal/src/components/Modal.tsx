@@ -58,11 +58,6 @@ export const Modal: React.FC<ModalProps> = ({
             'bg-surface-2 rounded-2xl shadow-card border border-edge p-0 gap-0',
             // Hide the default shadcn/radix close button — we render our own
             '[&>button.absolute]:hidden',
-            // shadcn's DialogContent is `display: grid`; grid items default to
-            // `min-width: auto`, so any wide child (e.g. an input + padding)
-            // can blow the track past max-w-*. Force min-w-0 on direct
-            // children so the track honours the container's max-width.
-            '[&>*]:min-w-0',
           )}
           onInteractOutside={(e) => {
             if (!closeOnOverlayClick) e.preventDefault();

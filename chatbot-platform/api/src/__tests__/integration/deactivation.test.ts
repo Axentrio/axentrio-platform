@@ -184,7 +184,7 @@ describe('Deactivation + Session Cleanup', () => {
         .send();
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/last active admin/i);
+      expect(res.body.error.message).toMatch(/last active admin/i);
     });
   });
 });

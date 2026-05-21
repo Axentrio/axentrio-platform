@@ -55,7 +55,7 @@ export const Modal: React.FC<ModalProps> = ({
         <DialogContent
           className={cn(
             sizeClasses[size],
-            'bg-surface-2 rounded-2xl shadow-card border border-edge p-0 gap-0',
+            'bg-surface-2 rounded-2xl shadow-card border border-edge p-0 gap-0 overflow-hidden',
             // Hide the default shadcn/radix close button — we render our own
             '[&>button.absolute]:hidden',
           )}

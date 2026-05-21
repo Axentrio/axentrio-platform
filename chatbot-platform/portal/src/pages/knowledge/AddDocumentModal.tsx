@@ -184,7 +184,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
               onDragLeave={() => setIsDragOver(false)}
               onClick={() => !file && fileInputRef.current?.click()}
               className={cn(
-                'relative border-2 border-dashed rounded-xl transition-all',
+                'relative border-2 border-dashed rounded-xl transition-all overflow-hidden',
                 file
                   ? 'border-emerald-500/30 bg-emerald-500/5 p-4'
                   : isDragOver
@@ -194,7 +194,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
             >
               {file ? (
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-emerald-500/10">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 shrink-0">
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -204,7 +204,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setFile(null); }}
-                    className="p-1 rounded-md hover:bg-surface-3 text-text-muted"
+                    className="p-1 rounded-md hover:bg-surface-3 text-text-muted shrink-0"
                   >
                     <X className="w-4 h-4" />
                   </button>

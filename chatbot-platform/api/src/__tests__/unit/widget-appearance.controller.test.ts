@@ -49,10 +49,13 @@ describe('getWidgetAppearance', () => {
     const res = makeRes();
     await getWidgetAppearance(req, res);
     expect(res.json).toHaveBeenCalledWith({
-      primaryColor: '#abcdef',
-      avatarUrl: 'https://example.com/a.png',
-      launcherPosition: 'bottom-left',
-      launcherLabel: 'Hi',
+      success: true,
+      data: {
+        primaryColor: '#abcdef',
+        avatarUrl: 'https://example.com/a.png',
+        launcherPosition: 'bottom-left',
+        launcherLabel: 'Hi',
+      },
     });
   });
 
@@ -62,10 +65,13 @@ describe('getWidgetAppearance', () => {
     const res = makeRes();
     await getWidgetAppearance(req, res);
     expect(res.json).toHaveBeenCalledWith({
-      primaryColor: null,
-      avatarUrl: null,
-      launcherPosition: 'bottom-right',
-      launcherLabel: null,
+      success: true,
+      data: {
+        primaryColor: null,
+        avatarUrl: null,
+        launcherPosition: 'bottom-right',
+        launcherLabel: null,
+      },
     });
   });
 });
@@ -96,10 +102,13 @@ describe('updateWidgetAppearance', () => {
     expect(saved.settings.widget.launcherLabel).toBe('Chat');
 
     expect(res.json).toHaveBeenCalledWith({
-      primaryColor: '#6366f1',
-      avatarUrl: null,
-      launcherPosition: 'bottom-left',
-      launcherLabel: 'Chat',
+      success: true,
+      data: {
+        primaryColor: '#6366f1',
+        avatarUrl: null,
+        launcherPosition: 'bottom-left',
+        launcherLabel: 'Chat',
+      },
     });
   });
 

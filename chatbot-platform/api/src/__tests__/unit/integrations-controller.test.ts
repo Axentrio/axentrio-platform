@@ -72,12 +72,13 @@ describe('Integrations Controller', () => {
       await getIntegrations(req, res);
 
       expect(res.json).toHaveBeenCalledWith({
-        calcom: { eventTypeId: 123, hasApiKey: true },
+        success: true,
+        data: { calcom: { eventTypeId: 123, hasApiKey: true } },
       });
 
-      // Ensure raw apiKey is NOT in the response
+      // Ensure raw apiKey is NOT in the response payload
       const responseArg = res.json.mock.calls[0][0];
-      expect(responseArg.calcom.apiKey).toBeUndefined();
+      expect(responseArg.data.calcom.apiKey).toBeUndefined();
     });
 
     it('should return empty object when no integrations configured', async () => {
@@ -87,7 +88,7 @@ describe('Integrations Controller', () => {
       const res = mockRes();
       await getIntegrations(req, res);
 
-      expect(res.json).toHaveBeenCalledWith({});
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: {} });
     });
 
     it('should return empty object when settings is undefined', async () => {
@@ -97,7 +98,7 @@ describe('Integrations Controller', () => {
       const res = mockRes();
       await getIntegrations(req, res);
 
-      expect(res.json).toHaveBeenCalledWith({});
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: {} });
     });
   });
 
@@ -153,8 +154,8 @@ describe('Integrations Controller', () => {
       const savedTenant = mockSave.mock.calls[0][0];
       expect(savedTenant.settings.integrations.calcom).toBeUndefined();
 
-      // Response should be empty
-      expect(res.json).toHaveBeenCalledWith({});
+      // Response data should be empty
+      expect(res.json).toHaveBeenCalledWith({ success: true, data: {} });
     });
 
     it('should never include raw apiKey in response', async () => {
@@ -169,8 +170,8 @@ describe('Integrations Controller', () => {
       await updateIntegrations(req, res);
 
       const responseArg = res.json.mock.calls[0][0];
-      expect(responseArg.calcom.apiKey).toBeUndefined();
-      expect(responseArg.calcom.hasApiKey).toBe(true);
+      expect(responseArg.data.calcom.apiKey).toBeUndefined();
+      expect(responseArg.data.calcom.hasApiKey).toBe(true);
     });
 
     it('should auto-set webhookUrl when saving calcom with eventTypeId and webhookUrl is empty', async () => {

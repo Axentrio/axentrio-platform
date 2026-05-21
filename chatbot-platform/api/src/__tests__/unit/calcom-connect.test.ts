@@ -72,17 +72,15 @@ describe('connectCalcom', () => {
     vi.clearAllMocks();
   });
 
-  it('returns 400 if apiKey is missing', async () => {
+  it('throws BadRequestError if apiKey is missing', async () => {
     const req = mockReq({});
     const res = mockRes();
 
-    await connectCalcom(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({ error: 'A valid API key is required' });
+    await expect(connectCalcom(req, res)).rejects.toThrow(/A valid API key is required/);
+    expect(res.json).not.toHaveBeenCalled();
   });
 
-  it('returns 400 if Cal.com rejects the key (401)', async () => {
+  it('throws BadRequestError if Cal.com rejects the key (401)', async () => {
     const axiosError: any = new Error('Unauthorized');
     axiosError.response = { status: 401 };
     mockAxiosGet.mockRejectedValue(axiosError);
@@ -90,24 +88,16 @@ describe('connectCalcom', () => {
     const req = mockReq({ apiKey: 'bad-key' });
     const res = mockRes();
 
-    await connectCalcom(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({ error: 'Invalid or expired API key' });
+    await expect(connectCalcom(req, res)).rejects.toThrow(/Invalid or expired API key/);
   });
 
-  it('returns 400 if no event types found', async () => {
+  it('throws BadRequestError if no event types found', async () => {
     mockAxiosGet.mockResolvedValue({ data: { data: { eventTypeGroups: [] } } });
 
     const req = mockReq({ apiKey: 'valid-key' });
     const res = mockRes();
 
-    await connectCalcom(req, res);
-
-    expect(res.status).toHaveBeenCalledWith(400);
-    expect(res.json).toHaveBeenCalledWith({
-      error: 'No event types found. Create one in Cal.com first.',
-    });
+    await expect(connectCalcom(req, res)).rejects.toThrow(/No event types found/);
   });
 
   it('returns 200 with encrypted key stored and event types returned', async () => {
@@ -152,18 +142,19 @@ describe('connectCalcom', () => {
     expect(savedTenant.settings.integrations.calcom.language).toBe('fr');
     expect(savedTenant.settings.integrations.calcom.collectFields).toBe(true);
 
-    // Should return 200 with event types
+    // Should return 200 with event types wrapped in the success envelope
     expect(res.status).not.toHaveBeenCalledWith(400);
     const jsonArg = res.json.mock.calls[0][0];
-    expect(jsonArg.eventTypes).toHaveLength(2);
-    expect(jsonArg.eventTypes[0]).toEqual({
+    expect(jsonArg.success).toBe(true);
+    expect(jsonArg.data.eventTypes).toHaveLength(2);
+    expect(jsonArg.data.eventTypes[0]).toEqual({
       id: 1,
       title: 'Consultation',
       slug: 'consultation',
       length: 30,
     });
     // Falls back to slug when title is empty
-    expect(jsonArg.eventTypes[1]).toEqual({
+    expect(jsonArg.data.eventTypes[1]).toEqual({
       id: 2,
       title: 'quick-call',
       slug: 'quick-call',

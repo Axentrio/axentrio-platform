@@ -32,8 +32,6 @@ import { BookingLog } from './entities/BookingLog';
 import { AgentTrace } from './entities/AgentTrace';
 import { TenantBillingAccount } from './entities/TenantBillingAccount';
 import { BillingEvent } from './entities/BillingEvent';
-import { FaqSection } from './entities/FaqSection';
-import { FaqItem } from './entities/FaqItem';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -73,8 +71,6 @@ export const AppDataSource = new DataSource({
     AgentTrace,
     TenantBillingAccount,
     BillingEvent,
-    FaqSection,
-    FaqItem,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

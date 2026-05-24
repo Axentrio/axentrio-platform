@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, IsNull } from 'typeorm';
 import { DeleteObjectCommand } from '@aws-sdk/client-s3';
 import { createS3Client } from '../config/s3.config';
 import { KnowledgeBase } from '../database/entities/KnowledgeBase';
@@ -46,16 +46,22 @@ export class KnowledgeService {
     this.tenantRepo = dataSource.getRepository(Tenant);
   }
 
+  /**
+   * Resolve the tenant-primary (bot-less) KnowledgeBase, creating it if absent.
+   * Multi-bot: tenant-level knowledge operations target the primary KB
+   * (botId IS NULL); per-bot dedicated KBs are managed via the bots API. The
+   * partial-unique index still protects against a concurrent double-create.
+   */
   async getOrCreateKnowledgeBase(tenantId: string): Promise<KnowledgeBase> {
-    let kb = await this.kbRepo.findOne({ where: { tenantId } });
+    let kb = await this.kbRepo.findOne({ where: { tenantId, botId: IsNull() } });
     if (!kb) {
       try {
-        kb = this.kbRepo.create({ tenantId, status: 'inactive' });
+        kb = this.kbRepo.create({ tenantId, botId: null, status: 'inactive' });
         kb = await this.kbRepo.save(kb);
       } catch (err: any) {
         // Race condition: another request created it between our findOne and save
         if (err?.message?.includes('duplicate key') || err?.code === '23505') {
-          kb = await this.kbRepo.findOne({ where: { tenantId } });
+          kb = await this.kbRepo.findOne({ where: { tenantId, botId: IsNull() } });
           if (!kb) throw err; // genuinely broken
         } else {
           throw err;

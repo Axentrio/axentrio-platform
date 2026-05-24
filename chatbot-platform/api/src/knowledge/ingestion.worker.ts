@@ -90,7 +90,9 @@ export function createIngestionProcessor(dataSource: DataSource, s3Client: S3Cli
         return;
       }
 
-      const kb = await kbRepo.findOneOrFail({ where: { tenantId } });
+      // Multi-bot: fetch the document's OWN KnowledgeBase (a tenant may now
+      // have several), not "the tenant's KB".
+      const kb = await kbRepo.findOneOrFail({ where: { id: doc.knowledgeBaseId } });
       let chunks = chunkText(processedText, kb.chunkSize, kb.chunkOverlap);
 
       if (chunks.length > config.rag.maxChunksPerDoc) {

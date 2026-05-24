@@ -14,6 +14,7 @@ import { Agent } from '../database/entities/Agent';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { Tenant } from '../database/entities/Tenant';
 import { KnowledgeBase } from '../database/entities/KnowledgeBase';
+import { IsNull } from 'typeorm';
 import { logger } from '../utils/logger';
 import { authenticateWidget } from '../middleware/auth.middleware';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
@@ -283,7 +284,7 @@ router.post(
     const tenantForAi = await AppDataSource.getRepository(Tenant).findOne({ where: { id: session.tenantId } });
     const aiEnabled = (tenantForAi as any)?.settings?.ai?.enabled;
     const kb = aiEnabled
-      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: session.tenantId, status: 'active' } })
+      ? await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { tenantId: session.tenantId, status: 'active', botId: IsNull() } })
       : null;
     session.status = (aiEnabled && kb) ? 'bot' : 'waiting';
     session.assignedAgentId = undefined;

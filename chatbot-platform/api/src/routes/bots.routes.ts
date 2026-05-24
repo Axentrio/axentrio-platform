@@ -17,6 +17,8 @@ import crypto from 'crypto';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { Bot, BotSettings } from '../database/entities/Bot';
+import { BotKnowledgeBase } from '../database/entities/BotKnowledgeBase';
+import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, NotFoundError, ForbiddenError } from '../middleware/error-handler';
@@ -128,6 +130,7 @@ router.post(
       // TODO(billing): enforceCountLimit({ ..., capability: 'bots' }) here once
       // `bots` is added to PlanLimits/Entitlements and the billing epic is committed.
 
+      let saved: Bot | null = null;
       for (let attempt = 0; attempt < MAX_KEY_ATTEMPTS; attempt++) {
         const draft = manager.create(Bot, {
           tenantId,
@@ -138,13 +141,24 @@ router.post(
           settings: defaultBotSettings(name),
         });
         try {
-          return await manager.save(Bot, draft);
+          saved = await manager.save(Bot, draft);
+          break;
         } catch (err) {
           if (isUniqueViolation(err) && attempt < MAX_KEY_ATTEMPTS - 1) continue;
           throw err;
         }
       }
-      throw new Error('Failed to generate a unique bot public key');
+      if (!saved) throw new Error('Failed to generate a unique bot public key');
+
+      // Seed a dedicated (empty) KnowledgeBase and attach it, so the bot is
+      // self-contained. It answers from nothing until documents are added.
+      const kb = await manager.save(
+        manager.create(KnowledgeBase, { tenantId, botId: saved.id, status: 'inactive' }),
+      );
+      await manager.save(
+        manager.create(BotKnowledgeBase, { botId: saved.id, knowledgeBaseId: kb.id, tenantId }),
+      );
+      return saved;
     });
 
     sendCreated(res, { ...toListItem(bot), embedSnippet: embedSnippet(bot.publicKey) });
@@ -233,6 +247,80 @@ router.delete(
 
     bot.deletedAt = new Date();
     await botRepository.save(bot);
+    sendNoContent(res);
+  })
+);
+
+// ── Per-bot knowledge-base attachment ──────────────────────────────────────
+
+/** Load a tenant-owned, non-deleted bot or 404. */
+async function loadTenantBot(botId: string, tenantId: string | undefined): Promise<Bot> {
+  const bot = await botRepository.findOne({ where: { id: botId, tenantId, deletedAt: IsNull() } });
+  if (!bot) throw new NotFoundError('Bot not found');
+  return bot;
+}
+
+/**
+ * GET /bots/:id/knowledge-bases — KnowledgeBases attached to the bot.
+ */
+router.get(
+  '/:id/knowledge-bases',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId;
+    await loadTenantBot(req.params.id, tenantId);
+    const rows = await AppDataSource.getRepository(BotKnowledgeBase).find({
+      where: { botId: req.params.id, tenantId },
+    });
+    sendSuccess(res, { knowledgeBaseIds: rows.map((r) => r.knowledgeBaseId) });
+  })
+);
+
+/**
+ * POST /bots/:id/knowledge-bases/:kbId — attach a KnowledgeBase (idempotent).
+ * Both the bot and the KB must belong to the caller's tenant.
+ */
+router.post(
+  '/:id/knowledge-bases/:kbId',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId;
+    const { id: botId, kbId } = req.params;
+
+    await loadTenantBot(botId, tenantId);
+    const kb = await AppDataSource.getRepository(KnowledgeBase).findOne({ where: { id: kbId, tenantId } });
+    if (!kb) throw new NotFoundError('Knowledge base not found');
+
+    await AppDataSource.getRepository(BotKnowledgeBase)
+      .createQueryBuilder()
+      .insert()
+      .values({ botId, knowledgeBaseId: kbId, tenantId: tenantId! })
+      .orIgnore() // already attached → no-op
+      .execute();
+
+    sendSuccess(res, { botId, knowledgeBaseId: kbId, attached: true });
+  })
+);
+
+/**
+ * DELETE /bots/:id/knowledge-bases/:kbId — detach a KnowledgeBase (does not
+ * delete the KB). Detaching the last one is allowed — the bot then answers
+ * from nothing.
+ */
+router.delete(
+  '/:id/knowledge-bases/:kbId',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId;
+    const { id: botId, kbId } = req.params;
+
+    await loadTenantBot(botId, tenantId);
+    await AppDataSource.getRepository(BotKnowledgeBase).delete({
+      botId,
+      knowledgeBaseId: kbId,
+      tenantId,
+    });
     sendNoContent(res);
   })
 );

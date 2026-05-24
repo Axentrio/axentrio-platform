@@ -16,6 +16,7 @@ import {
 } from 'typeorm';
 import { Tenant } from './Tenant';
 import { Agent } from './Agent';
+import { Bot } from './Bot';
 import { Participant } from './Participant';
 import { Message } from './Message';
 import { HandoffRequest } from './HandoffRequest';
@@ -32,6 +33,14 @@ export class ChatSession {
 
   @Column({ type: 'uuid', name: 'tenant_id' })
   tenantId!: string;
+
+  /**
+   * The Bot this conversation belongs to. Nullable through Phase 1 (backfilled
+   * to the tenant's anchor bot); enforced NOT NULL in a later migration once
+   * null sessions have drained. NULL is bound to the resolved bot on resume.
+   */
+  @Column({ type: 'uuid', nullable: true, name: 'bot_id' })
+  botId?: string | null;
 
   @Column({ type: 'varchar', length: 255, name: 'visitor_id' })
   visitorId!: string;
@@ -120,6 +129,10 @@ export class ChatSession {
   @ManyToOne(() => Agent, (agent) => agent.assignedSessions)
   @JoinColumn({ name: 'assigned_agent_id' })
   assignedAgent?: Agent;
+
+  @ManyToOne(() => Bot, (bot) => bot.sessions, { nullable: true })
+  @JoinColumn({ name: 'bot_id' })
+  bot?: Bot;
 
   @OneToMany(() => Participant, (participant) => participant.session)
   participants!: Participant[];

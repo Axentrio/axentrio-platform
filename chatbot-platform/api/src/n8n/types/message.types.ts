@@ -126,6 +126,8 @@ export interface IntegrationsConfig {
 export interface OutboundMessage {
   event: MessageEvent;
   tenantId: string;
+  /** The Bot this session belongs to (multi-bot). Optional until all sessions are attributed. */
+  botId?: string | null;
   sessionId: string;
   timestamp: string;
   payload: MessagePayload;

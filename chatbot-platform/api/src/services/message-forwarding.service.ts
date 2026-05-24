@@ -259,6 +259,7 @@ export async function forwardMessageToN8n(
   const outboundPayload: OutboundMessage = {
     event: 'message.received',
     tenantId: session.tenantId,
+    botId: session.botId ?? null,
     sessionId: session.id,
     timestamp: new Date().toISOString(),
     payload: {

@@ -11,6 +11,8 @@ import { logger } from '../utils/logger';
 import { Tenant } from './entities/Tenant';
 import { User } from './entities/User';
 import { Agent } from './entities/Agent';
+import { Bot } from './entities/Bot';
+import { BotKnowledgeBase } from './entities/BotKnowledgeBase';
 import { ChatSession } from './entities/ChatSession';
 import { Participant } from './entities/Participant';
 import { Message } from './entities/Message';
@@ -52,6 +54,8 @@ export const AppDataSource = new DataSource({
     Tenant,
     User,
     Agent,
+    Bot,
+    BotKnowledgeBase,
     ChatSession,
     Participant,
     Message,

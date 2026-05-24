@@ -9,6 +9,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
+import { Bot } from '../database/entities/Bot';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError } from '../middleware';
 import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
@@ -184,6 +185,14 @@ router.post(
       return;
     }
 
+    // Multi-bot (Phase 1): attribute the new session to the tenant's anchor
+    // bot. Resolution still keys on tenant.apiKey here; the anchor is the bot
+    // that owns it. Nullable-safe — if somehow absent, the session stays
+    // unattributed and is bound on a later resume.
+    const anchorBot = await AppDataSource.getRepository(Bot).findOne({
+      where: { tenantId: tenant.id, isDefault: true },
+    });
+
     // Determine initial status based on AI settings
     const aiEnabled = tenant.settings?.ai?.enabled;
     const usePlatformAgent = tenant.settings?.ai?.usePlatformAgent;
@@ -210,6 +219,7 @@ router.post(
       });
       const draft = manager.create(ChatSession, {
         tenantId: tenant.id,
+        botId: anchorBot?.id ?? null,
         visitorId,
         source: 'widget',
         metadata: {

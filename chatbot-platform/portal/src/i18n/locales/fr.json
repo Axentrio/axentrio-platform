@@ -29,7 +29,8 @@
     "superAdmin": "Super administrateur",
     "allTenants": "Tous les clients",
     "allUsers": "Tous les utilisateurs",
-    "platformAnalytics": "Analyses de la plateforme"
+    "platformAnalytics": "Analyses de la plateforme",
+    "faqEditor": "Éditeur de FAQ"
   },
   "sidebar": {
     "impersonating": "Emprunt d'identité",
@@ -1216,6 +1217,81 @@
     "impersonationBanner": {
       "message": "Vous empruntez l'identité de <strong>{{tenant}}</strong> — revenez à votre propre compte une fois terminé.",
       "exitButton": "Quitter"
+    },
+    "faq": {
+      "title": "Éditeur de FAQ",
+      "subtitle": "Modifiez la FAQ de la plateforme affichée à tous les tenants.",
+      "newSection": "Nouvelle section",
+      "newItem": "Nouvel élément",
+      "edit": "Modifier",
+      "delete": "Supprimer",
+      "moveUp": "Monter",
+      "moveDown": "Descendre",
+      "emptySections": "Aucune section pour l'instant.",
+      "emptyItems": "Cette section ne contient pas encore d'éléments.",
+      "pickSection": "Choisissez une section à gauche pour modifier ses éléments.",
+      "itemsCount_one": "{{count}} élément",
+      "itemsCount_other": "{{count}} éléments",
+      "sectionIdLabel": "Id de section",
+      "reserved": "Réservée",
+      "reservedTooltip": "Les sections réservées ne peuvent pas être supprimées car l'application y renvoie.",
+      "reservedSingletonTooltip": "Les sections réservées doivent conserver au moins un élément.",
+      "saved": "Enregistré.",
+      "created": {
+        "section": "Section créée.",
+        "item": "Élément créé."
+      },
+      "deleted": {
+        "section": "Section supprimée.",
+        "item": "Élément supprimé."
+      },
+      "langs": {
+        "en": "Anglais",
+        "nl": "Néerlandais",
+        "fr": "Français"
+      },
+      "dialog": {
+        "newSection": "Nouvelle section",
+        "editSection": "Modifier la section",
+        "newSectionDescription": "Créez une nouvelle section de FAQ. L'id apparaît dans l'URL (?section=…) et ne pourra plus être modifié.",
+        "editSectionDescription": "Mettez à jour le titre de la section dans chaque langue prise en charge.",
+        "newItem": "Nouvel élément",
+        "editItem": "Modifier l'élément",
+        "itemDescription": "Question et réponse par langue. L'anglais est obligatoire ; les autres langues retombent sur l'anglais si elles sont vides.",
+        "deleteSectionTitle": "Supprimer la section ?",
+        "deleteSectionDescription": "Cela supprime définitivement la section « {{title}} » et tous ses éléments.",
+        "deleteItemTitle": "Supprimer l'élément ?",
+        "deleteItemDescription": "Cela supprime définitivement l'élément « {{question}} »."
+      },
+      "fields": {
+        "id": "Id de section",
+        "idHelp": "Lettres minuscules, chiffres et tirets. Exemple : getting-started",
+        "slug": "Slug",
+        "slugHelp": "Lettres minuscules, chiffres et tirets. Doit être unique dans la section.",
+        "title": "Titre",
+        "question": "Question",
+        "answer": "Réponse",
+        "optionalPlaceholder": "Optionnel — retombe sur l'anglais si vide."
+      },
+      "errors": {
+        "load": "Impossible de charger les FAQ.",
+        "save": "Impossible d'enregistrer les modifications.",
+        "delete": "Échec de la suppression.",
+        "reorder": "Échec du réordonnancement.",
+        "idRequired": "L'id est requis.",
+        "idTooLong": "L'id est trop long (max 64).",
+        "idKebab": "Utilisez des lettres minuscules, chiffres et tirets.",
+        "idExists": "Une section avec cet id existe déjà.",
+        "slugRequired": "Le slug est requis.",
+        "slugTooLong": "Le slug est trop long (max 80).",
+        "slugKebab": "Utilisez des lettres minuscules, chiffres et tirets.",
+        "slugExists": "Un élément avec ce slug existe déjà dans cette section.",
+        "enTitleRequired": "Le titre en anglais est requis.",
+        "enQuestionRequired": "La question en anglais est requise.",
+        "enAnswerRequired": "La réponse en anglais est requise."
+      },
+      "sectionEyebrow": "Section",
+      "dragHandle": "Glisser pour réordonner"
     }
   },
   "help": {
@@ -1231,11 +1307,7 @@
       "noMatches": "Aucun résultat pour « {{query}} »",
       "matches_one": "{{count}} résultat pour « {{query}} »",
       "matches_other": "{{count}} résultats pour « {{query}} »",
-      "tryDifferent": "Essayez un autre mot-clé ou téléchargez le document FAQ complet."
-    },
-    "download": {
-      "title": "Télécharger le document FAQ complet (PDF)",
-      "button": "Télécharger la FAQ"
+      "tryDifferent": "Essayez un autre mot-clé."
     },
     "section": {
       "questionCount_one": "{{count}} question",
@@ -1249,333 +1321,13 @@
       "subtitle": "Questions fréquentes sur les instructions et le comportement du bot",
       "ariaLabel": "Bot IA — Foire aux questions",
       "closeLabel": "Fermer la FAQ",
-      "browseAll": "Parcourir toutes les FAQ",
-      "downloadPdf": "Télécharger la FAQ complète (PDF)"
+      "browseAll": "Parcourir toutes les FAQ"
     },
-    "faq": {
-      "sections": {
-        "getting-started": {
-          "title": "Premiers pas",
-          "items": {
-            "what-is-handsoff": {
-              "q": "Qu'est-ce que HandsOff ?",
-              "a": "HandsOff est une plateforme d'automatisation propulsée par l'IA qui aide les entreprises à automatiser les conversations clients sur plusieurs canaux. Elle combine un chatbot IA intelligent, le transfert vers un agent humain, des analyses et des outils de gestion d'équipe au sein d'un dashboard unifié."
-            },
-            "how-to-get-started": {
-              "q": "Comment démarrer avec HandsOff ?",
-              "a": "Après votre inscription, suivez la checklist de configuration dans votre dashboard Analyses : (1) Activez votre Assistant IA, (2) Configurez la voix de votre marque et l'identité du bot, (3) Téléversez les documents de votre base de connaissances, (4) Connectez votre calendrier de réservation (optionnel) et (5) Configurez les automatisations. Chaque étape contient un lien direct vers la page de paramètres correspondante."
-            },
-            "what-channels": {
-              "q": "Quels canaux puis-je connecter à HandsOff ?",
-              "a": "HandsOff prend actuellement en charge les widgets de chat pour sites web, les bots Telegram et les pages Facebook. Vous pouvez gérer toutes les conversations issues de ces canaux dans une Boîte de réception unifiée. De nouveaux canaux sont ajoutés régulièrement."
-            },
-            "need-coding": {
-              "q": "Faut-il des compétences en programmation pour utiliser HandsOff ?",
-              "a": "Non. HandsOff est conçu pour être entièrement no-code. Vous pouvez configurer votre bot IA, personnaliser son apparence, connecter des canaux et gérer les conversations entièrement depuis un dashboard convivial. La seule étape technique consiste à copier un petit extrait d'intégration pour ajouter le widget de chat à votre site web."
-            },
-            "free-trial": {
-              "q": "Existe-t-il une période d'essai gratuite ?",
-              "a": "Oui, HandsOff propose une période d'essai gratuite afin que vous puissiez explorer toutes les fonctionnalités avant de vous engager. Pendant l'essai, vous bénéficiez d'un accès complet à la configuration du bot IA, au téléversement de la base de connaissances, à la connexion des canaux et aux analyses."
-            }
-          }
-        },
-        "ai-bot": {
-          "title": "Configuration du bot IA",
-          "items": {
-            "configure-identity": {
-              "q": "Comment configurer l'identité de mon bot IA ?",
-              "a": "Rendez-vous dans IA et Contenu > Bot IA. Vous pourrez y définir le Nom du chatbot (le nom affiché aux visiteurs), l'E-mail de support (utilisé pour les escalades), le Ton de voix (Amical, Professionnel, Décontracté, Formel ou Personnalisé), ainsi que des Instructions du bot détaillées qui guident la manière dont votre IA répond aux visiteurs."
-            },
-            "bot-instructions": {
-              "q": "Que sont les Instructions du bot et comment les utiliser ?",
-              "a": "Les Instructions du bot sont des prompts système qui indiquent à votre IA comment se comporter. Vous pouvez partir d'un modèle (Vierge ou basé sur la FAQ) ou rédiger vos propres instructions personnalisées. Utilisez des espaces réservés tels que {botName}, {tone}, {supportEmail}, {businessName}, {fallbackMessage}, {offHoursMessage}, {maxResponseLength} et {topicsToAvoid} pour rendre vos instructions dynamiques."
-            },
-            "change-tone": {
-              "q": "Comment changer le ton de voix de mon bot ?",
-              "a": "Dans les paramètres du Bot IA, sélectionnez l'une des cinq options de Ton de voix : Amical (chaleureux et accessible), Professionnel (courtois et orienté business), Décontracté (détendu et conversationnel), Formel (strict et corporatif) ou Personnalisé (définissez votre propre style dans les Instructions du bot)."
-            },
-            "disable-temporarily": {
-              "q": "Puis-je désactiver temporairement le bot IA ?",
-              "a": "Oui. La section Bot IA comporte un interrupteur intitulé « Activer les réponses propulsées par l'IA pour les visiteurs ». Le désactiver coupera les réponses automatisées tout en conservant votre configuration intacte pour quand vous souhaiterez le réactiver."
-            },
-            "greeting-message": {
-              "q": "Qu'est-ce que le Message d'accueil et comment le modifier ?",
-              "a": "Le Message d'accueil est le premier message que les visiteurs voient lorsqu'ils ouvrent le widget de chat. Par défaut, il s'agit de « Bienvenue ! Comment puis-je vous aider aujourd'hui ? » Vous pouvez le personnaliser dans la section Paramètres avancés de l'onglet Bot IA."
-            }
-          }
-        },
-        "knowledge-base": {
-          "title": "Base de connaissances",
-          "items": {
-            "what-is-kb": {
-              "q": "Qu'est-ce que la Base de connaissances ?",
-              "a": "La Base de connaissances est l'endroit où vous téléversez et stockez les informations que votre bot IA utilise pour répondre aux questions des visiteurs. Cela peut inclure des documents PDF, du texte collé, des FAQ, des descriptions de produits, des détails tarifaires et des politiques d'entreprise."
-            },
-            "file-formats": {
-              "q": "Quels formats de fichiers sont pris en charge pour les téléversements vers la base de connaissances ?",
-              "a": "Actuellement, vous pouvez téléverser des documents PDF, coller directement du texte brut ou ajouter manuellement des entrées de FAQ. L'IA traite ce contenu et l'utilise pour fournir des réponses précises et contextuelles aux demandes des visiteurs."
-            },
-            "add-documents": {
-              "q": "Comment ajouter des documents à la base de connaissances ?",
-              "a": "Rendez-vous dans IA et Contenu > Base de connaissances et cliquez sur « Ajouter un document » ou « Ajouter votre premier document ». Vous pouvez alors téléverser des PDF ou coller du texte. Une fois téléversé, l'IA fera automatiquement référence à ce contenu pour répondre aux questions pertinentes."
-            },
-            "only-from-kb": {
-              "q": "Le bot IA répond-il uniquement à partir de la base de connaissances ?",
-              "a": "L'IA répond principalement à partir de votre base de connaissances afin de garantir la précision et la cohérence de la marque. Toutefois, elle peut également utiliser son intelligence générale pour les civilités conversationnelles, les questions de clarification et les sujets non couverts par vos documents. Vous contrôlez cet équilibre via les Instructions du bot."
-            },
-            "update-content": {
-              "q": "Comment mettre à jour ou supprimer le contenu de la base de connaissances ?",
-              "a": "Rendez-vous dans IA et Contenu > Base de connaissances. Vous y verrez la liste de tous les documents téléversés avec une fonctionnalité de recherche. Vous pouvez supprimer les documents obsolètes et en ajouter de nouveaux à tout moment. L'IA met à jour ses réponses automatiquement en fonction du contenu actuel de la base de connaissances."
-            }
-          }
-        },
-        "custom-responses": {
-          "title": "Réponses prédéfinies",
-          "items": {
-            "what-are": {
-              "q": "Que sont les Réponses prédéfinies ?",
-              "a": "Les Réponses prédéfinies (également appelées réponses types) sont des réponses pré-rédigées aux questions courantes. Elles garantissent la cohérence à travers les conversations et aident votre IA à délivrer des messages précis et validés sur des sujets spécifiques."
-            },
-            "create": {
-              "q": "Comment créer une Réponse prédéfinie ?",
-              "a": "Rendez-vous dans IA et Contenu > Réponses prédéfinies et cliquez sur « Nouvelle réponse ». Remplissez le Titre (à usage interne), le Contenu (le message proprement dit), le Raccourci (un code rapide pour la déclencher), la Catégorie (pour l'organisation) et la Portée (les contextes auxquels elle s'applique)."
-            },
-            "categorize": {
-              "q": "Puis-je organiser les Réponses prédéfinies par catégorie ?",
-              "a": "Oui. Vous pouvez attribuer des catégories à chaque réponse prédéfinie et filtrer par catégorie à l'aide du menu déroulant. Cela facilite la gestion des réponses pour différents départements, produits ou sujets de conversation."
-            },
-            "when-used": {
-              "q": "Comment l'IA sait-elle quand utiliser une Réponse prédéfinie ?",
-              "a": "Les Réponses prédéfinies peuvent être déclenchées par des raccourcis (saisis par les agents), ou l'IA peut être instruite, via vos Instructions du bot, d'utiliser des réponses spécifiques pour certains sujets. La colonne UTILISÉE dans le tableau des réponses indique la fréquence d'utilisation de chaque réponse."
-            }
-          }
-        },
-        "appearance": {
-          "title": "Apparence du chatbot et image de marque",
-          "items": {
-            "customize": {
-              "q": "Comment personnaliser l'apparence du widget de chat ?",
-              "a": "Rendez-vous dans IA et Contenu > Apparence du chatbot. Vous pouvez définir la Couleur principale, l'URL de l'avatar du bot, la Position du lanceur (en bas à droite ou en bas à gauche), le Libellé du lanceur (texte affiché à côté de l'icône de chat) et prévisualiser toutes les modifications en temps réel."
-            },
-            "company-logo": {
-              "q": "Puis-je utiliser le logo de mon entreprise comme avatar du bot ?",
-              "a": "Oui. Dans l'onglet Apparence du chatbot, saisissez l'URL de votre image de logo dans le champ « URL de l'avatar du bot ». Si ce champ reste vide, le widget utilisera automatiquement le logo de votre entreprise lorsqu'il est disponible. La taille recommandée est de 256 × 256 px au format PNG ou SVG."
-            },
-            "launcher-label": {
-              "q": "Qu'est-ce que le Libellé du lanceur et comment le modifier ?",
-              "a": "Le Libellé du lanceur est le texte affiché à côté de l'icône de chat sur votre site web, comme « Discutez avec nous ». Vous pouvez personnaliser ce texte dans la section Apparence du chatbot pour qu'il corresponde à la voix de votre marque."
-            },
-            "welcome-message": {
-              "q": "Où apparaît le Message de bienvenue ?",
-              "a": "Le Message de bienvenue apparaît en haut du widget de chat lorsque le visiteur l'ouvre pour la première fois. Il se configure dans les paramètres du Bot IA, sous Paramètres avancés, et non dans l'onglet Apparence."
-            },
-            "preview": {
-              "q": "Puis-je prévisualiser mon widget de chat avant la mise en ligne ?",
-              "a": "Oui. L'onglet Apparence du chatbot inclut un panneau d'aperçu en direct montrant exactement à quoi ressemblera votre widget pour les visiteurs. Vous pouvez aussi cliquer sur « Ouvrir le test complet du widget » pour voir l'expérience intégrale, et utiliser « Tester le chat » depuis n'importe quelle page pour interagir avec votre bot."
-            }
-          }
-        },
-        "channels": {
-          "title": "Canaux et réseaux sociaux",
-          "items": {
-            "platforms": {
-              "q": "Quelles plateformes de messagerie HandsOff prend-il en charge ?",
-              "a": "Actuellement, HandsOff prend en charge les bots Telegram et les pages Facebook. Vous pouvez connecter l'une, l'autre ou les deux plateformes, et tous les messages alimenteront votre Boîte de réception unifiée pour une gestion centralisée."
-            },
-            "connect-telegram": {
-              "q": "Comment connecter un bot Telegram ?",
-              "a": "Rendez-vous dans IA et Contenu > Intégrations réseaux sociaux ou Paramètres > Canaux. Cliquez sur le bouton Telegram et suivez les instructions pour relier votre bot Telegram existant à l'aide de son token API. Une fois connecté, tous les messages envoyés à votre bot apparaîtront dans la Boîte de réception."
-            },
-            "connect-facebook": {
-              "q": "Comment connecter une page Facebook ?",
-              "a": "Dans la section Intégrations réseaux sociaux ou Canaux, cliquez sur le bouton Facebook et authentifiez-vous avec votre compte Facebook. Sélectionnez la page que vous souhaitez connecter ; HandsOff recevra et répondra automatiquement aux messages envoyés à cette page."
-            },
-            "unified-inbox": {
-              "q": "Puis-je gérer tous les canaux depuis une seule boîte de réception ?",
-              "a": "Oui. Le dashboard Boîte de réception regroupe les conversations issues de votre widget web, de Telegram et de Facebook dans une vue unique. Vous pouvez filtrer par canal à l'aide des onglets : Tous, Bot, Transfert et Agent."
-            }
-          }
-        },
-        "analytics": {
-          "title": "Analyses et rapports",
-          "items": {
-            "metrics": {
-              "q": "Quelles métriques HandsOff suit-il ?",
-              "a": "HandsOff fournit des analyses complètes comprenant : les Conversations actives, les Transferts en attente, les Agents en ligne, le Temps de réponse moyen, le score CSAT (Satisfaction client) et le Total de conversations. Vous pouvez visualiser les tendances dans le temps avec le filtre Sept derniers jours (d'autres plages temporelles sont disponibles)."
-            },
-            "chat-volume": {
-              "q": "Qu'est-ce que le graphique Volume de conversations ?",
-              "a": "Le graphique Volume de conversations affiche le nombre de conversations au fil du temps, réparties entre Bot (gérées par l'IA), Humain (gérées par un agent) et Transfert (conversations transférées). Cela vous aide à comprendre comment la charge de travail est répartie entre l'IA et votre équipe."
-            },
-            "export": {
-              "q": "Puis-je exporter mes données d'analyse ?",
-              "a": "Oui. Le dashboard Analyses inclut un bouton Exporter qui vous permet de télécharger vos données de performance pour une analyse ou un reporting plus poussé dans des outils externes."
-            },
-            "setup-checklist": {
-              "q": "Qu'est-ce que la checklist de configuration dans Analyses ?",
-              "a": "La checklist en haut de la page Analyses suit votre progression d'onboarding : Assistant IA activé, Voix de la marque configurée, Documents de base de connaissances téléversés, Calendrier de réservation connecté et Automatisations configurées. Chaque élément renvoie directement à la page de configuration correspondante."
-            }
-          }
-        },
-        "team": {
-          "title": "Gestion de l'équipe",
-          "items": {
-            "invite-members": {
-              "q": "Comment inviter des membres de mon équipe dans HandsOff ?",
-              "a": "Rendez-vous dans la section Équipe et cliquez sur « Inviter » dans l'onglet Membres. Saisissez l'adresse e-mail de la personne que vous souhaitez inviter ; elle recevra une invitation à rejoindre votre organisation."
-            },
-            "roles": {
-              "q": "Quels rôles sont disponibles dans HandsOff ?",
-              "a": "Le rôle principal affiché est Admin, qui dispose d'un accès complet à tous les paramètres et fonctionnalités. Vous pouvez gérer les rôles des membres via le menu déroulant du tableau des Membres. Des niveaux de rôle supplémentaires peuvent être disponibles selon votre formule."
-            },
-            "add-agent": {
-              "q": "Comment ajouter un agent en direct ?",
-              "a": "Dans la section Équipe, cliquez sur « Ajouter un agent ». Vous pouvez créer des profils d'agents, attribuer des shifts et suivre des métriques de performance. Les agents apparaissent dans l'onglet Agents avec leur statut en ligne et leurs attributions de conversations."
-            },
-            "schedule-shifts": {
-              "q": "Puis-je planifier des shifts pour mon équipe ?",
-              "a": "Oui. La section Équipe comprend un onglet Shifts dans lequel vous pouvez créer et gérer les plannings des agents. Cela garantit une couverture pendant les heures de pointe et aide à équilibrer la charge de travail au sein de votre équipe."
-            },
-            "statistics": {
-              "q": "Quelles statistiques d'équipe sont disponibles ?",
-              "a": "Le dashboard Équipe affiche le Total d'agents, le nombre d'agents En ligne maintenant (agents actuellement actifs), le Total de conversations du mois en cours et le Score CSAT moyen. L'onglet Performance fournit des métriques individuelles par agent à des fins de coaching et de reconnaissance."
-            }
-          }
-        },
-        "handoff": {
-          "title": "Transfert humain",
-          "items": {
-            "what-is": {
-              "q": "Qu'est-ce que le Transfert humain ?",
-              "a": "Le Transfert humain est une fonctionnalité qui transfère de manière fluide les conversations du bot IA vers un agent humain en direct lorsque le bot ne peut pas résoudre une demande ou lorsqu'un visiteur demande explicitement à parler à une personne."
-            },
-            "visitor-request": {
-              "q": "Comment un visiteur peut-il demander à parler à un agent humain ?",
-              "a": "Les visiteurs peuvent demander à parler à un agent humain à tout moment de la conversation. L'IA est entraînée à reconnaître des formulations telles que « parler à un humain », « discuter avec un agent » ou « j'ai besoin de l'aide d'une personne » et déclenche automatiquement le transfert."
-            },
-            "where-appear": {
-              "q": "Où apparaissent les demandes de transfert ?",
-              "a": "Les demandes de transfert apparaissent dans la Boîte de réception, sous l'onglet « Transfert ». Les agents peuvent voir les transferts en attente et les prendre en charge pour démarrer la conversation. La Boîte de réception affiche également des métriques en temps réel pour les Transferts en attente."
-            },
-            "ai-resume": {
-              "q": "L'IA peut-elle reprendre une conversation après un transfert ?",
-              "a": "L'IA conserve le contexte tout au long de la conversation. Après qu'un agent humain a résolu le problème et fermé la conversation, l'IA peut reprendre le traitement des nouvelles demandes de ce visiteur en ayant une connaissance complète de l'historique de la conversation."
-            },
-            "enable-disable": {
-              "q": "Comment activer ou désactiver le Transfert humain ?",
-              "a": "Le Transfert humain peut être activé ou désactivé dans Paramètres > Fonctionnalités. Recherchez la carte « Transfert humain » et activez-la ou désactivez-la. Lorsqu'il est activé, l'IA proposera automatiquement de mettre les visiteurs en relation avec un agent humain le cas échéant."
-            }
-          }
-        },
-        "capabilities": {
-          "title": "Fonctionnalités",
-          "items": {
-            "what-are": {
-              "q": "Quelles fonctionnalités puis-je activer pour mon chatbot ?",
-              "a": "HandsOff propose quatre fonctionnalités principales : Répondre aux questions (à partir de votre base de connaissances), Capture de prospects (collecte des informations de contact des visiteurs), Transfert humain (connexion avec des agents en direct) et Rendez-vous (réservation, replanification et annulation de rendez-vous)."
-            },
-            "lead-capture": {
-              "q": "Comment fonctionne la Capture de prospects ?",
-              "a": "Lorsqu'elle est activée, le chatbot collecte les informations de contact des visiteurs telles que nom, e-mail et numéro de téléphone lorsqu'ils manifestent de l'intérêt pour vos produits ou services. Ces données sont capturées automatiquement et peuvent déclencher des notifications pour l'équipe."
-            },
-            "book-appointments": {
-              "q": "Le chatbot peut-il prendre des rendez-vous ?",
-              "a": "Oui, lorsque la fonctionnalité Rendez-vous est activée, les visiteurs peuvent réserver, replanifier ou annuler des rendez-vous directement depuis le chat. Le bot prend en charge la vérification des disponibilités, la création de réservations, la liste des réservations existantes, la replanification et l'annulation."
-            },
-            "connect-calendar": {
-              "q": "Comment connecter un calendrier de réservation ?",
-              "a": "Rendez-vous dans Paramètres > Intégrations et trouvez la section Réservation de rendez-vous. Saisissez votre clé API Cal.com (disponible dans Cal.com > Settings > Developer > API Keys) et cliquez sur Connecter. Une fois la liaison établie, le chatbot pourra gérer votre calendrier automatiquement."
-            },
-            "team-notifications": {
-              "q": "Que sont les Notifications d'équipe ?",
-              "a": "Les Notifications d'équipe alertent votre équipe lorsque des événements importants surviennent. Vous pouvez activer « Alerte nouveau prospect » pour notifier l'équipe lorsqu'un nouveau prospect est capturé, et « Résumé de conversation » pour envoyer un résumé de chaque conversation terminée dans la boîte de réception de l'équipe."
-            }
-          }
-        },
-        "integrations": {
-          "title": "Intégrations et API",
-          "items": {
-            "api": {
-              "q": "HandsOff propose-t-il une API ?",
-              "a": "Oui. HandsOff fournit un accès API pour les intégrations avancées. Votre clé API unique est disponible dans Paramètres > Intégrations. Utilisez cette clé pour authentifier vos requêtes API et créer des workflows personnalisés."
-            },
-            "webhook-url": {
-              "q": "À quoi sert l'URL du webhook ?",
-              "a": "L'URL du webhook sortant, dans Paramètres > Intégrations, vous permet d'envoyer les événements de conversation, les captures de prospects et d'autres données vers des systèmes externes. Saisissez l'URL de votre endpoint webhook, testez la connexion et enregistrez pour commencer à recevoir des événements en temps réel."
-            },
-            "inbound-webhook": {
-              "q": "Qu'est-ce que l'endpoint Webhook entrant ?",
-              "a": "L'endpoint Webhook entrant est une URL en lecture seule qui permet à des workflows d'automatisation externes d'envoyer des messages ou des déclencheurs vers HandsOff. Incluez l'identifiant de votre tenant dans le corps de la requête lorsque vous configurez vos outils externes."
-            },
-            "secure-webhooks": {
-              "q": "Comment sécuriser mes connexions webhook ?",
-              "a": "Utilisez le Secret du webhook (disponible dans Paramètres > Intégrations) pour vérifier que les requêtes webhook entrantes sont authentiques. Configurez votre plateforme d'automatisation pour inclure cette clé secrète dans les en-têtes des requêtes, afin d'assurer une authentification sécurisée."
-            },
-            "regenerate-key": {
-              "q": "Puis-je régénérer ma clé API ?",
-              "a": "Oui. Dans Paramètres > Intégrations, votre clé API dispose d'un bouton de régénération à côté d'elle. La régénération de la clé invalide l'ancienne ; veillez donc à mettre immédiatement à jour tous les systèmes qui utilisaient la clé précédente."
-            }
-          }
-        },
-        "settings": {
-          "title": "Paramètres et gestion du compte",
-          "items": {
-            "update-profile": {
-              "q": "Comment mettre à jour les informations de mon profil ?",
-              "a": "Rendez-vous dans Paramètres > Profil. Vous pouvez mettre à jour votre Prénom et votre Nom. Votre adresse e-mail est gérée par Clerk (notre fournisseur d'authentification) et ne peut pas être modifiée directement dans HandsOff. Utilisez le menu utilisateur Clerk pour gérer votre e-mail et votre mot de passe."
-            },
-            "notifications": {
-              "q": "Comment fonctionnent les paramètres de notifications ?",
-              "a": "Dans Paramètres > Notifications, vous pouvez configurer : les Notifications sonores (avec volume ajustable), les Notifications bureau (alertes du navigateur) et les Notifications de transfert uniquement (recevez des alertes uniquement pour les demandes de transfert, pas pour tous les messages)."
-            },
-            "theme": {
-              "q": "Puis-je changer le thème du dashboard ?",
-              "a": "Oui. Rendez-vous dans Paramètres > Apparence et choisissez entre Clair, Sombre ou Système (suit la préférence de votre OS). Cela modifie uniquement l'apparence de votre dashboard HandsOff, pas celle du widget de chat."
-            },
-            "logo-name": {
-              "q": "Comment mettre à jour le logo et le nom d'affichage de mon organisation ?",
-              "a": "Rendez-vous dans Paramètres > Widget et Marque. Téléversez votre logo (recommandé : 256 × 256 px, PNG ou SVG), mettez à jour votre Nom d'affichage et consultez le statut de votre session active. Ces modifications s'appliquent à l'en-tête du widget de chat visible par les visiteurs."
-            },
-            "embed-widget": {
-              "q": "Comment intégrer le widget de chat sur mon site web ?",
-              "a": "Dans Paramètres > Widget et Marque, vous trouverez la section Intégrer le widget avec un extrait de script HTML prêt à l'emploi. Copiez cet extrait et collez-le dans le code HTML de votre site, juste avant la balise de fermeture </body>. Le widget apparaîtra immédiatement."
-            },
-            "sessions": {
-              "q": "Que sont les Sessions actives et le nombre maximum de sessions ?",
-              "a": "Les Sessions actives indiquent combien de visiteurs sont actuellement en train de discuter avec votre bot. Le Nombre maximum de sessions indique la limite de sessions de votre formule. Si vous approchez de cette limite, envisagez de passer à une formule supérieure pour un service ininterrompu."
-            }
-          }
-        },
-        "troubleshooting": {
-          "title": "Dépannage",
-          "items": {
-            "not-responding": {
-              "q": "Mon chatbot ne répond pas. Que dois-je vérifier ?",
-              "a": "Vérifiez d'abord que l'interrupteur du Bot IA est activé dans IA et Contenu > Bot IA. Ensuite, assurez-vous que votre Base de connaissances contient du contenu. Vérifiez que le code d'intégration de votre widget est correctement installé sur votre site web. Enfin, vérifiez que le statut de votre compte est actif dans Paramètres > Widget et Marque."
-            },
-            "widget-not-showing": {
-              "q": "Le widget de chat ne s'affiche pas sur mon site. Pourquoi ?",
-              "a": "Vérifiez que le script d'intégration est placé avant la balise de fermeture </body>. Vérifiez que la clé API dans le script correspond à votre clé actuelle dans Paramètres > Intégrations. Consultez la console du navigateur pour repérer d'éventuelles erreurs JavaScript. Assurez-vous qu'aucun bloqueur de publicité ni politique de sécurité de contenu ne bloque le widget."
-            },
-            "kb-not-used": {
-              "q": "Les documents de ma base de connaissances ne sont pas utilisés par l'IA. Pourquoi ?",
-              "a": "Assurez-vous que les documents ont été téléversés avec succès (vérifiez la liste dans IA et Contenu > Base de connaissances). L'IA n'utilise que les documents traités — laissez quelques minutes au système après le téléversement. Vérifiez également que vos Instructions du bot font bien référence à la base de connaissances pour répondre aux questions."
-            },
-            "handoff-not-reaching": {
-              "q": "Les demandes de transfert ne parviennent pas à mes agents. Que dois-je faire ?",
-              "a": "Assurez-vous que le Transfert humain est activé dans Paramètres > Fonctionnalités. Vérifiez que vous avez des agents ajoutés dans la section Équipe. Vérifiez que les paramètres de notifications sont correctement configurés dans Paramètres > Notifications. Confirmez que les agents sont en ligne et disponibles dans la Boîte de réception."
-            },
-            "reset-password": {
-              "q": "Comment réinitialiser mon mot de passe ?",
-              "a": "HandsOff utilise Clerk pour l'authentification. Pour modifier votre mot de passe, utilisez le menu utilisateur Clerk (accessible depuis le menu déroulant de votre profil) ou rendez-vous directement dans les paramètres de votre compte Clerk."
-            },
-            "additional-support": {
-              "q": "Où puis-je obtenir de l'aide supplémentaire ?",
-              "a": "Si vous avez besoin d'aide au-delà de cette FAQ, contactez notre équipe de support via l'E-mail de support configuré dans vos paramètres du Bot IA. Vous pouvez également consulter le portail de documentation HandsOff pour des guides détaillés et des tutoriels vidéo."
-            }
-          }
-        }
-      }
+    "loading": "Chargement des FAQ…",
+    "empty": "Aucune FAQ pour l'instant.",
+    "error": {
+      "load": "Impossible de charger les FAQ.",
+      "retry": "Réessayer"
     }
   },
   "inbox": {

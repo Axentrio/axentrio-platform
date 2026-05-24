@@ -24,3 +24,5 @@ export {
   BillingPlanId,
 } from './TenantBillingAccount';
 export { BillingEvent, BillingEventProvider } from './BillingEvent';
+export { FaqSection, type FaqTranslation } from './FaqSection';
+export { FaqItem } from './FaqItem';

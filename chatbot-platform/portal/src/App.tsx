@@ -47,6 +47,7 @@ import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
 import AdminAnalytics from '@pages/admin/AdminAnalytics';
+import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
 
@@ -312,6 +313,7 @@ const App: React.FC = () => {
                       <Route path="/admin/tenants/:id" element={<AdminTenantDetail />} />
                       <Route path="/admin/users" element={<AdminUsers />} />
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
+                      <Route path="/admin/faq" element={<AdminFaqEditor />} />
                     </Route>
 
                     {/* Redirects for old routes */}

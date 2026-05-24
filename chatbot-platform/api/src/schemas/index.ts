@@ -9,3 +9,4 @@ export * from './analytics.schema';
 export * from './user.schema';
 export * from './canned-response.schema';
 export * from './billing.schema';
+export * from './faq.schema';

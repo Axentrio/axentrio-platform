@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Download, Search, X } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Loader2, Search, X } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import {
   Accordion,
@@ -17,19 +16,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import {
-  faqSections,
-  FAQ_DOC_PATH,
-  FAQ_DOC_FILENAME,
-  sectionTitleKey,
-  itemQuestionKey,
-  itemAnswerKey,
-  type FaqItem,
-  type FaqSection,
-} from './helpFaqData';
+import { useFaq, type FaqItem, type FaqSection } from '@/queries/useFaqQueries';
+import { pickTranslation } from './helpFaqData';
 
 export interface FaqContentProps {
-  /** Currently-selected section id. */
+  /** Currently-selected section id. May be empty or unknown — first section used as fallback. */
   activeSectionId: string;
   onSectionChange: (id: string) => void;
   /** Search query. Empty string means "not searching". */
@@ -87,7 +78,8 @@ export const FaqContent: React.FC<FaqContentProps> = ({
   autoFocusSearch = false,
   className,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { data, isLoading, isError, refetch } = useFaq();
   const searchInputRef = useRef<HTMLInputElement>(null);
   const trimmedQuery = query.trim();
   const tokens = useMemo(
@@ -98,16 +90,17 @@ export const FaqContent: React.FC<FaqContentProps> = ({
     [trimmedQuery],
   );
   const isSearching = tokens.length > 0;
+  const sections = data?.sections ?? [];
   const activeSection =
-    faqSections.find((s) => s.id === activeSectionId) ?? faqSections[0];
+    sections.find((s) => s.id === activeSectionId) ?? sections[0];
 
   const searchHits = useMemo<SearchHit[]>(() => {
     if (!isSearching) return [];
     const hits: SearchHit[] = [];
-    for (const section of faqSections) {
+    for (const section of sections) {
       section.items.forEach((item, index) => {
-        const qText = t(itemQuestionKey(section.id, item.id));
-        const aText = t(itemAnswerKey(section.id, item.id));
+        const qText = pickTranslation(item.question, i18n.language);
+        const aText = pickTranslation(item.answer, i18n.language);
         const haystack = `${qText} ${aText}`.toLowerCase();
         if (tokens.every((tok) => haystack.includes(tok))) {
           hits.push({ section, item, index, qText, aText });
@@ -115,7 +108,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
       });
     }
     return hits;
-  }, [isSearching, tokens, t]);
+  }, [isSearching, tokens, sections, i18n.language]);
 
   const matchesBySection = useMemo<Record<string, number>>(() => {
     if (!isSearching) return {};
@@ -125,8 +118,6 @@ export const FaqContent: React.FC<FaqContentProps> = ({
     }, {});
   }, [isSearching, searchHits]);
 
-  // Keys for all current hits — used to auto-expand the accordion so users
-  // can scan answers without clicking through each result.
   const allHitKeys = useMemo(
     () => searchHits.map((h) => `hit-${h.section.id}-${h.index}`),
     [searchHits],
@@ -134,7 +125,6 @@ export const FaqContent: React.FC<FaqContentProps> = ({
 
   useEffect(() => {
     if (autoFocusSearch && searchInputRef.current) {
-      // Defer so it runs after any dialog/portal mount transitions.
       const ms = window.setTimeout(() => searchInputRef.current?.focus(), 0);
       return () => window.clearTimeout(ms);
     }
@@ -145,9 +135,41 @@ export const FaqContent: React.FC<FaqContentProps> = ({
     onSectionChange(id);
   };
 
+  if (isLoading) {
+    return (
+      <div className={cn('flex items-center justify-center py-12', className)}>
+        <Loader2 className="w-5 h-5 animate-spin text-text-muted" aria-hidden="true" />
+        <span className="sr-only">{t('help.loading')}</span>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className={cn('flex flex-col items-center justify-center gap-3 py-12 text-sm', className)}>
+        <p className="text-text-muted">{t('help.error.load')}</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10"
+        >
+          {t('help.error.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  if (sections.length === 0) {
+    return (
+      <div className={cn('flex items-center justify-center py-12 text-sm text-text-muted', className)}>
+        {t('help.empty')}
+      </div>
+    );
+  }
+
   return (
     <div className={cn('flex flex-col', className)}>
-      {/* Search + Download row */}
+      {/* Search row */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-edge">
         <div className="relative flex-1">
           <Search
@@ -174,16 +196,6 @@ export const FaqContent: React.FC<FaqContentProps> = ({
             </button>
           )}
         </div>
-        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
-          <a
-            href={FAQ_DOC_PATH}
-            download={FAQ_DOC_FILENAME}
-            title={t('help.download.title')}
-          >
-            <Download className="w-3.5 h-3.5" />
-            {t('help.download.button')}
-          </a>
-        </Button>
       </div>
 
       <div className="flex flex-col md:flex-row flex-1 min-h-0">
@@ -191,8 +203,8 @@ export const FaqContent: React.FC<FaqContentProps> = ({
         <aside className="hidden md:flex md:w-56 shrink-0 border-r border-edge flex-col">
           <nav className="flex-1 overflow-y-auto p-2">
             <ul className="space-y-0.5">
-              {faqSections.map((s) => {
-                const isActive = !isSearching && s.id === activeSection.id;
+              {sections.map((s) => {
+                const isActive = !isSearching && s.id === activeSection?.id;
                 const count = matchesBySection[s.id];
                 const dim = isSearching && !count;
                 return (
@@ -208,7 +220,9 @@ export const FaqContent: React.FC<FaqContentProps> = ({
                         dim && 'opacity-50',
                       )}
                     >
-                      <span className="truncate text-left">{t(sectionTitleKey(s.id))}</span>
+                      <span className="truncate text-left">
+                        {pickTranslation(s.titles, i18n.language)}
+                      </span>
                       {isSearching && count ? (
                         <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-400">
                           {count}
@@ -224,17 +238,17 @@ export const FaqContent: React.FC<FaqContentProps> = ({
 
         {/* Content pane */}
         <main className="flex-1 flex flex-col min-w-0">
-          {/* Mobile section picker (hidden while searching to avoid confusion) */}
-          {!isSearching && (
+          {/* Mobile section picker */}
+          {!isSearching && activeSection && (
             <div className="md:hidden p-4 border-b border-edge">
               <Select value={activeSection.id} onValueChange={onSectionChange}>
                 <SelectTrigger aria-label={t('help.mobile.chooseSection')}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {faqSections.map((s) => (
+                  {sections.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {t(sectionTitleKey(s.id))}
+                      {pickTranslation(s.titles, i18n.language)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -249,9 +263,9 @@ export const FaqContent: React.FC<FaqContentProps> = ({
               query={trimmedQuery}
               expandedKeys={allHitKeys}
             />
-          ) : (
+          ) : activeSection ? (
             <SectionPane section={activeSection} />
-          )}
+          ) : null}
         </main>
       </div>
     </div>
@@ -259,12 +273,12 @@ export const FaqContent: React.FC<FaqContentProps> = ({
 };
 
 const SectionPane: React.FC<{ section: FaqSection }> = ({ section }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <>
       <div className="px-6 pt-5 pb-3 border-b border-edge">
         <h3 className="text-sm font-semibold text-text-primary truncate">
-          {t(sectionTitleKey(section.id))}
+          {pickTranslation(section.titles, i18n.language)}
         </h3>
         <p className="text-xs text-text-muted mt-0.5">
           {t('help.section.questionCount', { count: section.items.length })}
@@ -279,10 +293,10 @@ const SectionPane: React.FC<{ section: FaqSection }> = ({ section }) => {
               className="border-edge last:border-b-0"
             >
               <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
-                {t(itemQuestionKey(section.id, item.id))}
+                {pickTranslation(item.question, i18n.language)}
               </AccordionTrigger>
-              <AccordionContent className="text-sm text-text-secondary leading-relaxed">
-                {t(itemAnswerKey(section.id, item.id))}
+              <AccordionContent className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
+                {pickTranslation(item.answer, i18n.language)}
               </AccordionContent>
             </AccordionItem>
           ))}
@@ -305,7 +319,7 @@ const SearchResultsPane: React.FC<SearchResultsPaneProps> = ({
   query,
   expandedKeys,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <>
       <div className="px-6 pt-5 pb-3 border-b border-edge">
@@ -339,14 +353,14 @@ const SearchResultsPane: React.FC<SearchResultsPaneProps> = ({
                 <AccordionTrigger className="text-sm text-left hover:no-underline py-3">
                   <div className="flex-1 min-w-0 pr-3">
                     <div className="text-[10px] uppercase tracking-wide text-text-muted mb-0.5">
-                      {t(sectionTitleKey(hit.section.id))}
+                      {pickTranslation(hit.section.titles, i18n.language)}
                     </div>
                     <div className="text-text-primary">
                       <HighlightedText text={hit.qText} tokens={tokens} />
                     </div>
                   </div>
                 </AccordionTrigger>
-                <AccordionContent className="text-sm text-text-secondary leading-relaxed">
+                <AccordionContent className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
                   <HighlightedText text={hit.aText} tokens={tokens} />
                 </AccordionContent>
               </AccordionItem>

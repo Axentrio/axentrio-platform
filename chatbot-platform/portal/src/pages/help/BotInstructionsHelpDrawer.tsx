@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { ArrowRight, Download, X } from 'lucide-react';
+import { ArrowRight, Loader2, X } from 'lucide-react';
 import {
   Accordion,
   AccordionContent,
@@ -10,13 +10,8 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion';
 import { cn } from '@/lib/utils';
-import {
-  faqSections,
-  FAQ_DOC_PATH,
-  FAQ_DOC_FILENAME,
-  itemQuestionKey,
-  itemAnswerKey,
-} from './helpFaqData';
+import { useFaq } from '@/queries/useFaqQueries';
+import { pickTranslation } from './helpFaqData';
 
 interface BotInstructionsHelpDrawerProps {
   isOpen: boolean;
@@ -29,9 +24,10 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
   isOpen,
   onClose,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { data, isLoading, isError, refetch } = useFaq();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
-  const section = faqSections.find((s) => s.id === SECTION_ID) ?? faqSections[0];
+  const section = data?.sections.find((s) => s.id === SECTION_ID);
 
   // ESC to close. Intentionally non-modal: no focus trap, no scroll lock, no
   // click-outside handler — the form behind the drawer stays fully usable so
@@ -45,17 +41,12 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
     return () => document.removeEventListener('keydown', handler);
   }, [isOpen, onClose]);
 
-  // Move focus to the close button on mount so screen readers announce
-  // the panel and keyboard users have a stable starting point.
   useEffect(() => {
     if (isOpen) closeButtonRef.current?.focus();
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  // Portal to <body> so the drawer escapes any ancestor that establishes a
-  // containing block for position: fixed (transform, filter, contain, etc.).
-  // Without this the drawer is offset and its h-full is wrong.
   return createPortal(
     <aside
       role="dialog"
@@ -84,25 +75,45 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
       </header>
 
       <div className="flex-1 overflow-y-auto px-5 py-3">
-        <Accordion type="single" collapsible className="w-full">
-          {section.items.map((item) => (
-            <AccordionItem
-              key={`${section.id}-${item.id}`}
-              value={`${section.id}-${item.id}`}
-              className="border-edge last:border-b-0"
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-5 h-5 animate-spin text-text-muted" aria-hidden="true" />
+            <span className="sr-only">{t('help.loading')}</span>
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center gap-2 py-12 text-sm">
+            <p className="text-text-muted">{t('help.error.load')}</p>
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10"
             >
-              <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
-                {t(itemQuestionKey(section.id, item.id))}
-              </AccordionTrigger>
-              <AccordionContent className="text-sm text-text-secondary leading-relaxed">
-                {t(itemAnswerKey(section.id, item.id))}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
+              {t('help.error.retry')}
+            </button>
+          </div>
+        ) : !section || section.items.length === 0 ? (
+          <div className="py-12 text-sm text-text-muted text-center">{t('help.empty')}</div>
+        ) : (
+          <Accordion type="single" collapsible className="w-full">
+            {section.items.map((item) => (
+              <AccordionItem
+                key={item.id}
+                value={item.id}
+                className="border-edge last:border-b-0"
+              >
+                <AccordionTrigger className="text-sm text-text-primary text-left hover:no-underline py-3">
+                  {pickTranslation(item.question, i18n.language)}
+                </AccordionTrigger>
+                <AccordionContent className="text-sm text-text-secondary leading-relaxed whitespace-pre-wrap">
+                  {pickTranslation(item.answer, i18n.language)}
+                </AccordionContent>
+              </AccordionItem>
+            ))}
+          </Accordion>
+        )}
       </div>
 
-      <footer className="px-5 py-4 border-t border-edge space-y-2">
+      <footer className="px-5 py-4 border-t border-edge">
         <Link
           to="/help?section=ai-bot"
           onClick={onClose}
@@ -111,14 +122,6 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
           <span>{t('help.drawer.browseAll')}</span>
           <ArrowRight className="w-3.5 h-3.5" />
         </Link>
-        <a
-          href={FAQ_DOC_PATH}
-          download={FAQ_DOC_FILENAME}
-          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-text-secondary hover:bg-surface-3 hover:text-text-primary transition-colors"
-        >
-          <span>{t('help.drawer.downloadPdf')}</span>
-          <Download className="w-3.5 h-3.5" />
-        </a>
       </footer>
     </aside>,
     document.body,

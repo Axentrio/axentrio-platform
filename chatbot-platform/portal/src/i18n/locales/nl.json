@@ -29,7 +29,8 @@
     "superAdmin": "Super Admin",
     "allTenants": "Alle klanten",
     "allUsers": "Alle gebruikers",
-    "platformAnalytics": "Platformanalyse"
+    "platformAnalytics": "Platformanalyse",
+    "faqEditor": "FAQ-editor"
   },
   "sidebar": {
     "impersonating": "Personifiëren",
@@ -1216,6 +1217,81 @@
     "impersonationBanner": {
       "message": "Je personifieert <strong>{{tenant}}</strong> — keer terug naar je eigen account zodra je klaar bent.",
       "exitButton": "Verlaten"
+    },
+    "faq": {
+      "title": "FAQ-editor",
+      "subtitle": "Bewerk de platform-FAQ die alle tenants te zien krijgen.",
+      "newSection": "Nieuwe sectie",
+      "newItem": "Nieuw item",
+      "edit": "Bewerken",
+      "delete": "Verwijderen",
+      "moveUp": "Omhoog",
+      "moveDown": "Omlaag",
+      "emptySections": "Nog geen secties.",
+      "emptyItems": "Deze sectie bevat nog geen items.",
+      "pickSection": "Kies links een sectie om de items te bewerken.",
+      "itemsCount_one": "{{count}} item",
+      "itemsCount_other": "{{count}} items",
+      "sectionIdLabel": "Sectie-id",
+      "reserved": "Gereserveerd",
+      "reservedTooltip": "Gereserveerde secties kunnen niet verwijderd worden omdat de app ernaar verwijst.",
+      "reservedSingletonTooltip": "Gereserveerde secties moeten minstens één item behouden.",
+      "saved": "Opgeslagen.",
+      "created": {
+        "section": "Sectie aangemaakt.",
+        "item": "Item aangemaakt."
+      },
+      "deleted": {
+        "section": "Sectie verwijderd.",
+        "item": "Item verwijderd."
+      },
+      "langs": {
+        "en": "Engels",
+        "nl": "Nederlands",
+        "fr": "Frans"
+      },
+      "dialog": {
+        "newSection": "Nieuwe sectie",
+        "editSection": "Sectie bewerken",
+        "newSectionDescription": "Maak een nieuwe FAQ-sectie. De id verschijnt in de URL (?section=…) en kan later niet meer gewijzigd worden.",
+        "editSectionDescription": "Werk de sectietitel bij in elke ondersteunde taal.",
+        "newItem": "Nieuw item",
+        "editItem": "Item bewerken",
+        "itemDescription": "Vraag en antwoord per taal. Engels is verplicht; andere talen vallen terug op Engels indien leeg.",
+        "deleteSectionTitle": "Sectie verwijderen?",
+        "deleteSectionDescription": "Hiermee verwijder je de sectie \"{{title}}\" en al haar items definitief.",
+        "deleteItemTitle": "Item verwijderen?",
+        "deleteItemDescription": "Hiermee verwijder je het item \"{{question}}\" definitief."
+      },
+      "fields": {
+        "id": "Sectie-id",
+        "idHelp": "Kleine letters, cijfers en koppeltekens. Voorbeeld: getting-started",
+        "slug": "Slug",
+        "slugHelp": "Kleine letters, cijfers en koppeltekens. Moet uniek zijn binnen de sectie.",
+        "title": "Titel",
+        "question": "Vraag",
+        "answer": "Antwoord",
+        "optionalPlaceholder": "Optioneel — valt terug op Engels indien leeg."
+      },
+      "errors": {
+        "load": "Kan FAQs niet laden.",
+        "save": "Kan wijzigingen niet opslaan.",
+        "delete": "Verwijderen mislukt.",
+        "reorder": "Volgorde wijzigen mislukt.",
+        "idRequired": "Id is verplicht.",
+        "idTooLong": "Id is te lang (max 64).",
+        "idKebab": "Gebruik kleine letters, cijfers en koppeltekens.",
+        "idExists": "Een sectie met deze id bestaat al.",
+        "slugRequired": "Slug is verplicht.",
+        "slugTooLong": "Slug is te lang (max 80).",
+        "slugKebab": "Gebruik kleine letters, cijfers en koppeltekens.",
+        "slugExists": "Een item met deze slug bestaat al in deze sectie.",
+        "enTitleRequired": "Engelse titel is verplicht.",
+        "enQuestionRequired": "Engelse vraag is verplicht.",
+        "enAnswerRequired": "Engels antwoord is verplicht."
+      },
+      "sectionEyebrow": "Sectie",
+      "dragHandle": "Versleep om te herschikken"
     }
   },
   "help": {
@@ -1231,11 +1307,7 @@
       "noMatches": "Geen resultaten voor \"{{query}}\"",
       "matches_one": "{{count}} resultaat voor \"{{query}}\"",
       "matches_other": "{{count}} resultaten voor \"{{query}}\"",
-      "tryDifferent": "Probeer een ander trefwoord, of download het volledige FAQ-document."
-    },
-    "download": {
-      "title": "Download het volledige FAQ-document (PDF)",
-      "button": "FAQ downloaden"
+      "tryDifferent": "Probeer een ander trefwoord."
     },
     "section": {
       "questionCount_one": "{{count}} vraag",
@@ -1249,333 +1321,13 @@
       "subtitle": "Veelgestelde vragen over botinstructies en -gedrag",
       "ariaLabel": "AI-bot — Veelgestelde vragen",
       "closeLabel": "FAQ sluiten",
-      "browseAll": "Alle FAQ's bekijken",
-      "downloadPdf": "Volledige FAQ downloaden (PDF)"
+      "browseAll": "Alle FAQ's bekijken"
     },
-    "faq": {
-      "sections": {
-        "getting-started": {
-          "title": "Aan de slag",
-          "items": {
-            "what-is-handsoff": {
-              "q": "Wat is HandsOff?",
-              "a": "HandsOff is een AI-gedreven automatiseringsplatform dat bedrijven helpt klantgesprekken over meerdere kanalen te automatiseren. Het combineert een intelligente AI-chatbot, overdracht naar live agents, analyses en team-managementtools in één centraal dashboard."
-            },
-            "how-to-get-started": {
-              "q": "Hoe ga ik aan de slag met HandsOff?",
-              "a": "Na het aanmaken van een account doorloop je de installatiechecklist in je Analytics-dashboard: (1) Activeer je AI-assistent, (2) Configureer je merkstem en botidentiteit, (3) Upload kennisbankdocumenten, (4) Koppel je boekingsagenda (optioneel) en (5) Stel automatiseringen in. Elke stap bevat een rechtstreekse link naar de bijhorende instellingenpagina."
-            },
-            "what-channels": {
-              "q": "Welke kanalen kan ik aan HandsOff koppelen?",
-              "a": "HandsOff ondersteunt momenteel chatwidgets voor websites, Telegram-bots en Facebook-pagina's. Je kan alle gesprekken vanuit deze kanalen beheren in één centrale Inbox. Er worden regelmatig nieuwe kanalen toegevoegd."
-            },
-            "need-coding": {
-              "q": "Heb ik programmeerkennis nodig om HandsOff te gebruiken?",
-              "a": "Nee. HandsOff is volledig no-code opgezet. Je kan je AI-bot configureren, het uiterlijk aanpassen, kanalen koppelen en gesprekken beheren via het gebruiksvriendelijke dashboard. De enige technische stap is het kopiëren van een kleine embed-snippet om de chatwidget op je website te plaatsen."
-            },
-            "free-trial": {
-              "q": "Is er een gratis proefperiode beschikbaar?",
-              "a": "Ja, HandsOff biedt een gratis proefperiode waarin je alle functies kan uitproberen voor je een keuze maakt. Tijdens de proefperiode heb je volledige toegang tot AI-botconfiguratie, kennisbank-uploads, kanaalkoppelingen en analyses."
-            }
-          }
-        },
-        "ai-bot": {
-          "title": "AI-botconfiguratie",
-          "items": {
-            "configure-identity": {
-              "q": "Hoe configureer ik de identiteit van mijn AI-bot?",
-              "a": "Ga naar AI & Content > AI-bot. Hier stel je de Chatbot-naam in (de weergavenaam die bezoekers zien), het Support-e-mailadres (gebruikt voor escalaties), de Spraaktoon (Vriendelijk, Professioneel, Casual, Formeel of Aangepast) en de gedetailleerde Botinstructies die bepalen hoe je AI antwoordt aan bezoekers."
-            },
-            "bot-instructions": {
-              "q": "Wat zijn Botinstructies en hoe gebruik ik ze?",
-              "a": "Botinstructies zijn systeemprompts die je AI vertellen hoe hij zich moet gedragen. Je kan starten vanaf een sjabloon (Blanco of FAQ-gebaseerd) of je eigen aangepaste instructies schrijven. Gebruik placeholders zoals {botName}, {tone}, {supportEmail}, {businessName}, {fallbackMessage}, {offHoursMessage}, {maxResponseLength} en {topicsToAvoid} om instructies dynamisch te maken."
-            },
-            "change-tone": {
-              "q": "Hoe wijzig ik de spraaktoon van mijn bot?",
-              "a": "Kies in de instellingen van de AI-bot een van de vijf opties voor Spraaktoon: Vriendelijk (warm en toegankelijk), Professioneel (beleefd en zakelijk gericht), Casual (ontspannen en conversationeel), Formeel (strikt en corporate) of Aangepast (definieer je eigen stijl in de Botinstructies)."
-            },
-            "disable-temporarily": {
-              "q": "Kan ik de AI-bot tijdelijk uitschakelen?",
-              "a": "Ja. De AI-bot-sectie bevat een schakelaar met het label \"AI-antwoorden voor bezoekers inschakelen\". Door deze uit te zetten worden geautomatiseerde antwoorden uitgeschakeld, terwijl je configuratie bewaard blijft voor wanneer je ze opnieuw wil inschakelen."
-            },
-            "greeting-message": {
-              "q": "Wat is het Begroetingsbericht en hoe pas ik het aan?",
-              "a": "Het Begroetingsbericht is het eerste bericht dat bezoekers zien wanneer ze de chatwidget openen. De standaardtekst is \"Welkom! Hoe kan ik je vandaag helpen?\" Je kan dit aanpassen in de sectie Geavanceerde instellingen van het tabblad AI-bot."
-            }
-          }
-        },
-        "knowledge-base": {
-          "title": "Kennisbank",
-          "items": {
-            "what-is-kb": {
-              "q": "Wat is de Kennisbank?",
-              "a": "De Kennisbank is de plek waar je informatie uploadt en opslaat die je AI-bot gebruikt om vragen van bezoekers te beantwoorden. Dit kan PDF-documenten, geplakte tekst, FAQ's, productbeschrijvingen, prijsinformatie en bedrijfsbeleid omvatten."
-            },
-            "file-formats": {
-              "q": "Welke bestandsformaten worden ondersteund voor kennisbank-uploads?",
-              "a": "Momenteel kan je PDF-documenten uploaden, platte tekst rechtstreeks plakken of handmatig FAQ-items toevoegen. De AI verwerkt deze inhoud en gebruikt ze om nauwkeurige, contextbewuste antwoorden te geven op vragen van bezoekers."
-            },
-            "add-documents": {
-              "q": "Hoe voeg ik documenten toe aan de kennisbank?",
-              "a": "Ga naar AI & Content > Kennisbank en klik op \"Document toevoegen\" of \"Voeg je eerste document toe\". Je kan vervolgens PDF's uploaden of tekst plakken. Eenmaal geüpload zal de AI deze inhoud automatisch raadplegen bij het beantwoorden van relevante vragen."
-            },
-            "only-from-kb": {
-              "q": "Antwoordt de AI-bot enkel op basis van de kennisbank?",
-              "a": "De AI antwoordt primair vanuit je kennisbank om nauwkeurigheid en merkconsistentie te garanderen. Daarnaast kan hij zijn algemene intelligentie inzetten voor conversationele beleefdheden, verduidelijkende vragen en onderwerpen die niet in je documenten staan. Je stuurt deze balans via de Botinstructies."
-            },
-            "update-content": {
-              "q": "Hoe werk ik kennisbankinhoud bij of verwijder ik die?",
-              "a": "Ga naar AI & Content > Kennisbank. Je ziet een lijst met alle geüploade documenten en een zoekfunctie. Je kan verouderde documenten verwijderen en nieuwe toevoegen wanneer je wil. De AI past zijn antwoorden automatisch aan op basis van de huidige kennisbankinhoud."
-            }
-          }
-        },
-        "custom-responses": {
-          "title": "Vooraf opgestelde antwoorden",
-          "items": {
-            "what-are": {
-              "q": "Wat zijn Vooraf opgestelde antwoorden?",
-              "a": "Vooraf opgestelde antwoorden (ook wel canned responses genoemd) zijn vooraf geschreven antwoorden op veelgestelde vragen. Ze zorgen voor consistentie tussen gesprekken en helpen je AI om precieze, goedgekeurde berichten te leveren voor specifieke onderwerpen."
-            },
-            "create": {
-              "q": "Hoe maak ik een Vooraf opgesteld antwoord aan?",
-              "a": "Ga naar AI & Content > Vooraf opgestelde antwoorden en klik op \"Nieuw antwoord\". Vul de Titel in (voor intern gebruik), de Inhoud (het eigenlijke bericht), de Snelkoppeling (een korte code om het op te roepen), de Categorie (voor organisatie) en de Scope (in welke contexten het van toepassing is)."
-            },
-            "categorize": {
-              "q": "Kan ik Vooraf opgestelde antwoorden per categorie organiseren?",
-              "a": "Ja. Je kan aan elk vooraf opgesteld antwoord een categorie toewijzen en filteren op categorie via het dropdownmenu. Dit maakt het eenvoudig om antwoorden te beheren voor verschillende afdelingen, producten of gespreksonderwerpen."
-            },
-            "when-used": {
-              "q": "Hoe weet de AI wanneer een Vooraf opgesteld antwoord te gebruiken?",
-              "a": "Vooraf opgestelde antwoorden kunnen worden geactiveerd via snelkoppelingen (door agents getypt), of de AI kan via je Botinstructies aangestuurd worden om specifieke antwoorden te gebruiken voor bepaalde onderwerpen. De kolom GEBRUIKT in de antwoordentabel toont hoe vaak elk antwoord is ingezet."
-            }
-          }
-        },
-        "appearance": {
-          "title": "Chatbot-weergave & branding",
-          "items": {
-            "customize": {
-              "q": "Hoe pas ik het uiterlijk van de chatwidget aan?",
-              "a": "Ga naar AI & Content > Chatbot-weergave. Je kan de Primaire kleur, de URL van de bot-avatar, de Launcher-positie (rechtsonder of linksonder), het Launcher-label (de tekst naast het chatpictogram) instellen en alle wijzigingen in realtime bekijken."
-            },
-            "company-logo": {
-              "q": "Kan ik mijn bedrijfslogo gebruiken als bot-avatar?",
-              "a": "Ja. Geef in het tabblad Chatbot-weergave een URL naar je logoafbeelding op in het veld \"URL van bot-avatar\". Als het leeg blijft, gebruikt de widget automatisch je bedrijfslogo wanneer beschikbaar. De aanbevolen grootte is 256x256 px in PNG- of SVG-formaat."
-            },
-            "launcher-label": {
-              "q": "Wat is het Launcher-label en hoe pas ik het aan?",
-              "a": "Het Launcher-label is de tekst die naast het chatpictogram op je website verschijnt, bijvoorbeeld \"Chat met ons\". Je kan deze tekst aanpassen in de sectie Chatbot-weergave zodat hij aansluit bij je merkstem."
-            },
-            "welcome-message": {
-              "q": "Waar verschijnt het Welkomstbericht?",
-              "a": "Het Welkomstbericht verschijnt bovenaan de chatwidget wanneer een bezoeker hem voor het eerst opent. Het wordt geconfigureerd in de AI-botinstellingen onder Geavanceerde instellingen, niet in het tabblad Weergave."
-            },
-            "preview": {
-              "q": "Kan ik mijn chatwidget bekijken voor ik live ga?",
-              "a": "Ja. Het tabblad Chatbot-weergave bevat een live-previewpaneel dat exact toont hoe je widget eruit zal zien voor bezoekers. Je kan ook op \"Volledige widgettest openen\" klikken om de volledige ervaring te zien, of via \"Chat testen\" op elke pagina met je bot interageren."
-            }
-          }
-        },
-        "channels": {
-          "title": "Kanalen & social media",
-          "items": {
-            "platforms": {
-              "q": "Welke berichtenplatformen ondersteunt HandsOff?",
-              "a": "Momenteel ondersteunt HandsOff Telegram-bots en Facebook-pagina's. Je kan één of beide platformen koppelen, en alle berichten komen samen in je centrale Inbox voor gecentraliseerd beheer."
-            },
-            "connect-telegram": {
-              "q": "Hoe koppel ik een Telegram-bot?",
-              "a": "Ga naar AI & Content > Social media-integraties of Instellingen > Kanalen. Klik op de knop Telegram en volg de instructies om je bestaande Telegram-bot te koppelen via zijn API-token. Eenmaal gekoppeld verschijnen alle berichten naar je bot in de Inbox."
-            },
-            "connect-facebook": {
-              "q": "Hoe koppel ik een Facebook-pagina?",
-              "a": "Klik in de sectie Social media-integraties of Kanalen op de knop Facebook en authenticeer je met je Facebookaccount. Selecteer de pagina die je wil koppelen, en HandsOff zal automatisch berichten naar die pagina ontvangen en beantwoorden."
-            },
-            "unified-inbox": {
-              "q": "Kan ik alle kanalen beheren vanuit één inbox?",
-              "a": "Ja. Het Inbox-dashboard brengt gesprekken vanuit je websitewidget, Telegram en Facebook samen in één overzicht. Je kan filteren per kanaal via de tabs: Alle, Bot, Overdracht en Agent."
-            }
-          }
-        },
-        "analytics": {
-          "title": "Analyses & rapportering",
-          "items": {
-            "metrics": {
-              "q": "Welke statistieken houdt HandsOff bij?",
-              "a": "HandsOff biedt uitgebreide analyses, waaronder: Actieve chats, Openstaande overdrachten, Online agents, Gemiddelde reactietijd, CSAT-score (klanttevredenheid) en Totaal aantal chats. Je kan trends bekijken over tijd met de filter Laatste 7 dagen (andere tijdsbereiken zijn beschikbaar)."
-            },
-            "chat-volume": {
-              "q": "Wat is de Chatvolume-grafiek?",
-              "a": "De Chatvolume-grafiek toont het aantal gesprekken over tijd, opgesplitst per Bot (door AI afgehandeld), Mens (door agents afgehandeld) en Overdracht (overgedragen) gesprekken. Zo zie je hoe de werklast verdeeld is tussen AI en je team."
-            },
-            "export": {
-              "q": "Kan ik mijn analysegegevens exporteren?",
-              "a": "Ja. Het Analytics-dashboard bevat een Exporteer-knop waarmee je je prestatiegegevens kan downloaden voor verdere analyse of rapportering in externe tools."
-            },
-            "setup-checklist": {
-              "q": "Wat is de installatiechecklist in Analytics?",
-              "a": "De checklist bovenaan de Analytics-pagina volgt je onboardingvoortgang op: AI-assistent geactiveerd, Merkstem geconfigureerd, Kennisbankdocumenten geüpload, Boekingsagenda gekoppeld en Automatiseringen ingesteld. Elk item linkt rechtstreeks naar de bijhorende configuratiepagina."
-            }
-          }
-        },
-        "team": {
-          "title": "Teambeheer",
-          "items": {
-            "invite-members": {
-              "q": "Hoe nodig ik teamleden uit voor HandsOff?",
-              "a": "Ga naar de sectie Team en klik op \"Uitnodigen\" in het tabblad Leden. Voer het e-mailadres in van de persoon die je wil uitnodigen en zij ontvangen een uitnodiging om lid te worden van je organisatie."
-            },
-            "roles": {
-              "q": "Welke rollen zijn beschikbaar in HandsOff?",
-              "a": "De primaire rol die getoond wordt is Admin, die volledige toegang heeft tot alle instellingen en functies. Je beheert ledenrollen via het dropdownmenu in de Ledentabel. Afhankelijk van je abonnement kunnen er bijkomende rolniveaus beschikbaar zijn."
-            },
-            "add-agent": {
-              "q": "Hoe voeg ik een live agent toe?",
-              "a": "Klik in de sectie Team op \"Agent toevoegen\". Je kan agentprofielen instellen, shifts toewijzen en prestatiestatistieken bijhouden. Agents verschijnen in het tabblad Agents met hun onlinestatus en chattoewijzingen."
-            },
-            "schedule-shifts": {
-              "q": "Kan ik shifts plannen voor mijn team?",
-              "a": "Ja. De sectie Team bevat een tabblad Shifts waar je agentplanningen kan aanmaken en beheren. Zo verzeker je dekking tijdens piekmomenten en help je de werklast in je team in balans te houden."
-            },
-            "statistics": {
-              "q": "Welke teamstatistieken zijn beschikbaar?",
-              "a": "Het Team-dashboard toont Totaal aantal agents, Nu online (huidige actieve agents), Totaal aantal chats deze maand (Month-to-Date) en Gemiddelde CSAT-score. Het tabblad Prestaties biedt individuele agentstatistieken voor coaching en erkenning."
-            }
-          }
-        },
-        "handoff": {
-          "title": "Overdracht naar mens",
-          "items": {
-            "what-is": {
-              "q": "Wat is Overdracht naar mens?",
-              "a": "Overdracht naar mens is een functie die gesprekken naadloos overdraagt van de AI-bot naar een live menselijke agent wanneer de bot een vraag niet kan oplossen of wanneer een bezoeker expliciet vraagt om met iemand te spreken."
-            },
-            "visitor-request": {
-              "q": "Hoe vraagt een bezoeker een menselijke agent aan?",
-              "a": "Bezoekers kunnen op elk moment in het gesprek om een menselijke agent vragen. De AI is getraind om zinnen te herkennen zoals \"ik wil iemand spreken\", \"praat met een agent\" of \"ik heb hulp van een persoon nodig\" en zal de overdracht automatisch starten."
-            },
-            "where-appear": {
-              "q": "Waar verschijnen overdrachtsverzoeken?",
-              "a": "Overdrachtsverzoeken verschijnen in de Inbox onder het tabblad \"Overdracht\". Agents zien openstaande overdrachten en kunnen ze claimen om het gesprek over te nemen. De Inbox toont ook realtime statistieken voor Openstaande overdrachten."
-            },
-            "ai-resume": {
-              "q": "Kan de AI een gesprek hervatten na een overdracht?",
-              "a": "De AI behoudt de context gedurende het hele gesprek. Nadat een menselijke agent de kwestie heeft opgelost en de chat heeft afgesloten, kan de AI nieuwe vragen van die bezoeker opnieuw afhandelen met volledig besef van de gespreksgeschiedenis."
-            },
-            "enable-disable": {
-              "q": "Hoe schakel ik Overdracht naar mens in of uit?",
-              "a": "Overdracht naar mens kan worden in- of uitgeschakeld in Instellingen > Functionaliteiten. Zoek de kaart \"Overdracht naar mens\" en zet de schakelaar aan of uit. Wanneer ingeschakeld zal de AI bezoekers automatisch aanbieden om hen door te verbinden met een menselijke agent wanneer dat gepast is."
-            }
-          }
-        },
-        "capabilities": {
-          "title": "Functionaliteiten & features",
-          "items": {
-            "what-are": {
-              "q": "Welke functionaliteiten kan ik inschakelen voor mijn chatbot?",
-              "a": "HandsOff biedt vier hoofdfunctionaliteiten: Vragen beantwoorden (op basis van je kennisbank), Lead Capture (contactgegevens van bezoekers verzamelen), Overdracht naar mens (verbinden met live agents) en Afspraken (afspraken boeken, verzetten en annuleren)."
-            },
-            "lead-capture": {
-              "q": "Hoe werkt Lead Capture?",
-              "a": "Wanneer ingeschakeld verzamelt de chatbot contactgegevens van bezoekers zoals naam, e-mail en telefoonnummer wanneer ze interesse tonen in je producten of diensten. Deze gegevens worden automatisch vastgelegd en kunnen teamnotificaties activeren."
-            },
-            "book-appointments": {
-              "q": "Kan de chatbot afspraken boeken?",
-              "a": "Ja, met de functie Afspraken ingeschakeld kunnen bezoekers afspraken boeken, verzetten of annuleren rechtstreeks via de chat. De bot ondersteunt het controleren van beschikbaarheid, het aanmaken van boekingen, het opvragen van bestaande boekingen, verzetten en annuleren."
-            },
-            "connect-calendar": {
-              "q": "Hoe koppel ik een boekingsagenda?",
-              "a": "Ga naar Instellingen > Integraties en zoek de sectie Afsprakenboeking. Voer je Cal.com API-sleutel in (te vinden via Cal.com > Settings > Developer > API Keys) en klik op Verbinden. Eenmaal gekoppeld kan de chatbot je agenda automatisch beheren."
-            },
-            "team-notifications": {
-              "q": "Wat zijn Teamnotificaties?",
-              "a": "Teamnotificaties waarschuwen je team wanneer belangrijke gebeurtenissen plaatsvinden. Je kan \"Nieuwe lead-melding\" inschakelen om het team te waarschuwen wanneer een nieuwe lead wordt vastgelegd, en \"Gespreksoverzicht\" om een samenvatting van elk afgerond gesprek naar de teaminbox te sturen."
-            }
-          }
-        },
-        "integrations": {
-          "title": "Integraties & API",
-          "items": {
-            "api": {
-              "q": "Biedt HandsOff een API aan?",
-              "a": "Ja. HandsOff biedt API-toegang voor geavanceerde integraties. Je unieke API-sleutel vind je in Instellingen > Integraties. Gebruik deze sleutel om API-verzoeken te authenticeren en aangepaste workflows te bouwen."
-            },
-            "webhook-url": {
-              "q": "Waarvoor wordt de Webhook-URL gebruikt?",
-              "a": "Met de Outbound Webhook-URL in Instellingen > Integraties kan je gespreksevents, lead captures en andere gegevens naar externe systemen sturen. Voer je webhook-endpoint-URL in, test de verbinding en bewaar om realtime events te ontvangen."
-            },
-            "inbound-webhook": {
-              "q": "Wat is het Inbound Webhook-endpoint?",
-              "a": "Het Inbound Webhook-endpoint is een alleen-lezen URL waarmee externe automatiseringsworkflows berichten of triggers naar HandsOff kunnen sturen. Voeg je tenant-ID toe aan de request body wanneer je je externe tools configureert."
-            },
-            "secure-webhooks": {
-              "q": "Hoe beveilig ik mijn webhook-verbindingen?",
-              "a": "Gebruik het Webhook-geheim (te vinden in Instellingen > Integraties) om te verifiëren dat binnenkomende webhook-verzoeken authentiek zijn. Configureer je automatiseringsplatform om deze geheime sleutel mee te sturen in de request headers voor veilige authenticatie."
-            },
-            "regenerate-key": {
-              "q": "Kan ik mijn API-sleutel opnieuw genereren?",
-              "a": "Ja. In Instellingen > Integraties staat naast je API-sleutel een knop om hem opnieuw te genereren. Door de sleutel opnieuw te genereren wordt de oude ongeldig, dus zorg ervoor dat je alle systemen die de vorige sleutel gebruiken onmiddellijk bijwerkt."
-            }
-          }
-        },
-        "settings": {
-          "title": "Instellingen & accountbeheer",
-          "items": {
-            "update-profile": {
-              "q": "Hoe werk ik mijn profielgegevens bij?",
-              "a": "Ga naar Instellingen > Profiel. Je kan je Voornaam en Achternaam aanpassen. Je e-mailadres wordt beheerd door Clerk (onze authenticatieprovider) en kan niet rechtstreeks in HandsOff worden gewijzigd. Gebruik het gebruikersmenu van Clerk om je e-mail en wachtwoord te beheren."
-            },
-            "notifications": {
-              "q": "Hoe werken de notificatie-instellingen?",
-              "a": "In Instellingen > Notificaties kan je het volgende configureren: Geluidsnotificaties (met aanpasbaar volume), Desktopnotificaties (browsermeldingen) en Enkel overdrachtsnotificaties (alleen meldingen voor overdrachtsverzoeken, niet voor alle berichten)."
-            },
-            "theme": {
-              "q": "Kan ik het thema van het dashboard wijzigen?",
-              "a": "Ja. Ga naar Instellingen > Weergave en kies tussen Licht, Donker of Systeem (volgt je OS-voorkeur). Dit wijzigt enkel het uiterlijk van je HandsOff-dashboard, niet van de chatwidget."
-            },
-            "logo-name": {
-              "q": "Hoe werk ik mijn organisatielogo en weergavenaam bij?",
-              "a": "Ga naar Instellingen > Widget & merk. Upload je logo (aanbevolen: 256x256 px, PNG of SVG), pas je Weergavenaam aan en bekijk je actieve sessiestatus. Deze wijzigingen worden toegepast op de header van de chatwidget die bezoekers te zien krijgen."
-            },
-            "embed-widget": {
-              "q": "Hoe embed ik de chatwidget op mijn website?",
-              "a": "In Instellingen > Widget & merk vind je de sectie Widget embedden met een kant-en-klaar HTML-scriptsnippet. Kopieer dit snippet en plak het in de HTML van je website, net voor de afsluitende </body>-tag. De widget verschijnt onmiddellijk."
-            },
-            "sessions": {
-              "q": "Wat zijn Actieve sessies en Max sessies?",
-              "a": "Actieve sessies geeft aan hoeveel bezoekers op dit moment met je bot chatten. Max sessies geeft de sessielimiet van je abonnement aan. Als je deze limiet nadert, overweeg dan om je abonnement te upgraden om de dienst ononderbroken te houden."
-            }
-          }
-        },
-        "troubleshooting": {
-          "title": "Problemen oplossen",
-          "items": {
-            "not-responding": {
-              "q": "Mijn chatbot antwoordt niet. Wat moet ik controleren?",
-              "a": "Controleer eerst of de schakelaar van de AI-bot is ingeschakeld in AI & Content > AI-bot. Controleer vervolgens of er inhoud in je Kennisbank staat. Verzeker je ervan dat je widget-embedcode correct geïnstalleerd is op je website. Controleer ten slotte of je accountstatus actief is in Instellingen > Widget & merk."
-            },
-            "widget-not-showing": {
-              "q": "De chatwidget verschijnt niet op mijn website. Waarom?",
-              "a": "Controleer of het embed-script vóór de afsluitende </body>-tag is geplaatst. Controleer of de API-sleutel in het script overeenkomt met je huidige sleutel in Instellingen > Integraties. Bekijk de browserconsole voor JavaScript-fouten. Zorg ervoor dat geen enkele adblocker of content security policy de widget blokkeert."
-            },
-            "kb-not-used": {
-              "q": "Mijn kennisbankdocumenten worden niet gebruikt door de AI. Waarom?",
-              "a": "Controleer of documenten succesvol zijn geüpload (bekijk AI & Content > Kennisbank voor de documentenlijst). De AI gebruikt enkel verwerkte documenten — geef het systeem enkele minuten na het uploaden. Controleer ook of je Botinstructies verwijzen naar de kennisbank voor het beantwoorden van vragen."
-            },
-            "handoff-not-reaching": {
-              "q": "Overdrachtsverzoeken bereiken mijn agents niet. Wat moet ik doen?",
-              "a": "Controleer of Overdracht naar mens is ingeschakeld in Instellingen > Functionaliteiten. Controleer of je agents hebt toegevoegd in de sectie Team. Verifieer dat de notificatie-instellingen correct zijn geconfigureerd in Instellingen > Notificaties. Bevestig dat agents online en beschikbaar zijn in de Inbox."
-            },
-            "reset-password": {
-              "q": "Hoe reset ik mijn wachtwoord?",
-              "a": "HandsOff gebruikt Clerk voor authenticatie. Om je wachtwoord te wijzigen, gebruik je het Clerk-gebruikersmenu (toegankelijk via je profieldropdown) of ga je rechtstreeks naar je Clerk-accountinstellingen."
-            },
-            "additional-support": {
-              "q": "Waar kan ik bijkomende ondersteuning krijgen?",
-              "a": "Heb je meer hulp nodig dan deze FAQ biedt? Neem contact op met ons supportteam via het Support-e-mailadres dat is geconfigureerd in je AI-botinstellingen. Je kan ook het HandsOff-documentatieportaal raadplegen voor gedetailleerde gidsen en videotutorials."
-            }
-          }
-        }
-      }
+    "loading": "FAQs laden…",
+    "empty": "Nog geen FAQs.",
+    "error": {
+      "load": "Kan FAQs niet laden.",
+      "retry": "Opnieuw"
     }
   },
   "inbox": {

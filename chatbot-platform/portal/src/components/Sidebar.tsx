@@ -57,6 +57,7 @@ const adminMenuItems: MenuItem[] = [
   { path: '/admin/tenants', labelKey: 'nav.allTenants', icon: Shield, roles: ['super_admin'] },
   { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
   { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
+  { path: '/admin/faq', labelKey: 'nav.faqEditor', icon: HelpCircle, roles: ['super_admin'] },
 ];
 
 interface SidebarProps {

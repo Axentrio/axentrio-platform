@@ -1327,7 +1327,9 @@
         "enAnswerRequired": "English answer is required."
       },
       "sectionEyebrow": "Section",
-      "dragHandle": "Drag to reorder"
+      "dragHandle": "Drag to reorder",
+      "expandAnswer": "Expand answer",
+      "collapseAnswer": "Collapse answer"
     }
   },
   "inbox": {

@@ -16,6 +16,8 @@ import { toast } from 'sonner';
 import {
   ArrowDown,
   ArrowUp,
+  ChevronDown,
+  ChevronRight,
   GripVertical,
   HelpCircle,
   Loader2,
@@ -36,6 +38,7 @@ import {
   type Edge,
 } from '@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge';
 import { DropIndicator } from '@atlaskit/pragmatic-drag-and-drop-react-drop-indicator/box';
+import { pickTranslation } from '@/pages/help/helpFaqData';
 import {
   useFaq,
   useCreateFaqSection,
@@ -684,12 +687,14 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
   onDelete,
   onMove,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
   const dragData = useMemo<ItemDragData>(
     () => ({ kind: ITEM_KIND, id: it.id, sectionId }),
     [it.id, sectionId],
   );
   const { ref, isDragging, closestEdge } = useSortableRow(dragData);
+  const answerText = pickTranslation(it.answer, i18n.language);
 
   return (
     <li
@@ -706,9 +711,27 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
       >
         <GripVertical className="w-3.5 h-3.5" />
       </span>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? t('admin.faq.collapseAnswer') : t('admin.faq.expandAnswer')}
+        className="shrink-0 mt-0.5 p-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-3"
+      >
+        {expanded ? (
+          <ChevronDown className="w-3.5 h-3.5" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5" />
+        )}
+      </button>
       <div className="flex-1 min-w-0">
         <div className="text-sm text-text-primary truncate">{it.question.en}</div>
         <div className="text-[10px] text-text-muted mt-0.5 font-mono truncate">{it.slug}</div>
+        {expanded && (
+          <div className="mt-2 pt-2 border-t border-edge text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
+            {answerText}
+          </div>
+        )}
       </div>
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100">
         <IconButton

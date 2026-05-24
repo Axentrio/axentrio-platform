@@ -1291,7 +1291,9 @@
         "enAnswerRequired": "Engels antwoord is verplicht."
       },
       "sectionEyebrow": "Sectie",
-      "dragHandle": "Versleep om te herschikken"
+      "dragHandle": "Versleep om te herschikken",
+      "expandAnswer": "Antwoord uitklappen",
+      "collapseAnswer": "Antwoord inklappen"
     }
   },
   "help": {

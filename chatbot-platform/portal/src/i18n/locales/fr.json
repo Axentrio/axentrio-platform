@@ -1291,7 +1291,9 @@
         "enAnswerRequired": "La réponse en anglais est requise."
       },
       "sectionEyebrow": "Section",
-      "dragHandle": "Glisser pour réordonner"
+      "dragHandle": "Glisser pour réordonner",
+      "expandAnswer": "Afficher la réponse",
+      "collapseAnswer": "Masquer la réponse"
     }
   },
   "help": {

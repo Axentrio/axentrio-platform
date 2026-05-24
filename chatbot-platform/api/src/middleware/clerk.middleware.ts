@@ -9,10 +9,9 @@ import { clerkClient } from '@clerk/express';
 import crypto from 'crypto';
 import { AppDataSource, runInTransaction } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
-import { seedTrialAccount } from '../billing/service';
-import { scheduleTrialExpiry } from '../billing/trial-expiry-job';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
+import { Bot } from '../database/entities/Bot';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
@@ -128,15 +127,12 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
       const slug = await ensureUniqueSlug(orgName, tenantRepo);
       const apiKey = crypto.randomBytes(32).toString('hex');
 
-      // Wrap tenant insert + billing seed in a single transaction. If
-      // seedTrialAccount throws, both the tenant insert and any seed work
-      // roll back together — the next provision attempt will retry cleanly
-      // rather than leaving an orphaned tenant with no billing row.
-      // Race-safe: ON CONFLICT(clerk_org_id) DO NOTHING handles concurrent
-      // autoProvision requests. The seed is also idempotent via its own
-      // ON CONFLICT.
-      // Plan: .scratch/plan-billing.md § Reverse-trial signup flow.
-      let scheduleTrialEnd: Date | null = null;
+      // Forward-trial model (PR6/PR7): a fresh tenant starts at `tier='free'`
+      // with NO billing row. The 14-day Pro trial is granted at Checkout
+      // time (via Stripe `trial_period_days`) and is gated by the
+      // `chatbot_tenant_trial_reservations` table for first-signup-only semantics.
+      // ON CONFLICT(clerk_org_id) DO NOTHING makes concurrent autoProvision
+      // requests race-safe.
       try {
         const result = await runInTransaction(async (manager) => {
           await manager
@@ -148,7 +144,7 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
               slug,
               apiKey,
               clerkOrgId,
-              tier: 'pro',
+              tier: 'free',
               status: 'active',
               settings: {
                 ai: {
@@ -183,12 +179,36 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
           if (!t) {
             throw new Error('autoProvision: tenant not found after insert');
           }
-          const seed = await seedTrialAccount(t.id, manager);
-          return { tenant: t, trialEnd: seed?.trialEnd ?? null };
+
+          // Multi-bot: create the tenant's anchor Bot in the same tx. Its
+          // public_key == the tenant's api_key so the widget resolves
+          // identically; settings is the tenant's settings minus the
+          // tenant-level LLM secret (ai.apiKey). Idempotent + race-safe via
+          // ON CONFLICT DO NOTHING (the one-default-per-tenant partial unique
+          // index catches a concurrent provision).
+          const anchorSettings = JSON.parse(JSON.stringify(t.settings ?? {}));
+          if (anchorSettings?.ai && 'apiKey' in anchorSettings.ai) {
+            delete anchorSettings.ai.apiKey;
+          }
+          await manager
+            .createQueryBuilder()
+            .insert()
+            .into(Bot)
+            .values({
+              tenantId: t.id,
+              name: t.name,
+              publicKey: t.apiKey,
+              status: 'active',
+              isDefault: true,
+              settings: anchorSettings,
+            })
+            .orIgnore()
+            .execute();
+
+          return { tenant: t };
         });
         tenant = result.tenant;
-        scheduleTrialEnd = result.trialEnd;
-        logger.info('[AutoProvision] Tenant + billing seed committed', { tenantId: tenant.id });
+        logger.info('[AutoProvision] Tenant committed', { tenantId: tenant.id });
       } catch (provisionErr: any) {
         logger.error('[AutoProvision] Tenant provisioning tx FAILED', {
           clerkOrgId,
@@ -198,23 +218,6 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
       }
 
       logger.info('Auto-provisioned tenant', { tenantId: tenant.id, orgName });
-
-      // Schedule the delayed expiry job after the tx commits. Only when this
-      // caller's seed actually inserted the billing row (concurrent caller
-      // returned null). Bull failures fall back to the daily sweep.
-      if (scheduleTrialEnd) {
-        try {
-          await scheduleTrialExpiry(tenant.id, scheduleTrialEnd);
-        } catch (scheduleErr) {
-          logger.error(
-            '[AutoProvision] Failed to schedule trial-expiry job; daily sweep will recover',
-            {
-              tenantId: tenant.id,
-              error: scheduleErr instanceof Error ? scheduleErr.message : String(scheduleErr),
-            },
-          );
-        }
-      }
     }
 
     // --- Block suspended tenants ---

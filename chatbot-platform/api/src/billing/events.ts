@@ -28,7 +28,9 @@
  */
 
 import { EntityManager } from 'typeorm';
+import Stripe from 'stripe';
 import { logger } from '../utils/logger';
+import { AppDataSource } from '../database/data-source';
 import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { TenantBillingAccount } from '../database/entities/TenantBillingAccount';
 import { planIdForStripePriceId } from './plans';
@@ -132,6 +134,33 @@ export async function handleNormalizedEvent(
   if (event.type === 'refund.recorded') {
     return { outcome: 'audit_only_refund' };
   }
+
+  // PR9: trial_will_end is logging-only and intentionally has NO state
+  // mutation, no email, no banner. Just emit the structured log line; the
+  // idempotency wrapper persists the event-log row.
+  if (event.type === 'subscription.trial_will_end') {
+    const raw = event.raw as {
+      data?: { object?: { trial_end?: number | null } };
+    };
+    const trialEnd = raw?.data?.object?.trial_end
+      ? new Date(raw.data.object.trial_end * 1000).toISOString()
+      : null;
+    logger.info('Stripe trial_will_end received', {
+      eventId: event.providerEventId,
+      subscriptionId: event.subscriptionId ?? null,
+      tenantId: matched?.tenantId ?? null,
+      trialEnd,
+    });
+    return { outcome: 'trial_will_end_logged' };
+  }
+
+  // PR9: checkout.session.completed is bookkeeping only — persists
+  // customer_id / subscription_id onto the TBA row. Tier change is driven
+  // by the subsequent customer.subscription.created event.
+  if (event.type === 'checkout.session.completed') {
+    return handleCheckoutSessionCompleted(manager, event);
+  }
+
   if (!matched) {
     return { outcome: 'no_matching_row' };
   }
@@ -157,9 +186,121 @@ export async function handleNormalizedEvent(
   });
 
   switch (event.type) {
-    case 'subscription.created':
-    case 'subscription.updated':
     case 'subscription.deleted': {
+      // PR9: dedicated cancellation sink with stale-guard + resource_missing
+      // refetch distinction. Earlier behavior (sharing the created/updated
+      // arm) didn't apply the stale guard and silently called the schedule
+      // retrieve path on cancelled subs.
+      const deletedSubId = (event.raw as { data?: { object?: { id?: string } } })
+        ?.data?.object?.id;
+
+      // Stale-subscription guard (codex round 6 item 4): if the TBA row no
+      // longer points at the deleted subscription, an OLDER cancellation
+      // event arrived after the tenant re-subscribed. Do not clobber the
+      // newer state.
+      if (deletedSubId && row.subscriptionId && row.subscriptionId !== deletedSubId) {
+        logger.info(
+          'Stale subscription.deleted event; current TBA points at a different subscription — no mutation',
+          {
+            eventId: event.providerEventId,
+            tenantId,
+            deletedSubId,
+            currentSubscriptionId: row.subscriptionId,
+          },
+        );
+        return {
+          outcome: 'subscription_deleted_stale',
+          meta: { deletedSubId, currentSubscriptionId: row.subscriptionId },
+        };
+      }
+
+      // Refetch with resource_missing distinction (codex round 6 item 5).
+      // Stripe keeps cancelled subs visible for a while; a successful refetch
+      // confirms the deletion is current canonical state. A resource_missing
+      // error means Stripe hard-deleted the record — payload is canonical,
+      // proceed. Any other error means transient API failure — re-throw so
+      // the wrapper marks failed and Stripe retries.
+      let refetchOutcome: 'fresh' | 'resource_missing_proceed' = 'fresh';
+      if (deletedSubId) {
+        try {
+          await getStripeClient().subscriptions.retrieve(deletedSubId);
+        } catch (err) {
+          if (
+            err instanceof Stripe.errors.StripeInvalidRequestError &&
+            err.code === 'resource_missing'
+          ) {
+            refetchOutcome = 'resource_missing_proceed';
+            logger.warn(
+              'subscription.deleted refetch returned resource_missing — proceeding with cancellation',
+              { eventId: event.providerEventId, deletedSubId },
+            );
+          } else {
+            logger.warn(
+              'subscription.deleted refetch failed with non-resource_missing error — Stripe will retry',
+              {
+                eventId: event.providerEventId,
+                deletedSubId,
+                error: err instanceof Error ? err.message : String(err),
+              },
+            );
+            throw err;
+          }
+        }
+      }
+
+      // Apply cancellation mutations (plan PR9 §"customer.subscription.deleted").
+      await manager.update(
+        TenantBillingAccount,
+        { id: row.id },
+        {
+          status: 'cancelled',
+          currentPlanId: 'free',
+          pendingPlanId: null,
+          pendingPlanEffectiveAt: null,
+          trialEnd: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          subscriptionId: null,
+        },
+      );
+      // Primary cancellation cascades Tenant.tier='free'. Non-primary rows
+      // stay row-local — Tenant.tier reflects the surviving primary.
+      if (row.isPrimary) {
+        await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
+      }
+
+      // Audit log entry — `tenant.cancelled`. actor_id is the Tenant.id
+      // (Stripe is not a User; AuditLog.actorId is NOT NULL so we record the
+      // Tenant as both actor and entity to preserve the foreign-key shape).
+      const auditMeta: Record<string, unknown> = {
+        eventId: event.providerEventId,
+        deletedSubId,
+        refetchOutcome,
+      };
+      if (refetchOutcome === 'resource_missing_proceed') {
+        auditMeta.refetch_failed = 'resource_missing';
+      }
+      // Use raw SQL — TypeORM's insert() narrows `metadata` against the
+      // entity's `Record<string, unknown> | undefined` field in a way that
+      // rejects a dynamic dictionary literal.
+      await manager.query(
+        `INSERT INTO audit_logs (tenant_id, actor_id, action, entity_type, entity_id, metadata)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        [
+          tenantId,
+          tenantId,
+          'tenant.cancelled',
+          'tenant',
+          tenantId,
+          JSON.stringify(auditMeta),
+        ],
+      );
+
+      return { outcome: 'tenant_cancelled', meta: auditMeta };
+    }
+
+    case 'subscription.created':
+    case 'subscription.updated': {
       if (!event.subscription) {
         return { outcome: 'subscription_event_no_payload' };
       }
@@ -178,11 +319,16 @@ export async function handleNormalizedEvent(
         };
       }
 
-      // Unknown price (codex r4 #15 + cluster-2 round-1 #4): if the raw
-      // Stripe price id is unknown to our PLANS catalog, we cannot trust
-      // any state transition that would set `current_plan_id`. Apply the
+      // Unknown price (codex r4 #15 + cluster-2 round-1 #4 + PR9 codex r5 #9):
+      // if the raw Stripe price id is unknown to our PLANS catalog, we cannot
+      // trust any state transition that would set `current_plan_id`. This
+      // replaces the old `planIdForStripePriceId(priceId) ?? 'free'` silent-
+      // downgrade pattern that previously lived in `stripe.ts`. Apply the
       // guard for ALL non-terminal statuses (trialing/active/past_due AND
       // 'none' from `incomplete` — which is pre-payment, not terminal).
+      //
+      // The outer idempotency wrapper finalizes the event-log row as
+      // 'processed' (no Stripe retry) and logs at warn level.
       const rawSub = (event.raw as { data?: { object?: { status?: string; items?: { data?: Array<{ price?: { id?: string } }> } } } })?.data?.object;
       const rawStripeStatus = rawSub?.status;
       const rawPriceId = rawSub?.items?.data?.[0]?.price?.id;
@@ -191,6 +337,10 @@ export async function handleNormalizedEvent(
         rawStripeStatus === 'incomplete_expired' ||
         rawStripeStatus === 'unpaid';
       if (!isTerminalStripeStatus && rawPriceId && planIdForStripePriceId(rawPriceId) === null) {
+        logger.warn('Unknown Stripe price ID — skipping state mutation', {
+          priceId: rawPriceId,
+          eventId: event.providerEventId,
+        });
         return { outcome: 'unknown_price', meta: { priceId: rawPriceId } };
       }
 
@@ -384,5 +534,301 @@ export async function handleNormalizedEvent(
       logger.warn('Unknown normalized event type', { type: event.type });
       return { outcome: 'unknown_event_type' };
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// PR9 — checkout.session.completed handler (bookkeeping only).
+// ---------------------------------------------------------------------------
+
+/**
+ * Handler contract (codex round 4 item 4, codex round 5 item 8):
+ *  - Re-fetch the Checkout Session with expand=['subscription', 'customer'].
+ *  - Skip if mode !== 'subscription' or subscription is null.
+ *  - Resolve tenant via fallback chain:
+ *      1. session.metadata.tenantId
+ *      2. session.customer.metadata.tenantId
+ *      3. session.subscription.metadata.tenantId
+ *  - On unresolvable tenant: return a special outcome so the wrapper finalizes
+ *    the event-log row as 'processed' with last_error='cannot resolve tenant
+ *    from checkout session' (no Stripe retry — manual ops intervention).
+ *  - Persist customer_id and subscription_id onto the TBA row (idempotent).
+ *  - Do NOT update Tenant.tier — that's the subscription.created handler's job.
+ */
+async function handleCheckoutSessionCompleted(
+  manager: EntityManager,
+  event: NormalizedEvent,
+): Promise<{ outcome: string; meta?: Record<string, unknown> }> {
+  const stripe = getStripeClient();
+  const rawEvent = event.raw as { data?: { object?: { id?: string } } };
+  const sessionId = rawEvent?.data?.object?.id;
+  if (!sessionId) {
+    return { outcome: 'checkout_session_no_id' };
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ['subscription', 'customer'],
+  });
+
+  if (session.mode !== 'subscription' || !session.subscription) {
+    logger.info('checkout.session.completed ignored (non-subscription mode)', {
+      eventId: event.providerEventId,
+      sessionId,
+      mode: session.mode,
+    });
+    return { outcome: 'checkout_session_non_subscription' };
+  }
+
+  // Tenant resolution fallback chain (metadata only — email fallback is
+  // explicitly REJECTED per codex round 3 item 7).
+  const sessionTenantId =
+    typeof session.metadata?.tenantId === 'string' ? session.metadata.tenantId : null;
+  const customerTenantId = (() => {
+    if (!session.customer || typeof session.customer === 'string') return null;
+    const md = (session.customer as { metadata?: Record<string, string> }).metadata;
+    return typeof md?.tenantId === 'string' ? md.tenantId : null;
+  })();
+  const subscriptionTenantId = (() => {
+    if (typeof session.subscription === 'string') return null;
+    const md = (session.subscription as { metadata?: Record<string, string> }).metadata;
+    return typeof md?.tenantId === 'string' ? md.tenantId : null;
+  })();
+
+  const tenantId = sessionTenantId ?? customerTenantId ?? subscriptionTenantId;
+  const customerId =
+    typeof session.customer === 'string'
+      ? session.customer
+      : session.customer?.id ?? null;
+  const subscriptionId =
+    typeof session.subscription === 'string'
+      ? session.subscription
+      : session.subscription?.id ?? null;
+
+  if (!tenantId) {
+    logger.error(
+      'checkout.session.completed: cannot resolve tenant from metadata',
+      {
+        eventId: event.providerEventId,
+        sessionId,
+        customerId,
+        subscriptionId,
+      },
+    );
+    return {
+      outcome: 'checkout_session_unresolved_tenant',
+      meta: { sessionId, customerId, subscriptionId },
+    };
+  }
+
+  // Lock the tenant's billing rows and find the Stripe TBA row to update.
+  await manager
+    .createQueryBuilder()
+    .select()
+    .from(TenantBillingAccount, 'tba')
+    .where('tba.tenant_id = :tenantId', { tenantId })
+    .setLock('pessimistic_write')
+    .getMany();
+
+  const tbaRepo = manager.getRepository(TenantBillingAccount);
+  const stripeRow = await tbaRepo.findOne({
+    where: { tenantId, provider: 'stripe' },
+  });
+
+  if (!stripeRow) {
+    logger.warn(
+      'checkout.session.completed: no stripe TBA row for resolved tenant',
+      { eventId: event.providerEventId, tenantId, customerId, subscriptionId },
+    );
+    return {
+      outcome: 'checkout_session_no_tba_row',
+      meta: { tenantId, customerId, subscriptionId },
+    };
+  }
+
+  // Idempotent updates — re-delivery leaves the same values.
+  const updates: { customerId?: string; subscriptionId?: string } = {};
+  if (customerId && stripeRow.customerId !== customerId) {
+    updates.customerId = customerId;
+  }
+  if (subscriptionId && stripeRow.subscriptionId !== subscriptionId) {
+    updates.subscriptionId = subscriptionId;
+  }
+  if (Object.keys(updates).length > 0) {
+    await tbaRepo.update({ id: stripeRow.id }, updates);
+  }
+
+  return {
+    outcome: 'checkout_session_bookkeeping_applied',
+    meta: { tenantId, customerId, subscriptionId, fieldsUpdated: Object.keys(updates) },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// PR9 — Idempotency wrapper for inbound Stripe webhooks.
+// ---------------------------------------------------------------------------
+
+/**
+ * Run a Stripe webhook event through the locked PR9 idempotency contract.
+ *
+ *   BEGIN
+ *   pg_try_advisory_xact_lock(hashtext('webhook_event:stripe:' || event_id))
+ *   --- if FALSE: ROLLBACK; return { status: 'lock_unavailable' } → HTTP 503
+ *   --- if TRUE:
+ *   SELECT status, attempts FROM chatbot_stripe_webhook_events WHERE ...
+ *   --- if status='processed': ROLLBACK; return { status: 'replay' } → HTTP 200
+ *   --- else: UPSERT processing + attempts++
+ *   SAVEPOINT handler_body
+ *     run callback (mutates Tenant/TBA/AuditLog)
+ *   on success: RELEASE SAVEPOINT; UPDATE row → processed
+ *   on failure: ROLLBACK TO SAVEPOINT; UPDATE row → failed (+ last_error)
+ *   COMMIT (releases the advisory lock; commits the status update either way)
+ */
+export type StripeIdempotencyOutcome =
+  | { status: 'lock_unavailable' }
+  | { status: 'replay' }
+  | { status: 'processed'; outcome: string; meta?: Record<string, unknown> }
+  | { status: 'failed'; error: string };
+
+export interface StripeWebhookCallbackResult {
+  outcome: string;
+  /** Optional override of the row's final status. Used by the
+   *  checkout.session.completed unresolved-tenant path: outcome causes
+   *  'processed' + last_error message so Stripe doesn't retry but ops can
+   *  still find the failure in event-log queries. */
+  finalizeAsProcessedWithError?: string;
+  meta?: Record<string, unknown>;
+}
+
+export async function runStripeWebhookIdempotent(opts: {
+  eventId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+  subscriptionId?: string | null;
+  tenantId?: string | null;
+  callback: (manager: EntityManager) => Promise<StripeWebhookCallbackResult>;
+}): Promise<StripeIdempotencyOutcome> {
+  const provider = 'stripe';
+  const lockKey = `webhook_event:${provider}:${opts.eventId}`;
+
+  // Run everything inside a single top-level transaction — the advisory
+  // lock is xact-scoped so the outer COMMIT/ROLLBACK is what releases it.
+  // Use a queryRunner manually so we can issue raw SAVEPOINT / ROLLBACK TO
+  // SAVEPOINT statements that TypeORM's transaction helper doesn't expose.
+  const queryRunner = AppDataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    // Step A.1 — try to acquire the advisory lock. Failure means a parallel
+    // worker is processing the same event; return 503 (codex round 6 item 2).
+    const lockRows = await queryRunner.query(
+      `SELECT pg_try_advisory_xact_lock(hashtext($1)) AS got_lock`,
+      [lockKey],
+    );
+    const gotLock = lockRows?.[0]?.got_lock === true;
+    if (!gotLock) {
+      await queryRunner.rollbackTransaction();
+      return { status: 'lock_unavailable' };
+    }
+
+    // Step A.2 — pre-flight check for already-processed events. The advisory
+    // lock serialises concurrent attempts so a plain SELECT (no FOR UPDATE)
+    // is correct (codex round 5 item 6).
+    const existing: Array<{ status: string; attempts: number }> = await queryRunner.query(
+      `SELECT status, attempts FROM chatbot_stripe_webhook_events
+         WHERE provider = $1 AND event_id = $2`,
+      [provider, opts.eventId],
+    );
+    if (existing.length > 0 && existing[0].status === 'processed') {
+      await queryRunner.rollbackTransaction();
+      return { status: 'replay' };
+    }
+
+    // Step A.3 — upsert to status='processing', attempts++.
+    await queryRunner.query(
+      `INSERT INTO chatbot_stripe_webhook_events
+         (provider, event_id, event_type, status, attempts, subscription_id, tenant_id, payload)
+       VALUES ($1, $2, $3, 'processing', 1, $4, $5, $6::jsonb)
+       ON CONFLICT (provider, event_id) DO UPDATE SET
+         status = 'processing',
+         attempts = chatbot_stripe_webhook_events.attempts + 1,
+         last_error = NULL,
+         tenant_id = COALESCE(EXCLUDED.tenant_id, chatbot_stripe_webhook_events.tenant_id),
+         subscription_id = COALESCE(EXCLUDED.subscription_id, chatbot_stripe_webhook_events.subscription_id),
+         event_type = EXCLUDED.event_type`,
+      [
+        provider,
+        opts.eventId,
+        opts.eventType,
+        opts.subscriptionId ?? null,
+        opts.tenantId ?? null,
+        JSON.stringify(opts.payload),
+      ],
+    );
+
+    // Step B — handler body in a SAVEPOINT so its mutations can be rolled
+    // back independently of the status update we commit in Step C.
+    await queryRunner.query(`SAVEPOINT handler_body`);
+    let callbackResult: StripeWebhookCallbackResult;
+    try {
+      callbackResult = await opts.callback(queryRunner.manager);
+      await queryRunner.query(`RELEASE SAVEPOINT handler_body`);
+    } catch (err) {
+      await queryRunner.query(`ROLLBACK TO SAVEPOINT handler_body`);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // Step C (failure) — UPDATE row to status='failed' with last_error.
+      // Commits with the outer COMMIT below.
+      await queryRunner.query(
+        `UPDATE chatbot_stripe_webhook_events
+            SET status = 'failed', last_error = $1
+          WHERE provider = $2 AND event_id = $3`,
+        [errMsg, provider, opts.eventId],
+      );
+      await queryRunner.commitTransaction();
+      logger.error('Stripe webhook handler failed; will be retried by Stripe', {
+        eventId: opts.eventId,
+        eventType: opts.eventType,
+        error: errMsg,
+      });
+      return { status: 'failed', error: errMsg };
+    }
+
+    // Step C (success) — UPDATE row to status='processed'. The unresolved-
+    // tenant path on checkout.session.completed asks us to finalize as
+    // 'processed' with last_error set (so Stripe doesn't retry but the row
+    // surfaces the failure for ops queries).
+    const finalLastError = callbackResult.finalizeAsProcessedWithError ?? null;
+    await queryRunner.query(
+      `UPDATE chatbot_stripe_webhook_events
+          SET status = 'processed',
+              processed_at = now(),
+              last_error = $1
+        WHERE provider = $2 AND event_id = $3`,
+      [finalLastError, provider, opts.eventId],
+    );
+
+    await queryRunner.commitTransaction();
+    return {
+      status: 'processed',
+      outcome: callbackResult.outcome,
+      meta: callbackResult.meta,
+    };
+  } catch (outerErr) {
+    // An exception OUTSIDE the SAVEPOINT (rare — only the pre-flight queries
+    // or the COMMIT itself). Try to roll back and surface as failure.
+    try {
+      await queryRunner.rollbackTransaction();
+    } catch {
+      // ignore — already rolled back or connection dropped
+    }
+    const errMsg = outerErr instanceof Error ? outerErr.message : String(outerErr);
+    logger.error('Stripe webhook outer-tx failure', {
+      eventId: opts.eventId,
+      eventType: opts.eventType,
+      error: errMsg,
+    });
+    return { status: 'failed', error: errMsg };
+  } finally {
+    await queryRunner.release();
   }
 }

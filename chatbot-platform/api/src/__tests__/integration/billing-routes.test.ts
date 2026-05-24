@@ -73,7 +73,7 @@ describe('billing routes — no_stripe_subscription returns HTTP 400', () => {
 
   it.each([
     ['POST /billing/change-plan', () =>
-      request(app).post('/api/v1/billing/change-plan').send({ planId: 'premium' })],
+      request(app).post('/api/v1/billing/change-plan').send({ planId: 'essential' })],
     ['POST /billing/cancel', () => request(app).post('/api/v1/billing/cancel').send()],
     ['POST /billing/undo-cancel', () =>
       request(app).post('/api/v1/billing/undo-cancel').send()],
@@ -131,7 +131,7 @@ describe('POST /billing/checkout-session — duplicate-checkout guard', () => {
     const res = await request(app)
       .post('/api/v1/billing/checkout-session')
       .send({
-        planId: 'premium',
+        planId: 'essential',
         successUrl: 'https://example.com/s',
         cancelUrl: 'https://example.com/c',
       });

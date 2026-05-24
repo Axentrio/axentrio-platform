@@ -4,14 +4,14 @@
  */
 
 export type NormalizedStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
-export type InternalPlanId = 'free' | 'pro' | 'premium' | 'enterprise';
+export type InternalPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
 
 /**
  * Plans the user can self-serve into via checkout / change-plan.
- * 'free' is reachable only via cancellation; 'enterprise' is reachable
- * only via the super-admin manual override.
+ * 'free' is reachable only via cancellation (internal-only terminal state).
+ * 'enterprise' is sales-led — set by super-admin manual override after a deal closes.
  */
-export type CheckoutablePlanId = Extract<InternalPlanId, 'pro' | 'premium'>;
+export type CheckoutablePlanId = Extract<InternalPlanId, 'essential' | 'pro'>;
 
 export interface NormalizedSubscription {
   customerId: string;
@@ -29,6 +29,8 @@ export type NormalizedEventType =
   | 'subscription.created'
   | 'subscription.updated'
   | 'subscription.deleted'
+  | 'subscription.trial_will_end'
+  | 'checkout.session.completed'
   | 'invoice.paid'
   | 'invoice.payment_failed'
   | 'refund.recorded';
@@ -107,44 +109,71 @@ export class BillingProviderError extends Error {
 /**
  * Entitlement shape resolved per tenant. Numeric limits use `null` for
  * "unlimited" so call sites can distinguish "no cap" from "zero allowed."
+ *
+ * Feature flags reshaped per M0 PR2 (subscription epic):
+ *   - `customBranding` → split into `hideWidgetAttribution` (Pro+ removes
+ *     "Powered by Axentrio" watermark) and `customWidgetAppearance` (color/
+ *     title/avatar config — all paid tiers).
+ *   - New flags: `unifiedInbox`, `bookings`, `calendarIntegrations`,
+ *     `leadCapture`, `platformAssistant`, `crm`. `handoff` retained.
+ *   - Dropped: `fileUpload` (implicit in all paid tiers), `byoLlmKey` (unused),
+ *     `limits.channels` (channels are per-tier-by-feature, not numeric).
+ *
+ * Support tier `'community'` removed because `free` is now the internal-only
+ * cancellation sink, never a marketed plan. `'sla'` removed because
+ * Enterprise support is sold per-deal alongside the sales-led contract.
  */
 export interface Entitlements {
   planId: InternalPlanId;
   limits: {
+    /** Human support-agent seats (rows in `support_agents`). NOT the AI chatbot count. */
     agents: number | null;
+    /**
+     * AI chatbots (rows in `chatbot_bots`, anchor + extras combined). Per the
+     * epic verbatim: Essential 1, Pro 1, Enterprise 2. Paused bots still count
+     * toward the cap; only soft-delete frees a slot. (Multi-bot integration —
+     * docs/multi-bot-handoff.md § Action items.)
+     */
+    bots: number | null;
     sessions: number | null;
     dailyLlmCalls: number | null;
-    channels: number | null;
   };
   features: {
-    fileUpload: boolean;
+    unifiedInbox: boolean;
+    bookings: boolean;
+    calendarIntegrations: boolean;
+    leadCapture: boolean;
+    platformAssistant: boolean;
+    crm: boolean;
+    hideWidgetAttribution: boolean;
+    customWidgetAppearance: boolean;
     handoff: boolean;
-    customBranding: boolean;
-    byoLlmKey: boolean;
+    /** File upload to KnowledgeBase. False on `free` cancellation sink; true on all paid tiers. */
+    fileUpload: boolean;
   };
-  support: 'community' | 'email' | 'priority' | 'sla';
+  support: 'none' | 'email' | 'priority';
 }
 
 /**
  * Plan catalog entry. `rank` drives upgrade/downgrade direction choice in
  * `StripeBillingProvider.changeSubscription`.
+ *
+ * `isSelfServeCheckoutable` is the canonical predicate for "show this plan on
+ * upgrade UIs." Replaces ambiguous rank/price filtering — `free` (cancellation
+ * sink) and `enterprise` (sales-led) both have rank > 0 and one has a price,
+ * but neither should appear in a self-serve upgrade list.
+ *
+ * Price IDs are NOT stored on the plan definition — they are resolved at call
+ * time via `getStripePriceIdFor(planId)` so the catalog stays decoupled from
+ * env config (cleaner tests, no module-load ordering issues).
  */
 export interface PlanDefinition {
   id: InternalPlanId;
   displayName: string;
   rank: number;
-  priceUsdMonthly: number | null; // null = sales-led
+  priceEurMonthly: number | null; // null = no chargeable price (cancellation sink or sales-led)
+  isSelfServeCheckoutable: boolean;
   limits: Entitlements['limits'];
   features: Entitlements['features'];
   support: Entitlements['support'];
-  /**
-   * Provider-side price IDs, keyed by provider name then currency.
-   * `null` for plans not available through that provider (free → no Stripe price;
-   * enterprise → sales-led, no public price).
-   */
-  providerPriceIds: {
-    stripe: {
-      usd: string | null;
-    };
-  };
 }

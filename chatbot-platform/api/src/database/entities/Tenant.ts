@@ -16,7 +16,7 @@ import { ChatSession } from './ChatSession';
 import { User } from './User';
 import { Agent } from './Agent';
 
-export type TenantTier = 'free' | 'pro' | 'premium' | 'enterprise';
+export type TenantTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type TenantStatus = 'active' | 'suspended' | 'cancelled';
 
 @Entity('tenants')
@@ -46,7 +46,7 @@ export class Tenant {
 
   @Column({
     type: 'enum',
-    enum: ['free', 'pro', 'premium', 'enterprise'],
+    enum: ['free', 'essential', 'pro', 'enterprise'],
     default: 'free',
   })
   tier!: TenantTier;

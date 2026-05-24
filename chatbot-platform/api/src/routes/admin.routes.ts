@@ -3,8 +3,7 @@ import crypto from 'crypto';
 import { IsNull } from 'typeorm';
 import { AppDataSource, runInTransaction } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
-import { seedTrialAccount, setEnterpriseManual, setTierManual } from '../billing/service';
-import { scheduleTrialExpiry } from '../billing/trial-expiry-job';
+import { setEnterpriseManual, setTierManual } from '../billing/service';
 import { User } from '../database/entities/User';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
@@ -322,9 +321,11 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
 
 // POST /admin/tenants — create tenant with Clerk org
 router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: Request, res: Response) => {
-  // `tier` from body is ignored — every new tenant starts in trialing-Pro
-  // per the reverse-trial flow. Super-admin can move them to Enterprise
-  // after creation via POST /admin/tenants/:id/set-enterprise (step 12).
+  // `tier` from body is ignored — every new tenant starts at `tier='free'`
+  // in the forward-trial model (PR6/PR7). The 14-day Pro trial is granted
+  // at Checkout time (via Stripe `trial_period_days`) and is gated by the
+  // `chatbot_tenant_trial_reservations` table. Super-admin can move tenants to
+  // Enterprise after creation via POST /admin/tenants/:id/set-enterprise.
   const { name, settings, adminEmail } = req.body;
 
   // Step 1: Create Clerk org first
@@ -333,58 +334,37 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
     throw new ApiError('Failed to create organization in Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
   }
 
-  // Step 2: Create local Tenant record + seed trial billing account in one tx
+  // Step 2: Create local Tenant record
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const apiKey = `ak_${crypto.randomUUID().replace(/-/g, '')}`;
 
   let tenant: Tenant;
-  let trialEnd: Date;
   try {
     const mergedSettings = {
       ...settings,
       skills: settings?.skills ?? [...DEFAULT_SKILLS],
     };
-    ({ tenant, trialEnd } = await runInTransaction(async (manager) => {
+    tenant = await runInTransaction(async (manager) => {
       const t = manager.create(Tenant, {
         name,
         slug,
         apiKey,
         clerkOrgId: clerkOrg.id,
-        tier: 'pro',
+        tier: 'free',
         settings: mergedSettings,
       });
       await manager.save(t);
-      const seed = await seedTrialAccount(t.id, manager);
-      if (!seed) {
-        // Should not happen for a freshly-inserted tenant — the only conflict
-        // path is a prior billing row, and there cannot be one for a row we
-        // just inserted in this tx. Treat as a fatal error.
-        throw new Error(`seedTrialAccount returned null for fresh tenant ${t.id}`);
-      }
-      return { tenant: t, trialEnd: seed.trialEnd };
-    }));
+      return t;
+    });
     await logAudit(req.userId!, 'tenant.created', 'tenant', tenant.id, tenant.id, {
       name,
-      tier: 'pro',
-      trialEnd: trialEnd.toISOString(),
+      tier: 'free',
     });
   } catch (dbError) {
     // Compensating transaction: delete the Clerk org
     logger.error('Failed to create tenant in DB, cleaning up Clerk org', { error: dbError });
     await deleteClerkOrganization(clerkOrg.id);
     throw dbError;
-  }
-
-  // Step 2b: Schedule the per-tenant trial-expiry job after the tx commits.
-  // Bull isn't transactional with Postgres; the daily sweep is the
-  // authoritative safety net if this scheduling fails.
-  try {
-    await scheduleTrialExpiry(tenant.id, trialEnd);
-  } catch (scheduleErr) {
-    logger.error('Failed to schedule trial-expiry job; daily sweep will recover', {
-      tenantId: tenant.id,
-      error: scheduleErr instanceof Error ? scheduleErr.message : String(scheduleErr),
-    });
   }
 
   // Step 3: Add the creating super admin as org admin so they can manage & invite
@@ -474,7 +454,7 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
 // stop further charges. The existing Stripe row is demoted to non-primary,
 // so its webhooks won't move Tenant.tier anymore (per § Primary-switch &
 // tier-cascade rules).
-const ALLOWED_TIERS = ['free', 'pro', 'premium', 'enterprise'] as const;
+const ALLOWED_TIERS = ['free', 'essential', 'pro', 'enterprise'] as const;
 type AllowedTier = (typeof ALLOWED_TIERS)[number];
 
 router.post('/tenants/:id/set-tier', asyncHandler(async (req: Request, res: Response) => {

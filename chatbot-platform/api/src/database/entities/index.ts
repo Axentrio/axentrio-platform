@@ -24,5 +24,8 @@ export {
   BillingPlanId,
 } from './TenantBillingAccount';
 export { BillingEvent, BillingEventProvider } from './BillingEvent';
+export { StripeWebhookEvent, type StripeWebhookEventStatus } from './StripeWebhookEvent';
+export { TenantTrialReservation } from './TenantTrialReservation';
 export { FaqSection, type FaqTranslation } from './FaqSection';
 export { FaqItem } from './FaqItem';
+export { DemandSignal } from './DemandSignal';

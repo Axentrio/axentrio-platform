@@ -13,7 +13,7 @@ import { Tenant } from './Tenant';
 
 export type BillingProviderName = 'stripe' | 'manual';
 export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
-export type BillingPlanId = 'free' | 'pro' | 'premium' | 'enterprise';
+export type BillingPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
 
 @Entity('tenant_billing_accounts')
 @Unique('UQ_tenant_billing_accounts_tenant_provider', ['tenantId', 'provider'])
@@ -75,6 +75,9 @@ export class TenantBillingAccount {
 
   @Column({ type: 'varchar', length: 255, nullable: true, name: 'billing_email' })
   billingEmail?: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true, name: 'vat_id' })
+  vatId?: string | null;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb", name: 'raw_provider_data' })
   rawProviderData!: Record<string, unknown>;

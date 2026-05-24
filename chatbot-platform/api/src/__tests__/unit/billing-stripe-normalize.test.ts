@@ -24,13 +24,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { StripeBillingProvider } from '../../billing/providers/stripe';
-import { PLANS } from '../../billing/plans';
+import { PLANS, getStripePriceIdFor } from '../../billing/plans';
 
 function makeProvider() {
   return new StripeBillingProvider();
 }
 
-const PRO_PRICE = PLANS.pro.providerPriceIds.stripe.usd;
+const PRO_PRICE = getStripePriceIdFor('pro');
 
 interface StripeSubscriptionPayload {
   id: string;
@@ -215,12 +215,12 @@ describe('normalizeWebhookEvent — Stripe status → normalized status table', 
 });
 
 describe('Plan-rank upgrade vs downgrade selection', () => {
-  it('Pro → Premium is an upgrade (higher rank)', () => {
-    expect(PLANS.premium.rank > PLANS.pro.rank).toBe(true);
+  it('Essential → Pro is an upgrade (higher rank)', () => {
+    expect(PLANS.pro.rank > PLANS.essential.rank).toBe(true);
   });
 
-  it('Premium → Pro is a downgrade (lower rank)', () => {
-    expect(PLANS.pro.rank < PLANS.premium.rank).toBe(true);
+  it('Pro → Essential is a downgrade (lower rank)', () => {
+    expect(PLANS.essential.rank < PLANS.pro.rank).toBe(true);
   });
 
   it('Same-plan diff is zero — service rejects with no_op_plan_change', () => {

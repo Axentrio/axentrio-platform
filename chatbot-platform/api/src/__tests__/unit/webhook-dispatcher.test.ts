@@ -6,6 +6,21 @@ vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+// Stub the persistence path — exercised in detail by webhook-delivery.test.ts
+vi.mock('../../database/data-source', () => ({
+  AppDataSource: {
+    isInitialized: true,
+    getRepository: vi.fn(() => ({
+      save: vi.fn().mockResolvedValue(undefined),
+      create: vi.fn((row: unknown) => row),
+    })),
+  },
+}));
+
+vi.mock('../../database/entities/WebhookDeliveryLog', () => ({
+  WebhookDeliveryLog: class WebhookDeliveryLog {},
+}));
+
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { deliverWebhook } from '../../webhooks/webhook.dispatcher';

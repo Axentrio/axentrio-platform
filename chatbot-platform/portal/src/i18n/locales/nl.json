@@ -21,11 +21,15 @@
   },
   "nav": {
     "inbox": "Inbox",
-    "aiContent": "AI & Inhoud",
+    "aiContent": "AI-bot & inhoud",
     "analytics": "Analyses",
     "team": "Team",
     "settings": "Instellingen",
     "helpFaq": "Help & FAQ",
+    "socialMedia": "Social media",
+    "leadCapture": "Leads vastleggen",
+    "bookings": "Boekingen",
+    "successMeter": "Succesmeter",
     "superAdmin": "Super Admin",
     "allTenants": "Alle klanten",
     "allUsers": "Alle gebruikers",
@@ -36,7 +40,68 @@
     "impersonating": "Personifiëren",
     "switchTenant": "Klant wisselen",
     "exitImpersonation": "Stoppen",
-    "signOut": "Afmelden"
+    "signOut": "Afmelden",
+    "lockTooltip": "Vergrendeld",
+    "unlockWith": {
+      "pro": "Unlock met Pro",
+      "enterprise": "Unlock met Enterprise"
+    }
+  },
+  "lockedPreview": {
+    "comparePlans": "Plannen vergelijken",
+    "tierStrip": {
+      "yourPlan": "Jouw plan",
+      "required": "Vereist",
+      "trial": "Proefperiode",
+      "trialValue": "14 dagen",
+      "afterTrial": "Na proefperiode",
+      "cancelAnytime": "Annuleer op elk moment vóór de afrekening"
+    }
+  },
+  "bookings": {
+    "locked": {
+      "title": "AI Boekingen",
+      "oneLiner": "Ontgrendel AI-boekingen met Pro en laat klanten rechtstreeks via chat afspraken inplannen.",
+      "bullets": {
+        "1": "Realtime beschikbaarheid gesynchroniseerd met je Cal.com-agenda.",
+        "2": "De bot verzamelt naam, e-mail, telefoon en notities — geboekt in minder dan een minuut.",
+        "3": "Bevestigingsmails, herinneringen en reschedule-links worden automatisch verstuurd."
+      }
+    },
+    "placeholder": {
+      "title": "Boekingen",
+      "subtitle": "De boekingenmodule landt hier in M5."
+    }
+  },
+  "leads": {
+    "locked": {
+      "title": "Leads vastleggen",
+      "oneLiner": "Leg de intentie van elke bezoeker vast en verander gesprekken in gekwalificeerde leads.",
+      "bullets": {
+        "1": "Verzamel automatisch naam, e-mail, telefoon en de vraag waarmee ze binnenkwamen.",
+        "2": "Aangepaste velden en routeringsregels zodat de juiste persoon de juiste lead krijgt.",
+        "3": "Exporteer leads naar CSV of je CRM via webhook."
+      }
+    },
+    "placeholder": {
+      "title": "Leads vastleggen",
+      "subtitle": "De leadcapture-module landt hier in M6."
+    }
+  },
+  "socialMedia": {
+    "locked": {
+      "title": "Social media",
+      "oneLiner": "Bereik klanten waar ze al zijn — verbind elk berichtenkanaal in één inbox.",
+      "bullets": {
+        "1": "Facebook Messenger, Instagram, WhatsApp en Telegram op één plek.",
+        "2": "AI-antwoorden en menselijke overdracht werken in elk kanaal.",
+        "3": "Verenigde gespreksgeschiedenis, ongeacht waar de chat is gestart."
+      }
+    },
+    "tiktok": {
+      "title": "TikTok",
+      "description": "Directe berichten voor TikTok Business staan op onze roadmap. Laat het ons weten en we mailen je zodra het beschikbaar is."
+    }
   },
   "roles": {
     "super_admin": "Super admin",
@@ -121,7 +186,7 @@
     },
     "widget": {
       "title": "Widget & merk",
-      "description": "Beheer je logo, weergavenaam en insluitcode",
+      "description": "Beheer je logo en weergavenaam",
       "saveFailed": "Brandingsinstellingen opslaan is mislukt",
       "loadFailed": "Brandingsinstellingen laden is mislukt.",
       "appearanceNotice": {
@@ -1307,7 +1372,7 @@
   "help": {
     "page": {
       "title": "Help & FAQ",
-      "subtitle": "Antwoorden op veelgestelde vragen over HandsOff. Zoek of blader per sectie."
+      "subtitle": "Antwoorden op veelgestelde vragen over Axentrio. Zoek of blader per sectie."
     },
     "search": {
       "placeholder": "Zoek in alle FAQ's…",
@@ -1706,5 +1771,22 @@
       "title": "Chatanalyse",
       "comingSoon": "Gedetailleerde chatanalyse binnenkort beschikbaar…"
     }
+  },
+  "badges": {
+    "essential": "Essential",
+    "pro": "Pro",
+    "enterprise": "Enterprise",
+    "comingSoon": "Binnenkort"
+  },
+  "notifyMe": {
+    "cta": "Houd me op de hoogte",
+    "notified": "Op de hoogte",
+    "error": "Kon je interesse niet registreren. Probeer het opnieuw."
+  },
+  "upgrade": {
+    "startTrial": "Start Pro-proefperiode",
+    "subscribeNow": "Abonneer op Essential",
+    "contactSales": "Neem contact op met sales",
+    "error": "Kon de afrekenpagina niet starten. Probeer het opnieuw."
   }
 }

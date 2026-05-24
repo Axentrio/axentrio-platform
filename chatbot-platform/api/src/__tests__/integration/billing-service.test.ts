@@ -157,7 +157,7 @@ describe('startCheckout', () => {
     const stub = installStripeStub();
 
     await expect(
-      startCheckout(tenantId, 'premium', {
+      startCheckout(tenantId, 'essential', {
         successUrl: 'https://example.com/s',
         cancelUrl: 'https://example.com/c',
       }),
@@ -226,7 +226,7 @@ describe('Stripe-targeting ops on manual-only tenants → no_stripe_subscription
   });
 
   it.each([
-    ['changePlan', () => changePlan(tenantId, 'premium')],
+    ['changePlan', () => changePlan(tenantId, 'essential')],
     ['cancelAtPeriodEnd', () => cancelAtPeriodEnd(tenantId)],
     ['undoCancel', () => undoCancel(tenantId)],
     ['undoPendingChange', () => undoPendingChange(tenantId)],
@@ -261,7 +261,7 @@ describe('changePlan validation chain', () => {
       { status: 'past_due' },
     );
     installStripeStub();
-    await expect(changePlan(tenantId, 'premium')).rejects.toMatchObject({
+    await expect(changePlan(tenantId, 'essential')).rejects.toMatchObject({
       code: 'past_due_block',
     });
   });
@@ -272,7 +272,7 @@ describe('changePlan validation chain', () => {
       { pendingPlanId: 'pro', pendingPlanEffectiveAt: new Date() },
     );
     installStripeStub();
-    await expect(changePlan(tenantId, 'premium')).rejects.toMatchObject({
+    await expect(changePlan(tenantId, 'essential')).rejects.toMatchObject({
       code: 'pending_change_exists',
     });
   });
@@ -312,14 +312,14 @@ describe('changePlan validation chain', () => {
           id: 'sub_sched_1',
           phases: [
             { start_date: 1_700_000_000, items: [{ price: { id: 'price_test_pro' } }] },
-            { start_date: 1_900_000_000, items: [{ price: { id: 'price_test_premium' } }] },
+            { start_date: 1_900_000_000, items: [{ price: { id: 'price_test_essential' } }] },
           ],
         },
         items: { data: [{ id: 'si_1', price: { id: 'price_test_pro' } }] },
       })),
     });
 
-    await expect(changePlan(tenantId, 'premium')).rejects.toMatchObject({
+    await expect(changePlan(tenantId, 'essential')).rejects.toMatchObject({
       code: 'pending_change_exists',
     });
   });
@@ -337,22 +337,29 @@ describe('changePlan validation chain', () => {
         schedule: null,
         // Single item — the provider reads .items.data[0].id and threads
         // it into the update call so Stripe knows WHICH line item to swap.
-        items: { data: [{ id: 'si_REAL_ID', price: { id: 'price_test_pro' } }] },
+        items: { data: [{ id: 'si_REAL_ID', price: { id: 'price_test_essential' } }] },
       })),
       subscriptionsUpdate: updateMock,
     });
 
-    // Pro → Premium is an upgrade. We expect:
+    // Essential → Pro is an upgrade under the new tier ranks (essential=1, pro=2).
+    // The beforeEach seeded the primary Stripe row at currentPlanId='pro'; downgrade
+    // it to 'essential' so this test exercises the upgrade direction.
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'stripe' },
+      { currentPlanId: 'essential' },
+    );
+    // Expect:
     //   stripe.subscriptions.update(subId, {
-    //     items: [{ id: 'si_REAL_ID', price: <premium price> }],
+    //     items: [{ id: 'si_REAL_ID', price: <pro price> }],
     //     proration_behavior: 'always_invoice',
     //   })
-    await changePlan(tenantId, 'premium');
+    await changePlan(tenantId, 'pro');
     expect(updateMock).toHaveBeenCalledOnce();
     const [subId, payload] = updateMock.mock.calls[0]! as unknown as [string, unknown];
     expect(subId).toBe('sub_change');
     expect(payload).toMatchObject({
-      items: [{ id: 'si_REAL_ID', price: 'price_test_premium' }],
+      items: [{ id: 'si_REAL_ID', price: 'price_test_pro' }],
       proration_behavior: 'always_invoice',
     });
   });
@@ -370,13 +377,13 @@ describe('changePlan validation chain', () => {
         items: {
           data: [
             { id: 'si_1', price: { id: 'price_test_pro' } },
-            { id: 'si_2', price: { id: 'price_test_premium' } },
+            { id: 'si_2', price: { id: 'price_test_essential' } },
           ],
         },
       })),
     });
 
-    await expect(changePlan(tenantId, 'premium')).rejects.toMatchObject({
+    await expect(changePlan(tenantId, 'essential')).rejects.toMatchObject({
       code: 'subscription_shape_unexpected',
     });
   });

@@ -13,39 +13,39 @@
  * signature checking. See § Webhook event handling middleware ordering
  * invariant in .scratch/plan-billing.md.
  *
- * Per-request flow (unified DB transaction, codex r4 #1):
+ * Per-request flow (PR9-locked: advisory-lock + SAVEPOINT, plus the
+ * existing per-tenant audit trail in billing_events):
  *   1. Provider allowlist check via registry → 404 on miss.
  *   2. `provider.verifyWebhook` → 400 on bad signature.
  *   3. `provider.normalizeWebhookEvent` → 200 on null (ignored event type).
- *   4. Open one DB tx that:
- *      - resolves the tenant via the per-event lookup rules,
- *      - inserts the audit row (with resolved tenant_id or NULL)
- *        ON CONFLICT (provider, provider_event_id) DO NOTHING — rollback
- *        and return 200 if no rows inserted (already processed),
- *      - dispatches to `handleNormalizedEvent` for state mutation,
- *      - commits.
- *   5. Any throw inside the tx rolls everything back so the provider's
- *      next retry succeeds and writes both audit + state.
+ *   4. `runStripeWebhookIdempotent` opens an outer tx with
+ *      pg_try_advisory_xact_lock(hashtext('webhook_event:stripe:' || event_id))
+ *      — on lock contention returns HTTP 503 + Retry-After: 5.
+ *      — on already-processed row returns HTTP 200 (replay short-circuit).
+ *      Otherwise upserts the chatbot_stripe_webhook_events row to 'processing'
+ *      and runs the callback inside a SAVEPOINT.
+ *   5. The callback resolves the matching tenant_billing_accounts row,
+ *      inserts the per-tenant audit row in billing_events (with the
+ *      provider-event uniqueness invariant), and dispatches
+ *      `handleNormalizedEvent` for state mutation.
+ *   6. Callback failure rolls back the SAVEPOINT, marks the
+ *      chatbot_stripe_webhook_events row 'failed' with last_error, commits the
+ *      outer tx so the status update is durable, and returns HTTP 500
+ *      (Stripe retries; next attempt re-enters Step A with attempts++).
+ *   7. Callback success marks the row 'processed', commits, returns HTTP 200.
  */
 
 import { Router, Request, Response } from 'express';
-import { runInTransaction } from '../database/data-source';
-import { handleNormalizedEvent, resolveEventRow } from '../billing/events';
+import {
+  handleNormalizedEvent,
+  resolveEventRow,
+  runStripeWebhookIdempotent,
+} from '../billing/events';
 import {
   getBillingProvider,
   isWebhookProvider,
 } from '../billing/provider-registry';
 import { logger } from '../utils/logger';
-
-// Internal sentinel used to abort the tx cleanly when ON CONFLICT skipped
-// the audit insert (event already processed). Declared at module scope so
-// the handler's instanceof check sees it.
-class AlreadyProcessedSignal extends Error {
-  constructor() {
-    super('billing_event_already_processed');
-    this.name = 'AlreadyProcessedSignal';
-  }
-}
 
 // Outcomes from handleNormalizedEvent that represent "applied normally"
 // (no extra audit payload needed). Anything outside this set gets a
@@ -98,19 +98,51 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
     return;
   }
 
-  try {
-    await runInTransaction(async (manager) => {
-      // 1. Resolve the matching tenant row (no mutation yet).
+  // Resolve the best-known tenantId for the row from the raw event metadata
+  // so it can be persisted on the chatbot_stripe_webhook_events row even before the
+  // handler resolves it for mutation. NULL is acceptable.
+  const rawEventForMeta = normalized.raw as
+    | {
+        data?: {
+          object?: {
+            metadata?: { tenantId?: string };
+            subscription?: { metadata?: { tenantId?: string } } | string;
+            customer?: { metadata?: { tenantId?: string } } | string;
+          };
+        };
+      }
+    | undefined;
+  const rawObj = rawEventForMeta?.data?.object;
+  const metadataTenantId =
+    (typeof rawObj?.metadata?.tenantId === 'string' ? rawObj.metadata.tenantId : null) ??
+    (rawObj?.subscription && typeof rawObj.subscription === 'object'
+      ? rawObj.subscription.metadata?.tenantId ?? null
+      : null) ??
+    (rawObj?.customer && typeof rawObj.customer === 'object'
+      ? rawObj.customer.metadata?.tenantId ?? null
+      : null);
+
+  const outcome = await runStripeWebhookIdempotent({
+    eventId: normalized.providerEventId,
+    eventType: normalized.type,
+    payload: normalized.raw as Record<string, unknown>,
+    subscriptionId: normalized.subscriptionId ?? null,
+    tenantId: metadataTenantId ?? null,
+    callback: async (manager) => {
+      // Existing per-tenant audit trail (billing_events) + state-mutation
+      // dispatch. Runs inside the wrapper's SAVEPOINT so any throw rolls
+      // back both the billing_events insert AND the local mutations while
+      // the outer wrapper still commits the status='failed' update.
       const matched = await resolveEventRow(manager, normalized);
       const resolvedTenantId = matched?.tenantId ?? null;
 
-      // 2. Idempotency-gated audit insert.
-      // The unique index on (provider, provider_event_id) is PARTIAL
-      // (WHERE provider_event_id IS NOT NULL) so Postgres requires the same
-      // WHERE predicate on ON CONFLICT to use it as the arbiter index.
-      // Without the WHERE, the INSERT fails with "no unique or exclusion
-      // constraint matching the ON CONFLICT specification" — even though
-      // provider_event_id is always non-null at this callsite.
+      // Idempotency-gated audit insert. The unique index on
+      // (provider, provider_event_id) is PARTIAL (WHERE provider_event_id
+      // IS NOT NULL) so Postgres requires the same WHERE predicate on
+      // ON CONFLICT to use it as the arbiter index. Without the WHERE,
+      // the INSERT fails with "no unique or exclusion constraint matching
+      // the ON CONFLICT specification" — even though provider_event_id is
+      // always non-null at this callsite.
       const inserted: Array<{ id: string }> = await manager.query(
         `INSERT INTO billing_events
            (tenant_id, provider, provider_event_id, event_type, payload, raw_payload)
@@ -133,25 +165,32 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
         ],
       );
 
-      if (inserted.length === 0) {
-        // Already processed — throw the sentinel to rollback (no-op).
-        throw new AlreadyProcessedSignal();
-      }
+      // Note: the new chatbot_stripe_webhook_events row is the canonical idempotency
+      // gate (PR9). If billing_events insert returns zero rows it means a
+      // previous attempt already wrote the audit but failed to finalize the
+      // status row — proceed with the handler dispatch anyway so the state
+      // mutation can be applied.
 
-      // 3. State mutation — may throw, in which case both audit + state
-      // roll back and the provider's retry will succeed.
-      const outcome = await handleNormalizedEvent(manager, normalized, matched);
+      const handlerOutcome = await handleNormalizedEvent(manager, normalized, matched);
+
+      // Special case: checkout.session.completed unresolved-tenant path —
+      // finalize the wrapper's chatbot_stripe_webhook_events row as 'processed' with
+      // a last_error message so Stripe doesn't retry, but ops can still
+      // surface the failure in event-log queries.
+      const finalizeAsProcessedWithError =
+        handlerOutcome.outcome === 'checkout_session_unresolved_tenant'
+          ? 'cannot resolve tenant from checkout session'
+          : undefined;
 
       // Record the outcome marker on the audit row for support
-      // traceability when the outcome is non-standard (mismatch, unknown
-      // price, no matching row, etc.).
-      if (!NORMAL_OUTCOMES.has(outcome.outcome)) {
+      // traceability when the outcome is non-standard.
+      if (inserted.length > 0 && !NORMAL_OUTCOMES.has(handlerOutcome.outcome)) {
         await manager.query(
           `UPDATE billing_events
              SET payload = payload || $1::jsonb
            WHERE id = $2`,
           [
-            JSON.stringify({ outcome: outcome.outcome, ...(outcome.meta ?? {}) }),
+            JSON.stringify({ outcome: handlerOutcome.outcome, ...(handlerOutcome.meta ?? {}) }),
             inserted[0].id,
           ],
         );
@@ -162,22 +201,34 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
         eventType: normalized.type,
         eventId: normalized.providerEventId,
         tenantId: resolvedTenantId,
-        outcome: outcome.outcome,
+        outcome: handlerOutcome.outcome,
       });
-    });
 
-    res.status(200).json({ received: true });
-  } catch (err) {
-    if (err instanceof AlreadyProcessedSignal) {
+      return {
+        outcome: handlerOutcome.outcome,
+        meta: handlerOutcome.meta,
+        finalizeAsProcessedWithError,
+      };
+    },
+  });
+
+  switch (outcome.status) {
+    case 'lock_unavailable':
+      // Parallel worker is mid-processing this event_id. Tell Stripe to
+      // back off and retry — next attempt either short-circuits cleanly
+      // (status='processed') or re-enters the loop if the locked
+      // processor failed.
+      res.setHeader('Retry-After', '5');
+      res.status(503).json({ error: 'Concurrent processing in progress' });
+      return;
+    case 'replay':
       res.status(200).json({ alreadyProcessed: true });
       return;
-    }
-    logger.error('Billing webhook processing failed; provider will retry', {
-      provider: providerName,
-      eventType: normalized.type,
-      eventId: normalized.providerEventId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    res.status(500).json({ error: 'Webhook processing failed' });
+    case 'processed':
+      res.status(200).json({ received: true, outcome: outcome.outcome });
+      return;
+    case 'failed':
+      res.status(500).json({ error: 'Webhook processing failed' });
+      return;
   }
 });

@@ -1,28 +1,28 @@
 /**
- * Billing service — high-level operations called by routes, jobs, and
- * tenant-create flows.
+ * Billing service — high-level operations called by routes and tenant-
+ * create flows.
  *
- * v1 surface:
- *   - seedTrialAccount              (step 4)
- *   - expireTrialIfStillManual      (step 5)
- *   - findExpiredTrialCandidates    (step 5 — daily sweep)
- *   - sweepExpiredTrials            (step 5)
- *   - startCheckout                 (step 8 — Stripe-driven)
- *   - openCustomerPortal            (step 8 — Stripe-driven)
- *   - changePlan                    (step 8 — Stripe-driven)
- *   - cancelAtPeriodEnd             (step 8 — Stripe-driven)
- *   - undoCancel                    (step 8 — Stripe-driven)
- *   - undoPendingChange             (step 8 — Stripe-driven)
- *   - updateBillingEmail            (step 8 — local-only, self-audit)
- *   - getBillingState               (step 8 — read-only)
- *   - setEnterpriseManual           (step 8 — local-only, self-audit)
+ * v1 surface (post-reverse-trial removal — PR7):
+ *   - startCheckout                 (Stripe-driven)
+ *   - openCustomerPortal            (Stripe-driven)
+ *   - changePlan                    (Stripe-driven)
+ *   - cancelAtPeriodEnd             (Stripe-driven)
+ *   - undoCancel                    (Stripe-driven)
+ *   - undoPendingChange             (Stripe-driven)
+ *   - updateBillingEmail            (local-only, self-audit)
+ *   - updateVatId                   (PR5 — local + Stripe Tax ID sync)
+ *   - getBillingState               (read-only)
+ *   - setTierManual / setEnterpriseManual (local-only, self-audit)
  *
- * Plan: .scratch/plan-billing.md § Reverse-trial signup flow,
- *       § Implementation outline steps 4, 5, 8,
- *       § Service-level idempotency & audit-row rules.
+ * The reverse-trial flow (seedTrialAccount / expireTrialIfStillManual /
+ * sweepExpiredTrials) was retired in PR7: trial state is now owned by
+ * Stripe (forward trial via Checkout `trial_period_days`), and the
+ * `chatbot_tenant_trial_reservations` table is the source of truth for
+ * "has this tenant consumed their first-signup-only trial?".
+ *
+ * Plan: .scratch/plan-m0-foundation-reshape.md § PR6, § PR7.
  */
 
-import { EntityManager } from 'typeorm';
 import { AppDataSource, runInTransaction } from '../database/data-source';
 import { BillingEvent } from '../database/entities/BillingEvent';
 import { Tenant, TenantTier } from '../database/entities/Tenant';
@@ -32,220 +32,11 @@ import {
   TenantBillingAccount,
 } from '../database/entities/TenantBillingAccount';
 import { User } from '../database/entities/User';
-import { config } from '../config/environment';
-import { logger } from '../utils/logger';
 import { getBillingProvider } from './provider-registry';
 import { getStripeClient } from './providers/stripe';
 import { BillingProviderError, CheckoutablePlanId } from './types';
 
 const STRIPE = 'stripe' as const;
-
-const TRIAL_PLAN_ID = 'pro' as const;
-
-/**
- * Seed a fresh tenant with a manual, trialing-Pro billing account.
- *
- * Idempotent — uses `ON CONFLICT (tenant_id, provider) DO NOTHING` so
- * concurrent callers (admin-create racing autoProvision, retries) cannot
- * double-seed. Only writes the `trial.created` audit + sets `Tenant.tier`
- * when this call is the one that actually inserts the billing row.
- *
- * Called inside the caller's transaction so a failure rolls both back.
- *
- * Returns `{ trialEnd }` if this call seeded the row, or `null` if a
- * billing row already existed (caller should NOT schedule a duplicate
- * expiry job in that case).
- *
- * Plan: .scratch/plan-billing.md § Reverse-trial signup flow.
- */
-export async function seedTrialAccount(
-  tenantId: string,
-  manager: EntityManager,
-): Promise<{ trialEnd: Date } | null> {
-  const trialEnd = new Date(Date.now() + config.billing.trialDays * 24 * 60 * 60 * 1000);
-
-  // Use raw SQL with explicit RETURNING so the "did we actually insert?"
-  // signal is unambiguous. (TypeORM's `.orIgnore()` does not always populate
-  // identifiers in a way we can rely on for conflict detection.)
-  const inserted: Array<{ id: string }> = await manager.query(
-    `INSERT INTO tenant_billing_accounts
-       (tenant_id, provider, status, current_plan_id, trial_end, is_primary, raw_provider_data)
-     VALUES ($1, $2, $3, $4, $5, $6, '{}'::jsonb)
-     ON CONFLICT (tenant_id, provider) DO NOTHING
-     RETURNING id`,
-    [tenantId, 'manual', 'trialing', TRIAL_PLAN_ID, trialEnd, true],
-  );
-
-  if (inserted.length === 0) {
-    return null;
-  }
-
-  // Only on a fresh seed: ensure tier reflects the trial plan + write audit.
-  await manager.update(Tenant, { id: tenantId }, { tier: TRIAL_PLAN_ID });
-
-  const event = manager.create(BillingEvent, {
-    tenantId,
-    provider: 'system',
-    eventType: 'trial.created',
-    payload: {
-      planId: TRIAL_PLAN_ID,
-      trialEnd: trialEnd.toISOString(),
-      trialDays: config.billing.trialDays,
-    },
-  });
-  await manager.save(event);
-
-  return { trialEnd };
-}
-
-/**
- * Per-tenant trial-expiry check. Idempotent — safe to invoke from both the
- * delayed job (scheduled at tenant-create) and the daily safety-net sweep.
- *
- * Downgrade-only-if:
- *   - the tenant's primary billing row is still manual / trialing / Pro,
- *   - AND no non-manual row younger than 24h exists,
- *   - AND no non-manual row with status in (trialing/active/past_due) exists,
- *   - AND no recent `provider='stripe'` `billing_events` row exists (24h).
- *
- * On downgrade: sets `Tenant.tier='free'`, manual row's status='none' and
- * current_plan_id='free', writes a `billing_events` audit row.
- *
- * Plan: .scratch/plan-billing.md § Reverse-trial signup flow → Trial-expiry job.
- */
-export async function expireTrialIfStillManual(tenantId: string): Promise<{
-  downgraded: boolean;
-  reason?: string;
-}> {
-  return runInTransaction(async (manager) => {
-    const repo = manager.getRepository(TenantBillingAccount);
-
-    // Lock all of this tenant's billing rows for the duration of the tx.
-    const rows = await repo
-      .createQueryBuilder('a')
-      .setLock('pessimistic_write')
-      .where('a.tenant_id = :tenantId', { tenantId })
-      .getMany();
-
-    const primary = rows.find((r) => r.isPrimary === true);
-    if (
-      !primary ||
-      primary.provider !== 'manual' ||
-      primary.status !== 'trialing' ||
-      primary.currentPlanId !== TRIAL_PLAN_ID
-    ) {
-      return { downgraded: false, reason: 'primary_not_eligible' };
-    }
-
-    const TWENTY_FOUR_H_MS = 24 * 60 * 60 * 1000;
-    const cutoff = new Date(Date.now() - TWENTY_FOUR_H_MS);
-    const hasFreshNonManualRow = rows.some(
-      (r) => r.provider !== 'manual' && r.createdAt > cutoff,
-    );
-    if (hasFreshNonManualRow) {
-      return { downgraded: false, reason: 'fresh_non_manual_row' };
-    }
-
-    const hasActiveLikeNonManualRow = rows.some(
-      (r) =>
-        r.provider !== 'manual' &&
-        (r.status === 'trialing' || r.status === 'active' || r.status === 'past_due'),
-    );
-    if (hasActiveLikeNonManualRow) {
-      return { downgraded: false, reason: 'non_manual_active_like' };
-    }
-
-    const recentStripeEvent = await manager
-      .getRepository(BillingEvent)
-      .createQueryBuilder('e')
-      .where('e.tenant_id = :tenantId', { tenantId })
-      .andWhere('e.provider = :provider', { provider: 'stripe' })
-      .andWhere('e.created_at > :cutoff', { cutoff })
-      .limit(1)
-      .getOne();
-    if (recentStripeEvent) {
-      return { downgraded: false, reason: 'recent_stripe_event' };
-    }
-
-    // Downgrade.
-    await manager.update(
-      TenantBillingAccount,
-      { id: primary.id },
-      { status: 'none', currentPlanId: 'free' },
-    );
-    await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
-
-    const event = manager.create(BillingEvent, {
-      tenantId,
-      provider: 'system',
-      eventType: 'trial.expired',
-      payload: {
-        downgradedFrom: TRIAL_PLAN_ID,
-        downgradedTo: 'free',
-      },
-    });
-    await manager.save(event);
-
-    return { downgraded: true };
-  });
-}
-
-/**
- * Daily safety-net sweep — returns tenant IDs whose trials have expired
- * and still match the manual / trialing / Pro precondition. Caller
- * dispatches per-tenant expiry jobs for each one (or invokes the service
- * function directly — both are idempotent).
- *
- * The narrow predicate (matches what `expireTrialIfStillManual` checks
- * before downgrading) keeps the dispatch list small — the per-tenant
- * function still re-checks under row lock before committing.
- */
-export async function findExpiredTrialCandidates(): Promise<string[]> {
-  const rows: Array<{ tenant_id: string }> = await AppDataSource.query(
-    `SELECT tenant_id
-       FROM tenant_billing_accounts
-      WHERE provider = 'manual'
-        AND is_primary = true
-        AND status = 'trialing'
-        AND current_plan_id = 'pro'
-        AND trial_end IS NOT NULL
-        AND trial_end < now()`,
-  );
-  return rows.map((r) => r.tenant_id);
-}
-
-/**
- * Convenience: run the sweep and process each candidate sequentially.
- * Returns counts for telemetry. Errors per-tenant are logged but do not
- * abort the sweep.
- */
-export async function sweepExpiredTrials(): Promise<{
-  considered: number;
-  downgraded: number;
-  skipped: number;
-  failed: number;
-}> {
-  const candidates = await findExpiredTrialCandidates();
-  let downgraded = 0;
-  let skipped = 0;
-  let failed = 0;
-
-  for (const tenantId of candidates) {
-    try {
-      const result = await expireTrialIfStillManual(tenantId);
-      if (result.downgraded) downgraded += 1;
-      else skipped += 1;
-    } catch (err) {
-      failed += 1;
-      logger.error('Trial sweep: per-tenant expiry failed', {
-        tenantId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  return { considered: candidates.length, downgraded, skipped, failed };
-}
 
 // ---------------------------------------------------------------------------
 // Step 8 — high-level service operations on top of BillingProvider adapters.
@@ -339,7 +130,7 @@ export async function startCheckout(
   // Step 1: defensive plan-id validation. The TS type prevents 'free' /
   // 'enterprise' at the callsite, but runtime callers (route handlers
   // parsing JSON) need a guard too.
-  if (planId !== 'pro' && planId !== 'premium') {
+  if (planId !== 'essential' && planId !== 'pro') {
     throw new BillingProviderError('checkout_plan_invalid', STRIPE, { planId });
   }
 
@@ -446,7 +237,7 @@ export async function changePlan(
   tenantId: string,
   newPlanId: CheckoutablePlanId,
 ): Promise<void> {
-  if (newPlanId !== 'pro' && newPlanId !== 'premium') {
+  if (newPlanId !== 'essential' && newPlanId !== 'pro') {
     throw new BillingProviderError('checkout_plan_invalid', STRIPE, {
       planId: newPlanId,
     });
@@ -596,6 +387,97 @@ export async function updateBillingEmail(
         previousEmail,
         newEmail: email,
         provider: primary.provider,
+      },
+    });
+    await manager.save(event);
+
+    return { changed: true };
+  });
+}
+
+/**
+ * Update the tenant's VAT ID. Plan: § PR5 — `vatId` column on
+ * `TenantBillingAccount` + lifecycle.
+ *
+ * Behaviour:
+ *   - If local current value equals new value → idempotent no-op (no Stripe
+ *     calls).
+ *   - If `customer_id IS NULL` (no Stripe Customer yet) → store locally only.
+ *     We do NOT call `stripe.customers.create` eagerly here; the value flows
+ *     through to Stripe via `tax_id_data` on the first Checkout's
+ *     Customer-create.
+ *   - If `customer_id IS NOT NULL` and new value is non-null →
+ *     list existing tax IDs, delete each, then create one with
+ *     `{ type: 'eu_vat', value: newVatId }`. Net result: exactly one tax ID
+ *     on the Stripe Customer matching the local column.
+ *   - If `customer_id IS NOT NULL` and new value is null/empty → list and
+ *     delete all existing tax IDs, set local to null.
+ *
+ * v1 is EU-only — `type` is hardcoded to `'eu_vat'` everywhere.
+ *
+ * The Stripe calls (list/delete/create) happen INSIDE the tx so a failure
+ * rolls back the local row update and audit insert atomically — same
+ * pattern as `updateBillingEmail`.
+ */
+export async function updateVatId(
+  tenantId: string,
+  vatId: string | null,
+): Promise<{ changed: boolean }> {
+  // Normalize '' → null at the boundary so the rest of the flow only has
+  // to think about null vs string.
+  const newVatId = vatId === '' ? null : vatId;
+
+  return runInTransaction(async (manager) => {
+    const rows = await manager
+      .getRepository(TenantBillingAccount)
+      .createQueryBuilder('a')
+      .setLock('pessimistic_write')
+      .where('a.tenant_id = :tenantId', { tenantId })
+      .getMany();
+
+    const primary = rows.find((r) => r.isPrimary === true);
+    if (!primary) {
+      throw new BillingProviderError('no_active_account', STRIPE, { tenantId });
+    }
+
+    const previousVatId = primary.vatId ?? null;
+    if (previousVatId === newVatId) {
+      return { changed: false };
+    }
+
+    await manager.update(
+      TenantBillingAccount,
+      { id: primary.id },
+      { vatId: newVatId },
+    );
+
+    // Sync to Stripe Tax IDs — only when a Stripe Customer already exists.
+    // No Stripe Customer yet means the VAT ID is stored locally and flows
+    // through to Stripe via `tax_id_data` on the first Checkout's
+    // Customer-create (see StripeBillingProvider.createCustomer).
+    if (primary.customerId) {
+      const stripe = getStripeClient();
+      const existing = await stripe.customers.listTaxIds(primary.customerId);
+      for (const taxId of existing.data) {
+        await stripe.customers.deleteTaxId(primary.customerId, taxId.id);
+      }
+      if (newVatId) {
+        await stripe.customers.createTaxId(primary.customerId, {
+          type: 'eu_vat',
+          value: newVatId,
+        });
+      }
+    }
+
+    const event = manager.create(BillingEvent, {
+      tenantId,
+      provider: 'system',
+      eventType: 'billing.vat_id.updated',
+      payload: {
+        previousVatId,
+        newVatId,
+        provider: primary.provider,
+        syncedToStripe: !!primary.customerId,
       },
     });
     await manager.save(event);

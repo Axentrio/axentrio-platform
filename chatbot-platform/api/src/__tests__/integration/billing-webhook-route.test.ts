@@ -26,13 +26,13 @@ import {
   StripeBillingProvider,
 } from '../../billing/providers/stripe';
 import { registerBillingProvider } from '../../billing/provider-registry';
-import { PLANS } from '../../billing/plans';
+import { getStripePriceIdFor } from '../../billing/plans';
 import {
   createTestTenant,
   createTestBillingAccount,
 } from '../helpers/factories';
 
-const PRO_PRICE = PLANS.pro.providerPriceIds.stripe.usd ?? 'price_test_pro';
+const PRO_PRICE = getStripePriceIdFor('pro') ?? 'price_test_pro';
 
 // server.ts only registers the Stripe provider inside startServer(), which
 // integration tests don't run — register here.
@@ -261,7 +261,7 @@ describe('POST /api/v1/webhooks/billing/stripe — rollback on thrown mutation',
           { start_date: 1_700_000_000, items: [{ price: { id: PRO_PRICE } }] },
           {
             start_date: 1_900_000_000,
-            items: [{ price: { id: 'price_test_premium' } }],
+            items: [{ price: { id: 'price_test_essential' } }],
           },
         ],
       });
@@ -317,7 +317,7 @@ describe('POST /api/v1/webhooks/billing/stripe — rollback on thrown mutation',
     ).findOneByOrFail({ tenantId, provider: 'stripe' });
     expect(stripeRow.subscriptionId).toBe('sub_rollback');
     // Pending plan populated from the schedule's phase 2 price.
-    expect(stripeRow.pendingPlanId).toBe('premium');
+    expect(stripeRow.pendingPlanId).toBe('essential');
   });
 });
 

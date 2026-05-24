@@ -228,7 +228,7 @@ function ChatWidget({
         </div>
         <div className="text-center mt-2">
           <span className="text-[10px] text-[#c7c1b4] tracking-wide">
-            Powered by <span className="font-medium text-[#b5ae9e]">HandsOff</span>
+            Powered by <span className="font-medium text-[#b5ae9e]">Axentrio</span>
           </span>
         </div>
       </div>

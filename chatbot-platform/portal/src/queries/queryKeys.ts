@@ -84,6 +84,9 @@ export const queryKeys = {
     all: () => ['billing'] as const,
     state: () => [...queryKeys.billing.all(), 'state'] as const,
   },
+  entitlements: {
+    all: () => ['entitlements'] as const,
+  },
   faq: {
     all: () => ['faq'] as const,
     tree: () => [...queryKeys.faq.all(), 'tree'] as const,

@@ -14,7 +14,6 @@ let webhookQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let fileQueue: Queue | null = null;
 let knowledgeQueue: Queue | null = null;
-let billingQueue: Queue | null = null;
 let deadLetterQueue: Queue | null = null;
 
 // Fallback flag: when true, jobs are processed synchronously (no Redis)
@@ -81,14 +80,11 @@ export const initializeQueues = async (): Promise<void> => {
     // Knowledge processing queue
     knowledgeQueue = new Bull('knowledge-processing', createQueueOptions('knowledge-processing'));
 
-    // Billing queue (trial expiry + daily sweep — see src/billing/trial-expiry-job.ts)
-    billingQueue = new Bull('billing', createQueueOptions('billing'));
-
     // Dead letter queue for failed jobs
     deadLetterQueue = new Bull('dead-letter', createQueueOptions('dead-letter'));
 
     // Set up event handlers for all queues
-    [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, billingQueue, deadLetterQueue].forEach(
+    [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, deadLetterQueue].forEach(
       (queue) => {
         if (!queue) return;
 
@@ -145,7 +141,6 @@ export const initializeQueues = async (): Promise<void> => {
     notificationQueue = null;
     fileQueue = null;
     knowledgeQueue = null;
-    billingQueue = null;
     deadLetterQueue = null;
   }
 };
@@ -325,9 +320,6 @@ export const registerProcessor = (
     case 'knowledge-processing':
       queue = knowledgeQueue;
       break;
-    case 'billing':
-      queue = billingQueue;
-      break;
   }
 
   if (queue) {
@@ -370,8 +362,6 @@ export const getQueue = (queueName: string): Queue | null => {
       return fileQueue;
     case 'knowledge-processing':
       return knowledgeQueue;
-    case 'billing':
-      return billingQueue;
     case 'dead-letter':
       return deadLetterQueue;
     default:
@@ -478,7 +468,7 @@ export const resumeQueue = async (queueName: string): Promise<void> => {
  * Close all queues
  */
 export const closeQueues = async (): Promise<void> => {
-  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, billingQueue, deadLetterQueue];
+  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, deadLetterQueue];
 
   await Promise.all(
     queues.map(async (queue) => {

@@ -15,23 +15,28 @@
  *   - subscription_id persistence on out-of-order delivery
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AppDataSource, runInTransaction } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 import { handleNormalizedEvent, resolveEventRow } from '../../billing/events';
-import { PLANS } from '../../billing/plans';
+import { getStripePriceIdFor } from '../../billing/plans';
+import { setStripeClient } from '../../billing/providers/stripe';
 import { NormalizedEvent, NormalizedStatus } from '../../billing/types';
 import {
   createTestTenant,
   createTestBillingAccount,
 } from '../helpers/factories';
 
+afterEach(() => {
+  setStripeClient(null);
+  vi.restoreAllMocks();
+});
+
 // -- payload builders -------------------------------------------------------
 
-const PRO_PRICE = PLANS.pro.providerPriceIds.stripe.usd ?? 'price_test_pro';
-const PREMIUM_PRICE =
-  PLANS.premium.providerPriceIds.stripe.usd ?? 'price_test_premium';
+const PRO_PRICE = getStripePriceIdFor('pro') ?? 'price_test_pro';
+const ESSENTIAL_PRICE = getStripePriceIdFor('essential') ?? 'price_test_essential';
 
 function makeSubscriptionEvent(opts: {
   type: 'subscription.created' | 'subscription.updated' | 'subscription.deleted';
@@ -59,8 +64,8 @@ function makeSubscriptionEvent(opts: {
   const planId =
     priceId === PRO_PRICE
       ? 'pro'
-      : priceId === PREMIUM_PRICE
-        ? 'premium'
+      : priceId === ESSENTIAL_PRICE
+        ? 'essential'
         : 'free';
   const periodEnd = opts.currentPeriodEnd ?? 1_900_000_000;
   return {
@@ -72,7 +77,7 @@ function makeSubscriptionEvent(opts: {
       customerId: opts.customerId,
       subscriptionId: opts.subscriptionId,
       status,
-      currentPlanId: status === 'cancelled' || status === 'none' ? 'free' : (planId as 'pro' | 'premium'),
+      currentPlanId: status === 'cancelled' || status === 'none' ? 'free' : (planId as 'essential' | 'pro'),
       currentPeriodEnd: new Date(periodEnd * 1000),
       cancelAtPeriodEnd: opts.cancelAtPeriodEnd ?? false,
       pendingPlanId: null,
@@ -173,7 +178,7 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
       subscriptionId: 'sub_promote_active',
       customerId: 'cus_test_setup',
       stripeStatus: 'active',
-      priceId: PREMIUM_PRICE,
+      priceId: ESSENTIAL_PRICE,
     });
 
     await runInTransaction(async (manager) => {
@@ -182,7 +187,7 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
       expect(outcome.outcome).toBe('promoted_primary');
     });
 
-    expect(await loadTenantTier(tenantId)).toBe('premium');
+    expect(await loadTenantTier(tenantId)).toBe('essential');
   });
 
   it('subscription.created with status=incomplete does NOT promote (row stays non-primary)', async () => {
@@ -249,7 +254,7 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
     expect(await loadTenantTier(tenantId)).toBe('pro'); // tier preserved
   });
 
-  it('terminal status on a non-primary row updates row-local fields but NOT Tenant.tier', async () => {
+  it('subscription.deleted on non-primary row cancels row-local fields but NOT Tenant.tier (PR9)', async () => {
     // Set up: manual primary (Enterprise), older Stripe row non-primary.
     await AppDataSource.getRepository(Tenant).update({ id: tenantId }, { tier: 'enterprise' });
     // Manual is already isPrimary=true from beforeEach — just adjust plan/status.
@@ -267,6 +272,13 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
       },
     );
 
+    // PR9: subscription.deleted now refetches from Stripe. Mock the client
+    // so the refetch resolves (resource_missing path is exercised
+    // separately).
+    setStripeClient({
+      subscriptions: { retrieve: vi.fn().mockResolvedValue({ id: 'sub_demoted', status: 'canceled' }) },
+    } as never);
+
     const event = makeSubscriptionEvent({
       type: 'subscription.deleted',
       subscriptionId: 'sub_demoted',
@@ -278,7 +290,7 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
     await runInTransaction(async (manager) => {
       const matched = await resolveEventRow(manager, event);
       const outcome = await handleNormalizedEvent(manager, event, matched);
-      expect(outcome.outcome).toBe('non_primary_row_updated');
+      expect(outcome.outcome).toBe('tenant_cancelled');
     });
 
     const rows = await loadBilling(tenantId);
@@ -286,7 +298,8 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
     expect(stripeRow.status).toBe('cancelled');
     expect(stripeRow.currentPlanId).toBe('free');
     expect(stripeRow.isPrimary).toBe(false);
-    expect(await loadTenantTier(tenantId)).toBe('enterprise'); // untouched
+    expect(stripeRow.subscriptionId).toBeNull(); // PR9 clears subscriptionId
+    expect(await loadTenantTier(tenantId)).toBe('enterprise'); // untouched (non-primary)
   });
 });
 
@@ -320,7 +333,7 @@ describe('handleNormalizedEvent — audit-only paths', () => {
       subscriptionId: 'sub_DIFFERENT', // mismatch — row has sub_audit_only
       customerId: 'cus_audit_only',
       stripeStatus: 'active',
-      priceId: PREMIUM_PRICE,
+      priceId: ESSENTIAL_PRICE,
     });
 
     await runInTransaction(async (manager) => {

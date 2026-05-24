@@ -41,23 +41,23 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "what-is-handsoff",
         "position": 0,
         "question": {
-          "en": "What is HandsOff?",
-          "nl": "Wat is HandsOff?",
-          "fr": "Qu'est-ce que HandsOff ?"
+          "en": "What is Axentrio?",
+          "nl": "Wat is Axentrio?",
+          "fr": "Qu'est-ce que Axentrio ?"
         },
         "answer": {
-          "en": "HandsOff is an AI-powered automation platform that helps businesses automate customer conversations across multiple channels. It combines an intelligent AI chatbot, live agent handoff, analytics, and team management tools into one unified dashboard.",
-          "nl": "HandsOff is een AI-gedreven automatiseringsplatform dat bedrijven helpt klantgesprekken over meerdere kanalen te automatiseren. Het combineert een intelligente AI-chatbot, overdracht naar live agents, analyses en team-managementtools in één centraal dashboard.",
-          "fr": "HandsOff est une plateforme d'automatisation propulsée par l'IA qui aide les entreprises à automatiser les conversations clients sur plusieurs canaux. Elle combine un chatbot IA intelligent, le transfert vers un agent humain, des analyses et des outils de gestion d'équipe au sein d'un dashboard unifié."
+          "en": "Axentrio is an AI-powered automation platform that helps businesses automate customer conversations across multiple channels. It combines an intelligent AI chatbot, live agent handoff, analytics, and team management tools into one unified dashboard.",
+          "nl": "Axentrio is een AI-gedreven automatiseringsplatform dat bedrijven helpt klantgesprekken over meerdere kanalen te automatiseren. Het combineert een intelligente AI-chatbot, overdracht naar live agents, analyses en team-managementtools in één centraal dashboard.",
+          "fr": "Axentrio est une plateforme d'automatisation propulsée par l'IA qui aide les entreprises à automatiser les conversations clients sur plusieurs canaux. Elle combine un chatbot IA intelligent, le transfert vers un agent humain, des analyses et des outils de gestion d'équipe au sein d'un dashboard unifié."
         }
       },
       {
         "slug": "how-to-get-started",
         "position": 1,
         "question": {
-          "en": "How do I get started with HandsOff?",
-          "nl": "Hoe ga ik aan de slag met HandsOff?",
-          "fr": "Comment démarrer avec HandsOff ?"
+          "en": "How do I get started with Axentrio?",
+          "nl": "Hoe ga ik aan de slag met Axentrio?",
+          "fr": "Comment démarrer avec Axentrio ?"
         },
         "answer": {
           "en": "After signing up, follow the setup checklist in your Analytics dashboard: (1) Enable your AI Assistant, (2) Configure your brand voice and bot identity, (3) Upload knowledge base documents, (4) Connect your booking calendar (optional), and (5) Set up automations. Each step has a direct link to the relevant settings page.",
@@ -69,28 +69,28 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "what-channels",
         "position": 2,
         "question": {
-          "en": "What channels can I connect to HandsOff?",
-          "nl": "Welke kanalen kan ik aan HandsOff koppelen?",
-          "fr": "Quels canaux puis-je connecter à HandsOff ?"
+          "en": "What channels can I connect to Axentrio?",
+          "nl": "Welke kanalen kan ik aan Axentrio koppelen?",
+          "fr": "Quels canaux puis-je connecter à Axentrio ?"
         },
         "answer": {
-          "en": "HandsOff currently supports website chat widgets, Telegram bots, and Facebook Pages. You can manage all conversations from these channels in a single unified Inbox. Additional channels are added regularly.",
-          "nl": "HandsOff ondersteunt momenteel chatwidgets voor websites, Telegram-bots en Facebook-pagina's. Je kan alle gesprekken vanuit deze kanalen beheren in één centrale Inbox. Er worden regelmatig nieuwe kanalen toegevoegd.",
-          "fr": "HandsOff prend actuellement en charge les widgets de chat pour sites web, les bots Telegram et les pages Facebook. Vous pouvez gérer toutes les conversations issues de ces canaux dans une Boîte de réception unifiée. De nouveaux canaux sont ajoutés régulièrement."
+          "en": "Axentrio currently supports website chat widgets, Telegram bots, and Facebook Pages. You can manage all conversations from these channels in a single unified Inbox. Additional channels are added regularly.",
+          "nl": "Axentrio ondersteunt momenteel chatwidgets voor websites, Telegram-bots en Facebook-pagina's. Je kan alle gesprekken vanuit deze kanalen beheren in één centrale Inbox. Er worden regelmatig nieuwe kanalen toegevoegd.",
+          "fr": "Axentrio prend actuellement en charge les widgets de chat pour sites web, les bots Telegram et les pages Facebook. Vous pouvez gérer toutes les conversations issues de ces canaux dans une Boîte de réception unifiée. De nouveaux canaux sont ajoutés régulièrement."
         }
       },
       {
         "slug": "need-coding",
         "position": 3,
         "question": {
-          "en": "Do I need coding skills to use HandsOff?",
-          "nl": "Heb ik programmeerkennis nodig om HandsOff te gebruiken?",
-          "fr": "Faut-il des compétences en programmation pour utiliser HandsOff ?"
+          "en": "Do I need coding skills to use Axentrio?",
+          "nl": "Heb ik programmeerkennis nodig om Axentrio te gebruiken?",
+          "fr": "Faut-il des compétences en programmation pour utiliser Axentrio ?"
         },
         "answer": {
-          "en": "No. HandsOff is designed to be fully no-code. You can configure your AI bot, customize appearances, connect channels, and manage conversations entirely through the user-friendly dashboard. The only technical step is copying a small embed snippet to add the chat widget to your website.",
-          "nl": "Nee. HandsOff is volledig no-code opgezet. Je kan je AI-bot configureren, het uiterlijk aanpassen, kanalen koppelen en gesprekken beheren via het gebruiksvriendelijke dashboard. De enige technische stap is het kopiëren van een kleine embed-snippet om de chatwidget op je website te plaatsen.",
-          "fr": "Non. HandsOff est conçu pour être entièrement no-code. Vous pouvez configurer votre bot IA, personnaliser son apparence, connecter des canaux et gérer les conversations entièrement depuis un dashboard convivial. La seule étape technique consiste à copier un petit extrait d'intégration pour ajouter le widget de chat à votre site web."
+          "en": "No. Axentrio is designed to be fully no-code. You can configure your AI bot, customize appearances, connect channels, and manage conversations entirely through the user-friendly dashboard. The only technical step is copying a small embed snippet to add the chat widget to your website.",
+          "nl": "Nee. Axentrio is volledig no-code opgezet. Je kan je AI-bot configureren, het uiterlijk aanpassen, kanalen koppelen en gesprekken beheren via het gebruiksvriendelijke dashboard. De enige technische stap is het kopiëren van een kleine embed-snippet om de chatwidget op je website te plaatsen.",
+          "fr": "Non. Axentrio est conçu pour être entièrement no-code. Vous pouvez configurer votre bot IA, personnaliser son apparence, connecter des canaux et gérer les conversations entièrement depuis un dashboard convivial. La seule étape technique consiste à copier un petit extrait d'intégration pour ajouter le widget de chat à votre site web."
         }
       },
       {
@@ -102,9 +102,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Existe-t-il une période d'essai gratuite ?"
         },
         "answer": {
-          "en": "Yes, HandsOff offers a free trial period so you can explore all features before committing. During the trial, you have full access to AI bot configuration, knowledge base uploads, channel connections, and analytics.",
-          "nl": "Ja, HandsOff biedt een gratis proefperiode waarin je alle functies kan uitproberen voor je een keuze maakt. Tijdens de proefperiode heb je volledige toegang tot AI-botconfiguratie, kennisbank-uploads, kanaalkoppelingen en analyses.",
-          "fr": "Oui, HandsOff propose une période d'essai gratuite afin que vous puissiez explorer toutes les fonctionnalités avant de vous engager. Pendant l'essai, vous bénéficiez d'un accès complet à la configuration du bot IA, au téléversement de la base de connaissances, à la connexion des canaux et aux analyses."
+          "en": "Yes, Axentrio offers a free trial period so you can explore all features before committing. During the trial, you have full access to AI bot configuration, knowledge base uploads, channel connections, and analytics.",
+          "nl": "Ja, Axentrio biedt een gratis proefperiode waarin je alle functies kan uitproberen voor je een keuze maakt. Tijdens de proefperiode heb je volledige toegang tot AI-botconfiguratie, kennisbank-uploads, kanaalkoppelingen en analyses.",
+          "fr": "Oui, Axentrio propose une période d'essai gratuite afin que vous puissiez explorer toutes les fonctionnalités avant de vous engager. Pendant l'essai, vous bénéficiez d'un accès complet à la configuration du bot IA, au téléversement de la base de connaissances, à la connexion des canaux et aux analyses."
         }
       }
     ]
@@ -437,14 +437,14 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "platforms",
         "position": 0,
         "question": {
-          "en": "Which messaging platforms does HandsOff support?",
-          "nl": "Welke berichtenplatformen ondersteunt HandsOff?",
-          "fr": "Quelles plateformes de messagerie HandsOff prend-il en charge ?"
+          "en": "Which messaging platforms does Axentrio support?",
+          "nl": "Welke berichtenplatformen ondersteunt Axentrio?",
+          "fr": "Quelles plateformes de messagerie Axentrio prend-il en charge ?"
         },
         "answer": {
-          "en": "Currently, HandsOff supports Telegram bots and Facebook Pages. You can connect one or both platforms, and all messages will flow into your unified Inbox for centralized management.",
-          "nl": "Momenteel ondersteunt HandsOff Telegram-bots en Facebook-pagina's. Je kan één of beide platformen koppelen, en alle berichten komen samen in je centrale Inbox voor gecentraliseerd beheer.",
-          "fr": "Actuellement, HandsOff prend en charge les bots Telegram et les pages Facebook. Vous pouvez connecter l'une, l'autre ou les deux plateformes, et tous les messages alimenteront votre Boîte de réception unifiée pour une gestion centralisée."
+          "en": "Currently, Axentrio supports Telegram bots and Facebook Pages. You can connect one or both platforms, and all messages will flow into your unified Inbox for centralized management.",
+          "nl": "Momenteel ondersteunt Axentrio Telegram-bots en Facebook-pagina's. Je kan één of beide platformen koppelen, en alle berichten komen samen in je centrale Inbox voor gecentraliseerd beheer.",
+          "fr": "Actuellement, Axentrio prend en charge les bots Telegram et les pages Facebook. Vous pouvez connecter l'une, l'autre ou les deux plateformes, et tous les messages alimenteront votre Boîte de réception unifiée pour une gestion centralisée."
         }
       },
       {
@@ -470,9 +470,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Comment connecter une page Facebook ?"
         },
         "answer": {
-          "en": "In the Social Media Integrations or Channels section, click the Facebook button and authenticate with your Facebook account. Select the Page you want to connect, and HandsOff will automatically receive and respond to messages sent to that Page.",
-          "nl": "Klik in de sectie Social media-integraties of Kanalen op de knop Facebook en authenticeer je met je Facebookaccount. Selecteer de pagina die je wil koppelen, en HandsOff zal automatisch berichten naar die pagina ontvangen en beantwoorden.",
-          "fr": "Dans la section Intégrations réseaux sociaux ou Canaux, cliquez sur le bouton Facebook et authentifiez-vous avec votre compte Facebook. Sélectionnez la page que vous souhaitez connecter ; HandsOff recevra et répondra automatiquement aux messages envoyés à cette page."
+          "en": "In the Social Media Integrations or Channels section, click the Facebook button and authenticate with your Facebook account. Select the Page you want to connect, and Axentrio will automatically receive and respond to messages sent to that Page.",
+          "nl": "Klik in de sectie Social media-integraties of Kanalen op de knop Facebook en authenticeer je met je Facebookaccount. Selecteer de pagina die je wil koppelen, en Axentrio zal automatisch berichten naar die pagina ontvangen en beantwoorden.",
+          "fr": "Dans la section Intégrations réseaux sociaux ou Canaux, cliquez sur le bouton Facebook et authentifiez-vous avec votre compte Facebook. Sélectionnez la page que vous souhaitez connecter ; Axentrio recevra et répondra automatiquement aux messages envoyés à cette page."
         }
       },
       {
@@ -505,14 +505,14 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "metrics",
         "position": 0,
         "question": {
-          "en": "What metrics does HandsOff track?",
-          "nl": "Welke statistieken houdt HandsOff bij?",
-          "fr": "Quelles métriques HandsOff suit-il ?"
+          "en": "What metrics does Axentrio track?",
+          "nl": "Welke statistieken houdt Axentrio bij?",
+          "fr": "Quelles métriques Axentrio suit-il ?"
         },
         "answer": {
-          "en": "HandsOff provides comprehensive analytics including: Active Chats, Pending Handoffs, Online Agents, Average Response Time, CSAT (Customer Satisfaction) Score, and Total Chats. You can view trends over time with the Last 7 Days filter (other time ranges available).",
-          "nl": "HandsOff biedt uitgebreide analyses, waaronder: Actieve chats, Openstaande overdrachten, Online agents, Gemiddelde reactietijd, CSAT-score (klanttevredenheid) en Totaal aantal chats. Je kan trends bekijken over tijd met de filter Laatste 7 dagen (andere tijdsbereiken zijn beschikbaar).",
-          "fr": "HandsOff fournit des analyses complètes comprenant : les Conversations actives, les Transferts en attente, les Agents en ligne, le Temps de réponse moyen, le score CSAT (Satisfaction client) et le Total de conversations. Vous pouvez visualiser les tendances dans le temps avec le filtre Sept derniers jours (d'autres plages temporelles sont disponibles)."
+          "en": "Axentrio provides comprehensive analytics including: Active Chats, Pending Handoffs, Online Agents, Average Response Time, CSAT (Customer Satisfaction) Score, and Total Chats. You can view trends over time with the Last 7 Days filter (other time ranges available).",
+          "nl": "Axentrio biedt uitgebreide analyses, waaronder: Actieve chats, Openstaande overdrachten, Online agents, Gemiddelde reactietijd, CSAT-score (klanttevredenheid) en Totaal aantal chats. Je kan trends bekijken over tijd met de filter Laatste 7 dagen (andere tijdsbereiken zijn beschikbaar).",
+          "fr": "Axentrio fournit des analyses complètes comprenant : les Conversations actives, les Transferts en attente, les Agents en ligne, le Temps de réponse moyen, le score CSAT (Satisfaction client) et le Total de conversations. Vous pouvez visualiser les tendances dans le temps avec le filtre Sept derniers jours (d'autres plages temporelles sont disponibles)."
         }
       },
       {
@@ -573,9 +573,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "invite-members",
         "position": 0,
         "question": {
-          "en": "How do I invite team members to HandsOff?",
-          "nl": "Hoe nodig ik teamleden uit voor HandsOff?",
-          "fr": "Comment inviter des membres de mon équipe dans HandsOff ?"
+          "en": "How do I invite team members to Axentrio?",
+          "nl": "Hoe nodig ik teamleden uit voor Axentrio?",
+          "fr": "Comment inviter des membres de mon équipe dans Axentrio ?"
         },
         "answer": {
           "en": "Go to the Team section and click \"Invite\" in the Members tab. Enter the email address of the person you want to invite, and they will receive an invitation to join your organization.",
@@ -587,9 +587,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "roles",
         "position": 1,
         "question": {
-          "en": "What roles are available in HandsOff?",
-          "nl": "Welke rollen zijn beschikbaar in HandsOff?",
-          "fr": "Quels rôles sont disponibles dans HandsOff ?"
+          "en": "What roles are available in Axentrio?",
+          "nl": "Welke rollen zijn beschikbaar in Axentrio?",
+          "fr": "Quels rôles sont disponibles dans Axentrio ?"
         },
         "answer": {
           "en": "The primary role shown is Admin, which has full access to all settings and features. You can manage member roles through the dropdown in the Members table. Additional role tiers may be available depending on your plan.",
@@ -742,9 +742,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Quelles fonctionnalités puis-je activer pour mon chatbot ?"
         },
         "answer": {
-          "en": "HandsOff offers four main capabilities: Answer Questions (using your knowledge base), Lead Capture (collecting visitor contact information), Human Handoff (connecting to live agents), and Appointments (booking, rescheduling, and canceling meetings).",
-          "nl": "HandsOff biedt vier hoofdfunctionaliteiten: Vragen beantwoorden (op basis van je kennisbank), Lead Capture (contactgegevens van bezoekers verzamelen), Overdracht naar mens (verbinden met live agents) en Afspraken (afspraken boeken, verzetten en annuleren).",
-          "fr": "HandsOff propose quatre fonctionnalités principales : Répondre aux questions (à partir de votre base de connaissances), Capture de prospects (collecte des informations de contact des visiteurs), Transfert humain (connexion avec des agents en direct) et Rendez-vous (réservation, replanification et annulation de rendez-vous)."
+          "en": "Axentrio offers four main capabilities: Answer Questions (using your knowledge base), Lead Capture (collecting visitor contact information), Human Handoff (connecting to live agents), and Appointments (booking, rescheduling, and canceling meetings).",
+          "nl": "Axentrio biedt vier hoofdfunctionaliteiten: Vragen beantwoorden (op basis van je kennisbank), Lead Capture (contactgegevens van bezoekers verzamelen), Overdracht naar mens (verbinden met live agents) en Afspraken (afspraken boeken, verzetten en annuleren).",
+          "fr": "Axentrio propose quatre fonctionnalités principales : Répondre aux questions (à partir de votre base de connaissances), Capture de prospects (collecte des informations de contact des visiteurs), Transfert humain (connexion avec des agents en direct) et Rendez-vous (réservation, replanification et annulation de rendez-vous)."
         }
       },
       {
@@ -819,14 +819,14 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
         "slug": "api",
         "position": 0,
         "question": {
-          "en": "Does HandsOff offer an API?",
-          "nl": "Biedt HandsOff een API aan?",
-          "fr": "HandsOff propose-t-il une API ?"
+          "en": "Does Axentrio offer an API?",
+          "nl": "Biedt Axentrio een API aan?",
+          "fr": "Axentrio propose-t-il une API ?"
         },
         "answer": {
-          "en": "Yes. HandsOff provides API access for advanced integrations. Your unique API Key is available in Settings > Integrations. Use this key to authenticate API requests and build custom workflows.",
-          "nl": "Ja. HandsOff biedt API-toegang voor geavanceerde integraties. Je unieke API-sleutel vind je in Instellingen > Integraties. Gebruik deze sleutel om API-verzoeken te authenticeren en aangepaste workflows te bouwen.",
-          "fr": "Oui. HandsOff fournit un accès API pour les intégrations avancées. Votre clé API unique est disponible dans Paramètres > Intégrations. Utilisez cette clé pour authentifier vos requêtes API et créer des workflows personnalisés."
+          "en": "Yes. Axentrio provides API access for advanced integrations. Your unique API Key is available in Settings > Integrations. Use this key to authenticate API requests and build custom workflows.",
+          "nl": "Ja. Axentrio biedt API-toegang voor geavanceerde integraties. Je unieke API-sleutel vind je in Instellingen > Integraties. Gebruik deze sleutel om API-verzoeken te authenticeren en aangepaste workflows te bouwen.",
+          "fr": "Oui. Axentrio fournit un accès API pour les intégrations avancées. Votre clé API unique est disponible dans Paramètres > Intégrations. Utilisez cette clé pour authentifier vos requêtes API et créer des workflows personnalisés."
         }
       },
       {
@@ -852,9 +852,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Qu'est-ce que l'endpoint Webhook entrant ?"
         },
         "answer": {
-          "en": "The Inbound Webhook Endpoint is a read-only URL that allows external automation workflows to send messages or triggers into HandsOff. Include your tenant ID in the request body when configuring your external tools.",
-          "nl": "Het Inbound Webhook-endpoint is een alleen-lezen URL waarmee externe automatiseringsworkflows berichten of triggers naar HandsOff kunnen sturen. Voeg je tenant-ID toe aan de request body wanneer je je externe tools configureert.",
-          "fr": "L'endpoint Webhook entrant est une URL en lecture seule qui permet à des workflows d'automatisation externes d'envoyer des messages ou des déclencheurs vers HandsOff. Incluez l'identifiant de votre tenant dans le corps de la requête lorsque vous configurez vos outils externes."
+          "en": "The Inbound Webhook Endpoint is a read-only URL that allows external automation workflows to send messages or triggers into Axentrio. Include your tenant ID in the request body when configuring your external tools.",
+          "nl": "Het Inbound Webhook-endpoint is een alleen-lezen URL waarmee externe automatiseringsworkflows berichten of triggers naar Axentrio kunnen sturen. Voeg je tenant-ID toe aan de request body wanneer je je externe tools configureert.",
+          "fr": "L'endpoint Webhook entrant est une URL en lecture seule qui permet à des workflows d'automatisation externes d'envoyer des messages ou des déclencheurs vers Axentrio. Incluez l'identifiant de votre tenant dans le corps de la requête lorsque vous configurez vos outils externes."
         }
       },
       {
@@ -906,9 +906,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Comment mettre à jour les informations de mon profil ?"
         },
         "answer": {
-          "en": "Go to Settings > Profile. You can update your First Name and Last Name. Your email address is managed by Clerk (our authentication provider) and cannot be changed directly in HandsOff. Use the Clerk user menu to manage email and password.",
-          "nl": "Ga naar Instellingen > Profiel. Je kan je Voornaam en Achternaam aanpassen. Je e-mailadres wordt beheerd door Clerk (onze authenticatieprovider) en kan niet rechtstreeks in HandsOff worden gewijzigd. Gebruik het gebruikersmenu van Clerk om je e-mail en wachtwoord te beheren.",
-          "fr": "Rendez-vous dans Paramètres > Profil. Vous pouvez mettre à jour votre Prénom et votre Nom. Votre adresse e-mail est gérée par Clerk (notre fournisseur d'authentification) et ne peut pas être modifiée directement dans HandsOff. Utilisez le menu utilisateur Clerk pour gérer votre e-mail et votre mot de passe."
+          "en": "Go to Settings > Profile. You can update your First Name and Last Name. Your email address is managed by Clerk (our authentication provider) and cannot be changed directly in Axentrio. Use the Clerk user menu to manage email and password.",
+          "nl": "Ga naar Instellingen > Profiel. Je kan je Voornaam en Achternaam aanpassen. Je e-mailadres wordt beheerd door Clerk (onze authenticatieprovider) en kan niet rechtstreeks in Axentrio worden gewijzigd. Gebruik het gebruikersmenu van Clerk om je e-mail en wachtwoord te beheren.",
+          "fr": "Rendez-vous dans Paramètres > Profil. Vous pouvez mettre à jour votre Prénom et votre Nom. Votre adresse e-mail est gérée par Clerk (notre fournisseur d'authentification) et ne peut pas être modifiée directement dans Axentrio. Utilisez le menu utilisateur Clerk pour gérer votre e-mail et votre mot de passe."
         }
       },
       {
@@ -934,9 +934,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Puis-je changer le thème du dashboard ?"
         },
         "answer": {
-          "en": "Yes. Go to Settings > Appearance and choose between Light, Dark, or System (follows your OS preference). This changes the appearance of your HandsOff dashboard only, not the chat widget.",
-          "nl": "Ja. Ga naar Instellingen > Weergave en kies tussen Licht, Donker of Systeem (volgt je OS-voorkeur). Dit wijzigt enkel het uiterlijk van je HandsOff-dashboard, niet van de chatwidget.",
-          "fr": "Oui. Rendez-vous dans Paramètres > Apparence et choisissez entre Clair, Sombre ou Système (suit la préférence de votre OS). Cela modifie uniquement l'apparence de votre dashboard HandsOff, pas celle du widget de chat."
+          "en": "Yes. Go to Settings > Appearance and choose between Light, Dark, or System (follows your OS preference). This changes the appearance of your Axentrio dashboard only, not the chat widget.",
+          "nl": "Ja. Ga naar Instellingen > Weergave en kies tussen Licht, Donker of Systeem (volgt je OS-voorkeur). Dit wijzigt enkel het uiterlijk van je Axentrio-dashboard, niet van de chatwidget.",
+          "fr": "Oui. Rendez-vous dans Paramètres > Apparence et choisissez entre Clair, Sombre ou Système (suit la préférence de votre OS). Cela modifie uniquement l'apparence de votre dashboard Axentrio, pas celle du widget de chat."
         }
       },
       {
@@ -1058,9 +1058,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Comment réinitialiser mon mot de passe ?"
         },
         "answer": {
-          "en": "HandsOff uses Clerk for authentication. To change your password, use the Clerk user menu (accessible from your profile dropdown) or visit your Clerk account settings directly.",
-          "nl": "HandsOff gebruikt Clerk voor authenticatie. Om je wachtwoord te wijzigen, gebruik je het Clerk-gebruikersmenu (toegankelijk via je profieldropdown) of ga je rechtstreeks naar je Clerk-accountinstellingen.",
-          "fr": "HandsOff utilise Clerk pour l'authentification. Pour modifier votre mot de passe, utilisez le menu utilisateur Clerk (accessible depuis le menu déroulant de votre profil) ou rendez-vous directement dans les paramètres de votre compte Clerk."
+          "en": "Axentrio uses Clerk for authentication. To change your password, use the Clerk user menu (accessible from your profile dropdown) or visit your Clerk account settings directly.",
+          "nl": "Axentrio gebruikt Clerk voor authenticatie. Om je wachtwoord te wijzigen, gebruik je het Clerk-gebruikersmenu (toegankelijk via je profieldropdown) of ga je rechtstreeks naar je Clerk-accountinstellingen.",
+          "fr": "Axentrio utilise Clerk pour l'authentification. Pour modifier votre mot de passe, utilisez le menu utilisateur Clerk (accessible depuis le menu déroulant de votre profil) ou rendez-vous directement dans les paramètres de votre compte Clerk."
         }
       },
       {
@@ -1072,9 +1072,9 @@ export const INITIAL_FAQ_SEED: readonly FaqSeedSection[] = [
           "fr": "Où puis-je obtenir de l'aide supplémentaire ?"
         },
         "answer": {
-          "en": "If you need help beyond this FAQ, contact our support team using the Support Email configured in your AI Bot settings. You can also check the HandsOff documentation portal for detailed guides and video tutorials.",
-          "nl": "Heb je meer hulp nodig dan deze FAQ biedt? Neem contact op met ons supportteam via het Support-e-mailadres dat is geconfigureerd in je AI-botinstellingen. Je kan ook het HandsOff-documentatieportaal raadplegen voor gedetailleerde gidsen en videotutorials.",
-          "fr": "Si vous avez besoin d'aide au-delà de cette FAQ, contactez notre équipe de support via l'E-mail de support configuré dans vos paramètres du Bot IA. Vous pouvez également consulter le portail de documentation HandsOff pour des guides détaillés et des tutoriels vidéo."
+          "en": "If you need help beyond this FAQ, contact our support team using the Support Email configured in your AI Bot settings. You can also check the Axentrio documentation portal for detailed guides and video tutorials.",
+          "nl": "Heb je meer hulp nodig dan deze FAQ biedt? Neem contact op met ons supportteam via het Support-e-mailadres dat is geconfigureerd in je AI-botinstellingen. Je kan ook het Axentrio-documentatieportaal raadplegen voor gedetailleerde gidsen en videotutorials.",
+          "fr": "Si vous avez besoin d'aide au-delà de cette FAQ, contactez notre équipe de support via l'E-mail de support configuré dans vos paramètres du Bot IA. Vous pouvez également consulter le portail de documentation Axentrio pour des guides détaillés et des tutoriels vidéo."
         }
       }
     ]

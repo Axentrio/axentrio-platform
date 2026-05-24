@@ -21,11 +21,15 @@
   },
   "nav": {
     "inbox": "Inbox",
-    "aiContent": "AI & Content",
+    "aiContent": "AI Bot & Content",
     "analytics": "Analytics",
     "team": "Team",
     "settings": "Settings",
     "helpFaq": "Help & FAQ",
+    "socialMedia": "Social Media",
+    "leadCapture": "Lead Capture",
+    "bookings": "Bookings",
+    "successMeter": "Success Meter",
     "superAdmin": "Super Admin",
     "allTenants": "All Tenants",
     "allUsers": "All Users",
@@ -36,7 +40,68 @@
     "impersonating": "Impersonating",
     "switchTenant": "Switch tenant",
     "exitImpersonation": "Exit",
-    "signOut": "Sign Out"
+    "signOut": "Sign Out",
+    "lockTooltip": "Locked",
+    "unlockWith": {
+      "pro": "Unlock with Pro",
+      "enterprise": "Unlock with Enterprise"
+    }
+  },
+  "lockedPreview": {
+    "comparePlans": "Compare plans",
+    "tierStrip": {
+      "yourPlan": "Your plan",
+      "required": "Required",
+      "trial": "Trial",
+      "trialValue": "14 days",
+      "afterTrial": "After trial",
+      "cancelAnytime": "Cancel anytime before billing"
+    }
+  },
+  "bookings": {
+    "locked": {
+      "title": "AI Bookings",
+      "oneLiner": "Unlock AI Bookings with Pro and let customers schedule appointments directly through chat.",
+      "bullets": {
+        "1": "Real-time availability synced with your Cal.com calendar.",
+        "2": "Bot collects name, email, phone, and notes — booked in under a minute.",
+        "3": "Confirmation emails, reminders, and reschedule links sent automatically."
+      }
+    },
+    "placeholder": {
+      "title": "Bookings",
+      "subtitle": "Bookings module landing here in M5."
+    }
+  },
+  "leads": {
+    "locked": {
+      "title": "Lead Capture",
+      "oneLiner": "Capture every visitor's intent and turn conversations into qualified leads.",
+      "bullets": {
+        "1": "Automatically collect name, email, phone, and the question that brought them in.",
+        "2": "Custom fields and routing rules so the right person gets the right lead.",
+        "3": "Export leads to CSV or your CRM via webhook."
+      }
+    },
+    "placeholder": {
+      "title": "Lead Capture",
+      "subtitle": "Lead capture module landing here in M6."
+    }
+  },
+  "socialMedia": {
+    "locked": {
+      "title": "Social Media",
+      "oneLiner": "Reach customers where they already are — connect every messaging channel in one inbox.",
+      "bullets": {
+        "1": "Facebook Messenger, Instagram, WhatsApp, and Telegram in one place.",
+        "2": "AI bot answers and human handoff work across every channel.",
+        "3": "Unified conversation history regardless of where the chat started."
+      }
+    },
+    "tiktok": {
+      "title": "TikTok",
+      "description": "Direct-message support for TikTok Business is on our roadmap. Let us know you want it and we'll email you when it ships."
+    }
   },
   "roles": {
     "super_admin": "Super Admin",
@@ -121,7 +186,7 @@
     },
     "widget": {
       "title": "Widget & Brand",
-      "description": "Manage your logo, display name, and embed snippet",
+      "description": "Manage your logo and display name",
       "saveFailed": "Failed to save branding settings",
       "loadFailed": "Failed to load branding settings.",
       "appearanceNotice": {
@@ -960,7 +1025,7 @@
   "help": {
     "page": {
       "title": "Help & FAQ",
-      "subtitle": "Answers to common questions about HandsOff. Search or browse by section."
+      "subtitle": "Answers to common questions about Axentrio. Search or browse by section."
     },
     "search": {
       "placeholder": "Search all FAQs…",
@@ -1706,5 +1771,22 @@
       "title": "Chat Analysis",
       "comingSoon": "Detailed chat analysis coming soon…"
     }
+  },
+  "badges": {
+    "essential": "Essential",
+    "pro": "Pro",
+    "enterprise": "Enterprise",
+    "comingSoon": "Coming soon"
+  },
+  "notifyMe": {
+    "cta": "Notify me",
+    "notified": "Notified",
+    "error": "Couldn't register your interest. Please try again."
+  },
+  "upgrade": {
+    "startTrial": "Start Pro trial",
+    "subscribeNow": "Subscribe to Essential",
+    "contactSales": "Contact Sales",
+    "error": "Couldn't start checkout. Please try again."
   }
 }

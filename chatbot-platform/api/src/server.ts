@@ -43,6 +43,9 @@ import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
 import integrationsRoutes from './knowledge/integrations.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
+import botsRoutes from './routes/bots.routes';
+import demandSignalsRoutes from './routes/demand-signals.routes';
+import entitlementsRoutes from './routes/entitlements.routes';
 import faqRoutes from './routes/faq.routes';
 import skillsRoutes from './routes/skills.routes';
 import automationsRoutes from './routes/automations.routes';
@@ -229,6 +232,9 @@ apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/knowledge', knowledgeRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
+apiRouter.use('/bots', botsRoutes);
+apiRouter.use('/demand-signals', demandSignalsRoutes);
+apiRouter.use('/entitlements', entitlementsRoutes);
 apiRouter.use('/faq', faqRoutes);
 apiRouter.use('/tenants/me', aiSettingsRoutes);
 apiRouter.use('/tenants/me', widgetAppearanceRoutes);
@@ -300,30 +306,6 @@ async function startServer(): Promise<void> {
       logger.error('Stripe billing provider registration failed', { error: err });
       if (config.server.isProduction) {
         throw err;
-      }
-    }
-
-    // Register billing trial-expiry processor + daily safety-net sweep.
-    // The sweep is the *authoritative* recovery path for trial expiry; the
-    // per-tenant delayed job is just a latency optimization. If the sweep
-    // can't be registered in production, the system is silently broken —
-    // fail startup so deploys catch it immediately.
-    // Plan: .scratch/plan-billing.md § Implementation outline step 5.
-    try {
-      const { registerTrialExpiryProcessor, scheduleDailySweep } = await import(
-        './billing/trial-expiry-job'
-      );
-      registerTrialExpiryProcessor();
-      await scheduleDailySweep();
-      logger.info('Billing trial-expiry processor + daily sweep registered');
-    } catch (err) {
-      logger.error('Billing trial-expiry registration failed', { error: err });
-      if (config.server.isProduction) {
-        throw new Error(
-          `Billing trial-expiry sweep failed to register: ${
-            err instanceof Error ? err.message : String(err)
-          }. Sweep is the authoritative recovery path; refusing to start in production.`,
-        );
       }
     }
 

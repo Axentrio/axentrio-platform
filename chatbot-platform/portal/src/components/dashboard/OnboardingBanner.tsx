@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { CheckCircle, Circle, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/useAppAuth';
@@ -8,19 +9,20 @@ const DISMISSED_KEY = 'onboarding_banner_dismissed';
 
 interface ChecklistItem {
   key: string;
-  label: string;
+  labelKey: string;
   link: string;
 }
 
 const CHECKLIST_ITEMS: ChecklistItem[] = [
-  { key: 'aiEnabled', label: 'AI Assistant enabled', link: '/ai?tab=settings' },
-  { key: 'brandVoiceConfigured', label: 'Brand voice configured', link: '/ai?tab=settings' },
-  { key: 'knowledgeBaseHasDocs', label: 'Upload knowledge base docs', link: '/ai?tab=knowledge' },
-  { key: 'calcomConnected', label: 'Connect booking calendar', link: '/settings/integrations' },
-  { key: 'automationsConfigured', label: 'Set up automations', link: '/settings/automations' },
+  { key: 'aiEnabled', labelKey: 'analytics.onboardingBanner.steps.aiEnabled.label', link: '/ai?tab=settings' },
+  { key: 'brandVoiceConfigured', labelKey: 'analytics.onboardingBanner.steps.brandVoiceConfigured.label', link: '/ai?tab=settings' },
+  { key: 'knowledgeBaseHasDocs', labelKey: 'analytics.onboardingBanner.steps.knowledgeBaseHasDocs.label', link: '/ai?tab=knowledge' },
+  { key: 'calcomConnected', labelKey: 'analytics.onboardingBanner.steps.calcomConnected.label', link: '/settings/integrations' },
+  { key: 'automationsConfigured', labelKey: 'analytics.onboardingBanner.steps.automationsConfigured.label', link: '/settings/automations' },
 ];
 
 export const OnboardingBanner: React.FC = () => {
+  const { t } = useTranslation();
   const { user } = useAppAuth();
   const { data: status, isLoading } = useOnboardingStatus();
   const [dismissed, setDismissed] = useState(
@@ -49,18 +51,18 @@ export const OnboardingBanner: React.FC = () => {
       <div className="flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-text-primary">
-            Get the most from your AI assistant
+            {t('analytics.onboardingBanner.title')}
           </h3>
-          <p className="text-xs text-text-muted mt-0.5">Complete these steps to get started</p>
+          <p className="text-xs text-text-muted mt-0.5">{t('analytics.onboardingBanner.subtitle')}</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs font-medium text-text-secondary bg-surface-3 px-2 py-0.5 rounded-full">
-            {status.completedCount} of {status.totalCount}
+            {t('analytics.onboardingBanner.progress', { completed: status.completedCount, total: status.totalCount })}
           </span>
           <button
             onClick={handleDismiss}
             className="text-text-muted hover:text-text-secondary transition-colors"
-            aria-label="Dismiss"
+            aria-label={t('analytics.onboardingBanner.dismiss')}
           >
             <X className="h-4 w-4" />
           </button>
@@ -85,7 +87,7 @@ export const OnboardingBanner: React.FC = () => {
                       : 'text-sm text-text-primary'
                   }
                 >
-                  {item.label}
+                  {t(item.labelKey)}
                 </span>
               </div>
               {!complete && (
@@ -93,7 +95,7 @@ export const OnboardingBanner: React.FC = () => {
                   to={item.link}
                   className="text-xs font-medium text-primary-400 hover:text-primary-300 shrink-0"
                 >
-                  Set up →
+                  {t('analytics.onboardingBanner.setUp')}
                 </Link>
               )}
             </div>

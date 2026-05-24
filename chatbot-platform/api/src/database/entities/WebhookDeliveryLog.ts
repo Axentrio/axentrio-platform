@@ -40,6 +40,9 @@ export class WebhookDeliveryLog {
   @Column({ type: 'int', name: 'duration_ms', default: 0 })
   durationMs!: number;
 
+  @Column({ type: 'int', default: 1 })
+  attempt!: number;
+
   @Column({ type: 'text', nullable: true })
   error?: string;
 

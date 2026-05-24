@@ -10,10 +10,7 @@ import {
   getCachedPageToken,
 } from './oauth.service';
 import { setupMetaConnections } from './setup.service';
-import { AppDataSource } from '../../database/data-source';
-import { ChannelConnection } from '../../database/entities/ChannelConnection';
-import { enforceCountLimit } from '../../billing/enforce';
-import { Not } from 'typeorm';
+import { requireFeature } from '../../billing/enforce';
 import {
   ApiError,
   asyncHandler,
@@ -153,25 +150,11 @@ router.post(
         throw new BadRequestError('No valid pages found. OAuth session may have expired.');
       }
 
-      // Plan-gate (step 10, count 4). Each selected Page becomes a separate
-      // ChannelConnection row, so the cap applies to "current connections +
-      // number this request will add." Throws 402 plan_limit_channels.
-      await AppDataSource.transaction(async (manager) => {
-        await enforceCountLimit({
-          manager,
-          tenantId,
-          capability: 'channels',
-          errorCode: 'plan_limit_channels',
-          countQuery: async (m) => {
-            const current = await m.count(ChannelConnection, {
-              where: { tenantId, status: Not('disconnected') },
-            });
-            // Pretend the new ones are already there minus 1, so the helper's
-            // `current >= limit` check accounts for additions in this request.
-            return current + selectedPages.length - 1;
-          },
-        });
-      });
+      // Plan-gate. The legacy numeric `channels` cap was retired in the M0
+      // plan-catalog reshape. Channel availability is now feature-gated:
+      // paid tiers (which all have `unifiedInbox: true`) can connect; the
+      // `free` cancellation sink cannot.
+      await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
 
       // Create connections
       const connections = await setupMetaConnections(tenantId, selectedPages);

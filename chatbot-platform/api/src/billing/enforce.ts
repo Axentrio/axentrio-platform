@@ -4,9 +4,12 @@
  *
  * Two flavors of gate:
  *
- *   - **Count gates** (agents, sessions, channels): caller already holds a
- *     DB transaction; helper locks the tenants row, reads entitlements from
- *     the locked tier, runs a count query, throws if at/over cap.
+ *   - **Count gates** (agents, sessions): caller already holds a DB
+ *     transaction; helper locks the tenants row, reads entitlements from
+ *     the locked tier, runs a count query, throws if at/over cap. (The
+ *     legacy `channels` count gate was retired in the M0 plan-catalog
+ *     reshape; channel availability is now a per-tier-by-feature boolean,
+ *     not a numeric cap.)
  *
  *   - **Feature gates** (file upload, handoff, custom branding): no race
  *     window — boolean flag is read once. No tx required; a stale read just
@@ -72,7 +75,7 @@ export async function lockTenantEntitlements(
 export async function enforceCountLimit(input: {
   manager: EntityManager;
   tenantId: string;
-  capability: 'agents' | 'sessions' | 'channels';
+  capability: 'agents' | 'bots' | 'sessions';
   errorCode: string;
   countQuery: (manager: EntityManager) => Promise<number>;
 }): Promise<{ limit: number | null; current: number; entitlements: Entitlements }> {
@@ -89,10 +92,7 @@ export async function enforceCountLimit(input: {
  * Boolean feature gate. Read-only — no lock required.
  *
  * Throws `PlanLimitError` (HTTP 402, code = `errorCode`) when the tenant's
- * tier does not include the requested feature. `byoLlmKey` is gate-able too
- * even though v1 sets it to `true` for every plan — the surface stays
- * symmetric so future plan tweaks (e.g. "Free without BYO key") don't have
- * to re-thread the gate.
+ * tier does not include the requested feature.
  */
 export async function requireFeature(
   tenantId: string,

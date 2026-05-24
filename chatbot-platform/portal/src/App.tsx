@@ -34,6 +34,10 @@ import Inbox from '@pages/Inbox';
 import AiContent from '@pages/AiContent';
 import Analytics from '@pages/Analytics';
 import Team from '@pages/Team';
+import Bookings from '@pages/Bookings';
+import Leads from '@pages/Leads';
+import SocialMedia from '@pages/SocialMedia';
+import SuccessMeter from '@pages/SuccessMeter';
 import SettingsLayout from '@pages/settings/SettingsLayout';
 import ProfileSettings from '@pages/settings/ProfileSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
@@ -138,7 +142,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
               </div>
             )}
             <span className="font-semibold text-text-primary truncate max-w-[150px]">
-              {organization?.name ?? 'HandsOff'}
+              {organization?.name ?? 'Axentrio'}
             </span>
           </div>
         </div>
@@ -286,6 +290,11 @@ const App: React.FC = () => {
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/ai" element={<AiContent />} />
                       <Route path="/analytics" element={<Analytics />} />
+                      {/* M2 epic nav: locked-but-visible module routes */}
+                      <Route path="/channels" element={<SocialMedia />} />
+                      <Route path="/leads" element={<Leads />} />
+                      <Route path="/bookings" element={<Bookings />} />
+                      <Route path="/success-meter" element={<SuccessMeter />} />
                       <Route path="/help" element={<Help />} />
                       <Route path="/settings" element={<SettingsLayout />}>
                         <Route index element={<Navigate to="/settings/profile" replace />} />

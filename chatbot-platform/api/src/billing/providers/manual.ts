@@ -1,6 +1,5 @@
 /**
- * ManualBillingProvider — used for Enterprise (sales-managed) tenants and
- * for the reverse-trial period before a Stripe subscription is created.
+ * ManualBillingProvider — used for Enterprise (sales-managed) tenants.
  *
  * All subscription-mutating methods throw `BillingProviderError`. The
  * provider deliberately implements the full `BillingProvider` interface

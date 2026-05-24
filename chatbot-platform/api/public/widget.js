@@ -1228,7 +1228,6 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.storageKey = this.getStorageKey();
       this._connected = false;
       this._hasEverConnected = false;
-      this._apiKeyRejected = false; // permanent rejection from /widget/init (422 + invalid api key)
       this._agent = null; // { name, lastActive }
       this._agentActivityTimer = null;
       this.appearance = (this.config && this.config.appearance) || {};
@@ -1452,16 +1451,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           this._missingApiKeyWarned = true;
           // eslint-disable-next-line no-console
           console.warn(
-            '[handsoff-widget] Missing data-api-key attribute on the embed script. ' +
+            '[axentrio-widget] Missing data-api-key attribute on the embed script. ' +
             'The widget will render but cannot connect to the chat backend. ' +
             'Add data-api-key="<your-tenant-api-key>" to your <script> tag.',
           );
         }
         this.setConnectionState('offline');
-        return;
-      }
-      if (this._apiKeyRejected) {
-        // Permanent failure already detected; do not retry any backend call.
         return;
       }
       try {
@@ -1474,28 +1469,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       }
     }
 
-    _handleApiKeyRejected() {
-      this._apiKeyRejected = true;
-      // eslint-disable-next-line no-console
-      console.warn(
-        '[handsoff-widget] The embedded apiKey was rejected by the server (HTTP 422). ' +
-        'Verify it matches an active tenant in your portal. The widget will hide ' +
-        'until the next page load.',
-      );
-      this.setConnectionState('offline');
-      try {
-        if (this.isOpen && typeof this.close === 'function') this.close();
-        if (this.container && this.container.style) this.container.style.display = 'none';
-      } catch (_e) {
-        // Best-effort cleanup; never let UI teardown crash the script.
-      }
-    }
-
     async _initSession() {
-      if (this._apiKeyRejected) {
-        // Permanent failure already detected; do not retry.
-        return;
-      }
       // Try to restore existing session
       const storedSession = this.readStoredSession();
       if (storedSession) {
@@ -1526,23 +1500,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }),
       }, 15000);
 
-      if (!resp.ok) {
-        // Detect the specific permanent-failure shape — invalid apiKey rejected by
-        // the server (HTTP 422 + VALIDATION_ERROR + "Invalid API key"). Match narrowly
-        // so transient 5xx / malformed bodies still flow through the existing retry
-        // path. Never log the apiKey itself.
-        if (resp.status === 422) {
-          let body = null;
-          try { body = await resp.clone().json(); } catch (_e) { /* malformed — fall through */ }
-          const code = body && body.error && body.error.code;
-          const message = (body && body.error && body.error.message) || '';
-          if (code === 'VALIDATION_ERROR' && /invalid api key/i.test(message)) {
-            this._handleApiKeyRejected();
-            return;
-          }
-        }
-        throw new Error(`Widget init failed: ${resp.status}`);
-      }
+      if (!resp.ok) throw new Error(`Widget init failed: ${resp.status}`);
 
       const { data } = await resp.json();
       this.sessionId = data.session.id;

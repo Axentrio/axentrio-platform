@@ -1,0 +1,10 @@
+# Topic-extraction guardrails — four layers, both ends, evidence-grounded
+
+The Gap fingerprint depends on a stable per-Tenant Canonical Topic registry ([ADR-0003](./0003-gap-fingerprint-via-per-tenant-canonical-topics.md)). A single bad insert (empty string, `"?"`, `"stuff"`, 200-char paragraph, overbroad merge like `"customer question"`) becomes a permanent registry row spawning a Gap that never resolves. v1 ships four layers of guardrail:
+
+1. **Judge-prompt instruction.** The LLM judge is explicitly told: *"If the customer's question is unclear, generic, or you cannot extract a specific topic, return `topic: null`."*
+2. **Validation gate applied at both ends** — the topic phrase returned by the judge AND the candidate canonical phrase returned by the merge-or-create call. Rules: 1-6 words, 3-60 chars, not in the exact-match stopword list (`general`, `info`, `information`, `question`, `help`, `asking`, `chat`, `talk`, `stuff`, `things`, `something`, `anything`), not pure punctuation, not sentence-style. Stopwords are exact normalised phrase rejects, not substring rejects — `"info"` is rejected; `"pricing info"` is valid.
+3. **Null-on-failure with diagnostics.** Validation-failed judgments persist as `unsatisfied_unmapped` evidence with `rejected_topic` and `reject_reason` columns. Queryable/countable for drift monitoring. No Gap contribution.
+4. **Evidence grounding on merge-or-create.** The merge-or-create LLM call must return `{ canonical_topic, decision: "merge_with_existing:<id>" | "create_new", evidence_message_ids }`. The registry mutation is rejected if `evidence_message_ids` isn't a subset of the source judgments' evidence — preventing the LLM from inventing canonical topics not directly supported by chats.
+
+Codex pressure-tested an earlier three-layer draft that only validated the judge's output (not the canonical-creation step) and treated null-on-failure as silent — both holes are closed by the four-layer version. Confidence scoring, manual registry cleanup, and per-Tenant stopword customisation are deferred to v1.1.

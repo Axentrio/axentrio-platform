@@ -136,12 +136,14 @@ router.patch(
       throw new BadRequestError('Automations cannot be updated via this endpoint. Use /tenants/me/automations instead.');
     }
 
-    // Plan-gate (step 10, feature 7). Custom branding lives under
+    // Plan-gate. Custom widget appearance (color/title/avatar) lives under
     // `settings.theme` (primaryColor / logoUrl / customCss). Only enforce
     // when the request actually touches those keys — leaving the rest of
-    // the settings update path open for all tiers.
+    // the settings update path open for all tiers. M0 plan-catalog reshape
+    // split the old muddy `customBranding` flag — `customWidgetAppearance`
+    // is the closest semantic match for theme-level customization.
     if (settings?.theme !== undefined) {
-      await requireFeature(tenantId, 'customBranding', 'plan_limit_custom_branding');
+      await requireFeature(tenantId, 'customWidgetAppearance', 'plan_limit_custom_branding');
     }
 
     // Deep merge settings (preserve nested objects like theme, features)

@@ -88,12 +88,10 @@ describe('plan_limit_agents — POST /agents on Pro at cap', () => {
     const admin = await createTestUser(tenantId, { role: 'admin' });
     userId = admin.id;
     await authedAs({ tenantId, userId });
-    // Pro plan cap: 3 agents. Seed 3 distinct users + agents so the next
-    // POST hits the cap.
-    for (let i = 0; i < 3; i++) {
-      const u = await createTestUser(tenantId, { role: 'agent' });
-      await createTestAgent(tenantId, u.id);
-    }
+    // M0 plan-catalog reshape: Pro plan cap is now 1 agent (was 3 under the
+    // legacy four-tier scheme). Seed exactly 1 agent so the next POST hits the cap.
+    const u = await createTestUser(tenantId, { role: 'agent' });
+    await createTestAgent(tenantId, u.id);
   });
 
   it('returns 402 with code plan_limit_agents and includes the limit', async () => {
@@ -107,17 +105,17 @@ describe('plan_limit_agents — POST /agents on Pro at cap', () => {
 
     expect(res.status).toBe(402);
     expect(res.body.error?.code).toBe('plan_limit_agents');
-    expect(res.body.error?.details?.limit).toBe(3);
+    expect(res.body.error?.details?.limit).toBe(1);
 
     // No new agent row was created (the tx rolled back inside enforceCountLimit).
     const count = await AppDataSource.getRepository(Agent).count({
       where: { tenantId },
     });
-    expect(count).toBe(3);
+    expect(count).toBe(1);
   });
 
   it('returns 201 when under the cap', async () => {
-    // Demote one agent to bring us under the limit.
+    // Remove the seeded agent to bring us under the cap-of-1.
     const agents = await AppDataSource.getRepository(Agent).find({
       where: { tenantId },
       take: 1,
@@ -226,13 +224,17 @@ describe('plan_limit_custom_branding — PATCH /tenants/me theme update on Pro',
     await authedAs({ tenantId, userId: admin.id });
   });
 
-  it('returns 402 plan_limit_custom_branding when settings.theme is in body', async () => {
+  it('allows theme updates on Pro because customWidgetAppearance is included (200)', async () => {
+    // M0 plan-catalog reshape (Deviation 34/35): the legacy muddy `customBranding`
+    // flag split into `hideWidgetAttribution` (Pro+ only) and `customWidgetAppearance`
+    // (all paid tiers — even Essential plumbers need their widget to fit their site).
+    // The PATCH /tenants/me gate now checks `customWidgetAppearance`, which is true
+    // on Pro, so theme updates succeed.
     const res = await request(app)
       .patch('/api/v1/tenants/me')
       .send({ settings: { theme: { primaryColor: '#ff0000' } } });
 
-    expect(res.status).toBe(402);
-    expect(res.body.error?.code).toBe('plan_limit_custom_branding');
+    expect(res.status).toBe(200);
   });
 
   it('allows non-theme settings updates on Pro (200)', async () => {
@@ -250,14 +252,11 @@ describe('plan_limit_custom_branding — PATCH /tenants/me theme update on Pro',
 
 describe('plan_limit_agents — concurrent create race held by row lock', () => {
   it('two parallel create requests at cap-1 result in exactly one 201 and one 402', async () => {
-    const tenant = await createTestTenant({ tier: 'pro' }); // cap = 3
+    // M0 plan-catalog reshape: Pro cap is now 1 agent. Seed 0 agents (cap-1 = 0)
+    // and race two concurrent creates — exactly one should win the only slot.
+    const tenant = await createTestTenant({ tier: 'pro' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });
     await authedAs({ tenantId: tenant.id, userId: admin.id });
-    // Seed 2 agents (at limit-1).
-    for (let i = 0; i < 2; i++) {
-      const u = await createTestUser(tenant.id, { role: 'agent' });
-      await createTestAgent(tenant.id, u.id);
-    }
 
     const userA = await createTestUser(tenant.id, { role: 'agent' });
     const userB = await createTestUser(tenant.id, { role: 'agent' });
@@ -268,12 +267,101 @@ describe('plan_limit_agents — concurrent create race held by row lock', () => 
     ]);
 
     const statuses = [resA.status, resB.status].sort();
-    // Exactly one succeeded (3rd slot), one was capped.
+    // Exactly one succeeded (sole slot), one was capped.
     expect(statuses).toEqual([201, 402]);
 
     const count = await AppDataSource.getRepository(Agent).count({
       where: { tenantId: tenant.id },
     });
-    expect(count).toBe(3);
+    expect(count).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gate — bots count (multi-bot Phase 4 integration with billing epic)
+// ---------------------------------------------------------------------------
+
+describe('plan_limit_bots — POST /bots quota gate', () => {
+  /**
+   * Seed a non-anchor Bot directly via the repo (skips the route's quota gate)
+   * so we can exercise the cap from a known starting count.
+   */
+  async function seedBot(tenantId: string): Promise<void> {
+    await AppDataSource.query(
+      `INSERT INTO chatbot_bots
+         (tenant_id, name, public_key, status, is_default, settings, created_at, updated_at)
+       VALUES ($1, 'Seeded', $2, 'active', false, '{}'::jsonb, now(), now())`,
+      [tenantId, `bk_${Math.random().toString(36).slice(2, 26).padEnd(24, '0')}`],
+    );
+  }
+
+  it('Essential (cap=1) — second create returns 402 plan_limit_bots', async () => {
+    const tenant = await createTestTenant({ tier: 'essential' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    await authedAs({ tenantId: tenant.id, userId: admin.id });
+    // Seed the anchor-equivalent first bot directly (puts the tenant at cap=1).
+    await seedBot(tenant.id);
+
+    const res = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'My second bot' });
+
+    expect(res.status).toBe(402);
+    expect(res.body.error?.code).toBe('plan_limit_bots');
+    expect(res.body.error?.details?.limit).toBe(1);
+  });
+
+  it('Pro (cap=1) — second create returns 402 plan_limit_bots', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    await authedAs({ tenantId: tenant.id, userId: admin.id });
+    await seedBot(tenant.id);
+
+    const res = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'My second bot' });
+
+    expect(res.status).toBe(402);
+    expect(res.body.error?.code).toBe('plan_limit_bots');
+    expect(res.body.error?.details?.limit).toBe(1);
+  });
+
+  it('Enterprise (cap=2) — second create succeeds, third returns 402', async () => {
+    const tenant = await createTestTenant({ tier: 'enterprise' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    await authedAs({ tenantId: tenant.id, userId: admin.id });
+    await seedBot(tenant.id); // anchor-equivalent — count is now 1, under cap=2.
+
+    const second = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'Second bot' });
+    expect(second.status).toBe(201);
+
+    const third = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'Third bot' });
+    expect(third.status).toBe(402);
+    expect(third.body.error?.code).toBe('plan_limit_bots');
+    expect(third.body.error?.details?.limit).toBe(2);
+  });
+
+  it('Pro (cap=1) — paused bots still count toward the cap (only soft-delete frees a slot)', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    await authedAs({ tenantId: tenant.id, userId: admin.id });
+    // Seed a paused bot — should still occupy the slot per the multi-bot doc.
+    await AppDataSource.query(
+      `INSERT INTO chatbot_bots
+         (tenant_id, name, public_key, status, is_default, settings, created_at, updated_at)
+       VALUES ($1, 'Paused', $2, 'paused', false, '{}'::jsonb, now(), now())`,
+      [tenant.id, `bk_${Math.random().toString(36).slice(2, 26).padEnd(24, '0')}`],
+    );
+
+    const res = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'New bot while one is paused' });
+
+    expect(res.status).toBe(402);
+    expect(res.body.error?.code).toBe('plan_limit_bots');
   });
 });

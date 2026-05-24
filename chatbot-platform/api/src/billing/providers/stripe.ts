@@ -32,7 +32,7 @@ import type { Stripe as StripeNS } from 'stripe/cjs/stripe.core';
 import { config } from '../../config/environment';
 import { AppDataSource } from '../../database/data-source';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
-import { PLANS, planIdForStripePriceId } from '../plans';
+import { PLANS, planIdForStripePriceId, getStripePriceIdFor } from '../plans';
 import {
   BillingProvider,
   BillingProviderError,
@@ -67,7 +67,7 @@ function rank(planId: InternalPlanId): number {
 }
 
 function priceIdFor(planId: CheckoutablePlanId): string {
-  const id = PLANS[planId].providerPriceIds.stripe.usd;
+  const id = getStripePriceIdFor(planId);
   if (!id) {
     throw new BillingProviderError('checkout_plan_invalid', PROVIDER, { planId });
   }
@@ -133,10 +133,25 @@ export class StripeBillingProvider implements BillingProvider {
       return { customerId: found.data[0].id };
     }
 
+    // PR5 integration point: when creating the Stripe Customer for the
+    // first time, look up any locally-stored VAT ID on the tenant's
+    // billing row and pass it through as `tax_id_data`. This is how a
+    // pre-set VAT ID (stored via `PUT /billing/vat-id` BEFORE the first
+    // checkout) flows into Stripe Tax. If `vatId` is null we omit the
+    // field entirely; Stripe Checkout's `tax_id_collection` (set in PR6)
+    // will prompt for one during the session.
+    const localRow = await AppDataSource.getRepository(TenantBillingAccount).findOne({
+      where: { tenantId: input.tenantId },
+    });
+    const vatId = localRow?.vatId ?? null;
+
     const customer = await stripe.customers.create({
       email: input.email,
       name: input.name,
       metadata: { tenantId: input.tenantId },
+      ...(vatId
+        ? { tax_id_data: [{ type: 'eu_vat', value: vatId }] }
+        : {}),
     });
     return { customerId: customer.id };
   }
@@ -158,11 +173,69 @@ export class StripeBillingProvider implements BillingProvider {
       });
     }
 
+    // Trial-reservation guard (codex round 7 item 1). Only Pro is trial-
+    // eligible. The primary-key unique constraint on
+    // `chatbot_tenant_trial_reservations.tenant_id` serialises concurrent Pro
+    // checkouts — exactly one wins the insert and gets `allowTrial=true`;
+    // the rest see RETURNING empty and get `allowTrial=false`.
+    //
+    // Why this and not `stripe.subscriptions.list`: the Stripe API does
+    // not see in-flight Checkout sessions, so two concurrent Pro checkouts
+    // for the same tenant could each independently pass that guard and
+    // both grant a 14-day trial. The reservation table is the canonical
+    // source of truth for "has this tenant already consumed their trial."
+    let allowTrial = false;
+    if (input.planId === 'pro') {
+      const reserved: Array<{ tenant_id: string }> = await AppDataSource.query(
+        `INSERT INTO chatbot_tenant_trial_reservations (tenant_id)
+         VALUES ($1)
+         ON CONFLICT (tenant_id) DO NOTHING
+         RETURNING tenant_id`,
+        [input.tenantId],
+      );
+      allowTrial = reserved.length > 0;
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: row.customerId,
+      // Session-level metadata: the `checkout.session.completed` webhook
+      // handler reads this to resolve the tenant. Replaces the legacy
+      // `client_reference_id` field.
+      metadata: { tenantId: input.tenantId },
       line_items: [{ price: priceIdFor(input.planId), quantity: 1 }],
-      client_reference_id: input.tenantId,
+      payment_method_types: ['card', 'bancontact', 'ideal', 'sepa_debit'],
+      // Force payment-method capture during trial — Stripe will cancel the
+      // subscription if the customer never provides a payment method by
+      // trial-end (see `trial_settings.end_behavior.missing_payment_method`).
+      payment_method_collection: 'always',
+      subscription_data: {
+        // Subscription-level metadata: read by `customer.subscription.*`
+        // webhook handlers as the authoritative tenant resolution channel,
+        // since Stripe Customer metadata can drift if a sales user edits
+        // the Customer record in the dashboard.
+        metadata: { tenantId: input.tenantId },
+        // `trial_period_days` is OMITTED entirely (not set to 0) for
+        // non-trial plans — Stripe rejects `0` as invalid.
+        ...(allowTrial
+          ? {
+              trial_period_days: 14,
+              trial_settings: {
+                end_behavior: {
+                  missing_payment_method: 'cancel',
+                },
+              },
+            }
+          : {}),
+      },
+      automatic_tax: { enabled: true },
+      tax_id_collection: { enabled: true },
+      // `customer_update` is required in subscription mode when `customer`
+      // is pre-set on the session and we want Stripe Tax to derive address
+      // from the customer at checkout. `auto` lets the Checkout UI prompt
+      // for + update the Customer's address/name. Shipping is omitted
+      // (we don't ship physical goods).
+      customer_update: { address: 'auto', name: 'auto' },
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
     });
@@ -313,6 +386,14 @@ export class StripeBillingProvider implements BillingProvider {
     customerId: string,
   ): NormalizedSubscription {
     const priceId = sub.items.data[0]?.price.id ?? null;
+    // PR9 contract: `toNormalizedSubscription` is a pure normalizer used by
+    // both `getSubscription` (read API) and `normalizeWebhookEvent`. For
+    // unknown price IDs we fall back to 'free' HERE for type-shape reasons,
+    // but the WEBHOOK HANDLER in `events.ts` explicitly detects unknown
+    // raw price IDs (via `planIdForStripePriceId(rawPriceId) === null`)
+    // and refuses to mutate local state. So the fallback below NEVER
+    // causes a silent downgrade in the webhook path — the handler returns
+    // outcome='unknown_price' before reaching any plan-id-driven write.
     const planId = planIdForStripePriceId(priceId) ?? 'free';
     const status = statusFromStripe(sub.status);
 
@@ -393,6 +474,45 @@ export class StripeBillingProvider implements BillingProvider {
           customerId,
           subscriptionId: sub.id,
           subscription: normalized,
+          occurredAt,
+          raw: event,
+        };
+      }
+      case 'customer.subscription.trial_will_end': {
+        // PR9: logging-only handler. No state mutation. Normalize without
+        // re-fetching schedule/price info (it's not consulted downstream).
+        const sub = event.data.object as StripeNS.Subscription;
+        const customerId =
+          typeof sub.customer === 'string' ? sub.customer : sub.customer.id;
+        return {
+          providerEventId: event.id,
+          type: 'subscription.trial_will_end',
+          customerId,
+          subscriptionId: sub.id,
+          subscription: null,
+          occurredAt,
+          raw: event,
+        };
+      }
+      case 'checkout.session.completed': {
+        // PR9: bookkeeping only — persists customer_id / subscription_id
+        // on the TBA row. Tier change is driven by the subsequent
+        // customer.subscription.created event.
+        const session = event.data.object as StripeNS.Checkout.Session;
+        const customerId =
+          typeof session.customer === 'string'
+            ? session.customer
+            : session.customer?.id ?? '';
+        const subscriptionId =
+          typeof session.subscription === 'string'
+            ? session.subscription
+            : session.subscription?.id;
+        return {
+          providerEventId: event.id,
+          type: 'checkout.session.completed',
+          customerId,
+          subscriptionId: subscriptionId ?? undefined,
+          subscription: null,
           occurredAt,
           raw: event,
         };

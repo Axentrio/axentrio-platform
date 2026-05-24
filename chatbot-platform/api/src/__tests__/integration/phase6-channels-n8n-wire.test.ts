@@ -40,6 +40,7 @@ const {
   getCachedPageToken,
   setupMetaConnections,
   enforceCountLimit,
+  requireFeature,
   metaAppId,
   metaRedirect,
   n8nInboundSecret,
@@ -53,6 +54,7 @@ const {
   getCachedPageToken: vi.fn(),
   setupMetaConnections: vi.fn(),
   enforceCountLimit: vi.fn(),
+  requireFeature: vi.fn(),
   metaAppId: { value: 'app123' },
   metaRedirect: { value: 'https://example.com/cb' },
   n8nInboundSecret: { value: 'secret-token-xyz' },
@@ -98,7 +100,7 @@ vi.mock('../../channels/meta/setup.service', () => ({
 
 vi.mock('../../billing/enforce', () => ({
   enforceCountLimit,
-  requireFeature: vi.fn().mockResolvedValue(undefined),
+  requireFeature,
 }));
 
 vi.mock('../../database/data-source', () => ({
@@ -202,6 +204,8 @@ beforeEach(() => {
   getCachedPageToken.mockReset();
   setupMetaConnections.mockReset();
   enforceCountLimit.mockReset();
+  requireFeature.mockReset();
+  requireFeature.mockResolvedValue(undefined);
   circuitBreakerReset.mockReset();
   circuitBreakerGetState.mockReset();
   circuitBreakerGetStats.mockReset();
@@ -287,7 +291,10 @@ describe('meta/oauth.routes — POST /connect catch-all adapter', () => {
       { id: 'p1', name: 'Page 1', accessToken: 't1', tasks: [] },
     ]);
     getCachedPageToken.mockReturnValue('cached-token-1');
-    enforceCountLimit.mockImplementation(() => {
+    // M0 plan-catalog reshape retired the numeric `channels` count gate in
+    // favour of the `unifiedInbox` feature gate. The route now calls
+    // `requireFeature(tenantId, 'unifiedInbox', ...)` — mock that throw path.
+    requireFeature.mockImplementation(() => {
       throw new ApiError('plan limit reached', 402, 'PLAN_LIMIT_CHANNELS');
     });
 

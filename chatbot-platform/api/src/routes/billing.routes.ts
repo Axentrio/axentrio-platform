@@ -12,6 +12,7 @@
  *   POST /undo-cancel                 → undo a pending cancel
  *   POST /undo-pending-change         → release a pending downgrade
  *   PUT  /email                       → update billing email
+ *   PUT  /vat-id                      → update VAT ID (EU only, syncs to Stripe Tax)
  *
  * All routes:
  *   - require Clerk auth + autoProvision,
@@ -42,6 +43,7 @@ import {
   portalSessionSchema,
   startCheckoutSchema,
   updateBillingEmailSchema,
+  updateVatIdSchema,
 } from '../schemas/billing.schema';
 import {
   cancelAtPeriodEnd,
@@ -53,6 +55,7 @@ import {
   undoCancel,
   undoPendingChange,
   updateBillingEmail,
+  updateVatId,
 } from '../billing/service';
 import { BillingProviderError } from '../billing/types';
 
@@ -212,6 +215,23 @@ router.put(
       updateBillingEmail(req.tenantId!, email),
     );
     logger.info('Billing: email updated', {
+      tenantId: req.tenantId,
+      actorId: req.userId,
+      changed: result.changed,
+    });
+    sendSuccess(res, result);
+  }),
+);
+
+router.put(
+  '/vat-id',
+  validate(updateVatIdSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { vatId } = req.body as { vatId: string | null };
+    const result = await callBillingService(() =>
+      updateVatId(req.tenantId!, vatId),
+    );
+    logger.info('Billing: vat id updated', {
       tenantId: req.tenantId,
       actorId: req.userId,
       changed: result.changed,

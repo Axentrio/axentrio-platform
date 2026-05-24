@@ -21,11 +21,15 @@
   },
   "nav": {
     "inbox": "Boîte de réception",
-    "aiContent": "IA & Contenu",
+    "aiContent": "Bot IA & Contenu",
     "analytics": "Analyses",
     "team": "Équipe",
     "settings": "Paramètres",
     "helpFaq": "Aide & FAQ",
+    "socialMedia": "Réseaux sociaux",
+    "leadCapture": "Capture de leads",
+    "bookings": "Réservations",
+    "successMeter": "Indice de réussite",
     "superAdmin": "Super administrateur",
     "allTenants": "Tous les clients",
     "allUsers": "Tous les utilisateurs",
@@ -36,7 +40,68 @@
     "impersonating": "Emprunt d'identité",
     "switchTenant": "Changer de client",
     "exitImpersonation": "Quitter",
-    "signOut": "Se déconnecter"
+    "signOut": "Se déconnecter",
+    "lockTooltip": "Verrouillé",
+    "unlockWith": {
+      "pro": "Débloquer avec Pro",
+      "enterprise": "Débloquer avec Enterprise"
+    }
+  },
+  "lockedPreview": {
+    "comparePlans": "Comparer les forfaits",
+    "tierStrip": {
+      "yourPlan": "Votre forfait",
+      "required": "Requis",
+      "trial": "Essai",
+      "trialValue": "14 jours",
+      "afterTrial": "Après l'essai",
+      "cancelAnytime": "Annulez à tout moment avant la facturation"
+    }
+  },
+  "bookings": {
+    "locked": {
+      "title": "Réservations IA",
+      "oneLiner": "Débloquez les réservations IA avec Pro et laissez les clients planifier des rendez-vous directement via le chat.",
+      "bullets": {
+        "1": "Disponibilité en temps réel synchronisée avec votre agenda Cal.com.",
+        "2": "Le bot recueille nom, e-mail, téléphone et notes — réservé en moins d'une minute.",
+        "3": "E-mails de confirmation, rappels et liens de replanification envoyés automatiquement."
+      }
+    },
+    "placeholder": {
+      "title": "Réservations",
+      "subtitle": "Le module Réservations arrivera ici en M5."
+    }
+  },
+  "leads": {
+    "locked": {
+      "title": "Capture de leads",
+      "oneLiner": "Capturez l'intention de chaque visiteur et transformez les conversations en leads qualifiés.",
+      "bullets": {
+        "1": "Collectez automatiquement nom, e-mail, téléphone et la question qui les a amenés.",
+        "2": "Champs personnalisés et règles d'attribution pour que la bonne personne reçoive le bon lead.",
+        "3": "Exportez les leads vers CSV ou votre CRM via webhook."
+      }
+    },
+    "placeholder": {
+      "title": "Capture de leads",
+      "subtitle": "Le module de capture de leads arrivera ici en M6."
+    }
+  },
+  "socialMedia": {
+    "locked": {
+      "title": "Réseaux sociaux",
+      "oneLiner": "Atteignez les clients là où ils sont déjà — connectez chaque canal de messagerie dans une seule boîte de réception.",
+      "bullets": {
+        "1": "Facebook Messenger, Instagram, WhatsApp et Telegram au même endroit.",
+        "2": "Le bot IA et la reprise humaine fonctionnent sur tous les canaux.",
+        "3": "Historique de conversation unifié, peu importe où le chat a commencé."
+      }
+    },
+    "tiktok": {
+      "title": "TikTok",
+      "description": "Les messages directs pour TikTok Business sont sur notre feuille de route. Faites-nous signe et nous vous écrirons dès que c'est prêt."
+    }
   },
   "roles": {
     "super_admin": "Super administrateur",
@@ -121,7 +186,7 @@
     },
     "widget": {
       "title": "Widget & marque",
-      "description": "Gérez votre logo, votre nom d'affichage et votre extrait d'intégration",
+      "description": "Gérez votre logo et votre nom d'affichage",
       "saveFailed": "Échec de l'enregistrement des paramètres de marque",
       "loadFailed": "Échec du chargement des paramètres de marque.",
       "appearanceNotice": {
@@ -1307,7 +1372,7 @@
   "help": {
     "page": {
       "title": "Aide et FAQ",
-      "subtitle": "Réponses aux questions fréquentes sur HandsOff. Effectuez une recherche ou parcourez les sections."
+      "subtitle": "Réponses aux questions fréquentes sur Axentrio. Effectuez une recherche ou parcourez les sections."
     },
     "search": {
       "placeholder": "Rechercher dans toutes les FAQ…",
@@ -1706,5 +1771,22 @@
       "title": "Analyse des conversations",
       "comingSoon": "Analyse détaillée des conversations bientôt disponible…"
     }
+  },
+  "badges": {
+    "essential": "Essential",
+    "pro": "Pro",
+    "enterprise": "Enterprise",
+    "comingSoon": "Bientôt"
+  },
+  "notifyMe": {
+    "cta": "Me prévenir",
+    "notified": "Notifié",
+    "error": "Impossible d'enregistrer votre intérêt. Veuillez réessayer."
+  },
+  "upgrade": {
+    "startTrial": "Démarrer l'essai Pro",
+    "subscribeNow": "S'abonner à Essential",
+    "contactSales": "Contacter les ventes",
+    "error": "Impossible de démarrer le paiement. Veuillez réessayer."
   }
 }

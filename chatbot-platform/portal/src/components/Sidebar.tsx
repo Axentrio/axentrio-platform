@@ -1,6 +1,16 @@
 /**
  * Sidebar Component
- * Navigation sidebar with menu items
+ * Navigation sidebar with menu items.
+ *
+ * M2 (subscription/feature-access epic) — locked-but-visible nav:
+ *   - 8 epic-mandated items: Inbox, AI Bot & Content, Social Media, Lead
+ *     Capture, Bookings, Success Meter, General Settings, Help & FAQ.
+ *   - Items carrying `requiredFeature` are gated via `useHasFeature()`. When
+ *     the calling tenant lacks the entitlement, the entry stays visible and
+ *     clickable; it renders a compact PlanBadge + Lock icon + tooltip. The
+ *     click routes through to the module path where the locked-preview hero
+ *     takes over (Deviation 11).
+ *   - Existing admin sub-menu (super_admin only) is retained.
  */
 
 import React from 'react';
@@ -8,16 +18,19 @@ import { NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   MessageSquare,
-  Users,
-  BarChart3,
+  Bot,
+  Share2,
+  UserPlus,
+  Calendar,
+  Gauge,
   Settings,
   LogOut,
   Shield,
   UserCog,
   TrendingUp,
-  BookOpen,
   HelpCircle,
   ChevronDown,
+  Lock,
 } from 'lucide-react';
 import { useClerk, useOrganization } from '@clerk/clerk-react';
 import { useAppAuth } from '@auth/useAppAuth';
@@ -33,27 +46,63 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useHandoffsQuery } from '../queries/useHandoffQueries';
+import {
+  useHasFeature,
+  type PlanFeatures,
+} from '../queries/useEntitlementsQueries';
+import { PlanBadge } from '@/components/billing/PlanBadge';
 import type { UserRole } from '@app-types/index';
+
+type RequiredTier = 'pro' | 'enterprise';
 
 interface MenuItem {
   path: string;
   /** Translation key under `nav.*` */
   labelKey: string;
   icon: React.ElementType;
+  /**
+   * Feature flag that gates this item. When omitted, the item is visible to
+   * everyone (any paid tier — the `free` cancellation sink is handled
+   * upstream by route guards).
+   */
+  requiredFeature?: keyof PlanFeatures;
+  /** Tier that unlocks `requiredFeature`. Drives the badge + tooltip copy. */
+  requiredTier?: RequiredTier;
+}
+
+interface AdminMenuItem {
+  path: string;
+  labelKey: string;
+  icon: React.ElementType;
   roles: UserRole[];
-  badge?: number;
 }
 
 const menuItems: MenuItem[] = [
-  { path: '/inbox', labelKey: 'nav.inbox', icon: MessageSquare, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/ai', labelKey: 'nav.aiContent', icon: BookOpen, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/analytics', labelKey: 'nav.analytics', icon: BarChart3, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/team', labelKey: 'nav.team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
-  { path: '/settings', labelKey: 'nav.settings', icon: Settings, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
-  { path: '/help', labelKey: 'nav.helpFaq', icon: HelpCircle, roles: ['super_admin', 'admin', 'supervisor', 'agent'] },
+  // 1. Inbox — all paid tiers
+  { path: '/inbox', labelKey: 'nav.inbox', icon: MessageSquare },
+  // 2. AI Bot & Content — all paid tiers
+  { path: '/ai', labelKey: 'nav.aiContent', icon: Bot },
+  // 3. Social Media — all paid tiers
+  { path: '/channels', labelKey: 'nav.socialMedia', icon: Share2 },
+  // 4. Lead Capture — all paid tiers (surface arrives in M6)
+  { path: '/leads', labelKey: 'nav.leadCapture', icon: UserPlus },
+  // 5. Bookings — Pro+ only (surface arrives in M5)
+  {
+    path: '/bookings',
+    labelKey: 'nav.bookings',
+    icon: Calendar,
+    requiredFeature: 'bookings',
+    requiredTier: 'pro',
+  },
+  // 6. Success Meter — sidebar alias for Insights/Analytics (Deviation 5)
+  { path: '/success-meter', labelKey: 'nav.successMeter', icon: Gauge },
+  // 7. General Settings — all roles
+  { path: '/settings', labelKey: 'nav.settings', icon: Settings },
+  // 8. Help & FAQ — all roles
+  { path: '/help', labelKey: 'nav.helpFaq', icon: HelpCircle },
 ];
 
-const adminMenuItems: MenuItem[] = [
+const adminMenuItems: AdminMenuItem[] = [
   { path: '/admin/tenants', labelKey: 'nav.allTenants', icon: Shield, roles: ['super_admin'] },
   { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
   { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
@@ -63,6 +112,78 @@ const adminMenuItems: MenuItem[] = [
 interface SidebarProps {
   className?: string;
 }
+
+interface SidebarMenuEntryProps {
+  item: MenuItem;
+  badgeCount?: number;
+}
+
+/**
+ * Renders one navigation entry. When the item carries a `requiredFeature`
+ * and the tenant lacks it, the entry shows a lock icon + plan badge + tooltip
+ * but stays clickable so the destination route can render its preview hero.
+ *
+ * The Tooltip wraps only the icon (matches the pre-M2 pattern). Wrapping the
+ * whole NavLink via `TooltipTrigger asChild` is structurally fine in Radix
+ * but the data-state attributes Radix injects into NavLink interact poorly
+ * with NavLink's own active-state styling on some browser/CSS combinations.
+ * Icon-only tooltip is the safe pattern that worked pre-M2.
+ */
+const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount }) => {
+  const { t } = useTranslation();
+  // Hook order must not depend on whether the item is gated, so always call
+  // with a stable key. `unifiedInbox` is a safe no-op (true on every paid
+  // tier) when `requiredFeature` is undefined.
+  const featureKey = item.requiredFeature ?? 'unifiedInbox';
+  const hasFeature = useHasFeature(featureKey);
+  const isLocked = !!item.requiredFeature && !hasFeature;
+  const requiredTier = item.requiredTier ?? 'pro';
+
+  const label = t(item.labelKey);
+  const tooltipLabel = isLocked
+    ? t(`sidebar.unlockWith.${requiredTier}`)
+    : label;
+
+  return (
+    <NavLink
+      to={item.path}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
+            : isLocked
+              ? 'text-text-muted hover:bg-surface-3 hover:text-text-secondary'
+              : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary',
+        )
+      }
+      aria-label={
+        isLocked ? `${label} — ${t('sidebar.lockTooltip')}` : undefined
+      }
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="flex-shrink-0 inline-flex items-center justify-center">
+            <item.icon className="w-5 h-5" />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right">{tooltipLabel}</TooltipContent>
+      </Tooltip>
+      <span className="flex-1 min-w-0 truncate">{label}</span>
+      {isLocked && (
+        <span className="flex items-center gap-1 flex-shrink-0">
+          <Lock className="w-3 h-3" aria-hidden="true" />
+          <PlanBadge tier={requiredTier} size="sm" />
+        </span>
+      )}
+      {!isLocked && badgeCount != null && badgeCount > 0 && (
+        <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full flex-shrink-0">
+          {badgeCount > 99 ? '99+' : badgeCount}
+        </span>
+      )}
+    </NavLink>
+  );
+};
 
 export const Sidebar: React.FC<SidebarProps> = ({
   className = ''
@@ -78,14 +199,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isSuperAdmin = user?.role === 'super_admin';
   const isImpersonating = isSuperAdmin && !!activeTenant;
 
-  const hasAccess = (roles: UserRole[]) => {
+  const hasAdminAccess = (roles: UserRole[]) => {
     // While user is loading, show all items — route guards handle actual access
     if (!user) return true;
     return roles.includes(user.role);
   };
 
-  const filteredMenuItems = menuItems.filter((item) => hasAccess(item.roles));
-  const filteredAdminItems = adminMenuItems.filter((item) => hasAccess(item.roles));
+  const filteredAdminItems = adminMenuItems.filter((item) => hasAdminAccess(item.roles));
 
   return (
     <aside className={cn(
@@ -129,13 +249,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
         <div className="min-w-0 flex-1">
           <h1 className="font-bold text-text-primary truncate">
-            {isImpersonating ? activeTenant.tenantName : organization?.name ?? 'HandsOff'}
+            {isImpersonating ? activeTenant.tenantName : organization?.name ?? 'Axentrio'}
           </h1>
           <p className={cn(
             'text-xs',
             isImpersonating ? 'text-orange-400 font-medium' : 'text-text-muted'
           )}>
-            {isImpersonating ? t('sidebar.impersonating') : 'HandsOff'}
+            {isImpersonating ? t('sidebar.impersonating') : 'Axentrio'}
           </p>
         </div>
         {isSuperAdmin && !isImpersonating && (
@@ -161,34 +281,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
         <TooltipProvider>
           <ul className="space-y-1">
-            {filteredMenuItems.map((item) => (
+            {menuItems.map((item) => (
               <li key={item.path}>
-                <NavLink
-                  to={item.path}
-                  className={({ isActive }) =>
-                    cn(
-                      'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-                      isActive
-                        ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
-                        : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
-                    )
-                  }
-                >
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <item.icon className="w-5 h-5 flex-shrink-0" />
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {t(item.labelKey)}
-                    </TooltipContent>
-                  </Tooltip>
-                  <span className="flex-1">{t(item.labelKey)}</span>
-                  {item.path === '/inbox' && pendingCount > 0 && (
-                    <span className="flex items-center justify-center min-w-5 h-5 px-1.5 text-xs font-medium text-white bg-red-500 rounded-full">
-                      {pendingCount > 99 ? '99+' : pendingCount}
-                    </span>
-                  )}
-                </NavLink>
+                <SidebarMenuEntry
+                  item={item}
+                  badgeCount={item.path === '/inbox' ? pendingCount : undefined}
+                />
               </li>
             ))}
           </ul>

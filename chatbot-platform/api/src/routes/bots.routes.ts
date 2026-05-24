@@ -27,6 +27,8 @@ import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
 import { createBotSchema, updateBotSchema } from '../schemas/bot.schema';
+import { enforceCountLimit } from '../billing/enforce';
+import { getEntitlements } from '../billing/entitlements';
 
 const router = Router();
 const botRepository = AppDataSource.getRepository(Bot);
@@ -96,15 +98,18 @@ function toListItem(bot: Bot) {
 router.get(
   '/',
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
-    const tenantId = (req as ProvisionedRequest).tenantId;
-    const bots = await botRepository.find({
-      where: { tenantId, deletedAt: IsNull() },
-      order: { isDefault: 'DESC', createdAt: 'ASC' },
-    });
+    const tenantId = (req as ProvisionedRequest).tenantId!;
+    const [bots, entitlements] = await Promise.all([
+      botRepository.find({
+        where: { tenantId, deletedAt: IsNull() },
+        order: { isDefault: 'DESC', createdAt: 'ASC' },
+      }),
+      getEntitlements(tenantId),
+    ]);
     sendSuccess(res, {
       bots: bots.map(toListItem),
       used: bots.length,
-      limit: null, // TODO(billing): per-tier bot limit once the billing epic lands
+      limit: entitlements.limits.bots,
     });
   })
 );
@@ -123,12 +128,23 @@ router.post(
     const { name } = req.body as { name: string };
 
     const bot = await AppDataSource.transaction(async (manager) => {
-      // Serialise concurrent creates for this tenant (also the lock point for
-      // the future quota gate). The anchor bot guarantees ≥1 row to lock.
+      // Serialise concurrent creates for this tenant. The anchor bot guarantees
+      // ≥1 row to lock, so the FOR UPDATE has a target on every tenant.
       await manager.query('SELECT 1 FROM chatbot_bots WHERE tenant_id = $1 FOR UPDATE', [tenantId]);
 
-      // TODO(billing): enforceCountLimit({ ..., capability: 'bots' }) here once
-      // `bots` is added to PlanLimits/Entitlements and the billing epic is committed.
+      // Per-tier bot quota gate. Counts non-deleted rows (paused bots count
+      // against the cap; only soft-delete frees a slot per multi-bot doc).
+      await enforceCountLimit({
+        manager,
+        tenantId,
+        capability: 'bots',
+        errorCode: 'plan_limit_bots',
+        countQuery: (m) =>
+          m
+            .createQueryBuilder(Bot, 'b')
+            .where('b.tenant_id = :tenantId AND b.deleted_at IS NULL', { tenantId })
+            .getCount(),
+      });
 
       let saved: Bot | null = null;
       for (let attempt = 0; attempt < MAX_KEY_ATTEMPTS; attempt++) {
@@ -205,23 +221,49 @@ router.patch(
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const authReq = req as ProvisionedRequest;
     requireMutateRole(authReq.userRole);
-    const tenantId = authReq.tenantId;
+    const tenantId = authReq.tenantId!;
     const { name, status } = req.body as { name?: string; status?: 'active' | 'paused' };
 
-    const bot = await botRepository.findOne({
-      where: { id: req.params.id, tenantId, deletedAt: IsNull() },
+    // Activation (paused → active) must re-check the quota: a tenant could have
+    // 2 paused bots on Enterprise (cap=2), downgrade to Pro (cap=1), and then
+    // try to un-pause both. The quota counts non-deleted rows including paused
+    // ones, so the only honest gate is on the transition itself — within a tx
+    // with a row lock to keep the count consistent against concurrent activates.
+    const saved = await AppDataSource.transaction(async (manager) => {
+      const repo = manager.getRepository(Bot);
+      const bot = await repo.findOne({
+        where: { id: req.params.id, tenantId, deletedAt: IsNull() },
+      });
+      if (!bot) throw new NotFoundError('Bot not found');
+
+      if (status === 'paused' && bot.isDefault) {
+        throw new ForbiddenError('The default bot cannot be paused — it owns your existing embed.');
+      }
+
+      const activating = status === 'active' && bot.status === 'paused';
+      if (activating) {
+        await manager.query('SELECT 1 FROM chatbot_bots WHERE tenant_id = $1 FOR UPDATE', [tenantId]);
+        await enforceCountLimit({
+          manager,
+          tenantId,
+          capability: 'bots',
+          errorCode: 'plan_limit_bots',
+          countQuery: (m) =>
+            m
+              .createQueryBuilder(Bot, 'b')
+              .where(
+                "b.tenant_id = :tenantId AND b.deleted_at IS NULL AND b.status = 'active'",
+                { tenantId },
+              )
+              .getCount(),
+        });
+      }
+
+      if (name !== undefined) bot.name = name;
+      if (status !== undefined) bot.status = status;
+      return repo.save(bot);
     });
-    if (!bot) throw new NotFoundError('Bot not found');
 
-    if (status === 'paused' && bot.isDefault) {
-      throw new ForbiddenError('The default bot cannot be paused — it owns your existing embed.');
-    }
-    // TODO(billing): when activating (paused → active), gate on the per-tier
-    // bot quota once the billing epic lands.
-
-    if (name !== undefined) bot.name = name;
-    if (status !== undefined) bot.status = status;
-    const saved = await botRepository.save(bot);
     sendSuccess(res, toListItem(saved));
   })
 );

@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import { AppDataSource, getRepository } from '../database/data-source';
+import { getRepository } from '../database/data-source';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { WebhookEventLog } from '../database/entities/WebhookEventLog';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
@@ -18,8 +18,7 @@ import {
 } from './telegram/setup.service';
 import { disconnectMetaConnection } from './meta/disconnect.service';
 import { runHealthCheck } from './health-check.service';
-import { enforceCountLimit } from '../billing/enforce';
-import { Not } from 'typeorm';
+import { requireFeature } from '../billing/enforce';
 
 const router = Router();
 
@@ -82,25 +81,12 @@ router.post(
       throw new BadRequestError('botToken is required');
     }
 
-    // Plan-gate (step 10, count 4). Short tx that locks the tenants row,
-    // counts non-disconnected channel connections, and throws 402 on cap.
-    // We deliberately release the lock before the (slow) Telegram API call
-    // — a concurrent connect could squeak in past the check, but the
-    // resulting over-by-one is bounded by request concurrency, not by any
-    // long-lived state. Trade-off: avoid holding a row lock across a 1-3s
-    // network call.
-    await AppDataSource.transaction(async (manager) => {
-      await enforceCountLimit({
-        manager,
-        tenantId,
-        capability: 'channels',
-        errorCode: 'plan_limit_channels',
-        countQuery: (m) =>
-          m.count(ChannelConnection, {
-            where: { tenantId, status: Not('disconnected') },
-          }),
-      });
-    });
+    // Plan-gate. The legacy numeric `channels` count cap was retired in the
+    // M0 plan-catalog reshape — channel availability is per-tier-by-feature
+    // now. `unifiedInbox` is the proxy: paid tiers have it, the `free`
+    // cancellation sink does not. A cancelled tenant cannot connect new
+    // channels; everyone else can connect any supported channel.
+    await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
 

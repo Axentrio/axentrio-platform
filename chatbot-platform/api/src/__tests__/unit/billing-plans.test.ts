@@ -1,51 +1,116 @@
 /**
  * Plan catalog + entitlement resolver — pure unit tests.
  *
- * Plan: .scratch/plan-billing.md § Implementation outline step 14 → Unit.
+ * Updated for M0 plan-catalog reshape (subscription epic):
+ *   - Tiers: free | essential | pro | enterprise
+ *   - `free` is the internal-only cancellation sink
+ *   - Enterprise is sales-led (no self-serve price)
+ *   - Entitlement shape uses the new feature flag names
  */
 
 import { describe, it, expect } from 'vitest';
-import { PLANS, planIdForStripePriceId } from '../../billing/plans';
+import {
+  PLANS,
+  planIdForStripePriceId,
+  getStripePriceIdFor,
+  selfServeCheckoutablePlans,
+} from '../../billing/plans';
 import { entitlementsFor } from '../../billing/entitlements';
 
 describe('PLANS catalog', () => {
   it('exposes all four tiers with the documented ranks', () => {
     expect(PLANS.free.rank).toBe(0);
-    expect(PLANS.pro.rank).toBe(1);
-    expect(PLANS.premium.rank).toBe(2);
+    expect(PLANS.essential.rank).toBe(1);
+    expect(PLANS.pro.rank).toBe(2);
     expect(PLANS.enterprise.rank).toBe(3);
   });
 
   it('orders ranks correctly so upgrade vs downgrade is unambiguous', () => {
-    expect(PLANS.pro.rank).toBeLessThan(PLANS.premium.rank);
-    expect(PLANS.premium.rank).toBeLessThan(PLANS.enterprise.rank);
-    expect(PLANS.free.rank).toBeLessThan(PLANS.pro.rank);
+    expect(PLANS.free.rank).toBeLessThan(PLANS.essential.rank);
+    expect(PLANS.essential.rank).toBeLessThan(PLANS.pro.rank);
+    expect(PLANS.pro.rank).toBeLessThan(PLANS.enterprise.rank);
   });
 
-  it('matches the documented entitlement shape per tier', () => {
-    // These are the values the Billing UI displays — locking them in so a
-    // catalog edit breaks the test rather than silently changing limits.
-    expect(PLANS.free.limits.agents).toBe(1);
+  it('marks self-serve plans correctly (Essential + Pro only)', () => {
+    expect(PLANS.free.isSelfServeCheckoutable).toBe(false);
+    expect(PLANS.essential.isSelfServeCheckoutable).toBe(true);
+    expect(PLANS.pro.isSelfServeCheckoutable).toBe(true);
+    expect(PLANS.enterprise.isSelfServeCheckoutable).toBe(false);
+  });
+
+  it('locks the documented per-tier prices (EUR)', () => {
+    expect(PLANS.free.priceEurMonthly).toBeNull();
+    expect(PLANS.essential.priceEurMonthly).toBe(49.99);
+    expect(PLANS.pro.priceEurMonthly).toBe(99.99);
+    expect(PLANS.enterprise.priceEurMonthly).toBeNull();
+  });
+
+  it('locks limits per tier', () => {
+    // free is the cancellation sink — zero everything so the agent can't run.
+    expect(PLANS.free.limits.agents).toBe(0);
+    expect(PLANS.free.limits.bots).toBe(0);
     expect(PLANS.free.limits.dailyLlmCalls).toBe(0);
-    expect(PLANS.pro.limits.agents).toBe(3);
-    expect(PLANS.pro.limits.dailyLlmCalls).toBe(1000);
-    expect(PLANS.premium.limits.agents).toBe(10);
-    expect(PLANS.premium.limits.dailyLlmCalls).toBe(10000);
-    expect(PLANS.enterprise.limits.agents).toBeNull();
-    expect(PLANS.enterprise.limits.dailyLlmCalls).toBeNull();
+    // Essential and Pro: one human support agent + one AI bot per the epic.
+    expect(PLANS.essential.limits.agents).toBe(1);
+    expect(PLANS.essential.limits.bots).toBe(1);
+    expect(PLANS.pro.limits.agents).toBe(1);
+    expect(PLANS.pro.limits.bots).toBe(1);
+    // Enterprise: two of each per the epic.
+    expect(PLANS.enterprise.limits.agents).toBe(2);
+    expect(PLANS.enterprise.limits.bots).toBe(2);
   });
 
   it('gates features per tier', () => {
-    expect(PLANS.free.features.fileUpload).toBe(false);
+    // Cancellation sink: everything off.
+    expect(PLANS.free.features.unifiedInbox).toBe(false);
     expect(PLANS.free.features.handoff).toBe(false);
-    expect(PLANS.free.features.customBranding).toBe(false);
+    expect(PLANS.free.features.fileUpload).toBe(false);
 
-    expect(PLANS.pro.features.fileUpload).toBe(true);
-    expect(PLANS.pro.features.handoff).toBe(true);
-    expect(PLANS.pro.features.customBranding).toBe(false);
+    // Essential: basic feature set, watermark visible, no bookings/CRM/assistant.
+    expect(PLANS.essential.features.unifiedInbox).toBe(true);
+    expect(PLANS.essential.features.bookings).toBe(false);
+    expect(PLANS.essential.features.calendarIntegrations).toBe(false);
+    expect(PLANS.essential.features.platformAssistant).toBe(false);
+    expect(PLANS.essential.features.crm).toBe(false);
+    expect(PLANS.essential.features.hideWidgetAttribution).toBe(false);
+    expect(PLANS.essential.features.customWidgetAppearance).toBe(true);
+    expect(PLANS.essential.features.fileUpload).toBe(true);
 
-    expect(PLANS.premium.features.customBranding).toBe(true);
-    expect(PLANS.enterprise.features.customBranding).toBe(true);
+    // Pro: bookings + assistant on; watermark off; CRM still off.
+    expect(PLANS.pro.features.bookings).toBe(true);
+    expect(PLANS.pro.features.calendarIntegrations).toBe(true);
+    expect(PLANS.pro.features.platformAssistant).toBe(true);
+    expect(PLANS.pro.features.crm).toBe(false);
+    expect(PLANS.pro.features.hideWidgetAttribution).toBe(true);
+
+    // Enterprise: everything on, including CRM (entitlement gate true; the
+    // UI shows Coming Soon at the surface layer per D25).
+    expect(PLANS.enterprise.features.crm).toBe(true);
+    expect(PLANS.enterprise.features.hideWidgetAttribution).toBe(true);
+  });
+});
+
+describe('selfServeCheckoutablePlans', () => {
+  it('returns exactly Essential and Pro', () => {
+    const plans = selfServeCheckoutablePlans();
+    expect(plans.map((p) => p.id).sort()).toEqual(['essential', 'pro']);
+  });
+});
+
+describe('getStripePriceIdFor', () => {
+  it('returns null for non-self-serve plans regardless of env', () => {
+    expect(getStripePriceIdFor('free')).toBeNull();
+    expect(getStripePriceIdFor('enterprise')).toBeNull();
+  });
+
+  it('returns the configured price ID for Essential / Pro when set', () => {
+    // The test env may or may not have these set; the function just reads
+    // config. Whatever the value is, it should be consistent.
+    const essentialId = getStripePriceIdFor('essential');
+    const proId = getStripePriceIdFor('pro');
+    // Either both are configured strings or null — never undefined.
+    expect(typeof essentialId === 'string' || essentialId === null).toBe(true);
+    expect(typeof proId === 'string' || proId === null).toBe(true);
   });
 });
 
@@ -59,33 +124,41 @@ describe('planIdForStripePriceId', () => {
     expect(planIdForStripePriceId('price_completely_unknown')).toBeNull();
   });
 
-  it('reverse-maps a registered price ID to its plan', () => {
-    // The env-loaded test config sets pro/premium price IDs; if the test
-    // env strips them, the catalog has null and this still returns null.
-    const pro = PLANS.pro.providerPriceIds.stripe.usd;
-    const premium = PLANS.premium.providerPriceIds.stripe.usd;
-    if (pro) expect(planIdForStripePriceId(pro)).toBe('pro');
-    if (premium) expect(planIdForStripePriceId(premium)).toBe('premium');
+  it('round-trips: getStripePriceIdFor → planIdForStripePriceId', () => {
+    const essentialId = getStripePriceIdFor('essential');
+    const proId = getStripePriceIdFor('pro');
+    if (essentialId) expect(planIdForStripePriceId(essentialId)).toBe('essential');
+    if (proId) expect(planIdForStripePriceId(proId)).toBe('pro');
   });
 });
 
 describe('entitlementsFor', () => {
-  it('resolves free / pro / premium entitlements straight from the catalog', () => {
-    const free = entitlementsFor('free');
-    expect(free.planId).toBe('free');
-    expect(free.limits.agents).toBe(1);
-    expect(free.limits.dailyLlmCalls).toBe(0);
-    expect(free.features.fileUpload).toBe(false);
+  it('resolves Essential entitlements straight from the catalog', () => {
+    const ess = entitlementsFor('essential');
+    expect(ess.planId).toBe('essential');
+    expect(ess.limits.agents).toBe(1);
+    expect(ess.features.unifiedInbox).toBe(true);
+    expect(ess.features.bookings).toBe(false);
+    expect(ess.features.hideWidgetAttribution).toBe(false);
+  });
 
+  it('resolves Pro entitlements straight from the catalog', () => {
     const pro = entitlementsFor('pro');
     expect(pro.planId).toBe('pro');
-    expect(pro.limits.agents).toBe(3);
-    expect(pro.features.handoff).toBe(true);
+    expect(pro.limits.agents).toBe(1);
+    expect(pro.features.bookings).toBe(true);
+    expect(pro.features.platformAssistant).toBe(true);
+    expect(pro.features.hideWidgetAttribution).toBe(true);
+  });
 
-    const premium = entitlementsFor('premium');
-    expect(premium.planId).toBe('premium');
-    expect(premium.limits.channels).toBeNull(); // unlimited
-    expect(premium.features.customBranding).toBe(true);
+  it('resolves Free (cancellation sink) entitlements as all-zero/all-false', () => {
+    const free = entitlementsFor('free');
+    expect(free.planId).toBe('free');
+    expect(free.limits.agents).toBe(0);
+    expect(free.limits.dailyLlmCalls).toBe(0);
+    expect(free.features.unifiedInbox).toBe(false);
+    expect(free.features.handoff).toBe(false);
+    expect(free.features.fileUpload).toBe(false);
   });
 
   it('ignores Enterprise override columns for non-Enterprise tiers', () => {
@@ -106,9 +179,9 @@ describe('entitlementsFor', () => {
     expect(ent.planId).toBe('enterprise');
     expect(ent.limits.sessions).toBe(2500);
     expect(ent.limits.dailyLlmCalls).toBe(50000);
-    // Unbounded fields stay null when the override doesn't set them.
-    expect(ent.limits.agents).toBeNull();
-    expect(ent.limits.channels).toBeNull();
+    // agents + bots have no override path; use the plan defaults.
+    expect(ent.limits.agents).toBe(2);
+    expect(ent.limits.bots).toBe(2);
   });
 
   it('falls back to plan defaults for Enterprise when override is null', () => {

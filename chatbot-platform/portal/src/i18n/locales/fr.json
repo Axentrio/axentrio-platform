@@ -1293,7 +1293,15 @@
       "sectionEyebrow": "Section",
       "dragHandle": "Glisser pour réordonner",
       "expandAnswer": "Afficher la réponse",
-      "collapseAnswer": "Masquer la réponse"
+      "collapseAnswer": "Masquer la réponse",
+      "editSection": "Modifier la section",
+      "expandAll": "Tout déplier",
+      "collapseAll": "Tout replier",
+      "translationStatus": "Complétude de la traduction",
+      "translation": {
+        "complete": "Traduction {{lang}} complète",
+        "missing": "Traduction {{lang}} manquante"
+      }
     }
   },
   "help": {

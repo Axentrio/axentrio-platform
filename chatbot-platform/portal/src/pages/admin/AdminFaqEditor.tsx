@@ -18,6 +18,7 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   GripVertical,
   HelpCircle,
   Loader2,
@@ -378,6 +379,7 @@ const AdminFaqEditor: React.FC = () => {
             <ItemsPane
               section={activeSection}
               onNewItem={(sectionId) => setItemDialog({ mode: 'create', sectionId })}
+              onEditSection={(s) => setSectionDialog({ mode: 'edit', section: s })}
               onEditItem={(i) => setItemDialog({ mode: 'edit', item: i })}
               onDeleteItem={(i) => setItemToDelete(i)}
               onMoveItem={moveItem}
@@ -590,6 +592,7 @@ const SortableSectionRow: React.FC<SortableSectionRowProps> = ({
 interface ItemsPaneProps {
   section: FaqSection | null;
   onNewItem: (sectionId: string) => void;
+  onEditSection: (s: FaqSection) => void;
   onEditItem: (i: FaqItem) => void;
   onDeleteItem: (i: FaqItem) => void;
   onMoveItem: (i: FaqItem, direction: -1 | 1) => void;
@@ -598,11 +601,22 @@ interface ItemsPaneProps {
 const ItemsPane: React.FC<ItemsPaneProps> = ({
   section,
   onNewItem,
+  onEditSection,
   onEditItem,
   onDeleteItem,
   onMoveItem,
 }) => {
   const { t } = useTranslation();
+  // Expansion state lives here so the "expand all" toggle can flip every row
+  // at once, and so the chevron resets cleanly when the section changes.
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+
+  // Reset expansion whenever the section changes — different items, fresh
+  // collapsed state. Using section.id as the trigger.
+  useEffect(() => {
+    setExpandedIds(new Set());
+  }, [section?.id]);
+
   if (!section) {
     return (
       <main className="border border-edge rounded-2xl bg-surface-2 flex items-center justify-center text-xs text-text-muted">
@@ -611,6 +625,17 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
     );
   }
   const reservedSingleton = section.isReserved && section.items.length <= 1;
+  const anyExpanded = expandedIds.size > 0;
+  const toggleItem = (id: string) =>
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const toggleAll = () =>
+    setExpandedIds(anyExpanded ? new Set() : new Set(section.items.map((i) => i.id)));
+
   return (
     <main className="border border-edge rounded-2xl bg-surface-2 overflow-hidden flex flex-col">
       {/* Section header — visually distinct from the items list below. */}
@@ -638,10 +663,39 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
             <span>{t('admin.faq.itemsCount', { count: section.items.length })}</span>
           </div>
         </div>
-        <Button size="sm" onClick={() => onNewItem(section.id)} className="gap-1.5 shrink-0">
-          <Plus className="w-3.5 h-3.5" />
-          {t('admin.faq.newItem')}
-        </Button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => onEditSection(section)}
+            className="gap-1.5"
+            title={t('admin.faq.editSection')}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{t('admin.faq.editSection')}</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={toggleAll}
+            disabled={section.items.length === 0}
+            className="gap-1.5"
+            title={anyExpanded ? t('admin.faq.collapseAll') : t('admin.faq.expandAll')}
+          >
+            {anyExpanded ? (
+              <ChevronUp className="w-3.5 h-3.5" />
+            ) : (
+              <ChevronDown className="w-3.5 h-3.5" />
+            )}
+            <span className="hidden sm:inline">
+              {anyExpanded ? t('admin.faq.collapseAll') : t('admin.faq.expandAll')}
+            </span>
+          </Button>
+          <Button size="sm" onClick={() => onNewItem(section.id)} className="gap-1.5">
+            <Plus className="w-3.5 h-3.5" />
+            {t('admin.faq.newItem')}
+          </Button>
+        </div>
       </div>
 
       <ul className="flex-1 overflow-y-auto p-3 space-y-2">
@@ -656,6 +710,8 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
             isFirst={idx === 0}
             isLast={idx === section.items.length - 1}
             reservedSingleton={reservedSingleton}
+            isExpanded={expandedIds.has(it.id)}
+            onToggleExpand={() => toggleItem(it.id)}
             onEdit={onEditItem}
             onDelete={onDeleteItem}
             onMove={onMoveItem}
@@ -672,6 +728,8 @@ interface SortableItemRowProps {
   isFirst: boolean;
   isLast: boolean;
   reservedSingleton: boolean;
+  isExpanded: boolean;
+  onToggleExpand: () => void;
   onEdit: (i: FaqItem) => void;
   onDelete: (i: FaqItem) => void;
   onMove: (i: FaqItem, direction: -1 | 1) => void;
@@ -683,12 +741,13 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
   isFirst,
   isLast,
   reservedSingleton,
+  isExpanded,
+  onToggleExpand,
   onEdit,
   onDelete,
   onMove,
 }) => {
   const { t, i18n } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
   const dragData = useMemo<ItemDragData>(
     () => ({ kind: ITEM_KIND, id: it.id, sectionId }),
     [it.id, sectionId],
@@ -713,12 +772,12 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
       </span>
       <button
         type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        aria-label={expanded ? t('admin.faq.collapseAnswer') : t('admin.faq.expandAnswer')}
+        onClick={onToggleExpand}
+        aria-expanded={isExpanded}
+        aria-label={isExpanded ? t('admin.faq.collapseAnswer') : t('admin.faq.expandAnswer')}
         className="shrink-0 mt-0.5 p-0.5 rounded text-text-muted hover:text-text-primary hover:bg-surface-3"
       >
-        {expanded ? (
+        {isExpanded ? (
           <ChevronDown className="w-3.5 h-3.5" />
         ) : (
           <ChevronRight className="w-3.5 h-3.5" />
@@ -726,8 +785,11 @@ const SortableItemRow: React.FC<SortableItemRowProps> = ({
       </button>
       <div className="flex-1 min-w-0">
         <div className="text-sm text-text-primary truncate">{it.question.en}</div>
-        <div className="text-[10px] text-text-muted mt-0.5 font-mono truncate">{it.slug}</div>
-        {expanded && (
+        <div className="flex items-center gap-2 mt-0.5">
+          <div className="text-[10px] text-text-muted font-mono truncate">{it.slug}</div>
+          <TranslationStatus question={it.question} answer={it.answer} />
+        </div>
+        {isExpanded && (
           <div className="mt-2 pt-2 border-t border-edge text-xs text-text-secondary leading-relaxed whitespace-pre-wrap">
             {answerText}
           </div>
@@ -791,6 +853,48 @@ const IconButton: React.FC<
     {children}
   </button>
 );
+
+/**
+ * Three small lang chips (EN · NL · FR) showing per-language Q+A completeness.
+ * EN is always full opacity (backend enforces non-empty `en`); NL/FR dim when
+ * either question or answer is missing/empty in that language. Hover for an
+ * explanatory tooltip.
+ */
+const TranslationStatus: React.FC<{ question: FaqTranslation; answer: FaqTranslation }> = ({
+  question,
+  answer,
+}) => {
+  const { t } = useTranslation();
+  const isComplete = (lang: 'en' | 'nl' | 'fr') =>
+    Boolean(question[lang]?.trim()) && Boolean(answer[lang]?.trim());
+  return (
+    <div className="flex items-center gap-1 shrink-0" aria-label={t('admin.faq.translationStatus')}>
+      {(['en', 'nl', 'fr'] as const).map((lang) => {
+        const complete = isComplete(lang);
+        const label = complete
+          ? t('admin.faq.translation.complete', { lang: lang.toUpperCase() })
+          : t('admin.faq.translation.missing', { lang: lang.toUpperCase() });
+        return (
+          <Tooltip key={lang}>
+            <TooltipTrigger asChild>
+              <span
+                className={cn(
+                  'text-[9px] font-mono font-semibold uppercase px-1 py-0.5 rounded',
+                  complete
+                    ? 'bg-primary-500/15 text-primary-400'
+                    : 'bg-surface-3 text-text-muted line-through opacity-60',
+                )}
+              >
+                {lang}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{label}</TooltipContent>
+          </Tooltip>
+        );
+      })}
+    </div>
+  );
+};
 
 /* ========================================================================= */
 /*  Section dialog                                                           */

@@ -1293,7 +1293,15 @@
       "sectionEyebrow": "Sectie",
       "dragHandle": "Versleep om te herschikken",
       "expandAnswer": "Antwoord uitklappen",
-      "collapseAnswer": "Antwoord inklappen"
+      "collapseAnswer": "Antwoord inklappen",
+      "editSection": "Sectie bewerken",
+      "expandAll": "Alles uitklappen",
+      "collapseAll": "Alles inklappen",
+      "translationStatus": "Volledigheid van vertaling",
+      "translation": {
+        "complete": "{{lang}}-vertaling compleet",
+        "missing": "{{lang}}-vertaling ontbreekt"
+      }
     }
   },
   "help": {

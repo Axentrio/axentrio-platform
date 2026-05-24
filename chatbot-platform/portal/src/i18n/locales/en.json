@@ -1329,7 +1329,15 @@
       "sectionEyebrow": "Section",
       "dragHandle": "Drag to reorder",
       "expandAnswer": "Expand answer",
-      "collapseAnswer": "Collapse answer"
+      "collapseAnswer": "Collapse answer",
+      "editSection": "Edit section",
+      "expandAll": "Expand all",
+      "collapseAll": "Collapse all",
+      "translationStatus": "Translation completeness",
+      "translation": {
+        "complete": "{{lang}} translation complete",
+        "missing": "{{lang}} translation missing"
+      }
     }
   },
   "inbox": {

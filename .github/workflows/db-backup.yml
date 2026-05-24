@@ -45,8 +45,10 @@ jobs:
           set -euo pipefail
           TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           FILENAME="backup_${TIMESTAMP}.sql.gz"
-          # set -o pipefail above ensures pg_dump's exit code propagates through gzip
-          pg_dump "$DATABASE_URL" \
+          # set -o pipefail above ensures pg_dump's exit code propagates through gzip.
+          # Force the v17 binary explicitly: the ubuntu-latest runner ships with
+          # postgresql-client-16 in PATH, which refuses to dump from a v17 server.
+          /usr/lib/postgresql/17/bin/pg_dump "$DATABASE_URL" \
             --no-owner --no-privileges \
             --clean --if-exists \
             | gzip -9 > "$FILENAME"

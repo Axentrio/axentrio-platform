@@ -21,7 +21,7 @@ import { ChatSession } from './ChatSession';
 
 export type AgentStatus = 'online' | 'away' | 'busy' | 'offline';
 
-@Entity('agents')
+@Entity('support_agents')
 @Index(['tenantId', 'status'])
 export class Agent {
   @PrimaryGeneratedColumn('uuid')

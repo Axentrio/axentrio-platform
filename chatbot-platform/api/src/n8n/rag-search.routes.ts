@@ -12,6 +12,7 @@ import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { searchKnowledge } from '../llm/rag.service';
+import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 
 const router = Router();
 
@@ -48,6 +49,7 @@ router.post(
   verifyInternalAuth,
   [
     body('tenantId').isUUID().withMessage('tenantId must be a valid UUID'),
+    body('botId').optional().isUUID().withMessage('botId must be a valid UUID'),
     body('query').isString().notEmpty().withMessage('query is required'),
     body('maxChunks').optional().isInt({ min: 1, max: 20 }).withMessage('maxChunks must be 1-20'),
     body('conversationHistory').optional().isArray().withMessage('conversationHistory must be an array'),
@@ -59,15 +61,20 @@ router.post(
       return;
     }
 
-    const { tenantId, query, maxChunks, conversationHistory } = req.body;
+    const { tenantId, botId, query, maxChunks, conversationHistory } = req.body;
 
     try {
+      // Multi-bot: when n8n sends botId, scope retrieval to that bot's attached
+      // KBs (empty → no knowledge per I12). Omitted botId → tenant-wide (legacy),
+      // pending the n8n workflow update that begins sending botId.
+      const botKbIds = botId ? await getBotKnowledgeBaseIds(AppDataSource, botId) : undefined;
       const result = await searchKnowledge(
         AppDataSource,
         tenantId,
         query,
         conversationHistory || [],
-        maxChunks || 5
+        maxChunks || 5,
+        botKbIds
       );
 
       res.json(result);

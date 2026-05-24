@@ -247,6 +247,9 @@ export async function testChat(req: Request, res: Response) {
   if (useKnowledgeBase) {
     let result;
     try {
+      // TODO(multi-bot Phase 3 UI): when the test/preview chat targets a
+      // specific bot, pass that bot's attached KB ids here. For now this
+      // tenant-level preview stays tenant-wide (knowledgeBaseIds omitted).
       result = await generateResponse(AppDataSource, tenantId, ai, message, history);
     } catch (err: any) {
       const msg = err?.message || '';

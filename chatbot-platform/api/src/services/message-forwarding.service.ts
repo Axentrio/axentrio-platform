@@ -18,6 +18,7 @@ import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
+import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { config } from '../config/environment';
 import { AgentService, AgentResult } from '../agent/agent.service';
@@ -312,12 +313,18 @@ export async function forwardMessageToN8n(
       const messageContent = savedMessage.contentEncrypted
         ? decrypt(savedMessage.content)
         : savedMessage.content;
+      // Multi-bot: scope retrieval to the session's bot's attached KBs.
+      // Null botId (unattributed/legacy session) → tenant-wide (undefined).
+      const botKbIds = session.botId
+        ? await getBotKnowledgeBaseIds(AppDataSource, session.botId)
+        : undefined;
       const ragResult = await generateResponse(
         AppDataSource,
         session.tenantId,
         aiSettings as Parameters<typeof generateResponse>[2],
         messageContent,
-        history
+        history,
+        botKbIds
       );
 
       const botParticipant = await ensureBotParticipant(session, aiSettings);

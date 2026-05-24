@@ -2,26 +2,61 @@ name: Database Backup
 
 on:
   schedule:
-    # Run daily at 2:00 AM UTC
+    # Run daily at 02:00 UTC
     - cron: '0 2 * * *'
-  workflow_dispatch: # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 17 client
+        # Crunchy Bridge runs PG17; pin client to match to avoid version drift.
         run: |
+          set -euo pipefail
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+            https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Sanity-check DB URL secret
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::DATABASE_PUBLIC_URL secret is empty"
+            exit 1
+          fi
+          # Print only the host so we can see WHICH DB we're backing up in the run log,
+          # without leaking credentials. Format: user:***@host/db
+          MASKED=$(echo "$DATABASE_URL" | sed -E 's|(://[^:]+):[^@]+@|\1:***@|')
+          echo "Target: $MASKED"
 
       - name: Create database backup
         env:
           DATABASE_URL: ${{ secrets.DATABASE_PUBLIC_URL }}
+          PGSSLMODE: require
         run: |
-          TIMESTAMP=$(date +%Y-%m-%d_%H-%M-%S)
+          set -euo pipefail
+          TIMESTAMP=$(date -u +%Y%m%dT%H%M%SZ)
           FILENAME="backup_${TIMESTAMP}.sql.gz"
-          pg_dump "$DATABASE_URL" | gzip > "$FILENAME"
+          # set -o pipefail above ensures pg_dump's exit code propagates through gzip
+          pg_dump "$DATABASE_URL" \
+            --no-owner --no-privileges \
+            --clean --if-exists \
+            | gzip -9 > "$FILENAME"
+          SIZE=$(stat -c%s "$FILENAME" 2>/dev/null || stat -f%z "$FILENAME")
+          # Fail if the dump is suspiciously small (gzip header for empty input is ~20 bytes;
+          # a real schema-only dump should be at least a few KB).
+          if [ "$SIZE" -lt 2048 ]; then
+            echo "::error::Backup file is suspiciously small ($SIZE bytes). pg_dump probably failed."
+            exit 1
+          fi
           echo "FILENAME=$FILENAME" >> "$GITHUB_ENV"
           echo "Backup created: $FILENAME ($(du -h "$FILENAME" | cut -f1))"
 
@@ -31,6 +66,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
         run: |
+          set -euo pipefail
           aws s3 cp "$FILENAME" "s3://chatbot-db-backups/$FILENAME" \
             --endpoint-url "$R2_ENDPOINT"
           echo "Uploaded $FILENAME to R2"
@@ -41,6 +77,7 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
         run: |
+          set -euo pipefail
           CUTOFF_DATE=$(date -d '30 days ago' +%Y-%m-%d 2>/dev/null || date -v-30d +%Y-%m-%d)
           aws s3 ls "s3://chatbot-db-backups/" --endpoint-url "$R2_ENDPOINT" | while read -r line; do
             FILE_DATE=$(echo "$line" | awk '{print $1}')

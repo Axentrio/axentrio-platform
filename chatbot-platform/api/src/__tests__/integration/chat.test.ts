@@ -56,6 +56,7 @@ import {
   createTestSession,
   createTestParticipant,
   createTestMessage,
+  createTestAnchorBot,
 } from '../helpers/factories';
 
 describe('Chat Lifecycle', () => {
@@ -84,6 +85,9 @@ describe('Chat Lifecycle', () => {
   describe('POST /api/v1/auth/widget', () => {
     it('should return a token for valid apiKey', async () => {
       const tenant = await createTestTenant();
+      // Anchor bot required so resolveBotKey can resolve the legacy
+      // tenant.apiKey to a bot.
+      await createTestAnchorBot(tenant);
 
       const res = await request(app)
         .post('/api/v1/auth/widget')

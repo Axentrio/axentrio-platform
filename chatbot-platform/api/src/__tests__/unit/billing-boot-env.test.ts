@@ -1,17 +1,16 @@
 /**
  * Boot-time Stripe env-var validation.
  *
- * Plan: .scratch/plan-billing.md § Implementation outline step 14 → Unit:
- *   "boot-time env-var validation fails non-zero when any required Stripe
- *    var is missing."
+ * `src/config/environment.ts` calls `process.exit(1)` ONLY in production when
+ * any of the four Stripe vars is empty. In development the check downgrades
+ * to a warning so local devs can boot the API before Stripe credentials are
+ * provisioned. `NODE_ENV=test` skips the check entirely.
  *
- * src/config/environment.ts calls `process.exit(1)` on first import when
- * any of the four Stripe vars is empty (outside NODE_ENV=test). We can't
- * test that directly because Vitest itself runs with NODE_ENV=test which
- * intentionally bypasses the check.
+ * `SKIP_BILLING_BOOT_CHECK=true` further downgrades the production check to a
+ * warning — last-resort escape hatch for early prod deploys.
  *
- * Instead, we invoke the validator logic via a child Node process with
- * env vars adjusted, so each case gets a clean import of environment.ts.
+ * We invoke the validator logic via a child Node process with env vars
+ * adjusted, so each case gets a clean import of environment.ts.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -21,8 +20,8 @@ import path from 'path';
 const REQUIRED = [
   'STRIPE_SECRET_KEY',
   'STRIPE_WEBHOOK_SECRET',
-  'STRIPE_PRICE_PRO_USD_MONTHLY',
-  'STRIPE_PRICE_PREMIUM_USD_MONTHLY',
+  'STRIPE_PRICE_ESSENTIAL',
+  'STRIPE_PRICE_PRO',
 ] as const;
 
 function runBootCheck(envOverrides: Record<string, string | undefined>): {
@@ -31,11 +30,21 @@ function runBootCheck(envOverrides: Record<string, string | undefined>): {
 } {
   // Minimum env to get past pre-Stripe validation in environment.ts. We
   // load real .env values for everything else and only override the bits
-  // under test, so the test stays focused on the Stripe fail-fast logic.
+  // under test. NODE_ENV=production is the only mode where missing Stripe
+  // vars exit non-zero; dev/test only warn.
+  //
+  // In production NODE_ENV, environment.ts also requires non-default values
+  // for JWT_SECRET (≥32 chars), JWT_REFRESH_SECRET (≥32), ENCRYPTION_KEY
+  // (≥32), CLERK_SECRET_KEY (≠ dev default), and WIDGET_API_KEY (≠ dev
+  // default). Populate dummies so we exercise the Stripe check, not those.
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    // Force production-like check (test mode bypasses Stripe validation).
-    NODE_ENV: 'development',
+    NODE_ENV: 'production',
+    JWT_SECRET: 'a'.repeat(32),
+    JWT_REFRESH_SECRET: 'a'.repeat(32),
+    ENCRYPTION_KEY: 'a'.repeat(32),
+    CLERK_SECRET_KEY: 'sk_test_dummy_clerk_secret_for_boot_test',
+    WIDGET_API_KEY: 'widget-prod-dummy',
     ...envOverrides,
   };
   // Remove keys explicitly set to undefined so dotenv defaults don't refill.
@@ -67,9 +76,9 @@ function runBootCheck(envOverrides: Record<string, string | undefined>): {
 
 describe('Boot-time Stripe env validation', () => {
   for (const missing of REQUIRED) {
-    it(`exits non-zero when ${missing} is missing`, () => {
+    it(`exits non-zero in production when ${missing} is missing`, () => {
       // Provide placeholder values for the other three, blank out the
-      // one under test.
+      // one under test. (NODE_ENV=production set in runBootCheck.)
       const overrides: Record<string, string | undefined> = {};
       for (const k of REQUIRED) {
         overrides[k] = k === missing ? '' : `dummy_${k.toLowerCase()}`;
@@ -81,7 +90,7 @@ describe('Boot-time Stripe env validation', () => {
     });
   }
 
-  it('exits zero when all four Stripe vars are present', () => {
+  it('exits zero in production when all four Stripe vars are present', () => {
     const overrides: Record<string, string> = {};
     for (const k of REQUIRED) overrides[k] = `dummy_${k.toLowerCase()}`;
     const { status } = runBootCheck(overrides);
@@ -97,5 +106,17 @@ describe('Boot-time Stripe env validation', () => {
     const { status, stderr } = runBootCheck(overrides);
     expect(status).toBe(0);
     expect(stderr).toMatch(/SKIP_BILLING_BOOT_CHECK=true/);
+  });
+
+  it('boots in development (warn-only) even when all four Stripe vars are missing', () => {
+    // Local-dev escape: missing Stripe creds should NOT block server startup
+    // when NODE_ENV=development. A warning is logged; the boot proceeds.
+    const overrides: Record<string, string | undefined> = {
+      NODE_ENV: 'development',
+    };
+    for (const k of REQUIRED) overrides[k] = '';
+    const { status, stderr } = runBootCheck(overrides);
+    expect(status).toBe(0);
+    expect(stderr).toMatch(/\[non-production boot\]/);
   });
 });

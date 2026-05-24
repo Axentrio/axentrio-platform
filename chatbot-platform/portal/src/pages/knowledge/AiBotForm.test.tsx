@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AiBotForm from './AiBotForm';
 
 const { mockMutate } = vi.hoisted(() => ({ mockMutate: vi.fn() }));
@@ -45,7 +46,18 @@ const SYSTEM_PROMPT_PLACEHOLDER = /Write your bot's instructions here/;
 
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   const user = userEvent.setup();
-  const result = render(<AiBotForm onGoToKnowledgeBase={onGoToKnowledgeBase} />);
+  // AiBotForm pulls in BotInstructionsHelpDrawer which calls useFaq() (a React
+  // Query hook). Wrap in a fresh QueryClient per test so the hook can resolve.
+  // Mocked queries here (useKnowledgeQueries) bypass the client; useFaq still
+  // needs it for its useQuery call.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const result = render(
+    <QueryClientProvider client={queryClient}>
+      <AiBotForm onGoToKnowledgeBase={onGoToKnowledgeBase} />
+    </QueryClientProvider>,
+  );
   return { user, onGoToKnowledgeBase, ...result };
 };
 

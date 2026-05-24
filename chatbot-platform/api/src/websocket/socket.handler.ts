@@ -18,9 +18,13 @@ import { DeepPartial } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
-import { Tenant } from '../database/entities/Tenant';
 import { Participant } from '../database/entities/Participant';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import {
+  resolveBotKeyStrict,
+  BotPausedError,
+  BotNotFoundError,
+} from '../services/bot-resolution.service';
 import { encrypt } from '../utils/encryption';
 import { routeOutboundMessage } from '../channels/outbound-router';
 
@@ -128,13 +132,25 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
     return;
   }
 
-  // Mode 2: Widget (API key in query)
+  // Mode 2: Widget (API key in query). The key can be either a Bot.publicKey
+  // (`bk_*`) or a legacy Tenant.apiKey. resolveBotKeyStrict throws on unknown
+  // keys and on paused bots — both surface as auth errors that disconnect
+  // the socket (#16b's natural wiring for websocket).
   if (socket.handshake.query?.apiKey) {
-    const tenantRepo = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepo.findOne({
-      where: { apiKey: socket.handshake.query.apiKey as string },
-    });
-    if (!tenant) throw new Error('Authentication error: Invalid API key');
+    let resolved;
+    try {
+      resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
+    } catch (err) {
+      if (err instanceof BotPausedError) {
+        throw new Error('Authentication error: Bot is paused');
+      }
+      if (err instanceof BotNotFoundError) {
+        throw new Error('Authentication error: Invalid API key');
+      }
+      throw err;
+    }
+
+    const { tenant, bot } = resolved;
 
     socket.data.user = {
       id: (socket.handshake.query.visitorId as string) || socket.id,
@@ -144,6 +160,7 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
       type: 'widget' as const,
     };
     socket.data.tenantId = tenant.id;
+    socket.data.botId = bot.id;
     return;
   }
 

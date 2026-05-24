@@ -10,7 +10,8 @@ import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
-import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError } from '../middleware';
+import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
+import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
@@ -53,11 +54,16 @@ function simpleRateLimit(maxRequests: number, windowMs: number) {
 }
 const widgetInitRateLimit = simpleRateLimit(30, 60000); // 30 per minute
 
-// Inline API key validation (looks up tenant by apiKey in DB)
+// Inline API key validation. Resolves either a Bot.publicKey or a legacy
+// Tenant.apiKey via the shared resolver so the widget knows which bot it's
+// talking to. Paused bots are rejected here (#16b) — `paused: true` signals
+// the caller to return HTTP 403 instead of 401.
 interface ApiKeyValidationResult {
   valid: boolean;
   tenant?: Tenant;
+  bot?: Bot;
   error?: string;
+  paused?: boolean;
 }
 
 async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
@@ -65,16 +71,19 @@ async function validateApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
     return { valid: false, error: 'API key is required' };
   }
   try {
-    const tenantRepository = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepository.findOne({ where: { apiKey } });
-    if (!tenant) {
+    // #16b: paused bots are rejected at the widget surface. The strict resolver
+    // throws `BotPausedError` when the matched bot is paused — surface that
+    // distinctly from "invalid key" so the caller can return HTTP 403 with a
+    // user-facing message instead of 401.
+    const resolved = await resolveBotKeyStrict(apiKey);
+    return { valid: true, tenant: resolved.tenant, bot: resolved.bot };
+  } catch (error) {
+    if (error instanceof BotPausedError) {
+      return { valid: false, error: 'This chatbot is currently paused', paused: true };
+    }
+    if (error instanceof BotNotFoundError) {
       return { valid: false, error: 'Invalid API key' };
     }
-    if (tenant.status === 'suspended' || tenant.status === 'cancelled') {
-      return { valid: false, error: `Tenant account is ${tenant.status}` };
-    }
-    return { valid: true, tenant };
-  } catch (error) {
     return { valid: false, error: 'Internal error during validation' };
   }
 }
@@ -97,12 +106,21 @@ router.get(
 
     const result = await validateApiKey(apiKey);
 
-    if (!result.valid || !result.tenant) {
+    if (result.paused) {
+      // #16b: paused bot → 403, not 400. The widget can show a friendly
+      // "this chatbot is unavailable" state.
+      throw new ForbiddenError(result.error || 'This chatbot is currently paused');
+    }
+    if (!result.valid || !result.tenant || !result.bot) {
       throw new ValidationError(result.error || 'Invalid API key');
     }
 
     const tenant = result.tenant;
+    const bot = result.bot;
 
+    // Config still reads from Tenant.settings — the per-bot config flip
+    // (#16d) is a separate session. Bot identity is surfaced so the client
+    // knows which bot it's talking to.
     const widgetSettings = (tenant.settings?.widget ?? {}) as {
       avatarUrl?: string | null;
       launcherPosition?: 'bottom-right' | 'bottom-left';
@@ -117,6 +135,11 @@ router.get(
     sendSuccess(res, {
       tenantId: tenant.id,
       name: tenant.name,
+      bot: {
+        id: bot.id,
+        name: bot.name,
+        status: bot.status,
+      },
       theme: tenant.settings?.theme || {
         primaryColor: '#007bff',
         backgroundColor: '#ffffff',
@@ -153,11 +176,17 @@ router.post(
 
     const result = await validateApiKey(apiKey);
 
-    if (!result.valid || !result.tenant) {
+    if (result.paused) {
+      // #16b: paused bot → 403, not 400. The widget can show a friendly
+      // "this chatbot is unavailable" state.
+      throw new ForbiddenError(result.error || 'This chatbot is currently paused');
+    }
+    if (!result.valid || !result.tenant || !result.bot) {
       throw new ValidationError(result.error || 'Invalid API key');
     }
 
     const tenant = result.tenant;
+    const resolvedBot = result.bot;
 
     // Check if visitor already has an active session
     const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -171,6 +200,11 @@ router.post(
     });
 
     if (existingSession) {
+      // Bind a botId to legacy sessions that pre-date the column.
+      if (!existingSession.botId) {
+        existingSession.botId = resolvedBot.id;
+        await sessionRepository.save(existingSession);
+      }
       const token = generateWidgetToken(existingSession.id, tenant.id, visitorId);
 
       sendSuccess(res, {
@@ -184,14 +218,6 @@ router.post(
       });
       return;
     }
-
-    // Multi-bot (Phase 1): attribute the new session to the tenant's anchor
-    // bot. Resolution still keys on tenant.apiKey here; the anchor is the bot
-    // that owns it. Nullable-safe — if somehow absent, the session stays
-    // unattributed and is bound on a later resume.
-    const anchorBot = await AppDataSource.getRepository(Bot).findOne({
-      where: { tenantId: tenant.id, isDefault: true },
-    });
 
     // Determine initial status based on AI settings
     const aiEnabled = tenant.settings?.ai?.enabled;
@@ -219,7 +245,7 @@ router.post(
       });
       const draft = manager.create(ChatSession, {
         tenantId: tenant.id,
-        botId: anchorBot?.id ?? null,
+        botId: resolvedBot.id,
         visitorId,
         source: 'widget',
         metadata: {

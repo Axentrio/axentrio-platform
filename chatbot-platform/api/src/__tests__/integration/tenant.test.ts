@@ -22,6 +22,7 @@ import { app } from '../../server';
 import {
   createTestTenant,
   createTestUser,
+  createTestAnchorBot,
 } from '../helpers/factories';
 
 describe('Tenant Management', () => {
@@ -83,6 +84,10 @@ describe('Tenant Management', () => {
   describe('GET /api/v1/widget/config', () => {
     it('should return widget configuration for valid apiKey', async () => {
       const tenant = await createTestTenant({ name: 'Widget Test Tenant' });
+      // Anchor bot is required for `resolveBotKey` to resolve the legacy
+      // tenant.apiKey path — production tenants always have one via the
+      // auto-provision flow.
+      await createTestAnchorBot(tenant);
 
       const res = await request(app)
         .get('/api/v1/widget/config')
@@ -91,6 +96,7 @@ describe('Tenant Management', () => {
       expect(res.status).toBe(200);
       expect(res.body.data.tenantId).toBe(tenant.id);
       expect(res.body.data.name).toBe('Widget Test Tenant');
+      expect(res.body.data.bot?.id).toBeDefined();
     });
   });
 });

@@ -13,6 +13,7 @@ import {
   ForbiddenError,
   NotFoundError,
 } from './error-handler';
+import { resolveBotKey, type ResolvedBot } from '../services/bot-resolution.service';
 
 const tenantRepository = AppDataSource.getRepository(Tenant);
 
@@ -172,7 +173,12 @@ export async function validateSocketTenant(
 }
 
 /**
- * Get tenant by API key
+ * Get tenant by API key.
+ *
+ * Kept for backwards compatibility — resolves strictly against
+ * `Tenant.apiKey` (the legacy embed). New code should prefer
+ * `resolveBotByKey` (or `resolveBotKey` directly from the service) so it
+ * can attribute traffic to a specific bot.
  */
 export async function getTenantByApiKey(apiKey: string): Promise<Tenant | null> {
   try {
@@ -181,6 +187,23 @@ export async function getTenantByApiKey(apiKey: string): Promise<Tenant | null> 
     });
   } catch (error) {
     logger.error('Error fetching tenant by API key:', error);
+    return null;
+  }
+}
+
+/**
+ * Resolve a widget-embedded key (`bk_*` Bot.publicKey OR legacy
+ * `Tenant.apiKey`) to `{ tenant, bot, isAnchorViaLegacyKey }`. Returns
+ * `null` for unknown keys, soft-deleted bots, and suspended tenants.
+ *
+ * Paused bots are returned with `bot.status === 'paused'` — callers decide
+ * the response. See `resolveBotKeyStrict` for an exception-based variant.
+ */
+export async function resolveBotByKey(key: string): Promise<ResolvedBot | null> {
+  try {
+    return await resolveBotKey(key);
+  } catch (error) {
+    logger.error('Error resolving bot by key:', error);
     return null;
   }
 }

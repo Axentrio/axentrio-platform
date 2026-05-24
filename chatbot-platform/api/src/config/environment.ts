@@ -83,7 +83,7 @@ const envSchema = z.object({
   UPLOAD_DIR: z.string().default('./uploads'),
 
   // Tenant
-  DEFAULT_TIER: z.enum(['free', 'pro', 'enterprise']).default('free'),
+  DEFAULT_TIER: z.enum(['free', 'essential', 'pro', 'enterprise']).default('free'),
   MAX_SESSIONS_PER_TIER_FREE: z.string().default('100').transform(Number),
   MAX_SESSIONS_PER_TIER_PRO: z.string().default('1000').transform(Number),
   MAX_SESSIONS_PER_TIER_ENTERPRISE: z.string().default('10000').transform(Number),
@@ -157,12 +157,14 @@ const envSchema = z.object({
   META_OAUTH_REDIRECT_URI: z.string().optional(),
   META_OAUTH_JWT_SECRET: z.string().optional(),
 
-  // Billing — Stripe (required in non-test environments; validated below)
+  // Billing — Stripe (required in non-test environments; validated below).
+  // M0 subscription epic: EUR-only catalog (Essential + Pro). Enterprise is sales-led
+  // and has no self-serve price ID. Premium tier removed entirely.
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
-  STRIPE_PRICE_PRO_USD_MONTHLY: z.string().optional(),
-  STRIPE_PRICE_PREMIUM_USD_MONTHLY: z.string().optional(),
-  BILLING_TRIAL_DAYS: z.string().default('7').transform(Number),
+  STRIPE_PRICE_ESSENTIAL: z.string().optional(),
+  STRIPE_PRICE_PRO: z.string().optional(),
+  BILLING_TRIAL_DAYS: z.string().default('14').transform(Number),
   // Escape hatch: when 'true', boot proceeds without Stripe creds.
   // Billing endpoints will fail at call time. Use only for environments
   // that legitimately can't configure Stripe yet (early staging deploys).
@@ -198,28 +200,34 @@ if (env.NODE_ENV === 'production') {
   }
 }
 
-// Billing fail-fast — Stripe is required outside of test runs (plan step 2).
-// Plan: "fail-fast on boot if any of [secret, webhook secret, both price IDs] is missing or empty."
-// SKIP_BILLING_BOOT_CHECK=true downgrades the check to a warning so the API
-// can boot without Stripe configured. Billing endpoints will then fail at
-// call time. Intended for early deploys / environments without billing yet.
+// Billing fail-fast — Stripe is REQUIRED in production. Development and
+// staging boot with a warning when credentials are missing so local devs can
+// run the API without provisioning Stripe first; billing endpoints just fail
+// at call time. (User ask: until real Stripe keys are issued, don't block
+// local servers from starting.)
+//
+// `SKIP_BILLING_BOOT_CHECK=true` is still honoured in production for the rare
+// case where prod legitimately can't configure Stripe yet (early deploys);
+// downgrade to a warning instead of exit.
 if (env.NODE_ENV !== 'test') {
   const missing: string[] = [];
   if (!env.STRIPE_SECRET_KEY) missing.push('STRIPE_SECRET_KEY');
   if (!env.STRIPE_WEBHOOK_SECRET) missing.push('STRIPE_WEBHOOK_SECRET');
-  if (!env.STRIPE_PRICE_PRO_USD_MONTHLY) missing.push('STRIPE_PRICE_PRO_USD_MONTHLY');
-  if (!env.STRIPE_PRICE_PREMIUM_USD_MONTHLY) missing.push('STRIPE_PRICE_PREMIUM_USD_MONTHLY');
+  if (!env.STRIPE_PRICE_ESSENTIAL) missing.push('STRIPE_PRICE_ESSENTIAL');
+  if (!env.STRIPE_PRICE_PRO) missing.push('STRIPE_PRICE_PRO');
   if (missing.length > 0) {
     const message =
-      `Billing configuration error: required Stripe env vars are missing: ${missing.join(', ')}. ` +
-      `Set them or run with NODE_ENV=test to skip this check.`;
-    if (env.SKIP_BILLING_BOOT_CHECK === 'true') {
-      console.warn(
-        `[SKIP_BILLING_BOOT_CHECK=true] ${message} Billing endpoints will return errors until configured.`,
-      );
-    } else {
-      console.error(message);
+      `Billing configuration: required Stripe env vars are missing: ${missing.join(', ')}. ` +
+      `Billing endpoints will return errors until configured.`;
+    const isProd = env.NODE_ENV === 'production';
+    const skipped = env.SKIP_BILLING_BOOT_CHECK === 'true';
+    if (isProd && !skipped) {
+      console.error(`Billing configuration error: ${message} ` +
+        `Set them or pass SKIP_BILLING_BOOT_CHECK=true to boot with billing degraded.`);
       process.exit(1);
+    } else {
+      const prefix = isProd ? '[SKIP_BILLING_BOOT_CHECK=true]' : '[non-production boot]';
+      console.warn(`${prefix} ${message}`);
     }
   }
 }
@@ -417,8 +425,8 @@ export const config = {
     stripe: {
       secretKey: env.STRIPE_SECRET_KEY ?? '',
       webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
-      pricePro: env.STRIPE_PRICE_PRO_USD_MONTHLY ?? '',
-      pricePremium: env.STRIPE_PRICE_PREMIUM_USD_MONTHLY ?? '',
+      priceEssential: env.STRIPE_PRICE_ESSENTIAL ?? '',
+      pricePro: env.STRIPE_PRICE_PRO ?? '',
     },
   },
 } as const;

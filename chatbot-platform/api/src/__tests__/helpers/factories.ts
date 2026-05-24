@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
+import { Bot } from '../../database/entities/Bot';
 import { User } from '../../database/entities/User';
 import { Agent } from '../../database/entities/Agent';
 import { ChatSession } from '../../database/entities/ChatSession';
@@ -12,6 +13,12 @@ import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { CannedResponse } from '../../database/entities/CannedResponse';
 import { TenantBillingAccount } from '../../database/entities/TenantBillingAccount';
 
+/**
+ * Creates a tenant. Note: this does NOT auto-create an anchor bot. Tests
+ * that exercise `resolveBotKey` against `tenant.apiKey` (the legacy widget
+ * path) must call `createTestAnchorBot(tenant)` explicitly. This keeps
+ * billing/quota tests — which seed bots themselves — working unchanged.
+ */
 export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise<Tenant> {
   const repo = AppDataSource.getRepository(Tenant);
   return repo.save(
@@ -22,6 +29,30 @@ export async function createTestTenant(overrides: Partial<Tenant> = {}): Promise
       tier: 'pro',
       status: 'active',
       settings: {},
+      ...overrides,
+    }),
+  );
+}
+
+/**
+ * Create the anchor bot for a tenant. Mirrors the production auto-provision
+ * path (clerk.middleware.ts) and the `CreateBotTables` migration backfill:
+ * `publicKey === tenant.apiKey`, `isDefault=true`. Use this in tests that
+ * rely on `resolveBotKey` against the legacy `tenant.apiKey`.
+ */
+export async function createTestAnchorBot(
+  tenant: Tenant,
+  overrides: Partial<Bot> = {},
+): Promise<Bot> {
+  const repo = AppDataSource.getRepository(Bot);
+  return repo.save(
+    repo.create({
+      tenantId: tenant.id,
+      name: 'Anchor',
+      publicKey: tenant.apiKey,
+      status: 'active',
+      isDefault: true,
+      settings: {} as Bot['settings'],
       ...overrides,
     }),
   );
@@ -188,7 +219,8 @@ export async function createTestCannedResponse(
 
 /**
  * Create a tenant_billing_accounts row. Defaults to a manual + trialing-Pro
- * row that mirrors what `seedTrialAccount` would create at tenant signup.
+ * row — historically the reverse-trial seed shape; still useful for tests
+ * that need an already-seeded primary billing row.
  */
 export async function createTestBillingAccount(
   tenantId: string,

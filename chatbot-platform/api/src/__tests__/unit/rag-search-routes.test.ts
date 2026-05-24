@@ -105,6 +105,7 @@ describe('RAG Search Routes', () => {
         'test query',
         [],  // conversationHistory default
         5,   // maxChunks default
+        undefined, // knowledgeBaseIds — undefined = tenant-wide (multi-bot Phase 3)
       );
     });
   });
@@ -168,6 +169,7 @@ describe('RAG Search Routes', () => {
         'test',
         history,
         10,
+        undefined, // knowledgeBaseIds — undefined = tenant-wide (multi-bot Phase 3)
       );
     });
 

@@ -9,10 +9,10 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { User } from '../database/entities/User';
 import { logger } from '../utils/logger';
 import { generateWidgetToken } from '../middleware/auth.middleware';
-import { getTenantByApiKey } from '../middleware/tenant.middleware';
+import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
 import { rateLimitWidget } from '../middleware/rate-limit.middleware';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
-import { asyncHandler, BadRequestError, UnauthorizedError } from '../middleware/error-handler';
+import { asyncHandler, BadRequestError, ForbiddenError, UnauthorizedError } from '../middleware/error-handler';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { widgetAuthSchema } from '../schemas';
@@ -44,12 +44,25 @@ router.post(
       throw new BadRequestError('API key is required');
     }
 
-    // Validate API key and get tenant
-    const tenant = await getTenantByApiKey(apiKey);
-
-    if (!tenant) {
-      throw new UnauthorizedError('Invalid API key');
+    // Resolve API key → { tenant, bot } (handles both bk_* and legacy apiKey).
+    // #16b: paused bots are rejected at the HTTP surface with a 403, matching
+    // the websocket rejection. The resolver throws `BotPausedError` when the
+    // matched bot is paused; map that to 403 so the widget can surface
+    // "this chatbot is currently paused" copy to the visitor.
+    let resolved: Awaited<ReturnType<typeof resolveBotKeyStrict>>;
+    try {
+      resolved = await resolveBotKeyStrict(apiKey);
+    } catch (err) {
+      if (err instanceof BotPausedError) {
+        throw new ForbiddenError('This chatbot is currently paused.');
+      }
+      if (err instanceof BotNotFoundError) {
+        throw new UnauthorizedError('Invalid API key');
+      }
+      throw err;
     }
+
+    const { tenant, bot } = resolved;
 
     // Get or create session
     let session: ChatSession;
@@ -62,12 +75,17 @@ router.post(
 
       if (existingSession && existingSession.isActive()) {
         session = existingSession;
+        // Bind the resolved bot to legacy sessions that pre-date botId.
+        if (!existingSession.botId) {
+          session.botId = bot.id;
+        }
         session.updateActivity();
         await sessionRepository.save(session);
       } else {
         // Create new session if not found or closed
         session = sessionRepository.create({
           tenantId: tenant.id,
+          botId: bot.id,
           visitorId: userId || 'anonymous',
           status: 'waiting' as const,
           startedAt: new Date(),
@@ -85,6 +103,7 @@ router.post(
       // Create new session
       session = sessionRepository.create({
         tenantId: tenant.id,
+        botId: bot.id,
         visitorId: userId || 'anonymous',
         status: 'waiting' as const,
         startedAt: new Date(),

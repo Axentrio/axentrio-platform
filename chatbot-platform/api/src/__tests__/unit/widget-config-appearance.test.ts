@@ -54,9 +54,27 @@ beforeEach(() => {
   mockFindOne.mockReset();
 });
 
+// resolveBotKey runs Bot.findOne first (looks up by publicKey + tenant
+// relation), then falls back to Tenant.findOne. We script both calls.
+function mockResolvedBotAndTenant(tenant: any, bot: any | null = null) {
+  // First call (Bot lookup by publicKey)
+  mockFindOne.mockResolvedValueOnce(bot);
+  // Second call (Tenant lookup by apiKey) — only fires if bot is null
+  mockFindOne.mockResolvedValueOnce(tenant);
+  // Third call (anchor Bot lookup) — fires when tenant matched
+  mockFindOne.mockResolvedValueOnce({
+    id: 'anchor-bot-id',
+    name: 'Anchor',
+    status: 'active',
+    isDefault: true,
+    publicKey: tenant?.apiKey,
+    tenant,
+  });
+}
+
 describe('GET /widget/config — appearance block', () => {
   it('includes appearance with defaults when widget settings absent', async () => {
-    mockFindOne.mockResolvedValueOnce({
+    mockResolvedBotAndTenant({
       id: 't1',
       name: 'Tenant',
       status: 'active',
@@ -75,7 +93,7 @@ describe('GET /widget/config — appearance block', () => {
   });
 
   it('reflects saved widget settings', async () => {
-    mockFindOne.mockResolvedValueOnce({
+    mockResolvedBotAndTenant({
       id: 't1',
       name: 'Tenant',
       status: 'active',

@@ -13,6 +13,7 @@ import { CannedResponsesContent } from './CannedResponses';
 import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
 import { SocialChannelsContent } from '@/components/channels/SocialChannelsContent';
 import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
+import { EmbedWidgetCard } from '@/components/ai/EmbedWidgetCard';
 
 type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social';
 
@@ -131,6 +132,7 @@ const AiContent: React.FC = () => {
                 onGoToSocial={goToSocial}
               />
             )}
+            {isAdmin && <EmbedWidgetCard />}
             <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
           </>
         )}

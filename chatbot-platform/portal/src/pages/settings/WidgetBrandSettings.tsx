@@ -7,7 +7,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Camera, X, Loader2, Save, Check, Copy } from 'lucide-react';
+import { Camera, X, Loader2, Save, Check } from 'lucide-react';
 import { useOrganization } from '@clerk/clerk-react';
 import { toast } from 'sonner';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
@@ -140,9 +140,6 @@ const WidgetBrandSettings: React.FC = () => {
   };
 
   const isDirty = tenant && displayName !== tenant.name;
-
-  const apiUrl = (import.meta.env.VITE_API_URL || '').replace('/api/v1', '') || window.location.origin;
-  const embedSnippet = `<script src="${apiUrl}/widget.js"\n  data-api-key="${tenant?.apiKey}"></script>`;
 
   // ---------- Loading / Error states ----------
   if (isLoading) {
@@ -290,31 +287,6 @@ const WidgetBrandSettings: React.FC = () => {
                 {tenant.isActive ? t('settings.widget.status.active') : t('settings.widget.status.inactive')}
               </Badge>
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Embed Widget */}
-      <Card variant="glass">
-        <CardHeader>
-          <h3 className="font-medium text-text-primary">{t('settings.widget.embed.title')}</h3>
-          <p className="text-xs text-text-muted">{t('settings.widget.embed.description')}</p>
-        </CardHeader>
-        <CardContent>
-          <div className="relative">
-            <pre className="bg-black/20 rounded-lg p-3 font-mono text-xs text-text-secondary overflow-x-auto whitespace-pre-wrap break-all">
-              {embedSnippet}
-            </pre>
-            <button
-              onClick={() => {
-                navigator.clipboard.writeText(embedSnippet);
-                toast.success(t('settings.widget.embed.copied'));
-              }}
-              className="absolute top-2 right-2 p-1.5 rounded-md bg-surface-3/80 hover:bg-surface-3 text-text-muted hover:text-text-secondary transition-colors"
-              title={t('settings.widget.embed.copyTitle')}
-            >
-              <Copy className="h-3.5 w-3.5" />
-            </button>
           </div>
         </CardContent>
       </Card>

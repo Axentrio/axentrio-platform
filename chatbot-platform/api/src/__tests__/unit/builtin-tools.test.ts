@@ -63,7 +63,10 @@ function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
     sessionId: 'session-abc',
     runId: 'run-xyz',
     toolsCalledThisTurn: [],
-    dataSource: {} as any,
+    // The KbSearchTool now queries the session row to resolve `bot_id` for
+    // RAG scoping (multi-bot Phase 3). Stub `dataSource.query` so the tool
+    // sees "no session row" and falls back to tenant-wide search.
+    dataSource: { query: vi.fn().mockResolvedValue([]) } as any,
     conversationHistory: [],
     ...overrides,
   };
@@ -95,11 +98,15 @@ describe('KbSearchTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(fakeResult);
+    // Multi-bot Phase 3 added two trailing args: maxChunks (undefined → default)
+    // and knowledgeBaseIds (undefined → tenant-wide RAG, the legacy behaviour).
     expect(mockSearchKnowledge).toHaveBeenCalledWith(
       ctx.dataSource,
       ctx.tenantId,
       'how to reset password',
-      []
+      [],
+      undefined,
+      undefined,
     );
   });
 

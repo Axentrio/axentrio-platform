@@ -33,14 +33,23 @@ export const updateBillingEmailSchema = z.object({
 /**
  * VAT ID update schema — see plan PR5.
  *
- * v1 is EU-only. The regex is permissive enough to allow valid EU VAT IDs
- * that include letters after the country code (e.g. Spanish `ESA12345674`,
- * Irish `IE1234567T`) — Stripe Tax does canonical VIES validation
- * downstream. `null` and `''` both mean "clear the VAT ID".
+ * v1 is EU-only (post-Brexit: GB is explicitly rejected per the M0
+ * acceptance criterion). The regex is permissive enough to allow valid
+ * EU VAT IDs that include letters after the country code (e.g. Spanish
+ * `ESA12345674`, Irish `IE1234567T`) — Stripe Tax does canonical VIES
+ * validation downstream. `null` and `''` both mean "clear the VAT ID".
+ *
+ * The `.refine` blocks `GB`-prefixed IDs at the schema layer so the
+ * rejection is uniform across every entry point.
  */
 export const updateVatIdSchema = z.object({
   vatId: z.union([
-    z.string().regex(/^[A-Z]{2}[A-Z0-9]{2,12}$/),
+    z
+      .string()
+      .regex(/^[A-Z]{2}[A-Z0-9]{2,12}$/)
+      .refine((v) => !v.startsWith('GB'), {
+        message: 'UK VAT IDs are not supported — VIES validation is EU-only in v1',
+      }),
     z.null(),
     z.literal(''),
   ]),

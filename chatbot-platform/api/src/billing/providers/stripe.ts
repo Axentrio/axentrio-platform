@@ -166,48 +166,73 @@ export class StripeBillingProvider implements BillingProvider {
   }): Promise<{ url: string }> {
     const stripe = getStripeClient();
 
-    const row = await AppDataSource.getRepository(TenantBillingAccount).findOne({
-      where: { tenantId: input.tenantId, provider: PROVIDER },
-    });
-    if (!row || !row.customerId) {
-      throw new BillingProviderError('no_active_account', PROVIDER, {
-        tenantId: input.tenantId,
+    // Wrap the read-then-create critical section in a transaction with a
+    // per-tenant Postgres advisory lock. Without this, two concurrent
+    // re-subscribe attempts after a cancel can both pass the dup-check
+    // (the existing Stripe TBA row is in `cancelled` state) and each
+    // produce a live Stripe Checkout — completing both would create two
+    // paid subscriptions for the same tenant. `pg_try_advisory_xact_lock`
+    // auto-releases at tx commit/rollback, and the tx wrapper also
+    // unwinds the reservation INSERT cleanly if Stripe throws.
+    //
+    // Codex review caveat (concurrent-checkout race, audit follow-up):
+    // tx-held DB connection across the Stripe network call (typical
+    // ~500ms). Acceptable because the lock guarantees at most one such
+    // hold per tenant at a time, so pool exhaustion is bounded by
+    // distinct concurrent tenants, not concurrent attempts.
+    return AppDataSource.transaction(async (manager) => {
+      const [lockRow] = (await manager.query(
+        `SELECT pg_try_advisory_xact_lock(hashtext($1)::int) AS locked`,
+        [`checkout:${input.tenantId}`],
+      )) as Array<{ locked: boolean }>;
+      if (!lockRow?.locked) {
+        throw new BillingProviderError('checkout_in_progress', PROVIDER, {
+          tenantId: input.tenantId,
+        });
+      }
+
+      const row = await manager.findOne(TenantBillingAccount, {
+        where: { tenantId: input.tenantId, provider: PROVIDER },
       });
-    }
+      if (!row || !row.customerId) {
+        throw new BillingProviderError('no_active_account', PROVIDER, {
+          tenantId: input.tenantId,
+        });
+      }
 
-    // Trial-reservation guard (codex round 7 item 1 + audit gap #2 fix).
-    // Only Pro is trial-eligible. The primary-key unique constraint on
-    // `chatbot_tenant_trial_reservations.tenant_id` serialises concurrent
-    // Pro checkouts — exactly one wins the insert and gets `allowTrial=true`;
-    // the rest see RETURNING empty and get `allowTrial=false`.
-    //
-    // Why this and not `stripe.subscriptions.list`: the Stripe API does
-    // not see in-flight Checkout sessions, so two concurrent Pro checkouts
-    // for the same tenant could each independently pass that guard and
-    // both grant a 14-day trial.
-    //
-    // Audit-gap-#2 wrinkle: an unclaimed reservation must be releasable on
-    // checkout abandonment (M0 spec line 532). The `checkout.session.expired`
-    // webhook handler unwinds the reservation; until that fires the row
-    // counts as "in flight" and blocks a re-attempt. That's the right
-    // behaviour for a real abandonment — Stripe expires sessions after 24h,
-    // and the customer should not be able to spin up a fresh trial within
-    // that window by hammering the button.
-    let allowTrial = false;
-    if (input.planId === 'pro') {
-      const reserved: Array<{ tenant_id: string }> = await AppDataSource.query(
-        `INSERT INTO chatbot_tenant_trial_reservations (tenant_id)
-         VALUES ($1)
-         ON CONFLICT (tenant_id) DO NOTHING
-         RETURNING tenant_id`,
-        [input.tenantId],
-      );
-      allowTrial = reserved.length > 0;
-    }
+      // Trial-reservation guard (codex round 7 item 1 + audit gap #2 fix).
+      // Only Pro is trial-eligible. The primary-key unique constraint on
+      // `chatbot_tenant_trial_reservations.tenant_id` would also serialise
+      // concurrent Pro checkouts on its own, but with the advisory lock
+      // in place this INSERT now runs against a quiescent table — the
+      // reservation guard's purpose narrows to "has this tenant *ever*
+      // consumed a trial," and serialisation falls to the lock.
+      //
+      // Why this and not `stripe.subscriptions.list`: the Stripe API does
+      // not see in-flight Checkout sessions, so the old guard couldn't
+      // tell whether a trial was about to be granted via a parallel
+      // checkout. The reservation row is the canonical record.
+      //
+      // Audit-gap-#2 wrinkle: an unclaimed reservation must be releasable
+      // on checkout abandonment (M0 spec line 532). The
+      // `checkout.session.expired` webhook handler unwinds the
+      // reservation; until that fires the row counts as "in flight" and
+      // blocks a re-attempt. Stripe expires sessions after 24h, and the
+      // customer should not be able to spin up a fresh trial within that
+      // window by hammering the button.
+      let allowTrial = false;
+      if (input.planId === 'pro') {
+        const reserved: Array<{ tenant_id: string }> = await manager.query(
+          `INSERT INTO chatbot_tenant_trial_reservations (tenant_id)
+           VALUES ($1)
+           ON CONFLICT (tenant_id) DO NOTHING
+           RETURNING tenant_id`,
+          [input.tenantId],
+        );
+        allowTrial = reserved.length > 0;
+      }
 
-    let session: StripeNS.Checkout.Session;
-    try {
-      session = await stripe.checkout.sessions.create({
+      const session: StripeNS.Checkout.Session = await stripe.checkout.sessions.create({
         mode: 'subscription',
         customer: row.customerId,
         // Session-level metadata: the `checkout.session.completed` and
@@ -247,52 +272,31 @@ export class StripeBillingProvider implements BillingProvider {
         success_url: input.successUrl,
         cancel_url: input.cancelUrl,
       });
-    } catch (err) {
-      // Stripe rejected our checkout creation. Roll back the reservation
-      // so the tenant isn't locked out of a fresh attempt. The DELETE is
-      // safe to run unconditionally — it only nukes rows that this same
-      // call inserted (subscription_id and checkout_session_id are both
-      // still NULL because we never got past `create`).
+
+      // If Stripe threw above, the tx rolls back and the (unclaimed)
+      // reservation INSERT unwinds automatically — no manual DELETE
+      // needed any more.
+
+      if (!session.url) {
+        // Same recovery — throwing aborts the tx, which also undoes the
+        // reservation INSERT.
+        throw new BillingProviderError('checkout_session_no_url', PROVIDER);
+      }
+
+      // Stamp the reservation with the session id so the `checkout.session.
+      // expired` handler can scope its deletion (a stale expired event must
+      // not nuke a newer pending row for the same tenant).
       if (allowTrial) {
-        await AppDataSource.query(
-          `DELETE FROM chatbot_tenant_trial_reservations
-           WHERE tenant_id = $1
-             AND subscription_id IS NULL
-             AND checkout_session_id IS NULL`,
-          [input.tenantId],
+        await manager.query(
+          `UPDATE chatbot_tenant_trial_reservations
+           SET checkout_session_id = $1
+           WHERE tenant_id = $2 AND subscription_id IS NULL`,
+          [session.id, input.tenantId],
         );
       }
-      throw err;
-    }
 
-    if (!session.url) {
-      // Same recovery path — no usable session URL means we can't even
-      // hand control to Stripe. Don't leave the reservation orphaned.
-      if (allowTrial) {
-        await AppDataSource.query(
-          `DELETE FROM chatbot_tenant_trial_reservations
-           WHERE tenant_id = $1
-             AND subscription_id IS NULL
-             AND checkout_session_id IS NULL`,
-          [input.tenantId],
-        );
-      }
-      throw new BillingProviderError('checkout_session_no_url', PROVIDER);
-    }
-
-    // Stamp the reservation with the session id so the `checkout.session.
-    // expired` handler can scope its deletion (a stale expired event must
-    // not nuke a newer pending row for the same tenant).
-    if (allowTrial) {
-      await AppDataSource.query(
-        `UPDATE chatbot_tenant_trial_reservations
-         SET checkout_session_id = $1
-         WHERE tenant_id = $2 AND subscription_id IS NULL`,
-        [session.id, input.tenantId],
-      );
-    }
-
-    return { url: session.url };
+      return { url: session.url };
+    });
   }
 
   async createPortalSession(input: {

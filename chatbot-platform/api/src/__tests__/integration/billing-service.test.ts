@@ -210,6 +210,85 @@ describe('startCheckout', () => {
       }),
     ).rejects.toMatchObject({ code: 'checkout_plan_invalid' });
   });
+
+  it('concurrent re-subscribe is serialised by the per-tenant advisory lock', async () => {
+    // Setup: tenant just had a Stripe subscription that's now cancelled.
+    // The dup-checkout guard at service.ts only blocks active/trialing/
+    // past_due rows, so `cancelled` passes — without the advisory lock,
+    // two concurrent checkout requests would both reach Stripe and could
+    // both create live sessions.
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'manual' },
+      { isPrimary: false },
+    );
+    await createTestBillingAccount(tenantId, {
+      provider: 'stripe',
+      status: 'cancelled',
+      currentPlanId: 'free',
+      isPrimary: true,
+      customerId: 'cus_already_known',
+      subscriptionId: undefined,
+    });
+
+    // Make the Stripe checkout create *slow* so the two requests are
+    // genuinely in flight at the same time. The first request enters the
+    // critical section, acquires the advisory lock, then awaits Stripe;
+    // the second arrives during that await and must be rejected without
+    // a Stripe call. We use a "lock-acquired" gate that the stub flips
+    // when invoked — that way the second request is dispatched ONLY after
+    // we know the first has actually entered the locked section, even on
+    // a warm connection pool.
+    let resolveCheckout: ((value: { url: string }) => void) | null = null;
+    let signalLockAcquired: (() => void) | null = null;
+    const checkoutPromise = new Promise<{ url: string }>((resolve) => {
+      resolveCheckout = resolve;
+    });
+    const lockAcquired = new Promise<void>((resolve) => {
+      signalLockAcquired = resolve;
+    });
+    const stub = installStripeStub({
+      checkoutCreate: vi.fn(() => {
+        signalLockAcquired?.();
+        return checkoutPromise;
+      }),
+    });
+
+    // Kick off the first call (does not await — runs in parallel).
+    const first = startCheckout(tenantId, 'pro', {
+      successUrl: 'https://example.com/s',
+      cancelUrl: 'https://example.com/c',
+    });
+    // Wait until the first call has actually reached stripe.checkout.
+    // sessions.create — i.e. it's INSIDE the locked tx, holding the
+    // advisory lock. Only then dispatch the second.
+    await lockAcquired;
+    const second = startCheckout(tenantId, 'pro', {
+      successUrl: 'https://example.com/s',
+      cancelUrl: 'https://example.com/c',
+    });
+
+    // The second must reject quickly with checkout_in_progress.
+    await expect(second).rejects.toMatchObject({
+      code: 'checkout_in_progress',
+      providerName: 'stripe',
+    });
+
+    // Only ONE Stripe checkout call has been attempted at this point.
+    expect(stub.checkoutCreate).toHaveBeenCalledTimes(1);
+
+    // Resolve the first request so the test cleans up cleanly.
+    resolveCheckout?.({ url: 'https://stripe.example/checkout' });
+    await expect(first).resolves.toMatchObject({ url: expect.any(String) });
+
+    // After the first completes, a follow-up checkout MUST be allowed
+    // (lock released) — proves the lock didn't stick.
+    const third = await startCheckout(tenantId, 'pro', {
+      successUrl: 'https://example.com/s',
+      cancelUrl: 'https://example.com/c',
+    });
+    expect(third.url).toBeDefined();
+    expect(stub.checkoutCreate).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('Stripe-targeting ops on manual-only tenants → no_stripe_subscription', () => {

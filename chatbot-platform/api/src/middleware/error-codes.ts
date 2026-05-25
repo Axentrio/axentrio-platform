@@ -59,6 +59,7 @@ export const BILLING_ERROR_CODES = {
   SUBSCRIPTION_SHAPE_UNEXPECTED: 'subscription_shape_unexpected',
   SUBSCRIPTION_EXISTS: 'subscription_exists',
   PENDING_CHANGE_EXISTS: 'pending_change_exists',
+  CHECKOUT_IN_PROGRESS: 'checkout_in_progress',
 } as const;
 
 export type BillingErrorCode = (typeof BILLING_ERROR_CODES)[keyof typeof BILLING_ERROR_CODES];
@@ -74,4 +75,5 @@ export const BILLING_ERROR_STATUS: Record<BillingErrorCode, number> = {
   [BILLING_ERROR_CODES.SUBSCRIPTION_SHAPE_UNEXPECTED]: 400,
   [BILLING_ERROR_CODES.SUBSCRIPTION_EXISTS]: 409,
   [BILLING_ERROR_CODES.PENDING_CHANGE_EXISTS]: 409,
+  [BILLING_ERROR_CODES.CHECKOUT_IN_PROGRESS]: 409,
 };

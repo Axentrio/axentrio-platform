@@ -503,14 +503,20 @@ export async function handleNormalizedEvent(
       // Primary-switch & tier-cascade rules:
       // - Promotion fires only on transition into 'trialing' or 'active'.
       // - past_due preserves tier (cluster-2 round-1 #1).
-      // - Already-primary cascades tier for trialing/active/cancelled/none.
+      // - Already-primary cascades tier ONLY for entitlement-granting statuses
+      //   (trialing/active). `none` (= Stripe 'incomplete' / 'incomplete_expired')
+      //   and 'cancelled' must not promote `tenants.tier` to a paid plan — the
+      //   payment hasn't succeeded yet, and entitlements read `tenants.tier`
+      //   directly. `subscription.deleted` cascades to `free` via its own
+      //   dedicated handler, not this branch.
       const isPromotion = (s.status === 'trialing' || s.status === 'active') && !row.isPrimary;
       if (isPromotion) {
         await promotePrimaryAndCascadeTier(manager, row, newPlanForStatus);
         return { outcome: 'promoted_primary' };
       }
 
-      if (row.isPrimary && !isPastDue) {
+      const isEntitlementGranting = s.status === 'trialing' || s.status === 'active';
+      if (row.isPrimary && isEntitlementGranting) {
         await manager.update(Tenant, { id: tenantId }, { tier: newPlanForStatus });
         return { outcome: 'tier_cascaded' };
       }
@@ -518,6 +524,15 @@ export async function handleNormalizedEvent(
       if (row.isPrimary && isPastDue) {
         // Grace period — tier preserved.
         return { outcome: 'past_due_grace' };
+      }
+
+      if (row.isPrimary) {
+        // Primary row with a non-entitlement-granting status (e.g. `none`
+        // from `incomplete`, or `cancelled` that didn't go through
+        // subscription.deleted). Update row-local fields above already
+        // happened; tier stays as-is to avoid handing out paid access on
+        // no successful payment.
+        return { outcome: 'primary_non_entitlement_no_tier_cascade' };
       }
 
       // Non-primary row: update row-local fields only.

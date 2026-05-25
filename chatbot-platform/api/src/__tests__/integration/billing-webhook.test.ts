@@ -216,6 +216,56 @@ describe('handleNormalizedEvent — primary-switch & tier-cascade', () => {
     expect(await loadTenantTier(tenantId)).toBe('pro'); // still trialing-pro
   });
 
+  it('subscription.updated with status=incomplete on already-primary row does NOT escalate tier (latent-bug guard)', async () => {
+    // Setup: tenant currently on Essential primary, tier='essential'. A
+    // misbehaving Stripe transition (or a 3rd-party-fired event) sends
+    // subscription.updated with status=incomplete + Pro price. Pre-fix,
+    // the cascade would have set tier='pro' because newPlanForStatus
+    // returns the price-mapped plan for `none` status — granting full
+    // Pro entitlements on a no-payment state. Post-fix the cascade
+    // requires status ∈ {trialing, active}, so tier stays 'essential'.
+    //
+    // Surfaced via synthetic webhook drive on 2026-05-26 lifecycle smoke;
+    // codex review verdict: tighten the cascade.
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'manual' },
+      { isPrimary: false },
+    );
+    await AppDataSource.getRepository(TenantBillingAccount).update(
+      { tenantId, provider: 'stripe' },
+      {
+        subscriptionId: 'sub_incomplete_primary',
+        status: 'active',
+        currentPlanId: 'essential',
+        isPrimary: true,
+      },
+    );
+    await AppDataSource.getRepository(Tenant).update({ id: tenantId }, { tier: 'essential' });
+
+    const event = makeSubscriptionEvent({
+      type: 'subscription.updated',
+      subscriptionId: 'sub_incomplete_primary',
+      customerId: 'cus_test_setup',
+      stripeStatus: 'incomplete',
+      priceId: PRO_PRICE, // attempted Pro upgrade that hasn't paid
+    });
+
+    await runInTransaction(async (manager) => {
+      const matched = await resolveEventRow(manager, event);
+      const outcome = await handleNormalizedEvent(manager, event, matched);
+      expect(outcome.outcome).toBe('primary_non_entitlement_no_tier_cascade');
+    });
+
+    const rows = await loadBilling(tenantId);
+    const stripeRow = rows.find((r) => r.provider === 'stripe')!;
+    // Row-local fields updated to reflect the incoming state...
+    expect(stripeRow.status).toBe('none');
+    expect(stripeRow.currentPlanId).toBe('pro'); // price-mapped plan recorded
+    // ...but Tenant.tier preserved — the no-payment status must not unlock
+    // paid Pro entitlements.
+    expect(await loadTenantTier(tenantId)).toBe('essential');
+  });
+
   it('past_due preserves Tenant.tier and current_plan_id (grace period)', async () => {
     // Set up: tenant on active Stripe Pro. Demote manual FIRST to avoid
     // tripping the partial unique index on (tenant_id) WHERE is_primary.

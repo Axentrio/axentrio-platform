@@ -135,8 +135,21 @@ const AiContent: React.FC = () => {
                 onGoToSocial={goToSocial}
               />
             )}
-            {isAdmin && <EmbedWidgetCard />}
-            <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
+            {/* Settings (left/main) + install snippet (sticky right rail). Stacks
+                with settings first, embed below, on screens narrower than xl. */}
+            <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6 items-start">
+              <div className="min-w-0">
+                <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
+              </div>
+              {isAdmin && (
+                <div className="xl:sticky xl:top-6">
+                  <EmbedWidgetCard
+                    enabled={!!aiSettings?.enabled}
+                    onTestChat={() => setIsTestChatOpen(true)}
+                  />
+                </div>
+              )}
+            </div>
           </>
         )}
 

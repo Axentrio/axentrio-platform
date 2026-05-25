@@ -220,9 +220,14 @@
       },
       "embed": {
         "title": "Embed Widget",
+        "deployTitle": "Deploy",
         "description": "Add this snippet to your website's HTML, just before the closing </body> tag",
         "copied": "Copied to clipboard",
-        "copyTitle": "Copy snippet"
+        "copyTitle": "Copy snippet",
+        "statusActive": "Active",
+        "statusInactive": "Off",
+        "snippetLabel": "Embed snippet",
+        "installGuide": "Install guide"
       }
     },
     "integrations": {

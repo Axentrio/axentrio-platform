@@ -56,7 +56,13 @@ beforeEach(() => {
 
 // resolveBotKey runs Bot.findOne first (looks up by publicKey + tenant
 // relation), then falls back to Tenant.findOne. We script both calls.
-function mockResolvedBotAndTenant(tenant: any, bot: any | null = null) {
+// #16d: widget config now reads appearance/theme/features/businessHours
+// from the resolved bot's settings, so callers can put those on the anchor.
+function mockResolvedBotAndTenant(
+  tenant: any,
+  bot: any | null = null,
+  anchorSettings: Record<string, unknown> = {},
+) {
   // First call (Bot lookup by publicKey)
   mockFindOne.mockResolvedValueOnce(bot);
   // Second call (Tenant lookup by apiKey) — only fires if bot is null
@@ -69,6 +75,7 @@ function mockResolvedBotAndTenant(tenant: any, bot: any | null = null) {
     isDefault: true,
     publicKey: tenant?.apiKey,
     tenant,
+    settings: anchorSettings,
   });
 }
 
@@ -93,19 +100,24 @@ describe('GET /widget/config — appearance block', () => {
   });
 
   it('reflects saved widget settings', async () => {
-    mockResolvedBotAndTenant({
-      id: 't1',
-      name: 'Tenant',
-      status: 'active',
-      apiKey: 'k',
-      settings: {
+    mockResolvedBotAndTenant(
+      {
+        id: 't1',
+        name: 'Tenant',
+        status: 'active',
+        apiKey: 'k',
+        tier: 'pro',
+        settings: {},
+      },
+      null,
+      {
         widget: {
           avatarUrl: 'https://example.com/a.png',
           launcherPosition: 'bottom-left',
           launcherLabel: 'Chat',
         },
       },
-    });
+    );
     const { res, calls, jsonCalled } = makeRes();
     await handler(makeReq('k'), res, () => {});
     await jsonCalled;
@@ -115,5 +127,39 @@ describe('GET /widget/config — appearance block', () => {
       launcherPosition: 'bottom-left',
       launcherLabel: 'Chat',
     });
+  });
+
+  // D33/D34: Powered-by-Axentrio watermark is gated by tenant tier. Essential
+  // shows it (attribution.hide=false), Pro+ hides it (attribution.hide=true).
+  it('attribution.hide is false on Essential', async () => {
+    mockResolvedBotAndTenant({
+      id: 't1',
+      name: 'Tenant',
+      status: 'active',
+      apiKey: 'k',
+      tier: 'essential',
+      settings: {},
+    });
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('k'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.attribution).toEqual({ hide: false });
+  });
+
+  it('attribution.hide is true on Pro', async () => {
+    mockResolvedBotAndTenant({
+      id: 't1',
+      name: 'Tenant',
+      status: 'active',
+      apiKey: 'k',
+      tier: 'pro',
+      settings: {},
+    });
+    const { res, calls, jsonCalled } = makeRes();
+    await handler(makeReq('k'), res, () => {});
+    await jsonCalled;
+    const body = unwrap(calls[0]);
+    expect(body.attribution).toEqual({ hide: true });
   });
 });

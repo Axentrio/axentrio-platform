@@ -22,6 +22,7 @@ import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
 import { enforceCountLimit } from '../billing/enforce';
+import { entitlementsFor } from '../billing/entitlements';
 import { Not } from 'typeorm';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
@@ -118,10 +119,11 @@ router.get(
     const tenant = result.tenant;
     const bot = result.bot;
 
-    // Config still reads from Tenant.settings — the per-bot config flip
-    // (#16d) is a separate session. Bot identity is surfaced so the client
-    // knows which bot it's talking to.
-    const widgetSettings = (tenant.settings?.widget ?? {}) as {
+    // #16d completion: widget appearance + behavioural config lives on
+    // bot.settings. Tenant is only consulted for tier (entitlement gates)
+    // and the LLM-provider apiKey (read elsewhere, not exposed here).
+    const botSettings = bot.settings ?? {};
+    const widgetSettings = (botSettings.widget ?? {}) as {
       avatarUrl?: string | null;
       launcherPosition?: 'bottom-right' | 'bottom-left';
       launcherLabel?: string | null;
@@ -132,6 +134,20 @@ router.get(
       launcherLabel: widgetSettings.launcherLabel || null,
     };
 
+    // D33/D34: the "Powered by Axentrio" footer is hidden on Pro+ and
+    // shown on Essential. The widget client reads `attribution.hide` and
+    // renders the footer when false. Fail closed on unknown tier so a
+    // malformed DB row defaults to showing the attribution.
+    let hideAttribution = false;
+    try {
+      hideAttribution = entitlementsFor(tenant.tier, {
+        maxSessions: null,
+        dailyLlmCallLimit: null,
+      }).features.hideWidgetAttribution;
+    } catch {
+      hideAttribution = false;
+    }
+
     sendSuccess(res, {
       tenantId: tenant.id,
       name: tenant.name,
@@ -140,21 +156,22 @@ router.get(
         name: bot.name,
         status: bot.status,
       },
-      theme: tenant.settings?.theme || {
+      theme: botSettings.theme || {
         primaryColor: '#007bff',
         backgroundColor: '#ffffff',
         textColor: '#333333',
       },
       features: {
-        fileUploadEnabled: tenant.settings?.features?.fileUploadEnabled ?? false,
-        handoffEnabled: tenant.settings?.features?.handoffEnabled ?? true,
-        aiEnabled: tenant.settings?.ai?.enabled ?? false,
+        fileUploadEnabled: botSettings.features?.fileUploadEnabled ?? false,
+        handoffEnabled: botSettings.features?.handoffEnabled ?? true,
+        aiEnabled: botSettings.ai?.enabled ?? false,
       },
-      businessHours: tenant.settings?.businessHours || {
+      businessHours: botSettings.businessHours || {
         enabled: false,
         timezone: 'UTC',
       },
       appearance,
+      attribution: { hide: hideAttribution },
       widgetVersion: widgetVersionHash,
     });
   })
@@ -219,9 +236,10 @@ router.post(
       return;
     }
 
-    // Determine initial status based on AI settings
-    const aiEnabled = tenant.settings?.ai?.enabled;
-    const usePlatformAgent = tenant.settings?.ai?.usePlatformAgent;
+    // Determine initial status based on AI settings — #16d: read from
+    // bot.settings, not tenant.settings.
+    const aiEnabled = resolvedBot.settings?.ai?.enabled;
+    const usePlatformAgent = resolvedBot.settings?.ai?.usePlatformAgent;
     const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
     const initialStatus = (aiEnabled && (hasWebhook || usePlatformAgent)) ? 'bot' : 'waiting';
 

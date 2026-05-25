@@ -126,6 +126,10 @@ router.post(
       tenantId: tenant.id,
     });
 
+    // #16d completion: visible session config lives on bot.settings, not
+    // tenant.settings. The widget identity/appearance is per-bot since the
+    // multi-bot refactor.
+    const botSettings = bot.settings ?? {};
     sendSuccess(res, {
       token,
       session: {
@@ -137,9 +141,9 @@ router.post(
         id: tenant.id,
         name: tenant.name,
         settings: {
-          theme: tenant.settings?.theme,
-          features: tenant.settings?.features,
-          businessHours: tenant.settings?.businessHours,
+          theme: botSettings.theme,
+          features: botSettings.features,
+          businessHours: botSettings.businessHours,
         },
       },
     });

@@ -842,6 +842,23 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     .cb-input-area__privacy a:hover { color: var(--cb-primary-hover); }
 
+    /* D33: "Powered by Axentrio" watermark on Essential. Hidden for Pro+ via
+       config.attribution.hide from /widget/config. */
+    .cb-attribution {
+      font-family: var(--cb-sans);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--cb-ink-muted);
+      text-align: center;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      padding: 4px 0 0;
+      opacity: 0.7;
+      transition: opacity 120ms ease;
+    }
+    .cb-attribution:hover { opacity: 1; color: var(--cb-primary); }
+    .cb-attribution[hidden] { display: none; }
+
     .cb-input-wrapper {
       display: flex;
       align-items: flex-end;
@@ -1409,8 +1426,14 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         if (!data || typeof data !== 'object') return;
         if (data.appearance && typeof data.appearance === 'object') {
           this.appearance = data.appearance;
-          this._applyAppearance();
         }
+        // D33/D34: tier-driven attribution. Default rendering is visible
+        // (Essential semantics); Pro+ flips the element hidden once config
+        // lands. Stored on `this.appearance` so _applyAppearance can act on it.
+        if (data.attribution && typeof data.attribution === 'object') {
+          this.appearance.hideAttribution = data.attribution.hide === true;
+        }
+        this._applyAppearance();
       } catch (err) {
         this.log('Appearance config fetch failed:', err && err.message);
       }
@@ -1438,6 +1461,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         const headerAvatar = this.shadow.querySelector('.cb-header__avatar');
         if (headerAvatar) {
           headerAvatar.innerHTML = botAvatarHtml(this.appearance.avatarUrl, { eager: true });
+        }
+        // D33/D34: hide the "Powered by Axentrio" footer for entitled tiers.
+        const attribution = this.shadow.querySelector('.cb-attribution');
+        if (attribution) {
+          if (this.appearance.hideAttribution) {
+            attribution.setAttribute('hidden', '');
+          } else {
+            attribution.removeAttribute('hidden');
+          }
         }
       }
       // Note: already-rendered message-bubble avatars keep their original
@@ -1795,9 +1827,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
                 </button>
               </div>
             </div>
+            <a class="cb-attribution" href="https://axentrio.com" target="_blank" rel="noopener noreferrer">Powered by Axentrio</a>
           </div>
         </div>
-        
+
         <button class="cb-launcher" type="button" aria-label="Open chat" aria-expanded="false">
           <span class="cb-launcher__icon cb-launcher__icon--open" aria-hidden="true">${ICONS.chat}</span>
           <span class="cb-launcher__icon cb-launcher__icon--close" aria-hidden="true">${ICONS.close}</span>

@@ -157,6 +157,45 @@ describe('normalizeWebhookEvent — per event type', () => {
     const normalized = p.normalizeWebhookEvent(makeEvent('payment_intent.created', {}));
     expect(normalized).toBeNull();
   });
+
+  // Audit gap #2 fix: checkout.session.expired releases the trial
+  // reservation on abandonment. The normalize step must surface the
+  // session id (downstream handler scopes the DELETE by it).
+  it('maps checkout.session.expired → checkout.session.expired with sessionId', () => {
+    const p = makeProvider();
+    const session = {
+      id: 'cs_test_abandon_123',
+      customer: 'cus_abandon',
+      metadata: { tenantId: 'tenant-abandon-uuid' },
+    };
+    const normalized = p.normalizeWebhookEvent(
+      makeEvent('checkout.session.expired', session),
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized!.type).toBe('checkout.session.expired');
+    expect(normalized!.sessionId).toBe('cs_test_abandon_123');
+    expect(normalized!.customerId).toBe('cus_abandon');
+    expect(normalized!.subscription).toBeNull();
+  });
+
+  it('maps checkout.session.completed → checkout.session.completed with sessionId', () => {
+    const p = makeProvider();
+    const session = {
+      id: 'cs_test_complete_456',
+      customer: 'cus_complete',
+      subscription: 'sub_complete',
+      metadata: { tenantId: 'tenant-complete-uuid' },
+    };
+    const normalized = p.normalizeWebhookEvent(
+      makeEvent('checkout.session.completed', session),
+    );
+
+    expect(normalized).not.toBeNull();
+    expect(normalized!.type).toBe('checkout.session.completed');
+    expect(normalized!.sessionId).toBe('cs_test_complete_456');
+    expect(normalized!.subscriptionId).toBe('sub_complete');
+  });
 });
 
 describe('normalizeWebhookEvent — Stripe status → normalized status table', () => {

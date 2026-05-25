@@ -161,6 +161,15 @@ export async function handleNormalizedEvent(
     return handleCheckoutSessionCompleted(manager, event);
   }
 
+  // Audit gap #2 fix: release the trial reservation for an abandoned
+  // checkout so the tenant can retry with a fresh trial (M0 line 532).
+  // Scoped by (tenant_id, checkout_session_id, subscription_id IS NULL)
+  // so a stale expired event can't delete a newer pending reservation
+  // and a claimed row stays put.
+  if (event.type === 'checkout.session.expired') {
+    return handleCheckoutSessionExpired(manager, event);
+  }
+
   if (!matched) {
     return { outcome: 'no_matching_row' };
   }
@@ -449,6 +458,19 @@ export async function handleNormalizedEvent(
 
       await manager.update(TenantBillingAccount, { id: row.id }, updateFields);
 
+      // Audit gap #2 fix: claim the trial reservation. Idempotent — the
+      // WHERE clause only matches an unclaimed row. Runs for both
+      // subscription.created and subscription.updated so out-of-order
+      // events (which Stripe permits) still land the claim.
+      if (s.subscriptionId) {
+        await manager.query(
+          `UPDATE chatbot_tenant_trial_reservations
+             SET subscription_id = $1
+           WHERE tenant_id = $2 AND subscription_id IS NULL`,
+          [s.subscriptionId, tenantId],
+        );
+      }
+
       // Merge raw_provider_data.stripe.scheduleId via jsonb_set (preserves
       // siblings). Or clear it if schedule was removed.
       if (scheduleEnrichment) {
@@ -660,6 +682,84 @@ async function handleCheckoutSessionCompleted(
   return {
     outcome: 'checkout_session_bookkeeping_applied',
     meta: { tenantId, customerId, subscriptionId, fieldsUpdated: Object.keys(updates) },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Audit gap #2 — checkout.session.expired handler (trial-reservation
+// release on abandonment).
+// ---------------------------------------------------------------------------
+
+/**
+ * Releases the trial reservation row this expired Checkout claimed at
+ * creation time. The DELETE is scoped by three conditions:
+ *
+ *   1. `tenant_id` — read from `session.metadata.tenantId` (same source
+ *      as the completed handler; no email fallback).
+ *   2. `checkout_session_id` — must equal this specific expired session.
+ *      Without this, an old expired event could nuke a newer pending row.
+ *   3. `subscription_id IS NULL` — a claimed reservation (real trial
+ *      consumed) must never be deleted by this path.
+ *
+ * No Stripe API round-trip needed — the event payload already carries
+ * the session id and metadata.
+ */
+async function handleCheckoutSessionExpired(
+  manager: EntityManager,
+  event: NormalizedEvent,
+): Promise<{ outcome: string; meta?: Record<string, unknown> }> {
+  const sessionId = event.sessionId;
+  if (!sessionId) {
+    return { outcome: 'checkout_expired_no_session_id' };
+  }
+
+  // tenantId is the same chain checkout.session.completed uses, minus the
+  // fallback to a re-fetched customer (expired sessions never had a
+  // subscription, so the customer-metadata path is the most we can pull
+  // without a round-trip — and that's fine for cleanup-on-best-effort).
+  const raw = event.raw as {
+    data?: { object?: { metadata?: Record<string, string> } };
+  };
+  const tenantId =
+    typeof raw?.data?.object?.metadata?.tenantId === 'string'
+      ? raw.data.object.metadata.tenantId
+      : null;
+
+  if (!tenantId) {
+    logger.warn('checkout.session.expired: no tenantId in metadata; cannot release reservation', {
+      eventId: event.providerEventId,
+      sessionId,
+    });
+    return { outcome: 'checkout_expired_no_tenant_id', meta: { sessionId } };
+  }
+
+  const result: Array<{ tenant_id: string }> = await manager.query(
+    `DELETE FROM chatbot_tenant_trial_reservations
+       WHERE tenant_id = $1
+         AND checkout_session_id = $2
+         AND subscription_id IS NULL
+       RETURNING tenant_id`,
+    [tenantId, sessionId],
+  );
+
+  if (result.length === 0) {
+    // Either: claimed elsewhere (subscription_id is non-null), already
+    // expired-and-released, or the session id doesn't match what we
+    // recorded. All three are legitimate no-ops.
+    return {
+      outcome: 'checkout_expired_reservation_not_released',
+      meta: { tenantId, sessionId },
+    };
+  }
+
+  logger.info('Trial reservation released on checkout abandonment', {
+    eventId: event.providerEventId,
+    tenantId,
+    sessionId,
+  });
+  return {
+    outcome: 'checkout_expired_reservation_released',
+    meta: { tenantId, sessionId },
   };
 }
 

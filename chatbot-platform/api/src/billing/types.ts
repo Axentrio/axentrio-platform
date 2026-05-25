@@ -31,6 +31,7 @@ export type NormalizedEventType =
   | 'subscription.deleted'
   | 'subscription.trial_will_end'
   | 'checkout.session.completed'
+  | 'checkout.session.expired'
   | 'invoice.paid'
   | 'invoice.payment_failed'
   | 'refund.recorded';
@@ -40,6 +41,12 @@ export interface NormalizedEvent {
   type: NormalizedEventType;
   customerId: string;
   subscriptionId?: string;
+  /**
+   * Stripe Checkout session id. Populated only for `checkout.session.*`
+   * events. Used by the trial-reservation expired-cleanup handler to scope
+   * the DELETE so a stale expired event doesn't nuke a newer row.
+   */
+  sessionId?: string;
   subscription: NormalizedSubscription | null;
   invoiceUrl?: string;
   occurredAt: Date;

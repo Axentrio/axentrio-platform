@@ -99,6 +99,14 @@ vi.mock('../../utils/logger', () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
 }));
 
+// M5: connectCalcom / updateIntegrations / getCalcomEventTypes call
+// requireFeature first. The tier gate has its own pure-function tests in
+// calcom-access.test.ts; these wire-tests focus on the Cal.com-API
+// envelope shapes, so make requireFeature a no-op.
+vi.mock('../../billing/enforce', () => ({
+  requireFeature: vi.fn().mockResolvedValue(undefined),
+}));
+
 // `encrypt` / `decrypt` are not exercised by these tests, but `connectCalcom`
 // calls `encrypt(apiKey)` on the success path. We stub it to avoid needing
 // the real encryption key in the test environment.

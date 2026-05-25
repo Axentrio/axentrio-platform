@@ -175,17 +175,24 @@ export class StripeBillingProvider implements BillingProvider {
       });
     }
 
-    // Trial-reservation guard (codex round 7 item 1). Only Pro is trial-
-    // eligible. The primary-key unique constraint on
-    // `chatbot_tenant_trial_reservations.tenant_id` serialises concurrent Pro
-    // checkouts — exactly one wins the insert and gets `allowTrial=true`;
+    // Trial-reservation guard (codex round 7 item 1 + audit gap #2 fix).
+    // Only Pro is trial-eligible. The primary-key unique constraint on
+    // `chatbot_tenant_trial_reservations.tenant_id` serialises concurrent
+    // Pro checkouts — exactly one wins the insert and gets `allowTrial=true`;
     // the rest see RETURNING empty and get `allowTrial=false`.
     //
     // Why this and not `stripe.subscriptions.list`: the Stripe API does
     // not see in-flight Checkout sessions, so two concurrent Pro checkouts
     // for the same tenant could each independently pass that guard and
-    // both grant a 14-day trial. The reservation table is the canonical
-    // source of truth for "has this tenant already consumed their trial."
+    // both grant a 14-day trial.
+    //
+    // Audit-gap-#2 wrinkle: an unclaimed reservation must be releasable on
+    // checkout abandonment (M0 spec line 532). The `checkout.session.expired`
+    // webhook handler unwinds the reservation; until that fires the row
+    // counts as "in flight" and blocks a re-attempt. That's the right
+    // behaviour for a real abandonment — Stripe expires sessions after 24h,
+    // and the customer should not be able to spin up a fresh trial within
+    // that window by hammering the button.
     let allowTrial = false;
     if (input.planId === 'pro') {
       const reserved: Array<{ tenant_id: string }> = await AppDataSource.query(
@@ -198,52 +205,93 @@ export class StripeBillingProvider implements BillingProvider {
       allowTrial = reserved.length > 0;
     }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: row.customerId,
-      // Session-level metadata: the `checkout.session.completed` webhook
-      // handler reads this to resolve the tenant. Replaces the legacy
-      // `client_reference_id` field.
-      metadata: { tenantId: input.tenantId },
-      line_items: [{ price: priceIdFor(input.planId), quantity: 1 }],
-      payment_method_types: ['card', 'bancontact', 'ideal', 'sepa_debit'],
-      // Force payment-method capture during trial — Stripe will cancel the
-      // subscription if the customer never provides a payment method by
-      // trial-end (see `trial_settings.end_behavior.missing_payment_method`).
-      payment_method_collection: 'always',
-      subscription_data: {
-        // Subscription-level metadata: read by `customer.subscription.*`
-        // webhook handlers as the authoritative tenant resolution channel,
-        // since Stripe Customer metadata can drift if a sales user edits
-        // the Customer record in the dashboard.
+    let session: StripeNS.Checkout.Session;
+    try {
+      session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: row.customerId,
+        // Session-level metadata: the `checkout.session.completed` and
+        // `checkout.session.expired` webhook handlers read `tenantId` to
+        // resolve the owner without trusting Customer metadata (which can
+        // drift if edited in the dashboard).
         metadata: { tenantId: input.tenantId },
-        // `trial_period_days` is OMITTED entirely (not set to 0) for
-        // non-trial plans — Stripe rejects `0` as invalid.
-        ...(allowTrial
-          ? {
-              trial_period_days: 14,
-              trial_settings: {
-                end_behavior: {
-                  missing_payment_method: 'cancel',
+        line_items: [{ price: priceIdFor(input.planId), quantity: 1 }],
+        payment_method_types: ['card', 'bancontact', 'ideal', 'sepa_debit'],
+        // Force payment-method capture during trial — Stripe will cancel
+        // the subscription if the customer never provides a payment method
+        // by trial-end.
+        payment_method_collection: 'always',
+        subscription_data: {
+          // Subscription-level metadata: read by `customer.subscription.*`
+          // webhook handlers as the authoritative tenant resolution channel.
+          metadata: { tenantId: input.tenantId },
+          // `trial_period_days` is OMITTED entirely (not set to 0) for
+          // non-trial plans — Stripe rejects `0` as invalid.
+          ...(allowTrial
+            ? {
+                trial_period_days: 14,
+                trial_settings: {
+                  end_behavior: {
+                    missing_payment_method: 'cancel',
+                  },
                 },
-              },
-            }
-          : {}),
-      },
-      automatic_tax: { enabled: true },
-      tax_id_collection: { enabled: true },
-      // `customer_update` is required in subscription mode when `customer`
-      // is pre-set on the session and we want Stripe Tax to derive address
-      // from the customer at checkout. `auto` lets the Checkout UI prompt
-      // for + update the Customer's address/name. Shipping is omitted
-      // (we don't ship physical goods).
-      customer_update: { address: 'auto', name: 'auto' },
-      success_url: input.successUrl,
-      cancel_url: input.cancelUrl,
-    });
+              }
+            : {}),
+        },
+        automatic_tax: { enabled: true },
+        tax_id_collection: { enabled: true },
+        // `customer_update` is required in subscription mode when `customer`
+        // is pre-set on the session and we want Stripe Tax to derive
+        // address from the customer at checkout.
+        customer_update: { address: 'auto', name: 'auto' },
+        success_url: input.successUrl,
+        cancel_url: input.cancelUrl,
+      });
+    } catch (err) {
+      // Stripe rejected our checkout creation. Roll back the reservation
+      // so the tenant isn't locked out of a fresh attempt. The DELETE is
+      // safe to run unconditionally — it only nukes rows that this same
+      // call inserted (subscription_id and checkout_session_id are both
+      // still NULL because we never got past `create`).
+      if (allowTrial) {
+        await AppDataSource.query(
+          `DELETE FROM chatbot_tenant_trial_reservations
+           WHERE tenant_id = $1
+             AND subscription_id IS NULL
+             AND checkout_session_id IS NULL`,
+          [input.tenantId],
+        );
+      }
+      throw err;
+    }
+
     if (!session.url) {
+      // Same recovery path — no usable session URL means we can't even
+      // hand control to Stripe. Don't leave the reservation orphaned.
+      if (allowTrial) {
+        await AppDataSource.query(
+          `DELETE FROM chatbot_tenant_trial_reservations
+           WHERE tenant_id = $1
+             AND subscription_id IS NULL
+             AND checkout_session_id IS NULL`,
+          [input.tenantId],
+        );
+      }
       throw new BillingProviderError('checkout_session_no_url', PROVIDER);
     }
+
+    // Stamp the reservation with the session id so the `checkout.session.
+    // expired` handler can scope its deletion (a stale expired event must
+    // not nuke a newer pending row for the same tenant).
+    if (allowTrial) {
+      await AppDataSource.query(
+        `UPDATE chatbot_tenant_trial_reservations
+         SET checkout_session_id = $1
+         WHERE tenant_id = $2 AND subscription_id IS NULL`,
+        [session.id, input.tenantId],
+      );
+    }
+
     return { url: session.url };
   }
 
@@ -514,6 +562,26 @@ export class StripeBillingProvider implements BillingProvider {
           type: 'checkout.session.completed',
           customerId,
           subscriptionId: subscriptionId ?? undefined,
+          sessionId: session.id,
+          subscription: null,
+          occurredAt,
+          raw: event,
+        };
+      }
+      case 'checkout.session.expired': {
+        // Audit gap #2 fix: Stripe fires this 24h after an abandoned
+        // checkout. We release the (unclaimed) trial reservation so the
+        // tenant can retry with a fresh trial — M0 spec line 532.
+        const session = event.data.object as StripeNS.Checkout.Session;
+        const customerId =
+          typeof session.customer === 'string'
+            ? session.customer
+            : session.customer?.id ?? '';
+        return {
+          providerEventId: event.id,
+          type: 'checkout.session.expired',
+          customerId,
+          sessionId: session.id,
           subscription: null,
           occurredAt,
           raw: event,

@@ -61,6 +61,7 @@ Dashboard → **Developers → Webhooks → Add endpoint**.
 - Endpoint URL: `https://api.axentrio.<env>/api/v1/webhooks/billing/stripe` (note the `/api/v1/webhooks/...` mount prefix — matches the convention used by every other provider webhook, e.g. Meta/Telegram)
 - Events to subscribe:
   - `checkout.session.completed`
+  - `checkout.session.expired` (releases the trial reservation on abandoned checkouts — see audit gap #2)
   - `customer.subscription.created`
   - `customer.subscription.updated`
   - `customer.subscription.deleted`

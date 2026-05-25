@@ -99,9 +99,26 @@ export async function createTestSession(
   overrides: Partial<ChatSession> = {},
 ): Promise<ChatSession> {
   const repo = AppDataSource.getRepository(ChatSession);
+  // Multi-bot #16c: chat_sessions.bot_id is NOT NULL. Resolve the tenant's
+  // anchor bot for the session if the caller didn't supply one. If no anchor
+  // exists (legacy test fixtures that skip createTestAnchorBot), seed one.
+  let botId = overrides.botId;
+  if (!botId) {
+    const botRepo = AppDataSource.getRepository(Bot);
+    let anchor = await botRepo.findOne({
+      where: { tenantId, isDefault: true },
+    });
+    if (!anchor) {
+      const tenantRepo = AppDataSource.getRepository(Tenant);
+      const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+      anchor = await createTestAnchorBot(tenant);
+    }
+    botId = anchor.id;
+  }
   return repo.save(
     repo.create({
       tenantId,
+      botId,
       visitorId: `visitor-${crypto.randomBytes(4).toString('hex')}`,
       status: 'active',
       source: 'widget',

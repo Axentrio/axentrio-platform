@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2 } from 'lucide-react';
+import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2, Bot as BotsIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
 import { useGetAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
@@ -14,11 +14,13 @@ import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
 import { SocialChannelsContent } from '@/components/channels/SocialChannelsContent';
 import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
 import { EmbedWidgetCard } from '@/components/ai/EmbedWidgetCard';
+import BotsList from './bots/BotsList';
 
-type Tab = 'bot' | 'knowledge' | 'canned' | 'appearances' | 'social';
+type Tab = 'bot' | 'bots' | 'knowledge' | 'canned' | 'appearances' | 'social';
 
 const tabs: { key: Tab; labelKey: string; icon: React.ElementType }[] = [
   { key: 'bot', labelKey: 'ai.tabs.bot', icon: Bot },
+  { key: 'bots', labelKey: 'bots.tab.title', icon: BotsIcon },
   { key: 'knowledge', labelKey: 'ai.tabs.knowledge', icon: BookOpen },
   { key: 'canned', labelKey: 'ai.tabs.canned', icon: MessageSquareText },
   { key: 'appearances', labelKey: 'ai.tabs.appearances', icon: Palette },
@@ -27,6 +29,7 @@ const tabs: { key: Tab; labelKey: string; icon: React.ElementType }[] = [
 
 const PARAM_TO_TAB: Record<string, Tab> = {
   bot: 'bot',
+  bots: 'bots',
   knowledge: 'knowledge',
   canned: 'canned',
   appearances: 'appearances',
@@ -136,6 +139,8 @@ const AiContent: React.FC = () => {
             <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
           </>
         )}
+
+        {activeTab === 'bots' && <BotsList />}
 
         {activeTab === 'knowledge' && (
           <DocumentsTab

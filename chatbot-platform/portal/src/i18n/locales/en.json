@@ -1802,5 +1802,75 @@
     "subscribeNow": "Subscribe to Essential",
     "contactSales": "Contact Sales",
     "error": "Couldn't start checkout. Please try again."
+  },
+  "bots": {
+    "tab": {
+      "title": "Bots"
+    },
+    "default": "Default",
+    "status": {
+      "active": "Active",
+      "paused": "Paused"
+    },
+    "list": {
+      "empty": "No bots yet. Create your first bot to get started.",
+      "headers": {
+        "name": "Name",
+        "status": "Status",
+        "default": "Default",
+        "created": "Created",
+        "actions": "Actions"
+      }
+    },
+    "actions": {
+      "rename": "Rename",
+      "pause": "Pause",
+      "activate": "Activate",
+      "delete": "Delete",
+      "showEmbed": "Show embed snippet",
+      "newBot": "New bot",
+      "menuAria": "Actions for {{name}}"
+    },
+    "quota": {
+      "usage": "{{used}} of {{limit}} used",
+      "usageUnlimited": "{{used}} bots",
+      "upgradeCta": "You've reached your plan's bot limit — upgrade to add more."
+    },
+    "create": {
+      "title": "Create a new bot",
+      "nameLabel": "Bot name",
+      "namePlaceholder": "e.g. Support bot",
+      "submit": "Create bot"
+    },
+    "rename": {
+      "title": "Rename bot"
+    },
+    "pause": {
+      "title": "Pause this bot?",
+      "description": "{{name}} will stop replying to visitors until you activate it again."
+    },
+    "delete": {
+      "title": "Delete this bot?",
+      "description": "{{name}} will be permanently deleted. This action cannot be undone."
+    },
+    "embed": {
+      "title": "Embed snippet",
+      "description": "Paste this snippet into your website's HTML, just before the closing </body> tag.",
+      "copyButton": "Copy snippet",
+      "copied": "Copied"
+    },
+    "toast": {
+      "created": "Bot created",
+      "renamed": "Bot renamed",
+      "paused": "Bot paused",
+      "activated": "Bot activated",
+      "deleted": "Bot deleted"
+    },
+    "errors": {
+      "planLimit": "You've reached your plan's bot limit. Upgrade to add more.",
+      "anchorPauseBlocked": "The default bot can't be paused.",
+      "anchorDeleteBlocked": "The default bot can't be deleted.",
+      "generic": "Something went wrong. Please try again."
+    }
   }
 }

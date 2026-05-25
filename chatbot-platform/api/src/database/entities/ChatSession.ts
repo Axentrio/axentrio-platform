@@ -35,12 +35,12 @@ export class ChatSession {
   tenantId!: string;
 
   /**
-   * The Bot this conversation belongs to. Nullable through Phase 1 (backfilled
-   * to the tenant's anchor bot); enforced NOT NULL in a later migration once
-   * null sessions have drained. NULL is bound to the resolved bot on resume.
+   * The Bot serving this conversation. NOT NULL since migration 1782900 (#16c)
+   * — Phase 4a's resolveBotKey binds the bot at session creation; legacy null
+   * sessions were backfilled to the tenant's anchor.
    */
-  @Column({ type: 'uuid', nullable: true, name: 'bot_id' })
-  botId?: string | null;
+  @Column({ type: 'uuid', name: 'bot_id' })
+  botId!: string;
 
   @Column({ type: 'varchar', length: 255, name: 'visitor_id' })
   visitorId!: string;

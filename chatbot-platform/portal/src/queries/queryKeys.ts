@@ -91,4 +91,9 @@ export const queryKeys = {
     all: () => ['faq'] as const,
     tree: () => [...queryKeys.faq.all(), 'tree'] as const,
   },
+  bots: {
+    all: () => ['bots'] as const,
+    list: () => [...queryKeys.bots.all(), 'list'] as const,
+    embed: (botId: string) => [...queryKeys.bots.all(), 'embed', botId] as const,
+  },
 };

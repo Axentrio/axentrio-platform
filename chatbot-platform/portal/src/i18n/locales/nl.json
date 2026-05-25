@@ -1802,5 +1802,75 @@
     "subscribeNow": "Abonneer op Essential",
     "contactSales": "Neem contact op met sales",
     "error": "Kon de afrekenpagina niet starten. Probeer het opnieuw."
+  },
+  "bots": {
+    "tab": {
+      "title": "Bots"
+    },
+    "default": "Standaard",
+    "status": {
+      "active": "Actief",
+      "paused": "Gepauzeerd"
+    },
+    "list": {
+      "empty": "Nog geen bots. Maak je eerste bot om te beginnen.",
+      "headers": {
+        "name": "Naam",
+        "status": "Status",
+        "default": "Standaard",
+        "created": "Aangemaakt",
+        "actions": "Acties"
+      }
+    },
+    "actions": {
+      "rename": "Hernoemen",
+      "pause": "Pauzeren",
+      "activate": "Activeren",
+      "delete": "Verwijderen",
+      "showEmbed": "Toon embedcode",
+      "newBot": "Nieuwe bot",
+      "menuAria": "Acties voor {{name}}"
+    },
+    "quota": {
+      "usage": "{{used}} van {{limit}} gebruikt",
+      "usageUnlimited": "{{used}} bots",
+      "upgradeCta": "Je hebt de botlimiet van je abonnement bereikt — upgrade om meer toe te voegen."
+    },
+    "create": {
+      "title": "Maak een nieuwe bot",
+      "nameLabel": "Botnaam",
+      "namePlaceholder": "bijv. Support-bot",
+      "submit": "Bot aanmaken"
+    },
+    "rename": {
+      "title": "Bot hernoemen"
+    },
+    "pause": {
+      "title": "Deze bot pauzeren?",
+      "description": "{{name}} stopt met antwoorden tot je hem opnieuw activeert."
+    },
+    "delete": {
+      "title": "Deze bot verwijderen?",
+      "description": "{{name}} wordt permanent verwijderd. Dit kan niet ongedaan worden gemaakt."
+    },
+    "embed": {
+      "title": "Embedcode",
+      "description": "Plak dit fragment in de HTML van je website, vlak voor de afsluitende </body>-tag.",
+      "copyButton": "Code kopiëren",
+      "copied": "Gekopieerd"
+    },
+    "toast": {
+      "created": "Bot aangemaakt",
+      "renamed": "Bot hernoemd",
+      "paused": "Bot gepauzeerd",
+      "activated": "Bot geactiveerd",
+      "deleted": "Bot verwijderd"
+    },
+    "errors": {
+      "planLimit": "Je hebt de botlimiet van je abonnement bereikt. Upgrade om meer toe te voegen.",
+      "anchorPauseBlocked": "De standaardbot kan niet worden gepauzeerd.",
+      "anchorDeleteBlocked": "De standaardbot kan niet worden verwijderd.",
+      "generic": "Er ging iets mis. Probeer het opnieuw."
+    }
   }
 }

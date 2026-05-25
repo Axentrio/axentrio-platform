@@ -23,7 +23,6 @@ import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-ha
 import { ERROR_CODES } from '../middleware/error-codes';
 import {
   getAnchorBotConfig,
-  updateAnchorBotSettings,
   replaceAnchorBotSettingsSection,
 } from '../services/bot-config.service';
 

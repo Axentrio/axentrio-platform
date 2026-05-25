@@ -1802,5 +1802,75 @@
     "subscribeNow": "S'abonner à Essential",
     "contactSales": "Contacter les ventes",
     "error": "Impossible de démarrer le paiement. Veuillez réessayer."
+  },
+  "bots": {
+    "tab": {
+      "title": "Bots"
+    },
+    "default": "Par défaut",
+    "status": {
+      "active": "Actif",
+      "paused": "En pause"
+    },
+    "list": {
+      "empty": "Aucun bot pour l'instant. Créez votre premier bot pour commencer.",
+      "headers": {
+        "name": "Nom",
+        "status": "Statut",
+        "default": "Par défaut",
+        "created": "Créé le",
+        "actions": "Actions"
+      }
+    },
+    "actions": {
+      "rename": "Renommer",
+      "pause": "Mettre en pause",
+      "activate": "Activer",
+      "delete": "Supprimer",
+      "showEmbed": "Voir le code d'intégration",
+      "newBot": "Nouveau bot",
+      "menuAria": "Actions pour {{name}}"
+    },
+    "quota": {
+      "usage": "{{used}} sur {{limit}} utilisés",
+      "usageUnlimited": "{{used}} bots",
+      "upgradeCta": "Vous avez atteint la limite de bots de votre plan — passez à un plan supérieur pour en ajouter."
+    },
+    "create": {
+      "title": "Créer un nouveau bot",
+      "nameLabel": "Nom du bot",
+      "namePlaceholder": "ex. Bot de support",
+      "submit": "Créer le bot"
+    },
+    "rename": {
+      "title": "Renommer le bot"
+    },
+    "pause": {
+      "title": "Mettre ce bot en pause ?",
+      "description": "{{name}} cessera de répondre jusqu'à ce que vous le réactiviez."
+    },
+    "delete": {
+      "title": "Supprimer ce bot ?",
+      "description": "{{name}} sera définitivement supprimé. Cette action est irréversible."
+    },
+    "embed": {
+      "title": "Code d'intégration",
+      "description": "Collez ce fragment dans le HTML de votre site, juste avant la balise </body> de fermeture.",
+      "copyButton": "Copier le code",
+      "copied": "Copié"
+    },
+    "toast": {
+      "created": "Bot créé",
+      "renamed": "Bot renommé",
+      "paused": "Bot mis en pause",
+      "activated": "Bot activé",
+      "deleted": "Bot supprimé"
+    },
+    "errors": {
+      "planLimit": "Vous avez atteint la limite de bots de votre plan. Passez à un plan supérieur pour en ajouter.",
+      "anchorPauseBlocked": "Le bot par défaut ne peut pas être mis en pause.",
+      "anchorDeleteBlocked": "Le bot par défaut ne peut pas être supprimé.",
+      "generic": "Une erreur est survenue. Veuillez réessayer."
+    }
   }
 }

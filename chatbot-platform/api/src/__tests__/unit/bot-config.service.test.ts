@@ -69,13 +69,23 @@ describe('getBotConfigForSession', () => {
   });
 
   it('falls back to the anchor when session.botId is null', async () => {
+    // Defence-in-depth path: chat_sessions.bot_id became NOT NULL in
+    // migration #16c, so a real DB-backed session can no longer carry a
+    // null botId. The service's anchor fallback still exists for code
+    // paths that operate on synthetic / in-memory session shapes (the
+    // function takes a Pick<ChatSession, ...>, not a hydrated entity),
+    // and this test exercises that path with a plain object instead of
+    // trying to insert a row that would fail the NOT NULL constraint.
     const tenant = await createTestTenant();
     const anchor = await createTestAnchorBot(tenant, {
       settings: { theme: { primaryColor: '#anchor1' } } as Bot['settings'],
     });
-    const session = await createTestSession(tenant.id, { botId: null as any });
 
-    const { bot, settings } = await getBotConfigForSession(session);
+    const { bot, settings } = await getBotConfigForSession({
+      id: 'synthetic-session-null-bot',
+      tenantId: tenant.id,
+      botId: null as unknown as string,
+    });
 
     expect(bot.id).toBe(anchor.id);
     expect(settings.theme?.primaryColor).toBe('#anchor1');

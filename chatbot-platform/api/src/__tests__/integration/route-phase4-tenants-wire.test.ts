@@ -46,6 +46,8 @@ const {
   pendingInviteSave,
   pendingInviteRemove,
   chatSessionQB,
+  botFindOne,
+  botSave,
   appQuery,
   inviteToClerkOrganization,
   revokeAndResendClerkInvitation,
@@ -62,6 +64,9 @@ const {
   pendingInviteSave: vi.fn(),
   pendingInviteRemove: vi.fn(),
   chatSessionQB: vi.fn(),
+  // Multi-bot Phase 4 (#16d): GET /me + PATCH /me now hydrate from anchor bot.
+  botFindOne: vi.fn(),
+  botSave: vi.fn(),
   appQuery: vi.fn(),
   inviteToClerkOrganization: vi.fn(),
   revokeAndResendClerkInvitation: vi.fn(),
@@ -154,6 +159,9 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'Agent') {
         return { createQueryBuilder: vi.fn() };
       }
+      if (name === 'Bot') {
+        return { findOne: botFindOne, save: botSave };
+      }
       return { findOne: vi.fn(), save: vi.fn() };
     },
     query: appQuery,
@@ -193,6 +201,8 @@ beforeEach(() => {
   userSave.mockReset();
   userCount.mockReset();
   userCreateQB.mockReset();
+  botFindOne.mockReset();
+  botSave.mockReset();
   pendingInviteFind.mockReset();
   pendingInviteFindOne.mockReset();
   pendingInviteCreateQB.mockReset();

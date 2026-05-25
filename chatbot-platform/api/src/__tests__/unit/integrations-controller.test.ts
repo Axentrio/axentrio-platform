@@ -9,9 +9,14 @@ vi.mock('../../config/environment', () => ({
   config: { n8n: { defaultWebhookUrl: 'https://test-webhook.example.com/webhook' } },
 }));
 
+// Multi-bot Phase 4 (#16d): controller now talks to the Bot repo via the
+// bot-config service (findOne + save) plus the Tenant repo for webhook
+// auto-provisioning (findOneOrFail + save). A single shared mock is fine
+// because the test bodies wire up both Tenant + Bot shapes identically.
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: vi.fn(() => ({
+      findOne: mockFindOneOrFail,
       findOneOrFail: mockFindOneOrFail,
       save: mockSave,
     })),

@@ -5,9 +5,14 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 const mockFindOneOrFail = vi.fn();
 const mockSave = vi.fn();
 
+// Multi-bot Phase 4 (#16d): integrations.controller writes to Bot.settings.
+// A single shared findOne+save is sufficient — connectCalcom calls findOne
+// (via getAnchorBotConfig) twice (once to read, once inside the writer) and
+// save once.
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: vi.fn(() => ({
+      findOne: mockFindOneOrFail,
       findOneOrFail: mockFindOneOrFail,
       save: mockSave,
     })),

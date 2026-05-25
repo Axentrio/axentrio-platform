@@ -1687,6 +1687,20 @@
       "title": "Analytics",
       "subtitle": "Performance metrics and insights"
     },
+    "onboardingBanner": {
+      "title": "Finish setting up your chatbot",
+      "subtitle": "Complete these steps to get the most out of your assistant",
+      "progress": "{{completed}} of {{total}} done",
+      "dismiss": "Dismiss",
+      "setUp": "Set up",
+      "steps": {
+        "aiEnabled": { "label": "Enable the AI assistant" },
+        "brandVoiceConfigured": { "label": "Configure your brand voice" },
+        "knowledgeBaseHasDocs": { "label": "Add documents to your knowledge base" },
+        "calcomConnected": { "label": "Connect Cal.com" },
+        "automationsConfigured": { "label": "Configure automations" }
+      }
+    },
     "timeRange": {
       "placeholder": "Select range",
       "last24Hours": "Last 24 Hours",

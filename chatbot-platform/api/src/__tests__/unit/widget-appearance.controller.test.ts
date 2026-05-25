@@ -8,9 +8,13 @@ import {
 const mockFind = vi.fn();
 const mockSave = vi.fn();
 
+// Multi-bot Phase 4 (#16d): widget appearance reads/writes go through the
+// Bot repo (anchor bot resolver). `findOne` is the call shape used by
+// `getAnchorBotConfig`/`updateAnchorBotSettings`.
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: () => ({
+      findOne: mockFind,
       findOneOrFail: mockFind,
       save: mockSave,
     }),
@@ -35,7 +39,9 @@ beforeEach(() => {
 describe('getWidgetAppearance', () => {
   it('returns the saved widget+theme subset with defaults applied', async () => {
     mockFind.mockResolvedValueOnce({
-      id: 'tenant-123',
+      id: 'bot-anchor',
+      tenantId: 'tenant-123',
+      isDefault: true,
       settings: {
         theme: { primaryColor: '#abcdef' },
         widget: {
@@ -60,7 +66,7 @@ describe('getWidgetAppearance', () => {
   });
 
   it('returns null primaryColor/avatarUrl/launcherLabel and default position when nothing is saved', async () => {
-    mockFind.mockResolvedValueOnce({ id: 'tenant-123', settings: {} });
+    mockFind.mockResolvedValueOnce({ id: 'bot-anchor', tenantId: 'tenant-123', isDefault: true, settings: {} });
     const req = makeReq();
     const res = makeRes();
     await getWidgetAppearance(req, res);
@@ -78,12 +84,17 @@ describe('getWidgetAppearance', () => {
 
 describe('updateWidgetAppearance', () => {
   it('merges primaryColor into theme and other fields into widget; normalizes empty strings to null', async () => {
-    const tenant = {
-      id: 'tenant-123',
+    // Multi-bot Phase 4 (#16d): writes target the anchor bot. The controller
+    // calls findOne twice (once via getAnchorBotConfig to read, once inside
+    // updateAnchorBotSettings to load + save), so use a default (not -Once).
+    const bot = {
+      id: 'bot-anchor',
+      tenantId: 'tenant-123',
+      isDefault: true,
       settings: { theme: { primaryColor: '#000000' }, widget: {} },
     };
-    mockFind.mockResolvedValueOnce(tenant);
-    mockSave.mockResolvedValueOnce(tenant);
+    mockFind.mockResolvedValue(bot);
+    mockSave.mockImplementation(async (b: any) => b);
 
     const req = makeReq({
       primaryColor: '#6366f1',
@@ -113,15 +124,17 @@ describe('updateWidgetAppearance', () => {
   });
 
   it('only writes fields present in the body (partial PATCH)', async () => {
-    const tenant = {
-      id: 'tenant-123',
+    const bot = {
+      id: 'bot-anchor',
+      tenantId: 'tenant-123',
+      isDefault: true,
       settings: {
         theme: { primaryColor: '#111111' },
         widget: { launcherPosition: 'bottom-left', launcherLabel: 'old' },
       },
     };
-    mockFind.mockResolvedValueOnce(tenant);
-    mockSave.mockResolvedValueOnce(tenant);
+    mockFind.mockResolvedValue(bot);
+    mockSave.mockImplementation(async (b: any) => b);
 
     const req = makeReq({ primaryColor: '#222222' });
     const res = makeRes();

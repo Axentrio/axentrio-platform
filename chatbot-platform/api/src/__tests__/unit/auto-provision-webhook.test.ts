@@ -18,9 +18,12 @@ vi.mock('../../config/environment', () => ({
 const mockFindOneOrFail = vi.fn();
 const mockSave = vi.fn();
 
+// Multi-bot Phase 4 (#16d): updateAiSettings now also talks to the Bot repo
+// (via getAnchorBotConfig + updateAnchorBotSettings) — those call `findOne`.
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: () => ({
+      findOne: mockFindOneOrFail,
       findOneOrFail: mockFindOneOrFail,
       save: mockSave,
     }),

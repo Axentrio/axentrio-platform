@@ -21,6 +21,11 @@ import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
+import {
+  getAnchorBotConfig,
+  updateAnchorBotSettings,
+  replaceAnchorBotSettingsSection,
+} from '../services/bot-config.service';
 
 let knowledgeService: KnowledgeService;
 
@@ -173,12 +178,20 @@ export async function getStats(req: Request, res: Response) {
 
 export async function getAiSettings(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
-  const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({ where: { id: tenantId } });
-  const ai = tenant.settings?.ai || null;
+  // Multi-bot Phase 4 (#16d): behavioural AI config (brand voice, guardrails,
+  // provider/model/supportEmail) lives on Bot.settings. The provider apiKey
+  // stays on Tenant.settings.ai.apiKey and is merged in only to render the
+  // `hasApiKey` boolean — the secret itself is never sent down the wire.
+  const { settings: botSettings } = await getAnchorBotConfig(tenantId);
+  const botAi = botSettings.ai;
 
-  if (ai) {
-    const { apiKey, ...rest } = ai;
-    sendSuccess(res, { ...rest, hasApiKey: !!apiKey });
+  if (botAi) {
+    const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({ where: { id: tenantId } });
+    const tenantApiKey = tenant.settings?.ai?.apiKey;
+    // Bot.settings.ai never carries apiKey — strip it defensively in case a
+    // stale row from before the cutover still has it set.
+    const { apiKey: _stale, ...rest } = botAi as { apiKey?: string } & typeof botAi;
+    sendSuccess(res, { ...rest, hasApiKey: !!tenantApiKey });
   } else {
     // Portal-tolerance audit (plan §2.3): all `useGetAiSettings` callers in
     // portal/src use optional chaining (`aiSettings?.enabled`) or explicit
@@ -190,41 +203,75 @@ export async function getAiSettings(req: Request, res: Response) {
 export async function updateAiSettings(req: Request, res: Response) {
   const tenantId = (req as any).tenantId;
   const data = updateAiSettingsSchema.parse(req.body);
+
+  // Multi-bot Phase 4 (#16d): split the write surface.
+  //   - Behavioural AI config (everything under `ai` EXCEPT `apiKey`) → Bot.settings
+  //   - `ai.apiKey` (LLM provider secret) → stays on Tenant.settings.ai.apiKey
+  // Bot.settings.ai never carries apiKey by architectural rule — see
+  // bot-config.service.ts header.
+  const { settings: botSettings } = await getAnchorBotConfig(tenantId);
+  const existingBotAi: any = botSettings.ai || {};
+  const updatedBotAi: any = { ...existingBotAi };
+  // Strip any stale apiKey from a pre-cutover row.
+  delete updatedBotAi.apiKey;
+
+  if (data.enabled !== undefined) updatedBotAi.enabled = data.enabled;
+  if (data.provider !== undefined) updatedBotAi.provider = data.provider ?? null;
+  if (data.model !== undefined) updatedBotAi.model = data.model ?? null;
+  if (data.supportEmail !== undefined) {
+    updatedBotAi.supportEmail = data.supportEmail || null;
+  }
+  if (data.brandVoice) updatedBotAi.brandVoice = { ...existingBotAi.brandVoice, ...data.brandVoice };
+  if (data.guardrails) updatedBotAi.guardrails = { ...existingBotAi.guardrails, ...data.guardrails };
+
+  // Preserve usePlatformAgent if previously set (not in the input schema today).
+  if (existingBotAi.usePlatformAgent !== undefined) {
+    updatedBotAi.usePlatformAgent = existingBotAi.usePlatformAgent;
+  }
+
+  // Wholesale section replacement on `ai` (not a partial patch): the
+  // controller builds the full new ai shape from existingBotAi + the input.
+  // Replace-section also strips any stale apiKey defensively (per the service
+  // header — bot.settings.ai never carries apiKey).
+  await replaceAnchorBotSettingsSection(tenantId, 'ai', updatedBotAi);
+
+  // Handle the apiKey + webhook auto-provision on the tenant row.
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
-  const existingAi: any = tenant.settings?.ai || {};
-  const updatedAi: any = { ...existingAi };
-
-  if (data.enabled !== undefined) updatedAi.enabled = data.enabled;
-  if (data.provider !== undefined) updatedAi.provider = data.provider ?? null;
-  if (data.model !== undefined) updatedAi.model = data.model ?? null;
+  let tenantTouched = false;
   if (data.apiKey !== undefined) {
-    updatedAi.apiKey = data.apiKey ? encrypt(data.apiKey) : null;
+    const existingTenantAi: any = tenant.settings?.ai || {};
+    tenant.settings = {
+      ...tenant.settings,
+      ai: {
+        ...existingTenantAi,
+        apiKey: data.apiKey ? encrypt(data.apiKey) : null,
+      },
+    };
+    tenantTouched = true;
   }
-  if (data.supportEmail !== undefined) {
-    updatedAi.supportEmail = data.supportEmail || null;
-  }
-  if (data.brandVoice) updatedAi.brandVoice = { ...existingAi.brandVoice, ...data.brandVoice };
-  if (data.guardrails) updatedAi.guardrails = { ...existingAi.guardrails, ...data.guardrails };
-
-  tenant.settings = { ...tenant.settings, ai: updatedAi };
 
   // Auto-provision webhook URL + secret when AI is enabled and no custom URL is set
-  if (updatedAi.enabled && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+  if (updatedBotAi.enabled && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
     tenant.webhookUrl = config.n8n.defaultWebhookUrl;
     // Set webhookSecret to the shared inbound secret so the default n8n workflow
     // can authenticate callbacks. Per-tenant secrets are only for custom workflows.
     if (!tenant.webhookSecret && config.n8n.inboundSecret) {
       tenant.webhookSecret = config.n8n.inboundSecret;
     }
+    tenantTouched = true;
     logger.info(`Auto-provisioned webhook URL for tenant ${tenantId}`);
   }
 
-  await tenantRepo.save(tenant);
+  if (tenantTouched) {
+    await tenantRepo.save(tenant);
+  }
 
-  const { apiKey, ...rest } = updatedAi;
-  sendSuccess(res, { ...rest, hasApiKey: !!apiKey });
+  // Build the response — strip apiKey, surface hasApiKey from the tenant row.
+  const tenantApiKey = tenant.settings?.ai?.apiKey;
+  const { apiKey: _stripped, ...rest } = updatedBotAi;
+  sendSuccess(res, { ...rest, hasApiKey: !!tenantApiKey });
 }
 
 export async function testChat(req: Request, res: Response) {
@@ -233,13 +280,23 @@ export async function testChat(req: Request, res: Response) {
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
-  const ai = tenant.settings?.ai;
-  if (!ai?.enabled) {
+  // Multi-bot Phase 4 (#16d): behavioural AI from anchor Bot; provider apiKey
+  // from Tenant (secret stays tenant-scoped).
+  const { settings: botSettings } = await getAnchorBotConfig(tenantId);
+  const botAi = botSettings.ai;
+  if (!botAi?.enabled) {
     throw new BadRequestError('AI is not enabled. Save your AI settings first.');
   }
-  if (!ai.brandVoice?.name) {
+  if (!botAi.brandVoice?.name) {
     throw new BadRequestError('Incomplete AI settings. Set a chatbot name first.');
   }
+
+  const tenantApiKey = tenant.settings?.ai?.apiKey;
+  // Merge for downstream consumers that still expect a single `aiSettings`
+  // object (e.g. `generateResponse`). The apiKey is read-only here — we are
+  // NOT writing this merged shape anywhere.
+  type TenantAi = NonNullable<NonNullable<Tenant['settings']>['ai']>;
+  const ai: TenantAi = { ...botAi, apiKey: tenantApiKey ?? null } as TenantAi;
 
   const provider = ai.provider || DEFAULT_PROVIDER;
   const model = ai.model || DEFAULT_MODEL;
@@ -277,7 +334,8 @@ export async function testChat(req: Request, res: Response) {
     });
   } else {
     const { getProvider } = await import('../llm/provider-factory');
-    const llm = getProvider(provider, ai.apiKey ?? undefined);
+    // Secret apiKey path — still sourced from tenant (per architectural rule).
+    const llm = getProvider(provider, tenantApiKey ?? undefined);
 
     const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name });
 

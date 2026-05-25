@@ -13,6 +13,24 @@ vi.mock('../../llm/provider-factory', () => ({
   getProvider: (...args: any[]) => mockGetProvider(...args),
 }));
 
+// Multi-bot Phase 4 (#16d): AgentService.run resolves bot config via the
+// bot-config service (hits the DB). Stub the resolvers so each test's
+// in-memory tenant.settings.ai is what reaches the LLM call.
+vi.mock('../../services/bot-config.service', () => ({
+  getLlmRuntimeConfigForSession: async (_session: any) => ({
+    // The first call uses tenant arg from the test — but the test threads
+    // tenant through `agent.run(message, session, tenant, history)`. The
+    // agent now resolves config from the session/tenantId via the service.
+    // The behavioural slice + apiKey both come from the seeded `tenant.settings.ai`.
+    botAiSettings: { enabled: true, provider: 'openai', model: 'gpt-4o' } as any,
+    apiKey: 'sk-test',
+  }),
+  getBotConfigForSession: async (_session: any) => ({
+    bot: { id: 'bot-anchor' } as any,
+    settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } as any,
+  }),
+}));
+
 const mockMeteringRecord = vi.fn();
 const mockMeteringIsOverBudget = vi.fn().mockResolvedValue(false);
 const mockMetering = { record: mockMeteringRecord, isOverBudget: mockMeteringIsOverBudget };

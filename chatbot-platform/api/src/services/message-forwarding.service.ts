@@ -10,6 +10,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
 import { Tenant } from '../database/entities/Tenant';
+import { BotSettings } from '../database/entities/Bot';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
@@ -22,6 +23,15 @@ import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import { routeOutboundMessage } from '../channels/outbound-router';
 import { config } from '../config/environment';
 import { AgentService, AgentResult } from '../agent/agent.service';
+import {
+  getBotConfigForSession,
+  getLlmRuntimeConfigForSession,
+  BotPausedConfigError,
+  BotNotFoundConfigError,
+} from './bot-config.service';
+
+/** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
+type BotAiSettings = BotSettings['ai'];
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const messageRepository = AppDataSource.getRepository(Message);
@@ -75,20 +85,29 @@ export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
   };
 }
 
-export function buildTenantAiConfig(tenant: Tenant): TenantAiConfig | undefined {
-  const ai = tenant.settings?.ai;
+/**
+ * Build the AI config slice of the n8n outbound payload.
+ *
+ * Multi-bot Phase 4 (#16d): reads from the bot's `BotSettings.ai` (resolved
+ * via `getBotConfigForSession`), not `tenant.settings.ai`. `tenantName` is
+ * still passed in for `businessName` placeholder substitution.
+ */
+export function buildTenantAiConfig(
+  tenantName: string,
+  ai: BotAiSettings | undefined,
+): TenantAiConfig | undefined {
   if (!ai?.enabled) return undefined;
 
   return {
-    brandName: ai.brandVoice?.name || tenant.name,
+    brandName: ai.brandVoice?.name || tenantName,
     brandTone: ai.brandVoice?.tone || 'professional',
-    // n8n has its own prompt handling — pass the tenant's template through
+    // n8n has its own prompt handling — pass the bot's template through
     // with {placeholders} resolved, but without injecting a legacy fallback
     // (empty customInstructions → empty systemPrompt).
     systemPrompt: substituteVariables(
       ai.brandVoice?.customInstructions || '',
       ai,
-      { businessName: tenant.name }
+      { businessName: tenantName }
     ),
     guardrails: {
       topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
@@ -112,11 +131,16 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
   }
 }
 
-function buildIntegrationsConfig(tenant: Tenant): IntegrationsConfig | undefined {
-  const calcom = tenant.settings?.integrations?.calcom;
+/**
+ * Build the integrations slice of the n8n outbound payload from the bot's
+ * settings. Multi-bot Phase 4 (#16d): reads from `BotSettings` only — no
+ * tenant fall-through.
+ */
+function buildIntegrationsConfig(botSettings: BotSettings): IntegrationsConfig | undefined {
+  const calcom = botSettings.integrations?.calcom;
   if (!calcom?.apiKey || !calcom?.eventTypeId) return undefined;
 
-  const timezone = tenant.settings?.businessHours?.timezone || 'UTC';
+  const timezone = botSettings.businessHours?.timezone || 'UTC';
 
   return {
     calcom: {
@@ -178,7 +202,26 @@ export async function forwardMessageToN8n(
     return false;
   }
 
-  const aiSettings = tenant.settings?.ai;
+  // Multi-bot Phase 4 (#16d): resolve per-bot config. The behavioural slice
+  // (ai, businessHours, integrations) lives on Bot.settings; only the LLM
+  // provider apiKey stays on Tenant.settings.ai.apiKey (fetched lazily in the
+  // RAG fallback path below via getLlmRuntimeConfigForSession).
+  let botSettings: BotSettings;
+  try {
+    ({ settings: botSettings } = await getBotConfigForSession(session));
+  } catch (err) {
+    if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
+      // Traffic to a paused/deleted bot should have been rejected upstream
+      // (widget/auth layer, #16b). Don't propagate as 500 — log and drop.
+      logger.warn(
+        `Session ${session.id} points at a paused/deleted bot — should have been caught upstream`,
+        { error: err.message, tenantId: session.tenantId, botId: session.botId },
+      );
+      return false;
+    }
+    throw err;
+  }
+  const aiSettings = botSettings.ai;
 
   // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants
   // Ignore localhost URLs in production — leftover from dev setup
@@ -192,7 +235,7 @@ export async function forwardMessageToN8n(
   // ── Pre-forwarding checks (cheap, local) ──────────────────────────────
   if (session.status === 'bot' && savedMessage.type === 'text' && aiSettings?.enabled) {
     // Business hours check
-    const bh = tenant.settings?.businessHours;
+    const bh = botSettings.businessHours;
     if (bh?.enabled && bh.schedule?.length) {
       const now = new Date();
       const tz = bh.timezone || 'UTC';
@@ -270,9 +313,9 @@ export async function forwardMessageToN8n(
         : savedMessage.content,
       metadata: savedMessage.metadata || undefined,
     },
-    tenantConfig: buildTenantAiConfig(tenant),
+    tenantConfig: buildTenantAiConfig(tenant.name, aiSettings),
     knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
-    integrations: buildIntegrationsConfig(tenant),
+    integrations: buildIntegrationsConfig(botSettings),
     context: {
       previousMessages: await getConversationHistoryForPayload(session.id),
     },
@@ -318,10 +361,18 @@ export async function forwardMessageToN8n(
       const botKbIds = session.botId
         ? await getBotKnowledgeBaseIds(AppDataSource, session.botId)
         : undefined;
+      // generateResponse needs the LLM provider apiKey, which stays on
+      // Tenant.settings.ai.apiKey (NEVER on bot.settings). Merge the bot's
+      // behavioural slice with the tenant-held secret only at the call site.
+      const { apiKey: tenantApiKey } = await getLlmRuntimeConfigForSession(session);
+      const ragSettings = {
+        ...aiSettings,
+        apiKey: tenantApiKey,
+      } as Parameters<typeof generateResponse>[2];
       const ragResult = await generateResponse(
         AppDataSource,
         session.tenantId,
-        aiSettings as Parameters<typeof generateResponse>[2],
+        ragSettings,
         messageContent,
         history,
         botKbIds
@@ -387,7 +438,7 @@ async function platformAgentPath(
   session: ChatSession,
   savedMessage: Message,
   tenant: Tenant,
-  aiSettings: NonNullable<Tenant['settings']>['ai'],
+  aiSettings: BotAiSettings,
 ): Promise<boolean> {
   // Acquire per-session lock — prevents concurrent agent runs
   const locked = await acquireSessionLock(session.id);
@@ -485,7 +536,7 @@ async function platformAgentPath(
  */
 async function ensureBotParticipant(
   session: ChatSession,
-  aiSettings: NonNullable<Tenant['settings']>['ai']
+  aiSettings: BotAiSettings,
 ): Promise<Participant> {
   let botParticipant = await participantRepository.findOne({
     where: { sessionId: session.id, type: 'bot', isDeleted: false },
@@ -578,12 +629,24 @@ async function handleBotHandoff(
   botParticipantId: string,
   reason: HandoffRequest['reason']
 ): Promise<void> {
-  // Check if handoff is enabled for this tenant
-  const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
-  if (tenant?.settings?.features?.handoffEnabled === false) {
+  // Check if handoff is enabled for this bot (multi-bot Phase 4 #16d:
+  // features + ai now live on Bot.settings, not Tenant.settings).
+  let botSettings: BotSettings | undefined;
+  try {
+    ({ settings: botSettings } = await getBotConfigForSession(session));
+  } catch (err) {
+    if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
+      logger.warn(
+        `handleBotHandoff: session ${session.id} points at paused/deleted bot — proceeding with handoff anyway`,
+        { error: err.message },
+      );
+    } else {
+      throw err;
+    }
+  }
+  if (botSettings?.features?.handoffEnabled === false) {
     // Handoff disabled — send fallback message but keep session in bot status
-    const aiSettings = tenant.settings?.ai;
-    const fallbackMsg = aiSettings?.guardrails?.fallbackMessage ||
+    const fallbackMsg = botSettings.ai?.guardrails?.fallbackMessage ||
       "I'm sorry, I couldn't find an answer to your question.";
     await sendBotMessage(session, botParticipantId, fallbackMsg);
     logger.info(`Handoff skipped for session ${session.id} (handoff disabled)`, { reason });

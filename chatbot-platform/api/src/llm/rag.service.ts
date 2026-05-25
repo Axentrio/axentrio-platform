@@ -243,6 +243,12 @@ ${knowledgeContext}`;
   // If row missing or column null, the wrapper falls back to the env default
   // LLM_DAILY_LIMIT_PER_TENANT.
   const tenantOverride = await fetchTenantLimitOverride(dataSource, tenantId);
+  // Multi-bot Phase 4 (#16d) — DELIBERATE: `aiSettings.apiKey` is the LLM
+  // provider secret which STAYS on Tenant.settings.ai.apiKey by architectural
+  // rule (see bot-config.service.ts header). Callers of generateResponse pass
+  // a merged shape carrying the apiKey alongside the behavioural slice; we
+  // pluck the secret from there to seed the provider. NEVER move this read
+  // to bot.settings.ai.apiKey — that key is never set there.
   const provider = getProvider(
     aiSettings.provider || DEFAULT_PROVIDER,
     aiSettings.apiKey ?? undefined,

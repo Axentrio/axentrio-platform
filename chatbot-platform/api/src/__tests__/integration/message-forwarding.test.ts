@@ -19,11 +19,53 @@ import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { Tenant } from '../../database/entities/Tenant';
 import { decrypt } from '../../utils/encryption';
 import {
-  createTestTenant,
+  createTestTenant as baseCreateTestTenant,
+  createTestAnchorBot,
   createTestSession,
   createTestParticipant,
   createTestMessage,
 } from '../helpers/factories';
+import { Bot, BotSettings } from '../../database/entities/Bot';
+
+/**
+ * Multi-bot Phase 4 (#16d): the message-forwarding service now reads the
+ * behavioural slice (ai/businessHours/integrations/features) from
+ * `Bot.settings` via `getBotConfigForSession`. Tests pre-#16d passed those
+ * sections inside `tenant.settings`; we now route them to the anchor bot
+ * and keep the LLM provider apiKey on the tenant.
+ *
+ * This wrapper preserves the original ergonomics while transparently
+ * splitting `settings` into the right entities.
+ */
+async function createTestTenant(overrides: Partial<Tenant> = {}): Promise<Tenant> {
+  const { settings, ...tenantOverrides } = overrides;
+  // Keep apiKey on tenant, move everything else to the bot's settings.
+  const tenantSettings: any = {};
+  const botSettings: BotSettings = {};
+  if (settings) {
+    for (const [k, v] of Object.entries(settings)) {
+      if (k === 'ai') {
+        const ai: any = v ?? {};
+        const { apiKey, ...rest } = ai;
+        if (apiKey !== undefined) {
+          tenantSettings.ai = { apiKey };
+        }
+        if (Object.keys(rest).length > 0) {
+          botSettings.ai = rest as BotSettings['ai'];
+        }
+      } else {
+        // features / businessHours / integrations / skills / automations / etc.
+        (botSettings as any)[k] = v;
+      }
+    }
+  }
+  const tenant = await baseCreateTestTenant({
+    ...tenantOverrides,
+    settings: tenantSettings,
+  });
+  await createTestAnchorBot(tenant, { settings: botSettings });
+  return tenant;
+}
 
 // ── Mocks ────────────────────────────────────────────────────────────────────
 
@@ -64,7 +106,6 @@ import { FallbackService } from '../../n8n/fallback.service';
 const sessionRepo = AppDataSource.getRepository(ChatSession);
 const messageRepo = AppDataSource.getRepository(Message);
 const handoffRepo = AppDataSource.getRepository(HandoffRequest);
-const tenantRepo = AppDataSource.getRepository(Tenant);
 
 // ── Shared AI settings builder ───────────────────────────────────────────────
 
@@ -830,12 +871,21 @@ describe('forwardMessageToN8n', () => {
       expect(await forwardMessageToN8n(session, message)).toBe(true);
     });
 
-    it('should handle tenant with settings cleared mid-conversation', async () => {
+    it('should handle bot with settings cleared mid-conversation', async () => {
+      // Multi-bot Phase 4 (#16d): the behavioural slice lives on Bot.settings.
+      // Clearing the bot's settings (admin disables AI) means no webhook + no
+      // AI → forwarding returns false. (Previously this test cleared
+      // tenant.settings, which is no longer the source of truth.)
       const tenant = await createTestTenant({
         settings: { ai: aiSettings() },
       });
       const { session, message } = await setup(tenant.id);
-      await tenantRepo.update(tenant.id, { settings: {} });
+      await AppDataSource.getRepository(Bot)
+        .createQueryBuilder()
+        .update()
+        .set({ settings: {} as BotSettings })
+        .where('tenantId = :tenantId AND isDefault = true', { tenantId: tenant.id })
+        .execute();
 
       expect(await forwardMessageToN8n(session, message)).toBe(false);
     });

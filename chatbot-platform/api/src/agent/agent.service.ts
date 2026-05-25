@@ -11,6 +11,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
+import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 
 export type AgentResult =
   | { type: 'response'; content: string }
@@ -36,7 +37,16 @@ export class AgentService {
     conversationHistory: ChatMessage[],
   ): Promise<AgentResult> {
     const runId = crypto.randomUUID();
-    const aiSettings = tenant.settings?.ai;
+    // Multi-bot Phase 4 (#16d): resolve the bot config for this session.
+    // The behavioural slice (brand voice / guardrails / integrations) lives on
+    // Bot.settings; the LLM provider secret stays on Tenant.settings.ai.apiKey
+    // and is returned alongside as `apiKey` by this resolver.
+    const { botAiSettings, apiKey } = await getLlmRuntimeConfigForSession(session);
+    const aiSettings = botAiSettings;
+    // Resolve the bot's full settings (for the integrations slice the tool
+    // registry needs, and the prompt builder's skills/brandVoice consumption).
+    const { getBotConfigForSession } = await import('../services/bot-config.service');
+    const { settings: botSettings } = await getBotConfigForSession(session);
     const trace: AgentTrace = {
       sessionId: session.id,
       tenantId: tenant.id,
@@ -45,9 +55,9 @@ export class AgentService {
     };
 
     try {
-      const tools = await this.toolRegistry.getToolsForTenant(tenant);
-      const systemPrompt = this.promptBuilder.build(tenant, tools);
-      const provider = getProvider(aiSettings!.provider || DEFAULT_PROVIDER, aiSettings!.apiKey ?? undefined);
+      const tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
+      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools);
+      const provider = getProvider(aiSettings!.provider || DEFAULT_PROVIDER, apiKey ?? undefined);
       const model = aiSettings!.model || DEFAULT_MODEL;
 
       const messages: ChatMessage[] = [
@@ -182,7 +192,7 @@ export class AgentService {
       return {
         type: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
-        fallbackMessage: tenant.settings?.ai?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
+        fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
       };
     }
   }

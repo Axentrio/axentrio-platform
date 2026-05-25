@@ -60,40 +60,38 @@ describe('Payload Enrichment Helpers', () => {
   });
 
   describe('buildTenantAiConfig', () => {
+    // Multi-bot Phase 4 (#16d): signature is now (tenantName, botAiSettings).
+    // The behavioural AI slice lives on Bot.settings, not Tenant.settings.
     it('should return undefined when AI is disabled', () => {
-      const tenant = makeTenant({ ai: { enabled: false } });
-      expect(buildTenantAiConfig(tenant as any)).toBeUndefined();
+      expect(buildTenantAiConfig('Test Tenant', { enabled: false } as any)).toBeUndefined();
     });
 
     it('should return undefined when AI settings are missing', () => {
-      const tenant = makeTenant({});
-      expect(buildTenantAiConfig(tenant as any)).toBeUndefined();
+      expect(buildTenantAiConfig('Test Tenant', undefined)).toBeUndefined();
     });
 
     it('should return correct structure with all fields mapped', () => {
-      const tenant = makeTenant({
-        ai: {
-          enabled: true,
-          provider: 'openai',
-          model: 'gpt-4',
-          brandVoice: {
-            name: 'TestBot',
-            tone: 'friendly',
-            customInstructions: 'Be helpful',
-          },
-          guardrails: {
-            topicsToAvoid: ['politics'],
-            confidenceThreshold: 0.8,
-            maxResponseLength: 300,
-            escalationKeywords: ['human', 'agent'],
-            greetingMessage: 'Hi!',
-            fallbackMessage: 'Sorry',
-            offHoursMessage: 'Closed',
-          },
+      const ai = {
+        enabled: true,
+        provider: 'openai' as const,
+        model: 'gpt-4',
+        brandVoice: {
+          name: 'TestBot',
+          tone: 'friendly',
+          customInstructions: 'Be helpful',
         },
-      });
+        guardrails: {
+          topicsToAvoid: ['politics'],
+          confidenceThreshold: 0.8,
+          maxResponseLength: 300,
+          escalationKeywords: ['human', 'agent'],
+          greetingMessage: 'Hi!',
+          fallbackMessage: 'Sorry',
+          offHoursMessage: 'Closed',
+        },
+      };
 
-      const result = buildTenantAiConfig(tenant as any);
+      const result = buildTenantAiConfig('Test Tenant', ai);
 
       expect(result).toEqual({
         brandName: 'TestBot',
@@ -109,19 +107,15 @@ describe('Payload Enrichment Helpers', () => {
     });
 
     it('should use defaults when optional fields are missing', () => {
-      const tenant = makeTenant({
-        ai: {
-          enabled: true,
-          provider: 'openai',
-          model: 'gpt-4',
-          brandVoice: {},
-          guardrails: {},
-        },
-      });
-      // Also set tenant.name so default brandName picks it up
-      (tenant as any).name = 'My Tenant';
+      const ai = {
+        enabled: true,
+        provider: 'openai' as const,
+        model: 'gpt-4',
+        brandVoice: {} as any,
+        guardrails: {} as any,
+      };
 
-      const result = buildTenantAiConfig(tenant as any);
+      const result = buildTenantAiConfig('My Tenant', ai);
 
       expect(result).toBeDefined();
       expect(result!.brandName).toBe('My Tenant');
@@ -164,21 +158,3 @@ describe('Payload Enrichment Helpers', () => {
     });
   });
 });
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function makeTenant(settingsOverride: Record<string, any>) {
-  return {
-    id: VALID_UUID,
-    name: 'Test Tenant',
-    slug: 'test-tenant',
-    apiKey: 'ak_test',
-    tier: 'pro' as const,
-    status: 'active' as const,
-    settings: settingsOverride,
-    maxSessions: 100,
-    currentSessions: 0,
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  };
-}

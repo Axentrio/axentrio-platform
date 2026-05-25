@@ -1,6 +1,9 @@
 import type { Request, Response } from 'express';
-import { AppDataSource } from '../database/data-source';
-import { Tenant } from '../database/entities/Tenant';
+import type { BotSettings } from '../database/entities/Bot';
+import {
+  getAnchorBotConfig,
+  updateAnchorBotSettings,
+} from '../services/bot-config.service';
 import { updateWidgetAppearanceSchema } from '../schemas/widget-appearance.schema';
 import { sendSuccess } from '../utils/response';
 
@@ -11,13 +14,9 @@ type AppearanceResponse = {
   launcherLabel: string | null;
 };
 
-function toResponse(tenant: Tenant): AppearanceResponse {
-  const theme = (tenant.settings?.theme ?? {}) as { primaryColor?: string };
-  const widget = (tenant.settings?.widget ?? {}) as {
-    avatarUrl?: string | null;
-    launcherPosition?: 'bottom-right' | 'bottom-left';
-    launcherLabel?: string | null;
-  };
+function toResponse(settings: BotSettings): AppearanceResponse {
+  const theme = settings.theme ?? {};
+  const widget = settings.widget ?? {};
   return {
     primaryColor: theme.primaryColor ?? null,
     avatarUrl: widget.avatarUrl ?? null,
@@ -28,44 +27,43 @@ function toResponse(tenant: Tenant): AppearanceResponse {
 
 export async function getWidgetAppearance(req: Request, res: Response) {
   const tenantId = (req as any).tenantId as string;
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-  sendSuccess(res, toResponse(tenant));
+  // Multi-bot Phase 4 (#16d): read from anchor Bot.settings, not Tenant.settings.
+  const { settings } = await getAnchorBotConfig(tenantId);
+  sendSuccess(res, toResponse(settings));
 }
 
 export async function updateWidgetAppearance(req: Request, res: Response) {
   const tenantId = (req as any).tenantId as string;
   const data = updateWidgetAppearanceSchema.parse(req.body);
 
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+  // Read current anchor settings so we can do per-key presence updates.
+  // `updateAnchorBotSettings` already does section-level deep merge, but we
+  // still need to compute `null` semantics for empty-string normalization
+  // before handing the patch over.
+  const { settings: existing } = await getAnchorBotConfig(tenantId);
+  const existingTheme = (existing.theme ?? {}) as NonNullable<BotSettings['theme']>;
+  const existingWidget = (existing.widget ?? {}) as NonNullable<BotSettings['widget']>;
 
-  const existingTheme = (tenant.settings?.theme ?? {}) as Record<string, unknown>;
-  const existingWidget = (tenant.settings?.widget ?? {}) as Record<string, unknown>;
-
-  const nextTheme = { ...existingTheme };
-  const nextWidget = { ...existingWidget };
+  const themePatch: NonNullable<BotSettings['theme']> = { ...existingTheme };
+  const widgetPatch: NonNullable<BotSettings['widget']> = { ...existingWidget };
 
   if (Object.prototype.hasOwnProperty.call(data, 'primaryColor') && data.primaryColor !== undefined) {
-    nextTheme.primaryColor = data.primaryColor;
+    themePatch.primaryColor = data.primaryColor;
   }
   if (Object.prototype.hasOwnProperty.call(data, 'avatarUrl')) {
-    nextWidget.avatarUrl = data.avatarUrl === '' ? null : data.avatarUrl ?? null;
+    widgetPatch.avatarUrl = data.avatarUrl === '' ? null : data.avatarUrl ?? null;
   }
   if (Object.prototype.hasOwnProperty.call(data, 'launcherPosition') && data.launcherPosition !== undefined) {
-    nextWidget.launcherPosition = data.launcherPosition;
+    widgetPatch.launcherPosition = data.launcherPosition;
   }
   if (Object.prototype.hasOwnProperty.call(data, 'launcherLabel')) {
-    nextWidget.launcherLabel = data.launcherLabel === '' ? null : data.launcherLabel ?? null;
+    widgetPatch.launcherLabel = data.launcherLabel === '' ? null : data.launcherLabel ?? null;
   }
 
-  tenant.settings = {
-    ...(tenant.settings ?? {}),
-    theme: nextTheme,
-    widget: nextWidget,
-  } as Tenant['settings'];
+  const updated = await updateAnchorBotSettings(tenantId, {
+    theme: themePatch,
+    widget: widgetPatch,
+  });
 
-  await tenantRepo.save(tenant);
-
-  sendSuccess(res, toResponse(tenant));
+  sendSuccess(res, toResponse(updated.settings ?? {}));
 }

@@ -1687,6 +1687,20 @@
       "title": "Analytique",
       "subtitle": "Indicateurs de performance et analyses"
     },
+    "onboardingBanner": {
+      "title": "Terminez la configuration de votre chatbot",
+      "subtitle": "Suivez ces étapes pour tirer le meilleur parti de votre assistant",
+      "progress": "{{completed}} sur {{total}} terminés",
+      "dismiss": "Fermer",
+      "setUp": "Configurer",
+      "steps": {
+        "aiEnabled": { "label": "Activer l'assistant IA" },
+        "brandVoiceConfigured": { "label": "Configurer la voix de marque" },
+        "knowledgeBaseHasDocs": { "label": "Ajouter des documents à la base de connaissances" },
+        "calcomConnected": { "label": "Connecter Cal.com" },
+        "automationsConfigured": { "label": "Configurer les automatisations" }
+      }
+    },
     "timeRange": {
       "placeholder": "Sélectionner une période",
       "last24Hours": "Dernières 24 heures",

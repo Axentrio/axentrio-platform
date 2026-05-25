@@ -36,11 +36,13 @@ const {
   createDocument,
   deleteDocument,
   tenantFindOneOrFail,
+  botFindOne,
 } = vi.hoisted(() => ({
   getOrCreateKnowledgeBase: vi.fn(),
   createDocument: vi.fn(),
   deleteDocument: vi.fn(),
   tenantFindOneOrFail: vi.fn(),
+  botFindOne: vi.fn(),
 }));
 
 // Mock the KnowledgeService constructor — controller does
@@ -61,6 +63,9 @@ vi.mock('../../database/data-source', () => ({
       const name = entity?.name ?? '';
       if (name === 'Tenant') {
         return { findOneOrFail: tenantFindOneOrFail };
+      }
+      if (name === 'Bot') {
+        return { findOne: botFindOne };
       }
       return { findOneOrFail: vi.fn(), findOne: vi.fn(), save: vi.fn() };
     },
@@ -115,6 +120,7 @@ beforeEach(() => {
   createDocument.mockReset();
   deleteDocument.mockReset();
   tenantFindOneOrFail.mockReset();
+  botFindOne.mockReset();
 });
 
 // ─── 1. sendSuccess: GET /base ──────────────────────────────────────────────
@@ -190,6 +196,13 @@ describe('knowledge.controller.ts — testChat guard (BadRequestError)', () => {
     tenantFindOneOrFail.mockResolvedValue({
       id: TENANT_UUID,
       name: 'Acme',
+      settings: { ai: { enabled: false } },
+    });
+    // Multi-bot Phase 4 (#16d): testChat reads behavioural ai from anchor bot.
+    botFindOne.mockResolvedValue({
+      id: 'bot-anchor',
+      tenantId: TENANT_UUID,
+      isDefault: true,
       settings: { ai: { enabled: false } },
     });
 

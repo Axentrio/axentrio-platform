@@ -31,7 +31,7 @@ async function runAgentLoop(
   const runId = crypto.randomUUID();
   const aiSettings = tenant.settings.ai;
   const promptBuilder = new PromptBuilder();
-  const systemPrompt = promptBuilder.build(tenant as any, tools);
+  const systemPrompt = promptBuilder.build(tenant as any, (tenant.settings ?? {}) as any, tools);
 
   const provider = getProvider(aiSettings.provider, aiSettings.apiKey);
   const model = aiSettings.model;

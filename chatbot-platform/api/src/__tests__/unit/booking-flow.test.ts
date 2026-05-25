@@ -46,8 +46,62 @@ vi.mock('../../database/data-source', () => ({
       save: vi.fn().mockResolvedValue({ id: 'trace-1' }),
       create: vi.fn().mockImplementation((data: any) => data),
       find: vi.fn().mockResolvedValue([]),
+      findOne: vi.fn().mockResolvedValue(null),
     }),
   },
+}));
+
+// Multi-bot Phase 4 (#16d): AgentService now resolves bot config via the
+// bot-config service. Stub it to surface the test's `tenant.settings.ai`
+// and the same calcom integration so the booking tools register as usual.
+vi.mock('../../services/bot-config.service', () => ({
+  getLlmRuntimeConfigForSession: async (_s: any) => ({
+    botAiSettings: {
+      enabled: true,
+      provider: 'openai',
+      model: 'gpt-4o',
+      brandVoice: { name: 'ClinicBot', tone: 'friendly', customInstructions: '' },
+      guardrails: {
+        topicsToAvoid: [],
+        escalationKeywords: [],
+        confidenceThreshold: 0.7,
+        maxResponseLength: 500,
+        fallbackMessage: 'Let me connect you with our team.',
+        greetingMessage: '',
+        offHoursMessage: '',
+      },
+    },
+    apiKey: 'sk-test',
+  }),
+  getBotConfigForSession: async (_s: any) => ({
+    bot: { id: 'bot-anchor' },
+    settings: {
+      ai: {
+        enabled: true,
+        provider: 'openai',
+        model: 'gpt-4o',
+        brandVoice: { name: 'ClinicBot', tone: 'friendly', customInstructions: '' },
+        guardrails: {
+          topicsToAvoid: [],
+          escalationKeywords: [],
+          confidenceThreshold: 0.7,
+          maxResponseLength: 500,
+          fallbackMessage: 'Let me connect you with our team.',
+          greetingMessage: '',
+          offHoursMessage: '',
+        },
+      },
+      integrations: { calcom: { apiKey: 'encrypted_key', eventTypeId: 42 } },
+      skills: [{
+        name: 'booking',
+        trigger: 'User wants to schedule an appointment',
+        tools: ['check_availability', 'create_booking', 'list_bookings'],
+        instructions: 'Always check availability before creating. Collect name and email.',
+        maxSteps: 8,
+        enabled: true,
+      }],
+    },
+  }),
 }));
 
 // ── Test fixtures ───────────────────────────────────────────────────

@@ -1687,6 +1687,20 @@
       "title": "Analyse",
       "subtitle": "Prestatiemetingen en inzichten"
     },
+    "onboardingBanner": {
+      "title": "Maak je chatbot af",
+      "subtitle": "Doorloop deze stappen om het maximale uit je assistent te halen",
+      "progress": "{{completed}} van {{total}} voltooid",
+      "dismiss": "Sluiten",
+      "setUp": "Instellen",
+      "steps": {
+        "aiEnabled": { "label": "AI-assistent activeren" },
+        "brandVoiceConfigured": { "label": "Merkstem instellen" },
+        "knowledgeBaseHasDocs": { "label": "Documenten toevoegen aan kennisbank" },
+        "calcomConnected": { "label": "Cal.com koppelen" },
+        "automationsConfigured": { "label": "Automatiseringen instellen" }
+      }
+    },
     "timeRange": {
       "placeholder": "Selecteer periode",
       "last24Hours": "Laatste 24 uur",

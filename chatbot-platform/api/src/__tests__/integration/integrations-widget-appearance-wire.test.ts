@@ -31,9 +31,11 @@ import request from 'supertest';
 const TENANT_UUID = '11111111-1111-4111-8111-111111111111';
 const USER_UUID = '22222222-2222-4222-8222-222222222222';
 
-const { tenantFindOneOrFail, tenantSave, axiosGet } = vi.hoisted(() => ({
+const { tenantFindOneOrFail, tenantSave, botFindOne, botSave, axiosGet } = vi.hoisted(() => ({
   tenantFindOneOrFail: vi.fn(),
   tenantSave: vi.fn(),
+  botFindOne: vi.fn(),
+  botSave: vi.fn(),
   axiosGet: vi.fn(),
 }));
 
@@ -75,9 +77,16 @@ vi.mock('../../database/data-source', () => ({
     getRepository: (entity: { name?: string }) => {
       const name = entity?.name ?? '';
       if (name === 'Tenant') {
-        return { findOneOrFail: tenantFindOneOrFail, save: tenantSave };
+        return {
+          findOneOrFail: tenantFindOneOrFail,
+          findOne: tenantFindOneOrFail,
+          save: tenantSave,
+        };
       }
-      return { findOneOrFail: vi.fn(), save: vi.fn() };
+      if (name === 'Bot') {
+        return { findOne: botFindOne, save: botSave };
+      }
+      return { findOneOrFail: vi.fn(), findOne: vi.fn(), save: vi.fn() };
     },
   },
 }));
@@ -123,6 +132,8 @@ const ENVELOPE_META = {
 beforeEach(() => {
   tenantFindOneOrFail.mockReset();
   tenantSave.mockReset();
+  botFindOne.mockReset();
+  botSave.mockReset();
   axiosGet.mockReset();
 });
 
@@ -130,8 +141,11 @@ beforeEach(() => {
 
 describe('integrations.controller — GET /integrations success envelope', () => {
   it('emits { success:true, data:{ calcom:{ hasApiKey, ... } } }', async () => {
-    tenantFindOneOrFail.mockResolvedValue({
-      id: TENANT_UUID,
+    // Multi-bot Phase 4 (#16d): GET /integrations now hydrates from anchor bot.
+    botFindOne.mockResolvedValue({
+      id: 'bot-anchor',
+      tenantId: TENANT_UUID,
+      isDefault: true,
       settings: {
         integrations: {
           calcom: {
@@ -228,8 +242,11 @@ describe('integrations.controller — connectCalcom Cal.com unreachable → UPST
 
 describe('widget-appearance.controller — GET /widget-appearance success envelope', () => {
   it('emits { success:true, data:{ primaryColor, avatarUrl, launcherPosition, launcherLabel } }', async () => {
-    tenantFindOneOrFail.mockResolvedValue({
-      id: TENANT_UUID,
+    // Multi-bot Phase 4 (#16d): widget appearance hydrates from anchor bot.
+    botFindOne.mockResolvedValue({
+      id: 'bot-anchor',
+      tenantId: TENANT_UUID,
+      isDefault: true,
       settings: {
         theme: { primaryColor: '#abcdef' },
         widget: {
@@ -260,12 +277,14 @@ describe('widget-appearance.controller — GET /widget-appearance success envelo
 
 describe('widget-appearance.controller — PATCH /widget-appearance round-trip envelope', () => {
   it('emits { success:true, data:{...} } reflecting the patched fields', async () => {
-    // Initial fetch — fresh tenant with no widget settings.
-    tenantFindOneOrFail.mockResolvedValue({
-      id: TENANT_UUID,
+    // Multi-bot Phase 4 (#16d): writes target anchor bot, not tenant.
+    botFindOne.mockResolvedValue({
+      id: 'bot-anchor',
+      tenantId: TENANT_UUID,
+      isDefault: true,
       settings: {},
     });
-    tenantSave.mockImplementation(async (t: { settings?: unknown }) => t);
+    botSave.mockImplementation(async (b: { settings?: unknown }) => b);
 
     const res = await request(makeApp())
       .patch('/tenants/me/widget-appearance')
@@ -286,6 +305,6 @@ describe('widget-appearance.controller — PATCH /widget-appearance round-trip e
         launcherLabel: 'Hi',
       },
     });
-    expect(tenantSave).toHaveBeenCalledTimes(1);
+    expect(botSave).toHaveBeenCalledTimes(1);
   });
 });

@@ -46,6 +46,15 @@ vi.mock('../../utils/logger', () => ({
   },
 }));
 
+// Multi-bot Phase 4 (#16d): booking.service now reads integrations +
+// businessHours from Bot.settings via getBotConfigForSession. Re-route to
+// the existing tenant mock so each test's seeded `settings.integrations`
+// transparently flows to the new resolver.
+const mockGetBotConfigForSession = vi.fn();
+vi.mock('../../services/bot-config.service', () => ({
+  getBotConfigForSession: (...args: unknown[]) => mockGetBotConfigForSession(...args),
+}));
+
 const mockAxiosGet = vi.fn();
 const mockAxiosPost = vi.fn();
 const mockAxiosDelete = vi.fn();
@@ -89,6 +98,10 @@ function setupValidSession() {
   mockTenantFindOne.mockResolvedValue({
     id: TENANT_ID,
     name: 'Test Tenant',
+    settings: {},
+  });
+  mockGetBotConfigForSession.mockResolvedValue({
+    bot: { id: 'bot-anchor', tenantId: TENANT_ID, isDefault: true },
     settings: {
       integrations: {
         calcom: {
@@ -128,6 +141,10 @@ describe('Booking Service', () => {
       mockTenantFindOne.mockResolvedValue({
         id: TENANT_ID,
         name: 'Test Tenant',
+        settings: {},
+      });
+      mockGetBotConfigForSession.mockResolvedValue({
+        bot: { id: 'bot-anchor', tenantId: TENANT_ID, isDefault: true },
         settings: {},
       });
 

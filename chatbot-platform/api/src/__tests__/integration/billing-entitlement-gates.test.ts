@@ -60,6 +60,7 @@ import {
   createTestUser,
   createTestAgent,
   createTestSession,
+  createTestAnchorBot,
 } from '../helpers/factories';
 
 async function authedAs(opts: {
@@ -220,6 +221,9 @@ describe('plan_limit_custom_branding — PATCH /tenants/me theme update on Pro',
   beforeEach(async () => {
     const tenant = await createTestTenant({ tier: 'pro' });
     tenantId = tenant.id;
+    // Multi-bot Phase 4 (#16d): theme/widget/etc writes go to anchor bot.
+    // PATCH /tenants/me 500s without one.
+    await createTestAnchorBot(tenant);
     const admin = await createTestUser(tenantId, { role: 'admin' });
     await authedAs({ tenantId, userId: admin.id });
   });

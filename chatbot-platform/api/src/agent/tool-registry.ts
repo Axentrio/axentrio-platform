@@ -10,6 +10,7 @@ import {
 import { EscalationTool } from './tools/escalation.tool';
 import { CaptureLeadTool } from './tools/capture-lead.tool';
 import type { Tenant } from '../database/entities/Tenant';
+import type { BotSettings } from '../database/entities/Bot';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
 
@@ -44,7 +45,13 @@ export class ToolRegistry {
     return Array.from(this.builtinTools.keys());
   }
 
-  async getToolsForTenant(tenant: Tenant): Promise<ToolAdapter[]> {
+  /**
+   * Multi-bot Phase 4 (#16d): integrations config lives on Bot.settings, not
+   * Tenant.settings. Callers pass the resolved bot settings (via
+   * `getBotConfigForSession` / `getAnchorBotConfig`) alongside the tenant
+   * (still needed for tenant.id when loading custom tools).
+   */
+  async getToolsForTenant(tenant: Tenant, botSettings: BotSettings): Promise<ToolAdapter[]> {
     const tools: ToolAdapter[] = [];
 
     const kbSearch = this.builtinTools.get('kb_search');
@@ -56,7 +63,7 @@ export class ToolRegistry {
     const captureLead = this.builtinTools.get('capture_lead');
     if (captureLead) tools.push(captureLead);
 
-    const calcom = tenant.settings?.integrations?.calcom;
+    const calcom = botSettings.integrations?.calcom;
     if (calcom?.apiKey && calcom?.eventTypeId) {
       for (const name of BOOKING_TOOLS) {
         const tool = this.builtinTools.get(name);

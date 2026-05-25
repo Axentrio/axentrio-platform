@@ -5,6 +5,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { BookingLog } from '../database/entities/BookingLog';
 import { decrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
+import { getBotConfigForSession } from '../services/bot-config.service';
 
 interface CalComConfig {
   apiKey: string;
@@ -45,12 +46,16 @@ async function resolveSessionTenant(sessionId: string): Promise<{ session: ChatS
   const tenant = await tenantRepo.findOne({ where: { id: session.tenantId } });
   if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
 
-  const calcom = tenant.settings?.integrations?.calcom;
+  // Multi-bot Phase 4 (#16d): integrations + businessHours live on Bot.settings
+  // resolved from the session's bot (anchor fallback if session.botId is null).
+  const { settings: botSettings } = await getBotConfigForSession(session);
+
+  const calcom = botSettings.integrations?.calcom;
   if (!calcom?.apiKey || !calcom?.eventTypeId) {
     throw new BookingError('Booking not configured for this tenant', 'BOOKING_NOT_CONFIGURED', 400);
   }
 
-  const timezone = tenant.settings?.businessHours?.timezone || 'UTC';
+  const timezone = botSettings.businessHours?.timezone || 'UTC';
 
   return {
     session,

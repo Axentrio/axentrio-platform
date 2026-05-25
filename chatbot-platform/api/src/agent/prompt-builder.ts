@@ -1,4 +1,5 @@
 import { Tenant } from '../database/entities/Tenant';
+import type { BotSettings } from '../database/entities/Bot';
 import { ToolAdapter } from './tool-adapter';
 import { substituteVariables } from '../llm/prompt-builder';
 import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from '../llm/platform-rules';
@@ -13,11 +14,18 @@ interface SkillConfig {
 }
 
 export class PromptBuilder {
-  build(tenant: Tenant, tools: ToolAdapter[], kbContext?: string): string {
-    const ai = tenant.settings?.ai;
+  /**
+   * Multi-bot Phase 4 (#16d): brand voice, guardrails, and skills now live on
+   * Bot.settings (not Tenant.settings). Caller resolves the bot config via the
+   * bot-config.service and passes the settings slice in. Tenant still flows
+   * through for `tenant.name` (the fallback brand name) and tenant-wide
+   * substitution variables.
+   */
+  build(tenant: Tenant, botSettings: BotSettings, tools: ToolAdapter[], kbContext?: string): string {
+    const ai = botSettings.ai;
     const brandVoice = ai?.brandVoice;
     const guardrails = ai?.guardrails;
-    const skills: SkillConfig[] = (tenant.settings as Record<string, unknown>)?.skills as SkillConfig[] || [];
+    const skills: SkillConfig[] = (botSettings.skills as SkillConfig[]) || [];
 
     const sections: string[] = [];
 

@@ -25,6 +25,12 @@ import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { releaseAgentSessions } from '../utils/releaseAgentSessions';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { requireFeature } from '../billing/enforce';
+import {
+  getAnchorBotConfig,
+  updateAnchorBotSettings,
+  AnchorBotMissingError,
+} from '../services/bot-config.service';
+import type { BotSettings } from '../database/entities/Bot';
 
 function generateApiKey(): string {
   return crypto.randomBytes(32).toString('hex');
@@ -51,15 +57,28 @@ router.get(
       throw new NotFoundError('Tenant not found');
     }
 
-    // Strip encrypted AI API key from response
-    const settings = { ...tenant.settings };
+    // Multi-bot Phase 4 (#16d): hydrate settings response from anchor Bot,
+    // not Tenant.settings. Tenant retains only `ai.apiKey` (the secret) and
+    // legacy rollback values. The apiKey is merged in solely to render the
+    // `hasApiKey` boolean — the secret never leaves the server.
+    let botSettings: BotSettings = {};
+    try {
+      ({ settings: botSettings } = await getAnchorBotConfig(tenantId));
+    } catch (err) {
+      if (!(err instanceof AnchorBotMissingError)) throw err;
+      // No anchor yet (very early tenant) — fall back to empty settings.
+      logger.warn('Anchor bot missing during GET /tenants/me — returning empty settings', { tenantId });
+    }
+    const settings: Record<string, any> = { ...botSettings };
     if (settings.ai) {
-      const { apiKey, ...aiRest } = settings.ai;
-      settings.ai = { ...aiRest, hasApiKey: !!apiKey } as any;
+      const tenantApiKey = tenant.settings?.ai?.apiKey;
+      // Defensive: bot.settings.ai shouldn't carry apiKey, but strip it anyway.
+      const { apiKey: _stale, ...aiRest } = settings.ai as { apiKey?: string };
+      settings.ai = { ...aiRest, hasApiKey: !!tenantApiKey };
     }
     if (settings.integrations?.calcom) {
       const { apiKey, ...calcomRest } = settings.integrations.calcom;
-      settings.integrations = { ...settings.integrations, calcom: { ...calcomRest, hasApiKey: !!apiKey } as any };
+      settings.integrations = { ...settings.integrations, calcom: { ...calcomRest, hasApiKey: !!apiKey } };
     }
 
     // Check if tenant has any widget sessions (for onboarding status)
@@ -146,28 +165,35 @@ router.patch(
       await requireFeature(tenantId, 'customWidgetAppearance', 'plan_limit_custom_branding');
     }
 
-    // Deep merge settings (preserve nested objects like theme, features)
+    // Multi-bot Phase 4 (#16d): per-bot config (theme/widget/features/
+    // integrations/etc.) now lives on Bot.settings. Build a patch with only
+    // the moved keys present in the request body and apply via the writer.
+    // Section-level deep merge happens inside updateAnchorBotSettings — so
+    // e.g. `settings.theme.primaryColor` won't wipe `settings.theme.logoUrl`.
     if (settings) {
-      const existing = tenant.settings || {};
-      tenant.settings = {
-        ...existing,
-        ...settings,
-        theme: settings.theme ? { ...existing.theme, ...settings.theme } : existing.theme,
-        features: settings.features !== undefined
-          ? { ...existing.features, ...settings.features }
-          : existing.features,
-      };
+      const botPatch: Partial<BotSettings> = {};
+      if (settings.theme !== undefined) botPatch.theme = settings.theme;
+      if (settings.widget !== undefined) botPatch.widget = settings.widget;
+      if (settings.features !== undefined) botPatch.features = settings.features;
+      if (settings.integrations !== undefined) botPatch.integrations = settings.integrations;
+      if (settings.businessHours !== undefined) botPatch.businessHours = settings.businessHours;
+      // ai/skills/automations are rejected above — not relayed here.
+
+      if (Object.keys(botPatch).length > 0) {
+        await updateAnchorBotSettings(tenantId, botPatch);
+      }
     }
 
-    // Update business hours
+    // Update business hours via the legacy top-level `businessHours` body key.
     if (businessHours) {
-      tenant.settings = {
-        ...tenant.settings,
+      // Read current to preserve unrelated keys (timezone vs schedule vs enabled).
+      const { settings: currentBot } = await getAnchorBotConfig(tenantId);
+      await updateAnchorBotSettings(tenantId, {
         businessHours: {
-          ...tenant.settings?.businessHours,
+          ...(currentBot.businessHours ?? {}),
           ...businessHours,
-        },
-      };
+        } as BotSettings['businessHours'],
+      });
     }
 
     await tenantRepository.save(tenant);
@@ -177,15 +203,23 @@ router.patch(
       updates: { name, webhookUrl: !!webhookUrl, settings: !!settings },
     });
 
-    // Strip encrypted AI API key from response
-    const responseSettings = { ...tenant.settings };
+    // Build response settings from the freshly-saved anchor bot so the client
+    // sees the post-write state authoritatively (no read/write asymmetry).
+    let responseBotSettings: BotSettings = {};
+    try {
+      ({ settings: responseBotSettings } = await getAnchorBotConfig(tenantId));
+    } catch (err) {
+      if (!(err instanceof AnchorBotMissingError)) throw err;
+    }
+    const responseSettings: Record<string, any> = { ...responseBotSettings };
     if (responseSettings.ai) {
-      const { apiKey: _k, ...aiRest } = responseSettings.ai;
-      responseSettings.ai = { ...aiRest, hasApiKey: !!_k } as any;
+      const tenantApiKey = tenant.settings?.ai?.apiKey;
+      const { apiKey: _stale, ...aiRest } = responseSettings.ai as { apiKey?: string };
+      responseSettings.ai = { ...aiRest, hasApiKey: !!tenantApiKey };
     }
     if (responseSettings.integrations?.calcom) {
       const { apiKey: _ck, ...calcomRest } = responseSettings.integrations.calcom;
-      responseSettings.integrations = { ...responseSettings.integrations, calcom: { ...calcomRest, hasApiKey: !!_ck } as any };
+      responseSettings.integrations = { ...responseSettings.integrations, calcom: { ...calcomRest, hasApiKey: !!_ck } };
     }
 
     sendSuccess(res, {
@@ -937,7 +971,17 @@ router.get(
       [tenantId]
     ).catch(() => [{ count: 0 }]);
 
-    const status = computeOnboardingStatus(tenant, kbResult[0]?.count || 0);
+    // Multi-bot Phase 4 (#16d): onboarding steps inspect ai/integrations/
+    // automations — all on Bot.settings. Pass the anchor bot's settings into
+    // computeOnboardingStatus (the function expects `{ settings }` shape).
+    let botSettings: BotSettings = {};
+    try {
+      ({ settings: botSettings } = await getAnchorBotConfig(tenantId));
+    } catch (err) {
+      if (!(err instanceof AnchorBotMissingError)) throw err;
+    }
+
+    const status = computeOnboardingStatus({ settings: botSettings }, kbResult[0]?.count || 0);
     sendSuccess(res, status);
   })
 );
@@ -954,9 +998,13 @@ router.get(
     const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
     if (!tenant) throw new NotFoundError('Tenant not found');
 
+    // Multi-bot Phase 4 (#16d): tool registry resolves integrations from
+    // Bot.settings now. Anchor bot drives the tenant-level tool list.
+    const { settings: botSettings } = await getAnchorBotConfig(tenantId);
+
     const { ToolRegistry } = await import('../agent/tool-registry');
     const registry = new ToolRegistry();
-    const tools = await registry.getToolsForTenant(tenant);
+    const tools = await registry.getToolsForTenant(tenant, botSettings);
 
     sendSuccess(res, {
       tools: tools.map((t) => ({

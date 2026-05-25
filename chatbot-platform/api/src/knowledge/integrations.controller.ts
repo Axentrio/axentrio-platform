@@ -10,13 +10,13 @@ import { config } from '../config/environment';
 import { sendSuccess } from '../utils/response';
 import { ApiError, BadRequestError, RateLimitError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
+import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 
 export async function getIntegrations(req: Request, res: Response) {
   const tenantId = req.tenantId!;
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-
-  const integrations = tenant.settings?.integrations || {};
+  // Multi-bot Phase 4 (#16d): integrations live on Bot.settings.
+  const { settings } = await getAnchorBotConfig(tenantId);
+  const integrations = settings.integrations || {};
   const result: Record<string, any> = {};
 
   if (integrations.calcom) {
@@ -30,10 +30,10 @@ export async function getIntegrations(req: Request, res: Response) {
 export async function updateIntegrations(req: Request, res: Response) {
   const tenantId = req.tenantId!;
   const data = updateIntegrationsSchema.parse(req.body);
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
 
-  const existing = tenant.settings?.integrations || {};
+  // Multi-bot Phase 4 (#16d): read+write integrations on Bot.settings.
+  const { settings: existingSettings } = await getAnchorBotConfig(tenantId);
+  const existing = existingSettings.integrations || {};
   const updated: any = { ...existing };
 
   if (data.calcom === null) {
@@ -51,17 +51,25 @@ export async function updateIntegrations(req: Request, res: Response) {
     if (data.calcom.language) updated.calcom.language = data.calcom.language;
   }
 
-  tenant.settings = { ...tenant.settings, integrations: updated };
+  // Write integrations to anchor bot via the section-replacement writer
+  // (wholesale, so removing calcom actually deletes it from persisted state —
+  // the deep-merge writer would resurrect the old calcom from base).
+  await replaceAnchorBotSettingsSection(tenantId, 'integrations', updated);
 
-  // Auto-set webhook URL if saving Cal.com with eventTypeId and webhook not configured
-  if (updated.calcom?.eventTypeId && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
-    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
-    if (!tenant.webhookSecret) {
-      tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+  // Auto-set webhook URL on Tenant if saving Cal.com with eventTypeId and
+  // webhook not configured. webhookUrl/webhookSecret stay on Tenant (not
+  // moved to Bot).
+  if (updated.calcom?.eventTypeId) {
+    const tenantRepo = AppDataSource.getRepository(Tenant);
+    const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+    if (!tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
+      tenant.webhookUrl = config.n8n.defaultWebhookUrl;
+      if (!tenant.webhookSecret) {
+        tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
+      }
+      await tenantRepo.save(tenant);
     }
   }
-
-  await tenantRepo.save(tenant);
 
   // Return redacted response
   const response: Record<string, any> = {};
@@ -115,11 +123,10 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
     throw new BadRequestError('No event types found. Create one in Cal.com first.');
   }
 
-  // Persist: encrypt key, clear eventTypeId on reconnect, preserve other settings
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-
-  const existing = tenant.settings?.integrations || {};
+  // Persist: encrypt key, clear eventTypeId on reconnect, preserve other settings.
+  // Multi-bot Phase 4 (#16d): integrations live on Bot.settings.
+  const { settings: existingSettings } = await getAnchorBotConfig(tenantId);
+  const existing = existingSettings.integrations || {};
   const existingCalcom = (existing as any).calcom || {};
 
   // Auto-set webhookUrl only when not already set
@@ -134,15 +141,11 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
   // Clear eventTypeId on reconnect so tenant picks a new one
   delete updatedCalcom.eventTypeId;
 
-  tenant.settings = {
-    ...tenant.settings,
-    integrations: {
-      ...existing,
-      calcom: updatedCalcom,
-    },
-  };
-
-  await tenantRepo.save(tenant);
+  // Write the integrations section wholesale via the service writer.
+  await replaceAnchorBotSettingsSection(tenantId, 'integrations', {
+    ...existing,
+    calcom: updatedCalcom,
+  });
 
   const eventTypes = rawEventTypes.map((et: any) => ({
     id: et.id,
@@ -158,10 +161,10 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
 
 export async function getCalcomEventTypes(req: Request, res: Response): Promise<void> {
   const tenantId = req.tenantId!;
-  const tenantRepo = AppDataSource.getRepository(Tenant);
-  const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
+  // Multi-bot Phase 4 (#16d): integrations live on Bot.settings.
+  const { settings } = await getAnchorBotConfig(tenantId);
 
-  const calcom = tenant.settings?.integrations?.calcom;
+  const calcom = settings.integrations?.calcom;
   if (!calcom?.apiKey) {
     throw new BadRequestError('Cal.com not connected');
   }

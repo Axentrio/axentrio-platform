@@ -108,6 +108,7 @@ vi.mock('../../services/bot-config.service', () => ({
 const tenant: Partial<Tenant> = {
   id: 'tenant-booking-test',
   name: 'Test Clinic',
+  tier: 'pro',
   settings: {
     ai: {
       enabled: true,

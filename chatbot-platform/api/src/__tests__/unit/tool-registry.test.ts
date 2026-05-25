@@ -67,6 +67,7 @@ describe('ToolRegistry', () => {
     const registry = new ToolRegistry();
     const tenant = {
       id: 'tenant-1',
+      tier: 'pro',
       settings: {
         ai: { enabled: true },
         integrations: { calcom: { apiKey: 'enc_key', eventTypeId: 1 } },
@@ -86,7 +87,7 @@ describe('ToolRegistry', () => {
 
   it('excludes booking tools when tenant has no calcom integration', async () => {
     const registry = new ToolRegistry();
-    const tenant = { id: 'tenant-2', settings: { ai: { enabled: true } } };
+    const tenant = { id: 'tenant-2', tier: 'pro', settings: { ai: { enabled: true } } };
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('kb_search');

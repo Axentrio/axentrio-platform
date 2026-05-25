@@ -48,6 +48,13 @@ vi.mock('../../config/environment', () => ({
   },
 }));
 
+// M5: connectCalcom now calls requireFeature first. These unit tests focus
+// on the Cal.com-API interaction, not the tier gate (which has its own
+// pure-function tests in calcom-access.test.ts). Mock it to a no-op.
+vi.mock('../../billing/enforce', () => ({
+  requireFeature: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import axios from 'axios';

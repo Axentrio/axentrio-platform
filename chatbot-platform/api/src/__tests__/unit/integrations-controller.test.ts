@@ -37,6 +37,14 @@ vi.mock('../../utils/logger', () => ({
   },
 }));
 
+// M5: updateIntegrations / connectCalcom now call requireFeature when a
+// calcom block is being set. The pure-function tier check has its own
+// tests in calcom-access.test.ts — mock to a no-op here so the controller
+// tests can focus on persistence/redaction behaviour.
+vi.mock('../../billing/enforce', () => ({
+  requireFeature: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { getIntegrations, updateIntegrations } from '../../knowledge/integrations.controller';

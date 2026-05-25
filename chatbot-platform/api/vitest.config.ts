@@ -2,7 +2,18 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: path.resolve(__dirname, '.env.test') });
+// Load .env.test (override:true so re-runs / parent shells don't poison the
+// test environment with stale values).
+dotenv.config({ path: path.resolve(__dirname, '.env.test'), override: true });
+
+// `src/config/environment.ts` calls `dotenv.config({ path: .env })` on
+// import, which would otherwise pull the production DATABASE_URL into the
+// test process. Pin DATABASE_URL to TEST_DATABASE_URL here so the variable
+// is already set before environment.ts runs — dotenv won't overwrite a
+// pre-set value.
+if (process.env.TEST_DATABASE_URL) {
+  process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
+}
 
 export default defineConfig({
   test: {

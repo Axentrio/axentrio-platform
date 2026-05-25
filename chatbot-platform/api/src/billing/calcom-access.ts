@@ -23,16 +23,23 @@ export type CalcomIntegrationConfig = NonNullable<
   NonNullable<BotSettings['integrations']>['calcom']
 >;
 
-export function isCalcomAvailableForTier(tier: TenantTier): boolean {
+export function isCalcomAvailableForTier(tier: TenantTier | null | undefined): boolean {
+  if (!tier) return false;
   // Pass null overrides — calendarIntegrations is a pure feature flag, not
   // capacity-bound, so the per-tenant overrides don't matter here.
-  return entitlementsFor(tier, { maxSessions: null, dailyLlmCallLimit: null })
-    .features.calendarIntegrations;
+  // Unknown tiers (e.g. a malformed DB row) fail closed rather than crashing
+  // the message-forwarding hot path.
+  try {
+    return entitlementsFor(tier, { maxSessions: null, dailyLlmCallLimit: null })
+      .features.calendarIntegrations;
+  } catch {
+    return false;
+  }
 }
 
 export function getCalcomIntegrationForBot(
   botSettings: BotSettings,
-  tier: TenantTier,
+  tier: TenantTier | null | undefined,
 ): CalcomIntegrationConfig | null {
   if (!isCalcomAvailableForTier(tier)) return null;
   const calcom = botSettings.integrations?.calcom;

@@ -14,7 +14,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 // Define environment schema with validation
 const envSchema = z.object({
   // Server
-  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  NODE_ENV: z.enum(['development', 'staging', 'production', 'test']).default('development'),
   PORT: z.string().default('3000').transform(Number),
   WS_PORT: z.string().default('3001').transform(Number),
   API_VERSION: z.string().default('v1'),
@@ -243,6 +243,7 @@ export const config = {
     wsPort: env.WS_PORT,
     apiVersion: env.API_VERSION,
     isDevelopment: env.NODE_ENV === 'development',
+    isStaging: env.NODE_ENV === 'staging',
     isProduction: env.NODE_ENV === 'production',
     isTest: env.NODE_ENV === 'test',
   },

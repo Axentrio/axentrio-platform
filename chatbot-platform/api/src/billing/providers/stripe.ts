@@ -85,11 +85,13 @@ function statusFromStripe(s: StripeNS.Subscription.Status): NormalizedStatus {
     case 'paused':
       return 'past_due'; // v1: we don't pause subs ourselves; map defensively
     case 'unpaid':
-      return 'cancelled'; // terminal — Stripe gave up
+      return 'past_due'; // Stripe's auto-retry budget exhausted; entitlement-wise the same
+                         // dunning state as `past_due` (M0 PR9 mapping table).
     case 'incomplete':
       return 'none'; // pending first payment; no access granted yet
     case 'incomplete_expired':
-      return 'cancelled'; // terminal — first payment never succeeded
+      return 'none'; // initial payment never succeeded → no subscription ever existed
+                     // (M0 PR9 mapping table — `none`, not `cancelled`).
     case 'canceled':
       return 'cancelled';
     default:

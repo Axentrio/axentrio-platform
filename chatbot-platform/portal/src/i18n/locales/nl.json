@@ -460,29 +460,29 @@
             "byoLlm": "Eigen LLM-sleutel"
           }
         },
-        "pro": {
-          "name": "Pro",
-          "price": "$49/maand",
-          "blurb": "Voor groeiende teams.",
+        "essential": {
+          "name": "Essential",
+          "price": "€49,99/maand",
+          "blurb": "Zet je chatbot live, unified inbox, leads vastleggen.",
           "features": {
-            "agents": "3 agents",
-            "sessions": "100 gelijktijdige sessies",
-            "llmCalls": "1.000 platform-LLM-calls per dag",
-            "channels": "3 kanalen",
-            "uploadsHandoff": "Bestandsuploads & overdracht"
+            "agents": "1 chatbot, 1 menselijke agent",
+            "sessions": "Onbeperkte sessies",
+            "llmCalls": "Platform-LLM inbegrepen",
+            "channels": "Alle kanalen (unified inbox)",
+            "uploadsHandoff": "Bestandsuploads & menselijke overdracht"
           }
         },
-        "premium": {
-          "name": "Premium",
-          "price": "$199/maand",
-          "blurb": "Eigen branding + ruimte om te groeien.",
+        "pro": {
+          "name": "Pro",
+          "price": "€99,99/maand",
+          "blurb": "Voeg boekingen, agenda-integratie en platform-assistent toe.",
           "features": {
-            "agents": "10 agents",
-            "sessions": "500 gelijktijdige sessies",
-            "llmCalls": "10.000 platform-LLM-calls per dag",
-            "channels": "Onbeperkt aantal kanalen",
-            "branding": "Eigen branding & domein",
-            "support": "Prioriteitsondersteuning"
+            "agents": "1 chatbot, 1 menselijke agent",
+            "sessions": "Onbeperkte sessies",
+            "llmCalls": "Platform-LLM inbegrepen",
+            "channels": "Alle kanalen (unified inbox)",
+            "branding": "Verberg \"Powered by Axentrio\"",
+            "support": "Boekingen, agenda, platform-assistent"
           }
         },
         "enterprise": {
@@ -516,8 +516,8 @@
       },
       "manage": {
         "title": "Abonnement beheren",
-        "upgradeToPremium": "Upgraden naar Premium",
-        "downgradeToPro": "Downgraden naar Pro",
+        "upgradeToPro": "Upgraden naar Pro",
+        "downgradeToEssential": "Downgraden naar Essential",
         "cancelSubscription": "Abonnement opzeggen",
         "resumeSubscription": "Abonnement hervatten",
         "undoPendingChange": "Geplande wijziging ongedaan maken",
@@ -1162,8 +1162,8 @@
         "selected": "geselecteerd",
         "tierDescriptions": {
           "free": "Geen plan — misbruik / downgrade na refund",
+          "essential": "Essential-rechten, comped (geen Stripe)",
           "pro": "Pro-rechten, comped (geen Stripe)",
-          "premium": "Premium-rechten, comped",
           "enterprise": "Sales-managed, onbeperkt"
         },
         "noteLabel": "Let op:",

@@ -460,29 +460,29 @@
             "byoLlm": "Clé LLM personnelle"
           }
         },
-        "pro": {
-          "name": "Pro",
-          "price": "49 $/mois",
-          "blurb": "Pour les équipes en croissance.",
+        "essential": {
+          "name": "Essential",
+          "price": "49,99 €/mois",
+          "blurb": "Mettez votre chatbot en ligne, boîte unifiée, captez des leads.",
           "features": {
-            "agents": "3 agents",
-            "sessions": "100 sessions simultanées",
-            "llmCalls": "1 000 appels LLM plateforme/jour",
-            "channels": "3 canaux",
-            "uploadsHandoff": "Téléversements & transfert"
+            "agents": "1 chatbot, 1 agent humain",
+            "sessions": "Sessions illimitées",
+            "llmCalls": "LLM de plateforme inclus",
+            "channels": "Tous les canaux (boîte unifiée)",
+            "uploadsHandoff": "Téléversements & transfert vers humain"
           }
         },
-        "premium": {
-          "name": "Premium",
-          "price": "199 $/mois",
-          "blurb": "Image de marque personnalisée + marge de croissance.",
+        "pro": {
+          "name": "Pro",
+          "price": "99,99 €/mois",
+          "blurb": "Ajoutez les réservations, l'agenda et l'assistant de plateforme.",
           "features": {
-            "agents": "10 agents",
-            "sessions": "500 sessions simultanées",
-            "llmCalls": "10 000 appels LLM plateforme/jour",
-            "channels": "Canaux illimités",
-            "branding": "Image de marque & domaine personnalisés",
-            "support": "Support prioritaire"
+            "agents": "1 chatbot, 1 agent humain",
+            "sessions": "Sessions illimitées",
+            "llmCalls": "LLM de plateforme inclus",
+            "channels": "Tous les canaux (boîte unifiée)",
+            "branding": "Masquer « Powered by Axentrio »",
+            "support": "Réservations, agenda, assistant de plateforme"
           }
         },
         "enterprise": {
@@ -516,8 +516,8 @@
       },
       "manage": {
         "title": "Gérer l'abonnement",
-        "upgradeToPremium": "Passer à Premium",
-        "downgradeToPro": "Revenir à Pro",
+        "upgradeToPro": "Passer à Pro",
+        "downgradeToEssential": "Revenir à Essential",
         "cancelSubscription": "Résilier l'abonnement",
         "resumeSubscription": "Reprendre l'abonnement",
         "undoPendingChange": "Annuler le changement en attente",
@@ -1162,8 +1162,8 @@
         "selected": "sélectionné",
         "tierDescriptions": {
           "free": "Aucun plan — abus / rétrogradation suite à un remboursement",
+          "essential": "Droits Essential, offerts (sans Stripe)",
           "pro": "Droits Pro, offerts (sans Stripe)",
-          "premium": "Droits Premium, offerts",
           "enterprise": "Géré par les ventes, illimité"
         },
         "noteLabel": "Remarque :",

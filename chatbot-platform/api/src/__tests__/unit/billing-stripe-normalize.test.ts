@@ -166,9 +166,9 @@ describe('normalizeWebhookEvent — Stripe status → normalized status table', 
     ['trialing', 'trialing'],
     ['active', 'active'],
     ['past_due', 'past_due'],
-    ['unpaid', 'cancelled'],
+    ['unpaid', 'past_due'],            // M0 PR9: dunning continues; not terminal
     ['incomplete', 'none'],
-    ['incomplete_expired', 'cancelled'],
+    ['incomplete_expired', 'none'],    // M0 PR9: initial payment never succeeded → no sub existed
     ['paused', 'past_due'],
     ['canceled', 'cancelled'],
   ];

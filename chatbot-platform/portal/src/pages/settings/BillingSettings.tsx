@@ -74,6 +74,19 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
       t('settings.billing.plans.free.features.byoLlm'),
     ],
   },
+  essential: {
+    id: 'essential',
+    name: t('settings.billing.plans.essential.name'),
+    price: t('settings.billing.plans.essential.price'),
+    blurb: t('settings.billing.plans.essential.blurb'),
+    features: [
+      t('settings.billing.plans.essential.features.agents'),
+      t('settings.billing.plans.essential.features.sessions'),
+      t('settings.billing.plans.essential.features.llmCalls'),
+      t('settings.billing.plans.essential.features.channels'),
+      t('settings.billing.plans.essential.features.uploadsHandoff'),
+    ],
+  },
   pro: {
     id: 'pro',
     name: t('settings.billing.plans.pro.name'),
@@ -84,21 +97,8 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
       t('settings.billing.plans.pro.features.sessions'),
       t('settings.billing.plans.pro.features.llmCalls'),
       t('settings.billing.plans.pro.features.channels'),
-      t('settings.billing.plans.pro.features.uploadsHandoff'),
-    ],
-  },
-  premium: {
-    id: 'premium',
-    name: t('settings.billing.plans.premium.name'),
-    price: t('settings.billing.plans.premium.price'),
-    blurb: t('settings.billing.plans.premium.blurb'),
-    features: [
-      t('settings.billing.plans.premium.features.agents'),
-      t('settings.billing.plans.premium.features.sessions'),
-      t('settings.billing.plans.premium.features.llmCalls'),
-      t('settings.billing.plans.premium.features.channels'),
-      t('settings.billing.plans.premium.features.branding'),
-      t('settings.billing.plans.premium.features.support'),
+      t('settings.billing.plans.pro.features.branding'),
+      t('settings.billing.plans.pro.features.support'),
     ],
   },
   enterprise: {
@@ -253,7 +253,7 @@ const ActionRow: React.FC<{ state: BillingState }> = ({ state }) => {
   const showUndoPending = !!state.pendingPlanId;
   const showCancel = !state.cancelAtPeriodEnd && state.status !== 'cancelled';
   const targetPlan: CheckoutablePlan | null =
-    state.planId === 'pro' ? 'premium' : state.planId === 'premium' ? 'pro' : null;
+    state.planId === 'essential' ? 'pro' : state.planId === 'pro' ? 'essential' : null;
   const showChangePlan =
     targetPlan !== null && !state.pendingPlanId && state.status !== 'past_due';
 
@@ -275,14 +275,14 @@ const ActionRow: React.FC<{ state: BillingState }> = ({ state }) => {
             >
               {changePlan.isPending ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
-              ) : targetPlan === 'premium' ? (
+              ) : targetPlan === 'pro' ? (
                 <ArrowUpCircle className="w-4 h-4" />
               ) : (
                 <ArrowDownCircle className="w-4 h-4" />
               )}
-              {targetPlan === 'premium'
-                ? t('settings.billing.manage.upgradeToPremium')
-                : t('settings.billing.manage.downgradeToPro')}
+              {targetPlan === 'pro'
+                ? t('settings.billing.manage.upgradeToPro')
+                : t('settings.billing.manage.downgradeToEssential')}
             </Button>
           )}
           {showCancel && (
@@ -379,7 +379,7 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
   // your current plan would just create a duplicate Stripe sub (which the
   // server's duplicate-checkout guard would also reject with 409, but the
   // UI shouldn't even offer it).
-  const availablePlans = (['pro', 'premium'] as CheckoutablePlan[]).filter(
+  const availablePlans = (['essential', 'pro'] as CheckoutablePlan[]).filter(
     (id) => id !== state.planId,
   );
   if (availablePlans.length === 0) return null;

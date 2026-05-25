@@ -511,7 +511,7 @@ const AdminTenantDetail: React.FC = () => {
 
             <div className="space-y-3 py-2">
               <div className="grid grid-cols-2 gap-2">
-                {(['free', 'pro', 'premium', 'enterprise'] as ManualTier[]).map((tier) => {
+                {(['free', 'essential', 'pro', 'enterprise'] as ManualTier[]).map((tier) => {
                   const isCurrent = tenant.tier === tier;
                   const isSelected = pendingTier === tier;
                   return (
@@ -538,8 +538,8 @@ const AdminTenantDetail: React.FC = () => {
                       </div>
                       <p className="text-xs text-text-muted mt-1">
                         {tier === 'free' && t('admin.tenantDetail.tierDialog.tierDescriptions.free')}
+                        {tier === 'essential' && t('admin.tenantDetail.tierDialog.tierDescriptions.essential')}
                         {tier === 'pro' && t('admin.tenantDetail.tierDialog.tierDescriptions.pro')}
-                        {tier === 'premium' && t('admin.tenantDetail.tierDialog.tierDescriptions.premium')}
                         {tier === 'enterprise' && t('admin.tenantDetail.tierDialog.tierDescriptions.enterprise')}
                       </p>
                     </button>

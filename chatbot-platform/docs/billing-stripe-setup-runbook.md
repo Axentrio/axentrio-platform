@@ -58,7 +58,7 @@ Verify each in the table shows ✓ for "Subscriptions" and "Recurring".
 
 Dashboard → **Developers → Webhooks → Add endpoint**.
 
-- Endpoint URL: `https://api.axentrio.<env>/api/v1/billing/webhook/stripe` (note the `/api/v1` mount prefix)
+- Endpoint URL: `https://api.axentrio.<env>/api/v1/webhooks/billing/stripe` (note the `/api/v1/webhooks/...` mount prefix — matches the convention used by every other provider webhook, e.g. Meta/Telegram)
 - Events to subscribe:
   - `checkout.session.completed`
   - `customer.subscription.created`

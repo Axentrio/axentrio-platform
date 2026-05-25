@@ -465,29 +465,29 @@
             "byoLlm": "BYO LLM key"
           }
         },
-        "pro": {
-          "name": "Pro",
-          "price": "$49/mo",
-          "blurb": "For growing teams.",
+        "essential": {
+          "name": "Essential",
+          "price": "€49.99/mo",
+          "blurb": "Get your chatbot live, unified inbox, capture leads.",
           "features": {
-            "agents": "3 agents",
-            "sessions": "100 concurrent sessions",
-            "llmCalls": "1,000 platform LLM calls/day",
-            "channels": "3 channels",
-            "uploadsHandoff": "File uploads & handoff"
+            "agents": "1 chatbot, 1 human agent",
+            "sessions": "Unlimited sessions",
+            "llmCalls": "Platform LLM included",
+            "channels": "All channels (unified inbox)",
+            "uploadsHandoff": "File uploads & human handoff"
           }
         },
-        "premium": {
-          "name": "Premium",
-          "price": "$199/mo",
-          "blurb": "Custom branding + room to grow.",
+        "pro": {
+          "name": "Pro",
+          "price": "€99.99/mo",
+          "blurb": "Add bookings, calendar integration, platform assistant.",
           "features": {
-            "agents": "10 agents",
-            "sessions": "500 concurrent sessions",
-            "llmCalls": "10,000 platform LLM calls/day",
-            "channels": "Unlimited channels",
-            "branding": "Custom branding & domain",
-            "support": "Priority support"
+            "agents": "1 chatbot, 1 human agent",
+            "sessions": "Unlimited sessions",
+            "llmCalls": "Platform LLM included",
+            "channels": "All channels (unified inbox)",
+            "branding": "Hide Powered by Axentrio",
+            "support": "Bookings, calendar, platform assistant"
           }
         },
         "enterprise": {
@@ -521,8 +521,8 @@
       },
       "manage": {
         "title": "Manage subscription",
-        "upgradeToPremium": "Upgrade to Premium",
-        "downgradeToPro": "Downgrade to Pro",
+        "upgradeToPro": "Upgrade to Pro",
+        "downgradeToEssential": "Downgrade to Essential",
         "cancelSubscription": "Cancel subscription",
         "resumeSubscription": "Resume subscription",
         "undoPendingChange": "Undo pending change",
@@ -1203,8 +1203,8 @@
         "selected": "selected",
         "tierDescriptions": {
           "free": "No plan — abuse / refund downgrade",
+          "essential": "Essential entitlements, comped (no Stripe)",
           "pro": "Pro entitlements, comped (no Stripe)",
-          "premium": "Premium entitlements, comped",
           "enterprise": "Sales-managed, unlimited"
         },
         "noteLabel": "Note:",

@@ -148,7 +148,7 @@ export function useOptimisticSuspendTenant() {
   });
 }
 
-export type ManualTier = 'free' | 'pro' | 'premium' | 'enterprise';
+export type ManualTier = 'free' | 'essential' | 'pro' | 'enterprise';
 
 /**
  * Super-admin "Set tier (manual)" — handles all four tiers via the unified

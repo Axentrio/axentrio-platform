@@ -13,9 +13,9 @@ import { AxiosError } from 'axios';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
-export type BillingTier = 'free' | 'pro' | 'premium' | 'enterprise';
+export type BillingTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
-export type CheckoutablePlan = 'pro' | 'premium';
+export type CheckoutablePlan = 'essential' | 'pro';
 
 export interface BillingHistoryEntry {
   id: string;

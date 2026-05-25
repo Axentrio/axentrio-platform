@@ -13,6 +13,7 @@ import type { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
+import { getCalcomIntegrationForBot } from '../billing/calcom-access';
 
 const BOOKING_TOOLS = [
   'check_availability',
@@ -63,8 +64,9 @@ export class ToolRegistry {
     const captureLead = this.builtinTools.get('capture_lead');
     if (captureLead) tools.push(captureLead);
 
-    const calcom = botSettings.integrations?.calcom;
-    if (calcom?.apiKey && calcom?.eventTypeId) {
+    // Cal.com gate routes through the central helper so the tier check stays
+    // in lockstep with the n8n outbound payload (single source of truth).
+    if (getCalcomIntegrationForBot(botSettings, tenant.tier)) {
       for (const name of BOOKING_TOOLS) {
         const tool = this.builtinTools.get(name);
         if (tool) tools.push(tool);

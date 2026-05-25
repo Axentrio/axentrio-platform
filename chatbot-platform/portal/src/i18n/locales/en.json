@@ -59,6 +59,17 @@
     }
   },
   "bookings": {
+    "title": "Bookings",
+    "intro": "Let your chatbot schedule appointments. Cal.com handles the calendar; we wire it into every conversation.",
+    "calcom": {
+      "title": "Cal.com",
+      "statusConnected": "Connected",
+      "bodyConnected": "Your chatbot will offer available slots and book appointments through Cal.com. Manage the calendar, event types, and reminders from Cal.com directly.",
+      "bodyDisconnected": "Connect your Cal.com account so the chatbot can check availability and book appointments. Configuration lives under Settings → Integrations.",
+      "connect": "Connect Cal.com",
+      "manage": "Manage connection",
+      "viewInCalcom": "Open Cal.com dashboard"
+    },
     "locked": {
       "title": "AI Bookings",
       "oneLiner": "Unlock AI Bookings with Pro and let customers schedule appointments directly through chat.",
@@ -67,10 +78,6 @@
         "2": "Bot collects name, email, phone, and notes — booked in under a minute.",
         "3": "Confirmation emails, reminders, and reschedule links sent automatically."
       }
-    },
-    "placeholder": {
-      "title": "Bookings",
-      "subtitle": "Bookings module landing here in M5."
     }
   },
   "leads": {
@@ -309,6 +316,8 @@
       "calcom": {
         "title": "Appointment Booking",
         "subtitle": "Connect Cal.com to let your chatbot book appointments",
+        "lockedSubtitle": "Cal.com booking is available on the Pro plan.",
+        "unlockCta": "Upgrade to Pro to unlock",
         "connectedBadge": "Connected",
         "apiKeyLabel": "Cal.com API Key",
         "apiKeyHelper": "Find your API key at Cal.com → Settings → Developer → API Keys",

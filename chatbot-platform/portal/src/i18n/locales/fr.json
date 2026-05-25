@@ -59,6 +59,17 @@
     }
   },
   "bookings": {
+    "title": "Réservations",
+    "intro": "Laissez votre chatbot planifier des rendez-vous. Cal.com gère l'agenda ; nous l'intégrons à chaque conversation.",
+    "calcom": {
+      "title": "Cal.com",
+      "statusConnected": "Connecté",
+      "bodyConnected": "Votre chatbot proposera les créneaux disponibles et réservera les rendez-vous via Cal.com. Gérez l'agenda, les types d'événements et les rappels directement dans Cal.com.",
+      "bodyDisconnected": "Connectez votre compte Cal.com pour que le chatbot puisse vérifier la disponibilité et réserver des rendez-vous. La configuration se trouve sous Paramètres → Intégrations.",
+      "connect": "Connecter Cal.com",
+      "manage": "Gérer la connexion",
+      "viewInCalcom": "Ouvrir le tableau de bord Cal.com"
+    },
     "locked": {
       "title": "Réservations IA",
       "oneLiner": "Débloquez les réservations IA avec Pro et laissez les clients planifier des rendez-vous directement via le chat.",
@@ -67,10 +78,6 @@
         "2": "Le bot recueille nom, e-mail, téléphone et notes — réservé en moins d'une minute.",
         "3": "E-mails de confirmation, rappels et liens de replanification envoyés automatiquement."
       }
-    },
-    "placeholder": {
-      "title": "Réservations",
-      "subtitle": "Le module Réservations arrivera ici en M5."
     }
   },
   "leads": {
@@ -304,6 +311,8 @@
       "calcom": {
         "title": "Prise de rendez-vous",
         "subtitle": "Connectez Cal.com pour que votre chatbot prenne des rendez-vous",
+        "lockedSubtitle": "La réservation Cal.com est disponible avec le plan Pro.",
+        "unlockCta": "Passer à Pro pour débloquer",
         "connectedBadge": "Connecté",
         "apiKeyLabel": "Clé API Cal.com",
         "apiKeyHelper": "Trouvez votre clé API sur Cal.com → Settings → Developer → API Keys",

@@ -59,6 +59,17 @@
     }
   },
   "bookings": {
+    "title": "Boekingen",
+    "intro": "Laat je chatbot afspraken inplannen. Cal.com beheert de agenda; wij koppelen het aan elk gesprek.",
+    "calcom": {
+      "title": "Cal.com",
+      "statusConnected": "Verbonden",
+      "bodyConnected": "Je chatbot biedt beschikbare tijdslots aan en boekt afspraken via Cal.com. Beheer de agenda, eventtypes en herinneringen rechtstreeks in Cal.com.",
+      "bodyDisconnected": "Verbind je Cal.com-account zodat de chatbot beschikbaarheid kan controleren en afspraken kan boeken. Configuratie staat onder Instellingen → Integraties.",
+      "connect": "Cal.com verbinden",
+      "manage": "Verbinding beheren",
+      "viewInCalcom": "Open Cal.com-dashboard"
+    },
     "locked": {
       "title": "AI Boekingen",
       "oneLiner": "Ontgrendel AI-boekingen met Pro en laat klanten rechtstreeks via chat afspraken inplannen.",
@@ -67,10 +78,6 @@
         "2": "De bot verzamelt naam, e-mail, telefoon en notities — geboekt in minder dan een minuut.",
         "3": "Bevestigingsmails, herinneringen en reschedule-links worden automatisch verstuurd."
       }
-    },
-    "placeholder": {
-      "title": "Boekingen",
-      "subtitle": "De boekingenmodule landt hier in M5."
     }
   },
   "leads": {
@@ -304,6 +311,8 @@
       "calcom": {
         "title": "Afspraak boeken",
         "subtitle": "Koppel Cal.com om je chatbot afspraken te laten boeken",
+        "lockedSubtitle": "Cal.com-boekingen zijn beschikbaar in het Pro-abonnement.",
+        "unlockCta": "Upgrade naar Pro om te ontgrendelen",
         "connectedBadge": "Verbonden",
         "apiKeyLabel": "Cal.com API-sleutel",
         "apiKeyHelper": "Vind je API-sleutel op Cal.com → Instellingen → Developer → API Keys",

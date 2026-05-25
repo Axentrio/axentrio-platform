@@ -1,7 +1,8 @@
 // portal/src/components/settings/CalcomSettings.tsx
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Calendar, CheckCircle, Loader2, ChevronDown, Eye, EyeOff } from 'lucide-react';
+import { Calendar, CheckCircle, Loader2, ChevronDown, Eye, EyeOff, Lock } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   useIntegrations,
@@ -9,6 +10,7 @@ import {
   useFetchCalcomEventTypes,
   useUpdateIntegrations,
 } from '../../queries/useIntegrationQueries';
+import { useHasFeature } from '../../queries/useEntitlementsQueries';
 import { extractApiErrorMessage } from '../../services/apiClient';
 
 type State = 'idle' | 'connecting' | 'needs_event_type' | 'pick_event_type' | 'saving' | 'connected' | 'disconnecting';
@@ -22,10 +24,41 @@ interface EventType {
 
 export const CalcomSettings: React.FC = () => {
   const { t } = useTranslation();
+  const hasCalendarIntegrations = useHasFeature('calendarIntegrations');
   const { data: integrations, isLoading } = useIntegrations();
   const connectMutation = useConnectCalcom();
   const fetchEventTypesMutation = useFetchCalcomEventTypes();
   const updateMutation = useUpdateIntegrations();
+
+  // UX-only guard. The API enforces the same gate via `requireFeature` and the
+  // egress chokepoint in `getCalcomIntegrationForBot`; this card just hides
+  // the controls so non-Pro tenants don't see a form that would 402.
+  if (!hasCalendarIntegrations) {
+    return (
+      <div className="rounded-xl border border-edge bg-surface-3 p-6 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10">
+            <Calendar className="h-5 w-5 text-primary-400" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+              {t('settings.integrations.calcom.title')}
+              <Lock className="h-3 w-3 text-text-muted" />
+            </h3>
+            <p className="text-xs text-text-muted">
+              {t('settings.integrations.calcom.lockedSubtitle')}
+            </p>
+          </div>
+        </div>
+        <Link
+          to="/billing"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300"
+        >
+          {t('settings.integrations.calcom.unlockCta')}
+        </Link>
+      </div>
+    );
+  }
 
   const [state, setState] = useState<State>('idle');
   const [apiKey, setApiKey] = useState('');

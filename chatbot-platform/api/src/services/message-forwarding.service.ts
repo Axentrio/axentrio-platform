@@ -9,8 +9,9 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
-import { Tenant } from '../database/entities/Tenant';
+import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { BotSettings } from '../database/entities/Bot';
+import { getCalcomIntegrationForBot } from '../billing/calcom-access';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
@@ -134,11 +135,16 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
 /**
  * Build the integrations slice of the n8n outbound payload from the bot's
  * settings. Multi-bot Phase 4 (#16d): reads from `BotSettings` only — no
- * tenant fall-through.
+ * tenant fall-through. Tier gate is the canonical egress chokepoint: stored
+ * Cal.com creds are inert config that re-activates on upgrade, so a tenant
+ * who downgrades stops sending Cal.com to n8n without any DB cleanup.
  */
-function buildIntegrationsConfig(botSettings: BotSettings): IntegrationsConfig | undefined {
-  const calcom = botSettings.integrations?.calcom;
-  if (!calcom?.apiKey || !calcom?.eventTypeId) return undefined;
+function buildIntegrationsConfig(
+  botSettings: BotSettings,
+  tier: TenantTier,
+): IntegrationsConfig | undefined {
+  const calcom = getCalcomIntegrationForBot(botSettings, tier);
+  if (!calcom) return undefined;
 
   const timezone = botSettings.businessHours?.timezone || 'UTC';
 
@@ -315,7 +321,7 @@ export async function forwardMessageToN8n(
     },
     tenantConfig: buildTenantAiConfig(tenant.name, aiSettings),
     knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
-    integrations: buildIntegrationsConfig(botSettings),
+    integrations: buildIntegrationsConfig(botSettings, tenant.tier),
     context: {
       previousMessages: await getConversationHistoryForPayload(session.id),
     },

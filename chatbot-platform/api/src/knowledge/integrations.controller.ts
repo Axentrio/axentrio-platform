@@ -11,6 +11,7 @@ import { sendSuccess } from '../utils/response';
 import { ApiError, BadRequestError, RateLimitError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
+import { requireFeature } from '../billing/enforce';
 
 export async function getIntegrations(req: Request, res: Response) {
   const tenantId = req.tenantId!;
@@ -30,6 +31,13 @@ export async function getIntegrations(req: Request, res: Response) {
 export async function updateIntegrations(req: Request, res: Response) {
   const tenantId = req.tenantId!;
   const data = updateIntegrationsSchema.parse(req.body);
+
+  // Setting (not clearing) Cal.com requires the calendarIntegrations
+  // entitlement. Disconnect (`calcom: null`) stays allowed so downgraded
+  // tenants can still clean up their own state.
+  if (data.calcom && data.calcom !== null) {
+    await requireFeature(tenantId, 'calendarIntegrations', 'plan_limit_calendar_integrations');
+  }
 
   // Multi-bot Phase 4 (#16d): read+write integrations on Bot.settings.
   const { settings: existingSettings } = await getAnchorBotConfig(tenantId);
@@ -84,6 +92,11 @@ export async function updateIntegrations(req: Request, res: Response) {
 
 export async function connectCalcom(req: Request, res: Response): Promise<void> {
   const tenantId = req.tenantId!;
+
+  // Tier gate at the write boundary. Single source of truth alongside the
+  // egress-side `getCalcomIntegrationForBot` helper.
+  await requireFeature(tenantId, 'calendarIntegrations', 'plan_limit_calendar_integrations');
+
   const { apiKey } = req.body;
 
   if (!apiKey || typeof apiKey !== 'string' || apiKey.length > 256) {
@@ -161,6 +174,11 @@ export async function connectCalcom(req: Request, res: Response): Promise<void> 
 
 export async function getCalcomEventTypes(req: Request, res: Response): Promise<void> {
   const tenantId = req.tenantId!;
+
+  // Querying Cal.com via our API uses platform compute on a paid feature —
+  // gate the read alongside the writes.
+  await requireFeature(tenantId, 'calendarIntegrations', 'plan_limit_calendar_integrations');
+
   // Multi-bot Phase 4 (#16d): integrations live on Bot.settings.
   const { settings } = await getAnchorBotConfig(tenantId);
 

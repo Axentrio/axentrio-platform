@@ -271,6 +271,15 @@ async function startServer(): Promise<void> {
       logger.info('Database schema is up to date');
     }
 
+    // Hydrate Copilot docs corpus from the build-time bundle. Throws
+    // if the bundle is missing or empty — Copilot can't serve without
+    // its corpus, and silent fall-through would deliver "I don't know"
+    // to every question.
+    {
+      const { hydrateCopilotDocs } = await import('./copilot/hydrate');
+      await hydrateCopilotDocs(AppDataSource);
+    }
+
     await initializeRedis();
     if (config.server.isProduction && !isRedisAvailable()) {
       throw new Error('Redis is required in production but failed to connect');

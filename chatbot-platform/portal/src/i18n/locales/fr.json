@@ -1186,6 +1186,13 @@
         },
         "noteLabel": "Remarque :",
         "stripeWarning": "si ce tenant a un abonnement Stripe actif, cette action ne l'annule pas. Ouvrez le dashboard Stripe et annulez-y l'abonnement pour arrêter les prélèvements.",
+        "disposition": {
+          "title": "Abonnement Stripe actif :",
+          "explainer": "cette action ne l'annule pas, le client continue donc d'être facturé sur un palier Gratuit. Choisissez ce qu'il advient de l'abonnement :",
+          "will_cancel": "J'ai annulé / vais annuler l'abonnement dans le dashboard Stripe",
+          "leave_active": "Laisser l'abonnement actif intentionnellement",
+          "reasonPlaceholder": "Pourquoi l'abonnement reste-t-il actif ? (obligatoire — consigné dans le journal d'audit)"
+        },
         "setTo": "Définir sur {{tier}}",
         "pickATier": "Choisissez un palier"
       },

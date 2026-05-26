@@ -1186,6 +1186,13 @@
         },
         "noteLabel": "Let op:",
         "stripeWarning": "als deze tenant een actief Stripe-abonnement heeft, wordt dat hiermee niet geannuleerd. Open het Stripe dashboard en annuleer het abonnement daar om verdere kosten te voorkomen.",
+        "disposition": {
+          "title": "Actief Stripe-abonnement:",
+          "explainer": "deze actie annuleert het niet, dus de klant wordt nog steeds gefactureerd op een Gratis abonnement. Kies wat ermee gebeurt:",
+          "will_cancel": "Ik heb het abonnement geannuleerd / ga het annuleren in het Stripe dashboard",
+          "leave_active": "Het abonnement bewust actief laten",
+          "reasonPlaceholder": "Waarom blijft het abonnement actief? (verplicht — vastgelegd in het auditlogboek)"
+        },
         "setTo": "Instellen op {{tier}}",
         "pickATier": "Kies een tier"
       },

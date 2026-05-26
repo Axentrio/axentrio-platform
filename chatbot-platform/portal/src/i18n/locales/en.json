@@ -1227,6 +1227,13 @@
         },
         "noteLabel": "Note:",
         "stripeWarning": "if this tenant has an active Stripe subscription, this does not cancel it. Open the Stripe dashboard and cancel the subscription there to stop further charges.",
+        "disposition": {
+          "title": "Active Stripe subscription:",
+          "explainer": "this override won't cancel it, so the customer keeps being charged on a Free plan. Choose what happens to it:",
+          "will_cancel": "I have cancelled / will cancel it in the Stripe dashboard",
+          "leave_active": "Leave the subscription active intentionally",
+          "reasonPlaceholder": "Why is the subscription staying active? (required — recorded in the audit log)"
+        },
         "setTo": "Set to {{tier}}",
         "pickATier": "Pick a tier"
       },

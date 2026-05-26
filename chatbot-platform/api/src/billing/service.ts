@@ -607,6 +607,11 @@ export async function setTierManual(
   opts: {
     currentPeriodEnd?: Date | null;
     billingEmail?: string | null;
+    // Audit-only: the admin's declared intent for any pre-existing Stripe
+    // subscription when downgrading to Free (this override never cancels it).
+    // Recorded on the `tier.manual_override` event for accountability.
+    stripeDisposition?: 'will_cancel' | 'leave_active' | null;
+    dispositionReason?: string | null;
   } = {},
 ): Promise<{ changed: boolean }> {
   const targetStatus: BillingStatus = tier === 'free' ? 'none' : 'active';
@@ -724,6 +729,8 @@ export async function setTierManual(
           rows.find((r) => r.isPrimary === true)?.provider ?? null,
         currentPeriodEnd: periodEndArg?.toISOString() ?? null,
         billingEmail: billingEmailArg,
+        stripeDisposition: opts.stripeDisposition ?? null,
+        dispositionReason: opts.dispositionReason ?? null,
       },
     });
     await manager.save(event);

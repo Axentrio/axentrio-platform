@@ -35,6 +35,11 @@ import {
   type ManualTier,
 } from '../../queries/useAdminQueries';
 import { queryKeys } from '../../queries/queryKeys';
+import {
+  StripeDispositionField,
+  dispositionComplete,
+  type StripeDisposition,
+} from '@/components/admin/StripeDispositionField';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -63,6 +68,7 @@ interface TenantDetailData {
   slug: string;
   tier: string;
   status: string;
+  hasActiveStripeSubscription?: boolean;
   apiKeyMasked: string;
   createdAt: string;
   userCount: number;
@@ -136,6 +142,8 @@ const AdminTenantDetail: React.FC = () => {
   const [revealedApiKey, setRevealedApiKey] = useState<string | null>(null);
   const [showTierDialog, setShowTierDialog] = useState(false);
   const [pendingTier, setPendingTier] = useState<ManualTier | null>(null);
+  const [disposition, setDisposition] = useState<StripeDisposition | null>(null);
+  const [dispositionReason, setDispositionReason] = useState('');
 
   const { data, isLoading, isError } = useAdminTenantDetail(id ?? '');
   const { data: auditData } = useAdminTenantAudit(id ?? '');
@@ -224,6 +232,8 @@ const AdminTenantDetail: React.FC = () => {
               variant="outline"
               onClick={() => {
                 setPendingTier(null);
+                setDisposition(null);
+                setDispositionReason('');
                 setShowTierDialog(true);
               }}
               disabled={setTierMutation.isPending}
@@ -493,6 +503,8 @@ const AdminTenantDetail: React.FC = () => {
           if (!open) {
             setShowTierDialog(false);
             setPendingTier(null);
+            setDisposition(null);
+            setDispositionReason('');
           }
         }}
       >
@@ -518,7 +530,12 @@ const AdminTenantDetail: React.FC = () => {
                     <button
                       key={tier}
                       type="button"
-                      onClick={() => !isCurrent && setPendingTier(tier)}
+                      onClick={() => {
+                        if (isCurrent) return;
+                        setPendingTier(tier);
+                        setDisposition(null);
+                        setDispositionReason('');
+                      }}
                       disabled={isCurrent}
                       className={`
                         text-left rounded-lg border px-3 py-2.5 transition-colors
@@ -547,9 +564,18 @@ const AdminTenantDetail: React.FC = () => {
                 })}
               </div>
 
-              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
-                <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong> {t('admin.tenantDetail.tierDialog.stripeWarning')}
-              </div>
+              {pendingTier === 'free' && tenant.hasActiveStripeSubscription ? (
+                <StripeDispositionField
+                  disposition={disposition}
+                  onDispositionChange={setDisposition}
+                  reason={dispositionReason}
+                  onReasonChange={setDispositionReason}
+                />
+              ) : (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
+                  <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong> {t('admin.tenantDetail.tierDialog.stripeWarning')}
+                </div>
+              )}
             </div>
 
             <AlertDialogFooter>
@@ -560,17 +586,35 @@ const AdminTenantDetail: React.FC = () => {
                 onClick={(e) => {
                   e.preventDefault();
                   if (!id || !pendingTier) return;
+                  const requiresDisposition =
+                    pendingTier === 'free' && !!tenant.hasActiveStripeSubscription;
                   setTierMutation.mutate(
-                    { id, tier: pendingTier },
+                    {
+                      id,
+                      tier: pendingTier,
+                      stripeDisposition: requiresDisposition ? disposition : null,
+                      dispositionReason:
+                        requiresDisposition && disposition === 'leave_active'
+                          ? dispositionReason.trim()
+                          : null,
+                    },
                     {
                       onSuccess: () => {
                         setShowTierDialog(false);
                         setPendingTier(null);
+                        setDisposition(null);
+                        setDispositionReason('');
                       },
                     },
                   );
                 }}
-                disabled={!pendingTier || setTierMutation.isPending}
+                disabled={
+                  !pendingTier ||
+                  setTierMutation.isPending ||
+                  (pendingTier === 'free' &&
+                    !!tenant.hasActiveStripeSubscription &&
+                    !dispositionComplete(disposition, dispositionReason))
+                }
                 className="bg-accent-500 hover:bg-accent-500/90"
               >
                 {setTierMutation.isPending ? (

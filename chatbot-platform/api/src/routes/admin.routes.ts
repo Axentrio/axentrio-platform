@@ -65,7 +65,31 @@ router.get('/tenants', asyncHandler(async (req: Request, res: Response) => {
   }
 
   const result = await applyPagination(qb, params);
-  sendSuccess(res, result.data, { pagination: result.meta });
+
+  // Flag tenants that have a live Stripe subscription (any row, primary or a
+  // demoted one) so the manual tier-override dialog can force an explicit
+  // disposition before downgrading them to Free — otherwise the sub keeps
+  // billing behind a plan the app no longer grants. One batched query keyed
+  // on the page's tenant ids; no N+1.
+  const tenantIds = result.data.map((t) => t.id);
+  let stripeTenantIds = new Set<string>();
+  if (tenantIds.length > 0) {
+    const rows: Array<{ tenant_id: string }> = await AppDataSource.query(
+      `SELECT DISTINCT tenant_id FROM tenant_billing_accounts
+        WHERE provider = 'stripe'
+          AND subscription_id IS NOT NULL
+          AND status IN ('active', 'trialing', 'past_due')
+          AND tenant_id = ANY($1)`,
+      [tenantIds],
+    );
+    stripeTenantIds = new Set(rows.map((r) => r.tenant_id));
+  }
+  const data = result.data.map((t) => ({
+    ...t,
+    hasActiveStripeSubscription: stripeTenantIds.has(t.id),
+  }));
+
+  sendSuccess(res, data, { pagination: result.meta });
 }));
 
 // GET /admin/tenants/:id/pending-invites — list pending invites for a tenant
@@ -239,6 +263,7 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
     messageCountRaw,
     pendingInvites,
     recentAuditLogs,
+    liveStripeRows,
   ] = await Promise.all([
     userRepo.count({ where: { tenantId: tenant.id } }),
     userRepo.find({
@@ -263,7 +288,18 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
       order: { createdAt: 'DESC' },
       take: 20,
     }),
+    // Live Stripe subscription (primary or demoted) — drives the forced
+    // disposition step in the tier-override dialog (see set-tier route).
+    AppDataSource.query(
+      `SELECT 1 FROM tenant_billing_accounts
+        WHERE tenant_id = $1 AND provider = 'stripe'
+          AND subscription_id IS NOT NULL
+          AND status IN ('active', 'trialing', 'past_due')
+        LIMIT 1`,
+      [tenant.id],
+    ),
   ]);
+  const hasActiveStripeSubscription = (liveStripeRows as unknown[]).length > 0;
 
   // getRawOne returns numeric SUM as a string in node-postgres; coerce.
   const messageCount = Number(messageCountRaw?.total ?? 0);
@@ -287,6 +323,7 @@ router.get('/tenants/:id', asyncHandler(async (req: Request, res: Response) => {
   sendSuccess(res, {
     ...tenant,
     apiKeyMasked,
+    hasActiveStripeSubscription,
     userCount,
     sessionCount,
     messageCount,
@@ -459,11 +496,14 @@ type AllowedTier = (typeof ALLOWED_TIERS)[number];
 
 router.post('/tenants/:id/set-tier', asyncHandler(async (req: Request, res: Response) => {
   const tenantId = req.params.id;
-  const { tier, currentPeriodEnd, billingEmail } = (req.body ?? {}) as {
-    tier?: string;
-    currentPeriodEnd?: string | null;
-    billingEmail?: string | null;
-  };
+  const { tier, currentPeriodEnd, billingEmail, stripeDisposition, dispositionReason } =
+    (req.body ?? {}) as {
+      tier?: string;
+      currentPeriodEnd?: string | null;
+      billingEmail?: string | null;
+      stripeDisposition?: string | null;
+      dispositionReason?: string | null;
+    };
 
   if (!tier || !(ALLOWED_TIERS as readonly string[]).includes(tier)) {
     throw new BadRequestError(`tier must be one of ${ALLOWED_TIERS.join(', ')}`);
@@ -472,15 +512,51 @@ router.post('/tenants/:id/set-tier', asyncHandler(async (req: Request, res: Resp
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   if (!tenant) throw new NotFoundError('Tenant not found');
 
+  // Forced Stripe disposition: downgrading to Free does NOT cancel an existing
+  // Stripe subscription (see setTierManual), so the customer would keep being
+  // charged behind a Free plan. When a live Stripe sub exists, the admin must
+  // explicitly say what happens to it — and own it in the audit trail.
+  let disposition: 'will_cancel' | 'leave_active' | null = null;
+  let reason: string | null = null;
+  if (tier === 'free') {
+    const hasLiveStripeSub: boolean = (
+      await AppDataSource.query(
+        `SELECT 1 FROM tenant_billing_accounts
+          WHERE tenant_id = $1 AND provider = 'stripe'
+            AND subscription_id IS NOT NULL
+            AND status IN ('active', 'trialing', 'past_due')
+          LIMIT 1`,
+        [tenantId],
+      )
+    ).length > 0;
+
+    if (hasLiveStripeSub) {
+      if (stripeDisposition !== 'will_cancel' && stripeDisposition !== 'leave_active') {
+        throw new BadRequestError(
+          'stripeDisposition (will_cancel | leave_active) is required: this tenant has an active Stripe subscription that this override will not cancel',
+        );
+      }
+      disposition = stripeDisposition;
+      reason = typeof dispositionReason === 'string' ? dispositionReason.trim() : '';
+      if (disposition === 'leave_active' && !reason) {
+        throw new BadRequestError('dispositionReason is required when leaving the Stripe subscription active');
+      }
+    }
+  }
+
   const result = await setTierManual(tenantId, tier as AllowedTier, {
     currentPeriodEnd: currentPeriodEnd ? new Date(currentPeriodEnd) : undefined,
     billingEmail: billingEmail ?? undefined,
+    stripeDisposition: disposition,
+    dispositionReason: reason || null,
   });
 
   await logAudit(req.userId!, 'tenant.tier_manual', 'tenant', tenantId, tenantId, {
     previousTier: tenant.tier,
     newTier: tier,
     changed: result.changed,
+    stripeDisposition: disposition,
+    dispositionReason: reason || null,
   });
 
   logger.info('Super-admin set tenant tier (manual)', {

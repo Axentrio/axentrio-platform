@@ -151,7 +151,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
         <button
           type="button"
           onClick={() => refetch()}
-          className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10"
+          className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-surface-3"
         >
           {t('help.error.retry')}
         </button>

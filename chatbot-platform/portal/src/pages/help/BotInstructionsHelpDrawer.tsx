@@ -86,7 +86,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
             <button
               type="button"
               onClick={() => refetch()}
-              className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10"
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-primary-400 hover:bg-surface-3"
             >
               {t('help.error.retry')}
             </button>
@@ -117,7 +117,7 @@ export const BotInstructionsHelpDrawer: React.FC<BotInstructionsHelpDrawerProps>
         <Link
           to="/help?section=ai-bot"
           onClick={onClose}
-          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-primary-400 hover:bg-primary-500/10 transition-colors"
+          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-xs font-medium text-primary-400 hover:bg-surface-3 transition-colors"
         >
           <span>{t('help.drawer.browseAll')}</span>
           <ArrowRight className="w-3.5 h-3.5" />

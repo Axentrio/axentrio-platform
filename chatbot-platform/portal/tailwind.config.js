@@ -34,16 +34,16 @@ module.exports = {
   			background: 'hsl(var(--background))',
   			foreground: 'hsl(var(--foreground))',
   			primary: {
-  				'50': 'var(--color-primary-50, #eef2ff)',
-  				'100': 'var(--color-primary-100, #e0e7ff)',
-  				'200': 'var(--color-primary-200, #c7d2fe)',
-  				'300': 'var(--color-primary-300, #a5b4fc)',
-  				'400': 'var(--color-primary-400, #818cf8)',
-  				'500': 'var(--color-primary-500, #6366f1)',
-  				'600': 'var(--color-primary-600, #4f46e5)',
-  				'700': 'var(--color-primary-700, #4338ca)',
-  				'800': 'var(--color-primary-800, #3730a3)',
-  				'900': 'var(--color-primary-900, #312e81)',
+  				'50': 'rgb(var(--color-primary-50, 238 242 255) / <alpha-value>)',
+  				'100': 'rgb(var(--color-primary-100, 224 231 255) / <alpha-value>)',
+  				'200': 'rgb(var(--color-primary-200, 199 210 254) / <alpha-value>)',
+  				'300': 'rgb(var(--color-primary-300, 165 180 252) / <alpha-value>)',
+  				'400': 'rgb(var(--color-primary-400, 129 140 248) / <alpha-value>)',
+  				'500': 'rgb(var(--color-primary-500, 99 102 241) / <alpha-value>)',
+  				'600': 'rgb(var(--color-primary-600, 79 70 229) / <alpha-value>)',
+  				'700': 'rgb(var(--color-primary-700, 67 56 202) / <alpha-value>)',
+  				'800': 'rgb(var(--color-primary-800, 55 48 163) / <alpha-value>)',
+  				'900': 'rgb(var(--color-primary-900, 49 46 129) / <alpha-value>)',
   				DEFAULT: 'hsl(var(--primary))',
   				foreground: 'hsl(var(--primary-foreground))'
   			},
@@ -80,22 +80,22 @@ module.exports = {
   				foreground: 'hsl(var(--card-foreground))'
   			},
   			surface: {
-  				'0': 'var(--color-surface-0)',
-  				'1': 'var(--color-surface-1)',
-  				'2': 'var(--color-surface-2)',
-  				'3': 'var(--color-surface-3)',
-  				'4': 'var(--color-surface-4)'
+  				'0': 'rgb(var(--color-surface-0) / <alpha-value>)',
+  				'1': 'rgb(var(--color-surface-1) / <alpha-value>)',
+  				'2': 'rgb(var(--color-surface-2) / <alpha-value>)',
+  				'3': 'rgb(var(--color-surface-3) / <alpha-value>)',
+  				'4': 'rgb(var(--color-surface-4) / <alpha-value>)'
   			},
   			edge: {
-  				DEFAULT: 'var(--color-edge)',
-  				light: 'var(--color-edge-light, #353850)',
-  				focus: 'var(--color-primary-600, #4f46e5)'
+  				DEFAULT: 'rgb(var(--color-edge) / <alpha-value>)',
+  				light: 'rgb(var(--color-edge-light, 53 56 80) / <alpha-value>)',
+  				focus: 'rgb(var(--color-primary-600, 79 70 229) / <alpha-value>)'
   			},
   			text: {
-  				primary: 'var(--color-text-primary)',
-  				secondary: 'var(--color-text-secondary)',
-  				muted: 'var(--color-text-muted, #6b7194)',
-  				inverse: 'var(--color-text-inverse, #0f1117)'
+  				primary: 'rgb(var(--color-text-primary) / <alpha-value>)',
+  				secondary: 'rgb(var(--color-text-secondary) / <alpha-value>)',
+  				muted: 'rgb(var(--color-text-muted, 107 113 148) / <alpha-value>)',
+  				inverse: 'rgb(var(--color-text-inverse, 15 17 23) / <alpha-value>)'
   			},
   			status: {
   				online: '#34d399',

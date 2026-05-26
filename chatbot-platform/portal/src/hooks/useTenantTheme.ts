@@ -84,12 +84,15 @@ export function useTenantTheme() {
     const root = document.documentElement;
     const { palette, h, s } = generatePalette(baseColor);
 
-    // Set numbered scale
+    // Set numbered scale as "R G B" channels so Tailwind's /opacity works
     for (const [step, hex] of Object.entries(palette)) {
-      root.style.setProperty(`--color-primary-${step}`, hex);
+      const r = parseInt(hex.slice(1, 3), 16);
+      const g = parseInt(hex.slice(3, 5), 16);
+      const b = parseInt(hex.slice(5, 7), 16);
+      root.style.setProperty(`--color-primary-${step}`, `${r} ${g} ${b}`);
     }
 
-    // Set RGB for glow shadows (from the 500 step)
+    // Set comma-separated RGB for glow shadows / rgba() consumers (from the 500 step)
     const r500 = parseInt(palette['500'].slice(1, 3), 16);
     const g500 = parseInt(palette['500'].slice(3, 5), 16);
     const b500 = parseInt(palette['500'].slice(5, 7), 16);

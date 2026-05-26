@@ -513,7 +513,7 @@ const SortableSectionRow: React.FC<SortableSectionRowProps> = ({
         ref={ref}
         className={cn(
           'relative group flex items-center gap-1 rounded-lg px-1.5 py-1.5 transition-opacity',
-          isActive ? 'bg-primary-500/10' : 'hover:bg-surface-3',
+          isActive ? 'bg-primary-500/20 text-primary-300' : 'hover:bg-surface-3',
           isDragging && 'opacity-40',
         )}
       >

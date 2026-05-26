@@ -27,10 +27,10 @@ const DropdownMenuSubTrigger = React.forwardRef<
   <DropdownMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-default select-none items-center rounded-md px-2 py-1.5 text-sm outline-none",
+      "flex cursor-pointer select-none items-center rounded-md px-2 py-1.5 text-sm outline-none",
       "transition-colors duration-100",
-      "focus:bg-primary-500/[0.08] dark:focus:bg-primary-400/[0.10]",
-      "data-[state=open]:bg-primary-500/[0.08] dark:data-[state=open]:bg-primary-400/[0.10]",
+      "focus:bg-surface-3 data-[highlighted]:bg-surface-3",
+      "data-[state=open]:bg-surface-3",
       inset && "pl-8",
       className
     )}
@@ -98,10 +98,10 @@ const DropdownMenuItem = React.forwardRef<
   <DropdownMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center rounded-md px-2 py-1.5",
+      "relative flex cursor-pointer select-none items-center rounded-md px-2 py-1.5",
       "text-sm text-text-primary outline-none",
       "transition-colors duration-100",
-      "focus:bg-primary-500/[0.08] dark:focus:bg-primary-400/[0.10]",
+      "focus:bg-surface-3 data-[highlighted]:bg-surface-3",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       inset && "pl-8",
       className
@@ -118,10 +118,10 @@ const DropdownMenuCheckboxItem = React.forwardRef<
   <DropdownMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2",
+      "relative flex cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2",
       "text-sm outline-none",
       "transition-colors duration-100",
-      "focus:bg-primary-500/[0.08] dark:focus:bg-primary-400/[0.10]",
+      "focus:bg-surface-3 data-[highlighted]:bg-surface-3",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className
     )}
@@ -146,10 +146,10 @@ const DropdownMenuRadioItem = React.forwardRef<
   <DropdownMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center rounded-md py-1.5 pl-8 pr-2",
+      "relative flex cursor-pointer select-none items-center rounded-md py-1.5 pl-8 pr-2",
       "text-sm outline-none",
       "transition-colors duration-100",
-      "focus:bg-primary-500/[0.08] dark:focus:bg-primary-400/[0.10]",
+      "focus:bg-surface-3 data-[highlighted]:bg-surface-3",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className
     )}

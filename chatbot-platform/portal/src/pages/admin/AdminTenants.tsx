@@ -5,8 +5,8 @@
 
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
-import { Loader2, Search, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2, Search, Plus, MoreHorizontal, ChevronRight, Eye, Crown, Ban, Power } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -16,7 +16,16 @@ import {
   useOptimisticSuspendTenant,
   useOptimisticActivateTenant,
   useCreateTenant,
+  useSetTenantTier,
+  type ManualTier,
 } from '../../queries/useAdminQueries';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -52,8 +61,10 @@ import { extractApiErrorMessage } from '@services/apiClient';
 /*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
-type TenantTier = 'free' | 'pro' | 'enterprise';
+type TenantTier = 'free' | 'essential' | 'pro' | 'enterprise';
 type TenantStatus = 'active' | 'suspended' | 'cancelled';
+
+const TIER_OPTIONS: TenantTier[] = ['free', 'essential', 'pro', 'enterprise'];
 
 interface AdminTenant {
   id: string;
@@ -74,6 +85,8 @@ function tierBadgeClass(tier: TenantTier): string {
       return 'bg-accent-500/10 text-accent-400 border-accent-500/20';
     case 'pro':
       return 'bg-primary-600/10 text-primary-400 border-primary-600/20';
+    case 'essential':
+      return 'bg-sky-500/10 text-sky-400 border-sky-500/20';
     default:
       return 'bg-surface-3 text-text-muted border-edge';
   }
@@ -104,6 +117,7 @@ function formatDate(iso: string): string {
 
 const AdminTenants: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<TenantTier | 'all'>('all');
   const [statusFilter, setStatusFilter] = useState<TenantStatus | 'all'>('all');
@@ -112,6 +126,10 @@ const AdminTenants: React.FC = () => {
   const [createError, setCreateError] = useState<string | null>(null);
   const [mutatingRowIds, setMutatingRowIds] = useState<Set<string>>(new Set());
 
+  /* ---- Tier dialog ---- */
+  const [tierTarget, setTierTarget] = useState<AdminTenant | null>(null);
+  const [pendingTier, setPendingTier] = useState<TenantTier | null>(null);
+
   /* ---- Data ---- */
   const { data, isLoading, isError } = useAdminTenants();
 
@@ -119,6 +137,7 @@ const AdminTenants: React.FC = () => {
   const suspendMutation = useOptimisticSuspendTenant();
   const activateMutation = useOptimisticActivateTenant();
   const createMutation = useCreateTenant();
+  const setTierMutation = useSetTenantTier();
 
   /* ---- Derived list ---- */
   const tenants = (data as AdminTenant[] | undefined) ?? [];
@@ -177,6 +196,7 @@ const AdminTenants: React.FC = () => {
           <SelectContent>
             <SelectItem value="all">{t('admin.tenants.filters.allTiers')}</SelectItem>
             <SelectItem value="free">{t('admin.tenants.tiers.free')}</SelectItem>
+            <SelectItem value="essential">{t('admin.tenants.tiers.essential')}</SelectItem>
             <SelectItem value="pro">{t('admin.tenants.tiers.pro')}</SelectItem>
             <SelectItem value="enterprise">{t('admin.tenants.tiers.enterprise')}</SelectItem>
           </SelectContent>
@@ -220,79 +240,108 @@ const AdminTenants: React.FC = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((tenant) => (
-                  <TableRow
-                    key={tenant.id}
-                    className={cn(
-                      mutatingRowIds.has(tenant.id) && 'opacity-60 pointer-events-none',
-                    )}
-                  >
-                    <TableCell>
-                      <Link to={`/admin/tenants/${tenant.id}`} className="font-medium text-text-primary hover:text-primary-400 transition-colors">
-                        {tenant.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-text-secondary font-mono text-sm">
-                      {tenant.slug}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={tierBadgeClass(tenant.tier)}>
-                        {t(`admin.tenants.tiers.${tenant.tier}`)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={statusBadgeClass(tenant.status)}>
-                        {t(`admin.tenants.statuses.${tenant.status}`)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-text-secondary">
-                      {formatDate(tenant.createdAt)}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {tenant.status === 'active' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isMutating}
-                          onClick={() => {
-                            addMutatingRow(tenant.id);
-                            suspendMutation.mutate(tenant.id, {
-                              onSettled: () => removeMutatingRow(tenant.id),
-                            });
-                          }}
-                          className="text-status-busy border-status-busy/30 hover:bg-status-busy/10"
-                        >
-                          {suspendMutation.isPending ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            t('admin.tenants.actions.suspend')
-                          )}
-                        </Button>
-                      ) : tenant.status === 'suspended' ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={isMutating}
-                          onClick={() => {
-                            addMutatingRow(tenant.id);
-                            activateMutation.mutate(tenant.id, {
-                              onSettled: () => removeMutatingRow(tenant.id),
-                            });
-                          }}
-                          className="text-status-online border-status-online/30 hover:bg-status-online/10"
-                        >
-                          {activateMutation.isPending ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            t('admin.tenants.actions.activate')
-                          )}
-                        </Button>
-                      ) : (
-                        <span className="text-text-muted text-sm">—</span>
+                {filtered.map((tenant) => {
+                  const rowBusy = mutatingRowIds.has(tenant.id);
+                  return (
+                    <TableRow
+                      key={tenant.id}
+                      onClick={() => navigate(`/admin/tenants/${tenant.id}`)}
+                      className={cn(
+                        'group cursor-pointer',
+                        rowBusy && 'opacity-60 pointer-events-none',
                       )}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                    >
+                      <TableCell>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-medium text-text-primary transition-colors group-hover:text-primary-400">
+                            {tenant.name}
+                          </span>
+                          <ChevronRight className="w-3.5 h-3.5 text-text-muted opacity-0 -translate-x-1 transition-all group-hover:opacity-100 group-hover:translate-x-0" />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-text-secondary font-mono text-sm">
+                        {tenant.slug}
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={tierBadgeClass(tenant.tier)}>
+                          {t(`admin.tenants.tiers.${tenant.tier}`)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge className={statusBadgeClass(tenant.status)}>
+                          {t(`admin.tenants.statuses.${tenant.status}`)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-text-secondary">
+                        {formatDate(tenant.createdAt)}
+                      </TableCell>
+                      {/* Actions: stop row-navigation when interacting with the menu */}
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-text-muted hover:text-text-primary"
+                              aria-label={t('admin.tenants.actions.openMenu')}
+                            >
+                              {rowBusy ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                              ) : (
+                                <MoreHorizontal className="w-4 h-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-48">
+                            <DropdownMenuItem onClick={() => navigate(`/admin/tenants/${tenant.id}`)}>
+                              <Eye className="w-4 h-4 mr-2" />
+                              {t('admin.tenants.actions.viewDetails')}
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setTierTarget(tenant);
+                                setPendingTier(null);
+                              }}
+                            >
+                              <Crown className="w-4 h-4 mr-2" />
+                              {t('admin.tenants.actions.changeTier')}
+                            </DropdownMenuItem>
+                            {tenant.status !== 'cancelled' && <DropdownMenuSeparator />}
+                            {tenant.status === 'active' ? (
+                              <DropdownMenuItem
+                                className="text-status-busy focus:text-status-busy"
+                                disabled={isMutating}
+                                onClick={() => {
+                                  addMutatingRow(tenant.id);
+                                  suspendMutation.mutate(tenant.id, {
+                                    onSettled: () => removeMutatingRow(tenant.id),
+                                  });
+                                }}
+                              >
+                                <Ban className="w-4 h-4 mr-2" />
+                                {t('admin.tenants.actions.suspend')}
+                              </DropdownMenuItem>
+                            ) : tenant.status === 'suspended' ? (
+                              <DropdownMenuItem
+                                className="text-status-online focus:text-status-online"
+                                disabled={isMutating}
+                                onClick={() => {
+                                  addMutatingRow(tenant.id);
+                                  activateMutation.mutate(tenant.id, {
+                                    onSettled: () => removeMutatingRow(tenant.id),
+                                  });
+                                }}
+                              >
+                                <Power className="w-4 h-4 mr-2" />
+                                {t('admin.tenants.actions.activate')}
+                              </DropdownMenuItem>
+                            ) : null}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -345,6 +394,7 @@ const AdminTenants: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="free">{t('admin.tenants.tiers.free')}</SelectItem>
+                    <SelectItem value="essential">{t('admin.tenants.tiers.essential')}</SelectItem>
                     <SelectItem value="pro">{t('admin.tenants.tiers.pro')}</SelectItem>
                     <SelectItem value="enterprise">{t('admin.tenants.tiers.enterprise')}</SelectItem>
                   </SelectContent>
@@ -399,6 +449,108 @@ const AdminTenants: React.FC = () => {
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   t('admin.tenants.create.submit')
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Change Tier Dialog (manual override) */}
+      <AlertDialog
+        open={tierTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTierTarget(null);
+            setPendingTier(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <div className="relative">
+            <LoadingOverlay
+              isLoading={setTierMutation.isPending}
+              message={t('admin.tenantDetail.tierDialog.updating')}
+            />
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t('admin.tenantDetail.tierDialog.title')}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t('admin.tenantDetail.tierDialog.descriptionBefore')}{' '}
+                <strong>{tierTarget?.name}</strong>
+                {t('admin.tenantDetail.tierDialog.descriptionAfter')}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-2 gap-2">
+                {TIER_OPTIONS.map((tier) => {
+                  const isCurrent = tierTarget?.tier === tier;
+                  const isSelected = pendingTier === tier;
+                  return (
+                    <button
+                      key={tier}
+                      type="button"
+                      onClick={() => !isCurrent && setPendingTier(tier)}
+                      disabled={isCurrent}
+                      className={cn(
+                        'text-left rounded-lg border px-3 py-2.5 transition-colors',
+                        isCurrent && 'border-edge bg-surface-3 opacity-60 cursor-not-allowed',
+                        isSelected && 'border-accent-500/60 bg-accent-500/10',
+                        !isCurrent && !isSelected && 'border-edge hover:border-edge-strong hover:bg-surface-3',
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-text-primary">{t(`admin.tenants.tiers.${tier}`)}</span>
+                        {isCurrent && (
+                          <span className="text-xs text-text-muted">{t('admin.tenantDetail.tierDialog.current')}</span>
+                        )}
+                        {isSelected && (
+                          <span className="text-xs text-accent-400">{t('admin.tenantDetail.tierDialog.selected')}</span>
+                        )}
+                      </div>
+                      <p className="text-xs text-text-muted mt-1">
+                        {t(`admin.tenantDetail.tierDialog.tierDescriptions.${tier}`)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-300 leading-relaxed">
+                <strong>{t('admin.tenantDetail.tierDialog.noteLabel')}</strong>{' '}
+                {t('admin.tenantDetail.tierDialog.stripeWarning')}
+              </div>
+            </div>
+
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={setTierMutation.isPending}>
+                {t('common.cancel')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!tierTarget || !pendingTier) return;
+                  setTierMutation.mutate(
+                    { id: tierTarget.id, tier: pendingTier as ManualTier },
+                    {
+                      onSuccess: () => {
+                        setTierTarget(null);
+                        setPendingTier(null);
+                      },
+                    },
+                  );
+                }}
+                disabled={!pendingTier || setTierMutation.isPending}
+                className="bg-accent-500 hover:bg-accent-500/90"
+              >
+                {setTierMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : pendingTier ? (
+                  t('admin.tenantDetail.tierDialog.setTo', {
+                    tier: t(`admin.tenants.tiers.${pendingTier}`),
+                  })
+                ) : (
+                  t('admin.tenantDetail.tierDialog.pickATier')
                 )}
               </AlertDialogAction>
             </AlertDialogFooter>

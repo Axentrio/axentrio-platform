@@ -1054,7 +1054,10 @@
       "actions": {
         "createTenant": "Tenant aanmaken",
         "suspend": "Opschorten",
-        "activate": "Activeren"
+        "activate": "Activeren",
+        "viewDetails": "Details bekijken",
+        "changeTier": "Tier wijzigen",
+        "openMenu": "Menu openen"
       },
       "filters": {
         "searchPlaceholder": "Zoek op naam of slug…",
@@ -1066,7 +1069,8 @@
       "tiers": {
         "free": "Free",
         "pro": "Pro",
-        "enterprise": "Enterprise"
+        "enterprise": "Enterprise",
+        "essential": "Essential"
       },
       "statuses": {
         "active": "Actief",

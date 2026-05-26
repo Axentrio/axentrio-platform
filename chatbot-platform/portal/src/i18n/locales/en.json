@@ -1095,7 +1095,10 @@
       "actions": {
         "createTenant": "Create Tenant",
         "suspend": "Suspend",
-        "activate": "Activate"
+        "activate": "Activate",
+        "viewDetails": "View details",
+        "changeTier": "Change tier",
+        "openMenu": "Open menu"
       },
       "filters": {
         "searchPlaceholder": "Search by name or slug…",
@@ -1107,7 +1110,8 @@
       "tiers": {
         "free": "Free",
         "pro": "Pro",
-        "enterprise": "Enterprise"
+        "enterprise": "Enterprise",
+        "essential": "Essential"
       },
       "statuses": {
         "active": "Active",

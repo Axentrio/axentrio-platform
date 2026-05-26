@@ -124,8 +124,8 @@ export function TenantCommandPalette() {
                 className={cn(
                   'w-full flex items-center justify-between rounded-md px-2 py-2 text-sm text-left',
                   'transition-colors duration-100 cursor-pointer',
-                  'hover:bg-primary-500/[0.08]',
-                  isActive && 'bg-primary-500/[0.05]',
+                  'hover:bg-surface-3',
+                  isActive && 'bg-surface-3',
                   isInactive && 'opacity-50 cursor-not-allowed'
                 )}
               >

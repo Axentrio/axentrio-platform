@@ -39,3 +39,13 @@ export function getMetaPageAccessToken(credentials: Record<string, unknown>): st
   if (!token) return null;
   return decryptCredential(token, true);
 }
+
+/**
+ * Get the system-user / phone-number access token from a WhatsApp Cloud API
+ * connection, decrypting it.
+ */
+export function getWhatsAppAccessToken(credentials: Record<string, unknown>): string | null {
+  const token = credentials.accessToken as string | undefined;
+  if (!token) return null;
+  return decryptCredential(token, true);
+}

@@ -157,6 +157,12 @@ const envSchema = z.object({
   META_OAUTH_REDIRECT_URI: z.string().optional(),
   META_OAUTH_JWT_SECRET: z.string().optional(),
 
+  // WhatsApp Cloud API. App secret falls back to META_APP_SECRET (same Meta app);
+  // verify token falls back to META_VERIFY_TOKEN. Override only if WhatsApp lives
+  // in a separate app or you want a distinct webhook verify token.
+  WHATSAPP_APP_SECRET: z.string().optional(),
+  WHATSAPP_VERIFY_TOKEN: z.string().optional(),
+
   // Billing — Stripe (required in non-test environments; validated below).
   // M0 subscription epic: EUR-only catalog (Essential + Pro). Enterprise is sales-led
   // and has no self-serve price ID. Premium tier removed entirely.
@@ -410,6 +416,12 @@ export const config = {
     verifyToken: env.META_VERIFY_TOKEN || '',
     oauthRedirectUri: env.META_OAUTH_REDIRECT_URI || '',
     oauthJwtSecret: env.META_OAUTH_JWT_SECRET || '',
+  },
+
+  whatsapp: {
+    // Shared Meta app secret unless WhatsApp uses a separate app.
+    appSecret: env.WHATSAPP_APP_SECRET || env.META_APP_SECRET || '',
+    verifyToken: env.WHATSAPP_VERIFY_TOKEN || env.META_VERIFY_TOKEN || '',
   },
 
   email: {

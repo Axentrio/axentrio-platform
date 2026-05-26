@@ -48,6 +48,10 @@ _Avoid_: plan, subscription level, account type (use Tier).
 A contact captured during a ChatSession by the agent's `capture_lead` tool. Promoted to its own entity (rather than ChatSession metadata) at Essential tier. Holds `name`, `email`, `normalizedEmail`, `phone`, `source`, `status`, `notes`, `capturedAt`, `customFields` (Pro+ tier), and optional `assignedUserId` / `score` / `scoreReason` (Pro+/Enterprise). Upserted by `(tenantId, normalizedEmail)` so a returning visitor doesn't create duplicates. The sidebar surface is **Leads** (the things); the agent-behaviour setting/toggle is called **Lead Capture**.
 _Avoid_: contact, prospect, customer, visitor (use Lead).
 
+**Copilot**:
+The platform-side AI that answers tenant-admin questions inside the portal — explaining how Axentrio works, surfacing the admin's own tenant state, pointing at the right settings page. Distinct from `Agent`, which serves the Tenant's customers via the chat widget. Pro+ feature (`platformAssistant` entitlement flag). Marketed user-facing as **AI Platform Assistant**; in code, ADRs, API responses, DB columns, and engineering discussion, always use `Copilot`.
+_Avoid_: assistant, bot, helper, AI Platform Assistant (use Copilot — the marketing label is an alias, not a domain term).
+
 ## Relationships
 
 - A **Tenant** owns one or more **Agents** and one or more **KnowledgeBases**

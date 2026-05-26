@@ -40,6 +40,10 @@ import { FaqSection } from './entities/FaqSection';
 import { FaqItem } from './entities/FaqItem';
 import { DemandSignal } from './entities/DemandSignal';
 import { Lead } from './entities/Lead';
+import { CopilotDoc } from './entities/CopilotDoc';
+import { CopilotConversation } from './entities/CopilotConversation';
+import { CopilotMessage } from './entities/CopilotMessage';
+import { CopilotTrace } from './entities/CopilotTrace';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -87,6 +91,10 @@ export const AppDataSource = new DataSource({
     FaqItem,
     DemandSignal,
     Lead,
+    CopilotDoc,
+    CopilotConversation,
+    CopilotMessage,
+    CopilotTrace,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

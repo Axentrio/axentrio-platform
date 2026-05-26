@@ -30,3 +30,16 @@ export { FaqSection, type FaqTranslation } from './FaqSection';
 export { FaqItem } from './FaqItem';
 export { DemandSignal } from './DemandSignal';
 export { Lead, type LeadSource } from './Lead';
+export { CopilotDoc, type CopilotLocale } from './CopilotDoc';
+export { CopilotConversation } from './CopilotConversation';
+export {
+  CopilotMessage,
+  type CopilotMessageRole,
+  type CopilotMessageOutcome,
+  type CopilotToolCallSummary,
+} from './CopilotMessage';
+export {
+  CopilotTrace,
+  type CopilotTraceOutcome,
+  type CopilotRetrievalMode,
+} from './CopilotTrace';

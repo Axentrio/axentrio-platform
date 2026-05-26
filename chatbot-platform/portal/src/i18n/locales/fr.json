@@ -1186,6 +1186,13 @@
         },
         "noteLabel": "Remarque :",
         "stripeWarning": "si ce tenant a un abonnement Stripe actif, cette action ne l'annule pas. Ouvrez le dashboard Stripe et annulez-y l'abonnement pour arrêter les prélèvements.",
+        "disposition": {
+          "title": "Abonnement Stripe actif :",
+          "explainer": "cette action ne l'annule pas, le client continue donc d'être facturé sur un palier Gratuit. Choisissez ce qu'il advient de l'abonnement :",
+          "will_cancel": "J'ai annulé / vais annuler l'abonnement dans le dashboard Stripe",
+          "leave_active": "Laisser l'abonnement actif intentionnellement",
+          "reasonPlaceholder": "Pourquoi l'abonnement reste-t-il actif ? (obligatoire — consigné dans le journal d'audit)"
+        },
         "setTo": "Définir sur {{tier}}",
         "pickATier": "Choisissez un palier"
       },
@@ -1829,6 +1836,51 @@
     "subscribeNow": "S'abonner à Essential",
     "contactSales": "Contacter les ventes",
     "error": "Impossible de démarrer le paiement. Veuillez réessayer."
+  },
+  "copilot": {
+    "launcher": {
+      "tooltip": "Interroger l'assistant IA de la plateforme",
+      "tooltipLocked": "Assistant IA de la plateforme — inclus avec Pro"
+    },
+    "drawer": {
+      "title": "Assistant IA de la plateforme",
+      "closeAria": "Fermer l'assistant",
+      "clear": "Effacer la conversation",
+      "clearAria": "Effacer la conversation",
+      "loading": "Chargement de la conversation…",
+      "placeholder": "Posez une question sur votre bot, votre plan, vos leads ou comment faire quelque chose dans Axentrio…",
+      "sendAria": "Envoyer le message",
+      "thinking": "Réflexion…",
+      "rateLimited": "Vous envoyez trop vite — réessayez dans {{seconds}} secondes.",
+      "toolBadgeTooltip": "L'assistant a consulté {{name}}",
+      "welcome": {
+        "title": "Bonjour 👋",
+        "body": "Demandez-moi des informations sur votre bot, votre plan, vos leads ou comment faire quelque chose dans Axentrio. Je peux répondre à partir de la documentation et consulter les données de votre tenant — mais je ne peux rien modifier pour vous.",
+        "examples": [
+          "Sur quel plan suis-je et quand est-il renouvelé ?",
+          "Combien de leads avons-nous capturés cette semaine ?",
+          "Comment connecter Cal.com ?",
+          "Pourquoi mon bot ne répond-il pas ?"
+        ]
+      },
+      "outcome": {
+        "aborted": "[annulé]",
+        "error": "[échec]",
+        "tooLong": "[trop long]",
+        "interrupted": "[interrompu]",
+        "empty": "[aucune réponse]"
+      }
+    },
+    "locked": {
+      "title": "Débloquer l'assistant IA de la plateforme",
+      "oneLiner": "Une IA dans le portail qui répond à vos questions sur la plateforme et expose les données de votre tenant — inclus avec Pro et Enterprise.",
+      "bullets": [
+        "Posez des questions sur votre bot, votre plan, vos leads ou vos intégrations",
+        "Obtenez des réponses instantanées basées sur la documentation Axentrio",
+        "Voyez les statistiques en direct — \"combien de leads cette semaine ?\""
+      ],
+      "historyNote": "Vos conversations précédentes sont conservées et seront à nouveau disponibles dès que vous passerez à un plan supérieur."
+    }
   },
   "bots": {
     "tab": {

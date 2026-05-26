@@ -101,4 +101,8 @@ export const queryKeys = {
     list: (cursor?: string | null) =>
       [...queryKeys.leads.all(), 'list', cursor ?? null] as const,
   },
+  copilot: {
+    all: () => ['copilot'] as const,
+    conversation: () => [...queryKeys.copilot.all(), 'conversation'] as const,
+  },
 };

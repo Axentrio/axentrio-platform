@@ -1186,6 +1186,13 @@
         },
         "noteLabel": "Let op:",
         "stripeWarning": "als deze tenant een actief Stripe-abonnement heeft, wordt dat hiermee niet geannuleerd. Open het Stripe dashboard en annuleer het abonnement daar om verdere kosten te voorkomen.",
+        "disposition": {
+          "title": "Actief Stripe-abonnement:",
+          "explainer": "deze actie annuleert het niet, dus de klant wordt nog steeds gefactureerd op een Gratis abonnement. Kies wat ermee gebeurt:",
+          "will_cancel": "Ik heb het abonnement geannuleerd / ga het annuleren in het Stripe dashboard",
+          "leave_active": "Het abonnement bewust actief laten",
+          "reasonPlaceholder": "Waarom blijft het abonnement actief? (verplicht — vastgelegd in het auditlogboek)"
+        },
         "setTo": "Instellen op {{tier}}",
         "pickATier": "Kies een tier"
       },
@@ -1829,6 +1836,51 @@
     "subscribeNow": "Abonneer op Essential",
     "contactSales": "Neem contact op met sales",
     "error": "Kon de afrekenpagina niet starten. Probeer het opnieuw."
+  },
+  "copilot": {
+    "launcher": {
+      "tooltip": "Vraag het de AI-platformassistent",
+      "tooltipLocked": "AI-platformassistent — inbegrepen bij Pro"
+    },
+    "drawer": {
+      "title": "AI-platformassistent",
+      "closeAria": "Assistent sluiten",
+      "clear": "Gesprek wissen",
+      "clearAria": "Gesprek wissen",
+      "loading": "Gesprek laden…",
+      "placeholder": "Vraag iets over je bot, abonnement, leads of hoe je iets doet in Axentrio…",
+      "sendAria": "Bericht verzenden",
+      "thinking": "Aan het nadenken…",
+      "rateLimited": "Je stuurt te snel — probeer het opnieuw over {{seconds}} seconden.",
+      "toolBadgeTooltip": "De assistent zocht {{name}} op",
+      "welcome": {
+        "title": "Hallo 👋",
+        "body": "Vraag me over je bot, abonnement, leads of hoe je iets doet in Axentrio. Ik kan antwoorden op basis van de documentatie en de gegevens van je tenant — maar ik kan niets voor je wijzigen.",
+        "examples": [
+          "Op welk abonnement zit ik en wanneer wordt het verlengd?",
+          "Hoeveel leads hebben we deze week verzameld?",
+          "Hoe verbind ik Cal.com?",
+          "Waarom antwoordt mijn bot niet?"
+        ]
+      },
+      "outcome": {
+        "aborted": "[afgebroken]",
+        "error": "[mislukt]",
+        "tooLong": "[duurde te lang]",
+        "interrupted": "[onderbroken]",
+        "empty": "[geen antwoord]"
+      }
+    },
+    "locked": {
+      "title": "Ontgrendel de AI-platformassistent",
+      "oneLiner": "Een AI in het portaal die je platformvragen beantwoordt en de gegevens van je tenant toont — inbegrepen bij Pro en Enterprise.",
+      "bullets": [
+        "Stel vragen over je bot, abonnement, leads of integraties",
+        "Krijg directe antwoorden gebaseerd op de Axentrio-documentatie",
+        "Bekijk live statistieken — \"hoeveel leads deze week?\""
+      ],
+      "historyNote": "Je eerdere gesprekken blijven bewaard en zijn weer beschikbaar zodra je upgradet."
+    }
   },
   "bots": {
     "tab": {

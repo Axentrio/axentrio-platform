@@ -4,7 +4,8 @@
   "description": "Core API Server with WebSocket Gateway for Chatbot Platform",
   "main": "dist/server.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && ts-node scripts/build-copilot-docs.ts",
+    "build:copilot-docs": "ts-node scripts/build-copilot-docs.ts",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "typeorm": "typeorm-ts-node-commonjs",

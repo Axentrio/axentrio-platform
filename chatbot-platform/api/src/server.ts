@@ -48,6 +48,7 @@ import demandSignalsRoutes from './routes/demand-signals.routes';
 import leadsRoutes from './routes/leads.routes';
 import entitlementsRoutes from './routes/entitlements.routes';
 import faqRoutes from './routes/faq.routes';
+import copilotRoutes from './copilot/routes';
 import skillsRoutes from './routes/skills.routes';
 import automationsRoutes from './routes/automations.routes';
 import sessionManagementRoutes from './routes/session-management.routes';
@@ -217,6 +218,10 @@ if (config.server.isDevelopment) {
 // API routes under /api/v1
 const apiRouter = express.Router();
 apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
+// Copilot SSE stream can run up to 60s (agent loop hard timeout) plus a
+// few hundred ms for the final UPDATE + trace INSERT + clean SSE close.
+// 90s leaves headroom without letting a runaway loop hang the connection.
+apiRouter.use('/copilot', timeoutMiddleware(90000), copilotRoutes);
 apiRouter.use(timeoutMiddleware(30000));
 apiRouter.use('/auth', authRoutes);
 apiRouter.use('/chats', chatRoutes);
@@ -269,6 +274,15 @@ async function startServer(): Promise<void> {
       logger.info('Database migrations completed');
     } else {
       logger.info('Database schema is up to date');
+    }
+
+    // Hydrate Copilot docs corpus from the build-time bundle. Throws
+    // if the bundle is missing or empty — Copilot can't serve without
+    // its corpus, and silent fall-through would deliver "I don't know"
+    // to every question.
+    {
+      const { hydrateCopilotDocs } = await import('./copilot/hydrate');
+      await hydrateCopilotDocs(AppDataSource);
     }
 
     await initializeRedis();

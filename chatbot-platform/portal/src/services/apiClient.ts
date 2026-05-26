@@ -64,12 +64,21 @@ const PLAN_LIMIT_COPY: Record<string, string> = {
   plan_limit_custom_branding: 'Custom branding isn\'t available on your current plan. Upgrade to enable it.',
 };
 
+// Plan-gate codes whose 402 response should NOT fire a global toast.
+// These features render their own locked-preview surface that handles
+// the upgrade UX inline (M9a Copilot, future locked-preview-only
+// features). The toast would be noise on top of an already-locked UI.
+const PLAN_LIMIT_NO_TOAST: ReadonlySet<string> = new Set([
+  'plan_limit_platform_assistant',
+]);
+
 function handlePlanLimit(error: AxiosError): void {
   if (error.response?.status !== 402) return;
   const body = error.response.data as
     | { error?: { code?: string; message?: string; details?: { limit?: number } } }
     | undefined;
   const code = body?.error?.code ?? '';
+  if (PLAN_LIMIT_NO_TOAST.has(code)) return;
   const message =
     PLAN_LIMIT_COPY[code] ??
     body?.error?.message ??

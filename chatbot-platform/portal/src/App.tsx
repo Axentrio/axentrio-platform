@@ -55,6 +55,11 @@ import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
 
+// Copilot (AI Platform Assistant) — Pro+ feature, locked-but-visible
+import { CopilotDrawerProvider } from '@components/copilot/CopilotDrawerProvider';
+import { CopilotLauncher } from '@components/copilot/CopilotLauncher';
+import { CopilotDrawer } from '@components/copilot/CopilotDrawer';
+
 const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // Create Query Client
@@ -153,6 +158,9 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         </main>
       </div>
       {isSuperAdmin && <TenantCommandPalette />}
+      {/* Copilot — single render site so the drawer persists across route navigation. */}
+      <CopilotLauncher />
+      <CopilotDrawer />
     </div>
   );
 };
@@ -282,6 +290,7 @@ const App: React.FC = () => {
             <BrowserRouter>
               <SocketProvider>
               <ErrorBoundary>
+              <CopilotDrawerProvider>
               <AuthenticatedLayout>
                 <OrganizationRequired>
                   <Routes>
@@ -339,6 +348,7 @@ const App: React.FC = () => {
                   </Routes>
                 </OrganizationRequired>
               </AuthenticatedLayout>
+              </CopilotDrawerProvider>
               </ErrorBoundary>
               </SocketProvider>
             </BrowserRouter>

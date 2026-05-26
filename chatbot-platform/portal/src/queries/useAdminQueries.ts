@@ -167,11 +167,17 @@ export function useSetTenantTier() {
       tier: ManualTier;
       currentPeriodEnd?: string | null;
       billingEmail?: string | null;
+      // Required by the backend when downgrading to Free while a live Stripe
+      // subscription exists (the override does not cancel it).
+      stripeDisposition?: 'will_cancel' | 'leave_active' | null;
+      dispositionReason?: string | null;
     }) =>
       api.post(`/admin/tenants/${input.id}/set-tier`, {
         tier: input.tier,
         currentPeriodEnd: input.currentPeriodEnd ?? null,
         billingEmail: input.billingEmail ?? null,
+        stripeDisposition: input.stripeDisposition ?? null,
+        dispositionReason: input.dispositionReason ?? null,
       }),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(vars.id) });

@@ -21,10 +21,12 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { PendingInvite } from '../../database/entities/PendingInvite';
+import { BillingEvent } from '../../database/entities/BillingEvent';
 import {
   createTestTenant,
   createTestUser,
   createTestPendingInvite,
+  createTestBillingAccount,
 } from '../helpers/factories';
 
 describe('Admin Invite Resend/Cancel', () => {
@@ -95,6 +97,76 @@ describe('Admin Invite Resend/Cancel', () => {
         .send();
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('POST /api/v1/admin/tenants/:id/set-tier — forced Stripe disposition', () => {
+    async function giveActiveStripeSub(tid: string) {
+      await createTestBillingAccount(tid, {
+        provider: 'stripe',
+        status: 'active',
+        currentPlanId: 'pro',
+        subscriptionId: `sub_${tid.slice(0, 8)}`,
+        isPrimary: true,
+      });
+    }
+
+    it('rejects override→free with an active Stripe sub and no disposition (400)', async () => {
+      await giveActiveStripeSub(tenantId);
+
+      const res = await request(app)
+        .post(`/api/v1/admin/tenants/${tenantId}/set-tier`)
+        .send({ tier: 'free' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('rejects leave_active without a reason (400)', async () => {
+      await giveActiveStripeSub(tenantId);
+
+      const res = await request(app)
+        .post(`/api/v1/admin/tenants/${tenantId}/set-tier`)
+        .send({ tier: 'free', stripeDisposition: 'leave_active', dispositionReason: '   ' });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('accepts will_cancel and records it on the tier.manual_override event', async () => {
+      await giveActiveStripeSub(tenantId);
+
+      const res = await request(app)
+        .post(`/api/v1/admin/tenants/${tenantId}/set-tier`)
+        .send({ tier: 'free', stripeDisposition: 'will_cancel' });
+
+      expect(res.status).toBe(200);
+
+      const events = await AppDataSource.getRepository(BillingEvent).find({
+        where: { tenantId, eventType: 'tier.manual_override' },
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0].payload).toMatchObject({
+        newTier: 'free',
+        stripeDisposition: 'will_cancel',
+      });
+    });
+
+    it('does not require a disposition when no live Stripe sub exists', async () => {
+      const res = await request(app)
+        .post(`/api/v1/admin/tenants/${tenantId}/set-tier`)
+        .send({ tier: 'free' });
+
+      expect(res.status).toBe(200);
+    });
+
+    it('GET /tenants exposes hasActiveStripeSubscription', async () => {
+      await giveActiveStripeSub(tenantId);
+
+      const res = await request(app).get('/api/v1/admin/tenants');
+
+      expect(res.status).toBe(200);
+      const row = (res.body.data as Array<{ id: string; hasActiveStripeSubscription?: boolean }>)
+        .find((t) => t.id === tenantId);
+      expect(row?.hasActiveStripeSubscription).toBe(true);
     });
   });
 });

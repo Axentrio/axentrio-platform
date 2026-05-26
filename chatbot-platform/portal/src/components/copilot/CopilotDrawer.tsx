@@ -350,6 +350,22 @@ function InflightAssistant({ inflight }: { inflight: CopilotInflightTurn }) {
   );
 }
 
+/**
+ * Humanise a tool name for the badge:
+ *   getTenantSummary          → "tenant summary"
+ *   getRecentChatSessionStats → "recent chat session stats"
+ *   getKnownGapTopics         → "known gap topics"
+ * Strips the leading `get` verb, splits camelCase on capitals,
+ * lowercases. Tool names without the `getXxx` shape pass through.
+ */
+function humaniseToolName(name: string): string {
+  const stripped = name.startsWith('get') ? name.slice(3) : name;
+  return stripped
+    .replace(/([A-Z])/g, ' $1')
+    .trim()
+    .toLowerCase();
+}
+
 function ToolBadge({
   name,
   outcome,
@@ -367,13 +383,13 @@ function ToolBadge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] uppercase tracking-wide',
+        'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] tracking-wide',
         colorClass,
       )}
       title={t('copilot.drawer.toolBadgeTooltip', { name })}
     >
       <Wrench className="h-3 w-3" />
-      {name}
+      {humaniseToolName(name)}
     </span>
   );
 }

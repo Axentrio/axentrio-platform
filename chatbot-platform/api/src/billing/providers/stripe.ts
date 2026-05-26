@@ -90,6 +90,48 @@ function readCurrentPeriodEnd(
   return firstItem?.current_period_end;
 }
 
+/**
+ * Stripe API `2025-03-31.basil` (and dahlia after it) moved
+ * `invoice.subscription` to `invoice.parent.subscription_details.subscription`.
+ * The legacy field is still emitted on older pinned API versions; this
+ * helper reads either shape and returns the subscription id (or
+ * undefined when the invoice is one-off — not subscription-tied at all).
+ *
+ * `parent.type` is `'subscription_details'` for sub invoices; for other
+ * invoice kinds the field is absent. We tolerate both string and
+ * expanded-object forms (Stripe expands when `expand=['parent']` is
+ * passed; otherwise it's a string id).
+ */
+function readInvoiceSubscriptionId(
+  invoice: StripeNS.Invoice,
+): string | undefined {
+  // Legacy (pre-basil) shape: invoice.subscription
+  const legacy = (invoice as unknown as {
+    subscription?: string | { id?: string } | null;
+  }).subscription;
+  if (typeof legacy === 'string') return legacy;
+  if (legacy && typeof legacy === 'object' && typeof legacy.id === 'string') {
+    return legacy.id;
+  }
+
+  // Basil+ shape: invoice.parent.subscription_details.subscription
+  const parent = (invoice as unknown as {
+    parent?: {
+      type?: string;
+      subscription_details?: {
+        subscription?: string | { id?: string } | null;
+      };
+    };
+  }).parent;
+  const sub = parent?.subscription_details?.subscription;
+  if (typeof sub === 'string') return sub;
+  if (sub && typeof sub === 'object' && typeof sub.id === 'string') {
+    return sub.id;
+  }
+
+  return undefined;
+}
+
 function priceIdFor(planId: CheckoutablePlanId): string {
   const id = getStripePriceIdFor(planId);
   if (!id) {
@@ -625,13 +667,11 @@ export class StripeBillingProvider implements BillingProvider {
           typeof invoice.customer === 'string'
             ? invoice.customer
             : invoice.customer?.id ?? '';
-        const subId =
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          typeof (invoice as any).subscription === 'string'
-            ? // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ((invoice as any).subscription as string)
-            : // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ((invoice as any).subscription as { id?: string } | null | undefined)?.id;
+        // basil moved invoice.subscription → invoice.parent.subscription_
+        // details.subscription. Helper reads either shape so past_due
+        // recovery + payment-failure routing keep working on both
+        // pinned API versions.
+        const subId = readInvoiceSubscriptionId(invoice);
         return {
           providerEventId: event.id,
           type: event.type === 'invoice.paid' ? 'invoice.paid' : 'invoice.payment_failed',

@@ -10,15 +10,30 @@
  * `normalizeWebhookEvent` in providers/stripe.ts for the inverse.
  *
  * --- API VERSION NOTE ---
- * Fixtures here track the pre-Basil event shape (Stripe API
- * < `2025-03-31`). stripe-node v22 still defaults to a pre-Basil
- * pinned version, and Stripe sends webhooks in the version pinned to
- * the account / endpoint, so this is what we receive today.
+ * normalizeWebhookEvent reads BOTH shapes for every field that Stripe
+ * has migrated since 2025. The default fixtures here use the pre-Basil
+ * shape (root-level `current_period_end`, root-level
+ * `invoice.subscription`) — most existing tests use them and don't care
+ * which shape they're in. Dedicated tests below pin the post-migration
+ * shapes:
  *
- * Basil (2025-03-31) deprecates `invoice.subscription` in favor of
- * `invoice.parent.subscription_details.subscription`. If/when we upgrade
- * the SDK or pin a newer apiVersion, BOTH normalizeWebhookEvent and these
- * fixtures need updating. See:
+ *   - `current_period_end` moved from subscription root to
+ *     subscription_item in `2026-04-22.dahlia` — see
+ *     `readCurrentPeriodEnd()` in providers/stripe.ts. Two dahlia +
+ *     legacy tests below.
+ *
+ *   - `invoice.subscription` moved to
+ *     `invoice.parent.subscription_details.subscription` in
+ *     `2025-03-31.basil` — see `readInvoiceSubscriptionId()`. Three
+ *     basil + legacy + dual-field tests below.
+ *
+ * Webhooks arrive in the API version pinned to the account / endpoint /
+ * Stripe CLI — `stripe listen` uses the workbench-pinned version, which
+ * for this account is currently `2026-04-22.dahlia` (production webhook
+ * endpoint inherits whatever was selected when it was created). Tests
+ * cover both ends so a future version flip can't silently break
+ * subscription/invoice routing.
+ *
  * https://docs.stripe.com/changelog/basil/2025-03-31/adds-new-parent-field-to-invoicing-objects
  */
 
@@ -179,6 +194,68 @@ describe('normalizeWebhookEvent — per event type', () => {
     expect(normalized!.type).toBe('invoice.paid');
     expect(normalized!.subscriptionId).toBeUndefined();
     expect(normalized!.customerId).toBe('cus_invoice');
+  });
+
+  // Stripe API 2025-03-31.basil moved invoice.subscription to
+  // invoice.parent.subscription_details.subscription. A real-world bug
+  // would manifest as past_due → recovery silently no-op'ing because
+  // the dispatcher couldn't resolve the TBA row by subscription_id.
+  // readInvoiceSubscriptionId() is the helper that papers over both
+  // shapes; these tests pin its contract.
+  it('reads invoice.subscription from parent.subscription_details (basil API shape)', () => {
+    const p = makeProvider();
+    const basilInvoice = {
+      customer: 'cus_basil',
+      // No legacy invoice.subscription. New shape:
+      parent: {
+        type: 'subscription_details',
+        subscription_details: {
+          subscription: 'sub_basil_42',
+        },
+      },
+      hosted_invoice_url: 'https://stripe.example/i',
+    };
+    const normalized = p.normalizeWebhookEvent(makeEvent('invoice.paid', basilInvoice));
+
+    expect(normalized!.subscriptionId).toBe('sub_basil_42');
+  });
+
+  it('reads expanded invoice.parent.subscription_details.subscription as object', () => {
+    const p = makeProvider();
+    const expandedInvoice = {
+      customer: 'cus_expanded',
+      parent: {
+        type: 'subscription_details',
+        subscription_details: {
+          subscription: { id: 'sub_expanded_84', status: 'active' },
+        },
+      },
+    };
+    const normalized = p.normalizeWebhookEvent(
+      makeEvent('invoice.paid', expandedInvoice),
+    );
+
+    expect(normalized!.subscriptionId).toBe('sub_expanded_84');
+  });
+
+  it('legacy invoice.subscription still wins when both fields are present', () => {
+    // Defensive: a Stripe webhook with both fields populated (could
+    // happen during a brief transition window if a connection straddles
+    // pinned-version boundaries) should prefer the legacy field — it's
+    // the field the older code path was reading and any state derived
+    // from it would already exist locally under that id.
+    const p = makeProvider();
+    const dualInvoice = {
+      customer: 'cus_dual',
+      subscription: 'sub_legacy_wins',
+      parent: {
+        type: 'subscription_details',
+        subscription_details: { subscription: 'sub_basil_loses' },
+      },
+    };
+    const normalized = p.normalizeWebhookEvent(makeEvent('invoice.paid', dualInvoice));
+
+    expect(normalized!.subscriptionId).toBe('sub_legacy_wins');
   });
 
   it('maps invoice.payment_failed → invoice.payment_failed', () => {

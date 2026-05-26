@@ -1,12 +1,12 @@
-import axios from 'axios';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
-import { OutboundTransport, OutboundChannelMessage, DeliveryResult, ChannelCapabilities } from '../types';
+import { OutboundChannelMessage, ChannelCapabilities } from '../types';
 import { getMetaPageAccessToken } from '../credential-utils';
-import { logger } from '../../utils/logger';
+import { IG_GRAPH_API } from './graph-api';
+import { GraphOutboundTransport, GraphSendRequest } from './graph-outbound-transport';
 
-const IG_GRAPH_API = 'https://graph.instagram.com/v21.0';
+export class InstagramOutboundTransport extends GraphOutboundTransport {
+  protected readonly logTag = '[instagram]';
 
-export class InstagramOutboundTransport implements OutboundTransport {
   getCapabilities(): ChannelCapabilities {
     return {
       maxTextLength: 1000,
@@ -31,51 +31,28 @@ export class InstagramOutboundTransport implements OutboundTransport {
     };
   }
 
-  async send(
-    message: OutboundChannelMessage,
-    externalThreadId: string,
-    connection: ChannelConnection,
-  ): Promise<DeliveryResult> {
+  protected buildRequest(connection: ChannelConnection): GraphSendRequest | { error: string } {
     const accessToken = getMetaPageAccessToken(connection.credentials);
+    if (!accessToken) return { error: 'No page access token' };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const igBusinessId = (connection.credentials as any).igBusinessId || connection.platformAccountId;
+    return {
+      url: `${IG_GRAPH_API}/${igBusinessId}/messages`,
+      config: { params: { access_token: accessToken }, timeout: 10000 },
+    };
+  }
 
-    if (!accessToken) {
-      return { success: false, error: 'No page access token', retryable: false };
-    }
-
-    try {
-      const body = this.buildSendBody(message, externalThreadId);
-      const response = await axios.post(
-        `${IG_GRAPH_API}/${igBusinessId}/messages`,
-        body,
-        {
-          params: { access_token: accessToken },
-          timeout: 10000,
-        },
-      );
-
-      return {
-        success: true,
-        platformMessageId: response.data?.message_id,
-      };
-    } catch (error) {
-      const errMsg = axios.isAxiosError(error)
-        ? error.response?.data?.error?.message || error.message
-        : error instanceof Error ? error.message : 'Unknown error';
-      const retryable = axios.isAxiosError(error)
-        ? (error.response?.status || 0) >= 500 || error.response?.status === 429
-        : true;
-
-      logger.error(`[instagram] Send failed to ${externalThreadId}:`, errMsg);
-      return { success: false, error: errMsg, retryable };
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected extractMessageId(data: any): string | undefined {
+    return data?.message_id;
   }
 
   async sendTypingIndicator(_externalThreadId: string, _connection: ChannelConnection): Promise<void> {
     // Instagram does not support typing indicators
   }
 
-  private buildSendBody(
+  protected buildSendBody(
     message: OutboundChannelMessage,
     recipientId: string,
   ): Record<string, unknown> {

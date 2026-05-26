@@ -1,12 +1,13 @@
 import axios from 'axios';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
-import { OutboundTransport, OutboundChannelMessage, DeliveryResult, ChannelCapabilities } from '../types';
+import { OutboundChannelMessage, ChannelCapabilities } from '../types';
 import { getMetaPageAccessToken } from '../credential-utils';
-import { logger } from '../../utils/logger';
+import { FB_GRAPH_API as GRAPH_API } from './graph-api';
+import { GraphOutboundTransport, GraphSendRequest } from './graph-outbound-transport';
 
-const GRAPH_API = 'https://graph.facebook.com/v21.0';
+export class MessengerOutboundTransport extends GraphOutboundTransport {
+  protected readonly logTag = '[messenger]';
 
-export class MessengerOutboundTransport implements OutboundTransport {
   getCapabilities(): ChannelCapabilities {
     return {
       maxTextLength: 2000,
@@ -31,47 +32,22 @@ export class MessengerOutboundTransport implements OutboundTransport {
     };
   }
 
-  async send(
-    message: OutboundChannelMessage,
-    externalThreadId: string,
-    connection: ChannelConnection,
-  ): Promise<DeliveryResult> {
+  protected buildRequest(connection: ChannelConnection): GraphSendRequest | { error: string } {
     const accessToken = getMetaPageAccessToken(connection.credentials);
-    if (!accessToken) {
-      return { success: false, error: 'No page access token', retryable: false };
-    }
+    if (!accessToken) return { error: 'No page access token' };
 
     const pageId = connection.platformAccountId;
-    if (!pageId) {
-      return { success: false, error: 'No page ID', retryable: false };
-    }
+    if (!pageId) return { error: 'No page ID' };
 
-    try {
-      const body = this.buildSendBody(message, externalThreadId);
-      const response = await axios.post(
-        `${GRAPH_API}/${pageId}/messages`,
-        body,
-        {
-          params: { access_token: accessToken },
-          timeout: 10000,
-        },
-      );
+    return {
+      url: `${GRAPH_API}/${pageId}/messages`,
+      config: { params: { access_token: accessToken }, timeout: 10000 },
+    };
+  }
 
-      return {
-        success: true,
-        platformMessageId: response.data?.message_id,
-      };
-    } catch (error) {
-      const errMsg = axios.isAxiosError(error)
-        ? error.response?.data?.error?.message || error.message
-        : error instanceof Error ? error.message : 'Unknown error';
-      const retryable = axios.isAxiosError(error)
-        ? (error.response?.status || 0) >= 500 || error.response?.status === 429
-        : true;
-
-      logger.error(`[messenger] Send failed to ${externalThreadId}:`, errMsg);
-      return { success: false, error: errMsg, retryable };
-    }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  protected extractMessageId(data: any): string | undefined {
+    return data?.message_id;
   }
 
   async sendTypingIndicator(externalThreadId: string, connection: ChannelConnection): Promise<void> {
@@ -94,7 +70,7 @@ export class MessengerOutboundTransport implements OutboundTransport {
     }
   }
 
-  private buildSendBody(
+  protected buildSendBody(
     message: OutboundChannelMessage,
     recipientId: string,
   ): Record<string, unknown> {

@@ -2,8 +2,9 @@ import axios from 'axios';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { config } from '../../config/environment';
-
-const GRAPH_API = 'https://graph.facebook.com/v21.0';
+import { FB_GRAPH_API as GRAPH_API, FB_OAUTH_DIALOG } from './graph-api';
+import { logger } from '../../utils/logger';
+import { getRedisClient } from '../../config/redis';
 
 // Scopes must be added to the app in Meta Developer Console before requesting.
 // Start with core messaging scopes; add instagram scopes after enabling in console.
@@ -46,7 +47,7 @@ export function buildOAuthUrl(tenantId: string): string {
     auth_type: 'rerequest', // Force re-show permission dialog
   });
 
-  return `https://www.facebook.com/v21.0/dialog/oauth?${params.toString()}`;
+  return `${FB_OAUTH_DIALOG}?${params.toString()}`;
 }
 
 /**
@@ -94,9 +95,9 @@ export async function handleOAuthCallback(code: string): Promise<{
       params: { access_token: longLivedUserToken },
       timeout: 10000,
     });
-    console.log('[meta-oauth] Token permissions:', JSON.stringify(debugResponse.data.data));
+    logger.debug('[meta-oauth] Token permissions', { permissions: debugResponse.data.data });
   } catch (e: any) {
-    console.log('[meta-oauth] Permission check failed:', e.response?.data || e.message);
+    logger.debug('[meta-oauth] Permission check failed', { error: e.response?.data || e.message });
   }
 
   // 3. Get pages the user manages (personal pages)
@@ -136,14 +137,14 @@ export async function handleOAuthCallback(code: string): Promise<{
           }
         }
       } catch (e: any) {
-        console.log(`[meta-oauth] Failed to get pages for business ${biz.id}:`, e.response?.data?.error?.message || e.message);
+        logger.warn(`[meta-oauth] Failed to get pages for business ${biz.id}`, { error: e.response?.data?.error?.message || e.message });
       }
     }
   } catch (e: any) {
-    console.log('[meta-oauth] Failed to get businesses:', e.response?.data?.error?.message || e.message);
+    logger.warn('[meta-oauth] Failed to get businesses', { error: e.response?.data?.error?.message || e.message });
   }
 
-  console.log('[meta-oauth] Total pages found:', allPageData.map((p: any) => ({ id: p.id, name: p.name, tasks: p.tasks })));
+  logger.debug('[meta-oauth] Total pages found', { pages: allPageData.map((p: any) => ({ id: p.id, name: p.name, tasks: p.tasks })) });
 
   const pages: MetaPage[] = [];
 
@@ -178,27 +179,46 @@ export async function handleOAuthCallback(code: string): Promise<{
     { expiresIn: '15m' },
   );
 
-  // Store page tokens temporarily in memory (keyed by page ID)
-  // In production, use Redis. For now, module-level Map with TTL.
-  for (const page of pages) {
-    pageTokenCache.set(page.id, {
-      accessToken: page.accessToken,
-      expiresAt: Date.now() + 15 * 60 * 1000,
-    });
-  }
+  // Stash page tokens for the short window between this callback and /connect.
+  await Promise.all(pages.map((page) => cachePageToken(page.id, page.accessToken)));
 
   return { pages, sessionToken };
 }
 
-// TODO: Replace with Redis for multi-instance deployments.
-// Currently, OAuth callback and /connect may hit different instances,
-// causing "No valid pages found" errors with multiple replicas.
-const pageTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
+// Page tokens are cached in Redis so the OAuth callback and the subsequent
+// /connect request resolve the same token even when they land on different
+// instances. A module-level Map is kept only as a single-instance fallback when
+// Redis is unavailable (graceful degradation, matching the rest of the app).
+const PAGE_TOKEN_TTL_MS = 15 * 60 * 1000;
+const pageTokenKey = (pageId: string) => `meta:page_token:${pageId}`;
+const fallbackTokenCache = new Map<string, { accessToken: string; expiresAt: number }>();
 
-export function getCachedPageToken(pageId: string): string | null {
-  const cached = pageTokenCache.get(pageId);
+async function cachePageToken(pageId: string, accessToken: string): Promise<void> {
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      await redis.set(pageTokenKey(pageId), accessToken, 'PX', PAGE_TOKEN_TTL_MS);
+      return;
+    } catch (err) {
+      logger.warn('[meta-oauth] Redis set failed, using in-memory fallback', { error: err });
+    }
+  }
+  fallbackTokenCache.set(pageId, { accessToken, expiresAt: Date.now() + PAGE_TOKEN_TTL_MS });
+}
+
+export async function getCachedPageToken(pageId: string): Promise<string | null> {
+  const redis = getRedisClient();
+  if (redis) {
+    try {
+      const token = await redis.get(pageTokenKey(pageId));
+      if (token) return token;
+    } catch (err) {
+      logger.warn('[meta-oauth] Redis get failed, using in-memory fallback', { error: err });
+    }
+  }
+  const cached = fallbackTokenCache.get(pageId);
   if (!cached || cached.expiresAt < Date.now()) {
-    pageTokenCache.delete(pageId);
+    fallbackTokenCache.delete(pageId);
     return null;
   }
   return cached.accessToken;

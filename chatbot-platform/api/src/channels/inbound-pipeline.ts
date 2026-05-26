@@ -9,6 +9,7 @@ import { AppDataSource, getRepository } from '../database/data-source';
 import { WebhookEventLog } from '../database/entities/WebhookEventLog';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { ChatSession } from '../database/entities/ChatSession';
+import { Bot } from '../database/entities/Bot';
 import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
@@ -183,8 +184,9 @@ async function handleReceiptEvent(
 
 /**
  * Find an existing conversation binding or create a new session + participant + binding.
+ * Exported for regression testing of the per-tenant session creation (bot_id).
  */
-async function findOrCreateConversation(
+export async function findOrCreateConversation(
   event: NormalizedEvent,
   connection: ChannelConnection,
 ): Promise<{ session: ChatSession; participant: Participant; binding: ConversationBinding }> {
@@ -217,6 +219,16 @@ async function findOrCreateConversation(
     }
   }
 
+  // Channel sessions must reference the tenant's anchor (default) bot —
+  // chat_sessions.bot_id is NOT NULL. Channels are tenant-level, so all inbound
+  // conversations route to the anchor bot.
+  const anchorBot = await getRepository(Bot).findOne({
+    where: { tenantId: connection.tenantId, isDefault: true },
+  });
+  if (!anchorBot) {
+    throw new Error(`No anchor bot found for tenant ${connection.tenantId}; cannot create channel session`);
+  }
+
   if (existingBinding && (!existingBinding.session || existingBinding.session.status === 'closed')) {
     // Session is closed — create new session and update existing binding
     return AppDataSource.transaction(async (manager: EntityManager) => {
@@ -236,6 +248,7 @@ async function findOrCreateConversation(
 
       const newSession = manager.create(ChatSession, {
         tenantId: connection.tenantId,
+        botId: anchorBot.id,
         visitorId: event.sender.externalUserId,
         status: 'waiting',
         source: connection.channel,
@@ -295,6 +308,7 @@ async function findOrCreateConversation(
 
     const sessionData = manager.create(ChatSession, {
       tenantId: connection.tenantId,
+      botId: anchorBot.id,
       visitorId: event.sender.externalUserId,
       status: 'waiting',
       source: connection.channel,

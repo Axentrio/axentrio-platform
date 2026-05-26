@@ -308,10 +308,15 @@ describe('runCopilotTurn', () => {
   it('abort mid-stream → outcome=aborted, partial content persisted, error event emitted', async () => {
     const ac = new AbortController();
     const llm = makeScriptedLlm([
-      { tokens: ['p', 'a', 'r', 't', 'i', 'a', 'l'], delayMs: 20, finishReason: 'stop' },
+      // 1s pre-token delay gives a huge margin: the abort timer below fires
+      // (after runCopilotTurn attaches its listener) long before the stream
+      // would yield, so the abort reliably wins regardless of CI load.
+      // Replaces the old flaky 5ms-vs-20ms race.
+      { tokens: ['p', 'a', 'r', 't', 'i', 'a', 'l'], delayMs: 1000, finishReason: 'stop' },
     ]);
-    // Abort almost immediately so the stream is interrupted.
-    setTimeout(() => ac.abort(), 5);
+    // Fire after the turn starts (so the abort listener catches it), but well
+    // within the 1s stream window.
+    setTimeout(() => ac.abort(), 20);
     const sink = new BufferedSSESink();
     const result = await runCopilotTurn({
       dataSource: AppDataSource,

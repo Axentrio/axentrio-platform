@@ -81,6 +81,24 @@
     }
   },
   "leads": {
+    "title": "Leads",
+    "intro": "Elke contactpersoon die je chatbot heeft vastgelegd. De agent roept capture_lead aan zodra een bezoeker een e-mailadres deelt.",
+    "loadMore": "Meer laden",
+    "empty": {
+      "title": "Nog geen leads",
+      "body": "Zodra de chatbot de contactgegevens van een bezoeker vastlegt — minimaal naam + e-mail — verschijnen ze hier."
+    },
+    "table": {
+      "name": "Naam",
+      "contact": "Contact",
+      "source": "Bron",
+      "capturedAt": "Vastgelegd"
+    },
+    "detail": {
+      "fromSession": "Uit sessie",
+      "notes": "Notities",
+      "createdAt": "Aangemaakt op"
+    },
     "locked": {
       "title": "Leads vastleggen",
       "oneLiner": "Leg de intentie van elke bezoeker vast en verander gesprekken in gekwalificeerde leads.",
@@ -89,10 +107,6 @@
         "2": "Aangepaste velden en routeringsregels zodat de juiste persoon de juiste lead krijgt.",
         "3": "Exporteer leads naar CSV of je CRM via webhook."
       }
-    },
-    "placeholder": {
-      "title": "Leads vastleggen",
-      "subtitle": "De leadcapture-module landt hier in M6."
     }
   },
   "socialMedia": {

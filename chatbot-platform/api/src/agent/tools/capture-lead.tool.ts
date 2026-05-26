@@ -1,6 +1,7 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
+import { Lead } from '../../database/entities/Lead';
 import type { LeadCreatedEvent } from '../../webhooks/webhook.types';
 
 export class CaptureLeadTool implements ToolAdapter {
@@ -24,22 +25,53 @@ export class CaptureLeadTool implements ToolAdapter {
     const phone = args.phone as string | undefined;
 
     try {
-      // Persist lead info into session metadata
-      await ctx.dataSource.query(
-        `UPDATE chat_sessions SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{lead}', $1::jsonb) WHERE id = $2`,
-        [JSON.stringify({ name, email, phone: phone ?? null, capturedAt: new Date().toISOString() }), ctx.sessionId]
-      );
-
-      // Build and fire webhook event (fire-and-forget)
+      // Load the session so we can populate bot_id on the Lead row and have
+      // the channel/visitor metadata for the outbound webhook event.
       let session: ChatSession | null = null;
       try {
         session = await ctx.dataSource
           .getRepository(ChatSession)
           .findOne({ where: { id: ctx.sessionId } });
       } catch {
-        // non-fatal — session base will use defaults
+        // non-fatal — webhook event base will use defaults
       }
 
+      // M6: leads are now first-class. Write to `chatbot_leads` as the
+      // source of truth.
+      const leadRepo = ctx.dataSource.getRepository(Lead);
+      const lead = await leadRepo.save(
+        leadRepo.create({
+          tenantId: ctx.tenantId,
+          sessionId: ctx.sessionId,
+          botId: session?.botId ?? null,
+          name,
+          email,
+          phone: phone ?? null,
+          source: 'tool',
+          metadata: {},
+        }),
+      );
+
+      // Keep the legacy `session.metadata.lead` mirror so existing n8n
+      // workflows that read it still work. A future cleanup migration
+      // will retire this once everything's been switched over.
+      await ctx.dataSource.query(
+        `UPDATE chat_sessions SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{lead}', $1::jsonb) WHERE id = $2`,
+        [
+          JSON.stringify({
+            name,
+            email,
+            phone: phone ?? null,
+            capturedAt: lead.createdAt.toISOString(),
+            leadId: lead.id,
+          }),
+          ctx.sessionId,
+        ],
+      );
+
+      // Fire-and-forget outbound webhook so external systems (n8n, CRM)
+      // can react in real time. The event shape pre-dates the Lead table
+      // and is intentionally backwards-compatible.
       const base = buildEventBase('lead.created', ctx.tenantId, {
         id: ctx.sessionId,
         channel: session?.channel ?? 'widget',
@@ -57,7 +89,10 @@ export class CaptureLeadTool implements ToolAdapter {
 
       emitWebhookEvent(event);
 
-      return { success: true, data: { message: 'Lead captured', name, email } };
+      return {
+        success: true,
+        data: { message: 'Lead captured', name, email, leadId: lead.id },
+      };
     } catch (err) {
       return {
         success: false,

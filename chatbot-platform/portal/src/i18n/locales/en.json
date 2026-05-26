@@ -81,6 +81,24 @@
     }
   },
   "leads": {
+    "title": "Leads",
+    "intro": "Every contact your chatbot has captured. The agent fires capture_lead whenever a visitor shares their email.",
+    "loadMore": "Load more",
+    "empty": {
+      "title": "No leads yet",
+      "body": "When the chatbot captures a visitor's contact details — name + email at minimum — they'll show up here."
+    },
+    "table": {
+      "name": "Name",
+      "contact": "Contact",
+      "source": "Source",
+      "capturedAt": "Captured"
+    },
+    "detail": {
+      "fromSession": "From session",
+      "notes": "Notes",
+      "createdAt": "Created at"
+    },
     "locked": {
       "title": "Lead Capture",
       "oneLiner": "Capture every visitor's intent and turn conversations into qualified leads.",
@@ -89,10 +107,6 @@
         "2": "Custom fields and routing rules so the right person gets the right lead.",
         "3": "Export leads to CSV or your CRM via webhook."
       }
-    },
-    "placeholder": {
-      "title": "Lead Capture",
-      "subtitle": "Lead capture module landing here in M6."
     }
   },
   "socialMedia": {

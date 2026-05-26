@@ -81,6 +81,24 @@
     }
   },
   "leads": {
+    "title": "Leads",
+    "intro": "Chaque contact capturé par votre chatbot. L'agent déclenche capture_lead dès qu'un visiteur partage son e-mail.",
+    "loadMore": "Charger plus",
+    "empty": {
+      "title": "Aucun lead pour l'instant",
+      "body": "Lorsque le chatbot capture les coordonnées d'un visiteur — nom + e-mail au minimum — ils apparaîtront ici."
+    },
+    "table": {
+      "name": "Nom",
+      "contact": "Contact",
+      "source": "Source",
+      "capturedAt": "Capturé"
+    },
+    "detail": {
+      "fromSession": "Depuis la session",
+      "notes": "Notes",
+      "createdAt": "Créé le"
+    },
     "locked": {
       "title": "Capture de leads",
       "oneLiner": "Capturez l'intention de chaque visiteur et transformez les conversations en leads qualifiés.",
@@ -89,10 +107,6 @@
         "2": "Champs personnalisés et règles d'attribution pour que la bonne personne reçoive le bon lead.",
         "3": "Exportez les leads vers CSV ou votre CRM via webhook."
       }
-    },
-    "placeholder": {
-      "title": "Capture de leads",
-      "subtitle": "Le module de capture de leads arrivera ici en M6."
     }
   },
   "socialMedia": {

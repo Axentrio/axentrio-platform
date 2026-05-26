@@ -96,4 +96,9 @@ export const queryKeys = {
     list: () => [...queryKeys.bots.all(), 'list'] as const,
     embed: (botId: string) => [...queryKeys.bots.all(), 'embed', botId] as const,
   },
+  leads: {
+    all: () => ['leads'] as const,
+    list: (cursor?: string | null) =>
+      [...queryKeys.leads.all(), 'list', cursor ?? null] as const,
+  },
 };

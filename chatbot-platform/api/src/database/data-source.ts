@@ -39,6 +39,7 @@ import { TenantTrialReservation } from './entities/TenantTrialReservation';
 import { FaqSection } from './entities/FaqSection';
 import { FaqItem } from './entities/FaqItem';
 import { DemandSignal } from './entities/DemandSignal';
+import { Lead } from './entities/Lead';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -85,6 +86,7 @@ export const AppDataSource = new DataSource({
     FaqSection,
     FaqItem,
     DemandSignal,
+    Lead,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

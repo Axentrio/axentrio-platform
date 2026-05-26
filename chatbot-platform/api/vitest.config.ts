@@ -2,9 +2,11 @@ import { defineConfig } from 'vitest/config';
 import path from 'path';
 import dotenv from 'dotenv';
 
-// Load .env.test (override:true so re-runs / parent shells don't poison the
-// test environment with stale values).
-dotenv.config({ path: path.resolve(__dirname, '.env.test'), override: true });
+// Load .env.test. Locally we override so a stale parent-shell value can't
+// poison the test env. In CI the workflow injects TEST_DATABASE_URL itself
+// (pointing at the service container on :5432), so we must NOT override —
+// otherwise .env.test's local :5433 value clobbers it and tests can't connect.
+dotenv.config({ path: path.resolve(__dirname, '.env.test'), override: !process.env.CI });
 
 // `src/config/environment.ts` calls `dotenv.config({ path: .env })` on
 // import, which would otherwise pull the production DATABASE_URL into the

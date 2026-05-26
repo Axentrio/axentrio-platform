@@ -20,11 +20,20 @@ import {
   UpdateDateColumn,
   ManyToOne,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Tenant } from './Tenant';
 import { User } from './User';
 
 @Entity('chatbot_copilot_conversations')
+// Partial unique index — only ONE active (archived_at IS NULL) row per
+// (tenant_id, user_id). Mirrors the migration; declared here so the
+// synchronize-built test schema gets it too. ON CONFLICT against this
+// index requires the same WHERE clause (not the index name).
+@Index('uq_chatbot_copilot_conv_active', ['tenantId', 'userId'], {
+  unique: true,
+  where: '"archived_at" IS NULL',
+})
 export class CopilotConversation {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

@@ -76,6 +76,9 @@ import channelManagementRoutes from './channels/channel-management.routes';
 import { registerChannelAdapter } from './channels/channel-registry';
 import { telegramAdapter } from './channels/telegram';
 import { messengerAdapter, instagramAdapter } from './channels/meta';
+import { whatsappAdapter } from './channels/whatsapp';
+import whatsappWebhookRoutes from './channels/whatsapp/webhook.routes';
+import { registerIntegrationProviders } from './integrations';
 import metaOAuthRoutes, { metaOAuthCallbackRouter } from './channels/meta/oauth.routes';
 
 // Middleware
@@ -101,6 +104,10 @@ app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), cle
 
 // Meta webhook — must use raw body parser for HMAC verification
 app.use('/api/v1/channels/meta/webhook', express.raw({ type: 'application/json' }), metaWebhookRoutes);
+
+// WhatsApp Cloud API webhook — raw body parser for HMAC verification (same
+// scheme as Meta; mounted before express.json() so the Buffer is intact).
+app.use('/api/v1/channels/whatsapp/webhook', express.raw({ type: 'application/json' }), whatsappWebhookRoutes);
 
 // Billing webhooks — must use raw body parser for HMAC verification.
 // Mount BEFORE app-level express.json() so verifyWebhook receives the raw
@@ -390,11 +397,13 @@ async function startServer(): Promise<void> {
     registerChannelAdapter(telegramAdapter);
     registerChannelAdapter(messengerAdapter);
     registerChannelAdapter(instagramAdapter);
+    registerChannelAdapter(whatsappAdapter);
+    registerIntegrationProviders();
     apiRouter.use(channelWebhookRoutes);
     apiRouter.use('/channels', channelManagementRoutes);
     apiRouter.use('/channels/meta/oauth', metaOAuthRoutes); // Authenticated routes (url, pages, connect)
     // Note: OAuth callback mounted at app level before Clerk for unauthenticated Facebook redirect
-    logger.info('Channel adapters registered: telegram, messenger, instagram');
+    logger.info('Channel adapters registered: telegram, messenger, instagram, whatsapp');
 
     // Cleanup old webhook event logs and message deliveries (7-day retention)
     const cleanupChannelLogs = async () => {

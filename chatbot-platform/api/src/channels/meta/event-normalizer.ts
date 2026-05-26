@@ -1,4 +1,5 @@
-import { NormalizedEvent } from '../types';
+import { NormalizedEvent, EventNormalizer } from '../types';
+import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import crypto from 'crypto';
 
 // --- Meta webhook types ---
@@ -108,6 +109,19 @@ export function normalizeMetaPayload(payload: MetaWebhookPayload): Array<{
   }
 
   return results;
+}
+
+/**
+ * Adapter-interface normalizer. Filters the payload to the events for the
+ * resolved connection (matched by channel + Page/IG id) and returns plain
+ * NormalizedEvent[], matching the WhatsApp adapter shape.
+ */
+export class MetaEventNormalizer implements EventNormalizer {
+  normalize(rawPayload: unknown, connection: ChannelConnection): NormalizedEvent[] {
+    return normalizeMetaPayload(rawPayload as MetaWebhookPayload)
+      .filter((r) => r.channel === connection.channel && r.recipientId === connection.platformAccountId)
+      .map((r) => r.event);
+  }
 }
 
 function normalizeMessagingEvent(

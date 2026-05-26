@@ -7,11 +7,11 @@
 import axios from 'axios';
 import { getRepository } from '../database/data-source';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
-import { getTelegramBotToken, getMetaPageAccessToken } from './credential-utils';
+import { getTelegramBotToken, getMetaPageAccessToken, getWhatsAppAccessToken } from './credential-utils';
 import { logger } from '../utils/logger';
+import { FB_GRAPH_API as META_GRAPH_API } from './meta/graph-api';
 
 const TELEGRAM_API = 'https://api.telegram.org';
-const META_GRAPH_API = 'https://graph.facebook.com/v21.0';
 const PROBE_TIMEOUT_MS = 10_000;
 
 export interface HealthCheckOutcome {
@@ -72,6 +72,30 @@ async function probeChannel(conn: ChannelConnection): Promise<HealthCheckOutcome
       );
       if (!res.data?.id) {
         throw new Error('Meta /me returned no id');
+      }
+      return { ok: true, error: null, checkedAt };
+    }
+
+    if (conn.channel === 'whatsapp') {
+      const token = conn.credentials ? getWhatsAppAccessToken(conn.credentials as Record<string, unknown>) : null;
+      const phoneNumberId = conn.platformAccountId;
+      if (!token) {
+        throw new Error('Missing accessToken in stored credentials');
+      }
+      if (!phoneNumberId) {
+        throw new Error('Missing WhatsApp phone number ID');
+      }
+      // Probe the phone number node — confirms the token still owns it.
+      const res = await axios.get<{ id?: string }>(
+        `${META_GRAPH_API}/${phoneNumberId}`,
+        {
+          params: { fields: 'id,verified_name,quality_rating' },
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: PROBE_TIMEOUT_MS,
+        },
+      );
+      if (!res.data?.id) {
+        throw new Error('WhatsApp phone number probe returned no id');
       }
       return { ok: true, error: null, checkedAt };
     }

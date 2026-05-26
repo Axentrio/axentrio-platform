@@ -17,6 +17,10 @@ import {
   disconnectTelegramConnection,
 } from './telegram/setup.service';
 import { disconnectMetaConnection } from './meta/disconnect.service';
+import {
+  setupWhatsAppConnection,
+  disconnectWhatsAppConnection,
+} from './whatsapp/setup.service';
 import { runHealthCheck } from './health-check.service';
 import { requireFeature } from '../billing/enforce';
 
@@ -100,6 +104,50 @@ router.post(
 );
 
 /**
+ * POST /whatsapp/connect
+ * Connect a WhatsApp Cloud API number to the current tenant (single-tenant /
+ * manual onboarding). Body: { phoneNumberId, accessToken, wabaId?, label? }
+ */
+router.post(
+  '/whatsapp/connect',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+
+    const { phoneNumberId, accessToken, wabaId, label } = req.body as {
+      phoneNumberId?: string;
+      accessToken?: string;
+      wabaId?: string;
+      label?: string;
+    };
+
+    if (!phoneNumberId || typeof phoneNumberId !== 'string') {
+      throw new BadRequestError('phoneNumberId is required');
+    }
+    if (!accessToken || typeof accessToken !== 'string') {
+      throw new BadRequestError('accessToken is required');
+    }
+
+    // Same plan gate as other channels — see /telegram/connect note.
+    await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
+
+    const connection = await setupWhatsAppConnection(tenantId, {
+      phoneNumberId,
+      accessToken,
+      wabaId,
+      label,
+    });
+
+    const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;
+    sendCreated(res, safeConnection);
+  }),
+);
+
+/**
  * POST /:connectionId/health-check
  * Run a health check against the platform for this connection.
  * Verifies stored credentials are still valid; updates lastHealthCheckAt + lastError.
@@ -150,6 +198,8 @@ router.delete(
       await disconnectMetaConnection(connectionId);
       // Re-fetch after disconnect to get updated state
       connection = await repo.findOne({ where: { id: connectionId } }) as ChannelConnection;
+    } else if (existing.channel === 'whatsapp') {
+      connection = await disconnectWhatsAppConnection(connectionId);
     } else {
       // Generic disconnect for other channels
       existing.status = 'disconnected';

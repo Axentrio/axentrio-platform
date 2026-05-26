@@ -5,6 +5,7 @@ import { getChannelAdapter } from './channel-registry';
 import { ChannelType } from '../database/entities/ChannelConnection';
 import { processInboundEvent } from './inbound-pipeline';
 import { getChannelInboundQueue } from './inbound-queue.processor';
+import { logger } from '../utils/logger';
 
 const router = Router();
 
@@ -80,7 +81,7 @@ router.all('/channels/:channel/webhook', async (req: Request, res: Response) => 
       }
     } catch (error: any) {
       if (error?.code === '23505') continue; // Duplicate dedupe key
-      console.error(`[channel-webhook] Error processing ${channel} event:`, error);
+      logger.error(`[channel-webhook] Error processing ${channel} event:`, error);
     }
   }
 

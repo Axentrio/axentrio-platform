@@ -3,8 +3,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { encryptCredential } from '../credential-utils';
 import { logger } from '../../utils/logger';
-
-const GRAPH_API = 'https://graph.facebook.com/v21.0';
+import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 
 interface PageToConnect {
   id: string;

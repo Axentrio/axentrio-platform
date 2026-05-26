@@ -138,13 +138,14 @@ router.post(
       const pages = getSessionPages(sessionToken);
 
       // Filter to selected pages and get their tokens from cache
-      const selectedPages = pages
-        .filter((p) => pageIds.includes(p.id))
-        .map((p) => ({
-          ...p,
-          accessToken: getCachedPageToken(p.id) || '',
-        }))
-        .filter((p) => p.accessToken);
+      const selectedPages = (await Promise.all(
+        pages
+          .filter((p) => pageIds.includes(p.id))
+          .map(async (p) => ({
+            ...p,
+            accessToken: (await getCachedPageToken(p.id)) || '',
+          })),
+      )).filter((p) => p.accessToken);
 
       if (selectedPages.length === 0) {
         throw new BadRequestError('No valid pages found. OAuth session may have expired.');

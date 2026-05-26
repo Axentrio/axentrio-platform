@@ -1,35 +1,32 @@
-import { ChannelAdapter, ConnectionResolver, WebhookVerifier, EventNormalizer } from '../types';
+import { config } from '../../config/environment';
+import { ChannelAdapter } from '../types';
+import { GraphWebhookVerifier } from './graph-webhook';
+import { MetaConnectionResolver } from './connection-resolver';
+import { MetaEventNormalizer } from './event-normalizer';
 import { MessengerOutboundTransport } from './messenger-transport';
 import { InstagramOutboundTransport } from './instagram-transport';
 
-// Meta uses a dedicated webhook route, not the generic adapter pipeline.
-// However, we still register adapters so the outbound router can look them up
-// by channel type ('messenger' or 'instagram') for sending responses.
+// Messenger and Instagram are first-class ChannelAdapters sharing the Graph
+// webhook verifier + normalizer. Inbound events arrive on the dedicated
+// raw-body route (meta/webhook.routes.ts), which reuses the same shared
+// createGraphWebhookRouter factory; the outbound router looks these adapters up
+// by channel type to send replies.
 
-// Stub resolver/verifier — Meta webhook handling is in webhook.routes.ts
-const stubResolver: ConnectionResolver = {
-  async resolve() { return null; },
-};
-const stubVerifier: WebhookVerifier = {
-  handleVerificationChallenge() { return null; },
-  verifySignature() { return false; },
-};
-const stubNormalizer: EventNormalizer = {
-  normalize() { return []; },
-};
+const metaVerifier = new GraphWebhookVerifier(config.meta.verifyToken, config.meta.appSecret);
+const metaNormalizer = new MetaEventNormalizer();
 
 export const messengerAdapter: ChannelAdapter = {
   channel: 'messenger',
-  connectionResolver: stubResolver,
-  webhookVerifier: stubVerifier,
-  eventNormalizer: stubNormalizer,
+  connectionResolver: new MetaConnectionResolver('messenger'),
+  webhookVerifier: metaVerifier,
+  eventNormalizer: metaNormalizer,
   outboundTransport: new MessengerOutboundTransport(),
 };
 
 export const instagramAdapter: ChannelAdapter = {
   channel: 'instagram',
-  connectionResolver: stubResolver,
-  webhookVerifier: stubVerifier,
-  eventNormalizer: stubNormalizer,
+  connectionResolver: new MetaConnectionResolver('instagram'),
+  webhookVerifier: metaVerifier,
+  eventNormalizer: metaNormalizer,
   outboundTransport: new InstagramOutboundTransport(),
 };

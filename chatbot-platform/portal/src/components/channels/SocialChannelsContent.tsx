@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-  MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle, RefreshCw,
+  MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle, RefreshCw, Phone,
 } from 'lucide-react';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -28,6 +28,7 @@ import {
 import {
   useChannelConnections,
   useConnectTelegram,
+  useConnectWhatsApp,
   useMetaOAuthUrl,
   useMetaOAuthPages,
   useConnectMeta,
@@ -43,12 +44,14 @@ const CHANNEL_ICONS: Record<string, React.ElementType> = {
   telegram: Bot,
   messenger: MessageCircle,
   instagram: Camera,
+  whatsapp: Phone,
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
   telegram: 'Telegram',
   messenger: 'Messenger',
   instagram: 'Instagram',
+  whatsapp: 'WhatsApp',
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -71,6 +74,13 @@ export function SocialChannelsContent() {
   const [showTelegramModal, setShowTelegramModal] = useState(false);
   const [botToken, setBotToken] = useState('');
   const connectTelegram = useConnectTelegram();
+
+  // WhatsApp connect state
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [waPhoneNumberId, setWaPhoneNumberId] = useState('');
+  const [waAccessToken, setWaAccessToken] = useState('');
+  const [waWabaId, setWaWabaId] = useState('');
+  const connectWhatsApp = useConnectWhatsApp();
 
   // Meta OAuth page selection state
   const metaSetupToken = searchParams.get('meta_setup');
@@ -103,6 +113,19 @@ export function SocialChannelsContent() {
     await connectTelegram.mutateAsync({ botToken: botToken.trim() });
     setBotToken('');
     setShowTelegramModal(false);
+  };
+
+  const handleConnectWhatsApp = async () => {
+    if (!waPhoneNumberId.trim() || !waAccessToken.trim()) return;
+    await connectWhatsApp.mutateAsync({
+      phoneNumberId: waPhoneNumberId.trim(),
+      accessToken: waAccessToken.trim(),
+      wabaId: waWabaId.trim() || undefined,
+    });
+    setWaPhoneNumberId('');
+    setWaAccessToken('');
+    setWaWabaId('');
+    setShowWhatsAppModal(false);
   };
 
   if (isLoading) {
@@ -174,6 +197,9 @@ export function SocialChannelsContent() {
             </Button>
             <Button size="sm" variant="outline" onClick={handleConnectFacebook} disabled={metaOAuthUrl.isPending}>
               <MessageCircle className="h-4 w-4 mr-1" /> {t('ai.social.facebook.title')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setShowWhatsAppModal(true)}>
+              <Phone className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
             </Button>
           </div>
         </CardHeader>
@@ -306,6 +332,95 @@ export function SocialChannelsContent() {
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleConnectTelegram} disabled={!botToken.trim() || connectTelegram.isPending}>
               {connectTelegram.isPending ? t('ai.social.telegram.modal.connecting') : t('ai.social.telegram.modal.connect')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* WhatsApp connect modal */}
+      <AlertDialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t('ai.social.whatsapp.modal.title', { defaultValue: 'Connect WhatsApp' })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('ai.social.whatsapp.modal.description', {
+                defaultValue:
+                  'Connect a WhatsApp Cloud API number using its Phone Number ID and a permanent access token from Meta Business.',
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
+            <summary className="cursor-pointer select-none text-zinc-300">
+              {t('ai.social.whatsapp.modal.help.summary', { defaultValue: 'Where do I find these?' })}
+            </summary>
+            <ol className="mt-2 list-decimal space-y-1 pl-5">
+              <li>
+                {t('ai.social.whatsapp.modal.help.step1', {
+                  defaultValue: 'In the Meta App Dashboard, open WhatsApp → API Setup.',
+                })}
+              </li>
+              <li>
+                {t('ai.social.whatsapp.modal.help.step2', {
+                  defaultValue: 'Copy the Phone number ID and your System User access token.',
+                })}
+              </li>
+              <li>
+                {t('ai.social.whatsapp.modal.help.step3', {
+                  defaultValue:
+                    'Optionally add the WhatsApp Business Account ID so we can subscribe webhooks for you.',
+                })}
+              </li>
+            </ol>
+          </details>
+          <div className="space-y-3 py-4">
+            <div>
+              <Label htmlFor="waPhoneNumberId">
+                {t('ai.social.whatsapp.modal.phoneNumberIdLabel', { defaultValue: 'Phone Number ID' })}
+              </Label>
+              <Input
+                id="waPhoneNumberId"
+                placeholder="123456789012345"
+                value={waPhoneNumberId}
+                onChange={(e) => setWaPhoneNumberId(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="waAccessToken">
+                {t('ai.social.whatsapp.modal.accessTokenLabel', { defaultValue: 'Access Token' })}
+              </Label>
+              <Input
+                id="waAccessToken"
+                type="password"
+                placeholder="EAAG..."
+                value={waAccessToken}
+                onChange={(e) => setWaAccessToken(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="waWabaId">
+                {t('ai.social.whatsapp.modal.wabaIdLabel', {
+                  defaultValue: 'Business Account ID (optional)',
+                })}
+              </Label>
+              <Input
+                id="waWabaId"
+                placeholder="WABA ID"
+                value={waWabaId}
+                onChange={(e) => setWaWabaId(e.target.value)}
+              />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConnectWhatsApp}
+              disabled={!waPhoneNumberId.trim() || !waAccessToken.trim() || connectWhatsApp.isPending}
+            >
+              {connectWhatsApp.isPending
+                ? t('ai.social.whatsapp.modal.connecting', { defaultValue: 'Connecting…' })
+                : t('ai.social.whatsapp.modal.connect', { defaultValue: 'Connect' })}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

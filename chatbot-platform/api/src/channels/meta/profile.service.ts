@@ -1,7 +1,6 @@
 import axios from 'axios';
 import { logger } from '../../utils/logger';
-
-const GRAPH_API = 'https://graph.facebook.com/v21.0';
+import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 
 // Simple in-memory cache with TTL
 const profileCache = new Map<string, { displayName: string; avatarUrl?: string; expiresAt: number }>();

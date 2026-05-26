@@ -112,7 +112,7 @@ describe('runHealthCheck (Meta)', () => {
     const result = await runHealthCheck('conn-1');
 
     expect(axiosGet).toHaveBeenCalledWith(
-      'https://graph.facebook.com/v21.0/me',
+      'https://graph.facebook.com/v25.0/me',
       expect.objectContaining({
         params: expect.objectContaining({ access_token: 'page-token' }),
       }),

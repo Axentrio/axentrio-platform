@@ -51,6 +51,27 @@ export function useConnectTelegram() {
   });
 }
 
+export function useConnectWhatsApp() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (data: {
+      phoneNumberId: string;
+      accessToken: string;
+      wabaId?: string;
+      label?: string;
+    }) => {
+      return api.post('/channels/whatsapp/connect', data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      toast.success('WhatsApp number connected');
+    },
+    onError: (error: Any) => {
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to connect WhatsApp');
+    },
+  });
+}
+
 export function useMetaOAuthUrl() {
   return useMutation({
     mutationFn: async () => {

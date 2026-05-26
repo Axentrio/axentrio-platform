@@ -33,6 +33,13 @@ export async function setup() {
   } catch {
     console.warn('pgvector extension not available — skipping (knowledge base features will not work in tests)');
   }
+  // pg_trgm backs the Copilot lexical retriever (word_similarity over docs).
+  // Same try/catch pattern as pgvector — CI may run plain postgres.
+  try {
+    await ds.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
+  } catch {
+    console.warn('pg_trgm extension not available — Copilot lexical retrieval tests will fail');
+  }
 
   await ds.destroy();
 }

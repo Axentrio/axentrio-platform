@@ -489,8 +489,8 @@ export async function updateVatId(
 /**
  * Read-only snapshot of the tenant's billing state — used by the portal
  * Billing page and by route-level UI gating. Returns primary-row fields,
- * an aggregated `hasStripeSubscription` flag for "Subscribe" vs "Manage"
- * UI decisions, and the last 20 `billing_events` rows.
+ * a `hasStripeSubscription` flag for "Subscribe" vs "Manage" UI decisions,
+ * and the last 20 `billing_events` rows.
  */
 export interface BillingHistoryEntry {
   id: string;
@@ -516,15 +516,12 @@ export interface BillingState {
 }
 
 export async function getBillingState(tenantId: string): Promise<BillingState> {
-  const [tenant, primary, allRows, events] = await Promise.all([
+  const [tenant, primary, events] = await Promise.all([
     AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
       select: ['id', 'tier'],
     }),
     loadPrimaryBillingRow(tenantId),
-    AppDataSource.getRepository(TenantBillingAccount).find({
-      where: { tenantId },
-    }),
     AppDataSource.getRepository(BillingEvent).find({
       where: { tenantId },
       order: { createdAt: 'DESC' },
@@ -539,14 +536,19 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
     throw new Error(`getBillingState: tenant ${tenantId} has no primary billing row`);
   }
 
-  const hasStripeSubscription = allRows.some(
-    (r) =>
-      r.provider === STRIPE &&
-      !!r.subscriptionId &&
-      (r.status === 'trialing' ||
-        r.status === 'active' ||
-        r.status === 'past_due'),
-  );
+  // True only when the PRIMARY billing row is a live Stripe subscription.
+  // This must mirror the primary-row contract every Stripe action enforces:
+  // changePlan / cancelAtPeriodEnd / openCustomerPortal / undo* all reject
+  // with `no_stripe_subscription` unless the PRIMARY row is Stripe. Computing
+  // this from *any* row (e.g. a demoted-but-still-active Stripe row left
+  // behind by a manual tier override) would surface the "Manage" UI whose
+  // actions all 400, while hiding the "Subscribe" tiles — a dead end.
+  const hasStripeSubscription =
+    primary.provider === STRIPE &&
+    !!primary.subscriptionId &&
+    (primary.status === 'trialing' ||
+      primary.status === 'active' ||
+      primary.status === 'past_due');
 
   return {
     tier: tenant.tier,

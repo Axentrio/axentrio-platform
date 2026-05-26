@@ -174,6 +174,46 @@ describe('GET /billing/state', () => {
     expect(Array.isArray(res.body.data.events)).toBe(true);
   });
 
+  it('reports hasStripeSubscription=false when a manual-free override demoted a still-active Stripe row', async () => {
+    // Regression: a super-admin "Set tier → free" demotes the Stripe row to
+    // non-primary but leaves it active in Stripe. hasStripeSubscription must
+    // track the PRIMARY row (now manual/free) so the portal shows Subscribe
+    // tiles — not the Manage actions, which would all 400 on the manual row.
+    const tenant = await createTestTenant({ tier: 'free' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    configureMockAuth(auth, {
+      userId: admin.id,
+      tenantId: tenant.id,
+      role: 'admin',
+    });
+    // Demoted-but-live Stripe row.
+    await createTestBillingAccount(tenant.id, {
+      provider: 'stripe',
+      status: 'active',
+      currentPlanId: 'pro',
+      subscriptionId: 'sub_legacy_active',
+      isPrimary: false,
+    });
+    // Manual primary row from the tier override.
+    await createTestBillingAccount(tenant.id, {
+      provider: 'manual',
+      status: 'none',
+      currentPlanId: 'free',
+      isPrimary: true,
+      trialEnd: null,
+    });
+
+    const res = await request(app).get('/api/v1/billing/state');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({
+      tier: 'free',
+      primaryProvider: 'manual',
+      planId: 'free',
+      status: 'none',
+      hasStripeSubscription: false,
+    });
+  });
+
   it('rejects unauthorized roles (agent/supervisor) with 403', async () => {
     const tenant = await createTestTenant({ tier: 'pro' });
     const user = await createTestUser(tenant.id, { role: 'agent' });

@@ -1837,6 +1837,51 @@
     "contactSales": "Neem contact op met sales",
     "error": "Kon de afrekenpagina niet starten. Probeer het opnieuw."
   },
+  "copilot": {
+    "launcher": {
+      "tooltip": "Vraag het de AI-platformassistent",
+      "tooltipLocked": "AI-platformassistent — inbegrepen bij Pro"
+    },
+    "drawer": {
+      "title": "AI-platformassistent",
+      "closeAria": "Assistent sluiten",
+      "clear": "Gesprek wissen",
+      "clearAria": "Gesprek wissen",
+      "loading": "Gesprek laden…",
+      "placeholder": "Vraag iets over je bot, abonnement, leads of hoe je iets doet in Axentrio…",
+      "sendAria": "Bericht verzenden",
+      "thinking": "Aan het nadenken…",
+      "rateLimited": "Je stuurt te snel — probeer het opnieuw over {{seconds}} seconden.",
+      "toolBadgeTooltip": "De assistent zocht {{name}} op",
+      "welcome": {
+        "title": "Hallo 👋",
+        "body": "Vraag me over je bot, abonnement, leads of hoe je iets doet in Axentrio. Ik kan antwoorden op basis van de documentatie en de gegevens van je tenant — maar ik kan niets voor je wijzigen.",
+        "examples": [
+          "Op welk abonnement zit ik en wanneer wordt het verlengd?",
+          "Hoeveel leads hebben we deze week verzameld?",
+          "Hoe verbind ik Cal.com?",
+          "Waarom antwoordt mijn bot niet?"
+        ]
+      },
+      "outcome": {
+        "aborted": "[afgebroken]",
+        "error": "[mislukt]",
+        "tooLong": "[duurde te lang]",
+        "interrupted": "[onderbroken]",
+        "empty": "[geen antwoord]"
+      }
+    },
+    "locked": {
+      "title": "Ontgrendel de AI-platformassistent",
+      "oneLiner": "Een AI in het portaal die je platformvragen beantwoordt en de gegevens van je tenant toont — inbegrepen bij Pro en Enterprise.",
+      "bullets": [
+        "Stel vragen over je bot, abonnement, leads of integraties",
+        "Krijg directe antwoorden gebaseerd op de Axentrio-documentatie",
+        "Bekijk live statistieken — \"hoeveel leads deze week?\""
+      ],
+      "historyNote": "Je eerdere gesprekken blijven bewaard en zijn weer beschikbaar zodra je upgradet."
+    }
+  },
   "bots": {
     "tab": {
       "title": "Bots"

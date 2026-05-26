@@ -1842,6 +1842,51 @@
     "contactSales": "Contact Sales",
     "error": "Couldn't start checkout. Please try again."
   },
+  "copilot": {
+    "launcher": {
+      "tooltip": "Ask the AI Platform Assistant",
+      "tooltipLocked": "AI Platform Assistant — included with Pro"
+    },
+    "drawer": {
+      "title": "AI Platform Assistant",
+      "closeAria": "Close assistant",
+      "clear": "Clear conversation",
+      "clearAria": "Clear conversation",
+      "loading": "Loading conversation…",
+      "placeholder": "Ask about your bot, plan, leads, or how to do anything in Axentrio…",
+      "sendAria": "Send message",
+      "thinking": "Thinking…",
+      "rateLimited": "You're sending too quickly — try again in {{seconds}} seconds.",
+      "toolBadgeTooltip": "The assistant looked up {{name}}",
+      "welcome": {
+        "title": "Hi there 👋",
+        "body": "Ask me about your bot, your plan, your leads, or how to do anything in Axentrio. I can answer from the documentation and look at your tenant's data — but I can't change anything for you.",
+        "examples": [
+          "What plan am I on, and when does it renew?",
+          "How many leads did we capture this week?",
+          "How do I connect Cal.com?",
+          "Why isn't my bot replying?"
+        ]
+      },
+      "outcome": {
+        "aborted": "[aborted]",
+        "error": "[failed]",
+        "tooLong": "[took too long]",
+        "interrupted": "[interrupted]",
+        "empty": "[no reply]"
+      }
+    },
+    "locked": {
+      "title": "Unlock the AI Platform Assistant",
+      "oneLiner": "An in-portal AI that answers your platform questions and surfaces your tenant's data — included with Pro and Enterprise.",
+      "bullets": [
+        "Ask anything about your bot, plan, leads, or integrations",
+        "Get instant answers grounded in Axentrio's documentation",
+        "See live stats — \"how many leads this week?\""
+      ],
+      "historyNote": "Your previous chats are preserved and will be available again as soon as you upgrade."
+    }
+  },
   "bots": {
     "tab": {
       "title": "Bots"

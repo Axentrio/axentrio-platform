@@ -64,7 +64,13 @@ export function CopilotDrawer() {
     isClearing,
   } = useCopilotDrawer();
   const hasFeature = useHasFeature('platformAssistant');
-  const transcript = useCopilotConversation();
+  // Only fetch the transcript when the drawer is actually open AND
+  // the tenant has the entitlement. The unconditional fetch was
+  // firing 402s on every layout mount for non-Pro tenants and
+  // stacking plan-limit toasts (the global axios interceptor fires
+  // a toast per 402). Pre-loading the transcript saves nothing —
+  // the drawer is closed so nobody sees it.
+  const transcript = useCopilotConversation({ enabled: isOpen && hasFeature });
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const [composerValue, setComposerValue] = useState('');
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);

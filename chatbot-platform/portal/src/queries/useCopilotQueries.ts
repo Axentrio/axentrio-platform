@@ -69,7 +69,17 @@ interface ApiEnvelope<T> {
 
 const THIRTY_SECONDS_MS = 30 * 1000;
 
-export function useCopilotConversation() {
+/**
+ * Fetch the active conversation transcript.
+ *
+ * `enabled` defaults to `true` for backwards compatibility, but the
+ * drawer caller should pass `enabled: isOpen && hasFeature` so we
+ * don't fire 402-returning requests for Essential tenants whose
+ * drawer surface is a LockedPreview (the 402 response from the
+ * route is correct, but the locked-preview already handles the UX
+ * — no point round-tripping the server every page load).
+ */
+export function useCopilotConversation(opts: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: queryKeys.copilot.conversation(),
     queryFn: async () => {
@@ -79,6 +89,7 @@ export function useCopilotConversation() {
       return env.data;
     },
     staleTime: THIRTY_SECONDS_MS,
+    enabled: opts.enabled ?? true,
   });
 }
 

@@ -94,6 +94,11 @@ export class OpenAICopilotLlmStream implements CopilotLlmStream {
         temperature: options.temperature,
         tools,
         stream: true,
+        // Without `include_usage` the streamed response carries no
+        // token counters, which would leave every CopilotTrace at
+        // tokensIn/Out = 0. The final chunk arrives with `usage`
+        // populated when this flag is set.
+        stream_options: { include_usage: true },
       },
       { signal: options.signal },
     );

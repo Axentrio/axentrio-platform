@@ -66,6 +66,30 @@ function rank(planId: InternalPlanId): number {
   return PLANS[planId].rank;
 }
 
+/**
+ * Stripe's `2026-04-22.dahlia` API moved `current_period_end` (and
+ * `current_period_start`) off the Subscription object and onto each
+ * Subscription Item. The legacy field is still emitted for older
+ * pinned API versions; this helper reads either shape so the rest of
+ * the codebase doesn't have to care which Stripe version the account
+ * is pinned to.
+ *
+ * Returns the Unix seconds timestamp from whichever location populated
+ * it, or undefined if neither carries it (defensively — single-item
+ * subs should always have one).
+ */
+function readCurrentPeriodEnd(
+  sub: StripeNS.Subscription,
+): number | undefined {
+  const root = (sub as unknown as { current_period_end?: number })
+    .current_period_end;
+  if (typeof root === 'number') return root;
+  const firstItem = sub.items?.data?.[0] as
+    | (StripeNS.SubscriptionItem & { current_period_end?: number })
+    | undefined;
+  return firstItem?.current_period_end;
+}
+
 function priceIdFor(planId: CheckoutablePlanId): string {
   const id = getStripePriceIdFor(planId);
   if (!id) {
@@ -362,10 +386,11 @@ export class StripeBillingProvider implements BillingProvider {
 
     // Downgrade — Subscription Schedule with two phases.
     const currentPriceId = sub.items.data[0].price.id;
-    // Resolve current_period_end from Stripe payload. In some API versions
-    // it lives on `subscription.current_period_end`; we defensively cast.
-    const currentPeriodEnd = (sub as unknown as { current_period_end: number })
-      .current_period_end;
+    // `current_period_end` lives on the subscription root pre-dahlia, on
+    // each Subscription Item from `2026-04-22.dahlia` onward. The helper
+    // hides the shift so we keep working regardless of the account's
+    // pinned Stripe API version.
+    const currentPeriodEnd = readCurrentPeriodEnd(sub);
     if (!currentPeriodEnd) {
       throw new BillingProviderError('subscription_shape_unexpected', PROVIDER, {
         reason: 'missing_current_period_end',
@@ -469,8 +494,10 @@ export class StripeBillingProvider implements BillingProvider {
         : null;
     }
 
-    const currentPeriodEnd = (sub as unknown as { current_period_end?: number })
-      .current_period_end;
+    // dahlia API moves current_period_end to the Subscription Item.
+    // The helper covers both shapes so normalized events fire correctly
+    // on both API versions.
+    const currentPeriodEnd = readCurrentPeriodEnd(sub);
 
     return {
       customerId,

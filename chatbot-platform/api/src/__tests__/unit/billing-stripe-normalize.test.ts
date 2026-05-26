@@ -98,6 +98,55 @@ describe('normalizeWebhookEvent — per event type', () => {
     expect(normalized!.subscription!.status).toBe('active');
   });
 
+  // Stripe API 2026-04-22.dahlia moved current_period_end off the Subscription
+  // root and onto each Subscription Item. A real downgrade bug surfaced when
+  // `stripe listen` pinned to dahlia and `(sub as any).current_period_end` came
+  // back undefined, causing changePlan to throw subscription_shape_unexpected.
+  // readCurrentPeriodEnd() is the helper that papers over both shapes.
+  it('reads current_period_end from subscription_item when the root field is missing (dahlia API shape)', () => {
+    const p = makeProvider();
+    const dahliaSub = {
+      id: 'sub_dahlia_1',
+      customer: 'cus_dahlia',
+      status: 'trialing',
+      cancel_at_period_end: false,
+      trial_end: null,
+      // No root-level current_period_end — this is the dahlia shape.
+      items: {
+        data: [
+          {
+            id: 'si_dahlia_1',
+            current_period_end: 1_900_000_000,
+            price: { id: PRO_PRICE },
+          },
+        ],
+      },
+      schedule: null,
+    };
+    const normalized = p.normalizeWebhookEvent(
+      makeEvent('customer.subscription.updated', dahliaSub),
+    );
+
+    expect(normalized!.subscription!.currentPeriodEnd).toEqual(
+      new Date(1_900_000_000 * 1000),
+    );
+  });
+
+  it('reads current_period_end from the subscription root when present (pre-dahlia shape)', () => {
+    const p = makeProvider();
+    const legacySub = makeSubscriptionPayload({
+      status: 'active',
+      current_period_end: 1_800_000_000,
+    });
+    const normalized = p.normalizeWebhookEvent(
+      makeEvent('customer.subscription.updated', legacySub),
+    );
+
+    expect(normalized!.subscription!.currentPeriodEnd).toEqual(
+      new Date(1_800_000_000 * 1000),
+    );
+  });
+
   it('maps customer.subscription.deleted → subscription.deleted', () => {
     const p = makeProvider();
     const sub = makeSubscriptionPayload({ status: 'canceled' });

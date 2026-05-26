@@ -238,8 +238,11 @@ describe('startCheckout', () => {
     // when invoked — that way the second request is dispatched ONLY after
     // we know the first has actually entered the locked section, even on
     // a warm connection pool.
-    let resolveCheckout: ((value: { url: string }) => void) | null = null;
-    let signalLockAcquired: (() => void) | null = null;
+    // Force the type — TS narrows the closures' captures to `null`
+    // otherwise, since the Promise executor and the test body see the
+    // same `let` binding.
+    let resolveCheckout!: (value: { url: string }) => void;
+    let signalLockAcquired!: () => void;
     const checkoutPromise = new Promise<{ url: string }>((resolve) => {
       resolveCheckout = resolve;
     });
@@ -248,7 +251,7 @@ describe('startCheckout', () => {
     });
     const stub = installStripeStub({
       checkoutCreate: vi.fn(() => {
-        signalLockAcquired?.();
+        signalLockAcquired();
         return checkoutPromise;
       }),
     });
@@ -277,7 +280,7 @@ describe('startCheckout', () => {
     expect(stub.checkoutCreate).toHaveBeenCalledTimes(1);
 
     // Resolve the first request so the test cleans up cleanly.
-    resolveCheckout?.({ url: 'https://stripe.example/checkout' });
+    resolveCheckout({ url: 'https://stripe.example/checkout' });
     await expect(first).resolves.toMatchObject({ url: expect.any(String) });
 
     // After the first completes, a follow-up checkout MUST be allowed

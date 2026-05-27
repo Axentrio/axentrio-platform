@@ -7,12 +7,16 @@ import { logger } from '../../utils/logger';
 import { getRedisClient } from '../../config/redis';
 
 // Scopes must be added to the app in Meta Developer Console before requesting.
-// Start with core messaging scopes; add instagram scopes after enabling in console.
+// Core messaging scopes plus Instagram DM scopes (instagram_basic +
+// instagram_manage_messages). These require the Instagram product enabled on
+// the app and, for production, App Review approval.
 const OAUTH_SCOPES = [
   'pages_messaging',
   'pages_manage_metadata',
   'pages_show_list',
   'business_management',
+  'instagram_basic',
+  'instagram_manage_messages',
 ].join(',');
 
 interface MetaPage {

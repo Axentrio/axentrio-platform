@@ -8,8 +8,9 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-  MessageSquare, Bot, MessageCircle, Camera, Trash2, AlertCircle, RefreshCw, Phone,
+  MessageSquare, Trash2, AlertCircle, RefreshCw,
 } from 'lucide-react';
+import { SiTelegram, SiMessenger, SiInstagram, SiWhatsapp, SiFacebook } from 'react-icons/si';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,10 +43,10 @@ import { timeAgo } from '@/utils/timeAgo';
 type Any = any;
 
 const CHANNEL_ICONS: Record<string, React.ElementType> = {
-  telegram: Bot,
-  messenger: MessageCircle,
-  instagram: Camera,
-  whatsapp: Phone,
+  telegram: SiTelegram,
+  messenger: SiMessenger,
+  instagram: SiInstagram,
+  whatsapp: SiWhatsapp,
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -181,7 +182,7 @@ export function SocialChannelsContent() {
                 <span className="text-sm text-white">{page.name}</span>
                 {page.instagramAccount && (
                   <Badge variant="outline" className="text-xs">
-                    <Camera className="h-3 w-3 mr-1" />
+                    <SiInstagram className="h-3 w-3 mr-1" />
                     @{page.instagramAccount.username}
                   </Badge>
                 )}
@@ -208,13 +209,13 @@ export function SocialChannelsContent() {
           </div>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setShowTelegramModal(true)}>
-              <Bot className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
+              <SiTelegram className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
             </Button>
             <Button size="sm" variant="outline" onClick={handleConnectFacebook} disabled={metaOAuthUrl.isPending}>
-              <MessageCircle className="h-4 w-4 mr-1" /> {t('ai.social.facebook.title')}
+              <SiFacebook className="h-4 w-4 mr-1" /> {t('ai.social.facebook.title')}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowWhatsAppModal(true)}>
-              <Phone className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
+              <SiWhatsapp className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
             </Button>
           </div>
         </CardHeader>

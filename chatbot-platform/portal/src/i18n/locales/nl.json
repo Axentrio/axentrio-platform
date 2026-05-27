@@ -476,7 +476,7 @@
         },
         "essential": {
           "name": "Essential",
-          "price": "€49,99/maand",
+          "price": "€49,99/maand Excl. BTW",
           "blurb": "Zet je chatbot live, unified inbox, leads vastleggen.",
           "features": {
             "agents": "1 chatbot, 1 menselijke agent",
@@ -488,7 +488,7 @@
         },
         "pro": {
           "name": "Pro",
-          "price": "€99,99/maand",
+          "price": "€99,99/maand Excl. BTW",
           "blurb": "Voeg boekingen, agenda-integratie en platform-assistent toe.",
           "features": {
             "agents": "1 chatbot, 1 menselijke agent",
@@ -501,12 +501,12 @@
         },
         "enterprise": {
           "name": "Enterprise",
-          "price": "Op maat",
-          "blurb": "Sales-beheerd, SLA-ondersteuning.",
+          "price": "€149/maand Excl. BTW",
+          "blurb": "Twee chatbots, CRM, geavanceerde lead-intelligentie, prioriteitsondersteuning.",
           "features": {
-            "unlimited": "Alles onbeperkt",
-            "integrations": "Aangepaste integraties",
-            "sla": "SLA + toegewijde ondersteuning"
+            "unlimited": "2 chatbots, near-realtime inzichten",
+            "integrations": "CRM + geavanceerde lead-intelligentie",
+            "sla": "Prioriteitsondersteuning + toegewijde success"
           }
         }
       },
@@ -530,8 +530,8 @@
       },
       "manage": {
         "title": "Abonnement beheren",
-        "upgradeToPro": "Upgraden naar Pro",
-        "downgradeToEssential": "Downgraden naar Essential",
+        "upgradeTo": "Upgraden naar {{plan}}",
+        "downgradeTo": "Downgraden naar {{plan}}",
         "cancelSubscription": "Abonnement opzeggen",
         "resumeSubscription": "Abonnement hervatten",
         "undoPendingChange": "Geplande wijziging ongedaan maken",

@@ -40,8 +40,8 @@ router.get(
 
     // Catalog of all marketed plans (excludes the `free` cancellation sink).
     // The frontend uses this to render the locked-feature previews and the
-    // pricing/comparison page. Includes Enterprise (rank 3) so the upgrade
-    // story can show a Contact Sales row alongside the self-serve tiers.
+    // pricing/comparison page. Includes Enterprise (rank 3) which is now
+    // self-serve at €149/mo alongside Essential and Pro.
     const marketedPlans = (Object.values(PLANS) as Array<typeof PLANS[InternalPlanId]>)
       .filter((p) => p.id !== 'free')
       .sort((a, b) => a.rank - b.rank);

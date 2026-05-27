@@ -9,9 +9,10 @@ export type InternalPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
 /**
  * Plans the user can self-serve into via checkout / change-plan.
  * 'free' is reachable only via cancellation (internal-only terminal state).
- * 'enterprise' is sales-led — set by super-admin manual override after a deal closes.
+ * Enterprise is also reachable sales-led via super-admin manual override
+ * (POST /admin/tenants/:id/set-enterprise) for negotiated deals.
  */
-export type CheckoutablePlanId = Extract<InternalPlanId, 'essential' | 'pro'>;
+export type CheckoutablePlanId = Extract<InternalPlanId, 'essential' | 'pro' | 'enterprise'>;
 
 export interface NormalizedSubscription {
   customerId: string;

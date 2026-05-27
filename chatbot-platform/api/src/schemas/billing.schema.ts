@@ -3,17 +3,17 @@
  *
  * Plan: .scratch/plan-billing.md § Implementation outline step 9.
  *
- * `planId` is gated to the self-serve set ('essential' | 'pro') here so the
- * route layer rejects 'free' / 'enterprise' before the service even runs.
- * 'free' is the internal-only cancellation sink; 'enterprise' is sales-led
- * per the M0 epic. The service has a defensive runtime check too — both
- * layers because route handlers also accept HTTP clients that bypass the schema.
+ * `planId` is gated to the self-serve set ('essential' | 'pro' | 'enterprise')
+ * here so the route layer rejects 'free' before the service even runs. 'free'
+ * is the internal-only cancellation sink. The service has a defensive runtime
+ * check too — both layers because route handlers also accept HTTP clients
+ * that bypass the schema.
  */
 
 import { z } from 'zod';
 
 export const startCheckoutSchema = z.object({
-  planId: z.enum(['essential', 'pro']),
+  planId: z.enum(['essential', 'pro', 'enterprise']),
   successUrl: z.string().url(),
   cancelUrl: z.string().url(),
 });
@@ -23,7 +23,7 @@ export const portalSessionSchema = z.object({
 });
 
 export const changePlanSchema = z.object({
-  planId: z.enum(['essential', 'pro']),
+  planId: z.enum(['essential', 'pro', 'enterprise']),
 });
 
 export const updateBillingEmailSchema = z.object({

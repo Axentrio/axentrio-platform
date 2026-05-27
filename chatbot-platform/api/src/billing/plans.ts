@@ -88,8 +88,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     id: 'enterprise',
     displayName: 'Enterprise',
     rank: 3,
-    priceEurMonthly: null, // sales-led per D10; no self-serve price
-    isSelfServeCheckoutable: false,
+    priceEurMonthly: 149,
+    isSelfServeCheckoutable: true,
     // Epic: Enterprise includes "2 AI chatbots".
     limits: { agents: 2, bots: 2, sessions: null, dailyLlmCalls: null },
     features: {
@@ -115,8 +115,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
  * env config — tests can mock `config` without re-importing `plans.ts`, and
  * a missing env var doesn't cause module-load failures.
  *
- * Returns `null` for non-self-serve plans (`free`, `enterprise`) or when the
- * env var is unset. Callers must check for `null` and surface a deterministic
+ * Returns `null` for non-self-serve plans (`free`) or when the env var is
+ * unset. Callers must check for `null` and surface a deterministic
  * configuration error (see PR6 pre-flight guard).
  */
 export function getStripePriceIdFor(planId: InternalPlanId): string | null {
@@ -125,8 +125,9 @@ export function getStripePriceIdFor(planId: InternalPlanId): string | null {
       return config.billing.stripe.priceEssential || null;
     case 'pro':
       return config.billing.stripe.pricePro || null;
-    case 'free':
     case 'enterprise':
+      return config.billing.stripe.priceEnterprise || null;
+    case 'free':
       return null;
   }
 }
@@ -134,7 +135,7 @@ export function getStripePriceIdFor(planId: InternalPlanId): string | null {
 /**
  * Filter helper: returns only the plans that appear in self-serve upgrade
  * UIs (pricing page, change-plan flow, locked-feature CTA). Skips `free`
- * (cancellation sink) and `enterprise` (sales-led).
+ * (cancellation sink).
  */
 export function selfServeCheckoutablePlans(): PlanDefinition[] {
   return Object.values(PLANS).filter((p) => p.isSelfServeCheckoutable);
@@ -152,5 +153,6 @@ export function planIdForStripePriceId(priceId: string | null | undefined): Inte
   if (!priceId) return null;
   if (priceId === config.billing.stripe.priceEssential) return 'essential';
   if (priceId === config.billing.stripe.pricePro) return 'pro';
+  if (priceId === config.billing.stripe.priceEnterprise) return 'enterprise';
   return null;
 }

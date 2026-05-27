@@ -61,6 +61,12 @@ interface PlanCardData {
   features: string[];
 }
 
+// Self-serve plans in upgrade-rank order. Source of truth lives in
+// `selfServePlans` from /entitlements; this ordering mirrors it and is used
+// to label upgrades vs downgrades in the change-plan UI.
+const SELF_SERVE_PLANS: CheckoutablePlan[] = ['essential', 'pro', 'enterprise'];
+const planRank = (id: CheckoutablePlan): number => SELF_SERVE_PLANS.indexOf(id);
+
 const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
   free: {
     id: 'free',
@@ -252,10 +258,16 @@ const ActionRow: React.FC<{ state: BillingState }> = ({ state }) => {
   const showUndoCancel = state.cancelAtPeriodEnd;
   const showUndoPending = !!state.pendingPlanId;
   const showCancel = !state.cancelAtPeriodEnd && state.status !== 'cancelled';
-  const targetPlan: CheckoutablePlan | null =
-    state.planId === 'essential' ? 'pro' : state.planId === 'pro' ? 'essential' : null;
-  const showChangePlan =
-    targetPlan !== null && !state.pendingPlanId && state.status !== 'past_due';
+  // Change-plan targets: every other self-serve plan. Hidden when a pending
+  // change is already queued or when the sub is past_due (Stripe rejects
+  // mid-dunning upgrades).
+  const currentPlanId = state.planId as CheckoutablePlan;
+  const isOnSelfServePlan = SELF_SERVE_PLANS.includes(currentPlanId);
+  const changeTargets =
+    isOnSelfServePlan && !state.pendingPlanId && state.status !== 'past_due'
+      ? SELF_SERVE_PLANS.filter((id) => id !== currentPlanId)
+      : [];
+  const planDisplay = getPlanDisplay(t);
 
   return (
     <Card variant="glass">
@@ -267,27 +279,31 @@ const ActionRow: React.FC<{ state: BillingState }> = ({ state }) => {
       </CardHeader>
       <CardContent>
         <div className="flex flex-wrap gap-2">
-          {showChangePlan && targetPlan && (
-            <Button
-              variant="default"
-              onClick={() => changePlan.mutate({ planId: targetPlan })}
-              disabled={changePlan.isPending}
-            >
-              {changePlan.isPending ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : targetPlan === 'pro' ? (
-                <ArrowUpCircle className="w-4 h-4" />
-              ) : (
-                <ArrowDownCircle className="w-4 h-4" />
-              )}
-              {targetPlan === 'pro'
-                ? t('settings.billing.manage.upgradeToPro')
-                : t('settings.billing.manage.downgradeToEssential')}
-            </Button>
-          )}
+          {changeTargets.map((target) => {
+            const isUpgrade = planRank(target) > planRank(currentPlanId);
+            return (
+              <Button
+                key={target}
+                variant="default"
+                onClick={() => changePlan.mutate({ planId: target })}
+                disabled={changePlan.isPending}
+              >
+                {changePlan.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : isUpgrade ? (
+                  <ArrowUpCircle className="w-4 h-4" />
+                ) : (
+                  <ArrowDownCircle className="w-4 h-4" />
+                )}
+                {isUpgrade
+                  ? t('settings.billing.manage.upgradeTo', { plan: planDisplay[target].name })
+                  : t('settings.billing.manage.downgradeTo', { plan: planDisplay[target].name })}
+              </Button>
+            );
+          })}
           {showCancel && (
             <Button
-              variant="ghost"
+              variant="destructive"
               onClick={() => cancel.mutate()}
               disabled={cancel.isPending}
             >
@@ -379,15 +395,17 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
   // your current plan would just create a duplicate Stripe sub (which the
   // server's duplicate-checkout guard would also reject with 409, but the
   // UI shouldn't even offer it).
-  const availablePlans = (['essential', 'pro'] as CheckoutablePlan[]).filter(
-    (id) => id !== state.planId,
-  );
+  const availablePlans = SELF_SERVE_PLANS.filter((id) => id !== state.planId);
   if (availablePlans.length === 0) return null;
+  const gridCols =
+    availablePlans.length === 1
+      ? 'md:grid-cols-1'
+      : availablePlans.length === 2
+        ? 'md:grid-cols-2'
+        : 'md:grid-cols-3';
 
   return (
-    <div
-      className={`grid gap-4 ${availablePlans.length === 1 ? 'md:grid-cols-1' : 'md:grid-cols-2'}`}
-    >
+    <div className={`grid gap-4 ${gridCols}`}>
       {availablePlans.map((planId) => {
         const plan = planDisplay[planId];
         return (

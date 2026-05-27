@@ -164,12 +164,13 @@ const envSchema = z.object({
   WHATSAPP_VERIFY_TOKEN: z.string().optional(),
 
   // Billing — Stripe (required in non-test environments; validated below).
-  // M0 subscription epic: EUR-only catalog (Essential + Pro). Enterprise is sales-led
-  // and has no self-serve price ID. Premium tier removed entirely.
+  // M0 subscription epic: EUR-only catalog (Essential + Pro + Enterprise).
+  // Premium tier removed entirely.
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_PRICE_ESSENTIAL: z.string().optional(),
   STRIPE_PRICE_PRO: z.string().optional(),
+  STRIPE_PRICE_ENTERPRISE: z.string().optional(),
   BILLING_TRIAL_DAYS: z.string().default('14').transform(Number),
   // Escape hatch: when 'true', boot proceeds without Stripe creds.
   // Billing endpoints will fail at call time. Use only for environments
@@ -221,6 +222,7 @@ if (env.NODE_ENV !== 'test') {
   if (!env.STRIPE_WEBHOOK_SECRET) missing.push('STRIPE_WEBHOOK_SECRET');
   if (!env.STRIPE_PRICE_ESSENTIAL) missing.push('STRIPE_PRICE_ESSENTIAL');
   if (!env.STRIPE_PRICE_PRO) missing.push('STRIPE_PRICE_PRO');
+  if (!env.STRIPE_PRICE_ENTERPRISE) missing.push('STRIPE_PRICE_ENTERPRISE');
   if (missing.length > 0) {
     const message =
       `Billing configuration: required Stripe env vars are missing: ${missing.join(', ')}. ` +
@@ -440,6 +442,7 @@ export const config = {
       webhookSecret: env.STRIPE_WEBHOOK_SECRET ?? '',
       priceEssential: env.STRIPE_PRICE_ESSENTIAL ?? '',
       pricePro: env.STRIPE_PRICE_PRO ?? '',
+      priceEnterprise: env.STRIPE_PRICE_ENTERPRISE ?? '',
     },
   },
 } as const;

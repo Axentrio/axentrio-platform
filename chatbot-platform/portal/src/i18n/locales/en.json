@@ -481,7 +481,7 @@
         },
         "essential": {
           "name": "Essential",
-          "price": "€49.99/mo",
+          "price": "€49.99/mo Excl. VAT",
           "blurb": "Get your chatbot live, unified inbox, capture leads.",
           "features": {
             "agents": "1 chatbot, 1 human agent",
@@ -493,7 +493,7 @@
         },
         "pro": {
           "name": "Pro",
-          "price": "€99.99/mo",
+          "price": "€99.99/mo Excl. VAT",
           "blurb": "Add bookings, calendar integration, platform assistant.",
           "features": {
             "agents": "1 chatbot, 1 human agent",
@@ -506,12 +506,12 @@
         },
         "enterprise": {
           "name": "Enterprise",
-          "price": "Custom",
-          "blurb": "Sales-managed, SLA support.",
+          "price": "€149/mo Excl. VAT",
+          "blurb": "Two chatbots, CRM, advanced lead intelligence, priority support.",
           "features": {
-            "unlimited": "Unlimited everything",
-            "integrations": "Custom integrations",
-            "sla": "SLA + dedicated support"
+            "unlimited": "2 chatbots, near-realtime insights",
+            "integrations": "CRM + advanced lead intelligence",
+            "sla": "Priority support + dedicated success"
           }
         }
       },
@@ -535,8 +535,8 @@
       },
       "manage": {
         "title": "Manage subscription",
-        "upgradeToPro": "Upgrade to Pro",
-        "downgradeToEssential": "Downgrade to Essential",
+        "upgradeTo": "Upgrade to {{plan}}",
+        "downgradeTo": "Downgrade to {{plan}}",
         "cancelSubscription": "Cancel subscription",
         "resumeSubscription": "Resume subscription",
         "undoPendingChange": "Undo pending change",

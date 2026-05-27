@@ -476,7 +476,7 @@
         },
         "essential": {
           "name": "Essential",
-          "price": "49,99 €/mois",
+          "price": "49,99 €/mois hors TVA",
           "blurb": "Mettez votre chatbot en ligne, boîte unifiée, captez des leads.",
           "features": {
             "agents": "1 chatbot, 1 agent humain",
@@ -488,7 +488,7 @@
         },
         "pro": {
           "name": "Pro",
-          "price": "99,99 €/mois",
+          "price": "99,99 €/mois hors TVA",
           "blurb": "Ajoutez les réservations, l'agenda et l'assistant de plateforme.",
           "features": {
             "agents": "1 chatbot, 1 agent humain",
@@ -501,12 +501,12 @@
         },
         "enterprise": {
           "name": "Enterprise",
-          "price": "Sur mesure",
-          "blurb": "Géré par les ventes, support SLA.",
+          "price": "149 €/mois hors TVA",
+          "blurb": "Deux chatbots, CRM, intelligence avancée des leads, support prioritaire.",
           "features": {
-            "unlimited": "Tout illimité",
-            "integrations": "Intégrations personnalisées",
-            "sla": "SLA + support dédié"
+            "unlimited": "2 chatbots, insights en quasi temps réel",
+            "integrations": "CRM + intelligence avancée des leads",
+            "sla": "Support prioritaire + suivi dédié"
           }
         }
       },
@@ -530,8 +530,8 @@
       },
       "manage": {
         "title": "Gérer l'abonnement",
-        "upgradeToPro": "Passer à Pro",
-        "downgradeToEssential": "Revenir à Essential",
+        "upgradeTo": "Passer à {{plan}}",
+        "downgradeTo": "Revenir à {{plan}}",
         "cancelSubscription": "Résilier l'abonnement",
         "resumeSubscription": "Reprendre l'abonnement",
         "undoPendingChange": "Annuler le changement en attente",

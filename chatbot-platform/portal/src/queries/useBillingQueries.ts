@@ -15,7 +15,7 @@ import { queryKeys } from './queryKeys';
 
 export type BillingTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type BillingStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
-export type CheckoutablePlan = 'essential' | 'pro';
+export type CheckoutablePlan = 'essential' | 'pro' | 'enterprise';
 
 export interface BillingHistoryEntry {
   id: string;

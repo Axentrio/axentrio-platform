@@ -228,7 +228,7 @@ describe('GET /api/v1/entitlements — plans catalog', () => {
     expect(ids).toEqual(['essential', 'pro', 'enterprise']);
   });
 
-  it('plans entries expose priceEurMonthly (Essential 49.99, Pro 99.99, Enterprise null)', async () => {
+  it('plans entries expose priceEurMonthly (Essential 49.99, Pro 99.99, Enterprise 149)', async () => {
     const tenant = await createTestTenant({ tier: 'essential' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });
     setAuth({ tenantId: tenant.id, userId: admin.id });
@@ -241,10 +241,10 @@ describe('GET /api/v1/entitlements — plans catalog', () => {
     );
     expect(byId.get('essential')?.priceEurMonthly).toBe(49.99);
     expect(byId.get('pro')?.priceEurMonthly).toBe(99.99);
-    expect(byId.get('enterprise')?.priceEurMonthly).toBeNull();
+    expect(byId.get('enterprise')?.priceEurMonthly).toBe(149);
   });
 
-  it('plans entries expose isSelfServeCheckoutable (true for essential/pro, false for enterprise)', async () => {
+  it('plans entries expose isSelfServeCheckoutable (true for essential/pro/enterprise)', async () => {
     const tenant = await createTestTenant({ tier: 'essential' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });
     setAuth({ tenantId: tenant.id, userId: admin.id });
@@ -257,16 +257,16 @@ describe('GET /api/v1/entitlements — plans catalog', () => {
     );
     expect(byId.get('essential')?.isSelfServeCheckoutable).toBe(true);
     expect(byId.get('pro')?.isSelfServeCheckoutable).toBe(true);
-    expect(byId.get('enterprise')?.isSelfServeCheckoutable).toBe(false);
+    expect(byId.get('enterprise')?.isSelfServeCheckoutable).toBe(true);
   });
 
-  it('selfServePlans is exactly [essential, pro]', async () => {
+  it('selfServePlans is exactly [essential, pro, enterprise]', async () => {
     const tenant = await createTestTenant({ tier: 'essential' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });
     setAuth({ tenantId: tenant.id, userId: admin.id });
 
     const res = await request(app).get('/api/v1/entitlements');
     expect(res.status).toBe(200);
-    expect(res.body.data.selfServePlans).toEqual(['essential', 'pro']);
+    expect(res.body.data.selfServePlans).toEqual(['essential', 'pro', 'enterprise']);
   });
 });

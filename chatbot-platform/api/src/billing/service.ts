@@ -127,10 +127,10 @@ export async function startCheckout(
   planId: CheckoutablePlanId,
   returnUrls: { successUrl: string; cancelUrl: string },
 ): Promise<{ url: string }> {
-  // Step 1: defensive plan-id validation. The TS type prevents 'free' /
-  // 'enterprise' at the callsite, but runtime callers (route handlers
-  // parsing JSON) need a guard too.
-  if (planId !== 'essential' && planId !== 'pro') {
+  // Step 1: defensive plan-id validation. The TS type prevents 'free' at
+  // the callsite, but runtime callers (route handlers parsing JSON) need a
+  // guard too.
+  if (planId !== 'essential' && planId !== 'pro' && planId !== 'enterprise') {
     throw new BillingProviderError('checkout_plan_invalid', STRIPE, { planId });
   }
 

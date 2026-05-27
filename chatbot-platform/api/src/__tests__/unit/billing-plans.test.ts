@@ -4,7 +4,8 @@
  * Updated for M0 plan-catalog reshape (subscription epic):
  *   - Tiers: free | essential | pro | enterprise
  *   - `free` is the internal-only cancellation sink
- *   - Enterprise is sales-led (no self-serve price)
+ *   - Enterprise is self-serve at €149/mo (still reachable sales-led via
+ *     super-admin manual override for negotiated deals)
  *   - Entitlement shape uses the new feature flag names
  */
 
@@ -31,18 +32,18 @@ describe('PLANS catalog', () => {
     expect(PLANS.pro.rank).toBeLessThan(PLANS.enterprise.rank);
   });
 
-  it('marks self-serve plans correctly (Essential + Pro only)', () => {
+  it('marks self-serve plans correctly (Essential + Pro + Enterprise)', () => {
     expect(PLANS.free.isSelfServeCheckoutable).toBe(false);
     expect(PLANS.essential.isSelfServeCheckoutable).toBe(true);
     expect(PLANS.pro.isSelfServeCheckoutable).toBe(true);
-    expect(PLANS.enterprise.isSelfServeCheckoutable).toBe(false);
+    expect(PLANS.enterprise.isSelfServeCheckoutable).toBe(true);
   });
 
   it('locks the documented per-tier prices (EUR)', () => {
     expect(PLANS.free.priceEurMonthly).toBeNull();
     expect(PLANS.essential.priceEurMonthly).toBe(49.99);
     expect(PLANS.pro.priceEurMonthly).toBe(99.99);
-    expect(PLANS.enterprise.priceEurMonthly).toBeNull();
+    expect(PLANS.enterprise.priceEurMonthly).toBe(149);
   });
 
   it('locks limits per tier', () => {
@@ -91,26 +92,27 @@ describe('PLANS catalog', () => {
 });
 
 describe('selfServeCheckoutablePlans', () => {
-  it('returns exactly Essential and Pro', () => {
+  it('returns Essential, Pro, and Enterprise', () => {
     const plans = selfServeCheckoutablePlans();
-    expect(plans.map((p) => p.id).sort()).toEqual(['essential', 'pro']);
+    expect(plans.map((p) => p.id).sort()).toEqual(['enterprise', 'essential', 'pro']);
   });
 });
 
 describe('getStripePriceIdFor', () => {
-  it('returns null for non-self-serve plans regardless of env', () => {
+  it('returns null for free regardless of env', () => {
     expect(getStripePriceIdFor('free')).toBeNull();
-    expect(getStripePriceIdFor('enterprise')).toBeNull();
   });
 
-  it('returns the configured price ID for Essential / Pro when set', () => {
+  it('returns the configured price ID for self-serve plans when set', () => {
     // The test env may or may not have these set; the function just reads
     // config. Whatever the value is, it should be consistent.
     const essentialId = getStripePriceIdFor('essential');
     const proId = getStripePriceIdFor('pro');
-    // Either both are configured strings or null — never undefined.
+    const enterpriseId = getStripePriceIdFor('enterprise');
+    // Either configured strings or null — never undefined.
     expect(typeof essentialId === 'string' || essentialId === null).toBe(true);
     expect(typeof proId === 'string' || proId === null).toBe(true);
+    expect(typeof enterpriseId === 'string' || enterpriseId === null).toBe(true);
   });
 });
 
@@ -127,8 +129,10 @@ describe('planIdForStripePriceId', () => {
   it('round-trips: getStripePriceIdFor → planIdForStripePriceId', () => {
     const essentialId = getStripePriceIdFor('essential');
     const proId = getStripePriceIdFor('pro');
+    const enterpriseId = getStripePriceIdFor('enterprise');
     if (essentialId) expect(planIdForStripePriceId(essentialId)).toBe('essential');
     if (proId) expect(planIdForStripePriceId(proId)).toBe('pro');
+    if (enterpriseId) expect(planIdForStripePriceId(enterpriseId)).toBe('enterprise');
   });
 });
 

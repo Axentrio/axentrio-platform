@@ -39,3 +39,15 @@ temp/
 *.tmp
 .worktrees/
 .scratch/
+
+# MCP / Claude / tooling caches
+.mcp.json
+.claude/
+.agents/
+.superpowers/
+.playwright-mcp/
+skills-lock.json
+
+# App env files
+api/.env
+portal/.env

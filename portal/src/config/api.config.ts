@@ -19,7 +19,10 @@ export const WS_CONFIG = {
   options: {
     transports: ['websocket', 'polling'] as string[],
     reconnection: true,
-    reconnectionAttempts: 5,
+    // Keep retrying with backoff instead of giving up permanently after a
+    // handful of failures (the old value of 5 meant "Live updates" never
+    // recovered once the network blipped or the token expired mid-retry).
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
     randomizationFactor: 0.5,

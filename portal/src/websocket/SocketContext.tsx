@@ -75,14 +75,20 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsConnecting(true);
     setConnectionError(null);
 
-    // Get fresh Clerk token with org claim for socket auth
-    const token = await getToken({ template: undefined });
-    tokenRef.current = token;
-
     const socket = io(WS_CONFIG.url, {
       ...WS_CONFIG.options,
-      auth: {
-        token,
+      // Fetch a FRESH Clerk token before every (re)connection attempt. Clerk
+      // JWTs expire in ~60s, so a token captured once would make every
+      // reconnect fail auth — the socket would then exhaust its retries and
+      // never recover. Socket.IO invokes this callback on each connect.
+      auth: async (cb: (data: { token: string | null }) => void) => {
+        try {
+          const token = await getToken({ template: undefined });
+          tokenRef.current = token;
+          cb({ token });
+        } catch {
+          cb({ token: tokenRef.current });
+        }
       },
     });
 
@@ -109,8 +115,17 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     socket.on(WS_EVENTS.DISCONNECT, (reason) => {
       console.log('Socket disconnected:', reason);
       setIsConnected(false);
-      setIsConnecting(false);
-      
+
+      // Socket.IO auto-reconnects on transport drops, but NOT when the server
+      // forcibly disconnects us (idle/auth timeout, deploy). In that case we
+      // must reconnect manually — the auth callback fetches a fresh token.
+      if (reason === 'io server disconnect') {
+        setIsConnecting(true);
+        socket.connect();
+      } else {
+        setIsConnecting(false);
+      }
+
       handlersRef.current.forEach((handlers) => {
         handlers.onDisconnect?.(reason);
       });
@@ -121,11 +136,16 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       setIsConnected(false);
       setIsConnecting(false);
       setConnectionError(error.message);
-      
+
       handlersRef.current.forEach((handlers) => {
         handlers.onError?.(error);
       });
     });
+
+    // Manager-level reconnection lifecycle — keeps the "Reconnecting…" banner
+    // accurate while Socket.IO retries automatically with backoff.
+    socket.io.on('reconnect_attempt', () => setIsConnecting(true));
+    socket.io.on('reconnect', () => setIsConnecting(false));
 
     // Chat events
     socket.on(WS_EVENTS.CHAT_NEW, (chat: Chat) => {
@@ -225,6 +245,25 @@ export const SocketProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       disconnectSocket();
     };
   }, [isAuthenticated, isSignedIn, orgId, connectSocket, disconnectSocket]);
+
+  // Recover promptly when the network returns or the tab is re-focused —
+  // nudges Socket.IO to reconnect now instead of waiting out the backoff
+  // (covers laptop sleep/wake and long idle periods).
+  useEffect(() => {
+    const nudge = () => {
+      const s = socketRef.current;
+      if (s && !s.connected) s.connect();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') nudge();
+    };
+    window.addEventListener('online', nudge);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('online', nudge);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   // Register event handlers
   const registerHandlers = useCallback((handlers: SocketEventHandlers): string => {

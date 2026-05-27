@@ -36,10 +36,16 @@ interface MetaPage {
  * Build the Facebook Login OAuth URL for a tenant.
  */
 export function buildOAuthUrl(tenantId: string): string {
+  // 30m (not 5m): Facebook Login for Business is now a multi-step consent
+  // (Continue → Pages → Businesses → Instagram → review → Save) that routinely
+  // takes longer than 5 min, which expired the state JWT and broke the callback.
+  // TODO(follow-up): move to a server-stored single-use state (Redis, ~45m TTL)
+  // bound to tenant/redirect, and don't overwrite a valid Page token until the
+  // new OAuth exchange fully succeeds.
   const state = jwt.sign(
     { tenantId, nonce: crypto.randomBytes(16).toString('hex') },
     config.meta.oauthJwtSecret,
-    { expiresIn: '5m' },
+    { expiresIn: '30m' },
   );
 
   const params = new URLSearchParams({

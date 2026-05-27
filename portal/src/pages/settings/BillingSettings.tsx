@@ -59,6 +59,7 @@ interface PlanCardData {
   id: BillingTier;
   name: string;
   price: string;
+  priceNote: string;
   blurb: string;
   features: string[];
 }
@@ -74,6 +75,7 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
     id: 'free',
     name: t('settings.billing.plans.free.name'),
     price: t('settings.billing.plans.free.price'),
+    priceNote: t('settings.billing.plans.free.priceNote'),
     blurb: t('settings.billing.plans.free.blurb'),
     features: [
       t('settings.billing.plans.free.features.agents'),
@@ -86,6 +88,7 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
     id: 'essential',
     name: t('settings.billing.plans.essential.name'),
     price: t('settings.billing.plans.essential.price'),
+    priceNote: t('settings.billing.plans.essential.priceNote'),
     blurb: t('settings.billing.plans.essential.blurb'),
     features: [
       t('settings.billing.plans.essential.features.agents'),
@@ -99,6 +102,7 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
     id: 'pro',
     name: t('settings.billing.plans.pro.name'),
     price: t('settings.billing.plans.pro.price'),
+    priceNote: t('settings.billing.plans.pro.priceNote'),
     blurb: t('settings.billing.plans.pro.blurb'),
     features: [
       t('settings.billing.plans.pro.features.agents'),
@@ -113,6 +117,7 @@ const getPlanDisplay = (t: TFunction): Record<BillingTier, PlanCardData> => ({
     id: 'enterprise',
     name: t('settings.billing.plans.enterprise.name'),
     price: t('settings.billing.plans.enterprise.price'),
+    priceNote: t('settings.billing.plans.enterprise.priceNote'),
     blurb: t('settings.billing.plans.enterprise.blurb'),
     features: [
       t('settings.billing.plans.enterprise.features.unlimited'),
@@ -188,9 +193,12 @@ const CurrentPlanCard: React.FC<{ state: BillingState }> = ({ state }) => {
       </CardHeader>
       <CardContent>
         <div className="flex flex-col gap-4">
-          <div className="flex items-baseline gap-3">
+          <div className="flex items-baseline gap-3 flex-wrap">
             <span className="text-3xl font-bold text-text-primary">{plan.name}</span>
-            <span className="text-text-secondary">{plan.price}</span>
+            <span className="text-text-secondary">
+              <span className="font-medium text-text-primary">{plan.price}</span>
+              {plan.priceNote}
+            </span>
           </div>
           <p className="text-sm text-text-secondary">{plan.blurb}</p>
           {state.trialEnd && state.status === 'trialing' && (
@@ -384,20 +392,33 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
         : 'md:grid-cols-3';
 
   return (
-    <div className={`grid gap-4 ${gridCols}`}>
+    <div className={`grid items-stretch gap-4 ${gridCols}`}>
       {availablePlans.map((planId) => {
         const plan = planDisplay[planId];
+        const isRecommended = planId === 'pro';
         return (
-          <Card key={planId} variant="glass">
+          <Card
+            key={planId}
+            variant="glass"
+            className={`relative flex h-full flex-col ${
+              isRecommended ? 'ring-2 ring-primary-500/60' : ''
+            }`}
+          >
+            {isRecommended && (
+              <Badge className="absolute -top-2.5 right-4 border-transparent bg-primary-500 text-white shadow-sm">
+                {t('settings.billing.subscribe.recommended')}
+              </Badge>
+            )}
             <CardHeader>
-              <div className="flex items-baseline justify-between">
-                <h3 className="text-lg font-semibold text-text-primary">{plan.name}</h3>
-                <span className="text-text-secondary">{plan.price}</span>
+              <h3 className="text-base font-semibold text-text-primary">{plan.name}</h3>
+              <div className="mt-1 flex items-baseline gap-1.5">
+                <span className="text-3xl font-bold text-text-primary">{plan.price}</span>
+                <span className="text-xs text-text-secondary">{plan.priceNote}</span>
               </div>
-              <p className="text-sm text-text-secondary">{plan.blurb}</p>
+              <p className="mt-2 text-sm text-text-secondary">{plan.blurb}</p>
             </CardHeader>
-            <CardContent>
-              <ul className="space-y-1.5 mb-4">
+            <CardContent className="flex flex-1 flex-col">
+              <ul className="mb-6 space-y-2">
                 {plan.features.map((f) => (
                   <li key={f} className="flex items-start gap-2 text-sm text-text-secondary">
                     <CheckCircle2 className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
@@ -406,7 +427,8 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
                 ))}
               </ul>
               <Button
-                className="w-full"
+                className="mt-auto w-full"
+                variant={isRecommended ? 'default' : 'outline'}
                 onClick={() => handleSubscribe(planId)}
                 disabled={checkout.isPending}
               >

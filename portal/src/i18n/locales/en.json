@@ -470,7 +470,8 @@
       "plans": {
         "free": {
           "name": "Free",
-          "price": "$0/mo",
+          "price": "€0",
+          "priceNote": "/mo",
           "blurb": "Try out the basics on the house.",
           "features": {
             "agents": "1 agent",
@@ -481,7 +482,8 @@
         },
         "essential": {
           "name": "Essential",
-          "price": "€49.99/mo Excl. VAT",
+          "price": "€49.99",
+          "priceNote": "/mo · Excl. VAT",
           "blurb": "Get your chatbot live, unified inbox, capture leads.",
           "features": {
             "agents": "1 chatbot, 1 human agent",
@@ -493,7 +495,8 @@
         },
         "pro": {
           "name": "Pro",
-          "price": "€99.99/mo Excl. VAT",
+          "price": "€99.99",
+          "priceNote": "/mo · Excl. VAT",
           "blurb": "Add bookings, calendar integration, platform assistant.",
           "features": {
             "agents": "1 chatbot, 1 human agent",
@@ -506,7 +509,8 @@
         },
         "enterprise": {
           "name": "Enterprise",
-          "price": "€149/mo Excl. VAT",
+          "price": "€149",
+          "priceNote": "/mo · Excl. VAT",
           "blurb": "Two chatbots, CRM, advanced lead intelligence, priority support.",
           "features": {
             "unlimited": "2 chatbots, near-realtime insights",
@@ -548,7 +552,8 @@
         "contactSales": "Contact sales"
       },
       "subscribe": {
-        "cta": "Subscribe to {{plan}}"
+        "cta": "Subscribe to {{plan}}",
+        "recommended": "Most popular"
       },
       "email": {
         "title": "Billing email",

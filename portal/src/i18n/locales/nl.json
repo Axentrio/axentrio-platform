@@ -465,7 +465,8 @@
       "plans": {
         "free": {
           "name": "Gratis",
-          "price": "$0/maand",
+          "price": "€0",
+          "priceNote": "/maand",
           "blurb": "Probeer de basis gratis uit.",
           "features": {
             "agents": "1 agent",
@@ -476,7 +477,8 @@
         },
         "essential": {
           "name": "Essential",
-          "price": "€49,99/maand Excl. BTW",
+          "price": "€49,99",
+          "priceNote": "/maand · Excl. BTW",
           "blurb": "Zet je chatbot live, unified inbox, leads vastleggen.",
           "features": {
             "agents": "1 chatbot, 1 menselijke agent",
@@ -488,7 +490,8 @@
         },
         "pro": {
           "name": "Pro",
-          "price": "€99,99/maand Excl. BTW",
+          "price": "€99,99",
+          "priceNote": "/maand · Excl. BTW",
           "blurb": "Voeg boekingen, agenda-integratie en platform-assistent toe.",
           "features": {
             "agents": "1 chatbot, 1 menselijke agent",
@@ -501,7 +504,8 @@
         },
         "enterprise": {
           "name": "Enterprise",
-          "price": "€149/maand Excl. BTW",
+          "price": "€149",
+          "priceNote": "/maand · Excl. BTW",
           "blurb": "Twee chatbots, CRM, geavanceerde lead-intelligentie, prioriteitsondersteuning.",
           "features": {
             "unlimited": "2 chatbots, near-realtime inzichten",
@@ -543,7 +547,8 @@
         "contactSales": "Contact met sales"
       },
       "subscribe": {
-        "cta": "Abonneren op {{plan}}"
+        "cta": "Abonneren op {{plan}}",
+        "recommended": "Meest gekozen"
       },
       "email": {
         "title": "Facturatie-e-mail",

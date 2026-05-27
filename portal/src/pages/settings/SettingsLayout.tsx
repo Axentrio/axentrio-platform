@@ -52,7 +52,7 @@ const SettingsLayout: React.FC = () => {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="max-w-5xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
         {/* Header */}
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-text-primary">{t('settings.header.title')}</h1>

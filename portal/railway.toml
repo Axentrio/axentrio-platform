@@ -1,7 +1,6 @@
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "portal/Dockerfile"
-watchPatterns = ["portal/**"]
 
 [deploy]
 healthcheckPath = "/"

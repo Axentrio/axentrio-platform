@@ -12,7 +12,10 @@
  *   - Cancelling: shows the cancel-on-date banner with an Undo button.
  *   - Pending change: shows the upcoming-plan banner with an Undo button.
  *   - Past-due: read-only banner, only "Manage payment method" is enabled.
- *   - Enterprise (manual): shows "Contact sales" tile only.
+ *
+ * Enterprise is self-serve (€149/mo) like Essential/Pro — it appears in the
+ * subscribe tiles and change-plan targets, and Enterprise tenants self-manage
+ * (downgrade/cancel) via the normal ActionRow controls.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -31,7 +34,6 @@ import {
   ReceiptText,
   Save,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -359,29 +361,6 @@ const SubscribeTiles: React.FC<{ state: BillingState }> = ({ state }) => {
   const checkout = useStartCheckout();
 
   if (state.hasStripeSubscription) return null;
-  if (state.tier === 'enterprise') {
-    return (
-      <Card variant="glass">
-        <CardHeader>
-          <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-            <Sparkles className="w-5 h-5" />
-            {t('settings.billing.enterprise.title')}
-          </h2>
-        </CardHeader>
-        <CardContent>
-          <p className="text-text-secondary">
-            {t('settings.billing.enterprise.description')}
-          </p>
-          <Button asChild className="mt-4">
-            <a href="mailto:sales@example.com">
-              {t('settings.billing.enterprise.contactSales')}
-              <ExternalLink className="w-4 h-4 ml-1" />
-            </a>
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
 
   const handleSubscribe = (planId: CheckoutablePlan) => {
     checkout.mutate({

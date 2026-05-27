@@ -55,11 +55,27 @@ const CHANNEL_LABELS: Record<string, string> = {
   whatsapp: 'WhatsApp',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  active: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  error: 'bg-red-500/10 text-red-400 border-red-500/20',
-  disconnected: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
-  pending_setup: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+// Brand tint for the channel icon tile.
+const CHANNEL_COLORS: Record<string, string> = {
+  telegram: 'bg-sky-500/15 text-sky-400',
+  messenger: 'bg-blue-500/15 text-blue-400',
+  instagram: 'bg-pink-500/15 text-pink-400',
+  whatsapp: 'bg-emerald-500/15 text-emerald-400',
+};
+
+// Status indicator: colored dot + text.
+const STATUS_DOT: Record<string, string> = {
+  active: 'bg-emerald-400',
+  error: 'bg-red-400',
+  disconnected: 'bg-zinc-500',
+  pending_setup: 'bg-amber-400',
+};
+
+const STATUS_TEXT: Record<string, string> = {
+  active: 'text-emerald-400',
+  error: 'text-red-400',
+  disconnected: 'text-zinc-400',
+  pending_setup: 'text-amber-400',
 };
 
 export function SocialChannelsContent() {
@@ -221,15 +237,17 @@ export function SocialChannelsContent() {
                 return (
                   <div
                     key={conn.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors"
+                    className="group flex items-center justify-between gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors"
                   >
-                    <div className="flex items-center gap-3">
-                      <Icon className="h-5 w-5 text-zinc-400" />
-                      <div>
-                        <p className="text-sm font-medium text-white">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-white/10 text-zinc-400'}`}>
+                        <Icon className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-white truncate">
                           {conn.label || conn.platformAccountId}
                         </p>
-                        <p className="text-xs text-zinc-500">
+                        <p className="text-xs text-zinc-500 truncate">
                           {CHANNEL_LABELS[conn.channel] || conn.channel}
                           {conn.lastHealthCheckAt && (
                             <span className="ml-1.5 text-zinc-600" title={new Date(conn.lastHealthCheckAt).toLocaleString()}>
@@ -238,37 +256,42 @@ export function SocialChannelsContent() {
                           )}
                         </p>
                         {activityParts.length > 0 && (
-                          <p className="text-xs text-zinc-600 mt-0.5">{activityParts.join(' · ')}</p>
+                          <p className="text-xs text-zinc-600 mt-0.5 truncate">{activityParts.join(' · ')}</p>
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3 shrink-0">
                       {conn.lastError && (
                         <span className="text-xs text-red-400 max-w-[200px] truncate" title={conn.lastError}>
                           <AlertCircle className="h-3 w-3 inline mr-1" />
                           {conn.lastError}
                         </span>
                       )}
-                      <Badge variant="outline" className={STATUS_COLORS[conn.status] || ''}>
-                        {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
-                      </Badge>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        title={t('ai.social.actions.checkHealth')}
-                        disabled={checkingThis}
-                        onClick={() => healthCheckMutation.mutate(conn.id)}
-                      >
-                        <RefreshCw className={`h-4 w-4 ${checkingThis ? 'animate-spin' : ''}`} />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-400 hover:text-red-300"
-                        onClick={() => setDisconnectTarget(conn.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <span className="flex items-center gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[conn.status] || 'bg-zinc-500'}`} />
+                        <span className={`text-xs font-medium capitalize ${STATUS_TEXT[conn.status] || 'text-zinc-400'}`}>
+                          {t(`ai.social.status.${conn.status}`, { defaultValue: conn.status })}
+                        </span>
+                      </span>
+                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title={t('ai.social.actions.checkHealth')}
+                          disabled={checkingThis}
+                          onClick={() => healthCheckMutation.mutate(conn.id)}
+                        >
+                          <RefreshCw className={`h-4 w-4 ${checkingThis ? 'animate-spin' : ''}`} />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-red-400 hover:text-red-300"
+                          onClick={() => setDisconnectTarget(conn.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );

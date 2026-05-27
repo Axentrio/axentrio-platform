@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-  MessageSquare, Trash2, AlertCircle, RefreshCw,
+  MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2,
 } from 'lucide-react';
 import { SiTelegram, SiMessenger, SiInstagram, SiWhatsapp, SiFacebook } from 'react-icons/si';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -190,6 +190,7 @@ export function SocialChannelsContent() {
             ))}
             <div className="flex gap-2 pt-2">
               <Button onClick={handleConnectMetaPages} disabled={selectedPageIds.length === 0 || connectMeta.isPending}>
+                {connectMeta.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 {connectMeta.isPending ? t('ai.social.metaPages.connecting') : t('ai.social.metaPages.connectSelected')}
               </Button>
               <Button variant="ghost" onClick={() => setSearchParams({})}>{t('common.cancel')}</Button>
@@ -212,7 +213,12 @@ export function SocialChannelsContent() {
               <SiTelegram className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
             </Button>
             <Button size="sm" variant="outline" onClick={handleConnectFacebook} disabled={metaOAuthUrl.isPending}>
-              <SiFacebook className="h-4 w-4 mr-1" /> {t('ai.social.facebook.title')}
+              {metaOAuthUrl.isPending
+                ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                : <SiFacebook className="h-4 w-4 mr-1" />}
+              {metaOAuthUrl.isPending
+                ? t('ai.social.facebook.connecting', { defaultValue: 'Connecting…' })
+                : t('ai.social.facebook.title')}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setShowWhatsAppModal(true)}>
               <SiWhatsapp className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
@@ -353,7 +359,11 @@ export function SocialChannelsContent() {
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConnectTelegram} disabled={!botToken.trim() || connectTelegram.isPending}>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); handleConnectTelegram(); }}
+              disabled={!botToken.trim() || connectTelegram.isPending}
+            >
+              {connectTelegram.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {connectTelegram.isPending ? t('ai.social.telegram.modal.connecting') : t('ai.social.telegram.modal.connect')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -438,9 +448,10 @@ export function SocialChannelsContent() {
           <AlertDialogFooter>
             <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleConnectWhatsApp}
+              onClick={(e) => { e.preventDefault(); handleConnectWhatsApp(); }}
               disabled={!waPhoneNumberId.trim() || !waAccessToken.trim() || connectWhatsApp.isPending}
             >
+              {connectWhatsApp.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {connectWhatsApp.isPending
                 ? t('ai.social.whatsapp.modal.connecting', { defaultValue: 'Connecting…' })
                 : t('ai.social.whatsapp.modal.connect', { defaultValue: 'Connect' })}
@@ -450,7 +461,10 @@ export function SocialChannelsContent() {
       </AlertDialog>
 
       {/* Disconnect confirmation */}
-      <AlertDialog open={!!disconnectTarget} onOpenChange={() => setDisconnectTarget(null)}>
+      <AlertDialog
+        open={!!disconnectTarget}
+        onOpenChange={(open) => { if (!open && !disconnectMutation.isPending) setDisconnectTarget(null); }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('ai.social.disconnect.title')}</AlertDialogTitle>
@@ -459,17 +473,25 @@ export function SocialChannelsContent() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel disabled={disconnectMutation.isPending}>{t('common.cancel')}</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700"
-              onClick={() => {
-                if (disconnectTarget) {
-                  disconnectMutation.mutate(disconnectTarget);
+              disabled={disconnectMutation.isPending}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (!disconnectTarget) return;
+                try {
+                  await disconnectMutation.mutateAsync(disconnectTarget);
                   setDisconnectTarget(null);
+                } catch {
+                  // error surfaced via the mutation's toast; keep dialog open to retry
                 }
               }}
             >
-              {t('ai.social.disconnect.confirm')}
+              {disconnectMutation.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {disconnectMutation.isPending
+                ? t('ai.social.disconnect.disconnecting', { defaultValue: 'Disconnecting…' })
+                : t('ai.social.disconnect.confirm')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

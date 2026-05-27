@@ -289,7 +289,14 @@ export async function findOrCreateConversation(
       } as DeepPartial<Participant>);
       const savedParticipant = await manager.save(Participant, newParticipant) as Participant;
 
-      // Update existing binding to point to new session
+      // Update existing binding to point to new session.
+      // NOTE: ConversationBinding.session is a @ManyToOne sharing the sessionId
+      // column. It was loaded with relations:['session'] and still references the
+      // old (closed) session, so on save TypeORM would resolve the FK from that
+      // stale relation and clobber sessionId back to the closed session — which
+      // left every reopened session without a binding ("No conversation binding
+      // found" on outbound). Update the relation too so the FK persists correctly.
+      existingBinding.session = savedSession;
       existingBinding.sessionId = savedSession.id;
       existingBinding.externalUserName = event.sender.displayName || existingBinding.externalUserName;
       existingBinding.externalAvatarUrl = event.sender.avatarUrl || existingBinding.externalAvatarUrl;

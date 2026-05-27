@@ -489,6 +489,39 @@ async function startServer(): Promise<void> {
         if (totalClosed > 0) {
           logger.info(`Auto-closed ${totalClosed} stale sessions`);
         }
+
+        // Return stale handoffs to bot — a conversation parked in 'handoff' with no
+        // activity for 60 minutes is released back to the bot (mirrors releaseHandoff:
+        // status -> 'bot', agent unassigned) so the customer's next message gets an AI
+        // reply instead of the thread sitting silent forever. Uses a longer window than
+        // the close cutoff to give agents time before the bot reclaims an idle thread.
+        const handoffCutoff = new Date(Date.now() - 60 * 60 * 1000); // 60 minutes
+        let totalReturned = 0;
+        let returnedBatch: number;
+        batches = 0;
+        do {
+          const rows: Array<{ id: string }> = await AppDataSource.query(
+            `UPDATE chat_sessions
+             SET status = 'bot', assigned_agent_id = NULL, updated_at = NOW()
+             WHERE id IN (
+               SELECT id FROM chat_sessions
+               WHERE status = 'handoff'
+               AND last_activity_at < $1
+               AND last_activity_at IS NOT NULL
+               LIMIT $2
+               FOR UPDATE SKIP LOCKED
+             )
+             RETURNING id`,
+            [handoffCutoff, STALE_BATCH_SIZE]
+          );
+          returnedBatch = Array.isArray(rows) ? rows.length : 0;
+          totalReturned += returnedBatch;
+          batches++;
+        } while (returnedBatch === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);
+
+        if (totalReturned > 0) {
+          logger.info(`Auto-returned ${totalReturned} stale handoff sessions to bot`);
+        }
       } catch (error) {
         logger.error('Stale session cleanup failed', { error });
       }

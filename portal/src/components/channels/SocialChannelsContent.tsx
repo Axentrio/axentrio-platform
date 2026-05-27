@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -153,15 +154,13 @@ export function SocialChannelsContent() {
           <CardContent className="space-y-3">
             {metaPages.map((page: Any) => (
               <label key={page.id} className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selectedPageIds.includes(page.id)}
-                  onChange={(e) => {
+                  onCheckedChange={(checked) => {
                     setSelectedPageIds((prev) =>
-                      e.target.checked ? [...prev, page.id] : prev.filter((id: string) => id !== page.id),
+                      checked ? [...prev, page.id] : prev.filter((id: string) => id !== page.id),
                     );
                   }}
-                  className="rounded border-zinc-600"
                 />
                 <span className="text-sm text-white">{page.name}</span>
                 {page.instagramAccount && (

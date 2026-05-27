@@ -43,18 +43,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: chatbot-platform/api/package-lock.json
+          cache-dependency-path: api/package-lock.json
 
       - name: Install API dependencies
-        working-directory: chatbot-platform/api
+        working-directory: api
         run: npm ci
 
       - name: Type-check API
-        working-directory: chatbot-platform/api
+        working-directory: api
         run: npx tsc --noEmit
 
       - name: Run API tests
-        working-directory: chatbot-platform/api
+        working-directory: api
         run: npx vitest run
 
   portal-build:
@@ -66,18 +66,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: chatbot-platform/portal/package-lock.json
+          cache-dependency-path: portal/package-lock.json
 
       - name: Install Portal dependencies
-        working-directory: chatbot-platform/portal
+        working-directory: portal
         run: npm ci
 
       - name: Type-check Portal
-        working-directory: chatbot-platform/portal
+        working-directory: portal
         run: npx tsc --noEmit
 
       - name: Build Portal
-        working-directory: chatbot-platform/portal
+        working-directory: portal
         run: npm run build
 
   deploy-api:
@@ -91,15 +91,15 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: chatbot-platform/api/package-lock.json
+          cache-dependency-path: api/package-lock.json
 
       - name: Install dependencies and build
-        working-directory: chatbot-platform/api
+        working-directory: api
         run: npm ci && npm run build
 
       - name: Upload source maps to Sentry
         continue-on-error: true
-        working-directory: chatbot-platform/api
+        working-directory: api
         env:
           SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
           SENTRY_ORG: ${{ secrets.SENTRY_ORG }}
@@ -111,7 +111,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        working-directory: chatbot-platform
+        working-directory: .
         run: railway up --service chatbot-api --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
@@ -127,7 +127,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
-        working-directory: chatbot-platform
+        working-directory: .
         run: railway up --service chatbot-portal --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}

@@ -123,7 +123,7 @@ export class WebhookService {
       });
 
       // Route through outbound router — handles WebSocket + external channels
-      await routeOutboundMessage(
+      const deliveryResult = await routeOutboundMessage(
         payload,
         { sessionId, tenantId: session.tenantId, messageId },
         {
@@ -138,11 +138,26 @@ export class WebhookService {
         },
       );
 
-      logger.info(`Message sent to session ${sessionId}`, { messageId, type: payload.type });
+      if (!deliveryResult.success) {
+        // Message was persisted internally but the channel transport did NOT
+        // deliver it (e.g. no conversation binding, inactive connection, Graph
+        // send error). Surface it loudly — previously this was swallowed and
+        // n8n was told the send succeeded, leaving replies stuck in `sending`.
+        logger.error(`Channel delivery failed for session ${sessionId} — reply not delivered`, {
+          messageId,
+          channel: session.channel,
+          channelConnectionId: session.channelConnectionId,
+          error: deliveryResult.error,
+        });
+      } else {
+        logger.info(`Message sent to session ${sessionId}`, { messageId, type: payload.type });
+      }
 
       return {
         success: true,
         messageId,
+        channelDelivered: deliveryResult.success,
+        channelError: deliveryResult.success ? undefined : deliveryResult.error,
       };
 
     } catch (error) {

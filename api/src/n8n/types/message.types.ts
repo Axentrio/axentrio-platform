@@ -347,6 +347,10 @@ export interface WebhookResponse {
   error?: string;
   retryAfter?: number;
   actions?: InboundMessage[];
+  // Whether the outbound channel transport actually delivered the message.
+  // `success` only reflects internal persistence; this reflects channel delivery.
+  channelDelivered?: boolean;
+  channelError?: string;
 }
 
 export interface DeliveryStatus {

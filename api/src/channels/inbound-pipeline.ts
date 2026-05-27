@@ -202,6 +202,16 @@ export async function findOrCreateConversation(
     relations: ['session'],
   });
 
+  logger.info('[inbound] findOrCreateConversation binding lookup', {
+    channelConnectionId: connection.id,
+    channel: connection.channel,
+    externalUserId: event.sender.externalUserId,
+    externalThreadId: event.sender.externalThreadId,
+    bindingFound: !!existingBinding,
+    boundSessionId: existingBinding?.sessionId,
+    boundSessionStatus: existingBinding?.session?.status,
+  });
+
   if (existingBinding && existingBinding.session && existingBinding.session.status !== 'closed') {
     // Reuse active session
     const participantRepo = getRepository(Participant);
@@ -211,6 +221,9 @@ export async function findOrCreateConversation(
     });
 
     if (participant) {
+      logger.info('[inbound] Reusing active session', {
+        sessionId: existingBinding.sessionId, bindingId: existingBinding.id,
+      });
       return {
         session: existingBinding.session as ChatSession,
         participant: participant as Participant,
@@ -282,6 +295,11 @@ export async function findOrCreateConversation(
       existingBinding.externalAvatarUrl = event.sender.avatarUrl || existingBinding.externalAvatarUrl;
       const updatedBinding = await manager.save(ConversationBinding, existingBinding) as ConversationBinding;
 
+      logger.info('[inbound] Closed session reopened — binding reassigned to new session', {
+        newSessionId: savedSession.id, bindingId: updatedBinding.id,
+        externalThreadId: updatedBinding.externalThreadId,
+      });
+
       return {
         session: savedSession,
         participant: savedParticipant,
@@ -346,6 +364,11 @@ export async function findOrCreateConversation(
       platformUserData: event.sender.platformData || {},
     } as DeepPartial<ConversationBinding>);
     const savedBinding = await manager.save(ConversationBinding, bindingData) as ConversationBinding;
+
+    logger.info('[inbound] New session + binding created', {
+      sessionId: savedSession.id, bindingId: savedBinding.id,
+      externalThreadId: savedBinding.externalThreadId,
+    });
 
     return {
       session: savedSession,

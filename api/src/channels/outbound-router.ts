@@ -59,6 +59,9 @@ export async function routeOutboundMessage(
   // External channel — route through adapter
   const adapter = getChannelAdapter(session.channel);
   if (!adapter) {
+    logger.warn('[outbound] No adapter for channel — cannot deliver', {
+      sessionId: session.id, channel: session.channel, messageId: context.messageId,
+    });
     return { success: false, error: `No adapter for channel ${session.channel}` };
   }
 
@@ -66,6 +69,10 @@ export async function routeOutboundMessage(
     where: { sessionId: session.id, channelConnectionId: session.channelConnectionId },
   });
   if (!binding) {
+    logger.warn('[outbound] No conversation binding found — cannot deliver to channel', {
+      sessionId: session.id, channel: session.channel,
+      channelConnectionId: session.channelConnectionId, messageId: context.messageId,
+    });
     return { success: false, error: 'No conversation binding found' };
   }
 
@@ -73,8 +80,18 @@ export async function routeOutboundMessage(
     where: { id: session.channelConnectionId },
   });
   if (!connection || !connection.isActive()) {
+    logger.warn('[outbound] Channel connection not active — cannot deliver', {
+      sessionId: session.id, channel: session.channel,
+      channelConnectionId: session.channelConnectionId,
+      connectionStatus: connection?.status ?? 'not-found', messageId: context.messageId,
+    });
     return { success: false, error: 'Channel connection not active' };
   }
+
+  logger.info('[outbound] Delivering to channel', {
+    sessionId: session.id, channel: connection.channel,
+    externalThreadId: binding.externalThreadId, messageId: context.messageId,
+  });
 
   // Format response for this channel's capabilities
   const capabilities = adapter.outboundTransport.getCapabilities();

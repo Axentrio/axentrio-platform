@@ -36,7 +36,7 @@ export default function SocialMedia() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-6 p-6 max-w-6xl mx-auto w-full">
       <SocialChannelsContent />
 
       {/* TikTok — Coming Soon, per Deviation 29 */}

@@ -8,6 +8,7 @@
  */
 import { Bot, Lock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useLocation } from 'react-router-dom';
 import { Button } from '@components/ui/button';
 import { useHasFeature } from '../../queries/useEntitlementsQueries';
 import { useCopilotDrawer } from './CopilotDrawerProvider';
@@ -15,10 +16,14 @@ import { cn } from '@/lib/utils';
 
 export function CopilotLauncher() {
   const { t } = useTranslation();
+  const { pathname } = useLocation();
   const { open, isOpen } = useCopilotDrawer();
   const hasFeature = useHasFeature('platformAssistant');
 
   if (isOpen) return null;
+  // Inbox has its own bottom-right composer + Send button; the floating
+  // launcher would sit on top of it, so hide it on that route.
+  if (pathname.startsWith('/inbox')) return null;
 
   return (
     <Button

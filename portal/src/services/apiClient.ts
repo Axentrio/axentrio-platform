@@ -70,6 +70,10 @@ const PLAN_LIMIT_COPY: Record<string, string> = {
 // features). The toast would be noise on top of an already-locked UI.
 const PLAN_LIMIT_NO_TOAST: ReadonlySet<string> = new Set([
   'plan_limit_platform_assistant',
+  // Leads page renders a LockedPreview but still fires GET /leads on mount
+  // (hooks run before the locked-check), so its 402 would double-notify on
+  // top of the already-locked UI.
+  'plan_limit_lead_capture',
 ]);
 
 function handlePlanLimit(error: AxiosError): void {

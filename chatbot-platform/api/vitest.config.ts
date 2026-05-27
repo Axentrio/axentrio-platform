@@ -22,11 +22,13 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     globalSetup: ['./src/__tests__/global-setup.ts'],
-    setupFiles: ['./src/__tests__/setup.ts'],
+    setupFiles: ['./src/__tests__/env-setup.ts', './src/__tests__/setup.ts'],
     include: ['src/__tests__/**/*.test.ts'],
     testTimeout: 30000,
     hookTimeout: 60000,
-    fileParallelism: false,
+    // Files run in parallel; each worker uses its own database (see setup.ts),
+    // so the per-test TRUNCATE stays isolated to that worker.
+    fileParallelism: true,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

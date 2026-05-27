@@ -1,7 +1,12 @@
 /**
  * Vitest Global Setup
  * Runs once before the entire test suite (not per file).
- * Initializes the DB connection and creates the schema.
+ *
+ * Schema creation is now per-worker (see setup.ts): each worker drops/creates
+ * its own `chatbot_test_<id>` database so files can run in parallel without
+ * truncating each other's rows. Here we just fail fast if the server is
+ * unreachable, so a misconfigured DATABASE_URL surfaces once rather than in
+ * every worker.
  */
 import { DataSource } from 'typeorm';
 
@@ -11,39 +16,14 @@ if (!TEST_DATABASE_URL) {
 }
 
 export async function setup() {
-  // Create a temporary connection just to set up the schema
-  // We use a raw DataSource here to avoid importing app code that has side effects
-  const ds = new DataSource({
-    type: 'postgres',
-    url: TEST_DATABASE_URL,
-    synchronize: false,
-    logging: false,
-  });
-
+  const adminUrl = new URL(TEST_DATABASE_URL!);
+  adminUrl.pathname = '/postgres';
+  const ds = new DataSource({ type: 'postgres', url: adminUrl.toString(), logging: false });
   await ds.initialize();
-
-  // Drop and recreate public schema to ensure clean state
-  await ds.query('DROP SCHEMA IF EXISTS public CASCADE');
-  await ds.query('CREATE SCHEMA public');
-  // Pre-create extensions so TypeORM synchronize can handle uuid and vector columns
-  await ds.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
-  // pgvector may not be available in all environments (e.g., CI with plain postgres)
-  try {
-    await ds.query('CREATE EXTENSION IF NOT EXISTS vector');
-  } catch {
-    console.warn('pgvector extension not available — skipping (knowledge base features will not work in tests)');
-  }
-  // pg_trgm backs the Copilot lexical retriever (word_similarity over docs).
-  // Same try/catch pattern as pgvector — CI may run plain postgres.
-  try {
-    await ds.query('CREATE EXTENSION IF NOT EXISTS pg_trgm');
-  } catch {
-    console.warn('pg_trgm extension not available — Copilot lexical retrieval tests will fail');
-  }
-
+  await ds.query('SELECT 1');
   await ds.destroy();
 }
 
 export async function teardown() {
-  // Nothing needed — schema persists for inspection if needed
+  // Worker databases persist for inspection; they are dropped/recreated next run.
 }

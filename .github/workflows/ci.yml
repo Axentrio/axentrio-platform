@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  api-test:
     runs-on: ubuntu-latest
 
     services:
@@ -43,36 +43,45 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: |
-            chatbot-platform/api/package-lock.json
-            chatbot-platform/portal/package-lock.json
+          cache-dependency-path: chatbot-platform/api/package-lock.json
 
       - name: Install API dependencies
         working-directory: chatbot-platform/api
-        run: npm ci
-
-      - name: Install Portal dependencies
-        working-directory: chatbot-platform/portal
         run: npm ci
 
       - name: Type-check API
         working-directory: chatbot-platform/api
         run: npx tsc --noEmit
 
-      - name: Type-check Portal
-        working-directory: chatbot-platform/portal
-        run: npx tsc --noEmit
-
       - name: Run API tests
         working-directory: chatbot-platform/api
         run: npx vitest run
+
+  portal-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: chatbot-platform/portal/package-lock.json
+
+      - name: Install Portal dependencies
+        working-directory: chatbot-platform/portal
+        run: npm ci
+
+      - name: Type-check Portal
+        working-directory: chatbot-platform/portal
+        run: npx tsc --noEmit
 
       - name: Build Portal
         working-directory: chatbot-platform/portal
         run: npm run build
 
   deploy-api:
-    needs: test
+    needs: [api-test, portal-build]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
@@ -108,7 +117,7 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
   deploy-portal:
-    needs: test
+    needs: [api-test, portal-build]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:

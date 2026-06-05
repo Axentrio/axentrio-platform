@@ -23,6 +23,7 @@ import {
   CancelResult,
 } from './types';
 import { computeSlots, BusyInterval } from './slot-engine';
+import { sendBookingEmail } from './booking-email';
 
 export class InternalProvider implements BookingProvider {
   private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
@@ -200,6 +201,21 @@ export class InternalProvider implements BookingProvider {
       bookingId,
       botId: ctx.bot.id,
       start: start.toISOString(),
+    });
+
+    // Confirmation invite (non-fatal). Phase 0: customer + owner get the ICS.
+    await sendBookingEmail({
+      method: 'REQUEST',
+      uid: icsUid,
+      sequence: 0,
+      start,
+      end,
+      summary: eventType.name,
+      location: eventType.locationType === 'in_person' ? 'In person' : undefined,
+      timezone: rule.timezone,
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
     });
 
     return {

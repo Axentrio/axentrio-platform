@@ -28,6 +28,11 @@ vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+const sendBookingEmail = vi.fn();
+vi.mock('../../n8n/booking-providers/booking-email', () => ({
+  sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
+}));
+
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
 import { BookingError } from '../../n8n/booking-providers/types';
 
@@ -90,6 +95,9 @@ describe('InternalProvider.createBooking', () => {
     expect(logSave).toHaveBeenCalledOnce();
     // advisory lock + insert both ran inside the transaction
     expect(managerQuery).toHaveBeenCalledTimes(2);
+    // a confirmation invite was sent
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 0 });
   });
 
   it('returns the existing booking on idempotent retry without inserting', async () => {

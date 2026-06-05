@@ -1,12 +1,20 @@
 import { Resend } from 'resend';
 import { logger } from '../utils/logger';
 
+interface EmailAttachment {
+  filename: string;
+  /** Base64-encoded content. */
+  content: string;
+  contentType?: string;
+}
+
 interface SendEmailOptions {
   to: string | string[];
   subject: string;
   body: string;
   from?: string;
   replyTo?: string;
+  attachments?: EmailAttachment[];
 }
 
 interface SendEmailResult {
@@ -25,7 +33,7 @@ export class EmailService {
   }
 
   async send(options: SendEmailOptions): Promise<SendEmailResult> {
-    const { to, subject, body, from, replyTo } = options;
+    const { to, subject, body, from, replyTo, attachments } = options;
 
     if (!this.resend) {
       logger.warn('[EmailService] send called but no API key configured');
@@ -43,6 +51,15 @@ export class EmailService {
       subject,
       html: body,
       ...(replyTo ? { replyTo } : {}),
+      ...(attachments && attachments.length
+        ? {
+            attachments: attachments.map((a) => ({
+              filename: a.filename,
+              content: a.content,
+              ...(a.contentType ? { contentType: a.contentType } : {}),
+            })),
+          }
+        : {}),
     });
 
     if (error) {

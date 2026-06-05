@@ -56,14 +56,24 @@ export class InternalProvider implements BookingProvider {
     return { slots, timezone: rule.timezone };
   }
 
-  /** Existing pending/confirmed bookings' blocked ranges overlapping [start,end). */
-  private async loadBusy(calendarKey: string, rangeStartIso: string, rangeEndIso: string): Promise<BusyInterval[]> {
+  /**
+   * Existing pending/confirmed bookings' blocked ranges overlapping [start,end).
+   * `excludeId` omits a booking from the result (used on reschedule so a booking
+   * never conflicts with its own current slot).
+   */
+  private async loadBusy(
+    calendarKey: string,
+    rangeStartIso: string,
+    rangeEndIso: string,
+    excludeId?: string
+  ): Promise<BusyInterval[]> {
     const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
       `SELECT lower(blocked_range) AS s, upper(blocked_range) AS e
          FROM chatbot_bookings
         WHERE calendar_key = $1 AND status IN ('pending','confirmed')
-          AND blocked_range && tstzrange($2, $3, '[)')`,
-      [calendarKey, rangeStartIso, rangeEndIso]
+          AND blocked_range && tstzrange($2, $3, '[)')
+          AND ($4::uuid IS NULL OR id <> $4::uuid)`,
+      [calendarKey, rangeStartIso, rangeEndIso, excludeId ?? null]
     );
     return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
   }
@@ -229,16 +239,179 @@ export class InternalProvider implements BookingProvider {
     };
   }
 
-  // Listing internal bookings lands with reschedule/cancel in slice #5.
-  async listBookings(_ctx: BookingContext, _attendeeEmail: string): Promise<ListBookingsResult> {
-    return { bookings: [] };
+  async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
+    const bookings = await AppDataSource.getRepository(Booking).find({
+      where: {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        attendeeEmail,
+        status: 'confirmed',
+      },
+      order: { startUtc: 'ASC' },
+    });
+    return {
+      bookings: bookings.map((b) => ({
+        id: b.id,
+        startTime: b.startUtc.toISOString(),
+        endTime: b.endUtc.toISOString(),
+        attendee: { name: b.attendeeName ?? undefined, email: b.attendeeEmail ?? undefined },
+        status: b.status,
+      })),
+    };
   }
 
-  async rescheduleBooking(_ctx: BookingContext, _bookingId: string, _newStartTime: string): Promise<RescheduleResult> {
-    throw new BookingError('Internal reschedule is not yet available', 'BOOKING_NOT_IMPLEMENTED', 501);
+  /** Load a booking and verify it belongs to this tenant + bot (else 404). */
+  private async loadOwned(ctx: BookingContext, bookingId: string): Promise<Booking> {
+    const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
+    if (!booking || booking.tenantId !== ctx.tenant.id || booking.botId !== ctx.bot.id) {
+      throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+    }
+    return booking;
   }
 
-  async cancelBooking(_ctx: BookingContext, _bookingId: string, _reason?: string): Promise<CancelResult> {
-    throw new BookingError('Internal cancel is not yet available', 'BOOKING_NOT_IMPLEMENTED', 501);
+  async rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult> {
+    const booking = await this.loadOwned(ctx, bookingId);
+    if (booking.status !== 'confirmed') {
+      throw new BookingError('Only confirmed bookings can be rescheduled', 'BOOKING_NOT_RESCHEDULABLE', 409);
+    }
+    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+    const calendarKey = this.calendarKey(ctx);
+
+    const start = new Date(newStartTime);
+    if (Number.isNaN(start.getTime())) {
+      throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
+    }
+    const end = new Date(start.getTime() + eventType.durationMin * 60_000);
+    const blockedStart = new Date(start.getTime() - eventType.bufferBeforeMin * 60_000);
+    const blockedEnd = new Date(end.getTime() + eventType.bufferAfterMin * 60_000);
+
+    // Re-validate the new slot (excluding this booking's own current range).
+    const busy = await this.loadBusy(
+      calendarKey,
+      new Date(start.getTime() - 24 * 3600_000).toISOString(),
+      new Date(end.getTime() + 24 * 3600_000).toISOString(),
+      bookingId
+    );
+    const offered = computeSlots({
+      rule,
+      eventType,
+      rangeStart: start.toISOString(),
+      rangeEnd: new Date(start.getTime() + 1000).toISOString(),
+      now: new Date(),
+      busy,
+    }).some((s) => new Date(s.start).getTime() === start.getTime());
+    if (!offered) {
+      throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
+    }
+
+    // Single atomic UPDATE under the calendar lock: frees the old slot and
+    // reserves the new one in one statement; the exclusion constraint validates
+    // the new range against other bookings (the row is excluded from itself).
+    let sequence: number;
+    try {
+      sequence = await AppDataSource.transaction(async (manager) => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        const rows: Array<{ sequence: number }> = await manager.query(
+          `UPDATE chatbot_bookings
+              SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
+                  sequence=sequence+1, updated_at=now()
+            WHERE id=$5 AND tenant_id=$6 AND status='confirmed'
+            RETURNING sequence`,
+          [start.toISOString(), end.toISOString(), blockedStart.toISOString(), blockedEnd.toISOString(), bookingId, ctx.tenant.id]
+        );
+        if (!rows.length) {
+          throw new BookingError('Booking is no longer reschedulable', 'BOOKING_NOT_RESCHEDULABLE', 409);
+        }
+        return rows[0].sequence;
+      });
+    } catch (err) {
+      if (err instanceof BookingError) throw err;
+      if ((err as { code?: string })?.code === '23P01') {
+        throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
+      }
+      throw err;
+    }
+
+    await this.writeLog(ctx, 'rescheduled', booking, start, end);
+
+    await sendBookingEmail({
+      method: 'REQUEST',
+      uid: booking.icsUid,
+      sequence,
+      start,
+      end,
+      summary: eventType.name,
+      timezone: rule.timezone,
+      attendeeName: booking.attendeeName ?? '',
+      attendeeEmail: booking.attendeeEmail ?? '',
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+    });
+
+    return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
+  }
+
+  async cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult> {
+    const booking = await this.loadOwned(ctx, bookingId);
+    // Idempotent: already cancelled → success, no email/log.
+    if (booking.status === 'cancelled') {
+      return { success: true, cancelled: true };
+    }
+    if (booking.status !== 'confirmed') {
+      throw new BookingError('Only confirmed bookings can be cancelled', 'BOOKING_NOT_CANCELLABLE', 409);
+    }
+    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+
+    const rows: Array<{ sequence: number }> = await AppDataSource.getRepository(Booking).query(
+      `UPDATE chatbot_bookings
+          SET status='cancelled', sequence=sequence+1, notes=COALESCE($3, notes), updated_at=now()
+        WHERE id=$1 AND tenant_id=$2 AND status='confirmed'
+        RETURNING sequence`,
+      [bookingId, ctx.tenant.id, reason ?? null]
+    );
+    if (!rows.length) {
+      // Lost a race with another cancel — treat as idempotent success.
+      return { success: true, cancelled: true };
+    }
+
+    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason);
+
+    await sendBookingEmail({
+      method: 'CANCEL',
+      uid: booking.icsUid,
+      sequence: rows[0].sequence,
+      start: booking.startUtc,
+      end: booking.endUtc,
+      summary: eventType.name,
+      timezone: rule.timezone,
+      attendeeName: booking.attendeeName ?? '',
+      attendeeEmail: booking.attendeeEmail ?? '',
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+    });
+
+    return { success: true, cancelled: true };
+  }
+
+  private async writeLog(
+    ctx: BookingContext,
+    eventType: 'rescheduled' | 'cancelled',
+    booking: Booking,
+    start: Date,
+    end: Date,
+    reason?: string
+  ): Promise<void> {
+    const logRepo = AppDataSource.getRepository(BookingLog);
+    await logRepo.save(
+      logRepo.create({
+        tenantId: ctx.tenant.id,
+        sessionId: ctx.session.id,
+        calBookingId: booking.id,
+        eventType,
+        attendeeName: booking.attendeeName ?? undefined,
+        attendeeEmail: booking.attendeeEmail ?? undefined,
+        startTime: start,
+        endTime: end,
+        notes: reason,
+      })
+    );
   }
 }

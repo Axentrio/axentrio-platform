@@ -90,14 +90,6 @@ import { timeoutMiddleware } from './middleware/timeout.middleware';
 const app = express();
 const httpServer = createServer(app);
 
-// Health check (no prefix, for Railway)
-app.get('/health', (_req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-  });
-});
-
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
 app.use('/api/v1/webhooks/clerk', express.raw({ type: 'application/json' }), clerkWebhookRoutes);
@@ -204,6 +196,19 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Session-ID', 'X-Tenant-Context'],
 }));
+
+// Health check (no prefix, for Railway). Placed AFTER cors() so the
+// response carries Access-Control-Allow-Origin (browsers fetching it
+// from the portal need it), BEFORE express.json/rate-limit/clerk since
+// the endpoint has no body, must stay unauthenticated, and Railway
+// probes it every ~30s.
+app.get('/health', (_req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(rateLimitByIp);

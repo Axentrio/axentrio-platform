@@ -155,7 +155,7 @@ const ChatbotAppearancesForm: React.FC = () => {
           </p>
           <p className="text-xs text-muted-foreground">
             {t('ai.appearances.welcome.helper')}{' '}
-            <a href="/ai?tab=bot" className="underline">
+            <a href="/ai?tab=bots" className="underline">
               {t('ai.appearances.welcome.editLink')}
             </a>
           </p>

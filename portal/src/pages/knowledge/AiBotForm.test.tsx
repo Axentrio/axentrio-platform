@@ -13,8 +13,8 @@ vi.mock('@/auth/useAppAuth', () => ({
   }),
 }));
 
-vi.mock('@/queries/useKnowledgeQueries', () => ({
-  useGetAiSettings: () => ({
+vi.mock('@/queries/useBotsQueries', () => ({
+  useBotAiSettings: () => ({
     data: {
       enabled: true,
       brandVoice: {
@@ -36,7 +36,7 @@ vi.mock('@/queries/useKnowledgeQueries', () => ({
     isLoading: false,
     error: null,
   }),
-  useUpdateAiSettings: () => ({
+  useUpdateBotAiSettings: () => ({
     mutate: mockMutate,
     isPending: false,
   }),
@@ -55,7 +55,7 @@ const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   });
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <AiBotForm onGoToKnowledgeBase={onGoToKnowledgeBase} />
+      <AiBotForm botId="test-bot" onGoToKnowledgeBase={onGoToKnowledgeBase} />
     </QueryClientProvider>,
   );
   return { user, onGoToKnowledgeBase, ...result };

@@ -5,14 +5,17 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { CompactTypingIndicator } from '@/components/TypingIndicator';
-import { useTestChat, type TestChatResponse } from '@/queries/useKnowledgeQueries';
+import { useBotTestChat, type BotTestChatResponse } from '@/queries/useBotsQueries';
 
 interface TestChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  /** The bot being previewed — test chat runs against this bot's config + KBs. */
+  botId: string;
   botName: string;
   provider: string;
   model: string;
+  /** Whether the bot's (shared) knowledge base has indexed docs — gates KB toggle. */
   hasIndexedDocs: boolean;
 }
 
@@ -24,6 +27,7 @@ interface ChatMessage {
 const TestChatPanel: React.FC<TestChatPanelProps> = ({
   isOpen,
   onClose,
+  botId,
   botName,
   provider,
   model,
@@ -35,7 +39,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
   const [useKB, setUseKB] = useState(hasIndexedDocs);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const testChat = useTestChat();
+  const testChat = useBotTestChat(botId);
 
   // Reset on open
   useEffect(() => {
@@ -74,7 +78,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
       },
       {
         onSuccess: (data) => {
-          const resp = data as TestChatResponse;
+          const resp = data as BotTestChatResponse;
           const content = resp.response || t('ai.testChat.errors.emptyResponse');
           const botMsg: ChatMessage = { role: 'assistant', content };
           setMessages((prev) => [...prev, botMsg]);

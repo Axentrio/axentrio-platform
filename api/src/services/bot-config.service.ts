@@ -23,7 +23,7 @@
  *      know when #16c (`chat_sessions.bot_id NOT NULL` migration) is safe.
  */
 
-import { DataSource } from 'typeorm';
+import { DataSource, IsNull } from 'typeorm';
 import { Bot, BotSettings } from '../database/entities/Bot';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
@@ -78,6 +78,23 @@ export async function getBotConfigForBotId(botId: string): Promise<Bot> {
 }
 
 /**
+ * Load a bot the caller's tenant owns. Used by admin/management endpoints that
+ * target a SPECIFIC bot by id (e.g. the per-bot AI settings editor). Scoped to
+ * the tenant and excludes soft-deleted rows so a botId from one tenant can
+ * never read/write another tenant's bot, and a deleted bot is treated as gone.
+ *
+ * Throws `BotNotFoundConfigError` (maps to HTTP 404 at the route layer) when no
+ * matching, non-deleted bot exists for this tenant.
+ */
+export async function getOwnedBot(botId: string, tenantId: string): Promise<Bot> {
+  const bot = await ds().getRepository(Bot).findOne({
+    where: { id: botId, tenantId, deletedAt: IsNull() },
+  });
+  if (!bot) throw new BotNotFoundConfigError(botId);
+  return bot;
+}
+
+/**
  * Load the tenant's anchor bot. Used by admin/management endpoints that
  * target the tenant rather than a specific session. v1: only the anchor
  * is exposed via the existing `/tenants/me/*` endpoints; #16f will add
@@ -110,6 +127,10 @@ export async function getBotConfigForSession(
 ): Promise<{ bot: Bot; settings: BotSettings }> {
   if (session.botId) {
     const bot = await getBotConfigForBotId(session.botId);
+    // Defence in depth: the FK only ties bot_id → chatbot_bots(id), not to the
+    // session's tenant. Reject a session pointing at another tenant's bot so
+    // runtime config can never cross the tenant boundary.
+    if (bot.tenantId !== session.tenantId) throw new BotNotFoundConfigError(session.botId);
     if (bot.deletedAt) throw new BotNotFoundConfigError(session.botId);
     if (bot.status === 'paused') throw new BotPausedConfigError(session.botId);
     return { bot, settings: bot.settings ?? ({} as BotSettings) };
@@ -192,10 +213,34 @@ export async function replaceAnchorBotSettingsSection<K extends keyof BotSetting
   section: K,
   value: BotSettings[K],
 ): Promise<Bot> {
-  const repo = ds().getRepository(Bot);
-  const bot = await repo.findOne({ where: { tenantId, isDefault: true } });
+  const bot = await ds().getRepository(Bot).findOne({ where: { tenantId, isDefault: true } });
   if (!bot) throw new AnchorBotMissingError(tenantId);
+  return saveReplacedSection(bot, section, value);
+}
 
+/**
+ * Bot-scoped variant of {@link replaceAnchorBotSettingsSection} for endpoints
+ * that target a specific bot by id (per-bot AI settings editor). Resolves a
+ * tenant-owned, non-deleted bot via {@link getOwnedBot} — never an arbitrary
+ * bot id — then wholesale-replaces the section with the same apiKey-stripping
+ * guarantee.
+ */
+export async function replaceBotSettingsSection<K extends keyof BotSettings>(
+  botId: string,
+  tenantId: string,
+  section: K,
+  value: BotSettings[K],
+): Promise<Bot> {
+  const bot = await getOwnedBot(botId, tenantId);
+  return saveReplacedSection(bot, section, value);
+}
+
+/** Shared section-replace body for the anchor + bot-scoped variants. */
+async function saveReplacedSection<K extends keyof BotSettings>(
+  bot: Bot,
+  section: K,
+  value: BotSettings[K],
+): Promise<Bot> {
   let sanitized = value;
   if (section === 'ai' && value && typeof value === 'object' && 'apiKey' in (value as object)) {
     const { apiKey: _omit, ...rest } = value as { apiKey?: unknown } & Record<string, unknown>;
@@ -204,7 +249,7 @@ export async function replaceAnchorBotSettingsSection<K extends keyof BotSetting
   }
 
   bot.settings = { ...(bot.settings ?? {}), [section]: sanitized } as BotSettings;
-  return repo.save(bot);
+  return ds().getRepository(Bot).save(bot);
 }
 
 /**

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Plus, MoreVertical, Pencil, Pause, Play, Code, Trash2 } from 'lucide-react';
+import { Plus, MoreVertical, Pencil, Pause, Play, Code, Trash2, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -48,6 +49,9 @@ import {
 import CreateBotDialog from './CreateBotDialog';
 import RenameBotDialog from './RenameBotDialog';
 import EmbedSnippetDialog from './EmbedSnippetDialog';
+import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
+import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
+import { useChannelConnections } from '@/queries/useChannelQueries';
 
 function formatDate(iso: string): string {
   try {
@@ -59,9 +63,15 @@ function formatDate(iso: string): string {
 
 export const BotsList: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { data, isLoading, error } = useBots();
   const updateBot = useUpdateBot();
   const deleteBot = useDeleteBot();
+
+  // Tenant-wide onboarding signals (relocated here from the removed AI Bot tab).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: stats } = useKnowledgeStats() as { data: any };
+  const { data: channelConnections } = useChannelConnections();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [renaming, setRenaming] = useState<BotListItem | null>(null);
@@ -76,6 +86,11 @@ export const BotsList: React.FC = () => {
   const used = data?.used ?? 0;
   const limit = data?.limit ?? null;
   const atQuota = limit !== null && used >= limit;
+
+  const defaultBot = bots.find((b) => b.isDefault);
+  const botEnabled = defaultBot?.aiEnabled ?? false;
+  const hasIndexedDocs = parseInt(stats?.documents?.indexed || '0') > 0;
+  const hasConnectedChannel = (channelConnections?.length ?? 0) > 0;
 
   const handleActivate = async (bot: BotListItem) => {
     try {
@@ -146,6 +161,14 @@ export const BotsList: React.FC = () => {
   return (
     <TooltipProvider>
       <div className="space-y-6">
+        <OnboardingChecklist
+          botEnabled={botEnabled}
+          hasIndexedDocs={hasIndexedDocs}
+          hasConnectedChannel={hasConnectedChannel}
+          onGoToKnowledge={() => navigate('/ai?tab=knowledge')}
+          onGoToSocial={() => navigate('/ai?tab=social')}
+        />
+
         {/* Header: usage + new bot button */}
         <div className="flex items-center justify-between">
           <p className="text-sm text-text-muted">{usageLabel}</p>
@@ -212,6 +235,10 @@ export const BotsList: React.FC = () => {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => navigate(`/ai/bots/${bot.id}`)}>
+                            <Settings2 className="w-4 h-4 mr-2" />
+                            {t('bots.actions.editConfig')}
+                          </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => setRenaming(bot)}>
                             <Pencil className="w-4 h-4 mr-2" />
                             {t('bots.actions.rename')}

@@ -2,31 +2,33 @@
  * Bot management routes (multi-bot Phase 2 — clean CRUD).
  *
  * Tenant-scoped management of a tenant's Bots: list / create / rename /
- * pause / delete / embed. The anchor bot (`isDefault`) is protected — it
- * cannot be paused or deleted in v1 (it owns the legacy tenant.apiKey).
+ * pause / delete / embed, plus per-bot AI settings + test chat. The anchor bot
+ * (`isDefault`) is protected — it cannot be paused or deleted in v1 (it owns the
+ * legacy tenant.apiKey).
  *
- * DEFERRED to the billing epic landing: the per-tier bot quota gate on create
- * and activate (see the TODO in POST / and PATCH /:id). DEFERRED to Phase 3:
- * auto-seeding a dedicated KnowledgeBase on create (blocked by the current
- * one-KB-per-tenant unique constraint) — a new bot starts with no attached
- * KBs and answers from nothing until KBs are attached.
+ * On create, a bot is attached to the tenant's shared primary KnowledgeBase
+ * (`botId IS NULL`) via `ensureSharedKbAttached`, so it answers from the same
+ * documents as the rest of the tenant's bots until per-bot KB management ships.
  */
 
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import { IsNull } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
-import { Bot, BotSettings } from '../database/entities/Bot';
+import { Bot } from '../database/entities/Bot';
 import { BotKnowledgeBase } from '../database/entities/BotKnowledgeBase';
 import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
+import { requireRole } from '../middleware/auth.middleware';
 import { asyncHandler, NotFoundError, ForbiddenError } from '../middleware/error-handler';
+import { getBotAiSettings, updateBotAiSettings, botTestChat } from '../knowledge/bot-ai-settings.controller';
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { config } from '../config/environment';
-import { DEFAULT_SKILLS } from '../config/default-skills';
+import { defaultBotSettings } from '../config/default-bot-settings';
 import { createBotSchema, updateBotSchema } from '../schemas/bot.schema';
+import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { enforceCountLimit } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 
@@ -52,29 +54,6 @@ function isUniqueViolation(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as { code?: string }).code === '23505';
 }
 
-/** Default per-bot config for a newly-created (non-anchor) bot — clean slate. */
-function defaultBotSettings(name: string): BotSettings {
-  return {
-    ai: {
-      enabled: true,
-      usePlatformAgent: true,
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      brandVoice: { name: `${name} Assistant`, tone: 'friendly', customInstructions: '' },
-      guardrails: {
-        topicsToAvoid: [],
-        escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],
-        confidenceThreshold: 0.7,
-        maxResponseLength: 500,
-        greetingMessage: 'Welcome! How can I help you today?',
-        fallbackMessage: 'Let me connect you with our team.',
-        offHoursMessage: "We're currently outside business hours. We'll get back to you soon.",
-      },
-    },
-    skills: [...DEFAULT_SKILLS],
-  };
-}
-
 function embedSnippet(publicKey: string): string {
   return `<script src="${config.api.url}/widget.js" data-api-key="${publicKey}" async></script>`;
 }
@@ -86,6 +65,9 @@ function toListItem(bot: Bot) {
     status: bot.status,
     isDefault: bot.isDefault,
     publicKey: bot.publicKey,
+    // Surfaced so the (relocated) onboarding checklist can read the default
+    // bot's AI-enabled state without a second per-bot ai-settings fetch.
+    aiEnabled: bot.settings?.ai?.enabled ?? false,
     createdAt: bot.createdAt,
     updatedAt: bot.updatedAt,
   };
@@ -166,14 +148,10 @@ router.post(
       }
       if (!saved) throw new Error('Failed to generate a unique bot public key');
 
-      // Seed a dedicated (empty) KnowledgeBase and attach it, so the bot is
-      // self-contained. It answers from nothing until documents are added.
-      const kb = await manager.save(
-        manager.create(KnowledgeBase, { tenantId, botId: saved.id, status: 'inactive' }),
-      );
-      await manager.save(
-        manager.create(BotKnowledgeBase, { botId: saved.id, knowledgeBaseId: kb.id, tenantId }),
-      );
+      // Attach the tenant's shared primary KB so the new bot answers from the
+      // same documents (the existing Documents tab manages that KB). Per-bot KB
+      // management is a follow-up; until then all bots share tenant knowledge.
+      await ensureSharedKbAttached(manager, tenantId, saved.id);
       return saved;
     });
 
@@ -366,5 +344,15 @@ router.delete(
     sendNoContent(res);
   })
 );
+
+/**
+ * Per-bot AI settings + test chat (multi-bot config editing). Role gating
+ * mirrors the legacy `/tenants/me/ai-settings`: read = admin/supervisor,
+ * write + test-chat = admin only (`requireRole` already passes super_admin).
+ * Handlers live in `knowledge/bot-ai-settings.controller.ts`.
+ */
+router.get('/:id/ai-settings', requireRole('admin', 'supervisor'), asyncHandler(getBotAiSettings));
+router.put('/:id/ai-settings', requireRole('admin'), asyncHandler(updateBotAiSettings));
+router.post('/:id/test-chat', requireRole('admin'), asyncHandler(botTestChat));
 
 export default router;

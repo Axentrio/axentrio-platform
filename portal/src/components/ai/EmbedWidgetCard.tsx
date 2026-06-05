@@ -1,9 +1,9 @@
 /**
  * EmbedWidgetCard — "Deploy" panel
- * Right-rail panel on the AI & Content "AI Bot" tab. Shows the bot's live
- * status, the website install snippet, a Test-chat shortcut, and a link to the
- * install guide. Gated to admin at the call site because the snippet contains
- * the tenant API key.
+ * Right-rail panel on the per-bot editor. Shows the bot's live status, the
+ * website install snippet (built from THIS bot's `publicKey`), a Test-chat
+ * shortcut, and a link to the install guide. Gated to admin at the call site
+ * because the snippet contains the bot's embed key.
  */
 
 import React from 'react';
@@ -13,19 +13,23 @@ import { Copy, MessageSquare, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { useTenantSettings } from '@/queries/useTenantQueries';
 
 interface EmbedWidgetCardProps {
   /** Whether the AI bot is enabled — drives the status badge + Test-chat gating. */
   enabled?: boolean;
   /** Opens the test-chat panel. Omit to hide the Test-chat button. */
   onTestChat?: () => void;
+  /**
+   * The bot's own embed key (from `/bots/:id/embed`). The snippet binds to THIS
+   * bot — never falls back to the tenant/anchor key. Render nothing until it
+   * loads so a non-default bot can't show the anchor snippet.
+   */
+  publicKey?: string;
 }
 
-export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({ enabled = false, onTestChat }) => {
+export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({ enabled = false, onTestChat, publicKey }) => {
   const { t } = useTranslation();
-  const { data: tenant } = useTenantSettings() as { data: { apiKey?: string } | undefined };
-  const apiKey = tenant?.apiKey;
+  const apiKey = publicKey;
 
   if (!apiKey) return null;
 

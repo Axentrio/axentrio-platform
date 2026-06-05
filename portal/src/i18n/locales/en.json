@@ -1738,11 +1738,21 @@
       "dismiss": "Dismiss",
       "setUp": "Set up",
       "steps": {
-        "aiEnabled": { "label": "Enable the AI assistant" },
-        "brandVoiceConfigured": { "label": "Configure your brand voice" },
-        "knowledgeBaseHasDocs": { "label": "Add documents to your knowledge base" },
-        "calcomConnected": { "label": "Connect Cal.com" },
-        "automationsConfigured": { "label": "Configure automations" }
+        "aiEnabled": {
+          "label": "Enable the AI assistant"
+        },
+        "brandVoiceConfigured": {
+          "label": "Configure your brand voice"
+        },
+        "knowledgeBaseHasDocs": {
+          "label": "Add documents to your knowledge base"
+        },
+        "calcomConnected": {
+          "label": "Connect Cal.com"
+        },
+        "automationsConfigured": {
+          "label": "Configure automations"
+        }
       }
     },
     "timeRange": {
@@ -1918,7 +1928,8 @@
       "delete": "Delete",
       "showEmbed": "Show embed snippet",
       "newBot": "New bot",
-      "menuAria": "Actions for {{name}}"
+      "menuAria": "Actions for {{name}}",
+      "editConfig": "Edit config"
     },
     "quota": {
       "usage": "{{used}} of {{limit}} used",
@@ -1960,6 +1971,11 @@
       "anchorPauseBlocked": "The default bot can't be paused.",
       "anchorDeleteBlocked": "The default bot can't be deleted.",
       "generic": "Something went wrong. Please try again."
+    },
+    "editor": {
+      "backToBots": "Back to bots",
+      "title": "Bot configuration",
+      "subtitle": "Configure this bot's identity, voice, instructions, and guardrails."
     }
   }
 }

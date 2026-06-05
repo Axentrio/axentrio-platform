@@ -32,6 +32,7 @@ import { useAppAuth } from '@auth/useAppAuth';
 // Pages
 import Inbox from '@pages/Inbox';
 import AiContent from '@pages/AiContent';
+import BotEditor from '@pages/bots/BotEditor';
 import Analytics from '@pages/Analytics';
 import Team from '@pages/Team';
 import Bookings from '@pages/Bookings';
@@ -298,6 +299,7 @@ const App: React.FC = () => {
                     <Route element={<ProtectedRoute />}>
                       <Route path="/inbox" element={<Inbox />} />
                       <Route path="/ai" element={<AiContent />} />
+                      <Route path="/ai/bots/:id" element={<BotEditor />} />
                       <Route path="/analytics" element={<Analytics />} />
                       {/* M2 epic nav: locked-but-visible module routes */}
                       <Route path="/channels" element={<SocialMedia />} />

@@ -59,7 +59,7 @@ describe('ChatbotAppearancesForm', () => {
     expect(screen.getAllByText(/Hello — how can we help you today\?/).length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /edit in ai bot/i })).toHaveAttribute(
       'href',
-      '/ai?tab=bot',
+      '/ai?tab=bots',
     );
   });
 

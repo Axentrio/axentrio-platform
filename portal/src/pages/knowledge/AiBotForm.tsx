@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
+import { useBotAiSettings, useUpdateBotAiSettings } from '@/queries/useBotsQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
@@ -35,6 +35,8 @@ import { promptTemplates, findTemplate, AI_PLACEHOLDERS } from './aiBotTemplates
 import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
 
 interface AiBotFormProps {
+  /** The bot whose AI config this form edits (per-bot config editing). */
+  botId: string;
   onGoToKnowledgeBase: () => void;
 }
 
@@ -68,20 +70,21 @@ const computeEffectiveTone = (tone: string, customTone: string): string => {
   return isCustom ? (customTone.trim() || 'custom') : tone;
 };
 
-const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
+const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => {
   const { t } = useTranslation();
   const { isRole, tenantId } = useAppAuth();
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
 
-  // Track which tenant's settings have already populated the form. Refetches /
-  // query invalidations for the same tenant must not clobber in-flight edits;
-  // a tenant switch should re-hydrate from the new tenant's data.
-  const hydratedTenantRef = useRef<string | null>(null);
+  // Track which (tenant, bot) pair has already populated the form. Refetches /
+  // query invalidations for the same bot must not clobber in-flight edits;
+  // navigating to a different bot (or tenant) re-hydrates from its data.
+  const hydratedKeyRef = useRef<string | null>(null);
+  const hydrationKey = `${tenantId ?? ''}:${botId}`;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: aiSettings, isLoading, error } = useGetAiSettings({ enabled: isAdminOrSupervisor }) as { data: any; isLoading: boolean; error: any };
-  const updateSettings = useUpdateAiSettings();
+  const { data: aiSettings, isLoading, error } = useBotAiSettings(botId, { enabled: isAdminOrSupervisor }) as { data: any; isLoading: boolean; error: any };
+  const updateSettings = useUpdateBotAiSettings(botId);
 
   // Form state
   const [enabled, setEnabled] = useState(false);
@@ -117,8 +120,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
   useEffect(() => {
     if (!aiSettings) return;
     if (!tenantId) return;
-    if (hydratedTenantRef.current === tenantId) return;
-    hydratedTenantRef.current = tenantId;
+    if (hydratedKeyRef.current === hydrationKey) return;
+    hydratedKeyRef.current = hydrationKey;
 
     const hEnabled = aiSettings.enabled ?? false;
     const hBotName = aiSettings.brandVoice?.name ?? '';
@@ -174,7 +177,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ onGoToKnowledgeBase }) => {
       escalationKeywords: hEscalation,
       topicsToAvoid: hTopics,
     }));
-  }, [aiSettings, tenantId]);
+  }, [aiSettings, tenantId, hydrationKey]);
 
   const applyTemplate = (id: string) => {
     const tpl = findTemplate(id);

@@ -1,25 +1,18 @@
-import React, { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import React from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { MessageSquareText, MessageSquare, Bot, BookOpen, Palette, Share2, Bot as BotsIcon } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { MessageSquareText, Bot, BookOpen, Palette, Share2, Bot as BotsIcon } from 'lucide-react';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useGetAiSettings, useKnowledgeStats } from '@/queries/useKnowledgeQueries';
-import { useChannelConnections } from '@/queries/useChannelQueries';
+import { useBots } from '@/queries/useBotsQueries';
 import DocumentsTab from './knowledge/DocumentsTab';
-import AiBotForm from './knowledge/AiBotForm';
-import TestChatPanel from './knowledge/TestChatPanel';
 import { CannedResponsesContent } from './CannedResponses';
 import ChatbotAppearancesForm from './knowledge/ChatbotAppearancesForm';
 import { SocialChannelsContent } from '@/components/channels/SocialChannelsContent';
-import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
-import { EmbedWidgetCard } from '@/components/ai/EmbedWidgetCard';
 import BotsList from './bots/BotsList';
 
-type Tab = 'bot' | 'bots' | 'knowledge' | 'canned' | 'appearances' | 'social';
+type Tab = 'bots' | 'knowledge' | 'canned' | 'appearances' | 'social';
 
 const tabs: { key: Tab; labelKey: string; icon: React.ElementType }[] = [
-  { key: 'bot', labelKey: 'ai.tabs.bot', icon: Bot },
   { key: 'bots', labelKey: 'bots.tab.title', icon: BotsIcon },
   { key: 'knowledge', labelKey: 'ai.tabs.knowledge', icon: BookOpen },
   { key: 'canned', labelKey: 'ai.tabs.canned', icon: MessageSquareText },
@@ -28,7 +21,8 @@ const tabs: { key: Tab; labelKey: string; icon: React.ElementType }[] = [
 ];
 
 const PARAM_TO_TAB: Record<string, Tab> = {
-  bot: 'bot',
+  // Legacy `?tab=bot` (the removed standalone AI Bot tab) now lands on the Bots list.
+  bot: 'bots',
   bots: 'bots',
   knowledge: 'knowledge',
   canned: 'canned',
@@ -38,63 +32,49 @@ const PARAM_TO_TAB: Record<string, Tab> = {
 
 const AiContent: React.FC = () => {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { isRole } = useAppAuth();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [isTestChatOpen, setIsTestChatOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<string | undefined>();
-
-  const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeFilter, setActiveFilter] = React.useState<string | undefined>();
 
   // Derive active tab directly from the URL so browser back/forward works.
-  const activeTab: Tab = PARAM_TO_TAB[searchParams.get('tab') ?? ''] ?? 'bot';
+  const rawTab = searchParams.get('tab') ?? '';
+  const activeTab: Tab = PARAM_TO_TAB[rawTab] ?? 'bots';
   const setActiveTab = (tab: Tab) => {
     const next = new URLSearchParams(searchParams);
     next.set('tab', tab);
     setSearchParams(next, { replace: true });
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: aiSettings } = useGetAiSettings({ enabled: isAdminOrSupervisor }) as { data: any };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: stats } = useKnowledgeStats() as { data: any };
-  const { data: channelConnections } = useChannelConnections();
-  const indexed = parseInt(stats?.documents?.indexed || '0');
-  const hasIndexedDocs = indexed > 0;
-  const hasConnectedChannel = (channelConnections?.length ?? 0) > 0;
+  // Canonicalize the removed `?tab=bot` deep link to `?tab=bots` in the URL
+  // (PARAM_TO_TAB already resolves it; this rewrites the address bar too).
+  React.useEffect(() => {
+    if (rawTab === 'bot') setActiveTab('bots');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawTab]);
 
-  const goToKnowledge = () => setActiveTab('knowledge');
-  const goToSocial = () => setActiveTab('social');
+  // Default bot drives the Documents "configure AI" banner (AI enabled?) and the
+  // "configure" jump target — per-bot config now lives on the bot editor page.
+  const { data: botsData } = useBots();
+  const defaultBot = botsData?.bots.find((b) => b.isDefault);
+  const aiEnabled = defaultBot?.aiEnabled ?? false;
+
+  const configureDefaultBot = () =>
+    defaultBot ? navigate(`/ai/bots/${defaultBot.id}`) : setActiveTab('bots');
 
   return (
     <div className="h-full overflow-y-auto">
       {/* Header */}
       <div className="px-6 pt-6 pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-primary-500/10">
-              <Bot className="w-5 h-5 text-primary-400" />
-            </div>
-            <div>
-              <h1 className="text-lg font-semibold text-text-primary">{t('ai.header.title')}</h1>
-              <p className="text-xs text-text-muted">
-                {t('ai.header.subtitle')}
-              </p>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-primary-500/10">
+            <Bot className="w-5 h-5 text-primary-400" />
           </div>
-          {isAdmin && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setIsTestChatOpen(true)}
-              disabled={!aiSettings?.enabled}
-              title={!aiSettings?.enabled ? t('ai.header.testChatDisabledTooltip') : t('ai.header.testChatTooltip')}
-              className="gap-1.5"
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              {t('ai.header.testChat')}
-            </Button>
-          )}
+          <div>
+            <h1 className="text-lg font-semibold text-text-primary">{t('ai.header.title')}</h1>
+            <p className="text-xs text-text-muted">{t('ai.header.subtitle')}</p>
+          </div>
         </div>
       </div>
 
@@ -124,66 +104,23 @@ const AiContent: React.FC = () => {
 
       {/* Tab Content */}
       <div className="px-6 py-6">
-        {activeTab === 'bot' && (
-          <>
-            {isAdminOrSupervisor && (
-              <OnboardingChecklist
-                botEnabled={!!aiSettings?.enabled}
-                hasIndexedDocs={hasIndexedDocs}
-                hasConnectedChannel={hasConnectedChannel}
-                onGoToKnowledge={goToKnowledge}
-                onGoToSocial={goToSocial}
-              />
-            )}
-            {/* Settings (left/main) + install snippet (sticky right rail). Stacks
-                with settings first, embed below, on screens narrower than xl. */}
-            <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6 items-start">
-              <div className="min-w-0">
-                <AiBotForm onGoToKnowledgeBase={goToKnowledge} />
-              </div>
-              {isAdmin && (
-                <div className="xl:sticky xl:top-6">
-                  <EmbedWidgetCard
-                    enabled={!!aiSettings?.enabled}
-                    onTestChat={() => setIsTestChatOpen(true)}
-                  />
-                </div>
-              )}
-            </div>
-          </>
-        )}
-
         {activeTab === 'bots' && <BotsList />}
 
         {activeTab === 'knowledge' && (
           <DocumentsTab
             initialFilter={activeFilter}
             onFilterChange={(f) => setActiveFilter(f === 'all' ? undefined : f)}
-            showAiBanner={isAdminOrSupervisor && !aiSettings?.enabled}
-            onConfigureAi={() => setActiveTab('bot')}
+            showAiBanner={isAdminOrSupervisor && !aiEnabled}
+            onConfigureAi={configureDefaultBot}
           />
         )}
 
-        {activeTab === 'canned' && (
-          <CannedResponsesContent />
-        )}
+        {activeTab === 'canned' && <CannedResponsesContent />}
 
         {activeTab === 'appearances' && <ChatbotAppearancesForm />}
 
         {activeTab === 'social' && <SocialChannelsContent />}
       </div>
-
-      {/* Test Chat Panel */}
-      {isAdmin && (
-        <TestChatPanel
-          isOpen={isTestChatOpen}
-          onClose={() => setIsTestChatOpen(false)}
-          botName={aiSettings?.brandVoice?.name || t('ai.header.defaultBotName')}
-          provider={aiSettings?.provider || 'openai'}
-          model={aiSettings?.model || 'gpt-4o-mini'}
-          hasIndexedDocs={hasIndexedDocs}
-        />
-      )}
     </div>
   );
 };

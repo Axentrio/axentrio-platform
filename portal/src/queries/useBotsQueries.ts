@@ -26,6 +26,8 @@ export interface BotListItem {
   status: BotStatus;
   isDefault: boolean;
   publicKey: string;
+  /** The bot's AI-enabled state (for the onboarding checklist on the list). */
+  aiEnabled: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,5 +113,51 @@ export function useDeleteBot() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
     },
+  });
+}
+
+// --- Per-bot AI settings + test chat (multi-bot config editing) ---
+
+export interface BotTestChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface BotTestChatResponse {
+  response: string;
+  provider: string;
+  model: string;
+  confidence?: number;
+  chunksUsed?: number;
+}
+
+/** GET /bots/:id/ai-settings — always returns a full editable AI shape. */
+export function useBotAiSettings(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: queryKeys.bots.aiSettings(botId ?? ''),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    queryFn: () => api.get<any>(`/bots/${botId}/ai-settings`),
+    enabled: !!botId && (opts.enabled ?? true),
+  });
+}
+
+/** PUT /bots/:id/ai-settings — full-replace of the bot's behavioural AI config. */
+export function useUpdateBotAiSettings(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mutationFn: (data: any) => api.put<any>(`/bots/${botId}/ai-settings`, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.aiSettings(botId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
+    },
+  });
+}
+
+/** POST /bots/:id/test-chat — preview against this bot's config + attached KBs. */
+export function useBotTestChat(botId: string) {
+  return useMutation({
+    mutationFn: (data: { message: string; history: BotTestChatMessage[]; useKnowledgeBase: boolean }) =>
+      api.post<BotTestChatResponse>(`/bots/${botId}/test-chat`, data),
   });
 }

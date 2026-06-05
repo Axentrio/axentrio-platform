@@ -95,6 +95,7 @@ export const queryKeys = {
     all: () => ['bots'] as const,
     list: () => [...queryKeys.bots.all(), 'list'] as const,
     embed: (botId: string) => [...queryKeys.bots.all(), 'embed', botId] as const,
+    aiSettings: (botId: string) => [...queryKeys.bots.all(), 'ai-settings', botId] as const,
   },
   leads: {
     all: () => ['leads'] as const,

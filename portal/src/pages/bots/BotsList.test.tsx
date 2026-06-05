@@ -28,6 +28,15 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
+// Onboarding-checklist data sources (relocated into BotsList). Stubbed so they
+// don't consume the shared apiGet mock used for the bots list payload.
+vi.mock('@/queries/useKnowledgeQueries', () => ({
+  useKnowledgeStats: () => ({ data: undefined }),
+}));
+vi.mock('@/queries/useChannelQueries', () => ({
+  useChannelConnections: () => ({ data: [] }),
+}));
+
 import BotsList from './BotsList';
 import type { BotsListResponse } from '../../queries/useBotsQueries';
 
@@ -62,6 +71,7 @@ describe('BotsList — rendering', () => {
           status: 'active',
           isDefault: true,
           publicKey: 'bk_anchor',
+          aiEnabled: false,
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -71,6 +81,7 @@ describe('BotsList — rendering', () => {
           status: 'paused',
           isDefault: false,
           publicKey: 'bk_extra',
+          aiEnabled: false,
           createdAt: '2026-02-01T00:00:00.000Z',
           updatedAt: '2026-02-01T00:00:00.000Z',
         },
@@ -99,6 +110,7 @@ describe('BotsList — quota / new-bot button', () => {
           status: 'active',
           isDefault: true,
           publicKey: 'bk_anchor',
+          aiEnabled: false,
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -122,6 +134,7 @@ describe('BotsList — quota / new-bot button', () => {
           status: 'active',
           isDefault: true,
           publicKey: 'bk_anchor',
+          aiEnabled: false,
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -145,6 +158,7 @@ describe('BotsList — action menu', () => {
           status: 'active',
           isDefault: true,
           publicKey: 'bk_anchor',
+          aiEnabled: false,
           createdAt: '2026-01-01T00:00:00.000Z',
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
@@ -174,6 +188,7 @@ describe('BotsList — action menu', () => {
           status: 'active',
           isDefault: false,
           publicKey: 'bk_extra',
+          aiEnabled: false,
           createdAt: '2026-02-01T00:00:00.000Z',
           updatedAt: '2026-02-01T00:00:00.000Z',
         },

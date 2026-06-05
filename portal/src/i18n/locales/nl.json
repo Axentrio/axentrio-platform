@@ -1733,11 +1733,21 @@
       "dismiss": "Sluiten",
       "setUp": "Instellen",
       "steps": {
-        "aiEnabled": { "label": "AI-assistent activeren" },
-        "brandVoiceConfigured": { "label": "Merkstem instellen" },
-        "knowledgeBaseHasDocs": { "label": "Documenten toevoegen aan kennisbank" },
-        "calcomConnected": { "label": "Cal.com koppelen" },
-        "automationsConfigured": { "label": "Automatiseringen instellen" }
+        "aiEnabled": {
+          "label": "AI-assistent activeren"
+        },
+        "brandVoiceConfigured": {
+          "label": "Merkstem instellen"
+        },
+        "knowledgeBaseHasDocs": {
+          "label": "Documenten toevoegen aan kennisbank"
+        },
+        "calcomConnected": {
+          "label": "Cal.com koppelen"
+        },
+        "automationsConfigured": {
+          "label": "Automatiseringen instellen"
+        }
       }
     },
     "timeRange": {
@@ -1913,7 +1923,8 @@
       "delete": "Verwijderen",
       "showEmbed": "Toon embedcode",
       "newBot": "Nieuwe bot",
-      "menuAria": "Acties voor {{name}}"
+      "menuAria": "Acties voor {{name}}",
+      "editConfig": "Configuratie bewerken"
     },
     "quota": {
       "usage": "{{used}} van {{limit}} gebruikt",
@@ -1955,6 +1966,11 @@
       "anchorPauseBlocked": "De standaardbot kan niet worden gepauzeerd.",
       "anchorDeleteBlocked": "De standaardbot kan niet worden verwijderd.",
       "generic": "Er ging iets mis. Probeer het opnieuw."
+    },
+    "editor": {
+      "backToBots": "Terug naar bots",
+      "title": "Botconfiguratie",
+      "subtitle": "Configureer de identiteit, toon, instructies en richtlijnen van deze bot."
     }
   }
 }

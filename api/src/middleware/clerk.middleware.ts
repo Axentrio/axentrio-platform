@@ -12,6 +12,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { User } from '../database/entities/User';
 import { Agent } from '../database/entities/Agent';
 import { Bot } from '../database/entities/Bot';
+import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { PendingInvite } from '../database/entities/PendingInvite';
 import { config } from '../config/environment';
 import { DEFAULT_SKILLS } from '../config/default-skills';
@@ -204,6 +205,15 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
             })
             .orIgnore()
             .execute();
+
+          // Attach the tenant's shared primary KB to the anchor within this same
+          // tx (re-read the row since the insert used orIgnore and returns no id),
+          // so a freshly-provisioned tenant's bot answers from shared knowledge —
+          // not the empty-KB state the backfill repairs for existing tenants.
+          const anchor = await manager.findOne(Bot, { where: { tenantId: t.id, isDefault: true } });
+          if (anchor) {
+            await ensureSharedKbAttached(manager, t.id, anchor.id);
+          }
 
           return { tenant: t };
         });

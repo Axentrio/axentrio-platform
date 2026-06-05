@@ -46,6 +46,7 @@ import { CopilotMessage } from './entities/CopilotMessage';
 import { CopilotTrace } from './entities/CopilotTrace';
 import { EventType } from './entities/EventType';
 import { AvailabilityRule } from './entities/AvailabilityRule';
+import { Booking } from './entities/Booking';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -99,6 +100,7 @@ export const AppDataSource = new DataSource({
     CopilotTrace,
     EventType,
     AvailabilityRule,
+    Booking,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

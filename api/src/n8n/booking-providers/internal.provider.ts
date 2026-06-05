@@ -24,6 +24,7 @@ import {
 } from './types';
 import { computeSlots, BusyInterval } from './slot-engine';
 import { sendBookingEmail } from './booking-email';
+import { scheduleReminders, cancelReminders } from './reminders';
 
 export class InternalProvider implements BookingProvider {
   private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
@@ -228,6 +229,8 @@ export class InternalProvider implements BookingProvider {
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
     });
 
+    await this.scheduleAndPersistReminders(bookingId, start, 0);
+
     return {
       success: true,
       booking: {
@@ -237,6 +240,22 @@ export class InternalProvider implements BookingProvider {
         attendee,
       },
     };
+  }
+
+  /** Schedule reminders and persist their job ids; non-fatal on failure. */
+  private async scheduleAndPersistReminders(bookingId: string, start: Date, sequence: number): Promise<void> {
+    try {
+      const ids = await scheduleReminders(bookingId, start, sequence);
+      await AppDataSource.getRepository(Booking).query(
+        `UPDATE chatbot_bookings SET reminder_job_ids=$1::jsonb, updated_at=now() WHERE id=$2`,
+        [JSON.stringify(ids), bookingId]
+      );
+    } catch (err) {
+      logger.warn('[Booking] reminder scheduling failed (non-fatal)', {
+        bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
@@ -347,6 +366,10 @@ export class InternalProvider implements BookingProvider {
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
     });
 
+    // Replace reminders: drop the old jobs, schedule fresh ones for the new time.
+    await cancelReminders(booking.reminderJobIds).catch(() => undefined);
+    await this.scheduleAndPersistReminders(bookingId, start, sequence);
+
     return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
   }
 
@@ -387,6 +410,12 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: booking.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
     });
+
+    // Drop pending reminders (they'd no-op via sequence/status anyway).
+    await cancelReminders(booking.reminderJobIds).catch(() => undefined);
+    await AppDataSource.getRepository(Booking)
+      .query(`UPDATE chatbot_bookings SET reminder_job_ids='[]'::jsonb WHERE id=$1`, [bookingId])
+      .catch(() => undefined);
 
     return { success: true, cancelled: true };
   }

@@ -319,6 +319,10 @@ async function startServer(): Promise<void> {
       const s3Client = config.s3?.bucket ? createS3Client() : null;
       registerProcessor('knowledge-processing', createIngestionProcessor(AppDataSource, s3Client));
       logger.info('Knowledge ingestion processor registered');
+
+      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./n8n/booking-providers/reminders');
+      registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());
+      logger.info('Booking reminder processor registered');
     } catch (err) {
       logger.warn('Knowledge ingestion processor registration failed', { error: err });
     }

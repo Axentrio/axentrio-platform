@@ -14,6 +14,7 @@ let webhookQueue: Queue | null = null;
 let notificationQueue: Queue | null = null;
 let fileQueue: Queue | null = null;
 let knowledgeQueue: Queue | null = null;
+let bookingReminderQueue: Queue | null = null;
 let deadLetterQueue: Queue | null = null;
 
 // Fallback flag: when true, jobs are processed synchronously (no Redis)
@@ -80,6 +81,8 @@ export const initializeQueues = async (): Promise<void> => {
     // Knowledge processing queue
     knowledgeQueue = new Bull('knowledge-processing', createQueueOptions('knowledge-processing'));
 
+    bookingReminderQueue = new Bull('booking-reminders', createQueueOptions('booking-reminders'));
+
     // Dead letter queue for failed jobs
     deadLetterQueue = new Bull('dead-letter', createQueueOptions('dead-letter'));
 
@@ -141,6 +144,7 @@ export const initializeQueues = async (): Promise<void> => {
     notificationQueue = null;
     fileQueue = null;
     knowledgeQueue = null;
+    bookingReminderQueue = null;
     deadLetterQueue = null;
   }
 };
@@ -283,15 +287,28 @@ export const addFileJob = async (
 export async function addJob(
   queueName: string,
   data: any,
-  options?: { jobId?: string }
+  options?: { jobId?: string; delay?: number; attempts?: number }
 ): Promise<void> {
   const queue = getQueue(queueName);
   if (!queue) throw new Error(`Queue ${queueName} not available`);
   await queue.add(data, {
     jobId: options?.jobId,
-    attempts: 3,
+    attempts: options?.attempts ?? 3,
     backoff: { type: 'exponential', delay: 1000 },
+    ...(options?.delay != null ? { delay: options.delay } : {}),
   });
+}
+
+/** Remove a queued job by id (best-effort; no-op if missing). */
+export async function removeJob(queueName: string, jobId: string): Promise<void> {
+  const queue = getQueue(queueName);
+  if (!queue) return;
+  try {
+    const job = await queue.getJob(jobId);
+    if (job) await job.remove();
+  } catch (err) {
+    logger.warn('[Queue] removeJob failed', { queueName, jobId, error: err });
+  }
 }
 
 /**
@@ -319,6 +336,9 @@ export const registerProcessor = (
       break;
     case 'knowledge-processing':
       queue = knowledgeQueue;
+      break;
+    case 'booking-reminders':
+      queue = bookingReminderQueue;
       break;
   }
 
@@ -362,6 +382,8 @@ export const getQueue = (queueName: string): Queue | null => {
       return fileQueue;
     case 'knowledge-processing':
       return knowledgeQueue;
+    case 'booking-reminders':
+      return bookingReminderQueue;
     case 'dead-letter':
       return deadLetterQueue;
     default:
@@ -468,7 +490,7 @@ export const resumeQueue = async (queueName: string): Promise<void> => {
  * Close all queues
  */
 export const closeQueues = async (): Promise<void> => {
-  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, deadLetterQueue];
+  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, bookingReminderQueue, deadLetterQueue];
 
   await Promise.all(
     queues.map(async (queue) => {

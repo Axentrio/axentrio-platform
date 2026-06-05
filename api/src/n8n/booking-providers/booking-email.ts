@@ -89,6 +89,34 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   }
 }
 
+export interface ReminderEmailParams {
+  summary: string;
+  start: Date;
+  timezone: string;
+  attendeeName: string;
+  attendeeEmail: string;
+  /** e.g. "tomorrow" / "in 1 hour" — describes the lead time. */
+  leadLabel: string;
+}
+
+/** Plain appointment reminder (no ICS — the invite was sent on confirmation). */
+export async function sendReminderEmail(params: ReminderEmailParams): Promise<void> {
+  const body =
+    `<p>Reminder: your appointment is ${params.leadLabel}.</p>` +
+    `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>`;
+  try {
+    await getEmailService().send({
+      to: params.attendeeEmail,
+      subject: `Reminder: ${params.summary}`,
+      body,
+    });
+  } catch (err) {
+    logger.error('[Booking] reminder email failed (non-fatal)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 /** Test seam — reset the memoized EmailService. */
 export function __resetBookingEmailService(): void {
   emailService = null;

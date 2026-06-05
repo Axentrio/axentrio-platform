@@ -105,6 +105,131 @@ export async function getValidAccessToken(cred: CalendarCredential): Promise<str
   return token;
 }
 
+export interface GoogleBusyInterval {
+  start: Date;
+  end: Date;
+}
+
+/**
+ * Busy intervals from the bot's connected Google calendar for [startISO,endISO).
+ * Returns null when the bot has no active Google connection (internal-only).
+ * Throws on API/token failure so callers can fail-closed rather than offering
+ * slots that might collide with real events.
+ */
+export async function getGoogleBusyForBot(
+  botId: string,
+  startISO: string,
+  endISO: string
+): Promise<GoogleBusyInterval[] | null> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return null;
+
+  const accessToken = await getValidAccessToken(cred);
+  const resp = await axios.post(
+    'https://www.googleapis.com/calendar/v3/freeBusy',
+    { timeMin: startISO, timeMax: endISO, items: [{ id: cred.calendarId }] },
+    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+  );
+  const cal = resp.data?.calendars?.[cred.calendarId];
+  const busy: Array<{ start: string; end: string }> = cal?.busy || [];
+  return busy.map((b) => ({ start: new Date(b.start), end: new Date(b.end) }));
+}
+
+export interface CalendarEventInput {
+  startISO: string;
+  endISO: string;
+  timezone: string;
+  summary: string;
+  description?: string;
+}
+
+export interface CalendarEventResult {
+  eventId: string;
+  meetUrl: string | null;
+  calendarId: string;
+}
+
+/**
+ * Create an owner-only event (no customer attendee → Google sends no invite; we
+ * email our own ICS) with a Meet link. Returns null if the bot has no Google
+ * connection. Throws on API error so the caller can decide (best-effort sync).
+ */
+export async function createCalendarEvent(
+  botId: string,
+  input: CalendarEventInput
+): Promise<CalendarEventResult | null> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return null;
+  const accessToken = await getValidAccessToken(cred);
+  const resp = await axios.post(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
+    {
+      summary: input.summary,
+      description: input.description,
+      start: { dateTime: input.startISO, timeZone: input.timezone },
+      end: { dateTime: input.endISO, timeZone: input.timezone },
+      conferenceData: {
+        createRequest: {
+          requestId: `axentrio-${Date.now()}-${Math.round(input.startISO.length)}`,
+          conferenceSolutionKey: { type: 'hangoutsMeet' },
+        },
+      },
+    },
+    {
+      params: { conferenceDataVersion: 1 },
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      timeout: 10000,
+    }
+  );
+  return {
+    eventId: resp.data.id,
+    meetUrl: resp.data.hangoutLink || resp.data.conferenceData?.entryPoints?.[0]?.uri || null,
+    calendarId: cred.calendarId,
+  };
+}
+
+/** Update an existing event's times. Returns 'not_found' on 404/410 so the caller can recreate. */
+export async function updateCalendarEvent(
+  botId: string,
+  eventId: string,
+  input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'>
+): Promise<'ok' | 'not_found' | 'no_connection'> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return 'no_connection';
+  const accessToken = await getValidAccessToken(cred);
+  try {
+    await axios.patch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events/${encodeURIComponent(eventId)}`,
+      {
+        start: { dateTime: input.startISO, timeZone: input.timezone },
+        end: { dateTime: input.endISO, timeZone: input.timezone },
+      },
+      { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+    );
+    return 'ok';
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 404 || status === 410) return 'not_found';
+    throw err;
+  }
+}
+
+/** Delete an event. Swallows 404/410 (already gone). */
+export async function deleteCalendarEvent(botId: string, eventId: string): Promise<void> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return;
+  const accessToken = await getValidAccessToken(cred);
+  try {
+    await axios.delete(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events/${encodeURIComponent(eventId)}`,
+      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+    );
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 404 && status !== 410) throw err;
+  }
+}
+
 export async function disconnect(botId: string): Promise<void> {
   const cred = await getActiveCredential(botId);
   if (!cred) return;

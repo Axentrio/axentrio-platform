@@ -33,6 +33,13 @@ vi.mock('../../n8n/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
 }));
 
+vi.mock('../../integrations/google/google-calendar.service', () => ({
+  getGoogleBusyForBot: vi.fn().mockResolvedValue(null),
+  createCalendarEvent: vi.fn().mockResolvedValue(null),
+  updateCalendarEvent: vi.fn().mockResolvedValue('no_connection'),
+  deleteCalendarEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
 
 const ctx: any = {

@@ -7,6 +7,7 @@ const bookingFindOne = vi.fn();
 const bookingQuery = vi.fn();
 const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();
+const refSave = vi.fn((d: any) => d);
 const managerQuery = vi.fn();
 const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
 
@@ -18,6 +19,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       if (name === 'Booking') return { findOne: bookingFindOne, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
+      if (name === 'BookingReference') return { create: (d: any) => d, save: refSave, findOne: vi.fn() };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -31,6 +33,17 @@ vi.mock('../../utils/logger', () => ({
 const sendBookingEmail = vi.fn();
 vi.mock('../../n8n/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
+}));
+
+const getGoogleBusyForBot = vi.fn().mockResolvedValue(null);
+const createCalendarEvent = vi.fn().mockResolvedValue(null);
+const updateCalendarEvent = vi.fn().mockResolvedValue('no_connection');
+const deleteCalendarEvent = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../integrations/google/google-calendar.service', () => ({
+  getGoogleBusyForBot: (...args: any[]) => getGoogleBusyForBot(...args),
+  createCalendarEvent: (...args: any[]) => createCalendarEvent(...args),
+  updateCalendarEvent: (...args: any[]) => updateCalendarEvent(...args),
+  deleteCalendarEvent: (...args: any[]) => deleteCalendarEvent(...args),
 }));
 
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
@@ -136,6 +149,37 @@ describe('InternalProvider.createBooking', () => {
     await expect(
       provider.createBooking(ctx, 'idem-3', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
+  });
+
+  it('mirrors the booking to Google and puts the Meet link in the invite when connected', async () => {
+    createCalendarEvent.mockResolvedValueOnce({
+      eventId: 'gcal-evt-1',
+      meetUrl: 'https://meet.google.com/abc-defg-hij',
+      calendarId: 'primary',
+    });
+    await provider.createBooking(ctx, 'idem-gc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    // a booking_reference was stored for the Google event
+    expect(refSave).toHaveBeenCalledOnce();
+    expect(refSave.mock.calls[0][0]).toMatchObject({ externalEventId: 'gcal-evt-1', providerType: 'google' });
+    // the Meet link rode along in the invite
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ location: 'https://meet.google.com/abc-defg-hij' });
+  });
+
+  it('rejects a slot that conflicts with a Google calendar busy interval', async () => {
+    // Google reports the owner busy over the 07:00 slot → not offered.
+    getGoogleBusyForBot.mockResolvedValueOnce([
+      { start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T07:30:00Z') },
+    ]);
+    await expect(
+      provider.createBooking(ctx, 'idem-g1', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
+  });
+
+  it('fails closed (BOOKING_TEMPORARILY_UNAVAILABLE) when Google free/busy errors', async () => {
+    getGoogleBusyForBot.mockRejectedValueOnce(new Error('google down'));
+    await expect(
+      provider.createBooking(ctx, 'idem-g2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'BOOKING_TEMPORARILY_UNAVAILABLE' });
   });
 
   it('throws BOOKING_NOT_CONFIGURED when the bot has no event type', async () => {

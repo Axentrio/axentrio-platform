@@ -25,6 +25,13 @@ import {
 import { computeSlots, BusyInterval } from './slot-engine';
 import { sendBookingEmail } from './booking-email';
 import { scheduleReminders, cancelReminders } from './reminders';
+import {
+  getGoogleBusyForBot,
+  createCalendarEvent,
+  updateCalendarEvent,
+  deleteCalendarEvent,
+} from '../../integrations/google/google-calendar.service';
+import { BookingReference } from '../../database/entities/BookingReference';
 
 export class InternalProvider implements BookingProvider {
   private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
@@ -45,7 +52,7 @@ export class InternalProvider implements BookingProvider {
 
   async checkAvailability(ctx: BookingContext, startDate: string, endDate: string): Promise<AvailabilityResult> {
     const { eventType, rule } = await this.loadConfig(ctx.bot.id);
-    const busy = await this.loadBusy(this.calendarKey(ctx), startDate, endDate);
+    const busy = await this.loadAllBusy(ctx, this.calendarKey(ctx), startDate, endDate);
     const slots = computeSlots({
       rule,
       eventType,
@@ -77,6 +84,36 @@ export class InternalProvider implements BookingProvider {
       [calendarKey, rangeStartIso, rangeEndIso, excludeId ?? null]
     );
     return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
+  }
+
+  /**
+   * Internal booking busy + (if the bot has Google connected) the owner's
+   * Google calendar busy. Fails closed if Google can't be reached, so we never
+   * offer a slot that might collide with a real event.
+   */
+  private async loadAllBusy(
+    ctx: BookingContext,
+    calendarKey: string,
+    rangeStartIso: string,
+    rangeEndIso: string,
+    excludeId?: string
+  ): Promise<BusyInterval[]> {
+    const internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
+    let google: BusyInterval[] | null = null;
+    try {
+      google = await getGoogleBusyForBot(ctx.bot.id, rangeStartIso, rangeEndIso);
+    } catch (err) {
+      logger.warn('[Booking] Google free/busy unavailable — failing closed', {
+        botId: ctx.bot.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw new BookingError(
+        'Calendar is temporarily unavailable, please try again shortly',
+        'BOOKING_TEMPORARILY_UNAVAILABLE',
+        503
+      );
+    }
+    return google ? [...internal, ...google] : internal;
   }
 
   private toResult(booking: Booking, idempotent: boolean): CreateBookingResult {
@@ -124,8 +161,9 @@ export class InternalProvider implements BookingProvider {
     const blockedEnd = new Date(end.getTime() + eventType.bufferAfterMin * 60_000);
 
     // 3. Re-validate: the requested start must be an actually-offered slot
-    //    (rules, buffers, min-notice, horizon, and existing-booking busy).
-    const busy = await this.loadBusy(
+    //    (rules, buffers, min-notice, horizon, internal + Google busy).
+    const busy = await this.loadAllBusy(
+      ctx,
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString()
@@ -214,7 +252,13 @@ export class InternalProvider implements BookingProvider {
       start: start.toISOString(),
     });
 
-    // Confirmation invite (non-fatal). Phase 0: customer + owner get the ICS.
+    // Mirror to the owner's Google calendar (best-effort). The booking is the
+    // source of truth — if the mirror fails the booking still stands and is
+    // flagged sync_pending for later reconciliation.
+    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, eventType.name, start, end, rule.timezone, notes);
+
+    // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
+    // Phase 0 fallback); the Meet link rides along when present.
     await sendBookingEmail({
       method: 'REQUEST',
       uid: icsUid,
@@ -222,7 +266,8 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: eventType.name,
-      location: eventType.locationType === 'in_person' ? 'In person' : undefined,
+      location: meetUrl ?? (eventType.locationType === 'in_person' ? 'In person' : undefined),
+      description: meetUrl ? `Join with Google Meet: ${meetUrl}` : undefined,
       timezone: rule.timezone,
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
@@ -252,6 +297,115 @@ export class InternalProvider implements BookingProvider {
       );
     } catch (err) {
       logger.warn('[Booking] reminder scheduling failed (non-fatal)', {
+        bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  private async markSyncPending(bookingId: string): Promise<void> {
+    await AppDataSource.getRepository(Booking)
+      .query(`UPDATE chatbot_bookings SET sync_pending=true, updated_at=now() WHERE id=$1`, [bookingId])
+      .catch(() => undefined);
+  }
+
+  /** Mirror a new booking to Google (best-effort). Returns the Meet URL if any. */
+  private async syncGoogleCreate(
+    ctx: BookingContext,
+    bookingId: string,
+    summary: string,
+    start: Date,
+    end: Date,
+    timezone: string,
+    notes?: string
+  ): Promise<string | null> {
+    try {
+      const ev = await createCalendarEvent(ctx.bot.id, {
+        startISO: start.toISOString(),
+        endISO: end.toISOString(),
+        timezone,
+        summary,
+        description: notes,
+      });
+      if (!ev) return null; // no Google connection
+      const refRepo = AppDataSource.getRepository(BookingReference);
+      await refRepo.save(
+        refRepo.create({
+          bookingId,
+          providerType: 'google',
+          externalEventId: ev.eventId,
+          externalCalendarId: ev.calendarId,
+          meetingUrl: ev.meetUrl,
+        })
+      );
+      return ev.meetUrl;
+    } catch (err) {
+      logger.warn('[Booking] Google event create failed; booking stands (sync_pending)', {
+        bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.markSyncPending(bookingId);
+      return null;
+    }
+  }
+
+  private async syncGoogleReschedule(
+    ctx: BookingContext,
+    bookingId: string,
+    summary: string,
+    start: Date,
+    end: Date,
+    timezone: string
+  ): Promise<void> {
+    const refRepo = AppDataSource.getRepository(BookingReference);
+    const ref = await refRepo.findOne({ where: { bookingId, providerType: 'google' } });
+    try {
+      const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
+      if (ref) {
+        const res = await updateCalendarEvent(ctx.bot.id, ref.externalEventId, input);
+        if (res === 'not_found') {
+          // Owner deleted it in Google → recreate and repoint the reference.
+          const ev = await createCalendarEvent(ctx.bot.id, { ...input, summary });
+          if (ev) {
+            ref.externalEventId = ev.eventId;
+            ref.externalCalendarId = ev.calendarId;
+            ref.meetingUrl = ev.meetUrl;
+            await refRepo.save(ref);
+          }
+        }
+      } else {
+        // Google connected after the booking was created → create now.
+        const ev = await createCalendarEvent(ctx.bot.id, { ...input, summary });
+        if (ev) {
+          await refRepo.save(
+            refRepo.create({
+              bookingId,
+              providerType: 'google',
+              externalEventId: ev.eventId,
+              externalCalendarId: ev.calendarId,
+              meetingUrl: ev.meetUrl,
+            })
+          );
+        }
+      }
+    } catch (err) {
+      logger.warn('[Booking] Google event reschedule sync failed (sync_pending)', {
+        bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await this.markSyncPending(bookingId);
+    }
+  }
+
+  private async syncGoogleCancel(ctx: BookingContext, bookingId: string): Promise<void> {
+    const ref = await AppDataSource.getRepository(BookingReference).findOne({
+      where: { bookingId, providerType: 'google' },
+    });
+    if (!ref) return;
+    try {
+      await deleteCalendarEvent(ctx.bot.id, ref.externalEventId);
+    } catch (err) {
+      logger.warn('[Booking] Google event cancel sync failed', {
         bookingId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -305,7 +459,8 @@ export class InternalProvider implements BookingProvider {
     const blockedEnd = new Date(end.getTime() + eventType.bufferAfterMin * 60_000);
 
     // Re-validate the new slot (excluding this booking's own current range).
-    const busy = await this.loadBusy(
+    const busy = await this.loadAllBusy(
+      ctx,
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
@@ -370,6 +525,9 @@ export class InternalProvider implements BookingProvider {
     await cancelReminders(booking.reminderJobIds).catch(() => undefined);
     await this.scheduleAndPersistReminders(bookingId, start, sequence);
 
+    // Move the mirrored Google event (best-effort).
+    await this.syncGoogleReschedule(ctx, bookingId, eventType.name, start, end, rule.timezone).catch(() => undefined);
+
     return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
   }
 
@@ -416,6 +574,9 @@ export class InternalProvider implements BookingProvider {
     await AppDataSource.getRepository(Booking)
       .query(`UPDATE chatbot_bookings SET reminder_job_ids='[]'::jsonb WHERE id=$1`, [bookingId])
       .catch(() => undefined);
+
+    // Delete the mirrored Google event (best-effort).
+    await this.syncGoogleCancel(ctx, bookingId).catch(() => undefined);
 
     return { success: true, cancelled: true };
   }

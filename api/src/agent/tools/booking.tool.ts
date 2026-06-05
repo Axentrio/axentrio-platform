@@ -105,7 +105,7 @@ export class CreateBookingTool implements ToolAdapter {
             tags: session?.tags,
           };
 
-          const bookingData = result as Record<string, unknown>;
+          const bookingData = result as unknown as Record<string, unknown>;
           const appointmentEvent: AppointmentBookedEvent = {
             ...buildEventBase('appointment.booked', ctx.tenantId, sessionCtx),
             type: 'appointment.booked',

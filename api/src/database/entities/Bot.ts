@@ -82,6 +82,10 @@ export interface BotSettings {
     };
   };
   integrations?: {
+    // Which booking backend this bot uses. Defaults to 'calcom' when unset so
+    // existing bots keep their current behavior. 'internal' selects the
+    // in-house scheduler (added in later slices).
+    provider?: 'calcom' | 'internal';
     calcom?: {
       apiKey?: string | null;
       eventTypeId?: number;

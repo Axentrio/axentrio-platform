@@ -11,7 +11,7 @@ import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
 import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { BotSettings } from '../database/entities/Bot';
-import { getCalcomIntegrationForBot } from '../billing/calcom-access';
+import { getCalcomIntegrationForBot, isCalcomAvailableForTier } from '../billing/calcom-access';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
@@ -143,10 +143,28 @@ function buildIntegrationsConfig(
   botSettings: BotSettings,
   tier: TenantTier,
 ): IntegrationsConfig | undefined {
+  const timezone = botSettings.businessHours?.timezone || 'UTC';
+
+  // Internal scheduler: gated by the same calendar-integrations entitlement as
+  // Cal.com. The n8n flow is provider-agnostic — it only needs the booking block
+  // (under the `calcom` key) to activate the booking prompt + tools; those tools
+  // hit /internal/booking/* which dispatch to the internal provider. Per-slot
+  // config lives in the event_types/availability_rules tables, validated at
+  // booking time, so here we gate on the provider flag + tier only.
+  if (botSettings.integrations?.provider === 'internal') {
+    if (!isCalcomAvailableForTier(tier)) return undefined;
+    return {
+      calcom: {
+        enabled: true,
+        language: 'en',
+        collectFields: ['name', 'email'],
+        timezone,
+      },
+    };
+  }
+
   const calcom = getCalcomIntegrationForBot(botSettings, tier);
   if (!calcom) return undefined;
-
-  const timezone = botSettings.businessHours?.timezone || 'UTC';
 
   return {
     calcom: {

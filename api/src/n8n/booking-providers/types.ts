@@ -10,7 +10,7 @@
  */
 import type { ChatSession } from '../../database/entities/ChatSession';
 import type { Tenant } from '../../database/entities/Tenant';
-import type { BotSettings } from '../../database/entities/Bot';
+import type { Bot, BotSettings } from '../../database/entities/Bot';
 
 export class BookingError extends Error {
   constructor(
@@ -27,6 +27,8 @@ export class BookingError extends Error {
 export interface BookingContext {
   session: ChatSession;
   tenant: Tenant;
+  /** The resolved bot (session's bot, or the tenant anchor). */
+  bot: Bot;
   botSettings: BotSettings;
 }
 

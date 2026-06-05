@@ -14,20 +14,23 @@ import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider } from './booking-providers/types';
 import { CalcomProvider } from './booking-providers/calcom.provider';
+import { InternalProvider } from './booking-providers/internal.provider';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
 // keep working unchanged.
 export { BookingError } from './booking-providers/types';
 
 const calcomProvider = new CalcomProvider();
+const internalProvider = new InternalProvider();
 
 /** Select the booking backend for a bot. Defaults to Cal.com when unset. */
 function selectProvider(botSettings: BotSettings): BookingProvider {
   const provider = botSettings.integrations?.provider ?? 'calcom';
   switch (provider) {
+    case 'internal':
+      return internalProvider;
     case 'calcom':
       return calcomProvider;
-    // case 'internal': added in a later slice
     default:
       return calcomProvider;
   }
@@ -43,9 +46,9 @@ async function resolveContext(sessionId: string): Promise<BookingContext> {
 
   // Multi-bot Phase 4 (#16d): integrations + businessHours live on Bot.settings
   // resolved from the session's bot (anchor fallback if session.botId is null).
-  const { settings: botSettings } = await getBotConfigForSession(session);
+  const { bot, settings: botSettings } = await getBotConfigForSession(session);
 
-  return { session, tenant, botSettings };
+  return { session, tenant, bot, botSettings };
 }
 
 export async function listBookings(sessionId: string, attendeeEmail: string) {

@@ -38,6 +38,7 @@ import webhookAdminRoutes from './routes/webhook-admin.routes';
 import adminRoutes from './routes/admin.routes';
 import billingRoutes from './routes/billing.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
+import schedulerRoutes from './scheduler/scheduler.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
@@ -249,6 +250,7 @@ apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAd
 apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/knowledge', knowledgeRoutes);
+apiRouter.use('/scheduler', schedulerRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/bots', botsRoutes);
 apiRouter.use('/demand-signals', demandSignalsRoutes);

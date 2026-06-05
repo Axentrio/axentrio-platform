@@ -157,6 +157,11 @@ const envSchema = z.object({
   META_OAUTH_REDIRECT_URI: z.string().optional(),
   META_OAUTH_JWT_SECRET: z.string().optional(),
 
+  // Google Calendar (internal scheduler, Phase 1)
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  GOOGLE_CLIENT_SECRET: z.string().optional(),
+  GOOGLE_REDIRECT_URI: z.string().optional(),
+
   // WhatsApp Cloud API. App secret falls back to META_APP_SECRET (same Meta app);
   // verify token falls back to META_VERIFY_TOKEN. Override only if WhatsApp lives
   // in a separate app or you want a distinct webhook verify token.
@@ -418,6 +423,14 @@ export const config = {
     verifyToken: env.META_VERIFY_TOKEN || '',
     oauthRedirectUri: env.META_OAUTH_REDIRECT_URI || '',
     oauthJwtSecret: env.META_OAUTH_JWT_SECRET || '',
+  },
+
+  google: {
+    clientId: env.GOOGLE_CLIENT_ID || '',
+    clientSecret: env.GOOGLE_CLIENT_SECRET || '',
+    redirectUri: env.GOOGLE_REDIRECT_URI || '',
+    // Reuse the Meta OAuth JWT secret to sign the short-lived connect `state`.
+    stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
   },
 
   whatsapp: {

@@ -39,6 +39,7 @@ import adminRoutes from './routes/admin.routes';
 import billingRoutes from './routes/billing.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
 import schedulerRoutes from './scheduler/scheduler.routes';
+import googleCalendarRoutes, { googleCalendarCallbackRouter } from './integrations/google/google-calendar.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
@@ -216,6 +217,8 @@ app.use(rateLimitByIp);
 
 // Meta OAuth callback — after CORS but before Clerk (Facebook redirects here unauthenticated)
 app.use('/api/v1/channels/meta/oauth', metaOAuthCallbackRouter);
+// Public Google OAuth callback (Google redirects the browser here, no auth header).
+app.use('/api/v1/integrations/google', googleCalendarCallbackRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());
@@ -251,6 +254,7 @@ apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/billing', billingRoutes);
 apiRouter.use('/knowledge', knowledgeRoutes);
 apiRouter.use('/scheduler', schedulerRoutes);
+apiRouter.use('/integrations/google', googleCalendarRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/bots', botsRoutes);
 apiRouter.use('/demand-signals', demandSignalsRoutes);

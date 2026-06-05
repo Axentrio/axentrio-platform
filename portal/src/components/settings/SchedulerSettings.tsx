@@ -4,7 +4,9 @@
  * Cal.com's own connection is configured in the separate CalcomSettings card.
  */
 import React, { useEffect, useState } from 'react';
-import { CalendarClock, Save } from 'lucide-react';
+import { CalendarClock, Save, Check } from 'lucide-react';
+import { toast } from 'sonner';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +18,11 @@ import {
   useUpdateSchedulerConfig,
   type WeeklyHours,
 } from '../../queries/useSchedulerQueries';
+import {
+  useGoogleCalendarStatus,
+  useConnectGoogleCalendar,
+  useDisconnectGoogleCalendar,
+} from '../../queries/useGoogleCalendarQueries';
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'mon', label: 'Monday' },
@@ -58,6 +65,26 @@ function rowsFromWeeklyHours(weekly: WeeklyHours | undefined): DayState {
 export const SchedulerSettings: React.FC = () => {
   const { data, isLoading } = useSchedulerConfig();
   const update = useUpdateSchedulerConfig();
+  const queryClient = useQueryClient();
+  const googleStatus = useGoogleCalendarStatus();
+  const connectGoogle = useConnectGoogleCalendar();
+  const disconnectGoogle = useDisconnectGoogleCalendar();
+
+  // Toast + refresh after the OAuth callback redirects back with ?google=...
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const g = params.get('google');
+    if (!g) return;
+    if (g === 'connected') {
+      toast.success('Google Calendar connected');
+      queryClient.invalidateQueries({ queryKey: ['google', 'status'] });
+    } else if (g === 'error') {
+      toast.error('Google Calendar connection failed');
+    }
+    params.delete('google');
+    const qs = params.toString();
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
+  }, [queryClient]);
 
   const [provider, setProvider] = useState<'calcom' | 'internal'>('calcom');
   const [name, setName] = useState('Appointment');
@@ -162,6 +189,44 @@ export const SchedulerSettings: React.FC = () => {
 
             {provider === 'internal' && (
               <>
+                {/* Google Calendar connection (Phase 1) */}
+                <div className="space-y-2 border-t border-edge pt-4">
+                  <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
+                  {googleStatus.data?.connected ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-text-secondary flex items-center gap-2">
+                        <Check className="w-4 h-4 text-status-online" />
+                        Connected{googleStatus.data.accountEmail ? ` · ${googleStatus.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => disconnectGoogle.mutate()}
+                        disabled={disconnectGoogle.isPending}
+                      >
+                        Disconnect
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-text-muted">
+                        Optional: connect Google so bookings land on your calendar with a Meet link and respect your existing events.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => connectGoogle.mutate()}
+                        disabled={connectGoogle.isPending}
+                      >
+                        {connectGoogle.isPending ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+                        ) : null}
+                        Connect Google Calendar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Event type */}
                 <div className="space-y-3 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Event type</h3>

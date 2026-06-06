@@ -161,3 +161,60 @@ export function useBotTestChat(botId: string) {
       api.post<BotTestChatResponse>(`/bots/${botId}/test-chat`, data),
   });
 }
+
+// --- Per-bot knowledge (dedicated vs shared org KB) ---
+
+export interface BotKnowledgeDocument {
+  id: string;
+  title: string;
+  type: string;
+  status: 'pending' | 'processing' | 'indexed' | 'failed';
+  createdAt: string;
+}
+
+export interface BotKnowledgeState {
+  mode: 'shared' | 'dedicated';
+  kbId: string | null;
+  documents: BotKnowledgeDocument[];
+}
+
+export function useBotKnowledge(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: queryKeys.bots.knowledge(botId ?? ''),
+    queryFn: () => api.get<BotKnowledgeState>(`/bots/${botId}/knowledge`),
+    enabled: !!botId && (opts.enabled ?? true),
+  });
+}
+
+export function useEnableDedicatedKb(botId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post(`/bots/${botId}/knowledge/dedicated`, {}),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+  });
+}
+
+export function useDisableDedicatedKb(botId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.delete(`/bots/${botId}/knowledge/dedicated`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+  });
+}
+
+export function useAddBotDocument(botId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: { type: 'text' | 'faq'; title: string; sourceContent: string }) =>
+      api.post(`/bots/${botId}/documents`, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+  });
+}
+
+export function useDeleteBotDocument(botId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (docId: string) => api.delete(`/bots/${botId}/documents/${docId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
+  });
+}

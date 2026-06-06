@@ -88,9 +88,14 @@ export class KnowledgeService {
 
   async listDocuments(
     tenantId: string,
-    filters?: { status?: string; type?: string; page?: number; limit?: number }
+    filters?: { status?: string; type?: string; page?: number; limit?: number },
+    kbId?: string,
   ) {
-    const kb = await this.getOrCreateKnowledgeBase(tenantId);
+    // Target a specific KB (e.g. a bot's dedicated KB) when given; otherwise the
+    // tenant's shared primary KB.
+    const kb = kbId
+      ? await this.kbRepo.findOneOrFail({ where: { id: kbId, tenantId } })
+      : await this.getOrCreateKnowledgeBase(tenantId);
     const qb = this.docRepo
       .createQueryBuilder('doc')
       .where('doc.knowledgeBaseId = :kbId', { kbId: kb.id });
@@ -116,9 +121,14 @@ export class KnowledgeService {
       sourceContent?: string;
       uploadToken?: string;
       metadata?: Record<string, any>;
-    }
+    },
+    kbId?: string,
   ): Promise<KnowledgeDocument> {
-    const kb = await this.getOrCreateKnowledgeBase(tenantId);
+    // Target a specific KB (e.g. a bot's dedicated KB) when given; otherwise the
+    // tenant's shared primary KB.
+    const kb = kbId
+      ? await this.kbRepo.findOneOrFail({ where: { id: kbId, tenantId } })
+      : await this.getOrCreateKnowledgeBase(tenantId);
 
     // Enforce tier-based document limits
     const tenant = await this.tenantRepo.findOneOrFail({ where: { id: tenantId } });

@@ -1981,6 +1981,32 @@
       "backToBots": "Back to bots",
       "title": "Bot configuration",
       "subtitle": "Configure this bot's identity, voice, instructions, and guardrails."
+    },
+    "knowledge": {
+      "title": "Knowledge base",
+      "sharedDescription": "This bot uses your organization's shared knowledge base.",
+      "giveDedicated": "Give this bot its own knowledge",
+      "dedicatedTitle": "Dedicated knowledge",
+      "dedicatedDescription": "This bot answers only from its own documents below.",
+      "switchShared": "Switch back to shared",
+      "addTitle": "Add a document",
+      "titlePlaceholder": "Document title",
+      "contentPlaceholder": "Paste the text the bot should know…",
+      "add": "Add",
+      "empty": "No documents yet.",
+      "toast": {
+        "added": "Document added"
+      },
+      "errors": {
+        "generic": "Something went wrong",
+        "addFailed": "Failed to add document"
+      },
+      "status": {
+        "indexed": "Indexed",
+        "pending": "Pending",
+        "processing": "Processing",
+        "failed": "Failed"
+      }
     }
   }
 }

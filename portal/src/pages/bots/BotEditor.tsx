@@ -19,6 +19,7 @@ import { InlineError } from '@/components/ui/inline-error';
 import AiBotForm from '@/pages/knowledge/AiBotForm';
 import TestChatPanel from '@/pages/knowledge/TestChatPanel';
 import { EmbedWidgetCard } from '@/components/ai/EmbedWidgetCard';
+import BotKnowledgePanel from './BotKnowledgePanel';
 
 const BotEditor: React.FC = () => {
   const { t } = useTranslation();
@@ -92,8 +93,9 @@ const BotEditor: React.FC = () => {
           <InlineError message={t('ai.bot.loadError')} />
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-[3fr_1fr] gap-6 items-start">
-            <div className="min-w-0">
+            <div className="min-w-0 space-y-6">
               <AiBotForm botId={id} onGoToKnowledgeBase={goToKnowledge} />
+              <BotKnowledgePanel botId={id} readOnly={!isAdmin} />
             </div>
             {isAdmin && (
               <div className="xl:sticky xl:top-6">

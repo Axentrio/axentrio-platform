@@ -21,8 +21,15 @@ import { KnowledgeBase } from '../database/entities/KnowledgeBase';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
-import { asyncHandler, NotFoundError, ForbiddenError } from '../middleware/error-handler';
+import { asyncHandler, NotFoundError, ForbiddenError, BadRequestError } from '../middleware/error-handler';
 import { getBotAiSettings, updateBotAiSettings, botTestChat } from '../knowledge/bot-ai-settings.controller';
+import { KnowledgeService } from '../knowledge/knowledge.service';
+import { createDocumentSchema } from '../schemas/knowledge.schema';
+import {
+  getBotKnowledgeState,
+  enableDedicatedKb,
+  disableDedicatedKb,
+} from '../knowledge/bot-knowledge.service';
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { config } from '../config/environment';
@@ -354,5 +361,94 @@ router.delete(
 router.get('/:id/ai-settings', requireRole('admin', 'supervisor'), asyncHandler(getBotAiSettings));
 router.put('/:id/ai-settings', requireRole('admin'), asyncHandler(updateBotAiSettings));
 router.post('/:id/test-chat', requireRole('admin'), asyncHandler(botTestChat));
+
+/**
+ * Per-bot knowledge (dedicated vs shared org KB). "Dedicated replaces shared":
+ * enabling a dedicated KB detaches the shared one; switching back re-attaches it.
+ * Documents can only be added in dedicated mode (shared docs are managed in the
+ * org Knowledge tab). Mutations require admin/supervisor (`requireMutateRole`).
+ */
+const knowledgeSvc = new KnowledgeService(AppDataSource);
+
+router.get(
+  '/:id/knowledge',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId!;
+    await loadTenantBot(req.params.id, tenantId);
+    const state = await getBotKnowledgeState(tenantId, req.params.id);
+    const documents =
+      state.mode === 'dedicated' && state.kbId
+        ? (await knowledgeSvc.listDocuments(tenantId, {}, state.kbId)).documents
+        : [];
+    sendSuccess(res, { ...state, documents });
+  })
+);
+
+router.post(
+  '/:id/knowledge/dedicated',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId!;
+    await loadTenantBot(req.params.id, tenantId);
+    sendSuccess(res, await enableDedicatedKb(tenantId, req.params.id));
+  })
+);
+
+router.delete(
+  '/:id/knowledge/dedicated',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId!;
+    await loadTenantBot(req.params.id, tenantId);
+    sendSuccess(res, await disableDedicatedKb(tenantId, req.params.id));
+  })
+);
+
+router.post(
+  '/:id/documents',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId!;
+    await loadTenantBot(req.params.id, tenantId);
+    const state = await getBotKnowledgeState(tenantId, req.params.id);
+    if (state.mode !== 'dedicated' || !state.kbId) {
+      throw new BadRequestError('Enable a dedicated knowledge base for this bot first.');
+    }
+    const data = createDocumentSchema.parse(req.body);
+    const doc = await knowledgeSvc.createDocument(tenantId, data, state.kbId);
+    try {
+      const { addJob } = await import('../queue/message-queue');
+      await addJob(
+        'knowledge-processing',
+        { documentId: doc.id, tenantId, processingVersion: doc.processingVersion },
+        { jobId: `kb-${doc.id}-v${doc.processingVersion}` },
+      );
+    } catch (err) {
+      // Document stays 'pending'; a later retry can re-queue it.
+      void err;
+    }
+    sendCreated(res, doc);
+  })
+);
+
+router.delete(
+  '/:id/documents/:docId',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    requireMutateRole(authReq.userRole);
+    const tenantId = authReq.tenantId!;
+    await loadTenantBot(req.params.id, tenantId);
+    const state = await getBotKnowledgeState(tenantId, req.params.id);
+    const doc = await knowledgeSvc.getDocument(tenantId, req.params.docId);
+    if (!doc || doc.knowledgeBaseId !== state.kbId) {
+      throw new NotFoundError('Document not found');
+    }
+    await knowledgeSvc.deleteDocument(tenantId, req.params.docId);
+    sendNoContent(res);
+  })
+);
 
 export default router;

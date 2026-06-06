@@ -1971,6 +1971,32 @@
       "backToBots": "Retour aux bots",
       "title": "Configuration du bot",
       "subtitle": "Configurez l'identité, le ton, les instructions et les garde-fous de ce bot."
+    },
+    "knowledge": {
+      "title": "Base de connaissances",
+      "sharedDescription": "Ce bot utilise la base de connaissances partagée de votre organisation.",
+      "giveDedicated": "Donner à ce bot sa propre base",
+      "dedicatedTitle": "Base dédiée",
+      "dedicatedDescription": "Ce bot répond uniquement à partir de ses propres documents ci-dessous.",
+      "switchShared": "Revenir au partagé",
+      "addTitle": "Ajouter un document",
+      "titlePlaceholder": "Titre du document",
+      "contentPlaceholder": "Collez le texte que le bot doit connaître…",
+      "add": "Ajouter",
+      "empty": "Aucun document pour le moment.",
+      "toast": {
+        "added": "Document ajouté"
+      },
+      "errors": {
+        "generic": "Une erreur s'est produite",
+        "addFailed": "Échec de l'ajout du document"
+      },
+      "status": {
+        "indexed": "Indexé",
+        "pending": "En attente",
+        "processing": "En cours",
+        "failed": "Échec"
+      }
     }
   }
 }

@@ -1976,6 +1976,32 @@
       "backToBots": "Terug naar bots",
       "title": "Botconfiguratie",
       "subtitle": "Configureer de identiteit, toon, instructies en richtlijnen van deze bot."
+    },
+    "knowledge": {
+      "title": "Kennisbank",
+      "sharedDescription": "Deze bot gebruikt de gedeelde kennisbank van je organisatie.",
+      "giveDedicated": "Geef deze bot een eigen kennisbank",
+      "dedicatedTitle": "Eigen kennisbank",
+      "dedicatedDescription": "Deze bot antwoordt alleen op basis van zijn eigen documenten hieronder.",
+      "switchShared": "Terug naar gedeeld",
+      "addTitle": "Document toevoegen",
+      "titlePlaceholder": "Documenttitel",
+      "contentPlaceholder": "Plak de tekst die de bot moet kennen…",
+      "add": "Toevoegen",
+      "empty": "Nog geen documenten.",
+      "toast": {
+        "added": "Document toegevoegd"
+      },
+      "errors": {
+        "generic": "Er is iets misgegaan",
+        "addFailed": "Document toevoegen mislukt"
+      },
+      "status": {
+        "indexed": "Geïndexeerd",
+        "pending": "In wachtrij",
+        "processing": "Bezig",
+        "failed": "Mislukt"
+      }
     }
   }
 }

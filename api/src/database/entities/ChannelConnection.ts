@@ -24,6 +24,13 @@ export class ChannelConnection {
   @Column('uuid')
   tenantId!: string;
 
+  /**
+   * Bot this channel routes inbound messages to. NULL → fall back to the
+   * tenant's anchor bot (per-channel bot routing). FK is ON DELETE SET NULL.
+   */
+  @Column({ type: 'uuid', nullable: true })
+  botId!: string | null;
+
   @Column({ type: 'varchar', length: 20 })
   channel!: ChannelType;
 

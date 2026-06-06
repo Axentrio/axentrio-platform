@@ -23,6 +23,7 @@ import {
 } from './whatsapp/setup.service';
 import { runHealthCheck } from './health-check.service';
 import { requireFeature } from '../billing/enforce';
+import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 
 const router = Router();
 
@@ -47,6 +48,7 @@ router.get(
       select: [
         'id',
         'tenantId',
+        'botId',
         'channel',
         'status',
         'label',
@@ -209,6 +211,52 @@ router.delete(
     // Strip credentials from the response
     const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = connection;
 
+    sendSuccess(res, safeConnection);
+  }),
+);
+
+/**
+ * PATCH /:connectionId/bot
+ * Assign (or clear) the bot this channel routes inbound messages to.
+ * Body: { botId: string | null } — null reverts to the tenant's anchor bot.
+ * The bot must belong to the tenant and be active.
+ */
+router.patch(
+  '/:connectionId/bot',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user!.tenantId;
+    const { connectionId } = req.params;
+    const { botId } = (req.body ?? {}) as { botId?: string | null };
+
+    if (botId !== null && typeof botId !== 'string') {
+      throw new BadRequestError('botId must be a bot id string or null');
+    }
+
+    const repo = getRepository(ChannelConnection);
+    const connection = await repo.findOne({ where: { id: connectionId, tenantId } });
+    if (!connection) {
+      throw new NotFoundError('Channel connection not found');
+    }
+
+    if (botId) {
+      let bot;
+      try {
+        bot = await getOwnedBot(botId, tenantId);
+      } catch (err) {
+        if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Bot not found');
+        throw err;
+      }
+      if (bot.status !== 'active') {
+        throw new BadRequestError('Cannot route a channel to a paused bot — activate it first.');
+      }
+      connection.botId = bot.id;
+    } else {
+      connection.botId = null;
+    }
+
+    const saved = (await repo.save(connection)) as ChannelConnection;
+    const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = saved;
     sendSuccess(res, safeConnection);
   }),
 );

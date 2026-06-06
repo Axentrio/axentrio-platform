@@ -20,7 +20,7 @@ import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 import { enforceCountLimit } from '../billing/enforce';
-import { Not } from 'typeorm';
+import { Not, IsNull } from 'typeorm';
 
 /**
  * Main entry point: process a single NormalizedEvent for a given ChannelConnection.
@@ -183,6 +183,39 @@ async function handleReceiptEvent(
 }
 
 /**
+ * Resolve which bot a channel's inbound messages route to. The connection's
+ * assigned bot when set and still valid (tenant-owned, active, not deleted);
+ * otherwise the tenant's anchor bot. Falling back (rather than erroring) keeps
+ * messages flowing if an assigned bot is later paused or deleted.
+ */
+async function resolveChannelBotId(connection: ChannelConnection): Promise<string> {
+  const botRepo = getRepository(Bot);
+  if (connection.botId) {
+    const assigned = await botRepo.findOne({
+      where: {
+        id: connection.botId,
+        tenantId: connection.tenantId,
+        status: 'active',
+        deletedAt: IsNull(),
+      },
+    });
+    if (assigned) return assigned.id;
+    logger.warn('[inbound] channel-assigned bot invalid/inactive; falling back to anchor', {
+      connectionId: connection.id,
+      assignedBotId: connection.botId,
+      tenantId: connection.tenantId,
+    });
+  }
+  const anchorBot = await botRepo.findOne({
+    where: { tenantId: connection.tenantId, isDefault: true },
+  });
+  if (!anchorBot) {
+    throw new Error(`No anchor bot found for tenant ${connection.tenantId}; cannot create channel session`);
+  }
+  return anchorBot.id;
+}
+
+/**
  * Find an existing conversation binding or create a new session + participant + binding.
  * Exported for regression testing of the per-tenant session creation (bot_id).
  */
@@ -232,15 +265,11 @@ export async function findOrCreateConversation(
     }
   }
 
-  // Channel sessions must reference the tenant's anchor (default) bot —
-  // chat_sessions.bot_id is NOT NULL. Channels are tenant-level, so all inbound
-  // conversations route to the anchor bot.
-  const anchorBot = await getRepository(Bot).findOne({
-    where: { tenantId: connection.tenantId, isDefault: true },
-  });
-  if (!anchorBot) {
-    throw new Error(`No anchor bot found for tenant ${connection.tenantId}; cannot create channel session`);
-  }
+  // Resolve the bot for this channel (chat_sessions.bot_id is NOT NULL):
+  // the connection's assigned bot when set and still valid (owned, active,
+  // not soft-deleted), otherwise the tenant's anchor bot. An invalid/inactive
+  // assignment falls back to the anchor rather than dropping the message.
+  const targetBotId = await resolveChannelBotId(connection);
 
   if (existingBinding && (!existingBinding.session || existingBinding.session.status === 'closed')) {
     // Session is closed — create new session and update existing binding
@@ -261,7 +290,7 @@ export async function findOrCreateConversation(
 
       const newSession = manager.create(ChatSession, {
         tenantId: connection.tenantId,
-        botId: anchorBot.id,
+        botId: targetBotId,
         visitorId: event.sender.externalUserId,
         status: 'waiting',
         source: connection.channel,
@@ -333,7 +362,7 @@ export async function findOrCreateConversation(
 
     const sessionData = manager.create(ChatSession, {
       tenantId: connection.tenantId,
-      botId: anchorBot.id,
+      botId: targetBotId,
       visitorId: event.sender.externalUserId,
       status: 'waiting',
       source: connection.channel,

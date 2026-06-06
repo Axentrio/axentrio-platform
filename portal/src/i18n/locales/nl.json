@@ -960,6 +960,11 @@
         "title": "Kanaal loskoppelen",
         "description": "Hierdoor stoppen de berichten van dit kanaal. Je kunt het later opnieuw verbinden.",
         "confirm": "Loskoppelen"
+      },
+      "botPicker": {
+        "default": "Standaardbot",
+        "defaultSuffix": "(standaard)",
+        "aria": "Bot voor dit kanaal"
       }
     },
     "canned": {

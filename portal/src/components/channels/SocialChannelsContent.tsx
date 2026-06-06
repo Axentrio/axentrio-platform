@@ -18,6 +18,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   AlertDialog,
   AlertDialogContent,
   AlertDialogHeader,
@@ -36,7 +43,9 @@ import {
   useConnectMeta,
   useDisconnectChannel,
   useHealthCheckChannel,
+  useUpdateChannelBot,
 } from '../../queries/useChannelQueries';
+import { useBots } from '@/queries/useBotsQueries';
 import { timeAgo } from '@/utils/timeAgo';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -85,6 +94,9 @@ export function SocialChannelsContent() {
   const { data: connections, isLoading } = useChannelConnections();
   const disconnectMutation = useDisconnectChannel();
   const healthCheckMutation = useHealthCheckChannel();
+  const updateChannelBot = useUpdateChannelBot();
+  const { data: botsData } = useBots();
+  const bots = botsData?.bots ?? [];
   const metaOAuthUrl = useMetaOAuthUrl();
   const connectMeta = useConnectMeta();
 
@@ -268,6 +280,39 @@ export function SocialChannelsContent() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
+                      {conn.channel !== 'widget' && (
+                        <Select
+                          value={conn.botId ?? '__default__'}
+                          onValueChange={(v) =>
+                            updateChannelBot.mutate({
+                              connectionId: conn.id,
+                              botId: v === '__default__' ? null : v,
+                            })
+                          }
+                        >
+                          <SelectTrigger
+                            className="h-8 w-44"
+                            aria-label={t('ai.social.botPicker.aria', { defaultValue: 'Bot for this channel' })}
+                          >
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__default__">
+                              {t('ai.social.botPicker.default', { defaultValue: 'Default bot' })}
+                            </SelectItem>
+                            {bots
+                              .filter((b) => b.status === 'active')
+                              .map((b) => (
+                                <SelectItem key={b.id} value={b.id}>
+                                  {b.name}
+                                  {b.isDefault
+                                    ? ` ${t('ai.social.botPicker.defaultSuffix', { defaultValue: '(default)' })}`
+                                    : ''}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       {conn.lastError && (
                         <span className="text-xs text-red-400 max-w-[200px] truncate" title={conn.lastError}>
                           <AlertCircle className="h-3 w-3 inline mr-1" />

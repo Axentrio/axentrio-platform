@@ -8,6 +8,8 @@ type Any = any;
 interface ChannelConnection {
   id: string;
   tenantId: string;
+  /** Bot this channel routes to; null = the tenant's default/anchor bot. */
+  botId: string | null;
   channel: 'widget' | 'telegram' | 'messenger' | 'instagram' | 'whatsapp';
   status: 'active' | 'disconnected' | 'error' | 'pending_setup';
   label: string | null;
@@ -120,6 +122,22 @@ export function useDisconnectChannel() {
     },
     onError: (error: Any) => {
       toast.error(extractApiErrorMessage(error) ?? 'Failed to disconnect');
+    },
+  });
+}
+
+export function useUpdateChannelBot() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ connectionId, botId }: { connectionId: string; botId: string | null }) => {
+      return api.patch(`/channels/${connectionId}/bot`, { botId });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      toast.success('Channel bot updated');
+    },
+    onError: (error: Any) => {
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to update channel bot');
     },
   });
 }

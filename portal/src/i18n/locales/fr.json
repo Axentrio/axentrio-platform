@@ -955,6 +955,11 @@
         "title": "Déconnecter le canal",
         "description": "Cela arrêtera la réception de messages depuis ce canal. Vous pourrez le reconnecter plus tard.",
         "confirm": "Déconnecter"
+      },
+      "botPicker": {
+        "default": "Bot par défaut",
+        "defaultSuffix": "(par défaut)",
+        "aria": "Bot pour ce canal"
       }
     },
     "canned": {

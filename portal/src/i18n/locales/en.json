@@ -965,6 +965,11 @@
         "title": "Disconnect Channel",
         "description": "This will stop receiving messages from this channel. You can reconnect it later.",
         "confirm": "Disconnect"
+      },
+      "botPicker": {
+        "default": "Default bot",
+        "defaultSuffix": "(default)",
+        "aria": "Bot for this channel"
       }
     },
     "canned": {

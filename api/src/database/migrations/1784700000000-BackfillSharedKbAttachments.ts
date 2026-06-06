@@ -18,10 +18,13 @@ export class BackfillSharedKbAttachments1784700000000 implements MigrationInterf
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // 1. Create a primary (bot-less) KB for any tenant that has a bot but no
-    //    primary KB yet. All other columns carry table defaults.
+    //    primary KB yet. `status` is intentionally omitted so the column default
+    //    applies — its type differs across environments (varchar in the prod
+    //    migration, enum where the schema was synchronized), and a text literal
+    //    won't coerce to the enum. `botId` is cast to uuid (a bare NULL is text).
     await queryRunner.query(`
-      INSERT INTO knowledge_bases ("tenantId", "botId", status)
-      SELECT DISTINCT b.tenant_id, NULL, 'inactive'
+      INSERT INTO knowledge_bases ("tenantId", "botId")
+      SELECT DISTINCT b.tenant_id, NULL::uuid
       FROM chatbot_bots b
       WHERE b.deleted_at IS NULL
         AND NOT EXISTS (

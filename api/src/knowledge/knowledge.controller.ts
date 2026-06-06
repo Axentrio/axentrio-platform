@@ -297,8 +297,9 @@ export async function testChat(req: Request, res: Response) {
   type TenantAi = NonNullable<NonNullable<Tenant['settings']>['ai']>;
   const ai: TenantAi = { ...botAi, apiKey: tenantApiKey ?? null } as TenantAi;
 
-  const provider = ai.provider || DEFAULT_PROVIDER;
-  const model = ai.model || DEFAULT_MODEL;
+  // Platform-standardised model/provider (not per-bot/tenant).
+  const provider = DEFAULT_PROVIDER;
+  const model = DEFAULT_MODEL;
 
   if (useKnowledgeBase) {
     let result;

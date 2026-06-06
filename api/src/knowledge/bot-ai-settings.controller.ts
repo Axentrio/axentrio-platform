@@ -146,8 +146,9 @@ export async function botTestChat(req: Request, res: Response) {
   type TenantAi = NonNullable<NonNullable<Tenant['settings']>['ai']>;
   const ai: TenantAi = { ...botAi, apiKey: tenantApiKey ?? null } as TenantAi;
 
-  const provider = ai.provider || DEFAULT_PROVIDER;
-  const model = ai.model || DEFAULT_MODEL;
+  // Platform-standardised model/provider (not per-bot).
+  const provider = DEFAULT_PROVIDER;
+  const model = DEFAULT_MODEL;
 
   // Scope retrieval to this bot's attached KBs. Empty set → no-KB path.
   const botKbIds = await getBotKnowledgeBaseIds(AppDataSource, req.params.id);

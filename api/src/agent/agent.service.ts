@@ -57,8 +57,10 @@ export class AgentService {
     try {
       const tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
       const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools);
-      const provider = getProvider(aiSettings!.provider || DEFAULT_PROVIDER, apiKey ?? undefined);
-      const model = aiSettings!.model || DEFAULT_MODEL;
+      // Model/provider are platform-standardised — always the platform default,
+      // never per-bot/tenant (see llm/defaults).
+      const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);
+      const model = DEFAULT_MODEL;
 
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },

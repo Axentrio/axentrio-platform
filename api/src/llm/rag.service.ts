@@ -249,8 +249,9 @@ ${knowledgeContext}`;
   // a merged shape carrying the apiKey alongside the behavioural slice; we
   // pluck the secret from there to seed the provider. NEVER move this read
   // to bot.settings.ai.apiKey — that key is never set there.
+  // Model/provider are platform-standardised — always the platform default.
   const provider = getProvider(
-    aiSettings.provider || DEFAULT_PROVIDER,
+    DEFAULT_PROVIDER,
     aiSettings.apiKey ?? undefined,
     undefined,
     tenantId,
@@ -258,7 +259,7 @@ ${knowledgeContext}`;
   );
   // chat() will throw LlmRateLimitError → HTTP 429 if the daily cap is reached.
   const llmResponse = await provider.chat(messages, {
-    model: aiSettings.model || DEFAULT_MODEL,
+    model: DEFAULT_MODEL,
     maxTokens: 1000,
     temperature: 0.3,
     jsonMode: true,

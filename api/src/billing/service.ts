@@ -532,8 +532,35 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
   if (!tenant) {
     throw new Error(`getBillingState: tenant ${tenantId} not found`);
   }
+
+  const history: BillingHistoryEntry[] = events.map((e) => ({
+    id: e.id,
+    provider: e.provider,
+    eventType: e.eventType,
+    payload: e.payload,
+    createdAt: e.createdAt,
+  }));
+
   if (!primary) {
-    throw new Error(`getBillingState: tenant ${tenantId} has no primary billing row`);
+    // A tenant with no primary billing row has simply never subscribed (e.g.
+    // auto-provisioned on `free`). Return a neutral "no subscription" state —
+    // mirroring a free/status='none' row — instead of throwing, so the billing
+    // page renders the Subscribe tiles rather than 500ing. `hasStripeSubscription`
+    // false is what the portal keys on to show subscribe vs. manage.
+    return {
+      tier: tenant.tier,
+      primaryProvider: STRIPE,
+      planId: 'free',
+      status: 'none',
+      currentPeriodEnd: null,
+      cancelAtPeriodEnd: false,
+      pendingPlanId: null,
+      pendingPlanEffectiveAt: null,
+      trialEnd: null,
+      billingEmail: null,
+      hasStripeSubscription: false,
+      events: history,
+    };
   }
 
   // True only when the PRIMARY billing row is a live Stripe subscription.
@@ -562,13 +589,7 @@ export async function getBillingState(tenantId: string): Promise<BillingState> {
     trialEnd: primary.trialEnd ?? null,
     billingEmail: primary.billingEmail ?? null,
     hasStripeSubscription,
-    events: events.map((e) => ({
-      id: e.id,
-      provider: e.provider,
-      eventType: e.eventType,
-      payload: e.payload,
-      createdAt: e.createdAt,
-    })),
+    events: history,
   };
 }
 

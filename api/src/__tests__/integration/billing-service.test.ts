@@ -28,6 +28,7 @@ import {
   updateBillingEmail,
   openCustomerPortal,
   setTierManual,
+  getBillingState,
 } from '../../billing/service';
 import {
   setStripeClient,
@@ -703,5 +704,22 @@ describe('setTierManual', () => {
       where: { tenantId, eventType: 'tier.manual_override' },
     });
     expect(events.length).toBe(1); // only the first call's audit
+  });
+});
+
+describe('getBillingState — never-subscribed tenant', () => {
+  it('returns a neutral no-subscription state instead of throwing when there is no primary billing row', async () => {
+    // Auto-provisioned tenants start with no billing row; the page must still load.
+    const t = await createTestTenant({ tier: 'free' });
+
+    const state = await getBillingState(t.id);
+
+    expect(state.tier).toBe('free');
+    expect(state.status).toBe('none');
+    expect(state.planId).toBe('free');
+    expect(state.hasStripeSubscription).toBe(false);
+    expect(state.cancelAtPeriodEnd).toBe(false);
+    expect(state.pendingPlanId).toBeNull();
+    expect(state.events).toEqual([]);
   });
 });

@@ -1994,14 +1994,18 @@
       },
       "errors": {
         "generic": "Er is iets misgegaan",
-        "addFailed": "Document toevoegen mislukt"
+        "addFailed": "Document toevoegen mislukt",
+        "fileType": "Alleen PDF- of DOCX-bestanden worden ondersteund"
       },
       "status": {
         "indexed": "Geïndexeerd",
         "pending": "In wachtrij",
         "processing": "Bezig",
         "failed": "Mislukt"
-      }
+      },
+      "or": "of",
+      "uploadFile": "PDF/DOCX uploaden",
+      "uploading": "Uploaden…"
     }
   }
 }

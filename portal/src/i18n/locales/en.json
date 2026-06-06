@@ -1999,14 +1999,18 @@
       },
       "errors": {
         "generic": "Something went wrong",
-        "addFailed": "Failed to add document"
+        "addFailed": "Failed to add document",
+        "fileType": "Only PDF or DOCX files are supported"
       },
       "status": {
         "indexed": "Indexed",
         "pending": "Pending",
         "processing": "Processing",
         "failed": "Failed"
-      }
+      },
+      "or": "or",
+      "uploadFile": "Upload PDF/DOCX",
+      "uploading": "Uploading…"
     }
   }
 }

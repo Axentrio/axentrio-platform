@@ -6,9 +6,9 @@
  * Dedicated mode: the bot answers only from its own documents — add/list/delete
  * them here, or switch back to shared.
  */
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BookOpen, Plus, Trash2, ArrowLeftRight } from 'lucide-react';
+import { BookOpen, Plus, Trash2, ArrowLeftRight, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import {
   useDeleteBotDocument,
   type BotKnowledgeState,
 } from '@/queries/useBotsQueries';
+import { useUploadFile } from '@/queries/useKnowledgeQueries';
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = {
   indexed: 'default',
@@ -42,11 +43,36 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({ bot
   const disable = useDisableDedicatedKb(botId);
   const addDoc = useAddBotDocument(botId);
   const delDoc = useDeleteBotDocument(botId);
+  const uploadFile = useUploadFile();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
 
   const fail = (err: unknown, fallback: string) => toast.error(extractApiErrorMessage(err) ?? fallback);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (e.target) e.target.value = ''; // allow re-selecting the same file
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    const type = lower.endsWith('.pdf') ? 'pdf' : lower.endsWith('.docx') ? 'docx' : null;
+    if (!type) {
+      toast.error(t('bots.knowledge.errors.fileType'));
+      return;
+    }
+    try {
+      const res = (await uploadFile.mutateAsync(file)) as { uploadToken?: string };
+      const token = res?.uploadToken;
+      if (!token) throw new Error('no token');
+      addDoc.mutate(
+        { type, title: file.name, uploadToken: token },
+        { onSuccess: () => toast.success(t('bots.knowledge.toast.added')), onError: (er) => fail(er, t('bots.knowledge.errors.addFailed')) },
+      );
+    } catch (er) {
+      fail(er, t('bots.knowledge.errors.addFailed'));
+    }
+  };
 
   if (isLoading || !data) return <PageSkeleton variant="list" rows={3} />;
 
@@ -133,10 +159,30 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({ bot
               placeholder={t('bots.knowledge.contentPlaceholder')}
               rows={4}
             />
-            <Button onClick={handleAdd} disabled={addDoc.isPending || !title.trim() || !content.trim()} size="sm" className="gap-1.5">
-              <Plus className="w-4 h-4" />
-              {t('bots.knowledge.add')}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button onClick={handleAdd} disabled={addDoc.isPending || !title.trim() || !content.trim()} size="sm" className="gap-1.5">
+                <Plus className="w-4 h-4" />
+                {t('bots.knowledge.add')}
+              </Button>
+              <span className="text-xs text-text-muted">{t('bots.knowledge.or')}</span>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx"
+                className="hidden"
+                onChange={handleFile}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadFile.isPending || addDoc.isPending}
+                className="gap-1.5"
+              >
+                <Upload className="w-4 h-4" />
+                {uploadFile.isPending ? t('bots.knowledge.uploading') : t('bots.knowledge.uploadFile')}
+              </Button>
+            </div>
           </div>
         )}
 

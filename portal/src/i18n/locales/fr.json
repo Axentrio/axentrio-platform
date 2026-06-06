@@ -1989,14 +1989,18 @@
       },
       "errors": {
         "generic": "Une erreur s'est produite",
-        "addFailed": "Échec de l'ajout du document"
+        "addFailed": "Échec de l'ajout du document",
+        "fileType": "Seuls les fichiers PDF ou DOCX sont pris en charge"
       },
       "status": {
         "indexed": "Indexé",
         "pending": "En attente",
         "processing": "En cours",
         "failed": "Échec"
-      }
+      },
+      "or": "ou",
+      "uploadFile": "Importer PDF/DOCX",
+      "uploading": "Importation…"
     }
   }
 }

@@ -33,11 +33,16 @@ vi.mock('../../queries/useChannelQueries', () => ({
   useMetaOAuthPages: () => ({ data: undefined }),
   useConnectMeta: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisconnectChannel: () => ({ mutate: vi.fn() }),
+  useUpdateChannelBot: () => ({ mutate: vi.fn(), isPending: false }),
   useHealthCheckChannel: () => ({
     mutate: healthCheckMutate,
     isPending: false,
     variables: undefined,
   }),
+}));
+
+vi.mock('@/queries/useBotsQueries', () => ({
+  useBots: () => ({ data: { bots: [], used: 0, limit: null } }),
 }));
 
 function renderUI() {

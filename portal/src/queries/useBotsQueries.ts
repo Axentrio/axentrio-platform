@@ -205,8 +205,12 @@ export function useDisableDedicatedKb(botId: string) {
 export function useAddBotDocument(botId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (data: { type: 'text' | 'faq'; title: string; sourceContent: string }) =>
-      api.post(`/bots/${botId}/documents`, data),
+    mutationFn: (data: {
+      type: 'text' | 'faq' | 'pdf' | 'docx';
+      title: string;
+      sourceContent?: string;
+      uploadToken?: string;
+    }) => api.post(`/bots/${botId}/documents`, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.bots.knowledge(botId) }),
   });
 }

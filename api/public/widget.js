@@ -1511,6 +1511,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           this.sessionId = session.sessionId;
           this.tenantId = session.tenantId;
           this.visitorId = session.visitorId;
+          this.token = session.token;
+          // Restored (not brand-new) session — backfill missed messages on join.
+          this._isNewSession = false;
 
           if (key !== this.storageKey) {
             this.writeStoredSession(session);
@@ -1537,6 +1540,11 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       const { data } = await resp.json();
       this.sessionId = data.session.id;
       this.tenantId = data.session.tenantId || data.tenantId;
+      // Widget JWT — needed to call /widget/history for reconnect backfill.
+      this.token = data.token;
+      // Brand-new session: nothing to backfill on the first join (avoids
+      // re-rendering the server-side greeting on top of the client greeting).
+      this._isNewSession = true;
 
       // Clear old messages from previous session
       this.messages = [];
@@ -1564,7 +1572,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           visitorId: this.visitorId,
         },
         reconnection: true,
-        reconnectionAttempts: this.config.reconnectAttempts,
+        // Keep retrying indefinitely — a capped retry that exhausts leaves the
+        // widget permanently offline (and silently missing bot replies).
+        reconnectionAttempts: Infinity,
         reconnectionDelay: this.config.reconnectDelay,
       });
 
@@ -1582,6 +1592,15 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.socket.on('session:joined', (data) => {
         this.log('Joined session room:', data.sessionId);
         this.flushPendingMessages();
+        // Reconcile messages missed while disconnected. Replies are room-emitted
+        // with no replay, so a bot/agent reply sent during a disconnect would be
+        // lost from the UI. Backfill on every reconnect, and on the first join of
+        // a restored (not brand-new) session. Skipped for a brand-new session's
+        // first join to avoid duplicating the greeting.
+        if (this._joinedOnce || !this._isNewSession) {
+          this.syncHistory();
+        }
+        this._joinedOnce = true;
       });
 
       this.socket.on('session:join:error', () => {
@@ -1688,6 +1707,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           sessionId: this.sessionId,
           tenantId: this.tenantId,
           visitorId: this.visitorId,
+          token: this.token,
           messages: this.messages.slice(-this.config.maxCachedMessages),
         });
       }
@@ -1695,6 +1715,48 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
     saveSession() {
       this._saveSession();
+    }
+
+    // Reconcile the local transcript with the server after a (re)connect.
+    // Fetches /widget/history and renders any messages newer than the last one
+    // we've shown — recovering bot/agent replies emitted while the socket was
+    // disconnected (which are otherwise lost: replies are room-emitted with no
+    // replay). Dedupes by message id and by timestamp to avoid double-rendering.
+    async syncHistory() {
+      if (!this.token || !this.sessionId) return;
+      try {
+        const resp = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/history`, {
+          headers: { 'Authorization': 'Bearer ' + this.token },
+        }, 15000);
+        if (!resp.ok) return;
+        const { data } = await resp.json();
+        if (!Array.isArray(data)) return;
+
+        const shownIds = new Set(this.messages.map((m) => m.id));
+        let lastTs = 0;
+        for (const m of this.messages) {
+          const t = m.timestamp ? new Date(m.timestamp).getTime() : 0;
+          if (t > lastTs) lastTs = t;
+        }
+
+        for (const msg of data) {
+          if (!msg || shownIds.has(msg.id)) continue;
+          const ts = new Date(msg.createdAt).getTime();
+          // Only backfill messages newer than what we've already shown — avoids
+          // re-adding the greeting and previously-seen history.
+          if (lastTs && ts <= lastTs) continue;
+          const senderType = msg.sender && msg.sender.type;
+          this.hideTypingIndicator();
+          this.addMessage({
+            id: msg.id,
+            text: msg.content,
+            sender: senderType === 'user' ? 'user' : 'bot',
+            timestamp: new Date(msg.createdAt),
+          });
+        }
+      } catch (err) {
+        this.log('History sync failed:', err && err.message);
+      }
     }
     
     createShadowDOM() {

@@ -3,8 +3,8 @@
  * in-house scheduler, configure the event type and weekly availability.
  * Cal.com's own connection is configured in the separate CalcomSettings card.
  */
-import React, { useEffect, useState } from 'react';
-import { CalendarClock, Save, Check } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { CalendarClock, Save, Check, Plus, Trash2, Eye, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -16,6 +16,7 @@ import { cn } from '@/lib/utils';
 import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
+  useBookingAvailability,
   type WeeklyHours,
 } from '../../queries/useSchedulerQueries';
 import {
@@ -43,6 +44,17 @@ const TIMEZONES = [
   'UTC',
 ];
 
+// Full IANA list where the browser supports it (modern Chromium/Safari/FF),
+// falling back to the short curated list. Feeds a searchable <datalist>.
+const ALL_TIMEZONES: string[] = (() => {
+  try {
+    const sv = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    return typeof sv === 'function' ? sv('timeZone') : TIMEZONES;
+  } catch {
+    return TIMEZONES;
+  }
+})();
+
 interface DayRow {
   enabled: boolean;
   start: string;
@@ -50,6 +62,27 @@ interface DayRow {
 }
 
 type DayState = Record<string, DayRow>;
+
+/** A single date override row (holiday closure or one-off custom hours). */
+interface OverrideRow {
+  date: string;
+  closed: boolean;
+  start: string;
+  end: string;
+}
+
+function overridesFromConfig(raw: unknown[] | undefined): OverrideRow[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((o) => {
+    const ov = o as { date?: string; closed?: boolean; windows?: { start: string; end: string }[] };
+    return {
+      date: ov.date ?? '',
+      closed: !!ov.closed,
+      start: ov.windows?.[0]?.start ?? '09:00',
+      end: ov.windows?.[0]?.end ?? '17:00',
+    };
+  });
+}
 
 function rowsFromWeeklyHours(weekly: WeeklyHours | undefined): DayState {
   const out: DayState = {};
@@ -96,6 +129,8 @@ export const SchedulerSettings: React.FC = () => {
   const [timezone, setTimezone] = useState('Europe/Brussels');
   const [slotGranularityMin, setSlotGranularityMin] = useState(30);
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
+  const [overrides, setOverrides] = useState<OverrideRow[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
@@ -113,12 +148,33 @@ export const SchedulerSettings: React.FC = () => {
       setTimezone(data.availability.timezone);
       setSlotGranularityMin(data.availability.slotGranularityMin);
       setDays(rowsFromWeeklyHours(data.availability.weeklyHours));
+      setOverrides(overridesFromConfig(data.availability.dateOverrides));
     }
     setHydrated(true);
   }, [data, hydrated]);
 
   const setDay = (key: string, patch: Partial<DayRow>) =>
     setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
+
+  // Inline validation — surfaces config mistakes and blocks an invalid save.
+  const errors = useMemo<string[]>(() => {
+    if (provider !== 'internal') return [];
+    const e: string[] = [];
+    if (!name.trim()) e.push('Event name is required.');
+    if (!(durationMin >= 5)) e.push('Duration must be at least 5 minutes.');
+    if (slotGranularityMin > durationMin) e.push('Slot interval can’t be longer than the duration.');
+    if (minNoticeMin > maxHorizonDays * 1440) {
+      e.push('Minimum notice exceeds the booking horizon — no slots would ever appear.');
+    }
+    for (const { key, label } of DAYS) {
+      const r = days[key];
+      if (r.enabled && r.start >= r.end) e.push(`${label}: end time must be after start time.`);
+    }
+    for (const o of overrides) {
+      if (o.date && !o.closed && o.start >= o.end) e.push(`Override ${o.date}: end time must be after start time.`);
+    }
+    return e;
+  }, [provider, name, durationMin, slotGranularityMin, minNoticeMin, maxHorizonDays, days, overrides]);
 
   const handleSave = () => {
     if (provider === 'calcom') {
@@ -130,6 +186,9 @@ export const SchedulerSettings: React.FC = () => {
       const row = days[key];
       if (row.enabled) weeklyHours[key] = [{ start: row.start, end: row.end }];
     }
+    const dateOverrides = overrides
+      .filter((o) => o.date)
+      .map((o) => (o.closed ? { date: o.date, closed: true } : { date: o.date, windows: [{ start: o.start, end: o.end }] }));
     update.mutate({
       provider: 'internal',
       eventType: {
@@ -141,7 +200,7 @@ export const SchedulerSettings: React.FC = () => {
         maxHorizonDays,
         locationType: 'custom',
       },
-      availability: { timezone, weeklyHours, dateOverrides: [], slotGranularityMin },
+      availability: { timezone, weeklyHours, dateOverrides, slotGranularityMin },
     });
   };
 
@@ -249,17 +308,17 @@ export const SchedulerSettings: React.FC = () => {
                   <h3 className="text-sm font-medium text-text-primary">Weekly availability</h3>
                   <div>
                     <Label className="text-text-secondary mb-1 block">Timezone</Label>
-                    <select
+                    <Input
+                      list="scheduler-timezones"
                       value={timezone}
                       onChange={(e) => setTimezone(e.target.value)}
-                      className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
-                    >
-                      {(TIMEZONES.includes(timezone) ? TIMEZONES : [timezone, ...TIMEZONES]).map((tz) => (
-                        <option key={tz} value={tz}>
-                          {tz}
-                        </option>
+                      placeholder="Search timezone…"
+                    />
+                    <datalist id="scheduler-timezones">
+                      {ALL_TIMEZONES.map((tz) => (
+                        <option key={tz} value={tz} />
                       ))}
-                    </select>
+                    </datalist>
                   </div>
                   <div className="space-y-2">
                     {DAYS.map(({ key, label }) => (
@@ -290,11 +349,111 @@ export const SchedulerSettings: React.FC = () => {
                     ))}
                   </div>
                 </div>
+
+                {/* Date overrides — holidays / closures / one-off hours */}
+                <div className="space-y-3 border-t border-edge pt-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-text-primary">Date overrides</h3>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      onClick={() =>
+                        setOverrides((prev) => [...prev, { date: '', closed: true, start: '09:00', end: '17:00' }])
+                      }
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add
+                    </Button>
+                  </div>
+                  {overrides.length === 0 ? (
+                    <p className="text-xs text-text-muted">
+                      Close specific dates (holidays) or set one-off hours that override the weekly schedule.
+                    </p>
+                  ) : (
+                    <div className="space-y-2">
+                      {overrides.map((o, i) => (
+                        <div key={i} className="flex items-center gap-3 flex-wrap">
+                          <Input
+                            type="date"
+                            value={o.date}
+                            onChange={(e) =>
+                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))
+                            }
+                            className="w-40"
+                          />
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <Checkbox
+                              checked={o.closed}
+                              onCheckedChange={(c) =>
+                                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
+                              }
+                            />
+                            <span className="text-sm text-text-secondary">Closed</span>
+                          </label>
+                          {!o.closed && (
+                            <>
+                              <Input
+                                type="time"
+                                value={o.start}
+                                onChange={(e) =>
+                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))
+                                }
+                                className="w-32"
+                              />
+                              <span className="text-text-muted">–</span>
+                              <Input
+                                type="time"
+                                value={o.end}
+                                onChange={(e) =>
+                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))
+                                }
+                                className="w-32"
+                              />
+                            </>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            className="text-red-400 hover:text-red-300"
+                            onClick={() => setOverrides((prev) => prev.filter((_, j) => j !== i))}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Live slot preview (reflects the last SAVED config) */}
+                <div className="space-y-2 border-t border-edge pt-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-text-primary">Preview</h3>
+                    <Button variant="outline" size="sm" type="button" onClick={() => setShowPreview((v) => !v)}>
+                      <Eye className="w-3.5 h-3.5" /> {showPreview ? 'Hide' : 'Show'} next 7 days
+                    </Button>
+                  </div>
+                  {showPreview && <SlotPreview timezone={timezone} />}
+                </div>
               </>
             )}
 
+            {errors.length > 0 && (
+              <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-400">
+                  <AlertTriangle className="w-4 h-4" /> Fix before saving
+                </div>
+                <ul className="mt-1 list-disc pl-5 text-xs text-amber-300/90 space-y-0.5">
+                  {errors.map((e, i) => (
+                    <li key={i}>{e}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={update.isPending}>
+              <Button onClick={handleSave} disabled={update.isPending || errors.length > 0}>
                 {update.isPending ? (
                   <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white" />
                 ) : (
@@ -307,6 +466,63 @@ export const SchedulerSettings: React.FC = () => {
         )}
       </CardContent>
     </Card>
+  );
+};
+
+/** Calls the availability endpoint for the next 7 days. Reflects SAVED config. */
+const SlotPreview: React.FC<{ timezone: string }> = ({ timezone }) => {
+  const range = useMemo(() => {
+    const s = new Date();
+    const e = new Date(s.getTime() + 7 * 24 * 3600_000);
+    return { start: s.toISOString(), end: e.toISOString() };
+  }, []);
+  const { data, isLoading, isError } = useBookingAvailability(range.start, range.end, true);
+
+  const grouped = useMemo(() => {
+    const out = new Map<string, string[]>();
+    for (const s of data?.slots ?? []) {
+      const day = new Intl.DateTimeFormat('en-GB', {
+        timeZone: data?.timezone ?? timezone,
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+      }).format(new Date(s.start));
+      const time = new Intl.DateTimeFormat('en-GB', {
+        timeZone: data?.timezone ?? timezone,
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      }).format(new Date(s.start));
+      if (!out.has(day)) out.set(day, []);
+      out.get(day)!.push(time);
+    }
+    return Array.from(out.entries());
+  }, [data, timezone]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-text-muted">
+        <Loader2 className="w-4 h-4 animate-spin" /> Computing slots…
+      </div>
+    );
+  }
+  if (isError) {
+    return <p className="text-xs text-text-muted">Save your settings first, then preview.</p>;
+  }
+  const total = data?.slots.length ?? 0;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-text-muted">
+        {total} slot{total === 1 ? '' : 's'} in the next 7 days (reflects saved settings · {data?.timezone ?? timezone}).
+      </p>
+      {grouped.map(([day, times]) => (
+        <div key={day} className="text-sm">
+          <span className="text-text-secondary">{day}: </span>
+          <span className="text-text-primary">{times.slice(0, 8).join(', ')}</span>
+          {times.length > 8 && <span className="text-text-muted"> +{times.length - 8} more</span>}
+        </div>
+      ))}
+    </div>
   );
 };
 

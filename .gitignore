@@ -47,6 +47,11 @@ temp/
 .superpowers/
 .playwright-mcp/
 skills-lock.json
+.factory/
+.goose/
+.qwen/
+.trae/
+.windsurf/
 
 # App env files
 api/.env

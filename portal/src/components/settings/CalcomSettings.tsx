@@ -30,35 +30,9 @@ export const CalcomSettings: React.FC = () => {
   const fetchEventTypesMutation = useFetchCalcomEventTypes();
   const updateMutation = useUpdateIntegrations();
 
-  // UX-only guard. The API enforces the same gate via `requireFeature` and the
-  // egress chokepoint in `getCalcomIntegrationForBot`; this card just hides
-  // the controls so non-Pro tenants don't see a form that would 402.
-  if (!hasCalendarIntegrations) {
-    return (
-      <div className="rounded-xl border border-edge bg-surface-3 p-6 space-y-3">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10">
-            <Calendar className="h-5 w-5 text-primary-400" />
-          </div>
-          <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
-              {t('settings.integrations.calcom.title')}
-              <Lock className="h-3 w-3 text-text-muted" />
-            </h3>
-            <p className="text-xs text-text-muted">
-              {t('settings.integrations.calcom.lockedSubtitle')}
-            </p>
-          </div>
-        </div>
-        <Link
-          to="/billing"
-          className="inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300"
-        >
-          {t('settings.integrations.calcom.unlockCta')}
-        </Link>
-      </div>
-    );
-  }
+  // NOTE: the feature-gate early-return lives AFTER all hooks (below the
+  // effects). Returning here — before the useState/useEffect calls — changed the
+  // hook count when `useHasFeature` flipped false→true, throwing React #310.
 
   const [state, setState] = useState<State>('idle');
   const [apiKey, setApiKey] = useState('');
@@ -87,6 +61,36 @@ export const CalcomSettings: React.FC = () => {
       setState('idle');
     }
   }, [integrations]);
+
+  // UX-only feature gate — placed AFTER all hooks so hook order stays stable
+  // across renders (entitlements load async, flipping false→true). The API
+  // enforces the same gate via requireFeature + getCalcomIntegrationForBot.
+  if (!hasCalendarIntegrations) {
+    return (
+      <div className="rounded-xl border border-edge bg-surface-3 p-6 space-y-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary-600/10">
+            <Calendar className="h-5 w-5 text-primary-400" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-primary flex items-center gap-1.5">
+              {t('settings.integrations.calcom.title')}
+              <Lock className="h-3 w-3 text-text-muted" />
+            </h3>
+            <p className="text-xs text-text-muted">
+              {t('settings.integrations.calcom.lockedSubtitle')}
+            </p>
+          </div>
+        </div>
+        <Link
+          to="/billing"
+          className="inline-flex items-center gap-1 text-xs font-medium text-primary-400 hover:text-primary-300"
+        >
+          {t('settings.integrations.calcom.unlockCta')}
+        </Link>
+      </div>
+    );
+  }
 
   const handleConnect = async () => {
     setConnectError(null);

@@ -43,3 +43,24 @@ export const updateSchedulerSchema = z
   });
 
 export type UpdateSchedulerInput = z.infer<typeof updateSchedulerSchema>;
+
+// --- Admin bookings management (portal) ---
+
+export const listBookingsQuerySchema = z.object({
+  scope: z.enum(['upcoming', 'past']).default('upcoming'),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+export const availabilityQuerySchema = z.object({
+  startDate: z.string().datetime(),
+  endDate: z.string().datetime(),
+});
+
+export const cancelBookingBodySchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+export const rescheduleBookingBodySchema = z.object({
+  newStartTime: z.string().datetime(),
+});

@@ -7,11 +7,14 @@
  * functions keep their original signatures so callers (n8n booking tools, the
  * `/internal/booking/*` routes, the in-house agent tool) are unchanged.
  */
+import { In } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
+import { Booking } from '../database/entities/Booking';
+import { BookingReference } from '../database/entities/BookingReference';
 import type { BotSettings } from '../database/entities/Bot';
-import { getBotConfigForSession } from '../services/bot-config.service';
+import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider } from './booking-providers/types';
 import { CalcomProvider } from './booking-providers/calcom.provider';
 import { InternalProvider } from './booking-providers/internal.provider';
@@ -80,4 +83,134 @@ export async function rescheduleBooking(sessionId: string, bookingId: string, ne
 export async function cancelBooking(sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
   return selectProvider(ctx.botSettings).cancelBooking(ctx, bookingId, reason);
+}
+
+// ---------------------------------------------------------------------------
+// Admin (portal) surface — tenant-scoped management of internal bookings.
+//
+// The customer-facing functions above resolve context from a chat session. The
+// portal has no session, so these resolve context from the tenant's anchor bot
+// (where the scheduler config lives) and operate only on the `internal`
+// provider — Cal.com bookings live in Cal.com and are managed there.
+// ---------------------------------------------------------------------------
+
+export type BookingScope = 'upcoming' | 'past';
+
+export interface AdminBookingRow {
+  id: string;
+  startTime: string;
+  endTime: string;
+  status: string;
+  attendeeName: string | null;
+  attendeeEmail: string | null;
+  notes: string | null;
+  meetingUrl: string | null;
+}
+
+/** Build a provider context for admin actions from a booking's own bot/session. */
+async function buildAdminContext(tenantId: string, booking: Booking): Promise<BookingContext> {
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
+  const bot = await getOwnedBot(booking.botId, tenantId);
+  // Reuse the booking's originating session for audit-log parity. If the row
+  // was purged, synthesize a minimal session (booking_logs.session_id is a
+  // plain uuid column, not a FK to chat_sessions).
+  let session = booking.sessionId
+    ? await AppDataSource.getRepository(ChatSession).findOne({ where: { id: booking.sessionId } })
+    : null;
+  if (!session) {
+    session = { id: booking.sessionId ?? booking.id, tenantId, botId: bot.id } as ChatSession;
+  }
+  return { session, tenant, bot, botSettings: bot.settings ?? ({} as BotSettings) };
+}
+
+/** List the tenant anchor bot's internal bookings, upcoming or past. */
+export async function adminListBookings(
+  tenantId: string,
+  scope: BookingScope,
+  limit: number,
+  offset: number
+): Promise<{ bookings: AdminBookingRow[]; total: number }> {
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const repo = AppDataSource.getRepository(Booking);
+  const now = new Date();
+
+  const qb = repo
+    .createQueryBuilder('b')
+    .where('b.tenantId = :tenantId', { tenantId })
+    .andWhere('b.botId = :botId', { botId: bot.id })
+    .andWhere("b.provider = 'internal'");
+
+  if (scope === 'upcoming') {
+    qb.andWhere("b.status = 'confirmed'").andWhere('b.endUtc >= :now', { now }).orderBy('b.startUtc', 'ASC');
+  } else {
+    qb.andWhere("(b.status = 'cancelled' OR (b.status = 'confirmed' AND b.endUtc < :now))", { now }).orderBy(
+      'b.startUtc',
+      'DESC'
+    );
+  }
+
+  const total = await qb.getCount();
+  const rows = await qb.take(limit).skip(offset).getMany();
+
+  const ids = rows.map((r) => r.id);
+  const refs = ids.length
+    ? await AppDataSource.getRepository(BookingReference).find({
+        where: { bookingId: In(ids), providerType: 'google' },
+      })
+    : [];
+  const meetByBooking = new Map(refs.map((r) => [r.bookingId, r.meetingUrl ?? null]));
+
+  return {
+    total,
+    bookings: rows.map((b) => ({
+      id: b.id,
+      startTime: b.startUtc.toISOString(),
+      endTime: b.endUtc.toISOString(),
+      status: b.status,
+      attendeeName: b.attendeeName ?? null,
+      attendeeEmail: b.attendeeEmail ?? null,
+      notes: b.notes ?? null,
+      meetingUrl: meetByBooking.get(b.id) ?? null,
+    })),
+  };
+}
+
+/** Real available slots for the anchor bot (powers the admin reschedule picker). */
+export async function adminAvailability(tenantId: string, startDate: string, endDate: string) {
+  const { bot, settings } = await getAnchorBotConfig(tenantId);
+  const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+  if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
+  // checkAvailability only reads ctx.bot — the synthetic session is never used.
+  const ctx: BookingContext = {
+    session: { id: bot.id, tenantId, botId: bot.id } as ChatSession,
+    tenant,
+    bot,
+    botSettings: settings,
+  };
+  return internalProvider.checkAvailability(ctx, startDate, endDate);
+}
+
+/** Load a tenant-owned internal booking or throw a 404 (no cross-tenant leak). */
+async function loadAdminBooking(tenantId: string, bookingId: string): Promise<Booking> {
+  const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
+  if (!booking || booking.tenantId !== tenantId) {
+    throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+  }
+  if (booking.provider !== 'internal') {
+    throw new BookingError('Only internal bookings can be managed here', 'BOOKING_PROVIDER_UNSUPPORTED', 400);
+  }
+  return booking;
+}
+
+export async function adminCancelBooking(tenantId: string, bookingId: string, reason?: string) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.cancelBooking(ctx, bookingId, reason);
+}
+
+export async function adminRescheduleBooking(tenantId: string, bookingId: string, newStartTime: string) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }

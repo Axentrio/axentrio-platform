@@ -15,10 +15,10 @@ import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
 
-const SCOPES = [
-  'https://www.googleapis.com/auth/calendar.events',
-  'https://www.googleapis.com/auth/calendar.freebusy',
-];
+// Single scope: calendar.events covers both reading events (to compute busy
+// times via events.list) and writing them. Avoids the separate calendar.freebusy
+// scope (which isn't reliably granted and 403s the freeBusy endpoint).
+const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
 
 export class GoogleNotConfiguredError extends Error {
   constructor() {
@@ -125,14 +125,35 @@ export async function getGoogleBusyForBot(
   if (!cred) return null;
 
   const accessToken = await getValidAccessToken(cred);
-  const resp = await axios.post(
-    'https://www.googleapis.com/calendar/v3/freeBusy',
-    { timeMin: startISO, timeMax: endISO, items: [{ id: cred.calendarId }] },
-    { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+  // Use events.list (calendar.events scope) rather than freeBusy.query (which
+  // needs the calendar.freebusy scope). Busy = non-cancelled, non-transparent
+  // events overlapping the window.
+  const resp = await axios.get(
+    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
+    {
+      params: {
+        timeMin: startISO,
+        timeMax: endISO,
+        singleEvents: true,
+        orderBy: 'startTime',
+        maxResults: 2500,
+      },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 10000,
+    }
   );
-  const cal = resp.data?.calendars?.[cred.calendarId];
-  const busy: Array<{ start: string; end: string }> = cal?.busy || [];
-  return busy.map((b) => ({ start: new Date(b.start), end: new Date(b.end) }));
+  const items: Array<{
+    status?: string;
+    transparency?: string;
+    start?: { dateTime?: string; date?: string };
+    end?: { dateTime?: string; date?: string };
+  }> = resp.data?.items || [];
+  return items
+    .filter((e) => e.status !== 'cancelled' && e.transparency !== 'transparent' && (e.start?.dateTime || e.start?.date))
+    .map((e) => ({
+      start: new Date(e.start!.dateTime || e.start!.date!),
+      end: new Date(e.end?.dateTime || e.end?.date || e.start!.dateTime || e.start!.date!),
+    }));
 }
 
 export interface CalendarEventInput {

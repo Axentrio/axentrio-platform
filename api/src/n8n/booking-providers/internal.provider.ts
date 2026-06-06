@@ -32,6 +32,7 @@ import {
   deleteCalendarEvent,
 } from '../../integrations/google/google-calendar.service';
 import { BookingReference } from '../../database/entities/BookingReference';
+import { buildManageUrl } from '../../scheduler/booking-token';
 
 export class InternalProvider implements BookingProvider {
   private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
@@ -272,6 +273,7 @@ export class InternalProvider implements BookingProvider {
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      manageUrl: buildManageUrl(bookingId),
     });
 
     await this.scheduleAndPersistReminders(bookingId, start, 0);
@@ -519,6 +521,7 @@ export class InternalProvider implements BookingProvider {
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      manageUrl: buildManageUrl(bookingId),
     });
 
     // Replace reminders: drop the old jobs, schedule fresh ones for the new time.

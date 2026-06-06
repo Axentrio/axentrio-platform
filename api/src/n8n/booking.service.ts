@@ -13,6 +13,8 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
+import { EventType } from '../database/entities/EventType';
+import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider } from './booking-providers/types';
@@ -213,4 +215,17 @@ export async function adminRescheduleBooking(tenantId: string, bookingId: string
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
+}
+
+/** Booking + display context for the public self-service manage page. */
+export async function getManageBooking(
+  bookingId: string
+): Promise<{ booking: Booking; timezone: string; eventName: string } | null> {
+  const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
+  if (!booking || booking.provider !== 'internal') return null;
+  const [rule, eventType] = await Promise.all([
+    AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } }),
+    AppDataSource.getRepository(EventType).findOne({ where: { botId: booking.botId, isActive: true } }),
+  ]);
+  return { booking, timezone: rule?.timezone ?? 'UTC', eventName: eventType?.name ?? 'Appointment' };
 }

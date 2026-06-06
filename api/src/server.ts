@@ -40,6 +40,7 @@ import billingRoutes from './routes/billing.routes';
 import knowledgeRoutes from './knowledge/knowledge.routes';
 import schedulerRoutes from './scheduler/scheduler.routes';
 import googleCalendarRoutes, { googleCalendarCallbackRouter } from './integrations/google/google-calendar.routes';
+import { bookingPublicRouter } from './scheduler/booking-public.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
@@ -219,6 +220,8 @@ app.use(rateLimitByIp);
 app.use('/api/v1/channels/meta/oauth', metaOAuthCallbackRouter);
 // Public Google OAuth callback (Google redirects the browser here, no auth header).
 app.use('/api/v1/integrations/google', googleCalendarCallbackRouter);
+// Public self-service booking pages (reached from email links; signed-token auth).
+app.use('/api/v1/bookings', bookingPublicRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());

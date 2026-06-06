@@ -32,6 +32,8 @@ export interface BookingEmailParams {
   attendeeEmail: string;
   /** Additional recipient (Phase 0: owner gets the invite too). */
   ownerEmail?: string;
+  /** Self-service manage link (reschedule/cancel). Omitted on cancellation. */
+  manageUrl?: string;
 }
 
 function formatWhen(start: Date, timezone: string): string {
@@ -65,7 +67,10 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     `<p>${lead}</p>` +
     `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>` +
     (params.location ? `<p>Location: ${params.location}</p>` : '') +
-    `<p>A calendar invite is attached.</p>`;
+    `<p>A calendar invite is attached.</p>` +
+    (!cancelled && params.manageUrl
+      ? `<p><a href="${params.manageUrl}">Reschedule or cancel this appointment</a></p>`
+      : '');
 
   try {
     await getEmailService().send({
@@ -97,13 +102,16 @@ export interface ReminderEmailParams {
   attendeeEmail: string;
   /** e.g. "tomorrow" / "in 1 hour" — describes the lead time. */
   leadLabel: string;
+  /** Self-service manage link (reschedule/cancel). */
+  manageUrl?: string;
 }
 
 /** Plain appointment reminder (no ICS — the invite was sent on confirmation). */
 export async function sendReminderEmail(params: ReminderEmailParams): Promise<void> {
   const body =
     `<p>Reminder: your appointment is ${params.leadLabel}.</p>` +
-    `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>`;
+    `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>` +
+    (params.manageUrl ? `<p><a href="${params.manageUrl}">Reschedule or cancel</a></p>` : '');
   try {
     await getEmailService().send({
       to: params.attendeeEmail,

@@ -16,6 +16,7 @@ import { EventType } from '../../database/entities/EventType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { logger } from '../../utils/logger';
 import { sendReminderEmail } from './booking-email';
+import { buildManageUrl } from '../../scheduler/booking-token';
 
 export const REMINDER_QUEUE = 'booking-reminders';
 
@@ -95,6 +96,7 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
       leadLabel: LEAD_LABEL[kind],
+      manageUrl: buildManageUrl(bookingId),
     });
   };
 }

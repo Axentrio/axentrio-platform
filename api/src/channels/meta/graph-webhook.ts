@@ -135,15 +135,35 @@ export function createGraphWebhookRouter(config: GraphWebhookConfig): Router {
         const connection = await config.resolve(recipientId, channel);
         if (!connection) continue;
 
-        const logEntry = eventLogRepo.create({
-          channelConnectionId: connection.id,
-          channel: connection.channel,
-          dedupeKey: event.dedupeKey,
-          eventType: event.rawEventType,
-          rawPayload: payload as Record<string, unknown>,
-          status: 'received',
-        });
-        await eventLogRepo.save(logEntry);
+        // Dedupe via INSERT ... ON CONFLICT DO NOTHING. Meta delivers webhooks
+        // at-least-once (chatty read/delivery receipts especially), so duplicate
+        // dedupeKeys are EXPECTED, not errors. orIgnore() avoids raising a DB
+        // exception on the conflict — previously the plain save() threw 23505,
+        // which the query logger surfaced as noisy error spam. A skipped insert
+        // just means we've already seen this event.
+        const insertResult = await eventLogRepo
+          .createQueryBuilder()
+          .insert()
+          .values({
+            channelConnectionId: connection.id,
+            channel: connection.channel,
+            dedupeKey: event.dedupeKey,
+            eventType: event.rawEventType,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- jsonb column; QB .values() generic rejects Record<string,unknown>
+            rawPayload: payload as any,
+            status: 'received',
+          })
+          .orIgnore()
+          .execute();
+
+        const isDuplicate = insertResult.identifiers.length === 0 || insertResult.identifiers[0] == null;
+        if (isDuplicate) {
+          logger.debug(`${tag} Duplicate ${channel} webhook event ignored`, {
+            dedupeKey: event.dedupeKey,
+            eventType: event.rawEventType,
+          });
+          continue;
+        }
 
         if (queue) {
           await queue.add('channel-inbound', {

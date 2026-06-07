@@ -85,7 +85,10 @@ function makeTenant(overrides: Record<string, any> = {}) {
   };
 }
 
-describe('Auto-provisioning webhook in updateAiSettings', () => {
+// Issue #3: updateAiSettings no longer auto-provisions the default n8n webhook.
+// AI bots are answered by the platform agent, not the (dead) default webhook.
+// A genuinely custom tenant.webhookUrl must be left untouched.
+describe('updateAiSettings no longer auto-provisions the default webhook (issue #3)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockDefaultWebhookUrl = 'http://n8n:5678/webhook/default';
@@ -93,31 +96,18 @@ describe('Auto-provisioning webhook in updateAiSettings', () => {
     mockSave.mockImplementation(async (t: any) => t);
   });
 
-  it('should auto-provision webhookUrl when AI is enabled and no webhookUrl exists', async () => {
+  it('does NOT set webhookUrl when AI is enabled and none exists', async () => {
     const tenant = makeTenant({ settings: {} });
     mockFindOneOrFail.mockResolvedValue(tenant);
 
     const { req, res } = makeMockReqRes({ enabled: true });
     await updateAiSettings(req, res);
 
-    expect(mockSave).toHaveBeenCalled();
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBe('http://n8n:5678/webhook/default');
+    expect(tenant.webhookUrl).toBeUndefined();
+    expect(tenant.webhookSecret).toBeUndefined();
   });
 
-  it('should auto-provision both webhookUrl and webhookSecret when both are missing', async () => {
-    const tenant = makeTenant({ settings: {} });
-    mockFindOneOrFail.mockResolvedValue(tenant);
-
-    const { req, res } = makeMockReqRes({ enabled: true });
-    await updateAiSettings(req, res);
-
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBe('http://n8n:5678/webhook/default');
-    expect(savedTenant.webhookSecret).toBe('shared-inbound-secret');
-  });
-
-  it('should NOT overwrite existing webhookUrl when AI is enabled', async () => {
+  it('leaves an existing custom webhookUrl untouched', async () => {
     const tenant = makeTenant({
       webhookUrl: 'http://custom.webhook/endpoint',
       settings: {},
@@ -127,45 +117,16 @@ describe('Auto-provisioning webhook in updateAiSettings', () => {
     const { req, res } = makeMockReqRes({ enabled: true });
     await updateAiSettings(req, res);
 
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBe('http://custom.webhook/endpoint');
+    expect(tenant.webhookUrl).toBe('http://custom.webhook/endpoint');
   });
 
-  it('should NOT set webhookUrl when AI is disabled', async () => {
+  it('does NOT set webhookUrl when AI is disabled', async () => {
     const tenant = makeTenant({ settings: {} });
     mockFindOneOrFail.mockResolvedValue(tenant);
 
     const { req, res } = makeMockReqRes({ enabled: false });
     await updateAiSettings(req, res);
 
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBeUndefined();
-  });
-
-  it('should NOT set webhookUrl when defaultWebhookUrl is not configured', async () => {
-    mockDefaultWebhookUrl = undefined;
-    const tenant = makeTenant({ settings: {} });
-    mockFindOneOrFail.mockResolvedValue(tenant);
-
-    const { req, res } = makeMockReqRes({ enabled: true });
-    await updateAiSettings(req, res);
-
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBeUndefined();
-  });
-
-  it('should preserve existing webhookSecret when webhookUrl is auto-provisioned', async () => {
-    const tenant = makeTenant({
-      webhookSecret: 'existing-secret',
-      settings: {},
-    });
-    mockFindOneOrFail.mockResolvedValue(tenant);
-
-    const { req, res } = makeMockReqRes({ enabled: true });
-    await updateAiSettings(req, res);
-
-    const savedTenant = mockSave.mock.calls[0][0];
-    expect(savedTenant.webhookUrl).toBe('http://n8n:5678/webhook/default');
-    expect(savedTenant.webhookSecret).toBe('existing-secret');
+    expect(tenant.webhookUrl).toBeUndefined();
   });
 });

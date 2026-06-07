@@ -262,13 +262,25 @@ export async function forwardMessageToN8n(
   }
   const aiSettings = botSettings.ai;
 
-  // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants.
-  const tenantUrl = isCustomWebhookUrl(tenant.webhookUrl, config.n8n.defaultWebhookUrl)
+  // Only a genuinely custom n8n webhook is honoured. The auto-provisioned
+  // default (config.n8n.defaultWebhookUrl) is intentionally NOT a fallback: that
+  // workflow is inactive (404), and AI bots without a custom webhook are
+  // answered by the platform agent instead. See issue #3.
+  const customWebhookUrl = isCustomWebhookUrl(tenant.webhookUrl, config.n8n.defaultWebhookUrl)
     ? tenant.webhookUrl!
     : undefined;
-  const webhookUrl = tenantUrl || (aiSettings?.enabled ? config.n8n.defaultWebhookUrl : undefined);
-  if (!webhookUrl) {
-    // No webhook configured and AI not enabled — session stays waiting, agent picks up
+
+  const aiEnabled = !!aiSettings?.enabled;
+  // usePlatformAgent defaults to true; only an explicit `false` opts out. Legacy
+  // bots that never set it (undefined) are treated as opted-in.
+  const usePlatformAgent = (aiSettings as any)?.usePlatformAgent !== false;
+  const willUsePlatformAgent = !customWebhookUrl && aiEnabled && usePlatformAgent && !!agentService;
+
+  if (!customWebhookUrl && !willUsePlatformAgent) {
+    // Nothing to forward to: AI is off, the platform agent is opted out, or the
+    // agent service is unavailable. Session stays waiting; a human agent picks
+    // up. (Previously this fell back to the dead default n8n webhook → 404 →
+    // spurious "connecting you to an agent" handoff. See issue #3.)
     return false;
   }
 
@@ -325,20 +337,14 @@ export async function forwardMessageToN8n(
     }
   }
 
-  // ── Platform agent path (opted-in tenants without custom webhook) ─────
-  if (
-    !tenantUrl &&
-    aiSettings?.enabled &&
-    (aiSettings as any)?.usePlatformAgent &&
-    agentService
-  ) {
+  // ── Platform agent path (AI bots without a custom webhook) ───────────
+  if (willUsePlatformAgent) {
     return platformAgentPath(session, savedMessage, tenant, aiSettings);
   }
 
-  // ── Build enriched outbound payload ────────────────────────────────────
+  // ── Custom webhook path (tenant-configured n8n workflow) ───────────────
   const webhookConfig = buildWebhookConfig(tenant);
-  // Override URL with resolved webhook URL (may be global default)
-  webhookConfig.url = webhookUrl;
+  webhookConfig.url = customWebhookUrl!;
 
   const outboundPayload: OutboundMessage = {
     event: 'message.received',

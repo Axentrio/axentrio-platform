@@ -187,7 +187,10 @@ describe('Integrations Controller', () => {
       expect(responseArg.data.calcom.hasApiKey).toBe(true);
     });
 
-    it('should auto-set webhookUrl when saving calcom with eventTypeId and webhookUrl is empty', async () => {
+    it('does NOT auto-set tenant.webhookUrl when saving calcom (issue #3)', async () => {
+      // Selecting a Cal.com event type used to point tenant.webhookUrl at the
+      // dead default n8n webhook. It no longer does — bookings run through the
+      // internal engine / platform agent.
       const tenant = {
         id: 'tenant-123',
         settings: { integrations: { calcom: { apiKey: 'encrypted:key' } } },
@@ -202,10 +205,9 @@ describe('Integrations Controller', () => {
       await updateIntegrations(req, res);
 
       expect(res.json).toHaveBeenCalled();
-      expect(mockSave).toHaveBeenCalledWith(
-        expect.objectContaining({
-          webhookUrl: expect.any(String),
-        })
+      expect(tenant.webhookUrl).toBeNull();
+      expect(mockSave).not.toHaveBeenCalledWith(
+        expect.objectContaining({ webhookUrl: expect.any(String) })
       );
     });
   });

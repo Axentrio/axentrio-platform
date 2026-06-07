@@ -47,7 +47,6 @@ import { Tenant } from '../../database/entities/Tenant';
 import { Bot } from '../../database/entities/Bot';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { BotKnowledgeBase } from '../../database/entities/BotKnowledgeBase';
-import { config } from '../../config/environment';
 import { app } from '../../server';
 import { createTestTenant, createTestAnchorBot, createTestUser } from '../helpers/factories';
 
@@ -197,11 +196,12 @@ describe('Per-bot AI settings', () => {
       expect(res.status).toBe(403);
     });
 
-    it('auto-provisions the tenant webhook when enabling AI and none is set', async () => {
-      if (!config.n8n.defaultWebhookUrl) return; // side effect only fires when configured
+    it('does NOT auto-provision the tenant webhook when enabling AI (issue #3)', async () => {
+      // AI bots are answered by the platform agent, not the dead default n8n
+      // webhook — enabling AI must leave tenant.webhookUrl unset.
       await request(app).put(`/api/v1/bots/${botId}/ai-settings`).send(fullAiBody({ enabled: true }));
       const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({ where: { id: tenantId } });
-      expect(tenant.webhookUrl).toBe(config.n8n.defaultWebhookUrl);
+      expect(tenant.webhookUrl ?? null).toBeNull();
     });
   });
 

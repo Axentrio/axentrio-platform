@@ -10,7 +10,6 @@
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
-import { config } from '../config/environment';
 import { logger } from '../utils/logger';
 import { generateResponse } from '../llm/rag.service';
 import { buildSystemPrompt } from '../llm/prompt-builder';
@@ -101,18 +100,11 @@ export async function updateBotAiSettings(req: Request, res: Response) {
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).
   await replaceBotSettingsSection(req.params.id, tenantId, 'ai', updatedBotAi);
 
-  // Auto-provision the default n8n webhook when the final ai.enabled is true and
-  // the tenant has no custom URL — mirrors the legacy anchor flow. Tenant-scoped.
+  // No webhook auto-provisioning: AI bots are answered by the platform agent,
+  // not the (dead) default n8n webhook. A genuinely custom tenant.webhookUrl is
+  // left untouched. See issue #3.
   const tenantRepo = AppDataSource.getRepository(Tenant);
   const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-  if (updatedBotAi.enabled && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
-    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
-    if (!tenant.webhookSecret && config.n8n.inboundSecret) {
-      tenant.webhookSecret = config.n8n.inboundSecret;
-    }
-    await tenantRepo.save(tenant);
-    logger.info(`Auto-provisioned webhook URL for tenant ${tenantId} (bot ${req.params.id})`);
-  }
 
   sendSuccess(res, toAiSettingsResponse(updatedBotAi, tenant.settings?.ai?.apiKey));
 }

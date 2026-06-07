@@ -1,7 +1,4 @@
 import axios from 'axios';
-import crypto from 'crypto';
-import { AppDataSource } from '../../database/data-source';
-import { Tenant } from '../../database/entities/Tenant';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { config } from '../../config/environment';
 import { ApiError, BadRequestError, RateLimitError } from '../../middleware/error-handler';
@@ -54,21 +51,13 @@ class CalcomIntegrationProvider implements IntegrationProvider {
   }
 
   /**
-   * Auto-set the tenant webhook URL once an event type is selected (Cal.com →
-   * n8n booking flow). webhookUrl/webhookSecret live on Tenant, not Bot.
+   * No-op since issue #3: selecting a Cal.com event type used to auto-point
+   * tenant.webhookUrl at the default n8n webhook, but that workflow is dead and
+   * bookings now run through the internal engine / platform agent. A genuinely
+   * custom tenant.webhookUrl is left untouched.
    */
-  async afterUpdate(tenantId: string, integrationConfig: IntegrationConfig | null): Promise<void> {
-    if (!integrationConfig?.eventTypeId) return;
-
-    const tenantRepo = AppDataSource.getRepository(Tenant);
-    const tenant = await tenantRepo.findOneOrFail({ where: { id: tenantId } });
-    if (!tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
-      tenant.webhookUrl = config.n8n.defaultWebhookUrl;
-      if (!tenant.webhookSecret) {
-        tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
-      }
-      await tenantRepo.save(tenant);
-    }
+  async afterUpdate(_tenantId: string, _integrationConfig: IntegrationConfig | null): Promise<void> {
+    // intentionally empty
   }
 
   /** Validate an API key against Cal.com, persist it, and return event types. */

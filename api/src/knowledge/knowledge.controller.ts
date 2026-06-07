@@ -251,17 +251,9 @@ export async function updateAiSettings(req: Request, res: Response) {
     tenantTouched = true;
   }
 
-  // Auto-provision webhook URL + secret when AI is enabled and no custom URL is set
-  if (updatedBotAi.enabled && !tenant.webhookUrl && config.n8n.defaultWebhookUrl) {
-    tenant.webhookUrl = config.n8n.defaultWebhookUrl;
-    // Set webhookSecret to the shared inbound secret so the default n8n workflow
-    // can authenticate callbacks. Per-tenant secrets are only for custom workflows.
-    if (!tenant.webhookSecret && config.n8n.inboundSecret) {
-      tenant.webhookSecret = config.n8n.inboundSecret;
-    }
-    tenantTouched = true;
-    logger.info(`Auto-provisioned webhook URL for tenant ${tenantId}`);
-  }
+  // No webhook auto-provisioning: AI bots are answered by the platform agent,
+  // not the (dead) default n8n webhook. A genuinely custom tenant.webhookUrl is
+  // left untouched. See issue #3.
 
   if (tenantTouched) {
     await tenantRepo.save(tenant);

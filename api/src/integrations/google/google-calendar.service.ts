@@ -161,6 +161,85 @@ export async function getActiveCredential(botId: string): Promise<CalendarCreden
   });
 }
 
+export interface CalendarListEntry {
+  id: string;
+  summary: string;
+  primary: boolean;
+  accessRole: string;
+}
+
+/**
+ * List the connected account's WRITABLE calendars (accessRole owner|writer) for
+ * the picker. Returns [] when the bot has no active connection. Needs the
+ * calendar.calendarlist.readonly scope (added in this release; older creds must
+ * reconnect to grant it).
+ */
+export async function listWritableCalendars(botId: string): Promise<CalendarListEntry[]> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return [];
+  const accessToken = await getValidAccessToken(cred);
+  const resp = await axios.get('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+    params: { minAccessRole: 'writer', maxResults: 250 },
+    headers: { Authorization: `Bearer ${accessToken}` },
+    timeout: 10000,
+  });
+  const items: Array<{
+    id: string;
+    summary?: string;
+    summaryOverride?: string;
+    primary?: boolean;
+    accessRole?: string;
+  }> = resp.data?.items || [];
+  return items
+    .filter((c) => c.accessRole === 'owner' || c.accessRole === 'writer')
+    .map((c) => ({
+      id: c.id,
+      summary: c.summaryOverride || c.summary || c.id,
+      primary: !!c.primary,
+      accessRole: c.accessRole!,
+    }));
+}
+
+export class CalendarNotConnectedError extends Error {
+  constructor() {
+    super('Calendar is not connected');
+    this.name = 'CalendarNotConnectedError';
+  }
+}
+export class CalendarNotWritableError extends Error {
+  constructor() {
+    super('Selected calendar is not writable');
+    this.name = 'CalendarNotWritableError';
+  }
+}
+
+/**
+ * Set the bot's write-target calendar. Validates the choice is writable under the
+ * connected account and canonicalizes the primary calendar to the literal
+ * `'primary'` (never stores the primary's email/id, which would bypass the
+ * verified-id_token identity rule). Triggers a rekey of active future bookings.
+ */
+export async function setBotCalendar(botId: string, calendarId: string): Promise<{ calendarId: string }> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) throw new CalendarNotConnectedError();
+  const writable = await listWritableCalendars(botId);
+  const chosen = writable.find((c) => c.id === calendarId || (calendarId === 'primary' && c.primary));
+  if (!chosen) throw new CalendarNotWritableError();
+
+  const newCalendarId = chosen.primary ? 'primary' : chosen.id;
+  cred.calendarId = newCalendarId;
+  await AppDataSource.getRepository(CalendarCredential).save(cred);
+
+  const identity = newCalendarId !== 'primary' ? newCalendarId : cred.accountEmail ?? null;
+  await rekeyBotBookings(botId, conflictKeyFor(botId, identity)).catch((err) =>
+    logger.warn('[Google] post-picker rekey failed (non-fatal)', {
+      botId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
+  return { calendarId: newCalendarId };
+}
+
 /** Return a valid access token, refreshing (and persisting) if expired. */
 export async function getValidAccessToken(cred: CalendarCredential): Promise<string> {
   const notExpired = cred.tokenExpiry && cred.tokenExpiry.getTime() - Date.now() > 60_000;

@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import jwt from 'jsonwebtoken';
 
+vi.mock('axios', () => ({ default: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() } }));
+import axios from 'axios';
+
 vi.mock('../../config/environment', () => ({
   config: {
     google: {
@@ -40,7 +43,16 @@ vi.mock('../../database/data-source', () => ({
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { validateState, getValidAccessToken, resolveCalendarIdentity, exchangeAndStore } from '../../integrations/google/google-calendar.service';
+import {
+  validateState,
+  getValidAccessToken,
+  resolveCalendarIdentity,
+  exchangeAndStore,
+  listWritableCalendars,
+  setBotCalendar,
+  CalendarNotWritableError,
+  CalendarNotConnectedError,
+} from '../../integrations/google/google-calendar.service';
 
 describe('google-calendar.service', () => {
   beforeEach(() => {
@@ -135,6 +147,55 @@ describe('google-calendar.service', () => {
       mockClient.verifyIdToken.mockRejectedValue(new Error('bad token'));
       await exchangeAndStore('t1', 'b1', 'code');
       expect(credSave).toHaveBeenCalledWith(expect.objectContaining({ accountEmail: null }));
+    });
+  });
+
+  describe('calendar picker', () => {
+    const cred = {
+      calendarId: 'primary',
+      accountEmail: 'owner@acme.com',
+      tokenExpiry: new Date(Date.now() + 3600_000),
+      accessTokenEnc: 'enc(tok)',
+      refreshTokenEnc: 'enc(r)',
+    };
+    beforeEach(() => {
+      credFindOne.mockResolvedValue(cred);
+      (axios.get as any).mockResolvedValue({
+        data: {
+          items: [
+            { id: 'owner@acme.com', summary: 'Owner', primary: true, accessRole: 'owner' },
+            { id: 'team@group.calendar.google.com', summary: 'Team', accessRole: 'writer' },
+            { id: 'readonly@group.calendar.google.com', summary: 'Holidays', accessRole: 'reader' },
+          ],
+        },
+      });
+    });
+
+    it('lists only writable calendars (owner|writer)', async () => {
+      const list = await listWritableCalendars('b1');
+      expect(list.map((c) => c.id)).toEqual(['owner@acme.com', 'team@group.calendar.google.com']);
+    });
+
+    it('stores an explicit non-primary calendar id', async () => {
+      const res = await setBotCalendar('b1', 'team@group.calendar.google.com');
+      expect(res.calendarId).toBe('team@group.calendar.google.com');
+      expect(credSave).toHaveBeenCalledWith(expect.objectContaining({ calendarId: 'team@group.calendar.google.com' }));
+    });
+
+    it('canonicalizes the primary calendar to the literal "primary"', async () => {
+      // Picking the primary calendar by its real id must store 'primary', not the email.
+      const res = await setBotCalendar('b1', 'owner@acme.com');
+      expect(res.calendarId).toBe('primary');
+      expect(credSave).toHaveBeenCalledWith(expect.objectContaining({ calendarId: 'primary' }));
+    });
+
+    it('rejects a non-writable / unknown calendar', async () => {
+      await expect(setBotCalendar('b1', 'readonly@group.calendar.google.com')).rejects.toBeInstanceOf(CalendarNotWritableError);
+    });
+
+    it('throws when the bot has no active calendar credential', async () => {
+      credFindOne.mockResolvedValue(null);
+      await expect(setBotCalendar('b1', 'primary')).rejects.toBeInstanceOf(CalendarNotConnectedError);
     });
   });
 });

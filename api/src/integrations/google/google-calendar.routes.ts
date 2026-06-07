@@ -15,5 +15,7 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 router.get('/connect-url', requireRole('admin'), asyncHandler(ctrl.getGoogleConnectUrl));
 router.get('/status', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getGoogleStatus));
 router.delete('/disconnect', requireRole('admin'), asyncHandler(ctrl.disconnectGoogle));
+router.get('/calendars', requireRole('admin', 'supervisor'), asyncHandler(ctrl.listGoogleCalendars));
+router.put('/calendar', requireRole('admin'), asyncHandler(ctrl.setGoogleCalendar));
 
 export default router;

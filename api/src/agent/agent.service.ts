@@ -40,10 +40,10 @@ interface PendingAvailability {
  * Turn freshly-offered availability into tappable slot chips.
  *
  * `title` is the human-readable button label; `value` is the message sent back
- * when tapped. Keep `value` compact + absolute (`Book <YYYY-MM-DD HH:mm> (tz)`,
- * ≤ ~55 chars) so it survives Telegram's 64-byte callback_data limit, stays
- * unambiguous for the LLM to re-book, and fits every channel's quick-reply
- * payload cap. (Telegram truncates longer payloads, corrupting the command.)
+ * when tapped — a natural-language, absolute date+time+tz the LLM can re-book
+ * from. (Telegram's 64-byte callback_data limit doesn't constrain this: quick
+ * replies are disabled on the Telegram adapter; the widget + Messenger/IG/
+ * WhatsApp have ample payload room.)
  */
 function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
@@ -51,7 +51,7 @@ function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | u
     const dt = DateTime.fromISO(s.start).setZone(av.timezone);
     return {
       title: dt.toFormat('ccc h:mm a'),
-      value: `Book ${dt.toFormat('yyyy-LL-dd HH:mm')} (${av.timezone})`,
+      value: `Book ${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')} (${av.timezone})`,
     };
   });
 }

@@ -15,7 +15,10 @@ export class TelegramOutboundTransport implements OutboundTransport {
   getCapabilities(): ChannelCapabilities {
     return {
       maxTextLength: 4096,
-      supportsQuickReplies: true,
+      // Quick replies disabled: Telegram caps callback_data at 64 bytes, which
+      // truncates our slot-booking payloads. We don't use Telegram, so suppress
+      // native quick replies here rather than constraining payloads everywhere.
+      supportsQuickReplies: false,
       maxQuickReplies: 100,
       supportsButtons: true,
       maxButtons: 100,

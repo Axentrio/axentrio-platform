@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Bot, MessageSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useBotAiSettings, useBotEmbed } from '@/queries/useBotsQueries';
+import { useBotAiSettings, useBotEmbed, useBotKnowledge } from '@/queries/useBotsQueries';
 import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -40,7 +40,14 @@ const BotEditor: React.FC = () => {
   const { data: embed } = useBotEmbed(isAdmin ? id : null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: stats } = useKnowledgeStats() as { data: any };
-  const hasIndexedDocs = parseInt(stats?.documents?.indexed || '0') > 0;
+  // A bot's test chat must reflect ITS knowledge, not just the tenant-primary KB.
+  // Dedicated bots answer only from their own KB (the primary may be empty), so
+  // count the bot's own indexed docs; shared bots use the tenant-primary stats.
+  const { data: botKnowledge } = useBotKnowledge(id, { enabled: isAdmin });
+  const hasIndexedDocs =
+    botKnowledge?.mode === 'dedicated'
+      ? (botKnowledge.documents ?? []).some((d) => d.status === 'indexed')
+      : parseInt(stats?.documents?.indexed || '0') > 0;
 
   const goToKnowledge = () => navigate('/ai?tab=knowledge');
 

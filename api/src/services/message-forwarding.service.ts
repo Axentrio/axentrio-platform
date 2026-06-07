@@ -653,9 +653,13 @@ async function sendBotMessage(
   await sessionRepository.update(session.id, { lastActivityAt: new Date() });
 
   // Route through outbound router — handles both WebSocket and external channels.
-  // Slot chips ride along in metadata; external channels ignore it.
+  // Quick replies go to BOTH: the widget renders them as chips (via socketEvent
+  // metadata below), and external channels (Messenger/IG/WhatsApp/Telegram) get
+  // them as native quick replies via the channel response payload. Each adapter
+  // gates on its own supportsQuickReplies/maxQuickReplies, so unsupported
+  // channels simply send the text.
   await routeOutboundMessage(
-    { type: 'text', content },
+    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
     {
       event: 'message:receive',

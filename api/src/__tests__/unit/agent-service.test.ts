@@ -162,8 +162,10 @@ describe('AgentService', () => {
       expect(result.quickReplies).toHaveLength(2);
       expect(result.quickReplies![0]).toHaveProperty('title');
       expect(result.quickReplies![0]).toHaveProperty('value');
-      // value carries the precise date+time so the next turn can book it
-      expect(result.quickReplies![0].value).toContain('10 June');
+      // value carries a compact absolute date+time+tz (Telegram 64-char safe)
+      expect(result.quickReplies![0].value).toContain('2026-06-10');
+      expect(result.quickReplies![0].value).toContain('UTC');
+      expect(result.quickReplies![0].value.length).toBeLessThanOrEqual(64);
     }
   });
 

@@ -13,6 +13,11 @@ vi.mock('../../llm/provider-factory', () => ({
   getProvider: (...args: any[]) => mockGetProvider(...args),
 }));
 
+// run() loads the active services catalog for the prompt; stub the repo.
+vi.mock('../../database/data-source', () => ({
+  AppDataSource: { getRepository: () => ({ find: async () => [] }) },
+}));
+
 // Multi-bot Phase 4 (#16d): AgentService.run resolves bot config via the
 // bot-config service (hits the DB). Stub the resolvers so each test's
 // in-memory tenant.settings.ai is what reaches the LLM call.
@@ -165,6 +170,48 @@ describe('AgentService', () => {
       // value carries the absolute date+time+tz so the next turn can re-book it
       expect(result.quickReplies![0].value).toContain('10 June');
       expect(result.quickReplies![0].value).toContain('UTC');
+    }
+  });
+
+  it('embeds the service name in slot chips when check_availability returns one', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }],
+          timezone: 'UTC',
+          serviceName: 'Mens Haircut',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: 'x', endDate: 'y', serviceId: 'svc-1' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Here are some times:',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'book a haircut',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies![0].value).toContain('Mens Haircut');
     }
   });
 

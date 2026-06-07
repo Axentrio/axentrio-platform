@@ -50,6 +50,9 @@ export interface ListBookingsResult {
 export interface AvailabilityResult {
   slots: BookingSlot[];
   timezone: string;
+  /** The service these slots are for (so the agent can book the right one). */
+  serviceId?: string;
+  serviceName?: string;
 }
 
 export interface CreateBookingResult {

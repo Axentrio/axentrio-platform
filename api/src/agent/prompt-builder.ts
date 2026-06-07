@@ -1,6 +1,23 @@
 import { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
+import type { ServiceType } from '../database/entities/ServiceType';
 import { ToolAdapter } from './tool-adapter';
+
+/** Human price hint for the service catalog (prices are populated in a later slice). */
+function priceHint(s: ServiceType): string {
+  switch (s.priceDisplayType) {
+    case 'fixed':
+      return s.fixedPrice ? `€${s.fixedPrice}` : '';
+    case 'from':
+      return s.fixedPrice ? `from €${s.fixedPrice}` : '';
+    case 'range':
+      return s.minPrice && s.maxPrice ? `€${s.minPrice}–€${s.maxPrice}` : '';
+    case 'on_request':
+      return 'price on request';
+    default:
+      return '';
+  }
+}
 import { substituteVariables } from '../llm/prompt-builder';
 import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from '../llm/platform-rules';
 
@@ -21,7 +38,13 @@ export class PromptBuilder {
    * through for `tenant.name` (the fallback brand name) and tenant-wide
    * substitution variables.
    */
-  build(tenant: Tenant, botSettings: BotSettings, tools: ToolAdapter[], kbContext?: string): string {
+  build(
+    tenant: Tenant,
+    botSettings: BotSettings,
+    tools: ToolAdapter[],
+    kbContext?: string,
+    services?: ServiceType[]
+  ): string {
     const ai = botSettings.ai;
     const brandVoice = ai?.brandVoice;
     const guardrails = ai?.guardrails;
@@ -62,6 +85,25 @@ export class PromptBuilder {
         .map((s) => `### ${s.name}\nWhen: ${s.trigger}\nTools: ${s.tools.join(', ')}\nRules: ${s.instructions}`)
         .join('\n\n');
       sections.push(`\n## AVAILABLE SKILLS\n\n${skillsSection}`);
+    }
+
+    // Bookable services catalog (multi-service). Only when booking is configured.
+    if (services && services.length) {
+      const lines = services
+        .map((s) => {
+          const price = priceHint(s);
+          const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
+          return `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}`;
+        })
+        .join('\n');
+      sections.push(
+        `\n## SERVICES (bookable)
+When the customer wants to book, identify which service they mean and pass its id as serviceId to check_availability and create_booking. Use the SAME service whose availability you checked.
+- If their request matches no service or is ambiguous, ask which one — never guess.
+- "auto-book": you may confirm the appointment once the customer picks a time.
+- "request-only": do NOT promise a confirmed appointment. Collect the details, then tell the customer it's a request the business owner will review (create_booking returns it as a request, not a confirmation).
+${lines}`
+      );
     }
 
     // KB context (pre-fetched)

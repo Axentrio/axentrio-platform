@@ -10,6 +10,7 @@ import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
+import { ServiceType } from '../database/entities/ServiceType';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
@@ -34,6 +35,9 @@ const BOOKING_MUTATION_TOOLS = ['create_booking', 'reschedule_booking', 'cancel_
 interface PendingAvailability {
   slots: Array<{ start: string; end: string }>;
   timezone: string;
+  /** The service the slots are for — embedded in the chip so a tap books the
+   *  right service when the bot offers more than one. */
+  serviceName?: string;
 }
 
 /**
@@ -47,11 +51,12 @@ interface PendingAvailability {
  */
 function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | undefined {
   if (!av || !av.slots.length) return undefined;
+  const forService = av.serviceName ? `${av.serviceName} on ` : '';
   return av.slots.slice(0, 8).map((s) => {
     const dt = DateTime.fromISO(s.start).setZone(av.timezone);
     return {
       title: dt.toFormat('ccc h:mm a'),
-      value: `Book ${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')} (${av.timezone})`,
+      value: `Book ${forService}${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')} (${av.timezone})`,
     };
   });
 }
@@ -80,7 +85,7 @@ export class AgentService {
     // Resolve the bot's full settings (for the integrations slice the tool
     // registry needs, and the prompt builder's skills/brandVoice consumption).
     const { getBotConfigForSession } = await import('../services/bot-config.service');
-    const { settings: botSettings } = await getBotConfigForSession(session);
+    const { bot, settings: botSettings } = await getBotConfigForSession(session);
     const trace: AgentTrace = {
       sessionId: session.id,
       tenantId: tenant.id,
@@ -90,7 +95,14 @@ export class AgentService {
 
     try {
       const tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
-      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools);
+      // Load the bookable services catalog for the prompt (only when booking is on).
+      const services = tools.some((t) => t.name === 'check_availability')
+        ? await AppDataSource.getRepository(ServiceType).find({
+            where: { botId: bot.id, isActive: true },
+            order: { sortOrder: 'ASC' },
+          })
+        : [];
+      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, services);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);
@@ -191,8 +203,14 @@ export class AgentService {
             toolsCalled.push(tool.name);
             // Track offered slots for the chip UI; a booking mutation clears them.
             if (tool.name === 'check_availability' && result.success && result.data) {
-              const d = result.data as { slots?: Array<{ start: string; end: string }>; timezone?: string };
-              if (Array.isArray(d.slots)) pendingAvailability = { slots: d.slots, timezone: d.timezone ?? 'UTC' };
+              const d = result.data as {
+                slots?: Array<{ start: string; end: string }>;
+                timezone?: string;
+                serviceName?: string;
+              };
+              if (Array.isArray(d.slots)) {
+                pendingAvailability = { slots: d.slots, timezone: d.timezone ?? 'UTC', serviceName: d.serviceName };
+              }
             } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
               pendingAvailability = null;
             }

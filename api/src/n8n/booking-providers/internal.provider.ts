@@ -143,7 +143,7 @@ export class InternalProvider implements BookingProvider {
       now: new Date(),
       busy,
     });
-    return { slots, timezone: rule.timezone };
+    return { slots, timezone: rule.timezone, serviceId: service.id, serviceName: service.name };
   }
 
   /**

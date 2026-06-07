@@ -12,7 +12,7 @@ import type { AppointmentBookedEvent, LeadCreatedEvent } from '../../webhooks/we
 
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
-  description = 'Check available appointment slots for a given date range.';
+  description = 'Check available appointment slots for a given date range and service.';
   parameters = {
     type: 'object',
     properties: {
@@ -24,6 +24,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
         type: 'string',
         description: 'End date in ISO 8601 format (e.g. 2026-04-07).',
       },
+      serviceId: {
+        type: 'string',
+        description:
+          'The id of the service to check (from the SERVICES list). Omit only when the business has a single service.',
+      },
     },
     required: ['startDate', 'endDate'],
   };
@@ -34,7 +39,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
       const result = await checkAvailability(
         ctx.sessionId,
         args.startDate as string,
-        args.endDate as string
+        args.endDate as string,
+        args.serviceId as string | undefined
       );
       return { success: true, data: result };
     } catch (err) {
@@ -65,6 +71,11 @@ export class CreateBookingTool implements ToolAdapter {
         type: 'string',
         description: 'Optional notes or reason for the booking.',
       },
+      serviceId: {
+        type: 'string',
+        description:
+          'The id of the service being booked (from the SERVICES list). Use the same service whose availability you checked. Omit only when the business has a single service.',
+      },
     },
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -81,7 +92,8 @@ export class CreateBookingTool implements ToolAdapter {
         idempotencyKey,
         args.startTime as string,
         { name: args.attendeeName as string, email: args.attendeeEmail as string },
-        args.notes as string | undefined
+        args.notes as string | undefined,
+        args.serviceId as string | undefined
       );
 
       // Fire-and-forget: emit appointment.booked + lead.created webhook events

@@ -51,14 +51,34 @@ export class InternalProvider implements BookingProvider {
     return `bot:${ctx.bot.id}`;
   }
 
+  /**
+   * Coerce a possibly-loose date range (the LLM often passes date-only strings
+   * like "2026-06-08", sometimes with start === end) into a sane RFC3339 window:
+   * a date-only end is extended to include that whole day, and a zero/negative
+   * window becomes a single day. This keeps the slot engine non-empty and feeds
+   * Google's events.list valid RFC3339 timestamps (it 400s on date-only values).
+   */
+  private normalizeRange(startDate: string, endDate: string): { rangeStart: string; rangeEnd: string } {
+    const start = new Date(startDate);
+    if (Number.isNaN(start.getTime())) {
+      throw new BookingError('Invalid start date', 'INVALID_RANGE', 400);
+    }
+    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(endDate);
+    let end = new Date(endDate);
+    if (dateOnly) end = new Date(end.getTime() + 24 * 3600_000); // include the whole end day
+    if (Number.isNaN(end.getTime()) || end <= start) end = new Date(start.getTime() + 24 * 3600_000);
+    return { rangeStart: start.toISOString(), rangeEnd: end.toISOString() };
+  }
+
   async checkAvailability(ctx: BookingContext, startDate: string, endDate: string): Promise<AvailabilityResult> {
     const { eventType, rule } = await this.loadConfig(ctx.bot.id);
-    const busy = await this.loadAllBusy(ctx, this.calendarKey(ctx), startDate, endDate);
+    const { rangeStart, rangeEnd } = this.normalizeRange(startDate, endDate);
+    const busy = await this.loadAllBusy(ctx, this.calendarKey(ctx), rangeStart, rangeEnd);
     const slots = computeSlots({
       rule,
       eventType,
-      rangeStart: startDate,
-      rangeEnd: endDate,
+      rangeStart,
+      rangeEnd,
       now: new Date(),
       busy,
     });

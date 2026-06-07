@@ -124,6 +124,15 @@ export async function getGoogleBusyForBot(
   const cred = await getActiveCredential(botId);
   if (!cred) return null;
 
+  // Google's events.list requires RFC3339 timestamps for timeMin/timeMax and
+  // 400s on date-only or no-offset values (which upstream callers may pass).
+  // Coerce to a canonical ISO instant; a zero/invalid window has no busy.
+  const timeMin = new Date(startISO);
+  const timeMax = new Date(endISO);
+  if (Number.isNaN(timeMin.getTime()) || Number.isNaN(timeMax.getTime()) || timeMax <= timeMin) {
+    return [];
+  }
+
   const accessToken = await getValidAccessToken(cred);
   // Use events.list (calendar.events scope) rather than freeBusy.query (which
   // needs the calendar.freebusy scope). Busy = non-cancelled, non-transparent
@@ -132,8 +141,8 @@ export async function getGoogleBusyForBot(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
     {
       params: {
-        timeMin: startISO,
-        timeMax: endISO,
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
         singleEvents: true,
         orderBy: 'startTime',
         maxResults: 2500,

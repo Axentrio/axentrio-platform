@@ -43,6 +43,27 @@ function oauthClient(): OAuth2Client {
   return new OAuth2Client(config.google.clientId, config.google.clientSecret, config.google.redirectUri);
 }
 
+/**
+ * Retry a Google Calendar API call on transient failures (HTTP 429 / 5xx) with
+ * bounded exponential backoff. Non-retryable statuses (4xx like 403/404/409) are
+ * rethrown immediately so callers keep their existing handling. Exported for tests.
+ */
+export async function withGoogleRetry<T>(fn: () => Promise<T>, retries = 3): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      const retryable = status === 429 || (status !== undefined && status >= 500 && status < 600);
+      if (!retryable || attempt >= retries) throw err;
+      const delayMs = Math.min(2000, 200 * 2 ** attempt);
+      attempt++;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 /** Build the consent URL; `state` is a signed JWT binding the connect to a bot. */
 export function buildConnectUrl(tenantId: string, botId: string): string {
   const client = oauthClient();
@@ -178,11 +199,13 @@ export async function listWritableCalendars(botId: string): Promise<CalendarList
   const cred = await getActiveCredential(botId);
   if (!cred) return [];
   const accessToken = await getValidAccessToken(cred);
-  const resp = await axios.get('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
-    params: { minAccessRole: 'writer', maxResults: 250 },
-    headers: { Authorization: `Bearer ${accessToken}` },
-    timeout: 10000,
-  });
+  const resp = await withGoogleRetry(() =>
+    axios.get('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      params: { minAccessRole: 'writer', maxResults: 250 },
+      headers: { Authorization: `Bearer ${accessToken}` },
+      timeout: 10000,
+    })
+  );
   const items: Array<{
     id: string;
     summary?: string;
@@ -293,19 +316,21 @@ export async function getGoogleBusyForBot(
   // Use events.list (calendar.events scope) rather than freeBusy.query (which
   // needs the calendar.freebusy scope). Busy = non-cancelled, non-transparent
   // events overlapping the window.
-  const resp = await axios.get(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
-    {
-      params: {
-        timeMin: timeMin.toISOString(),
-        timeMax: timeMax.toISOString(),
-        singleEvents: true,
-        orderBy: 'startTime',
-        maxResults: 2500,
-      },
-      headers: { Authorization: `Bearer ${accessToken}` },
-      timeout: 10000,
-    }
+  const resp = await withGoogleRetry(() =>
+    axios.get(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
+      {
+        params: {
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 2500,
+        },
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10000,
+      }
+    )
   );
   const items: Array<{
     status?: string;
@@ -363,26 +388,28 @@ export async function createCalendarEvent(
   const accessToken = await getValidAccessToken(cred);
   const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalendarId)}/events`;
   try {
-    const resp = await axios.post(
-      eventsUrl,
-      {
-        ...(opts.eventId ? { id: opts.eventId } : {}),
-        summary: input.summary,
-        description: input.description,
-        start: { dateTime: input.startISO, timeZone: input.timezone },
-        end: { dateTime: input.endISO, timeZone: input.timezone },
-        conferenceData: {
-          createRequest: {
-            requestId: `axentrio-${opts.eventId ?? `${Date.now()}-${input.startISO.length}`}`,
-            conferenceSolutionKey: { type: 'hangoutsMeet' },
+    const resp = await withGoogleRetry(() =>
+      axios.post(
+        eventsUrl,
+        {
+          ...(opts.eventId ? { id: opts.eventId } : {}),
+          summary: input.summary,
+          description: input.description,
+          start: { dateTime: input.startISO, timeZone: input.timezone },
+          end: { dateTime: input.endISO, timeZone: input.timezone },
+          conferenceData: {
+            createRequest: {
+              requestId: `axentrio-${opts.eventId ?? `${Date.now()}-${input.startISO.length}`}`,
+              conferenceSolutionKey: { type: 'hangoutsMeet' },
+            },
           },
         },
-      },
-      {
-        params: { conferenceDataVersion: 1 },
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        timeout: 10000,
-      }
+        {
+          params: { conferenceDataVersion: 1 },
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+          timeout: 10000,
+        }
+      )
     );
     return {
       eventId: resp.data.id,
@@ -393,10 +420,13 @@ export async function createCalendarEvent(
     const status = (err as { response?: { status?: number } })?.response?.status;
     // Idempotent retry: the deterministic id already exists → fetch and return it.
     if (status === 409 && opts.eventId) {
-      const got = await axios.get(`${eventsUrl}/${encodeURIComponent(opts.eventId)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-        timeout: 10000,
-      });
+      const existingId = opts.eventId;
+      const got = await withGoogleRetry(() =>
+        axios.get(`${eventsUrl}/${encodeURIComponent(existingId)}`, {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          timeout: 10000,
+        })
+      );
       return {
         eventId: got.data.id,
         meetUrl: got.data.hangoutLink || got.data.conferenceData?.entryPoints?.[0]?.uri || null,
@@ -424,13 +454,15 @@ export async function updateCalendarEvent(
   const target = calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
   try {
-    await axios.patch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
-      {
-        start: { dateTime: input.startISO, timeZone: input.timezone },
-        end: { dateTime: input.endISO, timeZone: input.timezone },
-      },
-      { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+    await withGoogleRetry(() =>
+      axios.patch(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
+        {
+          start: { dateTime: input.startISO, timeZone: input.timezone },
+          end: { dateTime: input.endISO, timeZone: input.timezone },
+        },
+        { headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, timeout: 10000 }
+      )
     );
     return 'ok';
   } catch (err) {
@@ -453,9 +485,11 @@ export async function deleteCalendarEvent(
   const target = calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
   try {
-    await axios.delete(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
-      { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+    await withGoogleRetry(() =>
+      axios.delete(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
+        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
+      )
     );
     return 'ok';
   } catch (err) {

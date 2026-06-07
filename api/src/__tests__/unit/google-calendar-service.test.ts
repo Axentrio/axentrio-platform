@@ -50,6 +50,7 @@ import {
   exchangeAndStore,
   listWritableCalendars,
   setBotCalendar,
+  withGoogleRetry,
   CalendarNotWritableError,
   CalendarNotConnectedError,
 } from '../../integrations/google/google-calendar.service';
@@ -196,6 +197,42 @@ describe('google-calendar.service', () => {
     it('throws when the bot has no active calendar credential', async () => {
       credFindOne.mockResolvedValue(null);
       await expect(setBotCalendar('b1', 'primary')).rejects.toBeInstanceOf(CalendarNotConnectedError);
+    });
+  });
+
+  describe('withGoogleRetry', () => {
+    const err = (status: number) => Object.assign(new Error(`http ${status}`), { response: { status } });
+
+    it('retries on 5xx then succeeds', async () => {
+      vi.useFakeTimers();
+      try {
+        const fn = vi.fn().mockRejectedValueOnce(err(503)).mockResolvedValueOnce('ok');
+        const p = withGoogleRetry(fn);
+        await vi.runAllTimersAsync();
+        await expect(p).resolves.toBe('ok');
+        expect(fn).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does NOT retry on 4xx (e.g. 409/404)', async () => {
+      const fn = vi.fn().mockRejectedValue(err(409));
+      await expect(withGoogleRetry(fn)).rejects.toMatchObject({ response: { status: 409 } });
+      expect(fn).toHaveBeenCalledTimes(1);
+    });
+
+    it('gives up after the retry budget on persistent 429', async () => {
+      vi.useFakeTimers();
+      try {
+        const fn = vi.fn().mockRejectedValue(err(429));
+        const p = withGoogleRetry(fn, 2).catch((e) => e);
+        await vi.runAllTimersAsync();
+        await p;
+        expect(fn).toHaveBeenCalledTimes(3); // initial + 2 retries
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 });

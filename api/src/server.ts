@@ -14,8 +14,8 @@ import helmet from 'helmet';
 import { clerkMiddleware } from '@clerk/express';
 import { config } from './config/environment';
 import { logger } from './utils/logger';
-import { AppDataSource } from './database/data-source';
-import { initializeRedis, closeRedis, isRedisAvailable } from './config/redis';
+import { AppDataSource, checkDatabaseHealth } from './database/data-source';
+import { initializeRedis, closeRedis, isRedisAvailable, getRedisClient } from './config/redis';
 import { initializeSocketIO } from './websocket/socket.handler';
 
 // Security middleware
@@ -88,10 +88,42 @@ import metaOAuthRoutes, { metaOAuthCallbackRouter } from './channels/meta/oauth.
 import { rateLimitByIp } from './middleware/rate-limit.middleware';
 import { errorHandler, notFoundHandler } from './middleware/error-handler';
 import { requestIdMiddleware } from './middleware/request-id.middleware';
+import { httpLoggerMiddleware } from './middleware/http-logger.middleware';
 import { timeoutMiddleware } from './middleware/timeout.middleware';
 
 const app = express();
 const httpServer = createServer(app);
+const REDIS_READINESS_TIMEOUT_MS = 1000;
+
+async function checkRedisReadiness(): Promise<boolean> {
+  if (!isRedisAvailable()) {
+    return false;
+  }
+
+  const redis = getRedisClient();
+  if (!redis) {
+    return false;
+  }
+
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    const response = await Promise.race([
+      redis.ping(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error('Redis readiness check timed out'));
+        }, REDIS_READINESS_TIMEOUT_MS);
+      }),
+    ]);
+    return response === 'PONG';
+  } catch {
+    return false;
+  } finally {
+    if (timeout) {
+      clearTimeout(timeout);
+    }
+  }
+}
 
 // Clerk webhook — must use raw body parser, registered before express.json()
 // Narrowed to /clerk sub-path to avoid consuming body for other /webhooks/* routes
@@ -114,6 +146,10 @@ app.use('/api/v1/webhooks/billing', express.raw({ type: 'application/json' }), b
 // routes mounted below and the /widget.js static serve) carries x-request-id
 // and req.requestId is available to handlers and the global error handler.
 app.use(requestIdMiddleware);
+
+// HTTP access logging — after requestIdMiddleware so every completed request
+// is logged once with requestId, status and latency. Skips /health internally.
+app.use(httpLoggerMiddleware);
 
 // Serve widget.js — before all middleware (no auth, open CORS, cached).
 // Single canonical source: chatbot-platform/api/public/widget.js. The Docker
@@ -212,6 +248,29 @@ app.get('/health', (_req, res) => {
   });
 });
 
+app.get('/health/ready', async (_req, res) => {
+  const [postgresHealthy, redisHealthy] = await Promise.all([
+    checkDatabaseHealth(),
+    checkRedisReadiness(),
+  ]);
+
+  const ready = postgresHealthy;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    timestamp: new Date().toISOString(),
+    dependencies: {
+      postgres: {
+        status: postgresHealthy ? 'up' : 'down',
+        required: true,
+      },
+      redis: {
+        status: redisHealthy ? 'up' : 'down',
+        required: false,
+      },
+    },
+  });
+});
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(rateLimitByIp);
@@ -225,14 +284,6 @@ app.use('/api/v1/bookings', bookingPublicRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());
-
-// Request logging in development
-if (config.server.isDevelopment) {
-  app.use((req, _res, next) => {
-    logger.debug(`${req.method} ${req.path}`);
-    next();
-  });
-}
 
 // API routes under /api/v1
 const apiRouter = express.Router();
@@ -308,7 +359,7 @@ async function startServer(): Promise<void> {
 
     await initializeRedis();
     if (config.server.isProduction && !isRedisAvailable()) {
-      throw new Error('Redis is required in production but failed to connect');
+      logger.warn('Redis unavailable in production — continuing with optional Redis features disabled');
     }
 
     // Initialize Bull queue (depends on Redis — graceful fallback if unavailable)

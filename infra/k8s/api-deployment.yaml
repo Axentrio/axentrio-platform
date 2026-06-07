@@ -1,5 +1,9 @@
 # =============================================================================
 # API Deployment
+# -----------------------------------------------------------------------------
+# NOTE: Reference manifest only. The live deployment is Railway (api/Dockerfile
+# + api/railway.toml); this is not applied by CI. Keep probes/annotations in
+# sync with endpoints that actually exist in the API.
 # =============================================================================
 apiVersion: apps/v1
 kind: Deployment
@@ -26,10 +30,8 @@ spec:
       labels:
         app.kubernetes.io/name: chatbot-api
         app.kubernetes.io/component: api
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "3000"
-        prometheus.io/path: "/metrics"
+      # No prometheus.io/scrape annotation: the API exposes no /metrics endpoint
+      # (MetricsService is a no-op stub). Re-add once a real /metrics is implemented.
     spec:
       securityContext:
         runAsNonRoot: true
@@ -85,7 +87,8 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health/ready
+              # /health is the only health endpoint the API implements today.
+              path: /health
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 5

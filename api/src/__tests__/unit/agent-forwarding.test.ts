@@ -73,3 +73,28 @@ describe('Agent Forwarding Routing', () => {
     expect(target).toBe('n8n_default');
   });
 });
+
+import { isCustomWebhookUrl } from '../../services/message-forwarding.service';
+
+describe('isCustomWebhookUrl — custom vs auto-provisioned default', () => {
+  const DEFAULT = 'http://n8n.railway.internal:5678/webhook/chatbot-platform';
+
+  it('treats a url equal to the platform default as NOT custom (the 404-handoff bug)', () => {
+    // Regression: an auto-provisioned default webhookUrl must not shadow the
+    // platform-agent path. This is what made AI bots hand off on every message.
+    expect(isCustomWebhookUrl(DEFAULT, DEFAULT)).toBe(false);
+  });
+
+  it('treats an explicit different url as custom', () => {
+    expect(isCustomWebhookUrl('https://acme.app/n8n/webhook', DEFAULT)).toBe(true);
+  });
+
+  it('null / undefined webhookUrl is not custom', () => {
+    expect(isCustomWebhookUrl(null, DEFAULT)).toBe(false);
+    expect(isCustomWebhookUrl(undefined, DEFAULT)).toBe(false);
+  });
+
+  it('localhost urls are never custom (dev leftovers)', () => {
+    expect(isCustomWebhookUrl('http://localhost:5678/webhook/x', DEFAULT)).toBe(false);
+  });
+});

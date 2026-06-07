@@ -67,6 +67,21 @@ export function getFallbackService(): FallbackService | null {
 }
 
 /**
+ * Whether a tenant.webhookUrl is an EXPLICIT custom n8n workflow (vs. an
+ * auto-provision artifact). A url equal to the platform default is set
+ * automatically when AI is enabled and must NOT count as custom — otherwise it
+ * shadows the platform-agent path and forces messages down the default n8n
+ * webhook (which, if its workflow is inactive, 404s and silently hands off).
+ * localhost urls are dev leftovers and never count.
+ */
+export function isCustomWebhookUrl(
+  webhookUrl: string | null | undefined,
+  defaultUrl: string | null | undefined,
+): boolean {
+  return !!webhookUrl && !webhookUrl.includes('localhost') && webhookUrl !== defaultUrl;
+}
+
+/**
  * Build a WebhookConfig from a Tenant entity
  */
 export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
@@ -247,9 +262,10 @@ export async function forwardMessageToN8n(
   }
   const aiSettings = botSettings.ai;
 
-  // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants
-  // Ignore localhost URLs in production — leftover from dev setup
-  const tenantUrl = tenant.webhookUrl && !tenant.webhookUrl.includes('localhost') ? tenant.webhookUrl : undefined;
+  // Use tenant's webhookUrl, or global default ONLY for AI-enabled tenants.
+  const tenantUrl = isCustomWebhookUrl(tenant.webhookUrl, config.n8n.defaultWebhookUrl)
+    ? tenant.webhookUrl!
+    : undefined;
   const webhookUrl = tenantUrl || (aiSettings?.enabled ? config.n8n.defaultWebhookUrl : undefined);
   if (!webhookUrl) {
     // No webhook configured and AI not enabled — session stays waiting, agent picks up
@@ -498,7 +514,7 @@ async function platformAgentPath(
 
     switch (result.type) {
       case 'response':
-        await sendBotMessage(session, botParticipant.id, result.content);
+        await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
         break;
 
       case 'error':
@@ -609,8 +625,10 @@ async function getConversationHistory(
 async function sendBotMessage(
   session: ChatSession,
   botParticipantId: string,
-  content: string
+  content: string,
+  quickReplies?: Array<{ title: string; value: string }>
 ): Promise<Message> {
+  const metadata = quickReplies?.length ? { quickReplies } : undefined;
   const botMsg = messageRepository.create({
     sessionId: session.id,
     tenantId: session.tenantId,
@@ -620,13 +638,15 @@ async function sendBotMessage(
     contentEncrypted: true,
     status: 'sent' as Message['status'],
     sentAt: new Date(),
+    ...(metadata ? { metadata } : {}),
   });
   const saved = await messageRepository.save(botMsg);
 
   await sessionRepository.increment({ id: session.id }, 'messageCount', 1);
   await sessionRepository.update(session.id, { lastActivityAt: new Date() });
 
-  // Route through outbound router — handles both WebSocket and external channels
+  // Route through outbound router — handles both WebSocket and external channels.
+  // Slot chips ride along in metadata; external channels ignore it.
   await routeOutboundMessage(
     { type: 'text', content },
     { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
@@ -638,6 +658,7 @@ async function sendBotMessage(
         content,
         senderType: 'bot',
         timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
       },
     },
   );

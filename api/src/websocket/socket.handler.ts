@@ -831,6 +831,22 @@ export function emitToRoom(
     return;
   }
   io.to(roomName).emit(event, data);
+
+  // Observability: a delivery-critical reply (message:receive) emitted to a
+  // room with no connected sockets is invisible to the client at that instant.
+  // The widget recovers it via /widget/history on reconnect, but log it so
+  // silent delivery gaps are measurable rather than invisible. Note: in a
+  // multi-replica deploy with the Redis adapter this counts LOCAL sockets only,
+  // so treat it as a signal, not a guarantee (current deploy is single-replica).
+  if (event === 'message:receive') {
+    const recipients = io.sockets.adapter.rooms.get(roomName)?.size ?? 0;
+    if (recipients === 0) {
+      logger.warn('[ws] message:receive emitted to a room with no connected sockets (recovered on reconnect)', {
+        roomName,
+        event,
+      });
+    }
+  }
 }
 
 /**

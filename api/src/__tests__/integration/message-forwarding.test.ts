@@ -207,16 +207,23 @@ describe('forwardMessageToN8n', () => {
       expect(result).toBe(false); // no agent service → stays waiting for a human
     });
 
-    it('an explicit usePlatformAgent:false stays waiting — never the dead default', async () => {
-      const tenant = await createTestTenant({
-        settings: { ai: aiSettings({ usePlatformAgent: false }) },
-      });
-      const { session, message } = await setup(tenant.id);
+    it('uses the platform agent even when usePlatformAgent is false — the flag is ignored (issue #3)', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: { ai: aiSettings({ usePlatformAgent: false }) },
+        });
+        const { session, message } = await setup(tenant.id);
 
-      const result = await forwardMessageToN8n(session, message);
+        const result = await forwardMessageToN8n(session, message);
 
-      expect(mockSendToWebhook).not.toHaveBeenCalled();
-      expect(result).toBe(false);
+        expect(runMock).toHaveBeenCalled();               // flag no longer gates the agent
+        expect(mockSendToWebhook).not.toHaveBeenCalled();  // never the dead default
+        expect(result).toBe(true);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
     });
 
     it('routes a legacy bot (usePlatformAgent unset) to the platform agent, not a webhook', async () => {

@@ -12,7 +12,6 @@ import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
-import { config } from '../config/environment';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
@@ -237,11 +236,11 @@ router.post(
     }
 
     // Determine initial status based on AI settings — #16d: read from
-    // bot.settings, not tenant.settings.
+    // bot.settings, not tenant.settings. Issue #3: an AI-enabled bot is answered
+    // by the platform agent (or a custom webhook), so it starts in 'bot' — no
+    // longer keyed off the legacy usePlatformAgent flag or the dead default URL.
     const aiEnabled = resolvedBot.settings?.ai?.enabled;
-    const usePlatformAgent = resolvedBot.settings?.ai?.usePlatformAgent;
-    const hasWebhook = !!(tenant.webhookUrl || config.n8n.defaultWebhookUrl);
-    const initialStatus = (aiEnabled && (hasWebhook || usePlatformAgent)) ? 'bot' : 'waiting';
+    const initialStatus = aiEnabled ? 'bot' : 'waiting';
 
     // Plan-gate (step 10, count 2). Wrap session create in a tx that locks
     // the tenants row, counts non-closed sessions, throws 402 on cap.

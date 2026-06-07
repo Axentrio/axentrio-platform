@@ -271,16 +271,17 @@ export async function forwardMessageToN8n(
     : undefined;
 
   const aiEnabled = !!aiSettings?.enabled;
-  // usePlatformAgent defaults to true; only an explicit `false` opts out. Legacy
-  // bots that never set it (undefined) are treated as opted-in.
-  const usePlatformAgent = (aiSettings as any)?.usePlatformAgent !== false;
-  const willUsePlatformAgent = !customWebhookUrl && aiEnabled && usePlatformAgent && !!agentService;
+  // AI-enabled bots without a custom webhook are answered by the platform agent.
+  // The legacy `usePlatformAgent` flag is no longer consulted: its only other
+  // target was the (dead) default n8n webhook, so honouring it could only
+  // produce "AI on but no answers". See issue #3.
+  const willUsePlatformAgent = !customWebhookUrl && aiEnabled && !!agentService;
 
   if (!customWebhookUrl && !willUsePlatformAgent) {
-    // Nothing to forward to: AI is off, the platform agent is opted out, or the
-    // agent service is unavailable. Session stays waiting; a human agent picks
-    // up. (Previously this fell back to the dead default n8n webhook → 404 →
-    // spurious "connecting you to an agent" handoff. See issue #3.)
+    // Nothing to forward to: AI is off, or the agent service is unavailable.
+    // Session stays waiting; a human agent picks up. (Previously this fell back
+    // to the dead default n8n webhook → 404 → spurious "connecting you to an
+    // agent" handoff. See issue #3.)
     return false;
   }
 

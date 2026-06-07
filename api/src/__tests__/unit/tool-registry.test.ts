@@ -99,4 +99,32 @@ describe('ToolRegistry', () => {
     expect(toolNames).not.toContain('reschedule_booking');
     expect(toolNames).not.toContain('cancel_booking');
   });
+
+  it('includes booking tools for the internal provider on an eligible tier (no Cal.com)', async () => {
+    const registry = new ToolRegistry();
+    const tenant = {
+      id: 'tenant-3',
+      tier: 'pro',
+      settings: { ai: { enabled: true }, integrations: { provider: 'internal' } },
+    };
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).toContain('check_availability');
+    expect(toolNames).toContain('create_booking');
+    expect(toolNames).toContain('reschedule_booking');
+    expect(toolNames).toContain('cancel_booking');
+  });
+
+  it('excludes booking tools for the internal provider on an ineligible tier', async () => {
+    const registry = new ToolRegistry();
+    const tenant = {
+      id: 'tenant-4',
+      tier: 'free',
+      settings: { ai: { enabled: true }, integrations: { provider: 'internal' } },
+    };
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).not.toContain('check_availability');
+    expect(toolNames).not.toContain('create_booking');
+  });
 });

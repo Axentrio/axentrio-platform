@@ -13,7 +13,7 @@ import type { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
-import { getCalcomIntegrationForBot } from '../billing/calcom-access';
+import { getCalcomIntegrationForBot, isCalcomAvailableForTier } from '../billing/calcom-access';
 
 const BOOKING_TOOLS = [
   'check_availability',
@@ -64,9 +64,15 @@ export class ToolRegistry {
     const captureLead = this.builtinTools.get('capture_lead');
     if (captureLead) tools.push(captureLead);
 
-    // Cal.com gate routes through the central helper so the tier check stays
-    // in lockstep with the n8n outbound payload (single source of truth).
-    if (getCalcomIntegrationForBot(botSettings, tenant.tier)) {
+    // Booking tools: enabled for the internal scheduler (gated by the same
+    // calendar-integrations tier as Cal.com) OR a configured Cal.com integration.
+    // Mirrors buildIntegrationsConfig in message-forwarding so the platform
+    // agent and the n8n payload stay in lockstep on which bots can book.
+    const bookingEnabled =
+      botSettings.integrations?.provider === 'internal'
+        ? isCalcomAvailableForTier(tenant.tier)
+        : !!getCalcomIntegrationForBot(botSettings, tenant.tier);
+    if (bookingEnabled) {
       for (const name of BOOKING_TOOLS) {
         const tool = this.builtinTools.get(name);
         if (tool) tools.push(tool);

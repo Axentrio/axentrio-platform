@@ -96,10 +96,12 @@ const mockSendToWebhook = vi.fn();
 import {
   forwardMessageToN8n,
   initializeForwarding,
+  initializeAgentService,
   buildWebhookConfig,
 } from '../../services/message-forwarding.service';
 import { OutboundService } from '../../n8n/outbound.service';
 import { FallbackService } from '../../n8n/fallback.service';
+import type { AgentService } from '../../agent/agent.service';
 
 // ── Repos ────────────────────────────────────────────────────────────────────
 
@@ -186,6 +188,57 @@ beforeEach(() => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('forwardMessageToN8n', () => {
+
+  // ── 0. No custom webhook → platform agent, never the dead default (#3) ────
+  // Exercises the REAL routing restructure (the determineRoute unit test is
+  // only a synthetic mirror). The bug: an AI bot without a custom webhook used
+  // to POST to the dead default n8n webhook → 404 → spurious handoff.
+  describe('no custom webhook routing (issue #3)', () => {
+    it('does NOT POST to any webhook when AI is on without a custom webhook', async () => {
+      // Legacy bot: usePlatformAgent unset, no custom webhook, no agent service.
+      const tenant = await createTestTenant({
+        settings: { ai: aiSettings({ usePlatformAgent: undefined }) },
+      });
+      const { session, message } = await setup(tenant.id);
+
+      const result = await forwardMessageToN8n(session, message);
+
+      expect(mockSendToWebhook).not.toHaveBeenCalled(); // the dead-default 404 is gone
+      expect(result).toBe(false); // no agent service → stays waiting for a human
+    });
+
+    it('an explicit usePlatformAgent:false stays waiting — never the dead default', async () => {
+      const tenant = await createTestTenant({
+        settings: { ai: aiSettings({ usePlatformAgent: false }) },
+      });
+      const { session, message } = await setup(tenant.id);
+
+      const result = await forwardMessageToN8n(session, message);
+
+      expect(mockSendToWebhook).not.toHaveBeenCalled();
+      expect(result).toBe(false);
+    });
+
+    it('routes a legacy bot (usePlatformAgent unset) to the platform agent, not a webhook', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: { ai: aiSettings({ usePlatformAgent: undefined }) },
+        });
+        const { session, message } = await setup(tenant.id);
+
+        const result = await forwardMessageToN8n(session, message);
+
+        expect(runMock).toHaveBeenCalled();          // platform agent handled it
+        expect(mockSendToWebhook).not.toHaveBeenCalled(); // never the dead default
+        expect(result).toBe(true);
+      } finally {
+        // Reset module-level agent so later tests see the default (null) state.
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+  });
 
   // ── 1. Session status guards ─────────────────────────────────────────────
 

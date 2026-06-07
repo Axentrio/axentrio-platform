@@ -248,6 +248,16 @@ app.get('/health', (_req, res) => {
   });
 });
 
+// TEMP SENTRY TEST — remove after verifying events land. Guarded by a token so
+// crawlers don't trip it; forces one error through the global handler → Sentry.
+app.get('/debug/sentry-test', (req, res, next) => {
+  if (req.query.confirm !== 'axentrio-sentry-test') {
+    res.status(404).end();
+    return;
+  }
+  next(new Error('Sentry verification error (API) — safe to ignore'));
+});
+
 app.get('/health/ready', async (_req, res) => {
   const [postgresHealthy, redisHealthy] = await Promise.all([
     checkDatabaseHealth(),

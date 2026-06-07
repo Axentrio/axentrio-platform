@@ -637,6 +637,30 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       border-top-right-radius: 4px;
     }
 
+    .cb-message__chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .cb-slot-chip {
+      font-family: var(--cb-sans);
+      font-size: 13px;
+      font-weight: 500;
+      padding: 7px 12px;
+      border-radius: 16px;
+      border: 1px solid var(--cb-primary);
+      background: transparent;
+      color: var(--cb-primary);
+      cursor: pointer;
+      transition: background 150ms var(--cb-ease), color 150ms var(--cb-ease);
+    }
+    .cb-slot-chip:hover {
+      background: var(--cb-primary);
+      color: var(--cb-primary-ink);
+    }
+    .cb-slot-chip:active { transform: scale(0.97); }
+
     .cb-message__time {
       font-family: var(--cb-sans);
       font-size: 11px;
@@ -1631,6 +1655,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             text: data.content,
             sender: 'bot',
             timestamp: new Date(data.timestamp || data.createdAt),
+            quickReplies: data.metadata && Array.isArray(data.metadata.quickReplies) ? data.metadata.quickReplies : undefined,
           });
         }
       });
@@ -1956,12 +1981,27 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       } else {
         content = `<div class="cb-message__bubble">${utils.escapeHtml(message.text)}</div>`;
       }
-      
+
+      // Tappable quick-reply chips (e.g. appointment slots). Bot messages only.
+      let chipsHtml = '';
+      if (!isUser && Array.isArray(message.quickReplies) && message.quickReplies.length) {
+        const chips = message.quickReplies
+          .map((qr) => {
+            const title = typeof qr === 'string' ? qr : qr.title || qr.value || '';
+            const value = typeof qr === 'string' ? qr : qr.value || qr.title || '';
+            if (!title) return '';
+            return `<button type="button" class="cb-slot-chip" data-value="${utils.escapeHtml(value)}">${utils.escapeHtml(title)}</button>`;
+          })
+          .join('');
+        if (chips) chipsHtml = `<div class="cb-message__chips">${chips}</div>`;
+      }
+
       return `
         <div class="cb-message cb-message--${message.sender}" data-id="${message.id}">
           <div class="cb-message__avatar">${isUser ? ICONS.user : botAvatarHtml(this.appearance.avatarUrl)}</div>
           <div class="cb-message__content">
             ${content}
+            ${chipsHtml}
             ${time ? `<span class="cb-message__time">${time}</span>` : ''}
           </div>
         </div>
@@ -1978,6 +2018,20 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       // is the only reliable way to dismiss on narrow viewports.
       if (this.headerCloseBtn) {
         this.headerCloseBtn.addEventListener('click', () => this.close());
+      }
+
+      // Quick-reply / slot chips — delegated so it covers chips added later.
+      if (this.messagesContainer) {
+        this.messagesContainer.addEventListener('click', (e) => {
+          const chip = e.target.closest && e.target.closest('.cb-slot-chip');
+          if (!chip) return;
+          const value = chip.getAttribute('data-value');
+          if (!value) return;
+          // Consume the offer: remove the whole chip row so it can't be re-tapped.
+          const row = chip.closest('.cb-message__chips');
+          if (row) row.remove();
+          this.sendMessage(value);
+        });
       }
 
       // Send message

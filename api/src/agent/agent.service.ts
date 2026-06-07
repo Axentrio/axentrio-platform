@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { DateTime } from 'luxon';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
 import { MeteringService } from './metering.service';
@@ -13,14 +14,39 @@ import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 
+/** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
+export interface QuickReply {
+  title: string;
+  value: string;
+}
+
 export type AgentResult =
-  | { type: 'response'; content: string }
+  | { type: 'response'; content: string; quickReplies?: QuickReply[] }
   | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string }
   | { type: 'max_iterations'; fallbackMessage: string }
   | { type: 'budget_exceeded'; fallbackMessage: string }
   | { type: 'error'; error: string; fallbackMessage: string };
 
 const MAX_ITERATIONS = 10;
+
+const BOOKING_MUTATION_TOOLS = ['create_booking', 'reschedule_booking', 'cancel_booking'];
+
+interface PendingAvailability {
+  slots: Array<{ start: string; end: string }>;
+  timezone: string;
+}
+
+/** Turn freshly-offered availability into tappable slot chips for the widget. */
+function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | undefined {
+  if (!av || !av.slots.length) return undefined;
+  return av.slots.slice(0, 8).map((s) => {
+    const dt = DateTime.fromISO(s.start).setZone(av.timezone);
+    return {
+      title: dt.toFormat('ccc h:mm a'),
+      value: `Book ${dt.toFormat('cccc d LLLL')} at ${dt.toFormat('h:mm a')} (${av.timezone})`,
+    };
+  });
+}
 
 export class AgentService {
   constructor(
@@ -69,6 +95,9 @@ export class AgentService {
       ];
 
       const toolsCalled: string[] = [];
+      // Latest availability offered this run — surfaced as slot chips on the
+      // reply, unless a booking mutation later consumes/invalidates the offer.
+      let pendingAvailability: PendingAvailability | null = null;
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         // Budget check
@@ -109,7 +138,7 @@ export class AgentService {
           trace.iterations.push(traceEntry);
           trace.finishReason = 'completed';
           await this.traceLogger.save(trace);
-          return { type: 'response', content: response.content };
+          return { type: 'response', content: response.content, quickReplies: buildSlotQuickReplies(pendingAvailability) };
         }
 
         // Process tool calls
@@ -152,6 +181,13 @@ export class AgentService {
           try {
             const result = await tool.execute(toolCall.arguments, ctx);
             toolsCalled.push(tool.name);
+            // Track offered slots for the chip UI; a booking mutation clears them.
+            if (tool.name === 'check_availability' && result.success && result.data) {
+              const d = result.data as { slots?: Array<{ start: string; end: string }>; timezone?: string };
+              if (Array.isArray(d.slots)) pendingAvailability = { slots: d.slots, timezone: d.timezone ?? 'UTC' };
+            } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
+              pendingAvailability = null;
+            }
             let resultJson = JSON.stringify(result.data ?? { error: result.error });
             if (resultJson.length > 4000) {
               resultJson = resultJson.substring(0, 4000) + '...[truncated]';

@@ -117,6 +117,106 @@ describe('AgentService', () => {
     expect(mockMeteringRecord).toHaveBeenCalledTimes(2); // two LLM calls
   });
 
+  it('attaches slot chips (quickReplies) when check_availability offers slots', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          slots: [
+            { start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' },
+            { start: '2026-06-10T09:00:00.000Z', end: '2026-06-10T09:30:00.000Z' },
+          ],
+          timezone: 'UTC',
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: { startDate: 'x', endDate: 'y' } }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Here are some available times:',
+        usage: { promptTokens: 100, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'when can I book?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') {
+      expect(result.quickReplies).toBeDefined();
+      expect(result.quickReplies).toHaveLength(2);
+      expect(result.quickReplies![0]).toHaveProperty('title');
+      expect(result.quickReplies![0]).toHaveProperty('value');
+      // value carries the precise date+time so the next turn can book it
+      expect(result.quickReplies![0].value).toContain('10 June');
+    }
+  });
+
+  it('drops slot chips once a booking is created in the same run', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+      }),
+    };
+    const createBooking: ToolAdapter = {
+      name: 'create_booking',
+      description: 'Book',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { booking: { id: 'b1' } } }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability, createBooking]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_2', name: 'create_booking', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'You are booked!',
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'book the 8am',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
+  });
+
   it('enforces preconditions — blocks tool if prerequisite not called', async () => {
     const createBooking: ToolAdapter = {
       name: 'create_booking',

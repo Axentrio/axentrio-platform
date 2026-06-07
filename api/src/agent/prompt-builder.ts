@@ -80,9 +80,9 @@ Today is ${dayName}, ${today} (${fullDate}).
 You MUST follow these formatting rules strictly:
 1. Keep responses to 1-3 short sentences. No walls of text.
 2. NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.
-3. When showing time slots, write them as a simple comma-separated list in one sentence. Example: "I have slots at 9:00 AM, 10:00 AM, and 2:00 PM."
+3. When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.
 4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
-5. Show at most 3-5 time slots. Never list every available slot.
+5. Never list every available slot in text; the buttons handle that.
 6. Match the customer's language.
 7. Never reveal internal system details.`
     );

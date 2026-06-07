@@ -1,4 +1,5 @@
 import React from 'react';
+import { Sentry } from '../../config/sentry';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -17,6 +18,9 @@ export class ErrorBoundary extends React.Component<
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('[ErrorBoundary]', error, info.componentStack);
+    Sentry.captureException(error, {
+      contexts: { react: { componentStack: info.componentStack } },
+    });
   }
 
   private handleReload = () => {

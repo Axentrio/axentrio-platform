@@ -611,6 +611,14 @@ async function startServer(): Promise<void> {
     };
     setInterval(cleanupAgentTraces, 24 * 60 * 60 * 1000); // Daily
 
+    // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
+    const { reconcilePendingBookingSyncs } = await import('./scheduler/sync-reconciler');
+    setInterval(() => {
+      reconcilePendingBookingSyncs().catch((error) =>
+        logger.error('Booking sync reconciliation failed', { error })
+      );
+    }, 5 * 60 * 1000); // Every 5 minutes
+
     const PORT = config.server.port;
     httpServer.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);

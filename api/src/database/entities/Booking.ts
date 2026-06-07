@@ -47,6 +47,20 @@ export class Booking {
   @Column({ type: 'boolean', name: 'sync_pending', default: false })
   syncPending!: boolean;
 
+  /** Reconciliation retry/claim state (P0-4). */
+  @Column({ type: 'int', name: 'sync_attempts', default: 0 })
+  syncAttempts!: number;
+
+  @Column({ type: 'timestamptz', name: 'sync_next_attempt_at', nullable: true })
+  syncNextAttemptAt?: Date | null;
+
+  @Column({ type: 'text', name: 'sync_last_error', nullable: true })
+  syncLastError?: string | null;
+
+  /** Short lease so concurrent reconciler runs/replicas don't double-process a row. */
+  @Column({ type: 'timestamptz', name: 'sync_claimed_until', nullable: true })
+  syncClaimedUntil?: Date | null;
+
   @Column({ type: 'timestamptz', name: 'start_utc' })
   startUtc!: Date;
 

@@ -6,7 +6,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
-import { initSentry, Sentry } from './config/sentry';
+import { initSentry } from './config/sentry';
 
 // Styles
 import './styles/index.css';
@@ -16,12 +16,6 @@ import './i18n';
 
 // Error tracking — no-op unless VITE_SENTRY_DSN is set
 initSentry();
-
-// TEMP SENTRY TEST — remove after verifying events land. Visiting the portal
-// with ?sentrytest=1 fires one event into the browser Sentry project.
-if (new URLSearchParams(window.location.search).get('sentrytest') === '1') {
-  Sentry.captureException(new Error('Sentry verification error (portal) — safe to ignore'));
-}
 
 // Initialize React
 const root = ReactDOM.createRoot(

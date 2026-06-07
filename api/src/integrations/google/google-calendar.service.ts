@@ -15,10 +15,18 @@ import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
 
-// Single scope: calendar.events covers both reading events (to compute busy
-// times via events.list) and writing them. Avoids the separate calendar.freebusy
-// scope (which isn't reliably granted and 403s the freeBusy endpoint).
-const SCOPES = ['https://www.googleapis.com/auth/calendar.events'];
+// Scopes:
+// - calendar.events: read events (busy via events.list) + write them.
+// - calendar.calendarlist.readonly: list the account's calendars for the picker
+//   (narrowest scope that allows CalendarList.list).
+// - openid/email: returns a verified id_token whose email is the connected
+//   account identity (used for the normalized conflict key + "which account?" UX).
+const SCOPES = [
+  'openid',
+  'email',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+];
 
 export class GoogleNotConfiguredError extends Error {
   constructor() {
@@ -51,6 +59,26 @@ export function validateState(state: string): { tenantId: string; botId: string 
   return jwt.verify(state, config.google.stateJwtSecret) as { tenantId: string; botId: string };
 }
 
+/**
+ * Extract the VERIFIED account email from a Google id_token. Returns the email
+ * only when the token verifies against our client id AND `email_verified` is
+ * true — an unverified email must never become the primary-calendar identity.
+ */
+async function verifiedEmailFromIdToken(idToken: string | null | undefined): Promise<string | null> {
+  if (!idToken) return null;
+  try {
+    const client = oauthClient();
+    const ticket = await client.verifyIdToken({ idToken, audience: config.google.clientId! });
+    const payload = ticket.getPayload();
+    if (payload?.email && payload.email_verified === true) return payload.email;
+  } catch (err) {
+    logger.warn('[Google] id_token verification failed; account email unknown', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  return null;
+}
+
 /** Exchange the auth code for tokens and persist the credential for the bot. */
 export async function exchangeAndStore(tenantId: string, botId: string, code: string): Promise<void> {
   const client = oauthClient();
@@ -58,8 +86,27 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
   if (!tokens.access_token) {
     throw new Error('Google did not return an access token');
   }
+  // Always recompute the account email from THIS connection's verified id_token;
+  // never carry forward a prior credential's email (a reconnect may be a
+  // different account).
+  const accountEmail = await verifiedEmailFromIdToken(tokens.id_token);
 
+  // Preserve a previously-picked non-`primary` calendarId across reconnect ONLY
+  // when it is still writable under the newly-connected account; otherwise reset
+  // to `primary`. (Writability is validated by the picker layer; here we keep it
+  // simple — same account email + prior non-primary id is preserved, else reset.)
   const repo = AppDataSource.getRepository(CalendarCredential);
+  const prior = await repo.findOne({ where: { botId, provider: 'google', status: 'active' } });
+  const preservedCalendarId =
+    prior &&
+    prior.calendarId &&
+    prior.calendarId !== 'primary' &&
+    prior.accountEmail &&
+    accountEmail &&
+    prior.accountEmail === accountEmail
+      ? prior.calendarId
+      : 'primary';
+
   // Replace any existing active credential for this bot (reconnect).
   await repo.update({ botId, provider: 'google', status: 'active' }, { status: 'revoked' });
 
@@ -68,14 +115,33 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
     botId,
     provider: 'google',
     status: 'active',
-    accountEmail: null,
+    accountEmail,
     accessTokenEnc: encrypt(tokens.access_token),
     refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
     tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-    calendarId: 'primary',
+    calendarId: preservedCalendarId,
   });
   await repo.save(cred);
-  logger.info('[Google] calendar connected', { botId, hasRefresh: !!tokens.refresh_token });
+  logger.info('[Google] calendar connected', {
+    botId,
+    hasRefresh: !!tokens.refresh_token,
+    hasEmail: !!accountEmail,
+    calendarId: preservedCalendarId,
+  });
+}
+
+/**
+ * Account-unique identity for the bot's connected calendar, or null if unknown.
+ * A `primary` calendar resolves to the stored verified account email; an explicit
+ * non-`primary` calendarId is itself account-unique. Legacy creds (email unknown
+ * + primary) return null → callers fall back to the bot-scoped key. This is the
+ * single source for the conflict `calendar_key` and never the literal `primary`.
+ */
+export async function resolveCalendarIdentity(botId: string): Promise<string | null> {
+  const cred = await getActiveCredential(botId);
+  if (!cred) return null;
+  if (cred.calendarId && cred.calendarId !== 'primary') return cred.calendarId;
+  return cred.accountEmail ?? null;
 }
 
 export async function getActiveCredential(botId: string): Promise<CalendarCredential | null> {

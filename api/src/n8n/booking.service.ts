@@ -57,9 +57,14 @@ export async function listBookings(sessionId: string, attendeeEmail: string) {
   return selectProvider().listBookings(ctx, attendeeEmail);
 }
 
-export async function checkAvailability(sessionId: string, startDate: string, endDate: string) {
+export async function checkAvailability(
+  sessionId: string,
+  startDate: string,
+  endDate: string,
+  serviceId?: string
+) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider().checkAvailability(ctx, startDate, endDate);
+  return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId);
 }
 
 export async function createBooking(
@@ -67,10 +72,11 @@ export async function createBooking(
   idempotencyKey: string,
   startTime: string,
   attendee: { name: string; email: string },
-  notes?: string
+  notes?: string,
+  serviceId?: string
 ) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes);
+  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId);
 }
 
 export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {

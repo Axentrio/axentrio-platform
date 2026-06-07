@@ -55,6 +55,9 @@ export interface AvailabilityResult {
 export interface CreateBookingResult {
   success: boolean;
   idempotent?: boolean;
+  /** True when the service is request-only: a request/lead was captured, NOT a
+   *  confirmed appointment (no calendar event). The AI must phrase accordingly. */
+  requested?: boolean;
   booking: {
     id: string | undefined;
     startTime: string | undefined;
@@ -79,13 +82,21 @@ export interface CancelResult {
 
 export interface BookingProvider {
   listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult>;
-  checkAvailability(ctx: BookingContext, startDate: string, endDate: string): Promise<AvailabilityResult>;
+  /** `serviceId` selects the service; when omitted the provider falls back to the
+   *  bot's sole active service (or errors `SERVICE_REQUIRED` if ≥2 exist). */
+  checkAvailability(
+    ctx: BookingContext,
+    startDate: string,
+    endDate: string,
+    serviceId?: string
+  ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,
     idempotencyKey: string,
     startTime: string,
     attendee: { name: string; email: string },
-    notes?: string
+    notes?: string,
+    serviceId?: string
   ): Promise<CreateBookingResult>;
   rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;

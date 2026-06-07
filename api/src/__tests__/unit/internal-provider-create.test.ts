@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
 const eventTypeFindOne = vi.fn();
+const serviceTypeFind = vi.fn();
 const ruleFindOne = vi.fn();
 const bookingFindOne = vi.fn();
 const bookingQuery = vi.fn();
@@ -15,7 +16,7 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: vi.fn((entity: any) => {
       const name = entity?.name || entity;
-      if (name === 'ServiceType') return { findOne: eventTypeFindOne };
+      if (name === 'ServiceType') return { findOne: eventTypeFindOne, find: serviceTypeFind };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       if (name === 'Booking') return { findOne: bookingFindOne, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
@@ -86,6 +87,7 @@ describe('InternalProvider.createBooking', () => {
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
     eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE]); // sole active service
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(null);
     bookingQuery.mockResolvedValue([]); // no busy intervals
@@ -184,18 +186,59 @@ describe('InternalProvider.createBooking', () => {
     ).rejects.toMatchObject({ code: 'BOOKING_TEMPORARILY_UNAVAILABLE' });
   });
 
-  it('throws BOOKING_NOT_CONFIGURED when the bot has no event type', async () => {
-    eventTypeFindOne.mockResolvedValue(null);
+  it('throws BOOKING_NOT_CONFIGURED when the bot has no active service', async () => {
+    serviceTypeFind.mockResolvedValue([]);
     await expect(
       provider.createBooking(ctx, 'idem-4', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'BOOKING_NOT_CONFIGURED' });
   });
 
   it('is a BookingError subclass on failure', async () => {
-    eventTypeFindOne.mockResolvedValue(null);
+    serviceTypeFind.mockResolvedValue([]);
     const err = await provider
       .createBooking(ctx, 'idem-5', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
       .catch((e) => e);
     expect(err).toBeInstanceOf(BookingError);
+  });
+
+  // ── Multi-service (K1b) ────────────────────────────────────────────────────
+
+  it('books a specific service when serviceId is given', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-hair', name: 'Haircut' });
+    const res = await provider.createBooking(
+      ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hair'
+    );
+    expect(res.success).toBe(true);
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hair', botId: 'bot-1', isActive: true } });
+  });
+
+  it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE, { ...EVENT_TYPE, id: 'et-2' }]);
+    await expect(
+      provider.createBooking(ctx, 'idem-amb', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'SERVICE_REQUIRED' });
+  });
+
+  it('throws SERVICE_NOT_FOUND for an unknown serviceId', async () => {
+    eventTypeFindOne.mockResolvedValue(null);
+    await expect(
+      provider.createBooking(ctx, 'idem-nf', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'nope')
+    ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
+  });
+
+  it('captures a request (no calendar event / email / lock) for a request-only service', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+    const res = await provider.createBooking(
+      ctx, 'idem-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req'
+    );
+    expect(res.success).toBe(true);
+    expect(res.requested).toBe(true);
+    expect(res.booking.id).toBe('req-1');
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(createCalendarEvent).not.toHaveBeenCalled();
   });
 });

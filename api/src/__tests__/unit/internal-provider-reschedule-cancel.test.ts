@@ -72,6 +72,7 @@ const confirmedBooking = () => ({
   id: 'bk-1',
   tenantId: 'ten-1',
   botId: 'bot-1',
+  eventTypeId: 'et-1',
   status: 'confirmed',
   icsUid: 'uid-1@axentrio',
   attendeeName: 'Ada',

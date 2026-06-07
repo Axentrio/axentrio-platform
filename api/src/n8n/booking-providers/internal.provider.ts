@@ -37,15 +37,51 @@ import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 
 export class InternalProvider implements BookingProvider {
-  private async loadConfig(botId: string): Promise<{ eventType: ServiceType; rule: AvailabilityRule }> {
-    const eventType = await AppDataSource.getRepository(ServiceType).findOne({
-      where: { botId, isActive: true },
-    });
+  /** Business availability for the bot (shared by all services). */
+  private async loadRule(botId: string): Promise<AvailabilityRule> {
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId } });
-    if (!eventType || !rule) {
+    if (!rule) {
       throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
     }
-    return { eventType, rule };
+    return rule;
+  }
+
+  /**
+   * Resolve the service to book against. `serviceId` selects it explicitly (must
+   * be active + belong to this bot). When omitted: the sole active service is
+   * used; zero active → `BOOKING_NOT_CONFIGURED`; ≥2 active → `SERVICE_REQUIRED`
+   * (so a slot chip / pre-multi-service payload without a serviceId can never
+   * silently book the wrong service — the caller must disambiguate).
+   */
+  private async resolveService(botId: string, serviceId?: string): Promise<ServiceType> {
+    const repo = AppDataSource.getRepository(ServiceType);
+    if (serviceId) {
+      const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true } });
+      if (!svc) throw new BookingError('That service is unavailable', 'SERVICE_NOT_FOUND', 404);
+      return svc;
+    }
+    const active = await repo.find({ where: { botId, isActive: true }, order: { sortOrder: 'ASC' } });
+    if (active.length === 0) {
+      throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
+    }
+    if (active.length > 1) {
+      throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);
+    }
+    return active[0];
+  }
+
+  /**
+   * The service an existing booking was made against (by stored `event_type_id`),
+   * for reschedule/cancel — uses the original service's duration/buffers even if
+   * it was later deactivated. Falls back to the sole active service for legacy
+   * rows with no service id.
+   */
+  private async serviceForBooking(booking: Booking): Promise<ServiceType> {
+    if (booking.eventTypeId) {
+      const svc = await AppDataSource.getRepository(ServiceType).findOne({ where: { id: booking.eventTypeId } });
+      if (svc) return svc;
+    }
+    return this.resolveService(booking.botId);
   }
 
   /**
@@ -89,13 +125,19 @@ export class InternalProvider implements BookingProvider {
     return { rangeStart: start.toISOString(), rangeEnd: end.toISOString() };
   }
 
-  async checkAvailability(ctx: BookingContext, startDate: string, endDate: string): Promise<AvailabilityResult> {
-    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+  async checkAvailability(
+    ctx: BookingContext,
+    startDate: string,
+    endDate: string,
+    serviceId?: string
+  ): Promise<AvailabilityResult> {
+    const rule = await this.loadRule(ctx.bot.id);
+    const service = await this.resolveService(ctx.bot.id, serviceId);
     const { rangeStart, rangeEnd } = this.normalizeRange(startDate, endDate);
     const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
     const slots = computeSlots({
       rule,
-      eventType,
+      eventType: service,
       rangeStart,
       rangeEnd,
       now: new Date(),
@@ -160,6 +202,7 @@ export class InternalProvider implements BookingProvider {
     return {
       success: true,
       idempotent: idempotent || undefined,
+      requested: booking.status === 'request_created' || undefined,
       booking: {
         id: booking.id,
         startTime: booking.startUtc.toISOString(),
@@ -177,9 +220,13 @@ export class InternalProvider implements BookingProvider {
     idempotencyKey: string,
     startTime: string,
     attendee: { name: string; email: string },
-    notes?: string
+    notes?: string,
+    serviceId?: string
   ): Promise<CreateBookingResult> {
-    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot.id);
+    // Create-time revalidation: the service must still exist, belong to this bot,
+    // and be active (a slot chip / multi-turn gap can go stale).
+    const service = await this.resolveService(ctx.bot.id, serviceId);
     const calendarKey = await this.calendarKey(ctx);
     const bookingRepo = AppDataSource.getRepository(Booking);
 
@@ -191,14 +238,21 @@ export class InternalProvider implements BookingProvider {
       return this.toResult(existing, true);
     }
 
-    // 2. Compute times + buffered blocked range.
+    // 2. Compute times.
     const start = new Date(startTime);
     if (Number.isNaN(start.getTime())) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
-    const end = new Date(start.getTime() + eventType.durationMin * 60_000);
-    const blockedStart = new Date(start.getTime() - eventType.bufferBeforeMin * 60_000);
-    const blockedEnd = new Date(end.getTime() + eventType.bufferAfterMin * 60_000);
+    const end = new Date(start.getTime() + service.durationMin * 60_000);
+
+    // Request-only service → capture a request/lead. No confirmed appointment,
+    // no calendar event, no email/reminders. (Owner notification UX is P2.)
+    if (service.bookingMode === 'request') {
+      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes);
+    }
+
+    const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
+    const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
     // 3. Re-validate: the requested start must be an actually-offered slot
     //    (rules, buffers, min-notice, horizon, internal + Google busy).
@@ -210,7 +264,7 @@ export class InternalProvider implements BookingProvider {
     );
     const offered = computeSlots({
       rule,
-      eventType,
+      eventType: service,
       rangeStart: start.toISOString(),
       rangeEnd: new Date(start.getTime() + 1000).toISOString(),
       now: new Date(),
@@ -229,15 +283,15 @@ export class InternalProvider implements BookingProvider {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
         const rows: Array<{ id: string }> = await manager.query(
           `INSERT INTO chatbot_bookings
-             (tenant_id, bot_id, provider, event_type_id, session_id, status,
+             (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key)
-           VALUES ($1,$2,'internal',$3,$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14)
            RETURNING id`,
           [
             ctx.tenant.id,
             ctx.bot.id,
-            eventType.id,
+            service.id,
             ctx.session.id,
             start.toISOString(),
             end.toISOString(),
@@ -295,7 +349,7 @@ export class InternalProvider implements BookingProvider {
     // Mirror to the owner's Google calendar (best-effort). The booking is the
     // source of truth — if the mirror fails the booking still stands and is
     // flagged sync_pending for later reconciliation.
-    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, eventType.name, start, end, rule.timezone, notes);
+    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, service.name, start, end, rule.timezone, notes);
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
@@ -305,8 +359,8 @@ export class InternalProvider implements BookingProvider {
       sequence: 0,
       start,
       end,
-      summary: eventType.name,
-      location: meetUrl ?? (eventType.locationType === 'in_person' ? 'In person' : undefined),
+      summary: service.name,
+      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
       description: meetUrl ? `Join with Google Meet: ${meetUrl}` : undefined,
       timezone: rule.timezone,
       attendeeName: attendee.name,
@@ -319,6 +373,89 @@ export class InternalProvider implements BookingProvider {
 
     return {
       success: true,
+      booking: {
+        id: bookingId,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        attendee,
+      },
+    };
+  }
+
+  /**
+   * Request-only capture: store a `request_created` Booking (a lead) with the
+   * customer's preferred time, but NO calendar event, email, or reminders. The
+   * owner reviews it (richer request UX + notification is P2). Requests don't
+   * block the calendar — the exclusion constraint only covers pending/confirmed.
+   */
+  private async createRequest(
+    ctx: BookingContext,
+    idempotencyKey: string,
+    service: ServiceType,
+    calendarKey: string,
+    start: Date,
+    end: Date,
+    attendee: { name: string; email: string },
+    notes?: string
+  ): Promise<CreateBookingResult> {
+    const bookingRepo = AppDataSource.getRepository(Booking);
+    const icsUid = `${uuidv4()}@axentrio`;
+    let bookingId: string;
+    try {
+      const rows: Array<{ id: string }> = await bookingRepo.query(
+        `INSERT INTO chatbot_bookings
+           (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
+            start_utc, end_utc, blocked_range, calendar_key,
+            attendee_name, attendee_email, notes, ics_uid, idempotency_key)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12)
+         RETURNING id`,
+        [
+          ctx.tenant.id,
+          ctx.bot.id,
+          service.id,
+          ctx.session.id,
+          start.toISOString(),
+          end.toISOString(),
+          calendarKey,
+          attendee.name,
+          attendee.email,
+          notes ?? null,
+          icsUid,
+          idempotencyKey,
+        ]
+      );
+      bookingId = rows[0].id;
+    } catch (err) {
+      if ((err as { code?: string })?.code === '23505') {
+        const dup = await bookingRepo.findOne({
+          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+        });
+        if (dup && dup.status !== 'failed') return this.toResult(dup, true);
+      }
+      throw err;
+    }
+
+    const logRepo = AppDataSource.getRepository(BookingLog);
+    await logRepo.save(
+      logRepo.create({
+        tenantId: ctx.tenant.id,
+        sessionId: ctx.session.id,
+        idempotencyKey,
+        calBookingId: bookingId,
+        eventType: 'created',
+        attendeeName: attendee.name,
+        attendeeEmail: attendee.email,
+        startTime: start,
+        endTime: end,
+        notes,
+      })
+    );
+
+    logger.info('[Booking] Internal request captured', { bookingId, botId: ctx.bot.id, service: service.name });
+
+    return {
+      success: true,
+      requested: true,
       booking: {
         id: bookingId,
         startTime: start.toISOString(),
@@ -505,16 +642,17 @@ export class InternalProvider implements BookingProvider {
     if (booking.status !== 'confirmed') {
       throw new BookingError('Only confirmed bookings can be rescheduled', 'BOOKING_NOT_RESCHEDULABLE', 409);
     }
-    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot.id);
+    const service = await this.serviceForBooking(booking);
     const calendarKey = await this.calendarKey(ctx);
 
     const start = new Date(newStartTime);
     if (Number.isNaN(start.getTime())) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
-    const end = new Date(start.getTime() + eventType.durationMin * 60_000);
-    const blockedStart = new Date(start.getTime() - eventType.bufferBeforeMin * 60_000);
-    const blockedEnd = new Date(end.getTime() + eventType.bufferAfterMin * 60_000);
+    const end = new Date(start.getTime() + service.durationMin * 60_000);
+    const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
+    const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
     // Re-validate the new slot (excluding this booking's own current range).
     const busy = await this.loadAllBusy(
@@ -526,7 +664,7 @@ export class InternalProvider implements BookingProvider {
     );
     const offered = computeSlots({
       rule,
-      eventType,
+      eventType: service,
       rangeStart: start.toISOString(),
       rangeEnd: new Date(start.getTime() + 1000).toISOString(),
       now: new Date(),
@@ -572,7 +710,7 @@ export class InternalProvider implements BookingProvider {
       sequence,
       start,
       end,
-      summary: eventType.name,
+      summary: service.name,
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
@@ -585,7 +723,7 @@ export class InternalProvider implements BookingProvider {
     await this.scheduleAndPersistReminders(bookingId, start, sequence);
 
     // Move the mirrored Google event (best-effort).
-    await this.syncGoogleReschedule(ctx, bookingId, eventType.name, start, end, rule.timezone).catch(() => undefined);
+    await this.syncGoogleReschedule(ctx, bookingId, service.name, start, end, rule.timezone).catch(() => undefined);
 
     return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
   }
@@ -599,7 +737,8 @@ export class InternalProvider implements BookingProvider {
     if (booking.status !== 'confirmed') {
       throw new BookingError('Only confirmed bookings can be cancelled', 'BOOKING_NOT_CANCELLABLE', 409);
     }
-    const { eventType, rule } = await this.loadConfig(ctx.bot.id);
+    const rule = await this.loadRule(ctx.bot.id);
+    const service = await this.serviceForBooking(booking);
 
     const rows: Array<{ sequence: number }> = await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
@@ -621,7 +760,7 @@ export class InternalProvider implements BookingProvider {
       sequence: rows[0].sequence,
       start: booking.startUtc,
       end: booking.endUtc,
-      summary: eventType.name,
+      summary: service.name,
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',

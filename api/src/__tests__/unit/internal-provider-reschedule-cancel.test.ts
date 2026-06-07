@@ -38,6 +38,7 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   createCalendarEvent: vi.fn().mockResolvedValue(null),
   updateCalendarEvent: vi.fn().mockResolvedValue('no_connection'),
   deleteCalendarEvent: vi.fn().mockResolvedValue(undefined),
+  resolveCalendarIdentity: vi.fn().mockResolvedValue(null),
 }));
 
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';

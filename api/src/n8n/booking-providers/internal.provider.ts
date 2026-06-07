@@ -30,9 +30,11 @@ import {
   createCalendarEvent,
   updateCalendarEvent,
   deleteCalendarEvent,
+  resolveCalendarIdentity,
 } from '../../integrations/google/google-calendar.service';
 import { BookingReference } from '../../database/entities/BookingReference';
 import { buildManageUrl } from '../../scheduler/booking-token';
+import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 
 export class InternalProvider implements BookingProvider {
   private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
@@ -46,9 +48,26 @@ export class InternalProvider implements BookingProvider {
     return { eventType, rule };
   }
 
-  /** Conflict key for a bot. Internal: the bot id (Phase 1: external calendar id). */
-  private calendarKey(ctx: BookingContext): string {
-    return `bot:${ctx.bot.id}`;
+  /**
+   * Deterministic Google event id for a booking: the booking uuid with hyphens
+   * stripped (32 hex chars = valid Google base32hex). Makes the Google create
+   * idempotent — a reconciler retry after a partial failure re-uses this id
+   * instead of producing a duplicate event.
+   */
+  private googleEventId(bookingId: string): string {
+    return bookingId.replace(/-/g, '');
+  }
+
+  /**
+   * Conflict key for a bot. Normalized to the connected calendar's account-unique
+   * identity (`gcal:<email-or-calendarId>`) so bots sharing one real calendar
+   * share one key (the EXCLUDE constraint then blocks cross-bot double-booking).
+   * Falls back to `bot:<id>` when the calendar identity is unknown (no/legacy
+   * connection) — never `gcal:primary`, which would collide globally.
+   */
+  private async calendarKey(ctx: BookingContext): Promise<string> {
+    const identity = await resolveCalendarIdentity(ctx.bot.id);
+    return conflictKeyFor(ctx.bot.id, identity);
   }
 
   /**
@@ -73,7 +92,7 @@ export class InternalProvider implements BookingProvider {
   async checkAvailability(ctx: BookingContext, startDate: string, endDate: string): Promise<AvailabilityResult> {
     const { eventType, rule } = await this.loadConfig(ctx.bot.id);
     const { rangeStart, rangeEnd } = this.normalizeRange(startDate, endDate);
-    const busy = await this.loadAllBusy(ctx, this.calendarKey(ctx), rangeStart, rangeEnd);
+    const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
     const slots = computeSlots({
       rule,
       eventType,
@@ -161,7 +180,7 @@ export class InternalProvider implements BookingProvider {
     notes?: string
   ): Promise<CreateBookingResult> {
     const { eventType, rule } = await this.loadConfig(ctx.bot.id);
-    const calendarKey = this.calendarKey(ctx);
+    const calendarKey = await this.calendarKey(ctx);
     const bookingRepo = AppDataSource.getRepository(Booking);
 
     // 1. Idempotency: a live (non-failed) booking with this key → return it.
@@ -342,13 +361,17 @@ export class InternalProvider implements BookingProvider {
     notes?: string
   ): Promise<string | null> {
     try {
-      const ev = await createCalendarEvent(ctx.bot.id, {
-        startISO: start.toISOString(),
-        endISO: end.toISOString(),
-        timezone,
-        summary,
-        description: notes,
-      });
+      const ev = await createCalendarEvent(
+        ctx.bot.id,
+        {
+          startISO: start.toISOString(),
+          endISO: end.toISOString(),
+          timezone,
+          summary,
+          description: notes,
+        },
+        { eventId: this.googleEventId(bookingId) }
+      );
       if (!ev) return null; // no Google connection
       const refRepo = AppDataSource.getRepository(BookingReference);
       await refRepo.save(
@@ -384,20 +407,33 @@ export class InternalProvider implements BookingProvider {
     try {
       const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
       if (ref) {
-        const res = await updateCalendarEvent(ctx.bot.id, ref.externalEventId, input);
+        // Target the event's real home (externalCalendarId), not the current
+        // credential calendar — a later picker change must not orphan it.
+        const res = await updateCalendarEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
         if (res === 'not_found') {
-          // Owner deleted it in Google → recreate and repoint the reference.
-          const ev = await createCalendarEvent(ctx.bot.id, { ...input, summary });
+          // Owner deleted it in Google → recreate (deterministic id) on its home.
+          const ev = await createCalendarEvent(
+            ctx.bot.id,
+            { ...input, summary },
+            { eventId: this.googleEventId(bookingId), calendarId: ref.externalCalendarId }
+          );
           if (ev) {
             ref.externalEventId = ev.eventId;
             ref.externalCalendarId = ev.calendarId;
             ref.meetingUrl = ev.meetUrl;
             await refRepo.save(ref);
           }
+        } else if (res === 'no_access') {
+          // Event lives on a now-inaccessible account (e.g. reconnect changed it).
+          await this.markSyncPending(bookingId);
         }
       } else {
         // Google connected after the booking was created → create now.
-        const ev = await createCalendarEvent(ctx.bot.id, { ...input, summary });
+        const ev = await createCalendarEvent(
+          ctx.bot.id,
+          { ...input, summary },
+          { eventId: this.googleEventId(bookingId) }
+        );
         if (ev) {
           await refRepo.save(
             refRepo.create({
@@ -425,7 +461,7 @@ export class InternalProvider implements BookingProvider {
     });
     if (!ref) return;
     try {
-      await deleteCalendarEvent(ctx.bot.id, ref.externalEventId);
+      await deleteCalendarEvent(ctx.bot.id, ref.externalEventId, ref.externalCalendarId);
     } catch (err) {
       logger.warn('[Booking] Google event cancel sync failed', {
         bookingId,
@@ -470,7 +506,7 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Only confirmed bookings can be rescheduled', 'BOOKING_NOT_RESCHEDULABLE', 409);
     }
     const { eventType, rule } = await this.loadConfig(ctx.bot.id);
-    const calendarKey = this.calendarKey(ctx);
+    const calendarKey = await this.calendarKey(ctx);
 
     const start = new Date(newStartTime);
     if (Number.isNaN(start.getTime())) {

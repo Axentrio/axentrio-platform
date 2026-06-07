@@ -39,11 +39,13 @@ const getGoogleBusyForBot = vi.fn().mockResolvedValue(null);
 const createCalendarEvent = vi.fn().mockResolvedValue(null);
 const updateCalendarEvent = vi.fn().mockResolvedValue('no_connection');
 const deleteCalendarEvent = vi.fn().mockResolvedValue(undefined);
+const resolveCalendarIdentity = vi.fn().mockResolvedValue(null);
 vi.mock('../../integrations/google/google-calendar.service', () => ({
   getGoogleBusyForBot: (...args: any[]) => getGoogleBusyForBot(...args),
   createCalendarEvent: (...args: any[]) => createCalendarEvent(...args),
   updateCalendarEvent: (...args: any[]) => updateCalendarEvent(...args),
   deleteCalendarEvent: (...args: any[]) => deleteCalendarEvent(...args),
+  resolveCalendarIdentity: (...args: any[]) => resolveCalendarIdentity(...args),
 }));
 
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';

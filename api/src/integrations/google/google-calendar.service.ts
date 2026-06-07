@@ -14,6 +14,7 @@ import { AppDataSource } from '../../database/data-source';
 import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import { encrypt, decrypt } from '../../utils/encryption';
 import { logger } from '../../utils/logger';
+import { conflictKeyFor, rekeyBotBookings } from '../../scheduler/calendar-rekey';
 
 // Scopes:
 // - calendar.events: read events (busy via events.list) + write them.
@@ -128,6 +129,16 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
     hasEmail: !!accountEmail,
     calendarId: preservedCalendarId,
   });
+
+  // Identity may have changed (first connect / reconnect / different account) —
+  // rekey this bot's active future bookings to the normalized conflict key.
+  const identity = preservedCalendarId !== 'primary' ? preservedCalendarId : accountEmail;
+  await rekeyBotBookings(botId, conflictKeyFor(botId, identity)).catch((err) =>
+    logger.warn('[Google] post-connect rekey failed (non-fatal)', {
+      botId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
 }
 
 /**
@@ -245,57 +256,97 @@ export interface CalendarEventResult {
   calendarId: string;
 }
 
+/** Options for create: a deterministic id (idempotent retries) and/or an explicit
+ *  target calendar (defaults to the credential's current calendarId). */
+export interface CreateEventOpts {
+  eventId?: string;
+  calendarId?: string;
+}
+
 /**
  * Create an owner-only event (no customer attendee → Google sends no invite; we
  * email our own ICS) with a Meet link. Returns null if the bot has no Google
  * connection. Throws on API error so the caller can decide (best-effort sync).
+ *
+ * When `opts.eventId` is given it becomes the Google event id, making the create
+ * idempotent: a retry after a partial failure hits 409 ("already exists"), which
+ * we treat as success by fetching the existing event. The id must be valid Google
+ * base32hex (callers pass a booking uuid with hyphens stripped).
  */
 export async function createCalendarEvent(
   botId: string,
-  input: CalendarEventInput
+  input: CalendarEventInput,
+  opts: CreateEventOpts = {}
 ): Promise<CalendarEventResult | null> {
   const cred = await getActiveCredential(botId);
   if (!cred) return null;
+  const targetCalendarId = opts.calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
-  const resp = await axios.post(
-    `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events`,
-    {
-      summary: input.summary,
-      description: input.description,
-      start: { dateTime: input.startISO, timeZone: input.timezone },
-      end: { dateTime: input.endISO, timeZone: input.timezone },
-      conferenceData: {
-        createRequest: {
-          requestId: `axentrio-${Date.now()}-${Math.round(input.startISO.length)}`,
-          conferenceSolutionKey: { type: 'hangoutsMeet' },
+  const eventsUrl = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalendarId)}/events`;
+  try {
+    const resp = await axios.post(
+      eventsUrl,
+      {
+        ...(opts.eventId ? { id: opts.eventId } : {}),
+        summary: input.summary,
+        description: input.description,
+        start: { dateTime: input.startISO, timeZone: input.timezone },
+        end: { dateTime: input.endISO, timeZone: input.timezone },
+        conferenceData: {
+          createRequest: {
+            requestId: `axentrio-${opts.eventId ?? `${Date.now()}-${input.startISO.length}`}`,
+            conferenceSolutionKey: { type: 'hangoutsMeet' },
+          },
         },
       },
-    },
-    {
-      params: { conferenceDataVersion: 1 },
-      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-      timeout: 10000,
+      {
+        params: { conferenceDataVersion: 1 },
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        timeout: 10000,
+      }
+    );
+    return {
+      eventId: resp.data.id,
+      meetUrl: resp.data.hangoutLink || resp.data.conferenceData?.entryPoints?.[0]?.uri || null,
+      calendarId: targetCalendarId,
+    };
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    // Idempotent retry: the deterministic id already exists → fetch and return it.
+    if (status === 409 && opts.eventId) {
+      const got = await axios.get(`${eventsUrl}/${encodeURIComponent(opts.eventId)}`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 10000,
+      });
+      return {
+        eventId: got.data.id,
+        meetUrl: got.data.hangoutLink || got.data.conferenceData?.entryPoints?.[0]?.uri || null,
+        calendarId: targetCalendarId,
+      };
     }
-  );
-  return {
-    eventId: resp.data.id,
-    meetUrl: resp.data.hangoutLink || resp.data.conferenceData?.entryPoints?.[0]?.uri || null,
-    calendarId: cred.calendarId,
-  };
+    throw err;
+  }
 }
 
-/** Update an existing event's times. Returns 'not_found' on 404/410 so the caller can recreate. */
+/**
+ * Update an existing event's times. Returns 'not_found' on 404/410 so the caller
+ * can recreate, 'no_access' on 403 (e.g. event lives on a now-disconnected
+ * account). `calendarId` targets the event's real home (BookingReference.
+ * externalCalendarId), defaulting to the credential's current calendar.
+ */
 export async function updateCalendarEvent(
   botId: string,
   eventId: string,
-  input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'>
-): Promise<'ok' | 'not_found' | 'no_connection'> {
+  input: Pick<CalendarEventInput, 'startISO' | 'endISO' | 'timezone'>,
+  calendarId?: string
+): Promise<'ok' | 'not_found' | 'no_access' | 'no_connection'> {
   const cred = await getActiveCredential(botId);
   if (!cred) return 'no_connection';
+  const target = calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
   try {
     await axios.patch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events/${encodeURIComponent(eventId)}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
       {
         start: { dateTime: input.startISO, timeZone: input.timezone },
         end: { dateTime: input.endISO, timeZone: input.timezone },
@@ -306,23 +357,33 @@ export async function updateCalendarEvent(
   } catch (err) {
     const status = (err as { response?: { status?: number } })?.response?.status;
     if (status === 404 || status === 410) return 'not_found';
+    if (status === 403) return 'no_access';
     throw err;
   }
 }
 
-/** Delete an event. Swallows 404/410 (already gone). */
-export async function deleteCalendarEvent(botId: string, eventId: string): Promise<void> {
+/** Delete an event on its home calendar. Swallows 404/410 (already gone); returns
+ *  'no_access' on 403 so the caller can mark terminal. */
+export async function deleteCalendarEvent(
+  botId: string,
+  eventId: string,
+  calendarId?: string
+): Promise<'ok' | 'no_access' | 'no_connection'> {
   const cred = await getActiveCredential(botId);
-  if (!cred) return;
+  if (!cred) return 'no_connection';
+  const target = calendarId || cred.calendarId;
   const accessToken = await getValidAccessToken(cred);
   try {
     await axios.delete(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(cred.calendarId)}/events/${encodeURIComponent(eventId)}`,
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(target)}/events/${encodeURIComponent(eventId)}`,
       { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 10000 }
     );
+    return 'ok';
   } catch (err) {
     const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status === 403) return 'no_access';
     if (status !== 404 && status !== 410) throw err;
+    return 'ok';
   }
 }
 
@@ -346,4 +407,12 @@ export async function disconnect(botId: string): Promise<void> {
   cred.status = 'revoked';
   await AppDataSource.getRepository(CalendarCredential).save(cred);
   logger.info('[Google] calendar disconnected', { botId });
+
+  // No active calendar anymore → fall back to the bot-scoped conflict key.
+  await rekeyBotBookings(botId, conflictKeyFor(botId, null)).catch((err) =>
+    logger.warn('[Google] post-disconnect rekey failed (non-fatal)', {
+      botId,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  );
 }

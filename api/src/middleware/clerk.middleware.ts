@@ -150,7 +150,6 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
               settings: {
                 ai: {
                   enabled: true,
-                  usePlatformAgent: true,
                   provider: 'openai',
                   model: 'gpt-4o-mini',
                   brandVoice: {

@@ -61,7 +61,6 @@ export interface BotSettings {
   };
   ai?: {
     enabled: boolean;
-    usePlatformAgent?: boolean;
     provider?: 'openai' | 'anthropic' | null;
     model?: string | null;
     supportEmail?: string | null;

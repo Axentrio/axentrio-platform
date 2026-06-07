@@ -15,7 +15,6 @@ import { DEFAULT_SKILLS } from './default-skills';
 export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
   return {
     enabled: true,
-    usePlatformAgent: true,
     provider: 'openai',
     model: 'gpt-4o-mini',
     brandVoice: { name: `${name} Assistant`, tone: 'friendly', customInstructions: '', templateId: null },

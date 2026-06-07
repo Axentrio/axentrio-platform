@@ -76,8 +76,7 @@ export async function getBotAiSettings(req: Request, res: Response) {
 
 /**
  * PUT /bots/:id/ai-settings — admin only. Full-replace of the `ai` section.
- * Carries forward the out-of-scope keys (`provider`/`model`/`usePlatformAgent`),
- * preserves the AI-enable webhook auto-provision side effect on the tenant.
+ * Carries forward the out-of-scope keys (`provider`/`model`).
  */
 export async function updateBotAiSettings(req: Request, res: Response) {
   const tenantId = (req as Request & { tenantId: string }).tenantId;
@@ -89,7 +88,6 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     // Out of scope for this slice — preserve existing, defaulting if absent.
     provider: existing.provider ?? 'openai',
     model: existing.model ?? 'gpt-4o-mini',
-    usePlatformAgent: existing.usePlatformAgent ?? true,
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,

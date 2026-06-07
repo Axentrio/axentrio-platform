@@ -124,7 +124,6 @@ const tenant: Partial<Tenant> = {
         greetingMessage: '',
         offHoursMessage: '',
       },
-      usePlatformAgent: true,
     },
     integrations: {
       calcom: { apiKey: 'encrypted_key', eventTypeId: 42 },

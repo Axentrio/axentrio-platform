@@ -7,7 +7,7 @@ import { z } from 'zod';
  * complete editable AI shape and uses `.strict()` at every object level so the
  * out-of-scope secrets/keys this slice must NOT accept — `apiKey`, `provider`,
  * `model` — are rejected with an error rather than silently dropped. The handler
- * carries `provider`/`model`/`usePlatformAgent` forward from the existing row.
+ * carries `provider`/`model` forward from the existing row.
  *
  * Field-level constraints mirror `updateAiSettingsSchema` exactly (lengths,
  * email format, array caps, numeric bounds); only the envelope is new.

@@ -272,9 +272,7 @@ export async function forwardMessageToN8n(
 
   const aiEnabled = !!aiSettings?.enabled;
   // AI-enabled bots without a custom webhook are answered by the platform agent.
-  // The legacy `usePlatformAgent` flag is no longer consulted: its only other
-  // target was the (dead) default n8n webhook, so honouring it could only
-  // produce "AI on but no answers". See issue #3.
+  // The dead default n8n webhook is never used as a fallback. See issue #3.
   const willUsePlatformAgent = !customWebhookUrl && aiEnabled && !!agentService;
 
   if (!customWebhookUrl && !willUsePlatformAgent) {

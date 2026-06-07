@@ -91,7 +91,6 @@ describe('Per-bot AI settings', () => {
       settings: {
         ai: {
           enabled: false,
-          usePlatformAgent: false,
           provider: 'anthropic',
           model: 'claude-x',
           brandVoice: { name: 'Existing', tone: 'friendly', customInstructions: '' },
@@ -154,7 +153,7 @@ describe('Per-bot AI settings', () => {
   });
 
   describe('PUT /bots/:id/ai-settings', () => {
-    it('full-replaces editable fields and preserves provider/model/usePlatformAgent', async () => {
+    it('full-replaces editable fields and preserves provider/model', async () => {
       const res = await request(app)
         .put(`/api/v1/bots/${botId}/ai-settings`)
         .send(fullAiBody({ brandVoice: { name: 'New Name', tone: 'casual', customInstructions: 'X', templateId: null } }));
@@ -166,7 +165,6 @@ describe('Per-bot AI settings', () => {
       // Out-of-scope keys preserved from the pre-existing row.
       expect(bot.settings.ai?.provider).toBe('anthropic');
       expect(bot.settings.ai?.model).toBe('claude-x');
-      expect(bot.settings.ai?.usePlatformAgent).toBe(false);
       // Never persisted onto the bot.
       expect((bot.settings.ai as Record<string, unknown>).apiKey).toBeUndefined();
     });

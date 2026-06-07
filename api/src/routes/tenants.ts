@@ -933,7 +933,7 @@ export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
   const automations = settings.automations || {};
 
   const steps = {
-    aiEnabled: !!(ai.enabled && ai.usePlatformAgent),
+    aiEnabled: !!ai.enabled,
     brandVoiceConfigured: !!(ai.brandVoice?.name && ai.brandVoice.name !== 'Organization Assistant'),
     knowledgeBaseHasDocs: kbDocCount > 0,
     calcomConnected: !!(integrations.calcom?.apiKey && integrations.calcom?.eventTypeId),

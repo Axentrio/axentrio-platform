@@ -196,9 +196,9 @@ describe('forwardMessageToN8n', () => {
   // to POST to the dead default n8n webhook → 404 → spurious handoff.
   describe('no custom webhook routing (issue #3)', () => {
     it('does NOT POST to any webhook when AI is on without a custom webhook', async () => {
-      // Legacy bot: usePlatformAgent unset, no custom webhook, no agent service.
+      // No custom webhook, no agent service → nothing to forward to.
       const tenant = await createTestTenant({
-        settings: { ai: aiSettings({ usePlatformAgent: undefined }) },
+        settings: { ai: aiSettings() },
       });
       const { session, message } = await setup(tenant.id);
 
@@ -208,12 +208,14 @@ describe('forwardMessageToN8n', () => {
       expect(result).toBe(false); // no agent service → stays waiting for a human
     });
 
-    it('uses the platform agent even when usePlatformAgent is false — the flag is ignored (issue #3)', async () => {
+    it('ignores a stray/legacy usePlatformAgent flag left in stored settings (issue #5)', async () => {
+      // The flag was removed (#5); legacy bot JSON may still carry it. Routing must
+      // not consult it — a stored `usePlatformAgent: false` still reaches the agent.
       const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' });
       initializeAgentService({ run: runMock } as unknown as AgentService);
       try {
         const tenant = await createTestTenant({
-          settings: { ai: aiSettings({ usePlatformAgent: false }) },
+          settings: { ai: { ...aiSettings(), usePlatformAgent: false } as any },
         });
         const { session, message } = await setup(tenant.id);
 
@@ -227,12 +229,12 @@ describe('forwardMessageToN8n', () => {
       }
     });
 
-    it('routes a legacy bot (usePlatformAgent unset) to the platform agent, not a webhook', async () => {
+    it('routes an AI bot with no custom webhook to the platform agent, not a webhook', async () => {
       const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' });
       initializeAgentService({ run: runMock } as unknown as AgentService);
       try {
         const tenant = await createTestTenant({
-          settings: { ai: aiSettings({ usePlatformAgent: undefined }) },
+          settings: { ai: aiSettings() },
         });
         const { session, message } = await setup(tenant.id);
 

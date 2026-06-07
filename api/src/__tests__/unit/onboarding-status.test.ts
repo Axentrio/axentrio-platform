@@ -11,7 +11,7 @@ describe('computeOnboardingStatus', () => {
 
   it('detects AI enabled', () => {
     const result = computeOnboardingStatus({
-      settings: { ai: { enabled: true, usePlatformAgent: true } },
+      settings: { ai: { enabled: true } },
     } as any, 0);
     expect(result.steps.aiEnabled).toBe(true);
     expect(result.completedCount).toBe(1);
@@ -19,7 +19,7 @@ describe('computeOnboardingStatus', () => {
 
   it('detects brand voice configured', () => {
     const result = computeOnboardingStatus({
-      settings: { ai: { enabled: true, usePlatformAgent: true, brandVoice: { name: 'MyBot' } } },
+      settings: { ai: { enabled: true, brandVoice: { name: 'MyBot' } } },
     } as any, 0);
     expect(result.steps.brandVoiceConfigured).toBe(true);
   });
@@ -39,7 +39,7 @@ describe('computeOnboardingStatus', () => {
   it('returns complete when all steps done', () => {
     const result = computeOnboardingStatus({
       settings: {
-        ai: { enabled: true, usePlatformAgent: true, brandVoice: { name: 'Bot' } },
+        ai: { enabled: true, brandVoice: { name: 'Bot' } },
         integrations: { calcom: { apiKey: 'enc', eventTypeId: 1 } },
         automations: { emailNotifications: { newLeadAlert: { enabled: true } } },
       },
@@ -50,7 +50,7 @@ describe('computeOnboardingStatus', () => {
 
   it('does not count brand voice when name is the default', () => {
     const result = computeOnboardingStatus({
-      settings: { ai: { enabled: true, usePlatformAgent: true, brandVoice: { name: 'Organization Assistant' } } },
+      settings: { ai: { enabled: true, brandVoice: { name: 'Organization Assistant' } } },
     } as any, 0);
     expect(result.steps.brandVoiceConfigured).toBe(false);
   });

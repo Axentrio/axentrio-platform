@@ -223,11 +223,6 @@ export async function updateAiSettings(req: Request, res: Response) {
   if (data.brandVoice) updatedBotAi.brandVoice = { ...existingBotAi.brandVoice, ...data.brandVoice };
   if (data.guardrails) updatedBotAi.guardrails = { ...existingBotAi.guardrails, ...data.guardrails };
 
-  // Preserve usePlatformAgent if previously set (not in the input schema today).
-  if (existingBotAi.usePlatformAgent !== undefined) {
-    updatedBotAi.usePlatformAgent = existingBotAi.usePlatformAgent;
-  }
-
   // Wholesale section replacement on `ai` (not a partial patch): the
   // controller builds the full new ai shape from existingBotAi + the input.
   // Replace-section also strips any stale apiKey defensively (per the service

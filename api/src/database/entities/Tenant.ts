@@ -86,7 +86,6 @@ export class Tenant {
     };
     ai?: {
       enabled: boolean;
-      usePlatformAgent?: boolean;
       provider?: 'openai' | 'anthropic' | null;
       model?: string | null;
       apiKey?: string | null;

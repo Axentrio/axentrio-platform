@@ -102,6 +102,7 @@ import {
 import { OutboundService } from '../../n8n/outbound.service';
 import { FallbackService } from '../../n8n/fallback.service';
 import type { AgentService } from '../../agent/agent.service';
+import { config } from '../../config/environment';
 
 // ── Repos ────────────────────────────────────────────────────────────────────
 
@@ -242,6 +243,85 @@ describe('forwardMessageToN8n', () => {
         expect(result).toBe(true);
       } finally {
         // Reset module-level agent so later tests see the default (null) state.
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('treats a stored webhookUrl equal to the configured default as NOT custom — no POST, agent answers', async () => {
+      // The exact stored-data bug (issue #3): tenant.webhookUrl was auto-provisioned
+      // to the platform default. It must not be forwarded to — the platform agent
+      // answers. (In the test env the default is a localhost URL, also non-custom;
+      // the non-localhost equals-default branch of isCustomWebhookUrl is unit-tested
+      // in agent-forwarding.test.ts.)
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          webhookUrl: config.n8n.defaultWebhookUrl,
+          webhookSecret: 's',
+          settings: { ai: aiSettings() },
+        });
+        const { session, message } = await setup(tenant.id);
+
+        const result = await forwardMessageToN8n(session, message);
+
+        expect(runMock).toHaveBeenCalled();
+        expect(mockSendToWebhook).not.toHaveBeenCalled();
+        expect(result).toBe(true);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('off-hours pre-check still fires for a no-custom (platform-agent) bot — no n8n, no agent run', async () => {
+      // The restructure moved the early-return; confirm the business-hours
+      // pre-check still short-circuits BEFORE the platform agent on the no-webhook path.
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: {
+            ai: aiSettings({ guardrails: { escalationKeywords: [], offHoursMessage: 'We are closed.' } }),
+            features: { fileUploadEnabled: true, handoffEnabled: true },
+            businessHours: {
+              enabled: true,
+              timezone: 'UTC',
+              // All days closed → off-hours regardless of wall-clock (no fake timers needed).
+              schedule: ['monday','tuesday','wednesday','thursday','friday','saturday','sunday']
+                .map((day) => ({ day, open: '08:00', close: '09:00', closed: true })),
+            },
+          },
+        });
+        const { session, message } = await setup(tenant.id);
+
+        const result = await forwardMessageToN8n(session, message);
+
+        expect(result).toBe(true);
+        expect(mockSendToWebhook).not.toHaveBeenCalled();
+        expect(runMock).not.toHaveBeenCalled(); // pre-check fired before the agent
+        expect(await getBotMessages(session.id)).toEqual(['We are closed.']);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('escalation keyword still fires for a no-custom (platform-agent) bot — no n8n, no agent run, handoff', async () => {
+      const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Hi' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({
+          settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
+        });
+        const { session, message } = await setup(tenant.id, 'I want to speak to human now');
+
+        const result = await forwardMessageToN8n(session, message);
+
+        expect(result).toBe(true);
+        expect(mockSendToWebhook).not.toHaveBeenCalled();
+        expect(runMock).not.toHaveBeenCalled(); // pre-check fired before the agent
+        const h = await handoffRepo.findOne({ where: { sessionId: session.id } });
+        expect(h!.reason).toBe('bot_escalation_keyword');
+      } finally {
         initializeAgentService(null as unknown as AgentService);
       }
     });

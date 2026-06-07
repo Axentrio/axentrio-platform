@@ -29,23 +29,15 @@ describe('computeOnboardingStatus', () => {
     expect(result.steps.knowledgeBaseHasDocs).toBe(true);
   });
 
-  it('detects calcom connected', () => {
-    const result = computeOnboardingStatus({
-      settings: { integrations: { calcom: { apiKey: 'encrypted_value_here', eventTypeId: 42 } } },
-    } as any, 0);
-    expect(result.steps.calcomConnected).toBe(true);
-  });
-
   it('returns complete when all steps done', () => {
     const result = computeOnboardingStatus({
       settings: {
         ai: { enabled: true, brandVoice: { name: 'Bot' } },
-        integrations: { calcom: { apiKey: 'enc', eventTypeId: 1 } },
         automations: { emailNotifications: { newLeadAlert: { enabled: true } } },
       },
     } as any, 3);
     expect(result.complete).toBe(true);
-    expect(result.completedCount).toBe(5);
+    expect(result.completedCount).toBe(4);
   });
 
   it('does not count brand voice when name is the default', () => {
@@ -55,9 +47,9 @@ describe('computeOnboardingStatus', () => {
     expect(result.steps.brandVoiceConfigured).toBe(false);
   });
 
-  it('returns totalCount of 5', () => {
+  it('returns totalCount of 4', () => {
     const result = computeOnboardingStatus({ settings: {} } as any, 0);
-    expect(result.totalCount).toBe(5);
+    expect(result.totalCount).toBe(4);
   });
 
   it('detects automations configured via bookingConfirmation', () => {

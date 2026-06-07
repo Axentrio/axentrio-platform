@@ -62,11 +62,13 @@ describe('scheduler.controller', () => {
     expect(sendSuccess).toHaveBeenCalled();
   });
 
-  it('does not require the feature when switching to calcom', async () => {
+  it('gates every write and normalizes a legacy calcom provider input to internal', async () => {
+    // Cal.com is shelved: a `provider: 'calcom'` payload is still Pro+-gated and
+    // persisted as internal rather than re-enabling the Cal.com path.
     const req: any = { tenantId: 'ten-1', body: { provider: 'calcom' } };
     await updateSchedulerConfig(req, res);
-    expect(requireFeature).not.toHaveBeenCalled();
-    expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'calcom' });
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'calendarIntegrations', expect.any(String));
+    expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
   });
 
   it('rejects an empty update', async () => {

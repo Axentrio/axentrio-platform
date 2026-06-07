@@ -929,14 +929,13 @@ router.delete(
 export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
   const settings = tenant.settings || {};
   const ai = settings.ai || {};
-  const integrations = settings.integrations || {};
   const automations = settings.automations || {};
 
+  // Cal.com is shelved, so the former `calcomConnected` onboarding step is gone.
   const steps = {
     aiEnabled: !!ai.enabled,
     brandVoiceConfigured: !!(ai.brandVoice?.name && ai.brandVoice.name !== 'Organization Assistant'),
     knowledgeBaseHasDocs: kbDocCount > 0,
-    calcomConnected: !!(integrations.calcom?.apiKey && integrations.calcom?.eventTypeId),
     automationsConfigured: !!(
       automations.emailNotifications?.bookingConfirmation?.enabled ||
       automations.emailNotifications?.newLeadAlert?.enabled ||
@@ -944,12 +943,13 @@ export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
     ),
   };
 
+  const totalCount = Object.keys(steps).length;
   const completedCount = Object.values(steps).filter(Boolean).length;
 
   return {
-    complete: completedCount === 5,
+    complete: completedCount === totalCount,
     completedCount,
-    totalCount: 5,
+    totalCount,
     steps,
   };
 }

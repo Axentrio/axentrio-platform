@@ -2,10 +2,12 @@
  * Booking service — provider dispatcher.
  *
  * Resolves the provider-agnostic context (session → tenant → bot settings) and
- * delegates each operation to the `BookingProvider` configured for the bot
- * (`bot.settings.integrations.provider`, default `'calcom'`). The five exported
- * functions keep their original signatures so callers (n8n booking tools, the
- * `/internal/booking/*` routes, the in-house agent tool) are unchanged.
+ * delegates each operation to the in-house `InternalProvider`. Cal.com is
+ * shelved: `CalcomProvider` stays on disk (dormant) for an easy revival, but
+ * every bot now books through the internal scheduler regardless of any legacy
+ * `integrations.provider` value. The five exported functions keep their
+ * original signatures so callers (n8n booking tools, the `/internal/booking/*`
+ * routes, the in-house agent tool) are unchanged.
  */
 import { In } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
@@ -18,27 +20,21 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider } from './booking-providers/types';
-import { CalcomProvider } from './booking-providers/calcom.provider';
 import { InternalProvider } from './booking-providers/internal.provider';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
 // keep working unchanged.
 export { BookingError } from './booking-providers/types';
 
-const calcomProvider = new CalcomProvider();
 const internalProvider = new InternalProvider();
 
-/** Select the booking backend for a bot. Defaults to Cal.com when unset. */
-function selectProvider(botSettings: BotSettings): BookingProvider {
-  const provider = botSettings.integrations?.provider ?? 'calcom';
-  switch (provider) {
-    case 'internal':
-      return internalProvider;
-    case 'calcom':
-      return calcomProvider;
-    default:
-      return calcomProvider;
-  }
+/**
+ * The booking backend. Cal.com is shelved — the in-house scheduler is the only
+ * active provider, so we ignore any stored `integrations.provider` value. To
+ * bring Cal.com back, restore the per-bot switch on `botSettings` here.
+ */
+function selectProvider(): BookingProvider {
+  return internalProvider;
 }
 
 /** Resolve session, tenant, and bot settings — provider-agnostic. */
@@ -58,12 +54,12 @@ async function resolveContext(sessionId: string): Promise<BookingContext> {
 
 export async function listBookings(sessionId: string, attendeeEmail: string) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider(ctx.botSettings).listBookings(ctx, attendeeEmail);
+  return selectProvider().listBookings(ctx, attendeeEmail);
 }
 
 export async function checkAvailability(sessionId: string, startDate: string, endDate: string) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider(ctx.botSettings).checkAvailability(ctx, startDate, endDate);
+  return selectProvider().checkAvailability(ctx, startDate, endDate);
 }
 
 export async function createBooking(
@@ -74,17 +70,17 @@ export async function createBooking(
   notes?: string
 ) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider(ctx.botSettings).createBooking(ctx, idempotencyKey, startTime, attendee, notes);
+  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes);
 }
 
 export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider(ctx.botSettings).rescheduleBooking(ctx, bookingId, newStartTime);
+  return selectProvider().rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
 export async function cancelBooking(sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider(ctx.botSettings).cancelBooking(ctx, bookingId, reason);
+  return selectProvider().cancelBooking(ctx, bookingId, reason);
 }
 
 // ---------------------------------------------------------------------------

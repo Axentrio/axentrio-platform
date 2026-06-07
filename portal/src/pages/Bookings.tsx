@@ -2,26 +2,20 @@
  * Bookings Page
  * Pro+ feature. Non-Pro tenants see the locked-preview hero.
  *
- * - Cal.com provider: this page surfaces connection status and deep-links into
- *   Settings → Integrations; Cal.com itself owns the appointment list.
- * - Internal provider: this page IS the appointment dashboard — upcoming/past
- *   bookings with inline cancel + reschedule, backed by the in-house scheduler.
+ * This page IS the appointment dashboard — upcoming/past bookings with inline
+ * cancel + reschedule, backed by the in-house scheduler. (Cal.com is shelved.)
  */
 
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   Calendar,
-  CheckCircle,
-  ExternalLink,
   Video,
   Loader2,
   CalendarClock,
   XCircle,
 } from 'lucide-react';
 import { useHasFeature } from '../queries/useEntitlementsQueries';
-import { useIntegrations } from '../queries/useIntegrationQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
 import {
   useSchedulerConfig,
@@ -93,62 +87,7 @@ export default function Bookings() {
         <h1 className="text-2xl font-semibold text-text-primary">{t('bookings.title')}</h1>
         <p className="text-sm text-text-secondary mt-1">{t('bookings.intro')}</p>
       </div>
-      {config?.provider === 'internal' ? (
-        <InternalBookingsDashboard timezone={config.availability?.timezone ?? DEFAULT_TZ} />
-      ) : (
-        <CalcomCard />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-
-function CalcomCard() {
-  const { t } = useTranslation();
-  const { data: integrations } = useIntegrations();
-  const calcomConnected = Boolean(
-    integrations?.calcom?.hasApiKey && integrations?.calcom?.eventTypeId,
-  );
-
-  return (
-    <div className="rounded-xl border border-edge bg-surface-1 p-6">
-      <div className="flex items-start gap-4">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary-600/10">
-          <Calendar className="h-5 w-5 text-primary-400" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h2 className="text-base font-semibold text-text-primary">{t('bookings.calcom.title')}</h2>
-            {calcomConnected && (
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-xs font-medium text-emerald-400">
-                <CheckCircle className="h-3 w-3" />
-                {t('bookings.calcom.statusConnected')}
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-text-secondary mt-1">
-            {calcomConnected ? t('bookings.calcom.bodyConnected') : t('bookings.calcom.bodyDisconnected')}
-          </p>
-          <div className="mt-4 flex items-center gap-3 flex-wrap">
-            <Link
-              to="/settings?tab=integrations"
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-primary-600"
-            >
-              {calcomConnected ? t('bookings.calcom.manage') : t('bookings.calcom.connect')}
-            </Link>
-            <a
-              href="https://app.cal.com/bookings"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-xs font-medium text-text-secondary hover:text-text-primary"
-            >
-              {t('bookings.calcom.viewInCalcom')}
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          </div>
-        </div>
-      </div>
+      <InternalBookingsDashboard timezone={config?.availability?.timezone ?? DEFAULT_TZ} />
     </div>
   );
 }

@@ -85,7 +85,9 @@ describe('ToolRegistry', () => {
     expect(toolNames).toContain('capture_lead');
   });
 
-  it('excludes booking tools when tenant has no calcom integration', async () => {
+  it('includes booking tools on an eligible tier even without explicit integration config', async () => {
+    // Cal.com is shelved: the internal scheduler is the default backend, so an
+    // eligible-tier tenant gets booking tools without any stored integration.
     const registry = new ToolRegistry();
     const tenant = { id: 'tenant-2', tier: 'pro', settings: { ai: { enabled: true } } };
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
@@ -93,11 +95,11 @@ describe('ToolRegistry', () => {
     expect(toolNames).toContain('kb_search');
     expect(toolNames).toContain('escalate_to_human');
     expect(toolNames).toContain('capture_lead');
-    expect(toolNames).not.toContain('check_availability');
-    expect(toolNames).not.toContain('create_booking');
-    expect(toolNames).not.toContain('list_bookings');
-    expect(toolNames).not.toContain('reschedule_booking');
-    expect(toolNames).not.toContain('cancel_booking');
+    expect(toolNames).toContain('check_availability');
+    expect(toolNames).toContain('create_booking');
+    expect(toolNames).toContain('list_bookings');
+    expect(toolNames).toContain('reschedule_booking');
+    expect(toolNames).toContain('cancel_booking');
   });
 
   it('includes booking tools for the internal provider on an eligible tier (no Cal.com)', async () => {
@@ -121,6 +123,21 @@ describe('ToolRegistry', () => {
       id: 'tenant-4',
       tier: 'free',
       settings: { ai: { enabled: true }, integrations: { provider: 'internal' } },
+    };
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).not.toContain('check_availability');
+    expect(toolNames).not.toContain('create_booking');
+  });
+
+  it('keeps booking tools off below Pro+ even with legacy Cal.com config (inert)', async () => {
+    // Shelved Cal.com creds left on a sub-Pro bot must not enable booking — the
+    // tier gate (calendarIntegrations) is the only thing that matters now.
+    const registry = new ToolRegistry();
+    const tenant = {
+      id: 'tenant-5',
+      tier: 'essential',
+      settings: { ai: { enabled: true }, integrations: { calcom: { apiKey: 'enc', eventTypeId: 1 } } },
     };
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);

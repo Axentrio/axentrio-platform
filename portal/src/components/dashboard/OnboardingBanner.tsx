@@ -17,7 +17,6 @@ const CHECKLIST_ITEMS: ChecklistItem[] = [
   { key: 'aiEnabled', labelKey: 'analytics.onboardingBanner.steps.aiEnabled.label', link: '/ai?tab=settings' },
   { key: 'brandVoiceConfigured', labelKey: 'analytics.onboardingBanner.steps.brandVoiceConfigured.label', link: '/ai?tab=settings' },
   { key: 'knowledgeBaseHasDocs', labelKey: 'analytics.onboardingBanner.steps.knowledgeBaseHasDocs.label', link: '/ai?tab=knowledge' },
-  { key: 'calcomConnected', labelKey: 'analytics.onboardingBanner.steps.calcomConnected.label', link: '/settings/integrations' },
   { key: 'automationsConfigured', labelKey: 'analytics.onboardingBanner.steps.automationsConfigured.label', link: '/settings/automations' },
 ];
 

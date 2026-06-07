@@ -41,13 +41,15 @@ function slugify(name: string): string {
 }
 
 async function readConfig(tenantId: string) {
-  const { bot, settings } = await getAnchorBotConfig(tenantId);
+  const { bot } = await getAnchorBotConfig(tenantId);
   const [eventType, availability] = await Promise.all([
     AppDataSource.getRepository(EventType).findOne({ where: { botId: bot.id, isActive: true } }),
     AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } }),
   ]);
   return {
-    provider: settings.integrations?.provider ?? 'calcom',
+    // Cal.com is shelved — the internal scheduler is the only provider, so we
+    // normalize away any legacy `integrations.provider: 'calcom'` left on old bots.
+    provider: 'internal' as const,
     eventType: eventType ?? null,
     availability: availability ?? null,
   };
@@ -61,15 +63,19 @@ export async function getSchedulerConfig(req: Request, res: Response): Promise<v
 export async function updateSchedulerConfig(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   const data = updateSchedulerSchema.parse(req.body);
+
+  // Cal.com is shelved — the internal scheduler is the only backend and stays
+  // gated by the same Pro+ entitlement, so every config write (provider, event
+  // type, or availability) requires it. Closes the path where a sub-Pro tenant
+  // could persist scheduler config by omitting `provider` from the payload.
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
   const { bot, settings } = await getAnchorBotConfig(tenantId);
 
   if (data.provider) {
-    if (data.provider === 'internal') {
-      await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
-    }
+    // Ignore any legacy 'calcom' input — the provider is always internal now.
     await replaceAnchorBotSettingsSection(tenantId, 'integrations', {
       ...(settings.integrations ?? {}),
-      provider: data.provider,
+      provider: 'internal',
     });
   }
 

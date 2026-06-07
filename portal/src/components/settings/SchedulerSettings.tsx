@@ -1,7 +1,7 @@
 /**
- * Internal scheduler settings — choose the booking provider and, for the
- * in-house scheduler, configure the event type and weekly availability.
- * Cal.com's own connection is configured in the separate CalcomSettings card.
+ * Internal scheduler settings — configure the in-house booking engine: Google
+ * Calendar connection, the event type, and weekly availability. (Cal.com is
+ * shelved; the built-in scheduler is the only provider.)
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { CalendarClock, Save, Check, Plus, Trash2, Eye, Loader2, AlertTriangle } from 'lucide-react';
@@ -119,7 +119,6 @@ export const SchedulerSettings: React.FC = () => {
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, [queryClient]);
 
-  const [provider, setProvider] = useState<'calcom' | 'internal'>('calcom');
   const [name, setName] = useState('Appointment');
   const [durationMin, setDurationMin] = useState(30);
   const [bufferBeforeMin, setBufferBeforeMin] = useState(0);
@@ -135,7 +134,6 @@ export const SchedulerSettings: React.FC = () => {
 
   useEffect(() => {
     if (!data || hydrated) return;
-    setProvider(data.provider ?? 'calcom');
     if (data.eventType) {
       setName(data.eventType.name);
       setDurationMin(data.eventType.durationMin);
@@ -158,7 +156,6 @@ export const SchedulerSettings: React.FC = () => {
 
   // Inline validation — surfaces config mistakes and blocks an invalid save.
   const errors = useMemo<string[]>(() => {
-    if (provider !== 'internal') return [];
     const e: string[] = [];
     if (!name.trim()) e.push('Event name is required.');
     if (!(durationMin >= 5)) e.push('Duration must be at least 5 minutes.');
@@ -174,13 +171,9 @@ export const SchedulerSettings: React.FC = () => {
       if (o.date && !o.closed && o.start >= o.end) e.push(`Override ${o.date}: end time must be after start time.`);
     }
     return e;
-  }, [provider, name, durationMin, slotGranularityMin, minNoticeMin, maxHorizonDays, days, overrides]);
+  }, [name, durationMin, slotGranularityMin, minNoticeMin, maxHorizonDays, days, overrides]);
 
   const handleSave = () => {
-    if (provider === 'calcom') {
-      update.mutate({ provider: 'calcom' });
-      return;
-    }
     const weeklyHours: WeeklyHours = {};
     for (const { key } of DAYS) {
       const row = days[key];
@@ -220,34 +213,6 @@ export const SchedulerSettings: React.FC = () => {
           <div className="py-6 text-sm text-text-muted">Loading…</div>
         ) : (
           <div className="space-y-5">
-            {/* Provider selector */}
-            <div>
-              <Label className="text-text-secondary mb-2 block">Booking provider</Label>
-              <div className="flex gap-2">
-                <Button
-                  variant={provider === 'internal' ? 'default' : 'outline'}
-                  onClick={() => setProvider('internal')}
-                  type="button"
-                >
-                  Built-in scheduler
-                </Button>
-                <Button
-                  variant={provider === 'calcom' ? 'default' : 'outline'}
-                  onClick={() => setProvider('calcom')}
-                  type="button"
-                >
-                  Cal.com
-                </Button>
-              </div>
-              {provider === 'calcom' && (
-                <p className="text-xs text-text-muted mt-2">
-                  Configure your Cal.com API key and event type in the Cal.com card above.
-                </p>
-              )}
-            </div>
-
-            {provider === 'internal' && (
-              <>
                 {/* Google Calendar connection (Phase 1) */}
                 <div className="space-y-2 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
@@ -436,8 +401,6 @@ export const SchedulerSettings: React.FC = () => {
                   </div>
                   {showPreview && <SlotPreview timezone={timezone} />}
                 </div>
-              </>
-            )}
 
             {errors.length > 0 && (
               <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">

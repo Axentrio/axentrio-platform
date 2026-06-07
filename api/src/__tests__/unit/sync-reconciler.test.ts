@@ -16,7 +16,7 @@ vi.mock('../../database/data-source', () => ({
     getRepository: (entity: any) => {
       const name = entity?.name ?? entity;
       if (name === 'BookingReference') return { findOne: refFindOne, save: refSave, create: (x: any) => x };
-      if (name === 'EventType') return { findOne: etFindOne };
+      if (name === 'ServiceType') return { findOne: etFindOne };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       return {};
     },

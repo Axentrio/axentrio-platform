@@ -12,7 +12,7 @@ import type { Job } from 'bull';
 import { addJob, removeJob } from '../../queue/message-queue';
 import { AppDataSource } from '../../database/data-source';
 import { Booking } from '../../database/entities/Booking';
-import { EventType } from '../../database/entities/EventType';
+import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { logger } from '../../utils/logger';
 import { sendReminderEmail } from './booking-email';
@@ -84,7 +84,7 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
       return;
     }
 
-    const eventType = await AppDataSource.getRepository(EventType).findOne({
+    const eventType = await AppDataSource.getRepository(ServiceType).findOne({
       where: { botId: booking.botId, isActive: true },
     });
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } });

@@ -16,7 +16,7 @@
  */
 import { AppDataSource } from '../database/data-source';
 import { BookingReference } from '../database/entities/BookingReference';
-import { EventType } from '../database/entities/EventType';
+import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
 import {
@@ -147,7 +147,7 @@ async function processOne(row: ClaimedRow): Promise<void> {
 }
 
 async function loadEventMeta(row: ClaimedRow): Promise<{ summary?: string; timezone?: string }> {
-  const etRepo = AppDataSource.getRepository(EventType);
+  const etRepo = AppDataSource.getRepository(ServiceType);
   const eventType = row.event_type_id
     ? await etRepo.findOne({ where: { id: row.event_type_id } })
     : await etRepo.findOne({ where: { botId: row.bot_id, isActive: true } });

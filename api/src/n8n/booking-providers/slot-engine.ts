@@ -18,7 +18,7 @@ import type {
   TimeWindow,
   Weekday,
 } from '../../database/entities/AvailabilityRule';
-import type { EventType } from '../../database/entities/EventType';
+import type { ServiceType } from '../../database/entities/ServiceType';
 import type { BookingSlot } from './types';
 
 export interface BusyInterval {
@@ -29,7 +29,7 @@ export interface BusyInterval {
 export interface SlotEngineInput {
   rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides' | 'slotGranularityMin'>;
   eventType: Pick<
-    EventType,
+    ServiceType,
     'durationMin' | 'bufferBeforeMin' | 'bufferAfterMin' | 'minNoticeMin' | 'maxHorizonDays'
   >;
   /** Query window (ISO UTC). */

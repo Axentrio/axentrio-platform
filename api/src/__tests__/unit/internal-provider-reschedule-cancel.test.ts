@@ -14,7 +14,7 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: vi.fn((entity: any) => {
       const name = entity?.name || entity;
-      if (name === 'EventType') return { findOne: eventTypeFindOne };
+      if (name === 'ServiceType') return { findOne: eventTypeFindOne };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };

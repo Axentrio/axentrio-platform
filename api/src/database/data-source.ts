@@ -44,7 +44,7 @@ import { CopilotDoc } from './entities/CopilotDoc';
 import { CopilotConversation } from './entities/CopilotConversation';
 import { CopilotMessage } from './entities/CopilotMessage';
 import { CopilotTrace } from './entities/CopilotTrace';
-import { EventType } from './entities/EventType';
+import { ServiceType } from './entities/ServiceType';
 import { AvailabilityRule } from './entities/AvailabilityRule';
 import { Booking } from './entities/Booking';
 import { CalendarCredential } from './entities/CalendarCredential';
@@ -100,7 +100,7 @@ export const AppDataSource = new DataSource({
     CopilotConversation,
     CopilotMessage,
     CopilotTrace,
-    EventType,
+    ServiceType,
     AvailabilityRule,
     Booking,
     CalendarCredential,

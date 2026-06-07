@@ -6,7 +6,7 @@
  */
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
-import { EventType } from '../database/entities/EventType';
+import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
@@ -43,7 +43,7 @@ function slugify(name: string): string {
 async function readConfig(tenantId: string) {
   const { bot } = await getAnchorBotConfig(tenantId);
   const [eventType, availability] = await Promise.all([
-    AppDataSource.getRepository(EventType).findOne({ where: { botId: bot.id, isActive: true } }),
+    AppDataSource.getRepository(ServiceType).findOne({ where: { botId: bot.id, isActive: true } }),
     AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } }),
   ]);
   return {
@@ -80,7 +80,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   }
 
   if (data.eventType) {
-    const repo = AppDataSource.getRepository(EventType);
+    const repo = AppDataSource.getRepository(ServiceType);
     let et = await repo.findOne({ where: { botId: bot.id, isActive: true } });
     if (!et) et = repo.create({ tenantId, botId: bot.id, isActive: true });
     Object.assign(et, data.eventType, { slug: slugify(data.eventType.name) });

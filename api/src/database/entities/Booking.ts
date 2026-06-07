@@ -17,7 +17,10 @@ import {
   Index,
 } from 'typeorm';
 
-export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'failed';
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'failed' | 'request_created';
+
+/** How the booking was handled: auto-confirmed vs captured as a request/lead. */
+export type BookingMode = 'auto' | 'request';
 
 @Index(['tenantId', 'botId', 'status'])
 @Entity('chatbot_bookings')
@@ -34,8 +37,14 @@ export class Booking {
   @Column({ type: 'varchar', length: 16, default: 'internal' })
   provider!: string;
 
+  /** FK → chatbot_service_types.id. Column name kept as `event_type_id` for
+   *  back-compat with existing analytics/webhook/admin payloads. */
   @Column({ type: 'uuid', name: 'event_type_id', nullable: true })
   eventTypeId?: string | null;
+
+  /** auto = confirmed appointment; request = captured as a request/lead. */
+  @Column({ type: 'varchar', length: 16, name: 'booking_mode', nullable: true })
+  bookingMode?: BookingMode | null;
 
   @Column({ type: 'uuid', name: 'session_id', nullable: true })
   sessionId?: string | null;
@@ -76,6 +85,28 @@ export class Booking {
 
   @Column({ type: 'varchar', length: 320, name: 'attendee_email', nullable: true })
   attendeeEmail?: string | null;
+
+  @Column({ type: 'varchar', length: 64, name: 'customer_phone', nullable: true })
+  customerPhone?: string | null;
+
+  @Column({ type: 'varchar', length: 512, name: 'customer_address', nullable: true })
+  customerAddress?: string | null;
+
+  /** Which channel the booking originated from (widget/messenger/instagram/…). */
+  @Column({ type: 'varchar', length: 32, name: 'source_channel', nullable: true })
+  sourceChannel?: string | null;
+
+  /** Structured answers to the service's intake questions (P3). */
+  @Column({ type: 'jsonb', name: 'intake_answers', nullable: true })
+  intakeAnswers?: Record<string, unknown> | null;
+
+  /** Links to files uploaded during the booking conversation (P5). */
+  @Column({ type: 'jsonb', name: 'uploaded_files', nullable: true })
+  uploadedFiles?: unknown[] | null;
+
+  /** Short AI-generated summary of the request, for the owner's records. */
+  @Column({ type: 'text', name: 'ai_summary', nullable: true })
+  aiSummary?: string | null;
 
   @Column({ type: 'text', nullable: true })
   notes?: string | null;

@@ -7,7 +7,7 @@
  */
 import { v4 as uuidv4 } from 'uuid';
 import { AppDataSource } from '../../database/data-source';
-import { EventType } from '../../database/entities/EventType';
+import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
@@ -37,8 +37,8 @@ import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 
 export class InternalProvider implements BookingProvider {
-  private async loadConfig(botId: string): Promise<{ eventType: EventType; rule: AvailabilityRule }> {
-    const eventType = await AppDataSource.getRepository(EventType).findOne({
+  private async loadConfig(botId: string): Promise<{ eventType: ServiceType; rule: AvailabilityRule }> {
+    const eventType = await AppDataSource.getRepository(ServiceType).findOne({
       where: { botId, isActive: true },
     });
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId } });

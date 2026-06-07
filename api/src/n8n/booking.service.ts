@@ -15,7 +15,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
-import { EventType } from '../database/entities/EventType';
+import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
@@ -221,7 +221,7 @@ export async function getManageBooking(
   if (!booking || booking.provider !== 'internal') return null;
   const [rule, eventType] = await Promise.all([
     AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } }),
-    AppDataSource.getRepository(EventType).findOne({ where: { botId: booking.botId, isActive: true } }),
+    AppDataSource.getRepository(ServiceType).findOne({ where: { botId: booking.botId, isActive: true } }),
   ]);
   return { booking, timezone: rule?.timezone ?? 'UTC', eventName: eventType?.name ?? 'Appointment' };
 }

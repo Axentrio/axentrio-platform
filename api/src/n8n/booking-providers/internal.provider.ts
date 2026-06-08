@@ -6,6 +6,8 @@
  * `BOOKING_NOT_IMPLEMENTED` so the bot degrades gracefully.
  */
 import { v4 as uuidv4 } from 'uuid';
+import { DateTime } from 'luxon';
+import type { EntityManager } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
@@ -93,6 +95,40 @@ function resolveContactFields(service: ServiceType, extras?: BookingExtras): { a
   if (req.address && !address) throw new BookingError('Address is required for this service', 'ADDRESS_REQUIRED', 400);
   if (req.phone && !phone) throw new BookingError('A contact phone number is required for this service', 'PHONE_REQUIRED', 400);
   return { address, phone };
+}
+
+/**
+ * P5b — enforce `maxBookingsPerDay` for a service on the slot's local calendar day.
+ * Counts only HELD rows (`status IN ('pending','confirmed')`) for the same service,
+ * by `start_utc` in the half-open `[dayStart, nextDay)` window of `timezone` (Luxon,
+ * DST-exact). `null`/`≤0` cap = unlimited (a malformed/legacy row degrades to "no
+ * limit", never "no bookings"). Runs inside the caller's advisory-lock transaction so
+ * the count-then-write is atomic. `excludeBookingId` skips the row being rescheduled.
+ */
+async function enforceServiceDayCapacity(
+  manager: EntityManager,
+  service: ServiceType,
+  start: Date,
+  timezone: string,
+  excludeBookingId?: string
+): Promise<void> {
+  const max = service.maxBookingsPerDay;
+  if (!max || max <= 0) return; // unlimited
+  const local = DateTime.fromJSDate(start).setZone(timezone);
+  const dayStart = local.startOf('day').toUTC().toISO();
+  const nextDay = local.startOf('day').plus({ days: 1 }).toUTC().toISO();
+  const params: unknown[] = [service.id, dayStart, nextDay];
+  let sql = `SELECT count(*)::int AS n FROM chatbot_bookings
+             WHERE event_type_id = $1 AND status IN ('pending','confirmed')
+               AND start_utc >= $2 AND start_utc < $3`;
+  if (excludeBookingId) {
+    sql += ` AND id <> $4`;
+    params.push(excludeBookingId);
+  }
+  const rows: Array<{ n: number }> = await manager.query(sql, params);
+  if ((rows[0]?.n ?? 0) >= max) {
+    throw new BookingError('No more openings for this service that day', 'CAPACITY_REACHED', 409);
+  }
 }
 
 export class InternalProvider implements BookingProvider {
@@ -348,6 +384,9 @@ export class InternalProvider implements BookingProvider {
     try {
       bookingId = await AppDataSource.transaction(async (manager) => {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        // P5b: capacity gate — count held bookings for this service on the slot's local
+        // day, inside the same lock so the count-then-insert is atomic.
+        await enforceServiceDayCapacity(manager, service, start, rule.timezone);
         const rows: Array<{ id: string }> = await manager.query(
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
@@ -906,6 +945,13 @@ export class InternalProvider implements BookingProvider {
     try {
       sequence = await AppDataSource.transaction(async (manager) => {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        // P5b: a reschedule into a DIFFERENT local day consumes capacity on the target
+        // day — gate it (excluding this booking's own row). Same-day time moves don't.
+        const oldDay = DateTime.fromJSDate(booking.startUtc).setZone(rule.timezone).toISODate();
+        const newDay = DateTime.fromJSDate(start).setZone(rule.timezone).toISODate();
+        if (oldDay !== newDay) {
+          await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
+        }
         const rows: Array<{ sequence: number }> = await manager.query(
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),

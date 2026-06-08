@@ -65,6 +65,7 @@ interface FormState {
   isActive: boolean;
   customerAddressRequired: boolean;
   customerLocationRequired: boolean;
+  maxBookingsPerDay: string;
   intakeQuestions: IntakeQuestion[];
 }
 
@@ -87,6 +88,7 @@ const BLANK: FormState = {
   isActive: true,
   customerAddressRequired: false,
   customerLocationRequired: false,
+  maxBookingsPerDay: '',
   intakeQuestions: [],
 };
 
@@ -110,6 +112,7 @@ function formFromService(s: Service): FormState {
     isActive: s.isActive,
     customerAddressRequired: !!s.customerAddressRequired,
     customerLocationRequired: !!s.customerLocationRequired,
+    maxBookingsPerDay: s.maxBookingsPerDay != null ? String(s.maxBookingsPerDay) : '',
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)
       ? s.intakeQuestions.map((q) => ({ ...q, options: q.options ? [...q.options] : undefined }))
@@ -138,6 +141,7 @@ function toInput(f: FormState): ServiceInput {
     isActive: f.isActive,
     customerAddressRequired: f.customerAddressRequired,
     customerLocationRequired: f.customerLocationRequired,
+    maxBookingsPerDay: f.maxBookingsPerDay.trim() === '' ? undefined : Number(f.maxBookingsPerDay),
     // Always send the array (even []) so the server replaces/clears; echo each id.
     intakeQuestions: f.intakeQuestions.map((q) => ({
       ...(q.id ? { id: q.id } : {}),
@@ -395,6 +399,16 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
                 />
                 <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>
               </label>
+              <div>
+                <Label className="text-text-secondary mb-1 block">Max bookings per day</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.maxBookingsPerDay}
+                  onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+                  placeholder="Unlimited"
+                />
+              </div>
             </div>
 
             <label htmlFor="service-active" className="flex items-center gap-2 cursor-pointer">

@@ -256,6 +256,40 @@ describe('InternalProvider.createBooking', () => {
     expect(transaction).not.toHaveBeenCalled();
     expect(createCalendarEvent).not.toHaveBeenCalled();
   });
+
+  // ── Capacity (P5b) ─────────────────────────────────────────────────────────
+
+  it('rejects with CAPACITY_REACHED when the service is at its daily cap', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, maxBookingsPerDay: 1 }]); // sole active, cap 1
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('count(*)')) return [{ n: 1 }]; // already at cap
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'bk-1' }];
+      return [];
+    });
+    await expect(
+      provider.createBooking(ctx, 'idem-cap', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+  });
+
+  it('allows the booking when under the daily cap', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, maxBookingsPerDay: 2 }]);
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('count(*)')) return [{ n: 1 }]; // 1 of 2 used
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'bk-1' }];
+      return [];
+    });
+    const res = await provider.createBooking(ctx, 'idem-cap2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+  });
+
+  it('treats a null cap as unlimited — never issues the count query', async () => {
+    // default EVENT_TYPE has no maxBookingsPerDay
+    const res = await provider.createBooking(ctx, 'idem-cap3', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('count(*)'))).toBe(false);
+  });
 });
 
 describe('InternalProvider.requestAppointment (P2a)', () => {

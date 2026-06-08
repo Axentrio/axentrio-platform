@@ -134,6 +134,7 @@ export class PromptBuilder {
       // (a service whose questions are all malformed produces no lines → no dangling rule).
       const hasIntake = services.some((s) => intakeLines(s) !== '');
       const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
+      const hasCapacity = services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
@@ -148,6 +149,11 @@ When the customer wants to book, identify which service they mean and pass its i
           hasContact
             ? `
 5. If the chosen service is flagged "needs address" and/or "needs phone", ask for it before booking or capturing the request, and pass it as customerAddress / customerPhone. If a booking tool returns ADDRESS_REQUIRED or PHONE_REQUIRED, ask for the missing detail and re-call the tool with it.`
+            : ''
+        }${
+          hasCapacity
+            ? `
+6. If create_booking returns CAPACITY_REACHED, that service is fully booked for that day — offer the customer the next available day instead; do not retry the same day.`
             : ''
         }
 ${lines}`

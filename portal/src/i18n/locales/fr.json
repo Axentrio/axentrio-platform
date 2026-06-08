@@ -60,7 +60,7 @@
   },
   "bookings": {
     "title": "Réservations",
-    "intro": "Laissez votre chatbot planifier des rendez-vous. Cal.com gère l'agenda ; nous l'intégrons à chaque conversation.",
+    "intro": "Laissez votre chatbot planifier des rendez-vous — il vérifie les disponibilités en temps réel et réserve directement dans la conversation.",
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Connecté",

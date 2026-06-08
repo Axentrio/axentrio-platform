@@ -60,7 +60,7 @@
   },
   "bookings": {
     "title": "Boekingen",
-    "intro": "Laat je chatbot afspraken inplannen. Cal.com beheert de agenda; wij koppelen het aan elk gesprek.",
+    "intro": "Laat je chatbot afspraken inplannen — hij controleert realtime beschikbaarheid en boekt direct in het gesprek.",
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Verbonden",

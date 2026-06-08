@@ -60,7 +60,7 @@
   },
   "bookings": {
     "title": "Bookings",
-    "intro": "Let your chatbot schedule appointments. Cal.com handles the calendar; we wire it into every conversation.",
+    "intro": "Let your chatbot schedule appointments — it checks real-time availability and books right inside the conversation.",
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Connected",

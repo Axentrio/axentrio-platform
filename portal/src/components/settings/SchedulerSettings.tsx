@@ -12,6 +12,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { DatePicker } from '@/components/ui/date-picker';
+import { TimeSelect } from '@/components/ui/time-select';
 import { cn } from '@/lib/utils';
 import {
   useSchedulerConfig,
@@ -257,20 +259,16 @@ export const SchedulerSettings: React.FC = () => {
                           />
                           <span className="text-sm text-text-primary">{label}</span>
                         </label>
-                        <Input
-                          type="time"
+                        <TimeSelect
                           value={days[key].start}
                           disabled={!days[key].enabled}
-                          onChange={(e) => setDay(key, { start: e.target.value })}
-                          className="w-32"
+                          onChange={(v) => setDay(key, { start: v })}
                         />
                         <span className="text-text-muted">–</span>
-                        <Input
-                          type="time"
+                        <TimeSelect
                           value={days[key].end}
                           disabled={!days[key].enabled}
-                          onChange={(e) => setDay(key, { end: e.target.value })}
-                          className="w-32"
+                          onChange={(v) => setDay(key, { end: v })}
                         />
                       </div>
                     ))}
@@ -300,13 +298,12 @@ export const SchedulerSettings: React.FC = () => {
                     <div className="space-y-2">
                       {overrides.map((o, i) => (
                         <div key={i} className="flex items-center gap-3 flex-wrap">
-                          <Input
-                            type="date"
+                          <DatePicker
                             value={o.date}
-                            onChange={(e) =>
-                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: e.target.value } : x)))
+                            onChange={(v) =>
+                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))
                             }
-                            className="w-40"
+                            className="w-44"
                           />
                           <label className="flex items-center gap-2 cursor-pointer">
                             <Checkbox
@@ -319,22 +316,18 @@ export const SchedulerSettings: React.FC = () => {
                           </label>
                           {!o.closed && (
                             <>
-                              <Input
-                                type="time"
+                              <TimeSelect
                                 value={o.start}
-                                onChange={(e) =>
-                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, start: e.target.value } : x)))
+                                onChange={(v) =>
+                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, start: v } : x)))
                                 }
-                                className="w-32"
                               />
                               <span className="text-text-muted">–</span>
-                              <Input
-                                type="time"
+                              <TimeSelect
                                 value={o.end}
-                                onChange={(e) =>
-                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, end: e.target.value } : x)))
+                                onChange={(v) =>
+                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, end: v } : x)))
                                 }
-                                className="w-32"
                               />
                             </>
                           )}

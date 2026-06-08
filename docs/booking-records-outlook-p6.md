@@ -483,9 +483,21 @@ respects their existing events (free/busy), and cross-bot double-booking is stil
       change for those legacy rows.
     The portal shows "Reconnect needed" instead of a misleading "Connected".
   - New config block `config.microsoft.{clientId, clientSecret, redirectUri, stateJwtSecret}`
-    from `MICROSOFT_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` (env, all optional). A separate
+    from `MICROSOFT_CLIENT_ID` / `_SECRET` / `_REDIRECT_URI` (env, all optional). **`stateJwtSecret`
+    source (locked):** like Google's (`config.google.stateJwtSecret` aliases `META_OAUTH_JWT_SECRET`,
+    line ~76), `config.microsoft.stateJwtSecret` **reuses the SAME `META_OAUTH_JWT_SECRET`** — one
+    shared state-signing secret across all OAuth callbacks; there is no separate
+    `MICROSOFT_STATE_JWT_SECRET` env var. The per-callback `provider` claim (round-1/round-2: Google
+    callback requires `provider==='google'`, Microsoft requires `provider==='microsoft'`) is what keeps
+    states provider-isolated, so sharing one signing secret is safe. A separate
     redirect URI / callback path (`/integrations/microsoft/callback`) so the Azure app
-    redirect matches.
+    redirect matches. **Public-callback authorization parity (locked):** the Microsoft callback
+    (public, no session, like Google's) MUST perform the SAME pre-store checks the Google callback
+    does before inserting the credential — re-verify `requireFeature(... 'calendarIntegrations')` and
+    `getOwnedBot` (tenant+bot resolved from the validated signed-JWT `state`) — so a Microsoft cred is
+    never stored for a bot the caller doesn't own or a tenant without the feature. This mirrors the
+    existing Google callback's `requireFeature` + `getOwnedBot` re-check exactly; Part B does not relax
+    it.
   - **Microsoft-not-configured AFTER a cred already exists** (env vars removed): `connect-url`
     throws `MicrosoftNotConfiguredError`; **`disconnect` MUST still work** (it only updates our
     DB row `status='revoked'` + rekeys; best-effort Graph revoke is skipped/swallowed when
@@ -732,3 +744,750 @@ changing the customer-facing email/ICS body; migrating old Google events on a pr
   personal account), the bot won't offer a slot colliding with an existing Outlook event and
   fails closed (503) on a Graph error, and reschedule/cancel update/delete the Outlook event.*
   Blocked by P6a (body builder) + P6b (OAuth/creds/port).
+
+---
+
+## Implementation refinements (codex round 1 — authoritative over conflicting text above)
+
+These resolve the round-1 review. Where a point is genuinely live-Graph behavior, it is
+turned into an explicit, testable decision rule with a concrete fallback/guard (P6c verifies
+the assumption, but the fallback is locked NOW so it is never hand-waved). Numbered to match
+the review.
+
+1. **Part A persistence claim narrowed (doc fix).** Part A does NOT make the *stored* Booking
+   row carry new rich contact/intake content. The confirmed-path INSERT adds **`source_channel`
+   only**. The rich-content columns (`customer_phone`, `customer_address`, `intake_answers`,
+   `ai_summary`) stay whatever an upstream slice (P3/P5) wrote — NULL on the auto-confirm path
+   today. Part A is precisely: **render existing Booking fields into the owner's calendar event
+   body when present** (and persist `source_channel`). The "Current state" bullet that reads as
+   if Part A backfills those columns is superseded by this line.
+
+2. **`transactionId` on `/me/events` — verify, but the backstop is locked.** P6c MUST verify
+   against live Graph that `POST /me/events` accepts a client-supplied `transactionId` on BOTH
+   the Teams payload and the no-Teams retry payload, and observe its dedupe window. **Locked
+   guard regardless of the verification outcome:** the **`BookingReference` ref-row lookup
+   (idempotency step 1) is the durable anchor**, NOT `transactionId`. If P6c finds Graph ignores
+   or rejects `transactionId` on `/me/events`, we DROP it from the payload and rely solely on
+   (a) ref-row-first check before every create and (b) the reconciler's recreate-on-not-found
+   recovering/relinking any orphan — `transactionId` is a best-effort *narrowing* of the
+   process-died-between-create-and-ref window, never a correctness requirement. Removing it
+   changes no other contract. Tests assert: ref-row present ⇒ no second create, independent of
+   `transactionId` support.
+
+3. **Teams fallback allow-list — concrete, fail-closed-on-unknown (locked).** The no-Teams
+   retry fires ONLY when ALL hold: (i) HTTP status is **4xx** (never 5xx — 5xx is transient,
+   retried by the Graph retry wrapper, not de-Teamed), (ii) the Graph error `code` is in the
+   **explicit allow-list** below, (iii) it is the create call. **Allow-list (locked starting
+   set):** `{ "OrganizerNotInDirectory",
+   "ExceptionMessageRequiresOnlineMeetingProvider", "OnlineMeetingErrorMessage" }` plus any code
+   whose message matches the case-insensitive substring `online meeting`. **`ErrorInvalidRequest` is
+   generic and is NOT matchable by code alone (locked):** because `ErrorInvalidRequest` is Graph's
+   catch-all bad-request code (it fires on malformed bodies and calendar errors too — which must NEVER
+   de-Team), an `ErrorInvalidRequest` response de-Teams ONLY when its message ALSO matches the
+   case-insensitive `online meeting` (or `onlineMeeting`/`teams`-online-meeting-specific) substring —
+   i.e. it qualifies via the message-substring rule, never via the bare code. This prevents
+   `ErrorInvalidRequest` from swallowing unrelated bad-request errors. **Unknown 4xx code ⇒
+   FAIL CLOSED on the de-Team decision: do NOT retry-without-Teams; propagate as a normal sync
+   failure (`sync_pending`).** P6c MAY ADD newly-observed personal-account codes to this
+   allow-list (append-only) but MUST NOT widen the trigger to "any 4xx". 401/403/throttle/
+   malformed-body are explicitly NOT in the list and never de-Team. This is the locked rule;
+   P6c's live check only *extends* the allow-list, it cannot relax the unknown⇒fail-closed
+   default.
+
+4. **Switch orphan — precise admin surface (locked).** Two concrete, already-existing surfaces,
+   no new UX promise: **(i)** at switch time the switch path emits exactly one
+   `CALENDAR_PROVIDER_SWITCHED` log line carrying `{ botId, fromProvider, toProvider,
+   rekeyedFutureBookingCount }`; **(ii)** for each old-provider booking later touched
+   (reschedule/cancel) the row's **`sync_last_error`** is set to the literal
+   `'no active <provider> credential for stored ref'` and `sync_pending` is cleared (terminal),
+   which is the durable, admin-visible signal already rendered in the existing admin bookings
+   view. No new table, no new field, no customer-facing claim. "Admin warning path" = these two.
+
+5. **Post-switch availability acceptance criterion (locked).** **After a provider switch, the
+   ACTIVE provider's calendar is the SOLE availability source.** Events stranded on the
+   abandoned (old-provider) calendar are NOT consulted for free/busy; their bookings are still
+   protected only via the in-scheduler rekey (`mscal:<account_id>`), not via reading the old
+   calendar. Support/QA acceptance: "switched-bot free/busy reflects only the new calendar" is a
+   pinned expectation, not a bug.
+
+6. **Retryable-vs-terminal taxonomy (exact, locked).** For a CRUD/sync mirror failure on a
+   booking row:
+   - **`no_connection`** (ref's provider has no active cred — e.g. after a switch/disconnect):
+     the reconciler routes by `ref.providerType`, finds no active cred, and goes **terminal
+     IMMEDIATELY** (sets `sync_last_error`, clears `sync_pending`) — it does NOT consume
+     `MAX_ATTEMPTS`, because retrying can never succeed (the cred is gone for good).
+   - **Provider env unconfigured / OUR-misconfig bucket (b)** (`invalid_client` etc.): retryable
+     under the **EXISTING bounded backoff**, terminal **after `MAX_ATTEMPTS`** (env may be
+     restored before the cap). Not immediate-terminal, because it can self-heal.
+   - **Owner-actionable reauth bucket (a)** (`invalid_grant`/policy): the cred is flagged
+     `reauth_required`; the mirror is `sync_pending` and retried under bounded backoff, terminal
+     after `MAX_ATTEMPTS`. Reconnect clears the flag and a fresh attempt can succeed.
+   - **Transient bucket (c)** (5xx/network/throttle): retryable, bounded backoff, terminal after
+     `MAX_ATTEMPTS`.
+   So exactly ONE class is immediate-terminal (`no_connection` for a stored ref whose provider
+   is gone); all others use the existing `MAX_ATTEMPTS` backoff. This removes the apparent
+   contradiction between "caught + `sync_pending`" and "goes terminal."
+
+7. **No credential WRITE on the read/identity path (locked, race-safe).** Identity resolution,
+   free/busy, and rekey are READ-ONLY with respect to credential state — they MUST NOT write
+   `reauth_required`. When `resolveIdentityMicrosoft`/`getBusyMicrosoft` observes a broken active
+   Microsoft cred (null `account_id`, or `calendarId != 'primary'`), it **THROWS
+   `CALENDAR_REAUTH_REQUIRED` WITHOUT writing the flag** (free/busy fails closed; identity caller
+   fails closed). The `reauth_required` flag is set ONLY by the **token-refresh path** (bucket
+   (a)), which already holds the cred row `FOR UPDATE` in its refresh txn — so the only writer of
+   `reauth_required` is the locked refresh, and it never races reconnect/disconnect (those take
+   the same per-bot advisory lock). A null-`account_id` active cred therefore reliably fails
+   closed on every read AND gets flagged the next time a token refresh is attempted, with no
+   write on the hot read path. This supersedes any earlier "set `reauth_required` and throw
+   inside identity resolution" wording: it is **throw-only inside identity resolution; flag-set
+   only inside the locked refresh.**
+
+8. **Migration index swap — exact, with rollback (locked).** `up()`: (1) dedup as specified;
+   (2) `DROP INDEX IF EXISTS "<existing partial-unique index name>"` — the implementer reads the
+   actual index name from the migration that created it (the one defining
+   `(botId, provider) WHERE status='active'`) and references it explicitly by that literal name
+   (NOT a guessed name); if the name is uncertain it is resolved from
+   `pg_indexes WHERE indexdef ILIKE '%status%active%' AND tablename='chatbot_calendar_credentials'`
+   at write time and hard-coded. (3) `CREATE UNIQUE INDEX "ux_calcred_active_per_bot" ON
+   chatbot_calendar_credentials (bot_id) WHERE status='active'`. `down()`: drop
+   `ux_calcred_active_per_bot`, recreate the original `(botId, provider) WHERE status='active'`
+   index under its original name. `IF EXISTS`/`IF NOT EXISTS` guards make both directions
+   idempotent. The new index name is fixed (`ux_calcred_active_per_bot`) so later migrations
+   reference a known literal.
+
+9. **`getActiveCredential` is provider-scoped by adapter closure (doc fix, not a contradiction).**
+   The port method signature stays `getActiveCredential(botId)` with **no provider arg** because
+   **each adapter instance is bound to exactly one provider** (the Google adapter only ever
+   queries `WHERE provider='google' AND status='active'`; the Microsoft adapter
+   `WHERE provider='microsoft' AND status='active'`). The provider is a property of the adapter,
+   not a parameter. `providerByType(ref.providerType)` returns the correctly-scoped adapter, so a
+   Google-ref op reads only the Google cred. There is no interface/usage contradiction: the
+   adapter closes over its provider.
+
+10. **Status response shape (locked).** Each provider block calls its OWN status endpoint
+    (`/integrations/google/status`, `/integrations/microsoft/status`). Each returns the SAME
+    shape: `{ connected: boolean, provider: 'google'|'microsoft', accountEmail: string|null,
+    needsReauth: boolean, misconfigured: boolean }`. **A provider reports `connected:true` ONLY
+    when ITS OWN provider has the single active cred**; when the OTHER provider is active, this
+    provider returns `connected:false` (its own active-cred query finds nothing — the
+    single-active model means at most one provider is ever `connected:true`). The UI shows the
+    active one as "Connected" and the inactive one as "Connect" + the switch-replaces copy. So
+    the two status endpoints are independent and provider-scoped; they cannot both report
+    connected.
+
+11. **Microsoft disconnect is DB-only (locked).** Normal disconnect does NOT call any Graph
+    token/consent-revocation endpoint; it sets the cred `status='revoked'` and rekeys. (Remote
+    Graph revocation is out of scope for P6 — the owner revokes app consent in their Microsoft
+    account settings if desired.) Therefore the env-missing case needs no special "swallow remote
+    revoke" carve-out — there is no remote revoke to swallow; disconnect is always a local DB
+    update and always works. This supersedes the earlier "best-effort Graph revoke is skipped/
+    swallowed when unconfigured" wording: there is **no** remote revoke in any disconnect path.
+
+12. **Create-time timezone — IANA-direct, verify, fail strategy locked.** The create payload
+    sends `start`/`end` as `{ dateTime, timeZone: <IANA tz> }`. **Decision rule:** modern Graph
+    accepts IANA zone names on event create when the request carries
+    `Prefer: outlook.timezone="<IANA>"`-style support; P6c MUST verify a common IANA zone (e.g.
+    `Europe/Paris`, `America/New_York`) is accepted on `POST /me/events`. **Locked fallback if
+    verification shows Graph rejects the IANA name:** the create payload sends
+    `timeZone: "UTC"` with `dateTime` converted to the absolute UTC instant (we already hold the
+    absolute start/end), which Graph accepts universally — NO Windows-zone mapping library is
+    introduced. So the event time is always correct regardless of IANA acceptance; the only
+    difference is whether the stored zone label is IANA or UTC. A create that errors on the zone
+    is NOT silently dropped — it falls to the UTC-instant form. Tests pin: create succeeds for a
+    non-UTC IANA zone via whichever form P6c locks.
+
+13. **All-day busy mapping (locked).** Under `Prefer: outlook.timezone="UTC"`, `calendarView`
+    returns all-day events with `dateTime` at `00:00:00`/next-day `00:00:00` and
+    `timeZone==="UTC"`; we parse them as UTC instants through the SAME path as timed events. We
+    do NOT attempt to re-anchor an all-day event to the owner's local midnight — the busy
+    interval is exactly what Graph returns under the UTC `Prefer` header. **Accepted consequence
+    (locked, test-pinned):** an all-day event's busy window is its Graph-UTC span; if that
+    differs from the owner's local-midnight intuition the bot is at worst MORE conservative
+    (fail-safe-toward-busy), never less — so it can over-block but never under-block, which is
+    the safe direction. No DST/all-day re-anchoring logic is added in P6.
+
+14. **Google regression coverage (locked).** Because Part B touches shared Google code (token
+    refresh → `FOR UPDATE` double-checked, state JWT → `provider:'google'` claim, status →
+    `needsReauth`, active-cred uniqueness index, provider-aware `conflictKeyFor` defaulting to
+    `gcal:`), P6b/P6c MUST include Google **regression** tests covering: connect (state mint +
+    callback, including a legacy provider-less state within the cutoff), refresh (stable refresh
+    token under the new `FOR UPDATE` path; no behavior change for non-rotating tokens), status
+    (`needsReauth` true for a no-refresh-token legacy cred, false otherwise), rekey (`gcal:` key
+    unchanged; no migration of existing Google bookings), free/busy (unchanged null-vs-busy),
+    and create/update/delete (unchanged outcomes + same deterministic-id idempotency). These are
+    listed so the shared-surface changes can't silently regress Google.
+
+15. **4000 cap is an internal safety cap (doc fix).** The 4000 code-point `description` cap is an
+    **internal safety bound**, NOT derived from a provider limit (Graph and Google both allow far
+    larger bodies). Its job is to keep bodies bounded/snapshot-stable and avoid pathological
+    payloads, not to satisfy an API maximum. Stated so no one "raises it to the provider limit."
+
+16. **Reconciler must load the FULL body input set (locked fixture).** `loadEventMeta` (extended)
+    MUST load every field `buildBookingEventContent` consumes so the reconciled body is
+    byte-identical to the inline one: from the booking row — `attendeeName`, `attendeeEmail`,
+    `customerPhone`, `customerAddress`, `intakeAnswers`, `aiSummary`, `notes`, `sourceChannel`,
+    `bookingId` (for `manageUrl`); and the related `service` `{ name, description }`. The
+    reconciler-parity test uses a fixture that populates ALL of these (non-null) and asserts the
+    inline-vs-reconciler builder strings are equal — so a partially-loaded row would fail the
+    test. This pins the exact load set.
+
+17. **`buildManageUrl`/base-URL config must NOT block booking (locked).** `Manage:` is always
+    appended, but a missing/invalid manage base-URL config MUST NOT throw out of the body builder
+    and MUST NOT fail event creation. **Rule:** `buildBookingEventContent` treats `manageUrl` as
+    just another value — if `buildManageUrl(bookingId)` returns null/empty (misconfig), the
+    `Manage:` line is simply **omitted** (same as any empty field), the rest of the body renders,
+    the event still creates, and the booking still succeeds. The builder never throws on manage
+    config. (If current `buildManageUrl` can throw on missing config, the caller catches and
+    passes `manageUrl=null`.) Booking success never depends on manage-URL config.
+
+18. **Port throw-contract documented (locked).** The port's method contract:
+    - `getBusy` → returns `BusyInterval[]` or `null` (`null` = no active cred only); **MAY THROW**
+      on a present-but-broken provider (token/config/parse) — callers (`loadAllBusy`) catch and
+      raise 503 (fail closed).
+    - `createEvent` → returns `CalendarEventResult` or `'no_connection'`-equivalent `null` (no
+      cred); **MAY THROW** token/config errors (`CALENDAR_REAUTH_REQUIRED`/
+      `MicrosoftNotConfiguredError`) — caught by the `InternalProvider` sync wrappers, which mark
+      `sync_pending` (booking already committed, never user-facing).
+    - `updateEvent`/`deleteEvent` → return status strings for HTTP outcomes; **MAY THROW**
+      token/config errors, absorbed by the same wrappers.
+    - `resolveIdentity` → returns `string|null`; **MAY THROW** for a broken Microsoft cred
+      (null `account_id`) — caller fails closed.
+    - `getActiveCredential` → returns `CalendarCredential|null`; does not throw.
+    Every call site of a throwing method is inside either `loadAllBusy` (→503) or a sync wrapper
+    (→`sync_pending`); no throw reaches the customer-facing booking result.
+
+19. **Delegated permissions only (locked).** P6 uses **delegated** Microsoft Graph permissions
+    (the authorization-code user flow against `/me/...`); **application permissions are explicitly
+    out of scope** and not requested. All Graph calls are `/me/...` with a per-owner delegated
+    access token; there is no app-only token, no admin-consent-for-app-permissions path beyond the
+    tenant-policy reauth bucket (a). This pins the token type so `/me` behavior is well-defined.
+
+20. **Umbrella verify list — covered.** The live-Graph items (IANA timezone acceptance on
+    create [#12], `transactionId` on `/me/events` [#2], Teams unsupported codes [#3], multitenant
+    + personal callback/status [deployment prereq, already stated]) each now carry a locked
+    fallback/guard above, so P6c's verification can only *confirm or pick the pre-locked
+    fallback*, never leave the path undefined.
+
+---
+
+## Implementation refinements (codex round 2 — authoritative over conflicting text above)
+
+Numbered to match the round-2 review.
+
+1. **Outlook immutable IDs (locked).** All Outlook event addressing uses
+   **`Prefer: IdType="ImmutableId"`** on the create call AND on every subsequent
+   update/delete/fetch. We capture and store the **immutable** `id` from the create response in
+   `BookingReference.externalEventId`, and send the same `Prefer: IdType="ImmutableId"` header on
+   `PATCH`/`DELETE /me/events/{id}`. This prevents the owner moving an event between folders from
+   changing its id (which would otherwise cause false `not_found`, duplicate recreates, or
+   undeletable stale events). The header is part of the locked Graph contract for every Outlook
+   event call (create/update/delete), exactly as `Prefer: outlook.timezone="UTC"` is for
+   free/busy. P6c verifies the create response id is immutable.
+
+2. **Booking path serializes with the provider switch via the SAME `calcred:<botId>` lock
+   (locked).** The lock interaction gap is real: the credential exchange/switch takes
+   `pg_advisory_xact_lock(hashtext('calcred:'||botId))`, but booking creation only took the
+   per-`calendar_key` lock — so a booking could resolve the OLD provider/identity, then a switch
+   rekeys, and the booking inserts under a now-stale key. **Fix (locked):** the booking-create
+   path takes the `calcred:<botId>` advisory lock at the point it resolves the provider +
+   computes the `calendar_key`, held in the same txn through the conflict-check + INSERT. Because
+   the switch's revoke+insert and the booking's resolve+stamp now contend on the **same**
+   `calcred:<botId>` lock, they serialize: either the booking commits fully under the old
+   identity before the switch (then the switch's `rekeyBotBookings` re-stamps it), or it blocks
+   until the switch commits and then resolves the NEW identity. No booking ever inserts under a
+   key that's stale relative to a committed switch. (The per-`calendar_key` gist lock still does
+   the overlap exclusion; `calcred:<botId>` is the additional outer serialization with the
+   switch.) This is a precise lock-ordering rule: **acquire `calcred:<botId>` BEFORE the
+   per-`calendar_key` lock** in the booking path to match the switch path's single lock and avoid
+   any cross-lock deadlock (consistent global order: calcred → calendar_key).
+
+3. **One ref per booking enforced by `bookingId`-only lookup (locked, supersedes
+   `(bookingId,'microsoft')`).** The idempotency step-1 ref lookup is by **`bookingId` ALONE**,
+   not `(bookingId, providerType)`. Before any create the path loads
+   `BookingReference WHERE booking_id=$1` (any provider); if ANY ref exists, the booking already
+   has a home provider and we **reuse that ref's provider** — we never create a second
+   provider's ref. Combined with "reschedule/cancel/reconcile route by `ref.providerType`" and
+   "only a brand-new booking (no ref at all) creates a ref under the active provider," this
+   guarantees **exactly one `BookingReference` row per booking for life**. The unique constraint
+   `(bookingId, providerType)` permits two rows physically, but the code path never writes a
+   second because it checks `bookingId` alone first. (We do NOT add a DB `unique(bookingId)` —
+   the column was left provider-scoped for the deferred dual-provider future; the single-ref
+   guarantee is enforced by the bookingId-first lookup, which is unit-tested: a booking with a
+   Google ref, after a switch to Outlook, never gains an Outlook ref on reschedule/cancel/
+   reconcile.)
+
+4. **`reauth_required` writes serialize on `calcred:<botId>`, not bare `FOR UPDATE` (locked,
+   corrects the round-1 race claim).** Round-1 said the refresh's `FOR UPDATE` row lock
+   serializes with reconnect/disconnect — but those take the `calcred:<botId>` advisory lock, a
+   different primitive, so they would NOT actually serialize. **Corrected lock rule:** the
+   token-refresh path (the only writer of `reauth_required` / rotated tokens) acquires the SAME
+   `calcred:<botId>` advisory lock for the duration of its read-recheck-refresh-persist txn (in
+   addition to, or instead of, the row `FOR UPDATE`). Connect/disconnect/switch already hold
+   `calcred:<botId>`. So refresh, reconnect, disconnect, and switch are all mutually serialized on
+   one primitive — a refresh can't flip `reauth_required` while a reconnect is clearing it, and a
+   disconnect can't revoke mid-refresh. The double-checked "re-read and only refresh if still
+   expired" runs inside this lock. (Read paths — free/busy/identity — take NO lock and NEVER
+   write the flag, per round-1 #7.)
+
+5. **Broken-cred invariants surfaced in `/status` (locked, fills the gap).** `/status` does NOT
+   need a token, but it MUST inspect the stored row's structural invariants and report
+   `needsReauth:true` when the active cred is structurally broken, so the portal never shows a
+   healthy "Connected" over a cred that always fails closed. **Locked status rule:** for a
+   Microsoft active cred, `needsReauth:true` if ANY of: `reauth_required===true`, OR
+   `refreshTokenEnc` is null, OR **`account_id` is null**, OR **`calendarId != 'primary'`** (the
+   two structural-broken conditions that throw on read). For Google: `reauth_required` OR no
+   refresh token (unchanged). This makes the structural-broken conditions (round-1 #7's
+   throw-only-on-read cases) visible in status without writing the flag — status DERIVES
+   `needsReauth` from the stored row each call; it doesn't require the flag to be set.
+
+6. **Cached-token rejection: one forced refresh + retry, then mapped (locked).** Graph can reject
+   a still-unexpired cached access token (revoked grant, claims challenge). **Rule:** on a
+   **401** from any Graph call (free/busy or CRUD), perform ONE forced token refresh (ignoring the
+   60s-cushion cache) and retry the call once. If the forced refresh itself fails, map by the
+   round-1 #6 refresh-failure taxonomy (bucket a/b/c). If the retried call still returns 401/403,
+   treat as **bucket (a) owner-actionable** → throw `CALENDAR_REAUTH_REQUIRED` (free/busy fails
+   closed; CRUD → `sync_pending`). **Exact 403 split (locked, resolves the `no_access`-vs-reauth
+   inconsistency with Event CRUD):** a 403 is classified by WHETHER it is token/identity-level or
+   event-operation-level:
+   - **AUTH/POLICY 403 → bucket (a) reauth** (throw `CALENDAR_REAUTH_REQUIRED`): a 403 carrying a
+     `WWW-Authenticate` challenge header, or a Graph error `code` indicating conditional-access /
+     tenant-policy / consent / insufficient-SCOPE (the whole grant lacks `Calendars.ReadWrite`) — i.e.
+     the *credential/grant itself* is the problem; a reconnect (re-consent / re-scope) is the fix.
+   - **EVENT-LEVEL 403 → CRUD `no_access` status (NOT reauth)** (the round-2/Event-CRUD mapping holds):
+     a 403 with no auth challenge whose Graph `code` denies the operation on THIS specific event while
+     the token is otherwise valid (e.g. the event is on a calendar/object the delegated token can't
+     modify) → `updateEvent`/`deleteEvent` return `'no_access'`, the booking row is flagged
+     `sync_pending`/terminal per the taxonomy, and we do NOT flip `reauth_required` (reconnecting the
+     SAME account won't change a per-event permission). 
+   So the split is: credential/grant-level 403 (challenge or scope/policy code) ⇒ reauth; event-level
+   403 (no challenge, operation-denied code on a valid token) ⇒ `no_access`. The forced-refresh+retry
+   path (above) only escalates to reauth when the RETRY still 401/403s WITH an auth-level signal; an
+   event-level 403 on the retry maps to `no_access`, not reauth. We do NOT add claims-challenge step-up
+   handling (out of scope) — a claims challenge is an auth-level 403 and maps to (a) reauth. This is the
+   exact mapping for cached-token rejection and for the standing Event-CRUD 403 outcome.
+
+7. **Teams fallback: status gate BEFORE substring match (locked, removes the contradiction).**
+   The de-Team decision evaluates in this exact order: (i) if status is 401/403/429 or any 5xx →
+   **never de-Team** (return to normal failure handling: 401/403→reauth, 429/5xx→retry wrapper);
+   (ii) ONLY for a remaining **4xx (i.e. 400/404/422-class, NOT 401/403/429)** do we then check
+   the error `code` allow-list OR the `online meeting` message substring. So the substring rule
+   can never catch a 401/403, because those are excluded one step earlier. The substring is a
+   secondary matcher scoped to already-non-auth 4xx responses. (Round-1 #3's allow-list stands;
+   this only fixes the evaluation order so 401/403 are filtered first.)
+
+8. **`transactionId` recovery claim stated honestly + durable marker (locked).** Corrected: if
+   `transactionId` is dropped/ignored and the process dies AFTER create but BEFORE the ref write,
+   the reconciler cannot relink an arbitrary orphan by event-body content alone. **To keep
+   recovery durable we write a stable searchable marker on the event at create time:** a
+   **`singleValueExtendedProperty`** (a custom Graph extended property) carrying our `bookingId`,
+   set in the SAME create payload. The reconciler's recreate-on-not-found path FIRST queries
+   `/me/events?$filter=...singleValueExtendedProperty...eq '<bookingId>'` to find a pre-existing
+   orphan and relink it (write the ref) instead of creating a duplicate; only if none is found
+   does it create. So recovery does NOT depend on `transactionId` (which stays as a best-effort
+   in-window dedupe) — the extended-property marker is the durable, queryable anchor.
+   **Residual hole (honest):** create succeeded, marker write was part of the same create so it
+   either both-landed or neither-landed; the only unrecoverable orphan is one where Graph created
+   the event but we never learned its id AND the marker filter is eventually-consistent at query
+   time — bounded, logged, never double-books (events don't affect `calendar_key`), never blocks
+   the booking. P6c verifies the extended-property create + `$filter` round-trip.
+
+9. **All-day free/busy: conservative expansion, not an unproven over-block claim (locked).** The
+   round-1 "UTC span can only over-block" claim is NOT proven and could UNDER-cover owner-local
+   hours. **Locked rule:** P6c verifies how Graph returns all-day events under
+   `Prefer: outlook.timezone="UTC"`. **Conservative guard regardless of outcome:** if a returned
+   event is all-day (`isAllDay===true`), we do NOT trust the raw UTC midnight-to-midnight span;
+   we **expand it to cover the full owner-local day(s) it spans**, by treating the all-day event
+   as busy from the start-of-day to end-of-day in the **booking/scheduling timezone** (the tz we
+   already use for offering slots) for each date the event covers. This guarantees an all-day
+   block can never UNDER-cover the owner-local day (it can only over-block at the edges, which is
+   fail-safe-toward-busy). `isAllDay` is read from the event; if absent we fall back to the timed
+   parse. Unit-tested: an all-day event blocks the entire owner-local day in the scheduling tz,
+   regardless of the owner's UTC offset.
+
+10. **Migration dedup: abort on real duplicates, no silent provider change (locked, supersedes
+    "keep most-recent").** Because keeping the most-recent active row could silently change a
+    bot's active provider WITHOUT repairing `calendar_key` (leaving future rows keyed to the
+    abandoned provider), the migration does NOT auto-pick a winner when it finds a bot with **>1
+    active cred of DIFFERENT providers**. **Locked behavior:** (a) if duplicates are all the SAME
+    provider (benign **only when they share the same calendar identity** — see next sentence), keep
+    greatest `(updated_at, id)`, revoke the rest (safe, identity/key unchanged). **Same-provider
+    duplicates that point at DIFFERENT calendar identities are NOT benign (locked):** if same-provider
+    active dups differ in their identity-bearing field (Google: `calendarId` differs, or `accountEmail`
+    differs when `calendarId='primary'`; Microsoft: `account_id` differs), keeping newest would
+    silently change the bot's calendar identity WITHOUT a rekey — so this case is treated like the
+    cross-provider case: the migration **ABORTS** (or, equivalently, refuses to auto-pick) for that bot.
+    Only same-provider dups whose identity field is identical (a true accidental duplicate of the same
+    calendar) are auto-deduped by keeping newest. (b) if a bot has active creds of **two different
+    providers** (the dangerous case), the migration **ABORTS with a loud error listing the
+    affected bot ids** for manual operator repair — it does NOT guess and does NOT silently rekey.
+    The abort list includes both the cross-provider bots AND the same-provider-different-identity bots,
+    since both would otherwise change calendar identity without a rekey.
+    In practice no bot has >1 active row today, so the abort is a guard, not an expected path.
+    **`down()` completeness (locked):** `down()` reverses ALL three `up()` schema actions — drop
+    `ux_calcred_active_per_bot` + recreate the original `(botId, provider)` partial index, drop
+    `account_id`, drop `reauth_required`. (The dedup data change is not auto-reversed — revoked
+    rows stay revoked, which is safe and auditable; `down()` only reverses DDL.)
+
+11. **Legacy Google state: rely on JWT `exp` only, DROP the cutoff constant (locked, supersedes
+    `LEGACY_STATE_CUTOFF`).** The "deploy time + 30m baked into build" constant is operationally
+    ambiguous (rolling deploys, reused artifacts, clock skew). **Removed.** Replaced by: the
+    Google callback accepts a provider-less state **iff the JWT itself is unexpired** (its own
+    `exp`, already 30m). Since every state JWT expires in 30m, all pre-deploy provider-less Google
+    states are naturally gone within 30m of the new build minting only `provider:'google'` states
+    — no separate cutoff constant, no clock-skew dependency, no operational follow-up. A Microsoft
+    state is still rejected by the Google callback regardless (provider mismatch), so no
+    cross-provider replay. After ~30m post-deploy, only `provider:'google'` states exist and the
+    leniency is moot. (This is strictly simpler and removes finding #11 entirely.)
+
+12. **`sourceChannel` is persisted, NOT rendered — removed from the builder load contract (doc
+    fix, resolves contradiction).** `source_channel` is written to the Booking row by P6a's INSERT
+    (round-1 #1) but is **NOT** a line in the calendar event body — the fixed body order never
+    renders it. Therefore round-1 #16's reconciler-load list is corrected: `loadEventMeta` loads
+    only the fields the **builder consumes** — `attendeeName`, `attendeeEmail`, `customerPhone`,
+    `customerAddress`, `intakeAnswers`, `aiSummary`, `notes`, `bookingId`, and `service`
+    `{ name, description }`. **`sourceChannel` is dropped from the builder load set** (it's a
+    stored-only field, not body input). No `sourceChannel` line exists in the body; no test
+    asserts one.
+
+13. **`manageUrl` normalized + capped like every other field (locked, closes the cap proof).**
+    `manageUrl` goes through the SAME per-field normalization + 500-code-point cap as all other
+    values before becoming the `Manage:` line. So a pathological base-URL config cannot make the
+    `Manage:` line exceed 500 code-points, and the protected-tail arithmetic (HEAD+TAIL ≤ ~5×500 <
+    4000) holds. If `buildManageUrl` returns null/empty, the line is omitted (round-1 #17). So
+    `Manage:` is both bounded (cap) and non-blocking (omit-on-empty) — the 4000 invariant is
+    preserved.
+
+14. **One time serializer for create AND update (locked).** The IANA-vs-UTC time-serialization
+    decision (round-1 #12) applies identically to `PATCH /me/events/{id}` reschedule start/end —
+    the SAME serializer function builds the `{ dateTime, timeZone }` for both create and update.
+    If P6c locks the UTC-instant fallback (Graph rejects IANA), BOTH create and reschedule use it;
+    they can never diverge. Reschedule never sends a zone form the create path wouldn't.
+
+15. **Graph retry budget (locked, controlled 503).** The Graph retry wrapper has a bounded
+    budget: **max 3 attempts** per logical Graph call, honoring `Retry-After` (parsed as either
+    delta-seconds OR an HTTP-date, whichever the header is) on 429 and 5xx, with an **overall
+    elapsed cap of ~10s per logical call** (a `Retry-After` longer than the remaining budget is
+    NOT slept on — we give up and throw). **Pagination shares ONE budget for the whole free/busy
+    query:** all `@odata.nextLink` page fetches draw from a single per-query attempt/elapsed
+    budget (e.g. an overall ~20s wall cap for the paged query) so a slow/throttling calendar ends
+    in a controlled `BOOKING_TEMPORARILY_UNAVAILABLE` (503 fail-closed), never an unbounded wait.
+    On budget exhaustion the wrapper THROWS (free/busy → 503; CRUD → `sync_pending`). Exact
+    numbers (3 attempts / 10s call / 20s query) are the locked defaults; P6c may tune within this
+    bounded shape but MUST keep a hard wall-clock cap.
+
+---
+
+## Implementation refinements (codex round 3 — authoritative over conflicting text above)
+
+Numbered to match the round-3 review.
+
+1. **The `calcred:<botId>` lock spans the ENTIRE busy-read → key → conflict-check → insert →
+   mirror-provider-selection window (locked).** Acquire `calcred:<botId>` BEFORE reading
+   provider free/busy, and hold it through `calendar_key` computation, the gist conflict check,
+   the booking INSERT, and the choice of mirror provider for `createEvent`. So the provider used
+   for the free/busy read, the identity used for the key, and the provider used for the mirror
+   are ONE consistent snapshot — a concurrent switch cannot land between "read Google busy" and
+   "insert/create against Outlook." If a switch is in flight it either completed before the lock
+   (booking sees the new provider for busy+key+mirror) or blocks until the booking commits (then
+   `rekeyBotBookings` re-stamps). This supersedes round-2 #2's narrower "resolve provider + key"
+   wording: the lock covers the busy snapshot too. **What the lock guards vs. what it cannot
+   (locked, removes the xact-vs-post-commit contradiction):** the `calcred:<botId>` advisory lock is
+   a `pg_advisory_xact_lock` released at commit, so it CANNOT span a post-commit external Graph/Google
+   call NOR the post-call `BookingReference` write (the ref write needs the external event id, which
+   only exists AFTER the call). It guards exactly the SNAPSHOT-CONSISTENCY window: provider-selection
+   (busy read + mirror provider) + the booking/conflict INSERT — held in one txn so the provider/key
+   used can't be invalidated mid-flight by a committed switch. The external `createEvent` AND the
+   `BookingReference` write both run AFTER that txn commits and the lock releases (round-2 #9: external
+   call is NOT in a DB transaction; the booking is DB-authoritative and the external call is best-
+   effort/retried). **Create- and ref-idempotency therefore do NOT rely on the advisory lock spanning
+   the external call (it can't):** they are carried by (a) the bookingId-first ref lookup performed
+   immediately before each create plus an **idempotent ref INSERT** keyed on the EXISTING
+   `(bookingId, providerType)` unique constraint — `INSERT ... ON CONFLICT (booking_id, provider_type)
+   DO NOTHING` (round-2 #3). Two post-commit creators converge to exactly ONE ref row because both
+   choose the SAME provider: a no-ref booking's provider is `resolveCalendarProvider(botId)`, which is
+   deterministic (the bot's single active cred) and identical for concurrent creators, so their two
+   inserts target the SAME `(bookingId, providerType)` and the unique constraint makes the second a
+   no-op. We do NOT add a bare `unique(booking_id)` (round-2 #3 keeps the column provider-scoped for the
+   deferred dual-provider future); the single-ref-for-life guarantee comes from bookingId-first lookup +
+   same-provider determinism + the `(bookingId, providerType)` constraint. **The one narrow window where
+   two DIFFERENT-provider refs could be written (locked, honestly bounded):** if a provider SWITCH
+   commits between two concurrent no-ref creators' `resolveCalendarProvider` reads, one creator may
+   resolve the OLD provider and the other the NEW, so their inserts target DIFFERENT
+   `(bookingId, providerType)` and do NOT collide → two refs briefly exist for one booking. This is
+   bounded and self-healing: each ref points at a real event the corresponding creator made under its
+   own provider; the bookingId-FIRST lookup (which loads `WHERE booking_id=$1` for ANY provider —
+   round-2 #3) means the SECOND creator to reach the lookup sees the first's ref and reuses it, so the
+   window is only the true tie where both read no-ref before either writes. The old-provider ref's event
+   becomes a switch-orphan (logged, owner-cleanup, never double-books) exactly like any other
+   post-switch old-provider event; reschedule/cancel route by `ref.providerType` and the
+   reconnect-rearm (#5) handles each ref by its own provider. So the invariant is: **at most one ref
+   per booking in the common case, and in the rare switch-during-concurrent-create tie a second
+   old-provider ref whose event is a documented, logged switch-orphan — never a double-book, never an
+   unbounded duplicate.** And
+   (b) Graph `transactionId` + extended-property dedupe (round-2 #8, round-3 #7) dedupe the external
+   event. **First-writer-wins on the ref is enforced by the `(bookingId, providerType)` idempotent
+   insert + same-provider determinism, NOT by the advisory lock.** So "the lock covers the mirror" means
+   ONLY that it covers the consistent CHOICE of mirror provider+key+busy snapshot; the external create
+   and the ref write happen post-lock and are made safe by ref-idempotency, NOT lock duration —
+   consistent with round-2 #9 everywhere.
+   **Token refresh happens BEFORE the booking lock, never nested inside it (locked, avoids BOTH the
+   self-deadlock AND the rolled-back-rotated-token loss):** the booking path does NOT trigger a token
+   refresh while holding `calcred:<botId>`. Instead it **pre-warms the token first**: BEFORE opening the
+   locked booking txn, it calls `getValidAccessToken*(botId)`, which (if needed) refreshes in its OWN
+   short txn — taking `calcred:<botId>`, `FOR UPDATE`, double-checked refresh, persisting the new access
+   token + expiry + any rotated Microsoft refresh token, and **committing that txn immediately** — then
+   releases the lock. Only after the token is valid does the booking path open its locked txn and run
+   busy-read → key → conflict-check → INSERT. So: (i) there is NO nested second acquisition of
+   `calcred:<botId>` and therefore no self-deadlock and no need to thread a connection handle into
+   `getBusy`; (ii) the rotated refresh token is persisted in its own COMMITTED txn before the booking
+   txn even opens, so a later booking-txn ROLLBACK can never discard a rotated refresh token (round-2
+   #4's "persist rotated refresh token" durability holds). The busy-read inside the locked booking txn
+   then uses the just-warmed cached token (>60s from expiry, so it will not re-refresh in the narrow
+   booking window); in the rare event Graph rejects it mid-window, the 401-forced-refresh path (round-2
+   #6) runs as its own committed refresh txn AFTER the booking work, on the post-commit external-call
+   side — never inside the booking's locked txn. This supersedes the earlier "refresh reuses the
+   holder's txn" wording: refresh is **never** nested inside the booking lock; it is pre-warmed before
+   and (if a mid-call 401 occurs) re-run on the post-commit side. Reschedule/cancel pre-warm the token
+   the same way before taking their `calcred:<botId>` lock.
+   **Reschedule and cancel are serialized identically — and reschedule's WHOLE availability snapshot is
+   inside the lock (locked):** `syncReschedule`/`syncCancel` also mutate provider-routed state and can
+   race a switch/rekey, so they take the SAME `calcred:<botId>` advisory lock. **For reschedule the lock
+   spans the ENTIRE re-validation window, identical to create:** acquire `calcred:<botId>` BEFORE the
+   reschedule's free/busy re-read for the new time, and hold it through the new `calendar_key`
+   computation, the gist conflict re-check at the new time, the `ref.providerType` lookup, AND the
+   booking-row mutation (new times, `sync_pending`/`sync_last_error` stamping) — all in one txn. So a
+   reschedule's busy snapshot + identity/key + provider-route are ONE consistent snapshot, exactly like
+   create (round-3 #1); a concurrent switch can't land between "read busy for new time" and "re-stamp
+   key / route the PATCH." Cancel (no availability check) holds the lock around its ref lookup + row
+   mutation. The external Graph PATCH/DELETE itself, like create, runs AFTER that committed DB step and
+   is NOT required inside the lock (best-effort/retried by the reconciler, routed by `ref.providerType`).
+   So create, reschedule, and cancel all serialize against connect/disconnect/switch/refresh on the one
+   `calcred:<botId>` primitive, each over its full snapshot window (lock-order calcred → calendar_key,
+   round-2 #2); none can compute its provider/key/busy from a snapshot a committed switch has already
+   invalidated.
+
+2. **Switch rekey runs INSIDE the same `calcred:<botId>`-held switch txn, before commit/release
+   (locked).** `exchangeAndStore`'s revoke-old + insert-new + **`rekeyBotBookings`** all execute
+   within the one transaction that holds `calcred:<botId>`; the lock is released only at commit.
+   So there is NO window where the new cred is active but future bookings are not yet rekeyed: a
+   new booking contending on `calcred:<botId>` blocks until the switch (including rekey) commits,
+   then sees both the new active cred AND already-rekeyed future rows. Rekey is never "after
+   commit / after lock release." (The fallible network work — code exchange, `/me` — still runs
+   OUTSIDE and BEFORE this txn per the original ordering; only the DB revoke+insert+rekey is
+   inside the locked txn.)
+
+3. **Partial-rekey stranded row: re-protected by leaving it on its old key AND blocking
+   overlapping NEW bookings via an explicit cross-key check is NOT done — instead the stranded
+   row is made SAFE by keeping the switch atomic (locked, supersedes the "mixed-key is fine"
+   hand-wave).** Because rekey now runs inside the switch txn (#2), the rekey is **all-or-nothing
+   for the non-conflicting rows**: `rekeyBotBookings` re-stamps every active future booking to the
+   new key. The ONLY row that can be left on the old `gcal:*` key is one whose re-stamp would
+   violate the gist EXCLUDE (a genuine pre-existing overlap) → `CALENDAR_REKEY_CONFLICT`, left on
+   old key, logged. **Locked safety statement for that residual row (honest about the bounded gap):**
+   such a row represents a REAL pre-existing double-book (two overlapping appointments already booked);
+   it is left on `gcal:*` because re-stamping it to `mscal:*` would itself violate the EXCLUDE. **There
+   IS a bounded residual protection gap while it sits stranded:** because the stranded row is on a
+   different key (`gcal:*`) from new `mscal:*` bookings, the gist EXCLUDE does NOT compare them, so a
+   NEW `mscal:*` booking could be accepted that overlaps the stranded row's interval in the part NOT
+   already covered by the appointment that conflicted with it — a genuine (if narrow) double-book
+   against the stranded appointment until repair. **This is the SAME bounded gap today's Google
+   reconnect rekey already has** (a `CALENDAR_REKEY_CONFLICT` row is always left on its old key by the
+   existing behavior) — P6 does NOT widen it and does NOT silently auto-merge (which would be unsafe).
+   **It is closed by operator repair, signalled by `CALENDAR_REKEY_CONFLICT` plus the switch-summary
+   count** (the loud log P6 adds): the operator resolves the underlying real double-book, after which
+   the row rekeys cleanly. We explicitly accept this bounded, surfaced, operator-actionable residual —
+   it is not introduced by P6, it is the documented cost of an overlapping booking existing at
+   rekey time — rather than claiming the stranded row creates no gap at all.
+
+4. **`/status` derives `needsReauth`; the 401-after-forced-refresh path DOES write the flag, and
+   it is on the refresh path — no contradiction (locked).** Reconciled: the forced-refresh+retry
+   (round-2 #6) is PART OF the token-refresh path and runs under `calcred:<botId>`. When a forced
+   refresh succeeds but the retried Graph call STILL returns 401/403 (revoked grant the refresh
+   couldn't detect, or a policy denial), that is bucket (a) and **the refresh path writes
+   `reauth_required=true`** — consistent with "only the refresh path writes the flag" (the
+   forced-refresh+retry IS the refresh path). `/status` then reports `needsReauth:true` both
+   because the flag is now set AND because status independently derives it from structural
+   invariants (round-2 #5). So: the only writer remains the refresh path; status never shows a
+   misleading "Connected" because it both reads the flag and re-derives from the row. The
+   apparent contradiction was about WHERE the 401-after-refresh write lives — it lives on the
+   refresh path, by definition.
+
+5. **`no_connection` terminal rows are RECLAIMED on reconnect of that provider (locked).** A
+   stored-ref provider with no active cred is terminal (`sync_last_error` set) — but it is NOT
+   "gone for good"; the owner can reconnect that provider. **Locked rule:** when a provider is
+   (re)connected (`exchangeAndStore` for that provider commits a new active cred), the connect
+   path **re-arms** that provider's terminal-by-`no_connection` bookings: it clears
+   `sync_last_error` and sets `sync_pending=true` for active future bookings whose
+   `BookingReference.providerType` equals the reconnected provider AND whose `sync_last_error`
+   was the `'no active <provider> credential for stored ref'` sentinel — so the reconciler retries
+   the mirror and the stale event re-syncs. **Re-arm also covers MAX_ATTEMPTS-terminal reauth rows
+   (locked):** because reconnect is the stated recovery for owner-actionable reauth (bucket (a)), the
+   re-arm ALSO clears `sync_last_error` + sets `sync_pending=true` for that provider's active future
+   bookings that went terminal after `MAX_ATTEMPTS` carrying the bucket-(a) reauth-required sentinel
+   (the `CALENDAR_REAUTH_REQUIRED`/`invalid_grant`/policy-denial terminal error) for the reconnected
+   provider — those are exactly the rows a fresh credential now lets succeed. So the re-arm set is:
+   for the reconnected provider's refs, BOTH (i) the `'no active <provider> credential for stored ref'`
+   `no_connection` sentinel AND (ii) the MAX_ATTEMPTS reauth-required sentinel. (Rows terminal for
+   OTHER reasons — bucket (b) OUR-misconfig, real non-auth Graph errors — are still NOT re-armed by a
+   reconnect; a reconnect doesn't fix those.) This makes both terminal-by-`no_connection` and
+   terminal-by-reauth recoverable: terminal stops the retry loop, reconnect re-arms. **Re-arm scope
+   covers pending CANCELs and ref-less CREATE failures, not only active reschedules (locked):** the
+   re-arm selection is NOT limited to active future bookings — it re-arms ANY booking carrying an
+   outstanding mirror obligation for the reconnected provider whose terminal error is one of the two
+   sentinels above, specifically: (i) **cancelled** bookings whose stale external event was never
+   deleted because the provider was disconnected/broken at cancel time (their `BookingReference` still
+   points at the reconnected provider and the DELETE went `no_connection`/terminal) — re-armed so the
+   reconciler deletes the stranded event; and (ii) **create failures that terminaled BEFORE any
+   `BookingReference` was written** — these have no ref AND no durable attempted-provider, so they are
+   identified by booking row state (`sync_last_error` = one of the two sentinels AND no ref row yet) and
+   re-armed to retry the create under the bot's CURRENTLY-active provider via `resolveCalendarProvider`
+   (round-3 #1) — which, right after a reconnect, IS the reconnected provider. The retry runs the
+   extended-property marker lookup against the active provider first (recover-or-create), then writes the
+   single ref. **Honest residual when a SWITCH intervened (locked, NOT a contradiction with round-3
+   #8's "create may have succeeded before ref"):** a ref-less terminal create CAN have produced an
+   orphan event (create reached Graph, ref write never landed — round-2 #8 / round-3 #8). If the bot
+   has since SWITCHED providers, that orphan lives on the now-abandoned old-provider calendar, and the
+   re-arm — targeting the currently-active provider — will NOT find it (it can't query the disconnected
+   old provider) and will create a fresh event under the active provider. This is exactly the SAME
+   accepted class as switch-orphans (round-1 #5 / the switch section): the old-calendar orphan is
+   logged and left for owner cleanup, never double-books (events don't affect `calendar_key`), never
+   blocks the booking. When NO switch intervened (the common reconnect-same-provider case), the marker
+   lookup runs against the right calendar and RELINKS the orphan instead of duplicating. So: ref-LESS
+   creates re-arm to the active provider; if that equals the original attempt's provider the orphan is
+   recovered, and if a switch changed it the old orphan is the documented, logged switch cost — never an
+   unbounded loop or a double-book. ref-BEARING obligations still route strictly by `ref.providerType`
+   (only the matching provider's reconnect re-arms them). So reconnect re-arms stranded creates,
+   reschedules, AND cancels — the full set of mirror obligations a missing credential left terminal —
+   with the cross-switch orphan explicitly accepted, not claimed away.
+   Without P6 doing this, the owner reconnecting wouldn't heal stranded rows — so it's
+   in scope. Tested: reconnect of the original provider re-syncs its stranded bookings (create,
+   reschedule, and cancel obligations); reconnect of the OTHER provider does not (those refs route to
+   the still-absent provider).
+
+6. **`getBusy` adapter loads the scheduling timezone internally (locked, no port-signature
+   change).** The port stays `getBusy(botId, startISO, endISO)`. The all-day expansion (round-2
+   #9) needs a tz; the Microsoft adapter loads the **bot's scheduling timezone** itself (the same
+   source `InternalProvider` already uses to offer slots — the bot/service availability tz),
+   inside `getBusyMicrosoft`, keyed by `botId`. No new port parameter. **Unknown-tz fallback is the
+   MAXIMAL local-day span, NOT a bare UTC day (locked, corrects the under-block):** a UTC midnight-to-
+   midnight span is NOT fail-safe for a non-UTC owner — their local day can extend up to ~14h ahead and
+   ~12h behind UTC, so a bare UTC-day span would UNDER-block the owner-local edges. Therefore, if the
+   scheduling tz is unavailable, the all-day expansion blocks the **widest possible local-day window**:
+   from `(UTC start-of-day − 12h)` to `(UTC end-of-day + 14h)` for each date the event covers (covering
+   every IANA offset from UTC−12 to UTC+14). This can only OVER-block (fail-safe-toward-busy) and can
+   never miss the owner's real local day, whatever their actual offset. (When the scheduling tz IS
+   available we use the precise local-day span per round-2 #9; the maximal window is only the
+   tz-unknown safety net.) So the tz is an internal adapter concern, implementable from `botId` alone,
+   and the fallback is conservatively over-blocking rather than potentially under-blocking.
+
+7. **Extended-property constant pinned (locked).** The recovery marker (round-2 #8) is a
+   `singleValueExtendedProperty` with a **fixed, hardcoded** definition:
+   `id = "String {GUID} Name BookingId"` where `{GUID}` is a single constant GUID minted once for
+   Axentrio and stored as a code constant (e.g. `AXENTRIO_BOOKING_ID_PROP_GUID`), `value =
+   <bookingId>` (the uuid string). Create payload includes
+   `singleValueExtendedProperties: [{ id: "<that id string>", value: "<bookingId>" }]`. Recovery
+   query: `GET /me/events?$filter=singleValueExtendedProperties/any(ep: ep/id eq '<id string>'
+   and ep/value eq '<bookingId>')` with the value URL-encoded and single-quotes escaped per OData
+   (a uuid has no quotes so escaping is trivial, but the encoder is applied uniformly). The GUID
+   and `Name BookingId` are constants, not per-tenant. P6c verifies the create+filter round-trip
+   with the exact id string. **Multiple-match behavior (locked):** the marker `$filter` can return
+   MORE than one event (if `transactionId` was ignored and several retries/workers each created an
+   event before any ref committed, or eventual consistency surfaces duplicates) — so the recovery path
+   does NOT assume exactly one. It deterministically **RELINKS the first match by created time
+   (earliest `createdDateTime`, then by event id as a stable tie-break) into the single
+   `BookingReference`**, and treats every OTHER match as a duplicate orphan: each is **logged** (with
+   bookingId + event id) and left for owner cleanup (it never double-books — events don't affect
+   `calendar_key` — and the booking still has exactly one ref). So "find the orphan" means "pick the
+   canonical one deterministically, log the rest"; the count of duplicate orphans is bounded by the
+   number of ignored-`transactionId` retries, not unbounded. **Escaping rules (locked, explicit for all
+   Outlook URLs):** (a) the
+   extended-property `id` string (`"String {GUID} Name BookingId"`) contains spaces and braces — as a
+   literal inside the `$filter` it is wrapped in single-quotes and the WHOLE `$filter` value is
+   percent-encoded as a query-string value (spaces/braces/quotes encoded); the `value` literal is
+   likewise single-quoted and percent-encoded, with any embedded single-quote doubled per OData (`''`)
+   — uuids contain none, but the encoder is applied uniformly so a non-uuid marker is still safe.
+   (b) **Event ids in path segments** (`/me/events/{id}` for PATCH/DELETE/fetch) are OPAQUE and, under
+   `IdType="ImmutableId"`, can contain URL-reserved characters (e.g. `/`, `+`, `=`): each event id is
+   **percent-encoded as a single path segment** (`encodeURIComponent`-equivalent) before being placed
+   in the URL — never concatenated raw — so an immutable id with reserved chars addresses correctly.
+   (c) `@odata.nextLink` is an absolute pre-encoded URL and is used VERBATIM (we only re-attach
+   headers, never re-encode it). These path/query/OData escaping rules are the locked contract for
+   every Outlook URL the path builds; P6c's round-trip test uses an id/marker exercising reserved
+   characters.
+
+8. **Concurrent no-ref create race accepted honestly (locked).** Two workers can both observe no
+   `BookingReference` for a booking and both `POST` a create before either ref commits — a true
+   duplicate-create race. Mitigations, in order of strength: (i) **`transactionId`** (same uuid on
+   both) dedupes them AT Graph if Graph honors it within its window → one event; (ii) if Graph
+   ignores `transactionId`, two events are created, BUT (iii) only ONE `BookingReference` is ever
+   written (the ref insert is idempotent on `(bookingId, providerType)` with same-provider
+   determinism — round-2 #3 / round-3 #1 — first writer wins, second ref write is a no-op/loses), and
+   (iv) the extended-property marker lets the reconciler find the canonical event and log every OTHER
+   match as a duplicate orphan (round-3 #7's multiple-match rule). **Accepted residual:** in the
+   (Graph-ignores-transactionId) case ONE OR MORE duplicate events can exist on the owner's calendar —
+   bounded by the number of racing retries/workers, each logged + surfaced — but they NEVER double-book
+   (events don't affect `calendar_key`) and the booking always has exactly one ref. (The earlier "at
+   most one duplicate" phrasing is corrected to "bounded by the racing-create count"; the marker
+   recovery deterministically keeps one and logs the rest.) **The advisory lock does NOT serialize the
+   external create
+   (corrected, consistent with round-3 #1):** the `calcred:<botId>` lock is released at the booking
+   txn's commit, BEFORE the post-commit Graph create — so it does NOT collapse two concurrent external
+   creates and we do NOT claim it does. What collapses duplicates to one ref is the idempotent
+   `(bookingId, providerType)` insert (above); what bounds duplicate EVENTS is `transactionId` +
+   marker recovery. The honest residual is exactly the (Graph-ignores-transactionId) reconciler-vs-
+   inline / reconciler-vs-reconciler window: one-or-more duplicate events bounded by the racing-create
+   count, exactly one ref, never a double-book. This is the honest, locked statement (not "transactionId
+   prevents duplicates," and not "the lock serializes the external create").
+
+9. **Created-but-no-joinUrl ⇒ `meetUrl = null` (locked, success path, not just error path).**
+   Independent of any error/fallback: after a successful create, we read
+   `onlineMeeting?.joinUrl` from the returned event; **if it is absent/empty, `meetUrl = null`**
+   (customer email omits the join line, event still lands) — exactly the no-Teams outcome. So the
+   join URL is determined by the RETURNED EVENT's `onlineMeeting.joinUrl`, never assumed from the
+   request. A work account that requested Teams but Graph returned no `joinUrl` is treated as
+   no-Teams (graceful), not an error. The demo's "Teams join on a work account" means "joinUrl
+   present on the returned event"; absence is handled identically to the personal-account case.
+
+10. **Retry budget: "attempts" = RETRIES PER HTTP REQUEST, pages are separate (locked, clarifies
+    round-2 #15).** "Max 3 attempts" means **per single HTTP request** (initial + up to 2 retries
+    on 429/5xx) — it does NOT cap the number of `calendarView` PAGES. A paged free/busy query may
+    fetch many pages (`$top=100`, bounded by the few-day window); EACH page request independently
+    gets up to 3 attempts. The SHARED limit across pages is the **overall ~20s wall-clock budget
+    for the whole query** (not a page count): when that elapses, the query throws → 503. So: per
+    request → ≤3 attempts honoring `Retry-After`; per whole paged query → one ~20s wall cap. Page
+    count is bounded by the window, not by the retry count. This removes the "3 attempts vs >3
+    pages" conflict.
+
+11. **`intakeAnswers` non-object root ⇒ Intake block OMITTED entirely (locked).** The per-key
+    rendering assumes `intakeAnswers` is a JSON object. **If the root value is NOT a plain object**
+    (it's an array, string, number, boolean, or null at the root), the **entire `Intake:` block
+    is omitted** — we do NOT attempt to render a non-object root. Only `typeof === 'object' &&
+    !Array.isArray && !== null` enters the per-key path. This makes the body byte-stable for ANY
+    arbitrary jsonb root shape (the column is arbitrary jsonb). Unit-tested: array root → no
+    Intake block; scalar root → no Intake block; object root → sorted per-key rendering.
+
+12. **`Prefer: IdType="ImmutableId"` on the orphan-lookup query + any id-returning fetch too
+    (locked).** Round-2 #1 required the immutable-id header on create/update/delete; it ALSO
+    applies to the recovery `$filter` query (round-3 #7) and ANY Graph read whose returned event
+    ids we persist or address later. The header is opt-in per request, so EVERY Graph request in
+    the Outlook path that returns or uses an event id carries `Prefer: IdType="ImmutableId"`
+    (create, update, delete, free/busy `calendarView`, orphan `$filter` lookup). Consistent
+    immutable ids everywhere prevents an id captured from one call being non-addressable in
+    another. **Combined Prefer directives (locked):** any Graph call that needs BOTH the immutable-id
+    directive AND the UTC-timezone directive — i.e. the free/busy `calendarView` page fetches and the
+    orphan `$filter` lookup, which require both `IdType="ImmutableId"` and `outlook.timezone="UTC"` —
+    MUST send BOTH in ONE comma-separated `Prefer` header
+    (`Prefer: IdType="ImmutableId", outlook.timezone="UTC"`), NOT two separate `Prefer` headers and
+    NEVER one directive overwriting the other. Each `@odata.nextLink` page re-attaches this same
+    combined header (the round-2 pagination rule that re-attaches `Prefer` per page). Calls needing
+    only one directive (create/update/delete need only `IdType="ImmutableId"`) send only that one.
+
+13. **Timezone serialization is a SINGLE hardcoded result from P6c, not a per-request runtime
+    fallback (locked, removes environment divergence).** The IANA-vs-UTC decision (round-1 #12,
+    round-2 #14) is resolved ONCE during P6c against live Graph and **baked in as a single
+    code-level constant/serializer choice** — NOT a per-request runtime probe and NOT an
+    environment flag. Either P6c confirms IANA is accepted and the serializer always sends the
+    IANA form, OR it doesn't and the serializer always sends the UTC-instant form. The SAME
+    serializer is used by create and update (round-2 #14), so create/update can never diverge and
+    behavior is identical across all environments (it's compiled-in, not probed). No runtime
+    capability detection, no startup flag.

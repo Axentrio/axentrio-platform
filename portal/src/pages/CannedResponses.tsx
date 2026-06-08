@@ -86,7 +86,7 @@ export const CannedResponsesContent: React.FC = () => {
   const [scopeFilter, setScopeFilter] = useState('all');
   const [form, setForm] = useState<FormData>(emptyForm);
 
-  const responses: CannedResponse[] = data?.data ?? [];
+  const responses: CannedResponse[] = useMemo(() => data?.data ?? [], [data]);
 
   const categories = useMemo(() => {
     const cats = new Set(responses.flatMap((r) => (r.category ? [r.category] : [])));

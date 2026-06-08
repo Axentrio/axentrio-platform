@@ -91,7 +91,7 @@ export const FaqContent: React.FC<FaqContentProps> = ({
     [trimmedQuery],
   );
   const isSearching = tokens.length > 0;
-  const sections = data?.sections ?? [];
+  const sections = useMemo(() => data?.sections ?? [], [data]);
   const activeSection =
     sections.find((s) => s.id === activeSectionId) ?? sections[0];
 

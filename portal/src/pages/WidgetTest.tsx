@@ -616,7 +616,13 @@ const WidgetTest: React.FC = () => {
     };
 
     init();
-    return () => { cancelled = true; if (socket) { socket.disconnect(); socketRef.current = null; } };
+    return () => {
+      cancelled = true;
+      if (socket) {
+        socket.disconnect();
+        if (socketRef.current === socket) socketRef.current = null;
+      }
+    };
   }, [apiKey, addLog]);
 
   const handleSend = useCallback((_e?: any, overrideText?: string) => {

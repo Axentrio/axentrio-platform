@@ -3,7 +3,7 @@
  * Wrap this around the authenticated part of the app so every
  * useAppAuth() consumer reads from the same cached result.
  */
-import React, { createContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { useUser, useAuth, useOrganization } from '@clerk/clerk-react';
 import type { User, UserRole } from '@app-types/index';
 import { API_CONFIG, ENDPOINTS } from '@config/api.config';
@@ -195,22 +195,28 @@ export const AppAuthProvider: React.FC<{ children: React.ReactNode }> = ({ child
   }, [dbIds, getToken]);
 
   // Build the User object the app expects
-  const user: User | null = clerkUser && dbIds ? {
-    id: dbIds.agentId,
-    email: dbIds.email || clerkUser.emailAddresses?.[0]?.emailAddress || '',
-    firstName: clerkUser.firstName || '',
-    lastName: clerkUser.lastName || '',
-    role: dbIds.role || mapClerkRole(orgRole ?? undefined),
-    status: 'online',
-    tenantId: dbIds.tenantId,
-    createdAt: clerkUser.createdAt?.toISOString() || new Date().toISOString(),
-    updatedAt: clerkUser.updatedAt?.toISOString() || new Date().toISOString(),
-    preferences: {
-      theme: 'system',
-      notifications: { sound: true, desktop: true, handsoffOnly: false },
-      language: 'en',
-    },
-  } : null;
+  const user: User | null = useMemo(
+    () =>
+      clerkUser && dbIds
+        ? {
+            id: dbIds.agentId,
+            email: dbIds.email || clerkUser.emailAddresses?.[0]?.emailAddress || '',
+            firstName: clerkUser.firstName || '',
+            lastName: clerkUser.lastName || '',
+            role: dbIds.role || mapClerkRole(orgRole ?? undefined),
+            status: 'online',
+            tenantId: dbIds.tenantId,
+            createdAt: clerkUser.createdAt?.toISOString() || new Date().toISOString(),
+            updatedAt: clerkUser.updatedAt?.toISOString() || new Date().toISOString(),
+            preferences: {
+              theme: 'system',
+              notifications: { sound: true, desktop: true, handsoffOnly: false },
+              language: 'en',
+            },
+          }
+        : null,
+    [clerkUser, dbIds, orgRole],
+  );
 
   const hasPermission = useCallback((permission: string): boolean => {
     if (!user) return false;

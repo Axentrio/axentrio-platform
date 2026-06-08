@@ -183,7 +183,10 @@ const Analytics: React.FC = () => {
   const chatVolumeData: TimeseriesPoint[] = (timeseriesRes as { timeseries?: TimeseriesPoint[] })?.timeseries ?? [];
 
   const metrics = (metricsRes as { metrics?: ChatMetrics })?.metrics;
-  const agents: AgentRow[] = (agentsRes as { agents?: AgentRow[] })?.agents ?? [];
+  const agents: AgentRow[] = useMemo(
+    () => (agentsRes as { agents?: AgentRow[] })?.agents ?? [],
+    [agentsRes],
+  );
 
   // Resolution pie: bot resolved = closed minus human-handled, human = rest
   const resolutionData = useMemo(() => {

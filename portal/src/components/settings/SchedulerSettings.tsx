@@ -24,6 +24,7 @@ import {
   useConnectGoogleCalendar,
   useDisconnectGoogleCalendar,
 } from '../../queries/useGoogleCalendarQueries';
+import { ServicesSection } from './ServicesSection';
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'mon', label: 'Monday' },
@@ -119,12 +120,6 @@ export const SchedulerSettings: React.FC = () => {
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, [queryClient]);
 
-  const [name, setName] = useState('Appointment');
-  const [durationMin, setDurationMin] = useState(30);
-  const [bufferBeforeMin, setBufferBeforeMin] = useState(0);
-  const [bufferAfterMin, setBufferAfterMin] = useState(0);
-  const [minNoticeMin, setMinNoticeMin] = useState(60);
-  const [maxHorizonDays, setMaxHorizonDays] = useState(60);
   const [timezone, setTimezone] = useState('Europe/Brussels');
   const [slotGranularityMin, setSlotGranularityMin] = useState(30);
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
@@ -134,14 +129,6 @@ export const SchedulerSettings: React.FC = () => {
 
   useEffect(() => {
     if (!data || hydrated) return;
-    if (data.eventType) {
-      setName(data.eventType.name);
-      setDurationMin(data.eventType.durationMin);
-      setBufferBeforeMin(data.eventType.bufferBeforeMin);
-      setBufferAfterMin(data.eventType.bufferAfterMin);
-      setMinNoticeMin(data.eventType.minNoticeMin);
-      setMaxHorizonDays(data.eventType.maxHorizonDays);
-    }
     if (data.availability) {
       setTimezone(data.availability.timezone);
       setSlotGranularityMin(data.availability.slotGranularityMin);
@@ -154,15 +141,10 @@ export const SchedulerSettings: React.FC = () => {
   const setDay = (key: string, patch: Partial<DayRow>) =>
     setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
-  // Inline validation — surfaces config mistakes and blocks an invalid save.
+  // Inline validation for the availability section (per-service rules live in
+  // the service editor). Blocks an invalid availability save.
   const errors = useMemo<string[]>(() => {
     const e: string[] = [];
-    if (!name.trim()) e.push('Event name is required.');
-    if (!(durationMin >= 5)) e.push('Duration must be at least 5 minutes.');
-    if (slotGranularityMin > durationMin) e.push('Slot interval can’t be longer than the duration.');
-    if (minNoticeMin > maxHorizonDays * 1440) {
-      e.push('Minimum notice exceeds the booking horizon — no slots would ever appear.');
-    }
     for (const { key, label } of DAYS) {
       const r = days[key];
       if (r.enabled && r.start >= r.end) e.push(`${label}: end time must be after start time.`);
@@ -171,7 +153,7 @@ export const SchedulerSettings: React.FC = () => {
       if (o.date && !o.closed && o.start >= o.end) e.push(`Override ${o.date}: end time must be after start time.`);
     }
     return e;
-  }, [name, durationMin, slotGranularityMin, minNoticeMin, maxHorizonDays, days, overrides]);
+  }, [days, overrides]);
 
   const handleSave = () => {
     const weeklyHours: WeeklyHours = {};
@@ -184,15 +166,6 @@ export const SchedulerSettings: React.FC = () => {
       .map((o) => (o.closed ? { date: o.date, closed: true } : { date: o.date, windows: [{ start: o.start, end: o.end }] }));
     update.mutate({
       provider: 'internal',
-      eventType: {
-        name,
-        durationMin,
-        bufferBeforeMin,
-        bufferAfterMin,
-        minNoticeMin,
-        maxHorizonDays,
-        locationType: 'custom',
-      },
       availability: { timezone, weeklyHours, dateOverrides, slotGranularityMin },
     });
   };
@@ -251,39 +224,28 @@ export const SchedulerSettings: React.FC = () => {
                   )}
                 </div>
 
-                {/* Event type */}
-                <div className="space-y-3 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Event type</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="sm:col-span-2">
-                      <Label className="text-text-secondary mb-1 block">Name</Label>
-                      <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Intro call" />
-                    </div>
-                    <NumberField label="Duration (min)" value={durationMin} onChange={setDurationMin} min={5} />
-                    <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
-                    <NumberField label="Buffer before (min)" value={bufferBeforeMin} onChange={setBufferBeforeMin} min={0} />
-                    <NumberField label="Buffer after (min)" value={bufferAfterMin} onChange={setBufferAfterMin} min={0} />
-                    <NumberField label="Min notice (min)" value={minNoticeMin} onChange={setMinNoticeMin} min={0} />
-                    <NumberField label="Max horizon (days)" value={maxHorizonDays} onChange={setMaxHorizonDays} min={1} />
-                  </div>
-                </div>
+                {/* Services catalog (multi-service) */}
+                <ServicesSection />
 
-                {/* Availability */}
+                {/* Availability (shared across all services) */}
                 <div className="space-y-3 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Weekly availability</h3>
-                  <div>
-                    <Label className="text-text-secondary mb-1 block">Timezone</Label>
-                    <Input
-                      list="scheduler-timezones"
-                      value={timezone}
-                      onChange={(e) => setTimezone(e.target.value)}
-                      placeholder="Search timezone…"
-                    />
-                    <datalist id="scheduler-timezones">
-                      {ALL_TIMEZONES.map((tz) => (
-                        <option key={tz} value={tz} />
-                      ))}
-                    </datalist>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-text-secondary mb-1 block">Timezone</Label>
+                      <Input
+                        list="scheduler-timezones"
+                        value={timezone}
+                        onChange={(e) => setTimezone(e.target.value)}
+                        placeholder="Search timezone…"
+                      />
+                      <datalist id="scheduler-timezones">
+                        {ALL_TIMEZONES.map((tz) => (
+                          <option key={tz} value={tz} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
                   </div>
                   <div className="space-y-2">
                     {DAYS.map(({ key, label }) => (

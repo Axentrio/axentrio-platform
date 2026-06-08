@@ -31,9 +31,42 @@ export interface SchedulerAvailability {
   slotGranularityMin: number;
 }
 
+export type BookingMode = 'auto' | 'request';
+export type DurationMode = 'fixed' | 'range' | 'ai';
+export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
+
+export interface Service {
+  id: string;
+  name: string;
+  category?: string | null;
+  description?: string | null;
+  bookingMode: BookingMode;
+  onlineBookable: boolean;
+  durationMode: DurationMode;
+  durationMin: number;
+  bufferBeforeMin: number;
+  bufferAfterMin: number;
+  minNoticeMin: number;
+  maxHorizonDays: number;
+  maxBookingsPerDay?: number | null;
+  priceDisplayType: PriceDisplayType;
+  fixedPrice?: number | null;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  priceNote?: string | null;
+  locationType: string;
+  preparationInstructions?: string | null;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+/** Create/update payload — required name+duration, everything else optional (server defaults). */
+export type ServiceInput = Partial<Omit<Service, 'id' | 'sortOrder'>> & { name: string; durationMin: number };
+
 export interface SchedulerConfig {
   provider: 'calcom' | 'internal';
   eventType: SchedulerEventType | null;
+  services?: Service[];
   availability: SchedulerAvailability | null;
 }
 
@@ -65,6 +98,59 @@ export function useUpdateSchedulerConfig() {
         extractApiErrorMessage(err) ?? (err instanceof Error ? err.message : undefined) ?? 'Failed to save'
       );
     },
+  });
+}
+
+// --- Services catalog (multi-service) ---
+
+const servicesKey = ['scheduler', 'services'] as const;
+
+export function useServices() {
+  return useQuery({
+    queryKey: servicesKey,
+    queryFn: async () => (await api.get<Any>('/scheduler/services')) as { services: Service[] },
+  });
+}
+
+function invalidateServices(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: servicesKey });
+  queryClient.invalidateQueries({ queryKey: schedulerKey });
+}
+
+export function useCreateService() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: ServiceInput) => api.post<Service>('/scheduler/services', input),
+    onSuccess: () => {
+      invalidateServices(queryClient);
+      toast.success('Service added');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to add service'),
+  });
+}
+
+export function useUpdateService() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Partial<ServiceInput> }) =>
+      api.put<Service>(`/scheduler/services/${id}`, input),
+    onSuccess: () => {
+      invalidateServices(queryClient);
+      toast.success('Service saved');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to save service'),
+  });
+}
+
+export function useDeleteService() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/scheduler/services/${id}`),
+    onSuccess: () => {
+      invalidateServices(queryClient);
+      toast.success('Service removed');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to remove service'),
   });
 }
 

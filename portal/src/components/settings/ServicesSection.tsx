@@ -18,6 +18,23 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   useServices,
   useCreateService,
   useUpdateService,
@@ -163,6 +180,7 @@ export const ServicesSection: React.FC = () => {
 
   const [editing, setEditing] = useState<Service | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(BLANK);
+  const [pendingDelete, setPendingDelete] = useState<Service | null>(null);
 
   const services = data?.services ?? [];
   const saving = create.isPending || update.isPending;
@@ -234,17 +252,15 @@ export const ServicesSection: React.FC = () => {
               <Button variant="ghost" size="sm" type="button" onClick={() => openEdit(s)}>
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
-              {s.isActive && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  className="text-red-400 hover:text-red-300"
-                  onClick={() => remove.mutate(s.id)}
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                className="text-red-400 hover:text-red-300"
+                onClick={() => setPendingDelete(s)}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
             </div>
           ))}
         </div>
@@ -270,14 +286,18 @@ export const ServicesSection: React.FC = () => {
               </div>
               <div>
                 <Label className="text-text-secondary mb-1 block">Booking mode</Label>
-                <select
+                <Select
                   value={form.bookingMode}
-                  onChange={(e) => set('bookingMode', e.target.value as FormState['bookingMode'])}
-                  className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
+                  onValueChange={(v) => set('bookingMode', v as FormState['bookingMode'])}
                 >
-                  <option value="auto">Auto-book (confirm automatically)</option>
-                  <option value="request">Request-only (capture as a request)</option>
-                </select>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto-book (confirm automatically)</SelectItem>
+                    <SelectItem value="request">Request-only (capture as a request)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -294,30 +314,38 @@ export const ServicesSection: React.FC = () => {
               <NumberField label="Duration (min)" value={form.durationMin} onChange={(v) => set('durationMin', v)} min={5} />
               <NumberField label="Buffer before" value={form.bufferBeforeMin} onChange={(v) => set('bufferBeforeMin', v)} min={0} />
               <NumberField label="Buffer after" value={form.bufferAfterMin} onChange={(v) => set('bufferAfterMin', v)} min={0} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
               <NumberField label="Min notice (min)" value={form.minNoticeMin} onChange={(v) => set('minNoticeMin', v)} min={0} />
               <NumberField label="Max horizon (days)" value={form.maxHorizonDays} onChange={(v) => set('maxHorizonDays', v)} min={1} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label className="text-text-secondary mb-1 block">Price display</Label>
-                <select
-                  value={form.priceDisplayType}
-                  onChange={(e) => set('priceDisplayType', e.target.value as FormState['priceDisplayType'])}
-                  className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
-                >
-                  <option value="none">No price</option>
-                  <option value="fixed">Fixed</option>
-                  <option value="from">Starting from</option>
-                  <option value="range">Range</option>
-                  <option value="on_request">On request</option>
-                </select>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-text-secondary mb-1 block">Price display</Label>
+                  <Select
+                    value={form.priceDisplayType}
+                    onValueChange={(v) => set('priceDisplayType', v as FormState['priceDisplayType'])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">No price</SelectItem>
+                      <SelectItem value="fixed">Fixed</SelectItem>
+                      <SelectItem value="from">Starting from</SelectItem>
+                      <SelectItem value="range">Range</SelectItem>
+                      <SelectItem value="on_request">On request</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(form.priceDisplayType === 'fixed' || form.priceDisplayType === 'from') && (
+                  <NumberField label="Price (€)" value={Number(form.fixedPrice) || 0} onChange={(v) => set('fixedPrice', String(v))} min={0} />
+                )}
               </div>
-              {(form.priceDisplayType === 'fixed' || form.priceDisplayType === 'from') && (
-                <NumberField label="Price (€)" value={Number(form.fixedPrice) || 0} onChange={(v) => set('fixedPrice', String(v))} min={0} />
-              )}
               {form.priceDisplayType === 'range' && (
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   <NumberField label="Min (€)" value={Number(form.minPrice) || 0} onChange={(v) => set('minPrice', String(v))} min={0} />
                   <NumberField label="Max (€)" value={Number(form.maxPrice) || 0} onChange={(v) => set('maxPrice', String(v))} min={0} />
                 </div>
@@ -330,8 +358,8 @@ export const ServicesSection: React.FC = () => {
               error={qError}
             />
 
-            <label className="flex items-center gap-2 cursor-pointer">
-              <Checkbox checked={form.isActive} onCheckedChange={(c) => set('isActive', c === true)} />
+            <label htmlFor="service-active" className="flex items-center gap-2 cursor-pointer">
+              <Checkbox id="service-active" checked={form.isActive} onCheckedChange={(c) => set('isActive', c === true)} />
               <span className="text-sm text-text-secondary">Active (offered to customers)</span>
             </label>
           </div>
@@ -347,6 +375,29 @@ export const ServicesSection: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete ? `"${pendingDelete.name}" will be removed and can no longer be booked. This can't be undone.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (pendingDelete) remove.mutate(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
@@ -403,17 +454,21 @@ const QuestionsEditor: React.FC<{
               onChange={(e) => update(i, { label: e.target.value })}
               placeholder="Question (e.g. What's the occasion?)"
             />
-            <select
+            <Select
               value={q.type}
-              onChange={(e) => {
-                const type = e.target.value as IntakeQuestion['type'];
+              onValueChange={(v) => {
+                const type = v as IntakeQuestion['type'];
                 update(i, { type, options: type === 'choice' ? q.options ?? ['', ''] : undefined });
               }}
-              className="px-2 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
             >
-              <option value="text">Text</option>
-              <option value="choice">Choice</option>
-            </select>
+              <SelectTrigger className="w-28 shrink-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="text">Text</SelectItem>
+                <SelectItem value="choice">Choice</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               variant="ghost"
               size="sm"
@@ -425,8 +480,8 @@ const QuestionsEditor: React.FC<{
             </Button>
           </div>
 
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Checkbox checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
+          <label htmlFor={`question-required-${i}`} className="flex items-center gap-2 cursor-pointer">
+            <Checkbox id={`question-required-${i}`} checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
             <span className="text-xs text-text-secondary">Required</span>
           </label>
 

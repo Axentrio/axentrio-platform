@@ -47,7 +47,10 @@ export function handleGraphChallenge(req: Request, verifyToken: string): string 
   const token = req.query['hub.verify_token'] as string | undefined;
   const challenge = req.query['hub.challenge'] as string | undefined;
 
-  if (mode === 'subscribe' && token === verifyToken) {
+  // Fail closed when no verify token is configured — otherwise an unset token
+  // (default '') is satisfied by an empty `hub.verify_token` param, letting an
+  // attacker complete the subscription handshake. See security audit #J.
+  if (verifyToken && mode === 'subscribe' && token === verifyToken) {
     return challenge ?? '';
   }
   return null;

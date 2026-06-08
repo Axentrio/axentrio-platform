@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import { timingSafeEqual } from 'crypto';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { WebhookVerifier } from '../types';
 
@@ -12,6 +13,10 @@ export class TelegramWebhookVerifier implements WebhookVerifier {
     if (!headerToken || !connection.webhookSecret) {
       return false;
     }
-    return headerToken === connection.webhookSecret;
+    // Constant-time comparison — the secret token is the sole inbound auth
+    // factor for Telegram (no per-payload HMAC). See security audit #J.
+    const a = Buffer.from(headerToken);
+    const b = Buffer.from(connection.webhookSecret);
+    return a.length === b.length && timingSafeEqual(a, b);
   }
 }

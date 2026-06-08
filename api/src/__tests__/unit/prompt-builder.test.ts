@@ -247,3 +247,42 @@ describe('buildSystemPrompt (llm)', () => {
       .toBe('Hi from Ava at Acme.');
   });
 });
+
+describe('PromptBuilder — intake questions (P3b)', () => {
+  const builder = new PromptBuilder();
+  const tenant = { name: 'TestCo', settings: { ai: { enabled: true } } } as unknown as Tenant;
+  const tools: ToolAdapter[] = [
+    { name: 'create_booking', description: 'Book', parameters: {}, hasSideEffects: true, execute: async () => ({ success: true }) },
+  ];
+
+  it('injects a service\'s questions + the ask-required rule', () => {
+    const services = [
+      { id: 'svc-1', name: 'Consult', durationMin: 30, bookingMode: 'auto', priceDisplayType: 'none',
+        intakeQuestions: [
+          { id: 'q-1', label: 'Occasion?', type: 'text', required: true },
+          { id: 'q-2', label: 'Guests?', type: 'choice', required: false, options: ['1-2', '3+'] },
+        ] },
+    ] as any;
+    const prompt = builder.build(tenant, tenant.settings as any, tools, undefined, services);
+    expect(prompt).toContain('Intake questions:');
+    expect(prompt).toContain('q-1 · "Occasion?" · text · required');
+    expect(prompt).toContain('q-2 · "Guests?" · choice · optional · options: 1-2, 3+');
+    expect(prompt).toContain('intakeAnswers');
+  });
+
+  it('degrades malformed question entries without crashing prompt construction', () => {
+    const services = [
+      { id: 'svc-1', name: 'Consult', durationMin: 30, bookingMode: 'auto', priceDisplayType: 'none',
+        intakeQuestions: [
+          { id: 'q-ok', label: 'Fine?', type: 'text', required: false },
+          { id: 'q-bad', label: { nested: 1 }, type: 'text', required: false }, // non-string label
+          { id: 42, label: 'numeric id', type: 'text', required: false }, // non-string id
+        ] },
+    ] as any;
+    let prompt = '';
+    expect(() => { prompt = builder.build(tenant, tenant.settings as any, tools, undefined, services); }).not.toThrow();
+    expect(prompt).toContain('q-ok · "Fine?"');
+    expect(prompt).not.toContain('nested');
+    expect(prompt).not.toContain('numeric id');
+  });
+});

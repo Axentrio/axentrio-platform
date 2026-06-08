@@ -48,4 +48,11 @@ describe('buildIntakeAnswers (P3c)', () => {
       { label: 'q1', answer: 'Birthday' },
     ]);
   });
+
+  it('skips a question with a non-string label (answer preserved via raw-id branch, no object reaches React)', () => {
+    // legacy/hand-edited: valid id, broken label
+    const bad = [{ id: 'q1', label: { x: 1 }, type: 'text', required: false }] as unknown as IntakeQuestion[];
+    const out = buildIntakeAnswers(bad, { q1: 'Birthday' });
+    expect(out).toEqual([{ label: 'q1', answer: 'Birthday' }]); // raw id label, string only
+  });
 });

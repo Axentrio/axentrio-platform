@@ -167,7 +167,10 @@ export function buildIntakeAnswers(
   const out: Array<{ label: string; answer: string }> = [];
   const usedKeys = new Set<string>();
   for (const q of qs) {
-    if (!q || typeof q.id !== 'string' || !(q.id in answers)) continue;
+    // Skip malformed question entries (non-string id/label from legacy/hand-edited
+    // jsonb) WITHOUT marking the id used — a stored answer then falls through to the
+    // raw-id branch below (preserved, never dropped; a non-string label can't reach React).
+    if (!q || typeof q.id !== 'string' || typeof q.label !== 'string' || !(q.id in answers)) continue;
     const answer = coerceAnswer(answers[q.id]);
     if (answer === null) continue;
     out.push({ label: q.label, answer });

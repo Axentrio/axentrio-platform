@@ -1,6 +1,6 @@
 import { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
-import type { ServiceType } from '../database/entities/ServiceType';
+import type { ServiceType, IntakeQuestion } from '../database/entities/ServiceType';
 import { ToolAdapter } from './tool-adapter';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
@@ -27,16 +27,24 @@ function sanitizeForLine(value: string): string {
 /** Indented `Intake questions:` sub-block for a service, in array order (≤8 short lines). */
 function intakeLines(s: ServiceType): string {
   const questions = Array.isArray(s.intakeQuestions) ? s.intakeQuestions : [];
-  if (!questions.length) return '';
-  const lines = questions.map((q) => {
-    const label = sanitizeForLine(q.label ?? '');
-    const req = q.required ? 'required' : 'optional';
-    const opts =
-      q.type === 'choice' && Array.isArray(q.options) && q.options.length
-        ? ` · options: ${q.options.map(sanitizeForLine).join(', ')}`
-        : '';
-    return `    - ${q.id} · "${label}" · ${q.type} · ${req}${opts}`;
-  });
+  const lines = questions
+    // Defensive: skip malformed entries (legacy/hand-edited jsonb) so a non-string
+    // id/label/option can never reach `.replace()` and crash prompt construction.
+    .filter(
+      (q): q is IntakeQuestion =>
+        !!q && typeof q.id === 'string' && typeof q.label === 'string' && (q.type === 'text' || q.type === 'choice')
+    )
+    .map((q) => {
+      const label = sanitizeForLine(q.label);
+      const req = q.required ? 'required' : 'optional';
+      const validOptions =
+        q.type === 'choice' && Array.isArray(q.options)
+          ? q.options.filter((o): o is string => typeof o === 'string')
+          : [];
+      const opts = validOptions.length ? ` · options: ${validOptions.map(sanitizeForLine).join(', ')}` : '';
+      return `    - ${q.id} · "${label}" · ${q.type} · ${req}${opts}`;
+    });
+  if (!lines.length) return '';
   return `\n  Intake questions:\n${lines.join('\n')}`;
 }
 import { substituteVariables } from '../llm/prompt-builder';
@@ -110,7 +118,6 @@ export class PromptBuilder {
 
     // Bookable services catalog (multi-service). Only when booking is configured.
     if (services && services.length) {
-      const hasIntake = services.some((s) => Array.isArray(s.intakeQuestions) && s.intakeQuestions.length);
       const lines = services
         .map((s) => {
           const price = priceHint(s);
@@ -119,6 +126,9 @@ export class PromptBuilder {
           return `${head}${intakeLines(s)}`;
         })
         .join('\n');
+      // Only inject the ask-intake rule when a service actually renders questions
+      // (a service whose questions are all malformed produces no lines → no dangling rule).
+      const hasIntake = services.some((s) => intakeLines(s) !== '');
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:

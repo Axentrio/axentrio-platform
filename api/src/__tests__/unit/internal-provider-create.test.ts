@@ -51,6 +51,24 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   resolveCalendarIdentity: (...args: any[]) => resolveCalendarIdentity(...args),
 }));
 
+// InternalProvider now goes through the CalendarProvider port. Mock it to return
+// a Google adapter wired to the same mock fns, so the existing assertions hold
+// (the mock fns' null returns simulate "no connection" at the method level).
+vi.mock('../../scheduler/calendar-provider', () => {
+  const googleAdapter = {
+    providerType: 'google',
+    getBusy: (...a: any[]) => getGoogleBusyForBot(...a),
+    createEvent: (...a: any[]) => createCalendarEvent(...a),
+    updateEvent: (...a: any[]) => updateCalendarEvent(...a),
+    deleteEvent: (...a: any[]) => deleteCalendarEvent(...a),
+    resolveIdentity: (...a: any[]) => resolveCalendarIdentity(...a),
+  };
+  return {
+    resolveCalendarProvider: async () => googleAdapter,
+    providerFor: () => googleAdapter,
+  };
+});
+
 const getUploadSession = vi.fn();
 vi.mock('../../file-handling/upload.service', () => ({
   getUploadService: () => ({ getSession: getUploadSession }),

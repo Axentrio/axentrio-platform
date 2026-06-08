@@ -29,13 +29,7 @@ import { computeSlots, BusyInterval } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
 import { scheduleReminders, cancelReminders } from './reminders';
-import {
-  getGoogleBusyForBot,
-  createCalendarEvent,
-  updateCalendarEvent,
-  deleteCalendarEvent,
-  resolveCalendarIdentity,
-} from '../../integrations/google/google-calendar.service';
+import { resolveCalendarProvider, providerFor } from '../../scheduler/calendar-provider';
 import { BookingReference } from '../../database/entities/BookingReference';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
@@ -246,8 +240,10 @@ export class InternalProvider implements BookingProvider {
    * connection) — never `gcal:primary`, which would collide globally.
    */
   private async calendarKey(ctx: BookingContext): Promise<string> {
-    const identity = await resolveCalendarIdentity(ctx.bot.id);
-    return conflictKeyFor(ctx.bot.id, identity);
+    const provider = await resolveCalendarProvider(ctx.bot.id);
+    if (!provider) return conflictKeyFor(ctx.bot.id, null);
+    const identity = await provider.resolveIdentity(ctx.bot.id);
+    return conflictKeyFor(ctx.bot.id, identity, provider.providerType);
   }
 
   /**
@@ -329,11 +325,12 @@ export class InternalProvider implements BookingProvider {
     excludeId?: string
   ): Promise<BusyInterval[]> {
     const internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
-    let google: BusyInterval[] | null = null;
+    let external: BusyInterval[] | null = null;
     try {
-      google = await getGoogleBusyForBot(ctx.bot.id, rangeStartIso, rangeEndIso);
+      const provider = await resolveCalendarProvider(ctx.bot.id);
+      external = provider ? await provider.getBusy(ctx.bot.id, rangeStartIso, rangeEndIso) : null;
     } catch (err) {
-      logger.warn('[Booking] Google free/busy unavailable — failing closed', {
+      logger.warn('[Booking] external calendar free/busy unavailable — failing closed', {
         botId: ctx.bot.id,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -343,7 +340,7 @@ export class InternalProvider implements BookingProvider {
         503
       );
     }
-    return google ? [...internal, ...google] : internal;
+    return external ? [...internal, ...external] : internal;
   }
 
   private toResult(booking: Booking, idempotent: boolean): CreateBookingResult {
@@ -535,7 +532,7 @@ export class InternalProvider implements BookingProvider {
       service,
       buildManageUrl(bookingId),
     );
-    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
+    const meetUrl = await this.syncCalendarCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
@@ -886,10 +883,30 @@ export class InternalProvider implements BookingProvider {
       .catch(() => undefined);
   }
 
-  /** Mirror a new booking to Google (best-effort). Returns the Meet URL if any.
-   *  `content` is the P6a builder output ({ summary, description }); the join URL
-   *  rides Google's native conferenceData, not the text body. */
-  private async syncGoogleCreate(
+  /**
+   * The ref to operate on for reschedule/cancel. Normally exactly one; if a rare
+   * switch/create race left more than one, prefer the ref matching the bot's
+   * current active provider, else the earliest-created — deterministic, so the
+   * chosen provider is never arbitrary.
+   */
+  private async canonicalRef(botId: string, bookingId: string): Promise<BookingReference | null> {
+    const refs = await AppDataSource.getRepository(BookingReference).find({
+      where: { bookingId },
+      order: { createdAt: 'ASC' },
+    });
+    if (refs.length <= 1) return refs[0] ?? null;
+    const provider = await resolveCalendarProvider(botId);
+    if (provider) {
+      const match = refs.find((r) => r.providerType === provider.providerType);
+      if (match) return match;
+    }
+    return refs[0];
+  }
+
+  /** Mirror a new booking to the bot's connected calendar (best-effort). Returns
+   *  the meeting join URL if any. `content` is the P6a builder output; the join
+   *  URL rides the provider's native conference fields, not the text body. */
+  private async syncCalendarCreate(
     ctx: BookingContext,
     bookingId: string,
     content: { summary: string; description: string },
@@ -897,8 +914,10 @@ export class InternalProvider implements BookingProvider {
     end: Date,
     timezone: string
   ): Promise<string | null> {
+    const provider = await resolveCalendarProvider(ctx.bot.id);
+    if (!provider) return null; // no calendar connection
     try {
-      const ev = await createCalendarEvent(
+      const ev = await provider.createEvent(
         ctx.bot.id,
         {
           startISO: start.toISOString(),
@@ -909,12 +928,12 @@ export class InternalProvider implements BookingProvider {
         },
         { eventId: this.googleEventId(bookingId) }
       );
-      if (!ev) return null; // no Google connection
+      if (!ev) return null;
       const refRepo = AppDataSource.getRepository(BookingReference);
       await refRepo.save(
         refRepo.create({
           bookingId,
-          providerType: 'google',
+          providerType: provider.providerType,
           externalEventId: ev.eventId,
           externalCalendarId: ev.calendarId,
           meetingUrl: ev.meetUrl,
@@ -922,7 +941,7 @@ export class InternalProvider implements BookingProvider {
       );
       return ev.meetUrl;
     } catch (err) {
-      logger.warn('[Booking] Google event create failed; booking stands (sync_pending)', {
+      logger.warn('[Booking] calendar event create failed; booking stands (sync_pending)', {
         bookingId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -931,7 +950,7 @@ export class InternalProvider implements BookingProvider {
     }
   }
 
-  private async syncGoogleReschedule(
+  private async syncCalendarReschedule(
     ctx: BookingContext,
     bookingId: string,
     summary: string,
@@ -940,16 +959,18 @@ export class InternalProvider implements BookingProvider {
     timezone: string
   ): Promise<void> {
     const refRepo = AppDataSource.getRepository(BookingReference);
-    const ref = await refRepo.findOne({ where: { bookingId, providerType: 'google' } });
+    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     try {
       const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
       if (ref) {
-        // Target the event's real home (externalCalendarId), not the current
-        // credential calendar — a later picker change must not orphan it.
-        const res = await updateCalendarEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
+        // Route by the REF's provider — the event lives there. After a provider
+        // switch, rescheduling an OLD event targets its original provider, which
+        // returns no_connection (cred gone) → sync_pending for manual attention.
+        const provider = providerFor(ref.providerType as 'google' | 'microsoft');
+        const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
         if (res === 'not_found') {
-          // Owner deleted it in Google → recreate (deterministic id) on its home.
-          const ev = await createCalendarEvent(
+          // Owner deleted it in the calendar → recreate (deterministic id) on its home.
+          const ev = await provider.createEvent(
             ctx.bot.id,
             { ...input, summary },
             { eventId: this.googleEventId(bookingId), calendarId: ref.externalCalendarId }
@@ -960,13 +981,16 @@ export class InternalProvider implements BookingProvider {
             ref.meetingUrl = ev.meetUrl;
             await refRepo.save(ref);
           }
-        } else if (res === 'no_access') {
-          // Event lives on a now-inaccessible account (e.g. reconnect changed it).
+        } else if (res === 'no_access' || res === 'no_connection') {
+          // Event lives on a now-inaccessible / disconnected account.
           await this.markSyncPending(bookingId);
         }
       } else {
-        // Google connected after the booking was created → create now.
-        const ev = await createCalendarEvent(
+        // Calendar connected after the booking was created → create on the bot's
+        // current active provider now.
+        const provider = await resolveCalendarProvider(ctx.bot.id);
+        if (!provider) return;
+        const ev = await provider.createEvent(
           ctx.bot.id,
           { ...input, summary },
           { eventId: this.googleEventId(bookingId) }
@@ -975,7 +999,7 @@ export class InternalProvider implements BookingProvider {
           await refRepo.save(
             refRepo.create({
               bookingId,
-              providerType: 'google',
+              providerType: provider.providerType,
               externalEventId: ev.eventId,
               externalCalendarId: ev.calendarId,
               meetingUrl: ev.meetUrl,
@@ -984,7 +1008,7 @@ export class InternalProvider implements BookingProvider {
         }
       }
     } catch (err) {
-      logger.warn('[Booking] Google event reschedule sync failed (sync_pending)', {
+      logger.warn('[Booking] calendar event reschedule sync failed (sync_pending)', {
         bookingId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -992,15 +1016,17 @@ export class InternalProvider implements BookingProvider {
     }
   }
 
-  private async syncGoogleCancel(ctx: BookingContext, bookingId: string): Promise<void> {
-    const ref = await AppDataSource.getRepository(BookingReference).findOne({
-      where: { bookingId, providerType: 'google' },
-    });
+  private async syncCalendarCancel(ctx: BookingContext, bookingId: string): Promise<void> {
+    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     if (!ref) return;
     try {
-      await deleteCalendarEvent(ctx.bot.id, ref.externalEventId, ref.externalCalendarId);
+      await providerFor(ref.providerType as 'google' | 'microsoft').deleteEvent(
+        ctx.bot.id,
+        ref.externalEventId,
+        ref.externalCalendarId
+      );
     } catch (err) {
-      logger.warn('[Booking] Google event cancel sync failed', {
+      logger.warn('[Booking] calendar event cancel sync failed', {
         bookingId,
         error: err instanceof Error ? err.message : String(err),
       });
@@ -1133,7 +1159,7 @@ export class InternalProvider implements BookingProvider {
     await this.scheduleAndPersistReminders(bookingId, start, sequence);
 
     // Move the mirrored Google event (best-effort).
-    await this.syncGoogleReschedule(ctx, bookingId, service.name, start, end, rule.timezone).catch(() => undefined);
+    await this.syncCalendarReschedule(ctx, bookingId, service.name, start, end, rule.timezone).catch(() => undefined);
 
     return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
   }
@@ -1184,7 +1210,7 @@ export class InternalProvider implements BookingProvider {
       .catch(() => undefined);
 
     // Delete the mirrored Google event (best-effort).
-    await this.syncGoogleCancel(ctx, bookingId).catch(() => undefined);
+    await this.syncCalendarCancel(ctx, bookingId).catch(() => undefined);
 
     return { success: true, cancelled: true };
   }

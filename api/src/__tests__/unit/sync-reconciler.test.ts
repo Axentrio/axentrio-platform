@@ -5,7 +5,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const queryMock = vi.fn();
-const refFindOne = vi.fn();
+const refFind = vi.fn();
 const refSave = vi.fn();
 const etFindOne = vi.fn();
 const ruleFindOne = vi.fn();
@@ -15,7 +15,7 @@ vi.mock('../../database/data-source', () => ({
     query: (...a: any[]) => queryMock(...a),
     getRepository: (entity: any) => {
       const name = entity?.name ?? entity;
-      if (name === 'BookingReference') return { findOne: refFindOne, save: refSave, create: (x: any) => x };
+      if (name === 'BookingReference') return { find: refFind, save: refSave, create: (x: any) => x };
       if (name === 'ServiceType') return { findOne: etFindOne };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       return {};
@@ -32,6 +32,23 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   updateCalendarEvent: (...a: any[]) => updateCalendarEvent(...a),
   deleteCalendarEvent: (...a: any[]) => deleteCalendarEvent(...a),
 }));
+
+// The reconciler routes through the CalendarProvider port. Mock it to a Google
+// adapter wired to the same google mocks (refs in these tests are google).
+vi.mock('../../scheduler/calendar-provider', () => {
+  const googleAdapter = {
+    providerType: 'google',
+    getBusy: vi.fn(),
+    createEvent: (...a: any[]) => createCalendarEvent(...a),
+    updateEvent: (...a: any[]) => updateCalendarEvent(...a),
+    deleteEvent: (...a: any[]) => deleteCalendarEvent(...a),
+    resolveIdentity: vi.fn(),
+  };
+  return {
+    resolveCalendarProvider: async () => googleAdapter,
+    providerFor: () => googleAdapter,
+  };
+});
 
 import { reconcilePendingBookingSyncs } from '../../scheduler/sync-reconciler';
 
@@ -53,7 +70,7 @@ const scheduledRetry = () => postUpdateSqls().some((s) => s.includes('sync_next_
 
 beforeEach(() => {
   vi.clearAllMocks();
-  refFindOne.mockResolvedValue(null);
+  refFind.mockResolvedValue([]);
   etFindOne.mockResolvedValue({ name: 'Intro call' });
   ruleFindOne.mockResolvedValue({ timezone: 'UTC' });
 });
@@ -74,7 +91,7 @@ describe('reconcilePendingBookingSyncs', () => {
 
   it('updates the event on its real calendar when a reference exists', async () => {
     claim({ ...baseRow, status: 'confirmed' });
-    refFindOne.mockResolvedValue({ externalEventId: 'ev', externalCalendarId: 'team@grp', bookingId: BID });
+    refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'team@grp', bookingId: BID }, providerType: 'google' }]);
     updateCalendarEvent.mockResolvedValue('ok');
 
     await reconcilePendingBookingSyncs();
@@ -85,7 +102,7 @@ describe('reconcilePendingBookingSyncs', () => {
 
   it('recreates the event when the existing one is gone (404)', async () => {
     claim({ ...baseRow, status: 'confirmed' });
-    refFindOne.mockResolvedValue({ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID });
+    refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
     updateCalendarEvent.mockResolvedValue('not_found');
     createCalendarEvent.mockResolvedValue({ eventId: EVID, calendarId: 'primary', meetUrl: null });
 
@@ -98,7 +115,7 @@ describe('reconcilePendingBookingSyncs', () => {
 
   it('goes terminal when the account is inaccessible (403)', async () => {
     claim({ ...baseRow, status: 'confirmed' });
-    refFindOne.mockResolvedValue({ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID });
+    refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
     updateCalendarEvent.mockResolvedValue('no_access');
 
     await reconcilePendingBookingSyncs();
@@ -109,7 +126,7 @@ describe('reconcilePendingBookingSyncs', () => {
 
   it('deletes the mirrored event for a cancelled booking', async () => {
     claim({ ...baseRow, status: 'cancelled' });
-    refFindOne.mockResolvedValue({ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID });
+    refFind.mockResolvedValue([{ ...{ externalEventId: 'ev', externalCalendarId: 'primary', bookingId: BID }, providerType: 'google' }]);
     deleteCalendarEvent.mockResolvedValue('ok');
 
     await reconcilePendingBookingSyncs();

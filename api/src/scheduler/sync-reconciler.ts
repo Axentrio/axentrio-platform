@@ -19,11 +19,7 @@ import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
-import {
-  createCalendarEvent,
-  updateCalendarEvent,
-  deleteCalendarEvent,
-} from '../integrations/google/google-calendar.service';
+import { resolveCalendarProvider, providerFor } from './calendar-provider';
 import { buildBookingEventContent } from '../n8n/booking-providers/booking-content';
 import { buildManageUrl } from './booking-token';
 
@@ -86,15 +82,42 @@ export async function reconcilePendingBookingSyncs(): Promise<void> {
   }
 }
 
+/**
+ * The ref to reconcile. Normally exactly one; if a rare switch/create race left
+ * more than one, prefer the ref matching the bot's current active provider, else
+ * the earliest-created (mirrors InternalProvider.canonicalRef).
+ */
+async function canonicalRef(botId: string, bookingId: string): Promise<BookingReference | null> {
+  const refs = await AppDataSource.getRepository(BookingReference).find({
+    where: { bookingId },
+    order: { createdAt: 'ASC' },
+  });
+  if (refs.length <= 1) return refs[0] ?? null;
+  const provider = await resolveCalendarProvider(botId);
+  if (provider) {
+    const match = refs.find((r) => r.providerType === provider.providerType);
+    if (match) return match;
+  }
+  return refs[0];
+}
+
 async function processOne(row: ClaimedRow): Promise<void> {
   const refRepo = AppDataSource.getRepository(BookingReference);
-  const ref = await refRepo.findOne({ where: { bookingId: row.id, providerType: 'google' } });
+  const ref = await canonicalRef(row.bot_id, row.id);
 
-  // Cancelled → delete the mirrored event (on its real home) if any.
+  // Cancelled → delete the mirrored event (on its real home) if any. Route by the
+  // REF's provider; a ref whose provider is no longer connected goes terminal.
   if (row.status === 'cancelled') {
     if (ref) {
-      const res = await deleteCalendarEvent(row.bot_id, ref.externalEventId, ref.externalCalendarId);
+      const res = await providerFor(ref.providerType as 'google' | 'microsoft').deleteEvent(
+        row.bot_id,
+        ref.externalEventId,
+        ref.externalCalendarId
+      );
       if (res === 'no_access') return terminal(row, 'reconnect needed: no access to delete event');
+      if (res === 'no_connection') {
+        return terminal(row, `reconnect needed: no active ${ref.providerType} credential for stored ref`);
+      }
     }
     return clear(row);
   }
@@ -118,11 +141,15 @@ async function processOne(row: ClaimedRow): Promise<void> {
   };
 
   if (ref) {
-    const res = await updateCalendarEvent(row.bot_id, ref.externalEventId, input, ref.externalCalendarId);
+    const provider = providerFor(ref.providerType as 'google' | 'microsoft');
+    const res = await provider.updateEvent(row.bot_id, ref.externalEventId, input, ref.externalCalendarId);
     if (res === 'no_access') return terminal(row, 'reconnect needed: no access to update event');
+    if (res === 'no_connection') {
+      return terminal(row, `reconnect needed: no active ${ref.providerType} credential for stored ref`);
+    }
     if (res === 'not_found') {
-      // Event was deleted on Google → recreate (deterministic id) on its home.
-      const ev = await createCalendarEvent(row.bot_id, input, {
+      // Event was deleted in the calendar → recreate (deterministic id) on its home.
+      const ev = await provider.createEvent(row.bot_id, input, {
         eventId: googleEventId(row.id),
         calendarId: ref.externalCalendarId,
       });
@@ -136,14 +163,17 @@ async function processOne(row: ClaimedRow): Promise<void> {
     return clear(row);
   }
 
-  // Confirmed + no ref → create (deterministic id; legacy rows were neutralized
-  // by the migration, so this never duplicates a pre-reconciler event).
-  const ev = await createCalendarEvent(row.bot_id, input, { eventId: googleEventId(row.id) });
-  if (!ev) return clear(row); // no Google connection → nothing to mirror
+  // Confirmed + no ref → create on the bot's current active provider (deterministic
+  // id; legacy rows were neutralized by the migration, so this never duplicates a
+  // pre-reconciler event).
+  const provider = await resolveCalendarProvider(row.bot_id);
+  if (!provider) return clear(row); // no connection → nothing to mirror
+  const ev = await provider.createEvent(row.bot_id, input, { eventId: googleEventId(row.id) });
+  if (!ev) return clear(row);
   await refRepo.save(
     refRepo.create({
       bookingId: row.id,
-      providerType: 'google',
+      providerType: provider.providerType,
       externalEventId: ev.eventId,
       externalCalendarId: ev.calendarId,
       meetingUrl: ev.meetUrl,

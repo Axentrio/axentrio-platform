@@ -18,6 +18,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
+      if (name === 'BookingReference') return { find: vi.fn().mockResolvedValue([]), save: vi.fn(), create: (x: any) => x };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -40,6 +41,20 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   deleteCalendarEvent: vi.fn().mockResolvedValue(undefined),
   resolveCalendarIdentity: vi.fn().mockResolvedValue(null),
 }));
+
+// InternalProvider routes calendar work through the port; these tests focus on
+// reschedule/cancel LOGIC, so a benign "no connection" adapter suffices.
+vi.mock('../../scheduler/calendar-provider', () => {
+  const adapter = {
+    providerType: 'google',
+    getBusy: vi.fn().mockResolvedValue(null),
+    createEvent: vi.fn().mockResolvedValue(null),
+    updateEvent: vi.fn().mockResolvedValue('no_connection'),
+    deleteEvent: vi.fn().mockResolvedValue('ok'),
+    resolveIdentity: vi.fn().mockResolvedValue(null),
+  };
+  return { resolveCalendarProvider: async () => adapter, providerFor: () => adapter };
+});
 
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
 

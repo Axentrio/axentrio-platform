@@ -4,9 +4,10 @@
  * portal Bookings settings page reads/writes these. Cal.com config is managed
  * separately via the integrations endpoints.
  */
+import { randomUUID } from 'crypto';
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
-import { ServiceType } from '../database/entities/ServiceType';
+import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
@@ -61,6 +62,32 @@ async function uniqueSlug(
     slug = `${base}-${n}`;
   }
   return `${base}-${Date.now()}`;
+}
+
+/**
+ * P3: reconcile submitted intake questions against the currently-stored set.
+ * The server is the sole authority on ids: a submitted id is honored ONLY if it
+ * matches a stored question id on this service (and not already used in this pass —
+ * first-in-array wins on a duplicate); every other id (forged, stale, missing,
+ * blank, or any id on create where `stored` is empty) is reminted. Stored ids
+ * absent from the submission are dropped. An empty result collapses to `null`.
+ */
+function reconcileIntakeQuestions(
+  submitted: Array<{ id?: string; label: string; type: 'text' | 'choice'; required: boolean; options?: string[] }>,
+  stored: IntakeQuestion[] | null | undefined
+): IntakeQuestion[] | null {
+  const storedIds = new Set(
+    (Array.isArray(stored) ? stored : []).map((q) => q.id).filter((id): id is string => typeof id === 'string')
+  );
+  const usedIds = new Set<string>();
+  const out: IntakeQuestion[] = submitted.map((q) => {
+    const id = q.id && storedIds.has(q.id) && !usedIds.has(q.id) ? q.id : randomUUID();
+    usedIds.add(id);
+    const question: IntakeQuestion = { id, label: q.label, type: q.type, required: q.required };
+    if (q.type === 'choice') question.options = q.options ?? [];
+    return question;
+  });
+  return out.length ? out : null;
 }
 
 async function readConfig(tenantId: string) {
@@ -145,7 +172,10 @@ export async function createService(req: Request, res: Response): Promise<void> 
   const data = serviceInputSchema.parse(req.body);
   const { bot } = await getAnchorBotConfig(tenantId);
   const repo = AppDataSource.getRepository(ServiceType);
-  const svc = repo.create({ tenantId, botId: bot.id, ...data, slug: await uniqueSlug(repo, bot.id, data.name) });
+  const { intakeQuestions, ...rest } = data;
+  const svc = repo.create({ tenantId, botId: bot.id, ...rest, slug: await uniqueSlug(repo, bot.id, data.name) });
+  // No stored set on create → every id is minted fresh; [] collapses to null.
+  if (intakeQuestions !== undefined) svc.intakeQuestions = reconcileIntakeQuestions(intakeQuestions, null);
   await repo.save(svc);
   logger.info('[Scheduler] service created', { tenantId, botId: bot.id, serviceId: svc.id });
   sendSuccess(res, svc);
@@ -159,7 +189,10 @@ export async function updateService(req: Request, res: Response): Promise<void> 
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
-  Object.assign(svc, data);
+  const { intakeQuestions, ...rest } = data;
+  Object.assign(svc, rest);
+  // Present ⇒ replace (reconciled against the loaded stored set); absent ⇒ unchanged.
+  if (intakeQuestions !== undefined) svc.intakeQuestions = reconcileIntakeQuestions(intakeQuestions, svc.intakeQuestions);
   if (data.name) svc.slug = await uniqueSlug(repo, bot.id, data.name, svc.id);
   await repo.save(svc);
   sendSuccess(res, svc);

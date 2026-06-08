@@ -26,6 +26,18 @@ export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
 
+/** P3: a per-service intake question the agent asks before booking/requesting. */
+export type IntakeQuestionType = 'text' | 'choice';
+export interface IntakeQuestion {
+  /** Server-minted uuid, stable across edits (the answer key). */
+  id: string;
+  label: string;
+  type: IntakeQuestionType;
+  required: boolean;
+  /** Only present for `choice`. */
+  options?: string[];
+}
+
 /** Postgres `numeric` round-trips as a string in node-pg; map to number both ways. */
 const numericTransformer = {
   to: (v: number | null | undefined) => v ?? null,
@@ -117,6 +129,14 @@ export class ServiceType {
 
   @Column({ type: 'text', name: 'preparation_instructions', nullable: true })
   preparationInstructions?: string | null;
+
+  /**
+   * P3: owner-authored intake questions (jsonb array, max ~8). Null = none.
+   * Stays loosely typed on read — a legacy/hand-edited non-array degrades to
+   * "no questions" at every consumer rather than throwing.
+   */
+  @Column({ type: 'jsonb', name: 'intake_questions', nullable: true })
+  intakeQuestions?: IntakeQuestion[] | null;
 
   @Column({ type: 'varchar', length: 32, name: 'location_type', default: 'custom' })
   locationType!: LocationType;

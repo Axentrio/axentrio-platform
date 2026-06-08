@@ -25,6 +25,51 @@ export const eventTypeInputSchema = z.object({
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
 });
 
+/**
+ * P3: a single intake question. `id` is accepted permissively (the controller
+ * reconciliation is the real authority — any non-matching id is reminted). The
+ * `preprocess` strips a stale `options` array when the type is `text` BEFORE
+ * field validation, so flipping choice→text never 400s on leftover options
+ * (a trailing `.transform` runs after parse and can't prevent the option rules).
+ */
+const intakeQuestionSchema = z.preprocess(
+  (val) => {
+    if (val && typeof val === 'object' && (val as { type?: unknown }).type === 'text') {
+      const { options: _drop, ...rest } = val as Record<string, unknown>;
+      return rest;
+    }
+    return val;
+  },
+  z
+    .object({
+      id: z.string().optional(),
+      label: z.string().trim().min(1).max(200),
+      type: z.enum(['text', 'choice']),
+      required: z.boolean().default(false),
+      options: z.array(z.string().trim().min(1).max(80)).optional(),
+    })
+    .superRefine((q, ctx) => {
+      if (q.type !== 'choice') return;
+      const opts = q.options ?? [];
+      if (opts.length < 2 || opts.length > 10) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'A choice question needs 2 to 10 options' });
+      }
+      // No duplicate options after trim, compared case-insensitively.
+      const seen = new Set<string>();
+      for (const o of opts) {
+        const key = o.toLowerCase();
+        if (seen.has(key)) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['options'], message: 'Options must be unique' });
+          break;
+        }
+        seen.add(key);
+      }
+    })
+);
+
+/** P3: optional per-service intake questions (max 8). `[]` clears; omitted leaves unchanged. */
+export const intakeQuestionsSchema = z.array(intakeQuestionSchema).max(8);
+
 /** Full service (ServiceType) input for the multi-service CRUD (K3). */
 export const serviceInputSchema = z.object({
   name: z.string().min(1).max(255),
@@ -53,6 +98,7 @@ export const serviceInputSchema = z.object({
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
   sortOrder: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),
+  intakeQuestions: intakeQuestionsSchema.optional(),
 });
 
 /** Partial for PUT — any subset of fields. */

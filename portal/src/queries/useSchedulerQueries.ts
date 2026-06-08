@@ -35,6 +35,16 @@ export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
 
+export type IntakeQuestionType = 'text' | 'choice';
+export interface IntakeQuestion {
+  /** Server-minted; echo it back on save so historical answer labels stay stable. */
+  id?: string;
+  label: string;
+  type: IntakeQuestionType;
+  required: boolean;
+  options?: string[];
+}
+
 export interface Service {
   id: string;
   name: string;
@@ -56,6 +66,7 @@ export interface Service {
   priceNote?: string | null;
   locationType: string;
   preparationInstructions?: string | null;
+  intakeQuestions?: IntakeQuestion[] | null;
   sortOrder: number;
   isActive: boolean;
 }

@@ -24,6 +24,7 @@ import {
   useDeleteService,
   type Service,
   type ServiceInput,
+  type IntakeQuestion,
 } from '../../queries/useSchedulerQueries';
 
 interface FormState {
@@ -43,6 +44,7 @@ interface FormState {
   priceNote: string;
   locationType: string;
   isActive: boolean;
+  intakeQuestions: IntakeQuestion[];
 }
 
 const BLANK: FormState = {
@@ -62,6 +64,7 @@ const BLANK: FormState = {
   priceNote: '',
   locationType: 'custom',
   isActive: true,
+  intakeQuestions: [],
 };
 
 function formFromService(s: Service): FormState {
@@ -82,6 +85,10 @@ function formFromService(s: Service): FormState {
     priceNote: s.priceNote ?? '',
     locationType: s.locationType,
     isActive: s.isActive,
+    // Preserve each question's server id so saves don't re-mint + orphan answer labels.
+    intakeQuestions: Array.isArray(s.intakeQuestions)
+      ? s.intakeQuestions.map((q) => ({ ...q, options: q.options ? [...q.options] : undefined }))
+      : [],
   };
 }
 
@@ -104,7 +111,33 @@ function toInput(f: FormState): ServiceInput {
     priceNote: f.priceNote.trim() || undefined,
     locationType: f.locationType,
     isActive: f.isActive,
+    // Always send the array (even []) so the server replaces/clears; echo each id.
+    intakeQuestions: f.intakeQuestions.map((q) => ({
+      ...(q.id ? { id: q.id } : {}),
+      label: q.label.trim(),
+      type: q.type,
+      required: q.required,
+      ...(q.type === 'choice'
+        ? { options: (q.options ?? []).map((o) => o.trim()).filter((o) => o.length > 0) }
+        : {}),
+    })),
   };
+}
+
+/** Client-side mirror of the server rules (server stays authoritative). */
+function questionsError(questions: IntakeQuestion[]): string | null {
+  if (questions.length > 8) return 'At most 8 questions per service.';
+  for (const q of questions) {
+    if (!q.label.trim()) return 'Every question needs a label.';
+    if (q.type === 'choice') {
+      const opts = (q.options ?? []).map((o) => o.trim()).filter((o) => o.length > 0);
+      if (opts.length < 2) return `"${q.label.trim() || 'Choice question'}" needs at least 2 options.`;
+      if (opts.length > 10) return `"${q.label.trim()}" can have at most 10 options.`;
+      const seen = new Set(opts.map((o) => o.toLowerCase()));
+      if (seen.size !== opts.length) return `"${q.label.trim()}" has duplicate options.`;
+    }
+  }
+  return null;
 }
 
 function priceLabel(s: Service): string {
@@ -146,8 +179,10 @@ export const ServicesSection: React.FC = () => {
 
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setForm((p) => ({ ...p, [k]: v }));
 
+  const qError = questionsError(form.intakeQuestions);
+
   const save = () => {
-    if (!form.name.trim() || !(form.durationMin >= 5)) return;
+    if (!form.name.trim() || !(form.durationMin >= 5) || qError) return;
     const input = toInput(form);
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close });
@@ -289,6 +324,12 @@ export const ServicesSection: React.FC = () => {
               )}
             </div>
 
+            <QuestionsEditor
+              questions={form.intakeQuestions}
+              onChange={(qs) => set('intakeQuestions', qs)}
+              error={qError}
+            />
+
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox checked={form.isActive} onCheckedChange={(c) => set('isActive', c === true)} />
               <span className="text-sm text-text-secondary">Active (offered to customers)</span>
@@ -299,7 +340,7 @@ export const ServicesSection: React.FC = () => {
             <Button variant="outline" type="button" onClick={close}>
               Cancel
             </Button>
-            <Button type="button" onClick={save} disabled={saving || !form.name.trim()}>
+            <Button type="button" onClick={save} disabled={saving || !form.name.trim() || !!qError}>
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {editing === 'new' ? 'Add service' : 'Save'}
             </Button>
@@ -326,5 +367,108 @@ const NumberField: React.FC<{ label: string; value: number; onChange: (v: number
     />
   </div>
 );
+
+/**
+ * Repeatable intake-questions editor. Rows keep their server `id` (carried so a
+ * save doesn't re-mint ids and orphan historical answer labels). `choice`
+ * questions edit options as individual add/remove rows.
+ */
+const QuestionsEditor: React.FC<{
+  questions: IntakeQuestion[];
+  onChange: (qs: IntakeQuestion[]) => void;
+  error: string | null;
+}> = ({ questions, onChange, error }) => {
+  const update = (i: number, patch: Partial<IntakeQuestion>) =>
+    onChange(questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
+  const remove = (i: number) => onChange(questions.filter((_, idx) => idx !== i));
+  const add = () => onChange([...questions, { label: '', type: 'text', required: false }]);
+
+  return (
+    <div className="space-y-2 border-t border-edge pt-3">
+      <div className="flex items-center justify-between">
+        <Label className="text-text-secondary">Intake questions</Label>
+        <Button variant="outline" size="sm" type="button" onClick={add} disabled={questions.length >= 8}>
+          <Plus className="w-3.5 h-3.5" /> Add question
+        </Button>
+      </div>
+      <p className="text-xs text-text-muted">
+        The assistant asks these before booking and saves the answers on the booking. Up to 8.
+      </p>
+
+      {questions.map((q, i) => (
+        <div key={i} className="rounded-lg border border-edge p-2.5 space-y-2">
+          <div className="flex items-start gap-2">
+            <Input
+              value={q.label}
+              onChange={(e) => update(i, { label: e.target.value })}
+              placeholder="Question (e.g. What's the occasion?)"
+            />
+            <select
+              value={q.type}
+              onChange={(e) => {
+                const type = e.target.value as IntakeQuestion['type'];
+                update(i, { type, options: type === 'choice' ? q.options ?? ['', ''] : undefined });
+              }}
+              className="px-2 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
+            >
+              <option value="text">Text</option>
+              <option value="choice">Choice</option>
+            </select>
+            <Button
+              variant="ghost"
+              size="sm"
+              type="button"
+              className="text-red-400 hover:text-red-300 shrink-0"
+              onClick={() => remove(i)}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </Button>
+          </div>
+
+          <label className="flex items-center gap-2 cursor-pointer">
+            <Checkbox checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
+            <span className="text-xs text-text-secondary">Required</span>
+          </label>
+
+          {q.type === 'choice' && (
+            <div className="space-y-1.5 pl-1">
+              {(q.options ?? []).map((opt, oi) => (
+                <div key={oi} className="flex items-center gap-2">
+                  <Input
+                    value={opt}
+                    onChange={(e) =>
+                      update(i, { options: (q.options ?? []).map((o, idx) => (idx === oi ? e.target.value : o)) })
+                    }
+                    placeholder={`Option ${oi + 1}`}
+                  />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    className="text-red-400 hover:text-red-300 shrink-0"
+                    onClick={() => update(i, { options: (q.options ?? []).filter((_, idx) => idx !== oi) })}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => update(i, { options: [...(q.options ?? []), ''] })}
+                disabled={(q.options ?? []).length >= 10}
+              >
+                <Plus className="w-3.5 h-3.5" /> Add option
+              </Button>
+            </div>
+          )}
+        </div>
+      ))}
+
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+};
 
 export default ServicesSection;

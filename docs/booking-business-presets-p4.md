@@ -76,7 +76,12 @@ depends on.
   z.array(strictTimeWindow)), dateOverrides: z.array(strictDateOverride),
   slotGranularityMin }).strict()` — so unknown keys are rejected at **every** level
   (window, override, day array, top). A `superRefine` then asserts `start < end` on
-  every window. **Timezone validation is environment-robust:** validate against
+  every window. **Export prerequisite (P4a must do this first):** `timeWindow` and
+  `dateOverride` are currently module-private in `scheduler.schema.ts` and `slugify` is
+  private to its module — P4a **exports** all three so `presets.ts` reuses the exact
+  runtime pieces (and `uniqueSlug`'s slugify) rather than re-declaring them, which would
+  let the preset guards drift from runtime behaviour. The slug-collision invariant
+  (below) imports that same exported `slugify`. **Timezone validation is environment-robust:** validate against
   `Intl.supportedValuesOf?.('timeZone')` **when the API exists**, else fall back to a
   try/`new Intl.DateTimeFormat(undefined, { timeZone })` probe (throws on an invalid
   zone on every modern Node/ICU build); `'UTC'` always passes. This avoids a
@@ -154,9 +159,11 @@ depends on.
      in the razor-thin window where a racing manual insert commits the *same* slug
      between the preset's slug computation and its own insert, the preset's
      `(bot_id, slug)` insert can fail — and because that's inside the apply transaction,
-     the **whole apply rolls back cleanly with no partial seed**; the owner simply
-     re-applies. Either way: no crash, no partial catalog, no corruption — worst case a
-     rare clean rollback the owner retries.); (b) the realistic outcome is at worst a
+     the **whole apply rolls back cleanly with no partial seed**. Note the catalog is then
+     non-empty (it holds the one racing manual row), so a **re-apply 409s** —
+     the owner finishes the catalog by manually adding services (or deletes the stray row
+     first, then re-applies). Either way: no crash, no partial seed, no corruption — worst
+     case a rare clean rollback that leaves a single manual row to build from.); (b) the realistic outcome is at worst a
      catalog with the seed plus one manually-added service, which the owner can trivially
      prune in the editor; (c) the scenario
      requires a brand-new owner to both click "Add service" and apply a preset within
@@ -210,9 +217,14 @@ depends on.
      opposite ordering is also safe: if the preset inserts the rule first and the owner
      **then** saves real hours via `updateSchedulerConfig`, that path's existing
      find-then-update branch finds the preset row and **updates** it to the owner's
-     hours — so an explicit owner save always wins over the seeded default regardless of
-     ordering. (P4 adds no new write path to `AvailabilityRule` beyond this one
-     conditional insert; `updateSchedulerConfig` is unchanged.)
+     hours. **One narrow race, accurately stated (not over-claimed):**
+     `updateSchedulerConfig` does find-then-insert, not an atomic upsert — so in the
+     razor-thin window where it reads "no rule", the preset then inserts, and the owner
+     insert then fires, the owner save can hit the `bot_id` unique constraint and **fail
+     once**; the owner re-saves and the now-find-then-update path writes their hours. An
+     explicit owner save wins **after at most one retry**, not unconditionally first-try.
+     (P4 adds no new write path to `AvailabilityRule` beyond this one conditional insert;
+     `updateSchedulerConfig` is unchanged — making it an upsert is an out-of-scope follow-up.)
   9. after the transaction commits, **re-reads the catalog through the same query
      `listServices` uses** (`repo.find({ where: { botId }, order: { sortOrder: 'ASC',
      createdAt: 'ASC' } })`) and returns `{ services }` — identical shape and
@@ -226,9 +238,14 @@ depends on.
   A read-only `GET /scheduler/presets` lists `{ key, label, description, serviceCount
   }` for the picker. It is gated for **reads** the same as `/services`
   (`requireRole('admin','supervisor','agent')`) **plus** the `calendarIntegrations`
-  feature, so non-entitled tenants don't even see presets. Apply is
-  `requireRole('admin')`, matching service mutations — see "Role consistency" below
-  for the exact (intentionally minimal) front-end behaviour.
+  feature (server returns the entitlement error otherwise). **Accurate UX consequence
+  (no client entitlement gate is added):** like `useServices`/`useSchedulerConfig`
+  today, the section still renders for a non-entitled tenant and the "Start from a
+  preset" button can still appear on an empty catalog — the entitlement failure surfaces
+  only when the dialog loads presets (or on apply), as the inline "Couldn't load presets"
+  message. So the gate is server-authoritative, not "presets are invisible to
+  non-entitled tenants." Apply is `requireRole('admin')`, matching service mutations —
+  see "Role consistency" below.
 - **Idempotency / overwrite: require an empty catalog.** Apply is rejected with
   `409 CATALOG_NOT_EMPTY` if the bot has **any** `ServiceType` row at all. The check
   is a row-existence count, **not** filtered by `isActive`: `repo.count({ where: {
@@ -340,8 +357,11 @@ depends on.
   flip `hydrated` before the refetch resolves — that's the ordering bug; flipping after
   guarantees the effect sees fresh `data`.) The
   exact component boundary: the preset dialog and button live in `ServicesSection`; the
-  only `SchedulerSettings` change is passing `onApplied={() => setHydrated(false)}` and
-  letting the existing effect re-fire. This is the single P4b change that touches
+  only `SchedulerSettings` change is passing an **async** `onApplied` that
+  `await`s `refetchQueries({ queryKey: schedulerKey })` and **then** (in the awaited
+  resolution) calls `setHydrated(false)` — NOT the naive `onApplied={() =>
+  setHydrated(false)}`, which would re-hydrate against the stale pre-apply cache (the
+  ordering bug). This refetch-then-rehydrate is the single P4b change that touches
   `SchedulerSettings`.
 - **Availability IS part of the preset** (each preset carries the Mon–Fri default),
   but applied **conservatively** (step 8: only when the bot has no `AvailabilityRule`
@@ -360,8 +380,10 @@ depends on.
   to a readable toast, and the dialog stays open so the owner can retry or close. A
   malformed **static** preset is NOT a user-retryable runtime condition — it's caught
   by the P4a CI schema test and never ships; if one somehow reached production the
-  apply would 500 and the owner would see a generic failure toast (no special-casing —
-  the fix is a code change, not a retry).
+  runtime `presetServiceSchema.parse` would throw a ZodError that the global
+  `asApiError` handler maps to a **422 VALIDATION_ERROR** (not a 500), surfaced as a
+  generic failure toast (no special-casing — the fix is a code change to the static
+  preset, not a user retry).
 - **Picker load failure UX + entitlement reality.** `SchedulerSettings` is rendered
   **unconditionally** in `IntegrationTab` today (verified — no client-side
   `calendarIntegrations` gate around it), so a non-entitled tenant already sees the
@@ -399,6 +421,86 @@ depends on.
   this rather than add P4-only client role gating; it's a rare path (non-admins seldom
   open booking settings to seed a catalog) and the failure is a clear toast, not a
   silent or destructive one.
+
+## Implementation refinements (codex round 2 — authoritative over any conflicting text above)
+
+1. **Availability conflict insert — use a raw parameterized statement, not `orIgnore('(bot_id)')`.**
+   TypeORM's `orIgnore(string)` arg is unreliable across versions (it can emit an
+   *untargeted* `ON CONFLICT DO NOTHING`). P4a instead runs an explicit
+   `manager.query('INSERT INTO chatbot_availability_rules (tenant_id, bot_id, timezone,
+   weekly_hours, date_overrides, slot_granularity_min) VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6)
+   ON CONFLICT (bot_id) DO NOTHING', [...])` so the conflict is targeted to `(bot_id)`
+   exactly (jsonb columns cast explicitly). Same semantics the design intends; no
+   dependence on ORM sugar. (Use the real table/column names from the `AvailabilityRule` entity.)
+   **jsonb params MUST be `JSON.stringify`'d:** node-pg serializes a top-level JS array as
+   a Postgres *array literal* (`[]`→`{}`), so binding `parsedAvailability.dateOverrides`
+   (or `weeklyHours`) directly to a `$n::jsonb` param would store the wrong shape and break
+   the slot engine's `(rule.dateOverrides || []).find(...)`. Pass
+   `JSON.stringify(parsedAvailability.weeklyHours)` and
+   `JSON.stringify(parsedAvailability.dateOverrides)` for `$4`/`$5`. P4a adds a test
+   asserting the inserted rule's `dateOverrides` reads back as `[]` (a JSON array), not `{}`.
+2. **`presetServiceSchema` must `.omit({ isActive, sortOrder, intakeQuestions }).strict()`.**
+   `serviceInputSchema.strict()` alone still *accepts + defaults* `isActive`/`sortOrder`
+   (they're known keys), contradicting "seeds never carry catalog-state fields." So omit
+   them (and `intakeQuestions`, see #3) before `.strict()`. The helper then relies on the
+   **entity** default (`isActive=true`) and the apply loop's `sortOrder=i`. The omitted
+   shape is still assignable to `createServiceRow`'s data (those fields are optional there).
+3. **`createService` now reconciles `intakeQuestions` (P3a) — the "create seam" is no
+   longer a bare spread.** `createServiceRow(manager, tenantId, botId, data)` takes
+   already-parsed **and (for the manual path) already-reconciled** data and does only
+   `repo.create({...}) → save`. `createService` performs its `reconcileIntakeQuestions`
+   step BEFORE calling the helper; presets omit `intakeQuestions` entirely (out of scope),
+   so the preset path passes none and seeds carry no intake. Extracting the helper must
+   preserve manual-create's intake reconciliation (don't move reconciliation into the
+   helper, or move it such that both callers keep today's behavior).
+4. **`slugify` stays in its current module; `presets.ts` does NOT import it at runtime**
+   (the controller imports `presets`, so importing controller-side `slugify` into
+   `presets.ts` would risk a cycle). The runtime apply path slugs via the existing
+   `createServiceRow → uniqueSlug` in the controller. Only the **CI invariant test**
+   needs `slugify` for the intra-preset slug-collision check — tests may import it freely
+   (no runtime cycle). If a shared home is cleaner, extract `slugify` to a tiny
+   dependency-free util both import; either way `presets.ts` carries no controller import.
+5. **Entitlement wording corrected:** `GET /scheduler/config` and `GET /scheduler/services`
+   do NOT currently call `requireFeature` (only the mutations + `listBookings` do), so
+   non-entitled tenants do **not** already get 402s from those reads. P4's gated
+   `GET /scheduler/presets` is therefore the **new** read-time entitlement failure in the
+   dialog path; the dialog handles it via the inline "Couldn't load presets" message. (P4
+   does not add or change gating on the existing config/services reads.)
+6. **Window `start < end` is compared numerically, not by string.** The shared `hhmm`
+   regex accepts unpadded hours (`9:00`), and `'9:00' > '17:00'` lexically — a real bug.
+   The preset availability `superRefine` parses each `HH:MM` to minutes (`h*60+m`) and
+   asserts `startMin < endMin`. (Preset seeds are zero-padded regardless, but the check
+   must not depend on that.)
+7. **Apply-vs-manual race, inverse loser stated:** a manual `POST /services` can compute
+   the same slug just before the preset commits and then lose the `(bot_id, slug)` race,
+   surfacing as a `23505` on the **manual** path. Today `createService` does not
+   special-case `23505`, so that manual call would 500. This is a **pre-existing**
+   property of `createService` under any concurrent same-slug insert (not introduced by
+   P4); hardening `createService`'s slug-race handling is out of scope. P4 only guarantees
+   its own apply transaction rolls back cleanly; the concurrent manual caller's 500 is the
+   accepted, pre-existing edge.
+8. **Price refine rejects irrelevant fields both ways:** `fixed`/`from` ⇒ `fixedPrice`
+   present AND `minPrice`/`maxPrice` absent; `range` ⇒ `minPrice`+`maxPrice` present
+   (`min ≤ max`) AND `fixedPrice` absent; `none`/`on_request` ⇒ no numeric price field
+   set. So a stale numeric field on the wrong `priceDisplayType` fails CI, not just a
+   missing one.
+9. **`createServiceRow`'s data param is a helper-specific type, not `z.infer<typeof
+   serviceInputSchema>`.** In Zod 3 a `.default()` field is *required* in the inferred
+   output, so the omitted `isActive`/`sortOrder` (refinement #2) wouldn't be assignable,
+   and manual-create can pass `intakeQuestions: null`. Define
+   `type ServiceRowInput = Omit<z.infer<typeof serviceInputSchema>, 'isActive' |
+   'sortOrder' | 'intakeQuestions'> & { isActive?: boolean; sortOrder?: number;
+   intakeQuestions?: IntakeQuestion[] | null }` (or equivalent) as the helper's `data`
+   type, so both callers (manual reconciled + preset omitted) type-check.
+10. **Preset times use a stricter parser than the shared `hhmm` regex.** `hhmm` accepts
+    `24:00`–`24:59` (it exists only because the slot engine treats `24:00` solely as an
+    end-of-day marker); a preset like `24:00`–`24:30` would pass a numeric `start < end`
+    check yet be skipped by slot generation. The preset availability `superRefine`
+    therefore validates each time with the **same rule the slot engine uses** — reject any
+    `start` of `24:00`+ and any hour > 23 except `24:00` as an `end` — i.e. mirror the
+    slot-engine time parser (or simply require preset times to match `^([01]\d|2[0-3]):[0-5]\d$`
+    for starts, allowing `24:00` only as an end). Preset seeds use plain 09:00–17:00, but
+    the guard must catch a future bad seed at CI.
 
 ## Out of scope (later / other epics)
 
@@ -443,7 +545,11 @@ depends on.
   exercising the lock path; and for the availability race, insert a conflicting
   `AvailabilityRule` mid-apply via the same seam and assert the services still commit
   while the losing availability insert is no-op'd by `ON CONFLICT (bot_id) DO NOTHING`
-  (rule count stays 1, services committed). *Demoable: with
+  (rule count stays 1, services committed); (g) **`GET /scheduler/presets`** returns the
+  `{ key, label, description, serviceCount }` list shape; (h) **gate coverage**: apply
+  without the `calendarIntegrations` feature → entitlement error, apply as a non-admin
+  role → 403, and the preset reads require `admin/supervisor/agent` — asserting the
+  stated security/picker contract. *Demoable: with
   an empty catalog, `POST
   /scheduler/presets/barber/apply` creates the Barber services (and an availability
   rule if none existed) and returns them; a second apply, or apply on a bot that

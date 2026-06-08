@@ -23,7 +23,7 @@
 import { EntityManager } from 'typeorm';
 import { ApiError } from '../middleware/error-handler';
 import { Tenant } from '../database/entities/Tenant';
-import { entitlementsFor, getEntitlements } from './entitlements';
+import { entitlementsFor, getEntitlements, TenantNotFoundError } from './entitlements';
 import type { Entitlements } from './types';
 
 export class PlanLimitError extends ApiError {
@@ -104,10 +104,10 @@ export async function requireFeature(
   try {
     entitlements = await getEntitlements(tenantId);
   } catch (err) {
-    if (err instanceof Error && err.message.includes('not found')) {
+    if (err instanceof TenantNotFoundError) {
       throw new ApiError(`Tenant ${tenantId} not found`, 404, 'tenant_not_found');
     }
-    throw err;
+    throw err; // unknown-tier or other real errors surface as 500
   }
   if (!entitlements.features[feature]) {
     throw new PlanLimitError(errorCode, null, { feature });

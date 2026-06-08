@@ -639,7 +639,7 @@ export async function setTierManual(
   const targetStatus: BillingStatus = tier === 'free' ? 'none' : 'active';
   const targetPlanId: BillingPlanId = tier;
 
-  return runInTransaction(async (manager) => {
+  const result = await runInTransaction(async (manager) => {
     const rows = await manager
       .getRepository(TenantBillingAccount)
       .createQueryBuilder('a')
@@ -738,7 +738,6 @@ export async function setTierManual(
     // Step 3: tenant tier cascade.
     const previousTier = tenant.tier;
     await manager.update(Tenant, { id: tenantId }, { tier });
-    await invalidateEntitlements(tenantId);
 
     // Step 4: audit row.
     const event = manager.create(BillingEvent, {
@@ -760,6 +759,11 @@ export async function setTierManual(
 
     return { changed: true };
   });
+
+  // Invalidate AFTER commit — invalidating inside the transaction would let a
+  // concurrent reader repopulate the cache with the pre-commit tier.
+  await invalidateEntitlements(tenantId);
+  return result;
 }
 
 /**

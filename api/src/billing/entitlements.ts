@@ -22,6 +22,14 @@ import type { Entitlements, InternalPlanId } from './types';
 const ENTITLEMENTS_TTL_SECONDS = 60;
 const entitlementsCacheKey = (tenantId: string) => `entitlements:${tenantId}`;
 
+/** Thrown by `getEntitlements` when no tenant row matches the id. */
+export class TenantNotFoundError extends Error {
+  constructor(tenantId: string) {
+    super(`getEntitlements: tenant ${tenantId} not found`);
+    this.name = 'TenantNotFoundError';
+  }
+}
+
 /**
  * Resolve entitlements for a tenant. Reads the plan from `PLANS[tier]` and,
  * for Enterprise tenants, applies the per-tenant override columns
@@ -39,7 +47,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
     });
 
     if (!tenant) {
-      throw new Error(`getEntitlements: tenant ${tenantId} not found`);
+      throw new TenantNotFoundError(tenantId);
     }
 
     return entitlementsFor(tenant.tier, {

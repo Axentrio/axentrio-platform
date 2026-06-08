@@ -213,6 +213,11 @@ router.patch(
 
     await tenantRepository.save(tenant);
 
+    // A first-time webhook secret may have just been auto-generated above; drop
+    // any cached secret (see n8n/webhook.controller verifyPerTenantSecret) so
+    // inbound webhooks don't keep validating against a stale `null` for the TTL.
+    await invalidate(`tenant:webhook-secret:${tenantId}`);
+
     logger.info('Tenant updated', {
       tenantId,
       updates: { name, webhookUrl: !!webhookUrl, settings: !!settings },

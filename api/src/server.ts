@@ -20,7 +20,7 @@ import { initializeRedis, closeRedis, isRedisAvailable, getRedisClient } from '.
 import { initializeSocketIO } from './websocket/socket.handler';
 
 // Security middleware
-import { cspMiddleware } from './security/csp.middleware';
+import { cspMiddleware, securityHeadersMiddleware } from './security/csp.middleware';
 import { xssMiddleware } from './security/xss-protection';
 
 // Routes
@@ -202,11 +202,15 @@ app.use('/api/v1/widget', (req, res, next) => {
   next();
 }, express.json(), widgetRoutes);
 
-// Security middleware stack
-app.use(helmet({ contentSecurityPolicy: config.server.isProduction }));
-if (config.server.isProduction) {
+// Security middleware stack. Apply in every environment except test (was
+// production-only). Mounted AFTER the pre-stack widget routes (/widget.js,
+// /api/v1/widget) so the embeddable widget never gets X-Frame-Options. #K
+const applySecurityHeaders = !config.server.isTest;
+app.use(helmet({ contentSecurityPolicy: applySecurityHeaders }));
+if (applySecurityHeaders) {
   app.use(cspMiddleware);
   app.use(xssMiddleware);
+  app.use(securityHeadersMiddleware);
 }
 // Per-request CORS options so `credentials` is decided per origin — a static
 // `credentials:true` would emit Access-Control-Allow-Credentials even for `*`.

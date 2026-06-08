@@ -6,10 +6,21 @@ import {
   listBookings,
   rescheduleBooking,
   cancelBooking,
+  BookingError,
 } from '../../n8n/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent, LeadCreatedEvent } from '../../webhooks/webhook.types';
+
+/**
+ * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
+ * …"), so the agent can branch on the codes the SERVICES prompt rules reference
+ * (ADDRESS_REQUIRED / PHONE_REQUIRED / SERVICE_REQUIRED / SLOT_UNAVAILABLE / etc.).
+ */
+function toolError(err: unknown, fallback: string): string {
+  if (err instanceof BookingError) return `${err.code}: ${err.message}`;
+  return err instanceof Error ? err.message : fallback;
+}
 
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
@@ -45,7 +56,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to check availability' };
+      return { success: false, error: toolError(err, 'Failed to check availability') };
     }
   }
 }
@@ -83,6 +94,14 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block (e.g. {\"<question-id>\": \"answer\"}). Include every answer you collected; omit unanswered questions.",
       },
+      customerAddress: {
+        type: 'string',
+        description: "The customer's address. Required only if the SERVICES entry flags 'needs address'.",
+      },
+      customerPhone: {
+        type: 'string',
+        description: "The customer's contact phone number. Required only if the SERVICES entry flags 'needs phone'.",
+      },
     },
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -101,7 +120,11 @@ export class CreateBookingTool implements ToolAdapter {
         { name: args.attendeeName as string, email: args.attendeeEmail as string },
         args.notes as string | undefined,
         args.serviceId as string | undefined,
-        args.intakeAnswers
+        args.intakeAnswers,
+        {
+          customerAddress: args.customerAddress as string | undefined,
+          customerPhone: args.customerPhone as string | undefined,
+        }
       );
 
       // Fire-and-forget: emit appointment.booked + lead.created — confirmed bookings only.
@@ -160,7 +183,7 @@ export class CreateBookingTool implements ToolAdapter {
 
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to create booking' };
+      return { success: false, error: toolError(err, 'Failed to create booking') };
     }
   }
 }
@@ -204,6 +227,14 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block. Include every answer you collected; omit unanswered questions.",
       },
+      customerAddress: {
+        type: 'string',
+        description: "The customer's address. Required only if the SERVICES entry flags 'needs address'.",
+      },
+      customerPhone: {
+        type: 'string',
+        description: "The customer's contact phone number. Required only if the SERVICES entry flags 'needs phone'.",
+      },
     },
     required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -220,11 +251,15 @@ export class RequestAppointmentTool implements ToolAdapter {
         args.notes as string | undefined,
         args.serviceId as string | undefined,
         args.aiSummary as string | undefined,
-        args.intakeAnswers
+        args.intakeAnswers,
+        {
+          customerAddress: args.customerAddress as string | undefined,
+          customerPhone: args.customerPhone as string | undefined,
+        }
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to capture request' };
+      return { success: false, error: toolError(err, 'Failed to capture request') };
     }
   }
 }
@@ -282,7 +317,7 @@ export class RescheduleBookingTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to reschedule booking' };
+      return { success: false, error: toolError(err, 'Failed to reschedule booking') };
     }
   }
 }
@@ -315,7 +350,7 @@ export class CancelBookingTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to cancel booking' };
+      return { success: false, error: toolError(err, 'Failed to cancel booking') };
     }
   }
 }

@@ -184,7 +184,8 @@ describe('CreateBookingTool', () => {
       { name: 'Alice', email: 'alice@test.com' },
       undefined,
       undefined,
-      undefined
+      undefined,
+      { customerAddress: undefined, customerPhone: undefined }
     );
   });
 
@@ -205,7 +206,8 @@ describe('CreateBookingTool', () => {
       { name: 'Bob', email: 'bob@test.com' },
       'Need consultation',
       undefined,
-      undefined
+      undefined,
+      { customerAddress: undefined, customerPhone: undefined }
     );
   });
 

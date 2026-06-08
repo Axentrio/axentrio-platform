@@ -19,7 +19,7 @@ import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceTy
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
-import { BookingError, BookingContext, BookingProvider } from './booking-providers/types';
+import { BookingError, BookingContext, BookingProvider, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
@@ -74,10 +74,11 @@ export async function createBooking(
   attendee: { name: string; email: string },
   notes?: string,
   serviceId?: string,
-  intakeAnswers?: unknown
+  intakeAnswers?: unknown,
+  extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers);
+  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
 }
 
 /**
@@ -93,10 +94,11 @@ export async function requestBooking(
   notes?: string,
   serviceId?: string,
   aiSummary?: string,
-  intakeAnswers?: unknown
+  intakeAnswers?: unknown,
+  extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
-  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers);
+  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
 }
 
 export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {
@@ -133,6 +135,9 @@ export interface AdminBookingRow {
   bookingMode?: string | null;
   /** P3: ordered, pre-labeled intake answers for display (null if none). */
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
+  /** P5a: captured contact details (null when not collected). */
+  customerAddress?: string | null;
+  customerPhone?: string | null;
 }
 
 /**
@@ -274,6 +279,8 @@ export async function adminListBookings(
         b.eventTypeId ? questionsByService.get(b.eventTypeId) : null,
         b.intakeAnswers
       ),
+      customerAddress: b.customerAddress ?? null,
+      customerPhone: b.customerPhone ?? null,
     })),
   };
 }

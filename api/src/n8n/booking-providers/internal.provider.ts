@@ -16,6 +16,7 @@ import {
   BookingError,
   BookingContext,
   BookingProvider,
+  BookingExtras,
   ListBookingsResult,
   AvailabilityResult,
   CreateBookingResult,
@@ -66,6 +67,32 @@ function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<stri
     out[key] = trimmed.slice(0, 2000);
   }
   return Object.keys(out).length ? out : null;
+}
+
+/** P5a — which contact fields a service requires. Single mapping for the column-name
+ *  wart: customerLocationRequired maps to PHONE (a callback number), not address. */
+function requiredContactFields(service: ServiceType): { address: boolean; phone: boolean } {
+  return { address: !!service.customerAddressRequired, phone: !!service.customerLocationRequired };
+}
+
+/** Trim + cap a contact value to its DB column width; empty/whitespace → null. */
+function cleanContact(v: string | undefined, max: number): string | null {
+  if (typeof v !== 'string') return null;
+  const t = v.trim();
+  return t ? t.slice(0, max) : null;
+}
+
+/**
+ * P5a — resolve the address/phone to persist, enforcing the service's required-field
+ * gates (recoverable errors the agent re-asks on). Whitespace-only counts as absent.
+ */
+function resolveContactFields(service: ServiceType, extras?: BookingExtras): { address: string | null; phone: string | null } {
+  const req = requiredContactFields(service);
+  const address = cleanContact(extras?.customerAddress, 512);
+  const phone = cleanContact(extras?.customerPhone, 64);
+  if (req.address && !address) throw new BookingError('Address is required for this service', 'ADDRESS_REQUIRED', 400);
+  if (req.phone && !phone) throw new BookingError('A contact phone number is required for this service', 'PHONE_REQUIRED', 400);
+  return { address, phone };
 }
 
 export class InternalProvider implements BookingProvider {
@@ -254,7 +281,8 @@ export class InternalProvider implements BookingProvider {
     attendee: { name: string; email: string },
     notes?: string,
     serviceId?: string,
-    intakeAnswers?: unknown
+    intakeAnswers?: unknown,
+    extras?: BookingExtras
   ): Promise<CreateBookingResult> {
     const rule = await this.loadRule(ctx.bot.id);
     // Create-time revalidation: the service must still exist, belong to this bot,
@@ -284,8 +312,11 @@ export class InternalProvider implements BookingProvider {
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
     if (service.bookingMode === 'request') {
-      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers);
+      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras);
     }
+
+    // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
+    const contact = resolveContactFields(service, extras);
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
@@ -321,8 +352,9 @@ export class InternalProvider implements BookingProvider {
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
-              attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb)
+              attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
+              customer_address, customer_phone)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -340,6 +372,8 @@ export class InternalProvider implements BookingProvider {
             icsUid,
             idempotencyKey,
             intakeJson ? JSON.stringify(intakeJson) : null,
+            contact.address,
+            contact.phone,
           ]
         );
         return rows[0].id;
@@ -435,13 +469,16 @@ export class InternalProvider implements BookingProvider {
     attendee: { name: string; email: string },
     notes?: string,
     aiSummary?: string,
-    intakeAnswers?: unknown
+    intakeAnswers?: unknown,
+    extras?: BookingExtras
   ): Promise<CreateBookingResult> {
     const bookingRepo = AppDataSource.getRepository(Booking);
     const icsUid = `${uuidv4()}@axentrio`;
     const sourceChannel = ctx.session?.channel ?? null;
     // P3: normalize intake answers against this resolved (request-mode) service.
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
+    // P5a: required address/phone gate (request path).
+    const contact = resolveContactFields(service, extras);
     let bookingId: string;
     try {
       const rows: Array<{ id: string }> = await bookingRepo.query(
@@ -449,8 +486,8 @@ export class InternalProvider implements BookingProvider {
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
-            source_channel, ai_summary, intake_answers)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
+            source_channel, ai_summary, intake_answers, customer_address, customer_phone)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -468,6 +505,8 @@ export class InternalProvider implements BookingProvider {
           sourceChannel,
           aiSummary ?? null,
           intakeJson ? JSON.stringify(intakeJson) : null,
+          contact.address,
+          contact.phone,
         ]
       );
       bookingId = rows[0].id;
@@ -546,7 +585,8 @@ export class InternalProvider implements BookingProvider {
     notes?: string,
     serviceId?: string,
     aiSummary?: string,
-    intakeAnswers?: unknown
+    intakeAnswers?: unknown,
+    extras?: BookingExtras
   ): Promise<CreateBookingResult> {
     // Idempotency FIRST: a live (non-failed) row with this key → return it (no re-notify),
     // before resolving the service — a catalog change must not turn a retry into an error.
@@ -568,7 +608,7 @@ export class InternalProvider implements BookingProvider {
     }
     const end = new Date(start.getTime() + service.durationMin * 60_000);
 
-    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers);
+    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras);
   }
 
   /**

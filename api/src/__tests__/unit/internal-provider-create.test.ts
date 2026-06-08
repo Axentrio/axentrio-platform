@@ -360,7 +360,8 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    const intakeParam = params[params.length - 1]; // intake_answers is the last bound value
+    // createRequest column tail: …, intake_answers, customer_address, customer_phone
+    const intakeParam = params[params.length - 3];
     const parsed = JSON.parse(intakeParam);
     expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
   });
@@ -373,7 +374,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    expect(params[params.length - 1]).toBeNull();
+    expect(params[params.length - 3]).toBeNull(); // intake_answers (before address, phone)
   });
 
   // ── Owner notification email (P2b) ─────────────────────────────────────────
@@ -404,5 +405,34 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(sendRequestNotificationEmail).not.toHaveBeenCalled();
     // the request + webhook still happened
     expect(emitWebhookEvent).toHaveBeenCalledOnce();
+  });
+
+  // ── Address / phone capture (P5a) ──────────────────────────────────────────
+
+  it('throws ADDRESS_REQUIRED when the service requires an address and none is given', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]); // sole-active path
+    await expect(
+      provider.requestAppointment(ctx, 'idem-addr', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined, {})
+    ).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+    expect(bookingQuery).not.toHaveBeenCalled();
+  });
+
+  it('throws PHONE_REQUIRED when the service requires a phone (customerLocationRequired) and only whitespace is given', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerLocationRequired: true }]);
+    await expect(
+      provider.requestAppointment(ctx, 'idem-phone', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined, { customerPhone: '   ' })
+    ).rejects.toMatchObject({ code: 'PHONE_REQUIRED' });
+  });
+
+  it('persists trimmed address/phone into the request row', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, customerLocationRequired: true }]);
+    await provider.requestAppointment(
+      ctx, 'idem-contact', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined,
+      { customerAddress: '  221B Baker Street  ', customerPhone: '+44 20 7946 0000' }
+    );
+    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const params = insert![1] as any[];
+    expect(params[params.length - 2]).toBe('221B Baker Street'); // customer_address (trimmed)
+    expect(params[params.length - 1]).toBe('+44 20 7946 0000'); // customer_phone
   });
 });

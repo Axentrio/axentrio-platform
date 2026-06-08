@@ -66,6 +66,8 @@ export interface Service {
   priceNote?: string | null;
   locationType: string;
   preparationInstructions?: string | null;
+  customerAddressRequired?: boolean;
+  customerLocationRequired?: boolean;
   intakeQuestions?: IntakeQuestion[] | null;
   sortOrder: number;
   isActive: boolean;
@@ -210,6 +212,8 @@ export interface AdminBooking {
   serviceName?: string | null;
   bookingMode?: string | null;
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
+  customerAddress?: string | null;
+  customerPhone?: string | null;
 }
 
 export interface AvailabilitySlot {

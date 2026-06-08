@@ -122,13 +122,18 @@ export class PromptBuilder {
         .map((s) => {
           const price = priceHint(s);
           const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
-          const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}`;
+          // P5a: customerLocationRequired maps to PHONE (callback number), not address.
+          const contact = [s.customerAddressRequired ? 'needs address' : '', s.customerLocationRequired ? 'needs phone' : '']
+            .filter(Boolean)
+            .join(' · ');
+          const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''}`;
           return `${head}${intakeLines(s)}`;
         })
         .join('\n');
       // Only inject the ask-intake rule when a service actually renders questions
       // (a service whose questions are all malformed produces no lines → no dangling rule).
       const hasIntake = services.some((s) => intakeLines(s) !== '');
+      const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
@@ -138,6 +143,11 @@ When the customer wants to book, identify which service they mean and pass its i
           hasIntake
             ? `
 4. If the chosen service lists "Intake questions", ask any required question the customer hasn't already answered before calling the booking tool (you may ask optional ones too, but never block the booking on them). Pass every answer you have in the tool's intakeAnswers object, keyed by the question id shown before each question. If a booking tool returns an error, fix it and re-call the tool, re-including the answers you already collected.`
+            : ''
+        }${
+          hasContact
+            ? `
+5. If the chosen service is flagged "needs address" and/or "needs phone", ask for it before booking or capturing the request, and pass it as customerAddress / customerPhone. If a booking tool returns ADDRESS_REQUIRED or PHONE_REQUIRED, ask for the missing detail and re-call the tool with it.`
             : ''
         }
 ${lines}`

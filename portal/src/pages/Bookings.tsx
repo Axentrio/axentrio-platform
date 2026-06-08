@@ -239,6 +239,11 @@ function BookingRow({
           {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
           {booking.serviceName ? ` · ${booking.serviceName}` : ''}
         </div>
+        {(booking.customerPhone || booking.customerAddress) && (
+          <div className="mt-1 text-sm text-text-secondary">
+            {[booking.customerPhone, booking.customerAddress].filter(Boolean).join(' · ')}
+          </div>
+        )}
         {booking.notes && (
           <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
         )}

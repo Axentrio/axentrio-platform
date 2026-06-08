@@ -83,6 +83,18 @@ export interface CancelResult {
   cancelled: boolean;
 }
 
+/**
+ * Optional create-path fields the agent may supply, bundled so new ones (P5)
+ * thread through one param instead of growing the positional signature. Tools
+ * expose individual params (e.g. customerAddress); they're collected into this.
+ */
+export interface BookingExtras {
+  /** P5a — required when service.customerAddressRequired. */
+  customerAddress?: string;
+  /** P5a — required when service.customerLocationRequired (a callback phone). */
+  customerPhone?: string;
+}
+
 export interface BookingProvider {
   listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult>;
   /** `serviceId` selects the service; when omitted the provider falls back to the
@@ -100,7 +112,8 @@ export interface BookingProvider {
     attendee: { name: string; email: string },
     notes?: string,
     serviceId?: string,
-    intakeAnswers?: unknown
+    intakeAnswers?: unknown,
+    extras?: BookingExtras
   ): Promise<CreateBookingResult>;
   rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;

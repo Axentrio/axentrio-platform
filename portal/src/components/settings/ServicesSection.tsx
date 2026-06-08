@@ -63,6 +63,8 @@ interface FormState {
   priceNote: string;
   locationType: string;
   isActive: boolean;
+  customerAddressRequired: boolean;
+  customerLocationRequired: boolean;
   intakeQuestions: IntakeQuestion[];
 }
 
@@ -83,6 +85,8 @@ const BLANK: FormState = {
   priceNote: '',
   locationType: 'custom',
   isActive: true,
+  customerAddressRequired: false,
+  customerLocationRequired: false,
   intakeQuestions: [],
 };
 
@@ -104,6 +108,8 @@ function formFromService(s: Service): FormState {
     priceNote: s.priceNote ?? '',
     locationType: s.locationType,
     isActive: s.isActive,
+    customerAddressRequired: !!s.customerAddressRequired,
+    customerLocationRequired: !!s.customerLocationRequired,
     // Preserve each question's server id so saves don't re-mint + orphan answer labels.
     intakeQuestions: Array.isArray(s.intakeQuestions)
       ? s.intakeQuestions.map((q) => ({ ...q, options: q.options ? [...q.options] : undefined }))
@@ -130,6 +136,8 @@ function toInput(f: FormState): ServiceInput {
     priceNote: f.priceNote.trim() || undefined,
     locationType: f.locationType,
     isActive: f.isActive,
+    customerAddressRequired: f.customerAddressRequired,
+    customerLocationRequired: f.customerLocationRequired,
     // Always send the array (even []) so the server replaces/clears; echo each id.
     intakeQuestions: f.intakeQuestions.map((q) => ({
       ...(q.id ? { id: q.id } : {}),
@@ -369,6 +377,25 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
               onChange={(qs) => set('intakeQuestions', qs)}
               error={qError}
             />
+
+            <div className="space-y-2 border-t border-edge pt-3">
+              <label htmlFor="svc-addr-req" className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  id="svc-addr-req"
+                  checked={form.customerAddressRequired}
+                  onCheckedChange={(c) => set('customerAddressRequired', c === true)}
+                />
+                <span className="text-sm text-text-secondary">Requires customer address</span>
+              </label>
+              <label htmlFor="svc-phone-req" className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  id="svc-phone-req"
+                  checked={form.customerLocationRequired}
+                  onCheckedChange={(c) => set('customerLocationRequired', c === true)}
+                />
+                <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>
+              </label>
+            </div>
 
             <label htmlFor="service-active" className="flex items-center gap-2 cursor-pointer">
               <Checkbox id="service-active" checked={form.isActive} onCheckedChange={(c) => set('isActive', c === true)} />

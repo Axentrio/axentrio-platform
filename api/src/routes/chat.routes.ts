@@ -23,7 +23,21 @@ import { emitToSession } from '../websocket/socket.handler';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { encrypt, decrypt, DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
-import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
+
+/**
+ * Widget tokens are bound to exactly one session (req.widget.sessionId). Enforce
+ * that the URL :sessionId matches the token's session — otherwise a visitor could
+ * read/post on another visitor's session within the same tenant. Fail closed if
+ * the token carries no sessionId. See security audit #G.
+ */
+export function requireWidgetSessionMatch(req: import('express').Request, _res: import('express').Response, next: import('express').NextFunction): void {
+  const tokenSessionId = (req as { widget?: { sessionId?: string } }).widget?.sessionId;
+  if (!tokenSessionId || tokenSessionId !== req.params.sessionId) {
+    return next(new ForbiddenError('Session does not match the widget token'));
+  }
+  next();
+}
 import { validate } from '../middleware/validate';
 import { sendSuccess, sendPaginated, sendCreated } from '../utils/response';
 import { sendMessageSchema, chatListQuerySchema } from '../schemas';
@@ -79,6 +93,7 @@ interface SendMessageRequest {
 router.get(
   '/:sessionId/history',
   authenticateWidget,
+  requireWidgetSessionMatch,
   validateTenant,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const { sessionId } = req.params;
@@ -123,6 +138,7 @@ router.get(
 router.post(
   '/:sessionId/message',
   authenticateWidget,
+  requireWidgetSessionMatch,
   validateTenant,
   rateLimit(),
   validate(sendMessageSchema),
@@ -208,6 +224,7 @@ router.post(
 router.get(
   '/:sessionId/status',
   authenticateWidget,
+  requireWidgetSessionMatch,
   validateTenant,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const { sessionId } = req.params;
@@ -257,6 +274,7 @@ router.get(
 router.post(
   '/:sessionId/close',
   authenticateWidget,
+  requireWidgetSessionMatch,
   validateTenant,
   asyncHandler(async (req: TenantRequest, res: Response) => {
     const { sessionId } = req.params;

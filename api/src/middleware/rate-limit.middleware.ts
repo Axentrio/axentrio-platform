@@ -118,10 +118,10 @@ function ensureLimiters(): void {
  * Get client IP address
  */
 function getClientIp(req: Request): string {
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
+  // With `trust proxy` configured (server.ts), Express derives the real client
+  // IP into req.ip from the trusted hop. Do NOT read the raw X-Forwarded-For
+  // left-most value — it's attacker-spoofable and lets a client mint unlimited
+  // rate-limit keys to bypass the limiter. See security audit #I.
   return req.ip || req.socket.remoteAddress || 'unknown';
 }
 

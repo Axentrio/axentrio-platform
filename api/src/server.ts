@@ -92,6 +92,12 @@ import { httpLoggerMiddleware } from './middleware/http-logger.middleware';
 import { timeoutMiddleware } from './middleware/timeout.middleware';
 
 const app = express();
+
+// Trust the single Railway proxy hop so `req.ip` resolves to the real client IP
+// from X-Forwarded-For. Without this, rate limiting reads a spoofable raw header
+// and can be bypassed by rotating X-Forwarded-For. See security audit #I.
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const REDIS_READINESS_TIMEOUT_MS = 1000;
 

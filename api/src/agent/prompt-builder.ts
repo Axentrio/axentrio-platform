@@ -146,6 +146,7 @@ export class PromptBuilder {
       const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
       const hasCapacity = services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
       const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
+      const hasOnRequestPrice = services.some((s) => s.priceDisplayType === 'on_request');
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
@@ -170,6 +171,11 @@ When the customer wants to book, identify which service they mean and pass its i
           hasDuration
             ? `
 7. For a service shown with a duration RANGE (e.g. "30-90 min"), establish the length FIRST — ask the customer how long they need ("choose length"), or estimate it from the conversation ("AI-estimated") — then pass that as durationMin to check_availability AND the booking tool (same value). If a tool returns DURATION_OUT_OF_RANGE, pick a length within the shown range. If create_booking returns SLOT_UNAVAILABLE for a range service, the chosen length didn't fit that start — offer a different start or a shorter length within range; don't retry the same start+length.`
+            : ''
+        }
+- Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${
+          hasOnRequestPrice
+            ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
             : ''
         }
 ${lines}`

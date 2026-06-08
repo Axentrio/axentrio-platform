@@ -425,6 +425,17 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
               )}
             </div>
 
+            {form.priceDisplayType !== 'none' && (
+              <div>
+                <Label className="text-text-secondary mb-1 block">Price note (optional)</Label>
+                <Input
+                  value={form.priceNote}
+                  onChange={(e) => set('priceNote', e.target.value)}
+                  placeholder="e.g. per hour, excl. materials"
+                />
+              </div>
+            )}
+
             <QuestionsEditor
               questions={form.intakeQuestions}
               onChange={(qs) => set('intakeQuestions', qs)}

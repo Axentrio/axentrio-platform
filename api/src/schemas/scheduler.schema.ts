@@ -25,6 +25,39 @@ export const eventTypeInputSchema = z.object({
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
 });
 
+/** Full service (ServiceType) input for the multi-service CRUD (K3). */
+export const serviceInputSchema = z.object({
+  name: z.string().min(1).max(255),
+  category: z.string().max(255).optional(),
+  description: z.string().max(2000).optional(),
+  bookingMode: z.enum(['auto', 'request']).default('auto'),
+  onlineBookable: z.boolean().default(true),
+  durationMode: z.enum(['fixed', 'range', 'ai']).default('fixed'),
+  durationMin: z.number().int().min(5).max(1440),
+  minDurationMin: z.number().int().min(5).max(1440).optional(),
+  maxDurationMin: z.number().int().min(5).max(1440).optional(),
+  bufferBeforeMin: z.number().int().min(0).max(480).default(0),
+  bufferAfterMin: z.number().int().min(0).max(480).default(0),
+  minNoticeMin: z.number().int().min(0).max(43200).default(0),
+  maxHorizonDays: z.number().int().min(1).max(365).default(60),
+  maxBookingsPerDay: z.number().int().min(1).max(100).optional(),
+  priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request']).default('none'),
+  fixedPrice: z.number().nonnegative().max(1_000_000).optional(),
+  minPrice: z.number().nonnegative().max(1_000_000).optional(),
+  maxPrice: z.number().nonnegative().max(1_000_000).optional(),
+  priceNote: z.string().max(255).optional(),
+  customerLocationRequired: z.boolean().default(false),
+  customerAddressRequired: z.boolean().default(false),
+  fileUploadAllowed: z.boolean().default(false),
+  preparationInstructions: z.string().max(2000).optional(),
+  locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
+  sortOrder: z.number().int().min(0).default(0),
+  isActive: z.boolean().default(true),
+});
+
+/** Partial for PUT — any subset of fields. */
+export const serviceUpdateSchema = serviceInputSchema.partial();
+
 export const availabilityInputSchema = z.object({
   timezone: z.string().min(1).max(64),
   weeklyHours: weeklyHours.default({}),

@@ -18,7 +18,7 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: any) => {
       const name = entity?.name || entity;
-      if (name === 'ServiceType') return { findOne: etFindOne, create: (d: any) => d, save: etSave };
+      if (name === 'ServiceType') return { findOne: etFindOne, find: async () => [], create: (d: any) => d, save: etSave };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
       return {};
     },

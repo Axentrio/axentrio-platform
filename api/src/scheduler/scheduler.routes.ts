@@ -15,6 +15,12 @@ router.get('/config', requireRole('admin', 'supervisor', 'agent'), asyncHandler(
 // Write: admin only.
 router.put('/config', requireRole('admin'), asyncHandler(ctrl.updateSchedulerConfig));
 
+// Services catalog (multi-service). Reads for admin/supervisor/agent; mutations admin-only.
+router.get('/services', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listServices));
+router.post('/services', requireRole('admin'), asyncHandler(ctrl.createService));
+router.put('/services/:id', requireRole('admin'), asyncHandler(ctrl.updateService));
+router.delete('/services/:id', requireRole('admin'), asyncHandler(ctrl.deleteService));
+
 // Bookings management (internal provider). Reads for admin/supervisor/agent;
 // mutations admin-only.
 router.get('/bookings', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listBookings));

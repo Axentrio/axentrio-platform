@@ -12,11 +12,14 @@ import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services
 import { requireFeature } from '../billing/enforce';
 import {
   updateSchedulerSchema,
+  serviceInputSchema,
+  serviceUpdateSchema,
   listBookingsQuerySchema,
   availabilityQuerySchema,
   cancelBookingBodySchema,
   rescheduleBookingBodySchema,
 } from '../schemas/scheduler.schema';
+import type { Repository } from 'typeorm';
 import {
   adminListBookings,
   adminAvailability,
@@ -40,17 +43,42 @@ function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'appointment';
 }
 
+/** Unique `(bot_id, slug)` — appends -2/-3/… on collision (enforced by a DB index). */
+async function uniqueSlug(
+  repo: Repository<ServiceType>,
+  botId: string,
+  name: string,
+  excludeId?: string
+): Promise<string> {
+  const base = slugify(name);
+  let slug = base;
+  let n = 1;
+  // Bounded loop — a handful of same-named services at most for a solo business.
+  while (n < 1000) {
+    const existing = await repo.findOne({ where: { botId, slug } });
+    if (!existing || existing.id === excludeId) return slug;
+    n += 1;
+    slug = `${base}-${n}`;
+  }
+  return `${base}-${Date.now()}`;
+}
+
 async function readConfig(tenantId: string) {
   const { bot } = await getAnchorBotConfig(tenantId);
-  const [eventType, availability] = await Promise.all([
-    AppDataSource.getRepository(ServiceType).findOne({ where: { botId: bot.id, isActive: true } }),
+  const repo = AppDataSource.getRepository(ServiceType);
+  const [eventType, services, availability] = await Promise.all([
+    repo.findOne({ where: { botId: bot.id, isActive: true }, order: { sortOrder: 'ASC' } }),
+    repo.find({ where: { botId: bot.id }, order: { sortOrder: 'ASC', createdAt: 'ASC' } }),
     AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } }),
   ]);
   return {
     // Cal.com is shelved — the internal scheduler is the only provider, so we
     // normalize away any legacy `integrations.provider: 'calcom'` left on old bots.
     provider: 'internal' as const,
+    // `eventType` (first active) kept for back-compat with the single-service UI;
+    // `services` is the full catalog (K3).
     eventType: eventType ?? null,
+    services,
     availability: availability ?? null,
   };
 }
@@ -97,6 +125,57 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });
   sendSuccess(res, await readConfig(tenantId));
+}
+
+// --- Services CRUD (multi-service catalog, K3) ---
+
+export async function listServices(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const services = await AppDataSource.getRepository(ServiceType).find({
+    where: { botId: bot.id },
+    order: { sortOrder: 'ASC', createdAt: 'ASC' },
+  });
+  sendSuccess(res, { services });
+}
+
+export async function createService(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  const data = serviceInputSchema.parse(req.body);
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const repo = AppDataSource.getRepository(ServiceType);
+  const svc = repo.create({ tenantId, botId: bot.id, ...data, slug: await uniqueSlug(repo, bot.id, data.name) });
+  await repo.save(svc);
+  logger.info('[Scheduler] service created', { tenantId, botId: bot.id, serviceId: svc.id });
+  sendSuccess(res, svc);
+}
+
+export async function updateService(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  const data = serviceUpdateSchema.parse(req.body);
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const repo = AppDataSource.getRepository(ServiceType);
+  const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
+  if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
+  Object.assign(svc, data);
+  if (data.name) svc.slug = await uniqueSlug(repo, bot.id, data.name, svc.id);
+  await repo.save(svc);
+  sendSuccess(res, svc);
+}
+
+/** Soft-deactivate (keep the row so existing bookings keep their service context). */
+export async function deleteService(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const repo = AppDataSource.getRepository(ServiceType);
+  const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
+  if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
+  svc.isActive = false;
+  await repo.save(svc);
+  sendSuccess(res, { id: svc.id, isActive: false });
 }
 
 // --- Admin bookings management ---

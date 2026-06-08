@@ -26,6 +26,12 @@ export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';
 
+/** Postgres `numeric` round-trips as a string in node-pg; map to number both ways. */
+const numericTransformer = {
+  to: (v: number | null | undefined) => v ?? null,
+  from: (v: string | null) => (v === null || v === undefined ? null : Number(v)),
+};
+
 @Entity('chatbot_service_types')
 export class ServiceType {
   @PrimaryGeneratedColumn('uuid')
@@ -88,14 +94,14 @@ export class ServiceType {
   @Column({ type: 'varchar', length: 16, name: 'price_display_type', default: 'none' })
   priceDisplayType!: PriceDisplayType;
 
-  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'fixed_price', nullable: true })
-  fixedPrice?: string | null;
+  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'fixed_price', nullable: true, transformer: numericTransformer })
+  fixedPrice?: number | null;
 
-  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'min_price', nullable: true })
-  minPrice?: string | null;
+  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'min_price', nullable: true, transformer: numericTransformer })
+  minPrice?: number | null;
 
-  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'max_price', nullable: true })
-  maxPrice?: string | null;
+  @Column({ type: 'numeric', precision: 10, scale: 2, name: 'max_price', nullable: true, transformer: numericTransformer })
+  maxPrice?: number | null;
 
   @Column({ type: 'varchar', length: 255, name: 'price_note', nullable: true })
   priceNote?: string | null;

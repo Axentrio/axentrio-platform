@@ -7,16 +7,25 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config/environment';
 
-// Server-only secret, shared with the OAuth-state signer (same trust domain).
-const SECRET = config.google.stateJwtSecret || 'booking-manage-dev-secret';
 const TOKEN_TYPE = 'booking_manage';
 
+// Server-only secret, shared with the OAuth-state signer (same trust domain).
+// Read at call time (not import time) and fail closed — no dev fallback, so a
+// missing secret can never be forged with a public default. See security audit #E.
+function getSecret(): string {
+  const secret = config.google.stateJwtSecret;
+  if (!secret) {
+    throw new Error('Booking token secret is not configured (META_OAUTH_JWT_SECRET)');
+  }
+  return secret;
+}
+
 export function signBookingToken(bookingId: string): string {
-  return jwt.sign({ bookingId, t: TOKEN_TYPE }, SECRET, { expiresIn: '120d' });
+  return jwt.sign({ bookingId, t: TOKEN_TYPE }, getSecret(), { expiresIn: '120d' });
 }
 
 export function verifyBookingToken(token: string): { bookingId: string } {
-  const decoded = jwt.verify(token, SECRET) as { bookingId?: string; t?: string };
+  const decoded = jwt.verify(token, getSecret()) as { bookingId?: string; t?: string };
   if (decoded.t !== TOKEN_TYPE || !decoded.bookingId) {
     throw new Error('Invalid booking token');
   }

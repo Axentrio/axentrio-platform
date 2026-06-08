@@ -139,6 +139,8 @@ export interface AdminBookingRow {
   /** P5a: captured contact details (null when not collected). */
   customerAddress?: string | null;
   customerPhone?: string | null;
+  /** P5e: attached files (snapshot subset for display/download). */
+  uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
 }
 
 /**
@@ -282,6 +284,11 @@ export async function adminListBookings(
       ),
       customerAddress: b.customerAddress ?? null,
       customerPhone: b.customerPhone ?? null,
+      uploadedFiles: Array.isArray(b.uploadedFiles)
+        ? (b.uploadedFiles as Array<Record<string, unknown>>)
+            .filter((f) => f && typeof f.fileSessionId === 'string' && typeof f.fileName === 'string')
+            .map((f) => ({ fileSessionId: f.fileSessionId as string, fileName: f.fileName as string }))
+        : null,
     })),
   };
 }

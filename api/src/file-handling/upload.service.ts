@@ -66,6 +66,8 @@ export interface UploadSession {
   status: 'pending' | 'uploading' | 'scanning' | 'ready' | 'failed' | 'quarantined';
   tenantId: string;
   userId: string;
+  /** The chat session that initiated the upload (P5e booking-linkage floor; from getSession). */
+  chatSessionId?: string;
   originalName: string;
   fileSize: number;
   mimeType: string;
@@ -282,6 +284,7 @@ export class UploadService {
       status: row.status as UploadSession['status'],
       tenantId: row.tenantId as string,
       userId: row.userId as string,
+      chatSessionId: (row.chatSessionId as string) ?? '',
       originalName: row.originalName as string,
       // bigint columns come back as strings from node-postgres — coerce.
       fileSize: typeof row.fileSize === 'string' ? Number(row.fileSize) : (row.fileSize as number),

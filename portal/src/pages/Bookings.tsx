@@ -14,7 +14,10 @@ import {
   Loader2,
   CalendarClock,
   XCircle,
+  Paperclip,
 } from 'lucide-react';
+import { api, extractApiErrorMessage } from '../services/apiClient';
+import { toast } from 'sonner';
 import { useHasFeature } from '../queries/useEntitlementsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
 import {
@@ -64,6 +67,16 @@ const dayLabel = (iso: string, tz: string) =>
   fmt(iso, tz, { weekday: 'long', day: 'numeric', month: 'long' });
 const timeLabel = (iso: string, tz: string) =>
   fmt(iso, tz, { hour: 'numeric', minute: '2-digit', hour12: true });
+
+/** P5e — fetch a fresh signed URL for an attached file and open it (404 if removed). */
+async function downloadFile(fileSessionId: string): Promise<void> {
+  try {
+    const { downloadUrl } = await api.get<{ downloadUrl: string }>(`/files/${fileSessionId}/download`);
+    window.open(downloadUrl, '_blank', 'noopener');
+  } catch (err) {
+    toast.error(extractApiErrorMessage(err) ?? 'File is no longer available');
+  }
+}
 
 // ---------------------------------------------------------------------------
 
@@ -256,6 +269,20 @@ function BookingRow({
               </div>
             ))}
           </dl>
+        )}
+        {booking.uploadedFiles && booking.uploadedFiles.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {booking.uploadedFiles.map((f) => (
+              <button
+                key={f.fileSessionId}
+                type="button"
+                onClick={() => downloadFile(f.fileSessionId)}
+                className="inline-flex items-center gap-1 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary hover:border-primary-500 hover:text-text-primary"
+              >
+                <Paperclip className="h-3 w-3" /> {f.fileName}
+              </button>
+            ))}
+          </div>
         )}
         {booking.meetingUrl && (
           <a

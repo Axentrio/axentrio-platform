@@ -113,6 +113,12 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes — pass the SAME value you checked availability with. Omit for fixed-duration services.",
       },
+      fileSessionIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
+      },
     },
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -136,6 +142,7 @@ export class CreateBookingTool implements ToolAdapter {
           customerAddress: args.customerAddress as string | undefined,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
+          fileSessionIds: args.fileSessionIds as string[] | undefined,
         }
       );
 
@@ -252,6 +259,12 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Omit for fixed-duration services.",
       },
+      fileSessionIds: {
+        type: 'array',
+        items: { type: 'string' },
+        description:
+          'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
+      },
     },
     required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -273,6 +286,7 @@ export class RequestAppointmentTool implements ToolAdapter {
           customerAddress: args.customerAddress as string | undefined,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
+          fileSessionIds: args.fileSessionIds as string[] | undefined,
         }
       );
       return { success: true, data: result };

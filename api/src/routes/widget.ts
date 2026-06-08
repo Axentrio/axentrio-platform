@@ -20,7 +20,7 @@ import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
-import { enforceCountLimit } from '../billing/enforce';
+import { enforceCountLimit, requireFeature } from '../billing/enforce';
 import { entitlementsFor } from '../billing/entitlements';
 import { Not } from 'typeorm';
 
@@ -582,6 +582,71 @@ router.post(
     sendSuccess(res, {
       message: 'Thank you for your feedback!',
     });
+  })
+);
+
+// ── File upload (P5e) ────────────────────────────────────────────────────────
+// Visitor-authenticated (widget session, NOT Clerk) wrappers over the SAME upload
+// service + virus scan the owner/portal path uses. Tenant + chat session come from
+// the server-trusted widget token, never the client.
+
+const UPLOAD_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+router.post(
+  '/files/upload',
+  widgetRateLimiter,
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const w = req.widget!;
+    if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
+    await requireFeature(w.tenantId, 'fileUpload', 'plan_limit_file_upload');
+    const { fileName, fileSize, mimeType } = req.body;
+    if (!fileName || !fileSize || !mimeType) {
+      throw new ValidationError('fileName, fileSize, and mimeType are required');
+    }
+    const { getUploadService } = await import('../file-handling/upload.service');
+    // generateUploadUrl runs the existing size/mime/quota validation; fileKey is
+    // server-derived and the presigned PUT pins ContentLength/Content-Type.
+    const session = await getUploadService().generateUploadUrl({
+      fileName,
+      fileSize,
+      mimeType,
+      tenantId: w.tenantId, // server-trusted
+      userId: '',
+      chatSessionId: w.sessionId, // binds the upload to THIS chat
+    });
+    sendSuccess(res, {
+      upload: { sessionId: session.sessionId, uploadUrl: session.uploadUrl, expiresAt: session.expiresAt },
+    });
+  })
+);
+
+router.post(
+  '/files/:sessionId/upload-complete',
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const w = req.widget!;
+    if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
+    const { sessionId } = req.params;
+    if (!UPLOAD_UUID_RE.test(sessionId)) throw new ValidationError('Invalid sessionId');
+    const { getUploadService } = await import('../file-handling/upload.service');
+    const uploadService = getUploadService();
+    const session = await uploadService.getSession(sessionId);
+    if (!session) throw new NotFoundError('Upload session not found');
+    // Ownership: a widget session may only complete/probe ITS OWN upload.
+    if (session.tenantId !== w.tenantId || session.chatSessionId !== w.sessionId) {
+      throw new ForbiddenError('Access denied');
+    }
+    // Terminal-state idempotency (never re-scan / re-transition).
+    if (session.status === 'ready' || session.status === 'quarantined') {
+      sendSuccess(res, { sessionId, status: session.status, scanResult: session.scanResult ?? null });
+      return;
+    }
+    const exists = await uploadService.fileExists(session.fileKey);
+    if (!exists) throw new NotFoundError('File not yet uploaded');
+    const { performScan } = await import('../file-handling/virus-scan-trigger');
+    const scanResult = await performScan(sessionId, session.fileKey);
+    sendSuccess(res, { sessionId, status: scanResult.clean ? 'ready' : 'quarantined', scanResult });
   })
 );
 

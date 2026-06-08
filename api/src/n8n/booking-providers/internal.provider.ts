@@ -407,6 +407,8 @@ export class InternalProvider implements BookingProvider {
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
     const contact = resolveContactFields(service, extras);
+    // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
+    const uploadedFiles = await this.validateUploadedFiles(ctx, service, extras?.fileSessionIds);
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
@@ -447,8 +449,8 @@ export class InternalProvider implements BookingProvider {
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
-              customer_address, customer_phone, booked_duration_min)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
+              customer_address, customer_phone, booked_duration_min, uploaded_files)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -469,6 +471,7 @@ export class InternalProvider implements BookingProvider {
             contact.address,
             contact.phone,
             effectiveDuration,
+            uploadedFiles ? JSON.stringify(uploadedFiles) : null,
           ]
         );
         return rows[0].id;
@@ -575,6 +578,8 @@ export class InternalProvider implements BookingProvider {
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
     // P5a: required address/phone gate (request path).
     const contact = resolveContactFields(service, extras);
+    // P5e: validate + snapshot attached files for the request row too.
+    const uploadedFiles = await this.validateUploadedFiles(ctx, service, extras?.fileSessionIds);
     let bookingId: string;
     try {
       const rows: Array<{ id: string }> = await bookingRepo.query(
@@ -582,8 +587,8 @@ export class InternalProvider implements BookingProvider {
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
-            source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
+            source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -604,6 +609,7 @@ export class InternalProvider implements BookingProvider {
           contact.address,
           contact.phone,
           bookedDurationMin ?? null,
+          uploadedFiles ? JSON.stringify(uploadedFiles) : null,
         ]
       );
       bookingId = rows[0].id;
@@ -788,6 +794,57 @@ export class InternalProvider implements BookingProvider {
         aiSummary: req.aiSummary,
       });
     })();
+  }
+
+  /**
+   * P5e — validate the customer's attached files against the RESOLVED service and snapshot
+   * them for `Booking.uploaded_files`. Ordered checks (security-first):
+   * 1. service-disallow FIRST (before any session load → no existence/timing oracle);
+   * 2. dedupe by id, then cap ≤5;
+   * 3. per id: status='ready' (scanned clean) AND tenant match AND chatSession match AND
+   *    well-formed snapshot fields — else FILE_NOT_READY.
+   * Returns the JSON array (immutable snapshot) or null when no files were attached.
+   */
+  private async validateUploadedFiles(
+    ctx: BookingContext,
+    service: ServiceType,
+    fileSessionIds?: string[]
+  ): Promise<Array<{ fileSessionId: string; fileName: string; mimeType: string; fileSize: number; fileKey: string }> | null> {
+    const ids = Array.isArray(fileSessionIds) ? fileSessionIds.filter((s) => typeof s === 'string' && s) : [];
+    if (!ids.length) return null;
+    if (!service.fileUploadAllowed) {
+      throw new BookingError('This service does not accept file uploads', 'FILE_UPLOAD_NOT_ALLOWED', 400);
+    }
+    const distinct = [...new Set(ids)];
+    if (distinct.length > 5) {
+      throw new BookingError('Too many files attached', 'TOO_MANY_FILES', 400);
+    }
+    const { getUploadService } = await import('../../file-handling/upload.service');
+    const uploadService = getUploadService();
+    const out: Array<{ fileSessionId: string; fileName: string; mimeType: string; fileSize: number; fileKey: string }> = [];
+    for (const id of distinct) {
+      const session = await uploadService.getSession(id);
+      const wellFormed =
+        !!session &&
+        session.status === 'ready' &&
+        session.tenantId === ctx.tenant.id &&
+        session.chatSessionId === ctx.session.id &&
+        typeof session.originalName === 'string' && !!session.originalName &&
+        typeof session.fileKey === 'string' && !!session.fileKey &&
+        typeof session.mimeType === 'string' && !!session.mimeType &&
+        typeof session.fileSize === 'number' && session.fileSize > 0;
+      if (!wellFormed) {
+        throw new BookingError('Attached file is not available', 'FILE_NOT_READY', 400);
+      }
+      out.push({
+        fileSessionId: id,
+        fileName: session!.originalName,
+        mimeType: session!.mimeType,
+        fileSize: session!.fileSize,
+        fileKey: session!.fileKey,
+      });
+    }
+    return out;
   }
 
   /** Schedule reminders and persist their job ids; non-fatal on failure. */

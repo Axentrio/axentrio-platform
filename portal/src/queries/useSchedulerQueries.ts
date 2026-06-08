@@ -70,6 +70,7 @@ export interface Service {
   preparationInstructions?: string | null;
   customerAddressRequired?: boolean;
   customerLocationRequired?: boolean;
+  fileUploadAllowed?: boolean;
   intakeQuestions?: IntakeQuestion[] | null;
   sortOrder: number;
   isActive: boolean;
@@ -216,6 +217,7 @@ export interface AdminBooking {
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
   customerAddress?: string | null;
   customerPhone?: string | null;
+  uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
 }
 
 export interface AvailabilitySlot {

@@ -51,6 +51,11 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   resolveCalendarIdentity: (...args: any[]) => resolveCalendarIdentity(...args),
 }));
 
+const getUploadSession = vi.fn();
+vi.mock('../../file-handling/upload.service', () => ({
+  getUploadService: () => ({ getSession: getUploadSession }),
+}));
+
 const emitWebhookEvent = vi.fn();
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: (...args: any[]) => emitWebhookEvent(...args),
@@ -298,7 +303,7 @@ describe('InternalProvider.createBooking', () => {
   it('persists booked_duration_min = service.durationMin for a fixed service', async () => {
     await provider.createBooking(ctx, 'idem-dur-fixed', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-1)).toBe(30); // booked_duration_min last
+    expect((insert![1] as any[]).at(-2)).toBe(30); // booked_duration_min (uploaded_files last)
   });
 
   it('books a range service at the chosen 60-min duration', async () => {
@@ -310,7 +315,7 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
     expect(res.booking.endTime).toBe('2026-06-10T08:00:00.000Z'); // start + 60min
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-1)).toBe(60);
+    expect((insert![1] as any[]).at(-2)).toBe(60);
   });
 
   it('defaults a range service to minDurationMin when no duration is given', async () => {
@@ -331,6 +336,48 @@ describe('InternalProvider.createBooking', () => {
     const res = await provider.createBooking(ctx, 'idem-dur-bad', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { durationMin: 60 });
     expect(res.success).toBe(true);
     expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z'); // fixed 30
+  });
+
+  // ── File upload (P5e) ──────────────────────────────────────────────────────
+
+  const readySession = (over: any = {}) => ({
+    status: 'ready', tenantId: 'ten-1', chatSessionId: 'sess-1',
+    originalName: 'room.jpg', fileKey: 'uploads/ten-1/2026/06/abc.jpg', mimeType: 'image/jpeg', fileSize: 1234,
+    ...over,
+  });
+
+  it('throws FILE_UPLOAD_NOT_ALLOWED when files are attached to a no-upload service (before any session load)', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: false }]);
+    await expect(
+      provider.createBooking(ctx, 'idem-f1', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1'] })
+    ).rejects.toMatchObject({ code: 'FILE_UPLOAD_NOT_ALLOWED' });
+    expect(getUploadSession).not.toHaveBeenCalled(); // no oracle
+  });
+
+  it('snapshots a ready, tenant+session-matched file into uploaded_files', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    getUploadSession.mockResolvedValue(readySession());
+    await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1', 'f-1'] });
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const files = JSON.parse((insert![1] as any[]).at(-1)); // uploaded_files last
+    expect(files).toEqual([{ fileSessionId: 'f-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
+  });
+
+  it('throws FILE_NOT_READY for an unscanned / foreign-tenant / wrong-session file', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    for (const bad of [{ status: 'scanning' }, { tenantId: 'other' }, { chatSessionId: 'other-sess' }]) {
+      getUploadSession.mockResolvedValueOnce(readySession(bad));
+      await expect(
+        provider.createBooking(ctx, `idem-bad-${JSON.stringify(bad)}`, OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1'] })
+      ).rejects.toMatchObject({ code: 'FILE_NOT_READY' });
+    }
+  });
+
+  it('throws TOO_MANY_FILES for more than 5 distinct files', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    await expect(
+      provider.createBooking(ctx, 'idem-many', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['a','b','c','d','e','f'] })
+    ).rejects.toMatchObject({ code: 'TOO_MANY_FILES' });
   });
 });
 
@@ -437,7 +484,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
     // createRequest column tail: …, intake_answers, customer_address, customer_phone
-    const intakeParam = params[params.length - 4];
+    const intakeParam = params[params.length - 5];
     const parsed = JSON.parse(intakeParam);
     expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
   });
@@ -450,7 +497,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    expect(params[params.length - 4]).toBeNull(); // intake_answers (before address, phone)
+    expect(params[params.length - 5]).toBeNull(); // intake_answers (before address, phone)
   });
 
   // ── Owner notification email (P2b) ─────────────────────────────────────────
@@ -508,7 +555,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    expect(params[params.length - 3]).toBe('221B Baker Street'); // customer_address
-    expect(params[params.length - 2]).toBe('+44 20 7946 0000'); // customer_phone
+    expect(params[params.length - 4]).toBe('221B Baker Street'); // customer_address
+    expect(params[params.length - 3]).toBe('+44 20 7946 0000'); // customer_phone
   });
 });

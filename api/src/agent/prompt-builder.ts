@@ -123,7 +123,11 @@ export class PromptBuilder {
           const price = priceHint(s);
           const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
           // P5a: customerLocationRequired maps to PHONE (callback number), not address.
-          const contact = [s.customerAddressRequired ? 'needs address' : '', s.customerLocationRequired ? 'needs phone' : '']
+          const contact = [
+            s.customerAddressRequired ? 'needs address' : '',
+            s.customerLocationRequired ? 'needs phone' : '',
+            s.fileUploadAllowed ? 'accepts files' : '',
+          ]
             .filter(Boolean)
             .join(' · ');
           // P5c: show the duration RANGE for range/ai services (the agent passes durationMin).
@@ -147,6 +151,7 @@ export class PromptBuilder {
       const hasCapacity = services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
       const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
       const hasOnRequestPrice = services.some((s) => s.priceDisplayType === 'on_request');
+      const hasFileUpload = services.some((s) => s.fileUploadAllowed);
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
@@ -176,6 +181,11 @@ When the customer wants to book, identify which service they mean and pass its i
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${
           hasOnRequestPrice
             ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
+            : ''
+        }${
+          hasFileUpload
+            ? `
+- Files: once you have identified a service flagged "accepts files", you may invite the customer to attach a relevant file (e.g. a photo of the room). Pass the uploaded file ids in fileSessionIds when booking/requesting. Do not invite a file before the service is resolved, or for a service that doesn't accept files. If a booking tool returns FILE_UPLOAD_NOT_ALLOWED, FILE_NOT_READY, or TOO_MANY_FILES, tell the customer plainly and proceed without the attachment if needed.`
             : ''
         }
 ${lines}`

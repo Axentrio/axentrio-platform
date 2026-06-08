@@ -92,8 +92,10 @@ const SettingsLayout: React.FC = () => {
                 </span>
                 <ul className="space-y-0.5">
                   {visibleNav
-                    .filter((item) => item.group === group)
-                    .map((item) => (
+                    .flatMap((item) =>
+                      item.group !== group
+                        ? []
+                        : [
                       <li key={item.path}>
                         <NavLink
                           to={item.path}
@@ -109,8 +111,8 @@ const SettingsLayout: React.FC = () => {
                           <item.icon className="w-4 h-4" />
                           {t(`settings.tabs.${item.labelKey}`)}
                         </NavLink>
-                      </li>
-                    ))}
+                      </li>,
+                    ])}
                 </ul>
               </div>
             ))}

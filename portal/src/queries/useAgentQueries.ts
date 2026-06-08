@@ -31,16 +31,8 @@ export function useAgentList(filters?: Record<string, unknown>) {
   return useQuery(agentOptions.list(filters));
 }
 
-export function useAgentDetail(id: string) {
-  return useQuery(agentOptions.detail(id));
-}
-
 export function useAgentShifts(id: string) {
   return useQuery(agentOptions.shifts(id));
-}
-
-export function useAgentPerformance(id: string) {
-  return useQuery(agentOptions.performance(id));
 }
 
 export function useUpdateAgent() {
@@ -48,17 +40,6 @@ export function useUpdateAgent() {
   return useMutation({
     mutationFn: ({ id, ...data }: { id: string } & Record<string, unknown>) =>
       api.patch(`/agents/${id}`, data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
-    },
-  });
-}
-
-
-export function useCreateAgent() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (data: Record<string, unknown>) => api.post('/agents', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.all() });
     },

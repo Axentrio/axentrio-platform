@@ -105,12 +105,6 @@ export const ENDPOINTS = {
   },
 } as const;
 
-export const PAGINATION = {
-  defaultPage: 1,
-  defaultLimit: 20,
-  maxLimit: 100,
-} as const;
-
 export const CHAT_STATUS_COLORS = {
   bot: 'bg-chat-bot',
   human: 'bg-chat-human',

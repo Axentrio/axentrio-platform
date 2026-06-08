@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-export const webhookOptions = {
+const webhookOptions = {
   status: () => queryOptions({
     queryKey: queryKeys.webhooks.status(),
     queryFn: () => api.get<Any>('/tenants/me/webhooks/status'),
@@ -39,12 +39,17 @@ export function useSaveWebhookUrl() {
 }
 
 export function useTestWebhook() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () =>
       api.post<{ testFailed?: boolean; error?: string; status?: number }>(
         '/tenants/me/webhooks/test',
       ),
     onSuccess: (result) => {
+      // A test ping writes a WebhookDeliveryLog row and shifts health/circuit
+      // state, so refresh the delivery log + status (otherwise stale until the
+      // 30s poll).
+      queryClient.invalidateQueries({ queryKey: queryKeys.webhooks.all() });
       if (result?.testFailed) {
         toast.error(`Test failed${result.error ? `: ${result.error}` : ''}`);
       } else {

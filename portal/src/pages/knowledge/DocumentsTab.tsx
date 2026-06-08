@@ -103,6 +103,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChan
             {t('ai.knowledge.list.banner.aiDisabled')}
           </p>
           <button
+            type="button"
             onClick={onConfigureAi}
             className="text-xs font-medium text-amber-400 hover:text-amber-300 flex-shrink-0 ml-3"
           >
@@ -132,6 +133,7 @@ const DocumentsTab: React.FC<DocumentsTabProps> = ({ initialFilter, onFilterChan
                   <div className="w-px h-4 bg-edge mx-0.5" />
                 )}
                 <button
+                  type="button"
                   onClick={() => handleFilterClick(f.key)}
                   className={`px-2.5 py-1 rounded-full text-xs font-medium transition-all duration-150 ${
                     typeFilter === f.key

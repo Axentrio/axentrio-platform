@@ -187,6 +187,7 @@ const WidgetBrandSettings: React.FC = () => {
             ref={logoInputRef}
             type="file"
             accept="image/*"
+            aria-label={t('settings.widget.logo.title')}
             onChange={handleLogoUpload}
             className="hidden"
           />

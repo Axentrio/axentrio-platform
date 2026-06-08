@@ -117,4 +117,3 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
   );
 };
 
-export default OnboardingChecklist;

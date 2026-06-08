@@ -42,7 +42,7 @@ export function useHandoffsQuery(status: 'pending' | 'assigned' | 'resolved' | '
   const { registerHandlers, unregisterHandlers } = useSocket();
   const { playHandoff } = useNotificationSound();
 
-  const query = useQuery(handoffOptions.list(status));
+  const { data, ...query } = useQuery(handoffOptions.list(status));
 
   useEffect(() => {
     const handlers = registerHandlers({
@@ -86,11 +86,12 @@ export function useHandoffsQuery(status: 'pending' | 'assigned' | 'resolved' | '
     };
   }, [queryClient, registerHandlers, unregisterHandlers, status, playHandoff]);
 
-  const handoffs = query.data ?? [];
+  const handoffs = data ?? [];
   const pendingCount = handoffs.filter((h) => h.status === 'pending').length;
 
   return {
     ...query,
+    data,
     handoffs,
     pendingCount,
   };

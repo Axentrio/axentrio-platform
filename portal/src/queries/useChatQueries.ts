@@ -11,7 +11,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   useQuery,
-  useMutation,
   useQueryClient,
   queryOptions,
 } from '@tanstack/react-query';
@@ -97,7 +96,7 @@ function buildChatListParams(
   return params;
 }
 
-export const chatOptions = {
+const chatOptions = {
   /**
    * Chat list query — accepts the full filters + pagination bag so that the
    * React Query cache key is tightly coupled to what was actually fetched.
@@ -128,38 +127,6 @@ export const chatOptions = {
 // Mutation hooks
 // ---------------------------------------------------------------------------
 
-export function useTakeoverChat() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (chatId: string) => api.post(`/chats/${chatId}/takeover`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats.all() });
-    },
-  });
-}
-
-export function useCloseChat() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (chatId: string) => api.post(`/chats/${chatId}/close`),
-    onSuccess: (_data, chatId) => {
-      // Remove the closed chat from every list cache entry
-      queryClient.setQueriesData<ChatListResponse>(
-        { queryKey: queryKeys.chats.all() },
-        (old) => {
-          if (!old) return old;
-          return {
-            ...old,
-            data: (old.data ?? []).filter((c) => c.id !== chatId),
-          };
-        },
-      );
-      // Remove detail cache
-      queryClient.removeQueries({ queryKey: queryKeys.chats.detail(chatId) });
-    },
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Hybrid chat list hook
 // ---------------------------------------------------------------------------
@@ -181,9 +148,9 @@ export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQuery
   const { playHandoff } = useNotificationSound();
 
   const opts = chatOptions.list(filters);
-  const query = useQuery(opts);
+  const { data, isLoading, isFetching, error, refetch } = useQuery(opts);
 
-  const rawData = query.data as ChatListResponse | undefined;
+  const rawData = data as ChatListResponse | undefined;
   const chats: Chat[] = rawData?.data ?? [];
   const total = rawData?.meta?.total ?? rawData?.pagination?.total ?? 0;
   const totalPages =
@@ -276,10 +243,10 @@ export function useChatsQuery(options: UseChatsQueryOptions = {}): UseChatsQuery
   return {
     chats,
     totalCount: total,
-    isLoading: query.isLoading,
-    isFetching: query.isFetching,
-    error: query.error,
-    refetch: query.refetch,
+    isLoading,
+    isFetching,
+    error,
+    refetch,
     pagination: {
       page,
       totalPages,
@@ -325,8 +292,14 @@ export function useChatDetail(
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // React Query for the chat detail
-  const detailQuery = useQuery(chatOptions.detail(chatId));
-  const raw = detailQuery.data as ChatDetailResponse | undefined;
+  const {
+    data: detailData,
+    isLoading: detailIsLoading,
+    isFetching: detailIsFetching,
+    error: detailError,
+    refetch: detailRefetch,
+  } = useQuery(chatOptions.detail(chatId));
+  const raw = detailData as ChatDetailResponse | undefined;
   const chat: Chat | null = raw ? (raw as Chat) : null;
   const messages: Message[] = raw?.messages ?? [];
 
@@ -453,12 +426,12 @@ export function useChatDetail(
     messages,
     isTyping,
     typingUsers,
-    isLoading: detailQuery.isLoading,
-    isFetching: detailQuery.isFetching,
-    error: detailQuery.error,
+    isLoading: detailIsLoading,
+    isFetching: detailIsFetching,
+    error: detailError,
     sendMessage,
     sendTyping,
-    refetch: detailQuery.refetch,
+    refetch: detailRefetch,
     markAsRead,
   };
 }

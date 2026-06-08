@@ -136,6 +136,7 @@ export async function* streamCopilotMessages(
 
   try {
     while (true) {
+      // react-doctor-disable-next-line react-doctor/async-await-in-loop -- SSE stream must be read sequentially in order
       const { value, done } = await reader.read();
       if (done) return;
       buffer += decoder.decode(value, { stream: true });

@@ -2,7 +2,7 @@ import { useQuery, queryOptions } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
-export const analyticsOptions = {
+const analyticsOptions = {
   timeseries: (startDate: string, endDate: string) => queryOptions({
     queryKey: queryKeys.analytics.timeseries(startDate, endDate),
     queryFn: () => api.get('/analytics/chats/timeseries', { params: { startDate, endDate } }),

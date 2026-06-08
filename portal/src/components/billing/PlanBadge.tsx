@@ -50,4 +50,3 @@ export function PlanBadge({ tier, size = 'sm', className, ...rest }: PlanBadgePr
   );
 }
 
-export default PlanBadge;

@@ -68,6 +68,7 @@ const AppearanceSettings: React.FC = () => {
           <div className="grid grid-cols-3 gap-4">
             {themeModes.map((mode) => (
               <button
+                type="button"
                 key={mode}
                 onClick={() => setTheme(mode)}
                 className={cn(

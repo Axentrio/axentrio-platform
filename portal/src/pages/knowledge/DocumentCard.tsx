@@ -146,6 +146,7 @@ const DocumentCard: React.FC<DocumentCardProps> = ({ document, onEdit, onRetry, 
           <p className="text-[11px] text-red-400/80 line-clamp-2 flex-1">{document.errorMessage}</p>
           {isAdmin && (
             <button
+              type="button"
               onClick={onRetry}
               className="flex-shrink-0 p-1 rounded hover:bg-red-400/10 transition-colors"
               title={t('ai.knowledge.card.actions.retryProcessing')}

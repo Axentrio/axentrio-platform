@@ -14,7 +14,7 @@ import type { FaqTranslation } from '@/queries/useFaqQueries';
  *
  * `ai-bot` — BotInstructionsHelpDrawer renders only this section
  */
-export const RESERVED_SECTION_IDS = ['ai-bot'] as const;
+const RESERVED_SECTION_IDS = ['ai-bot'] as const;
 export type ReservedSectionId = (typeof RESERVED_SECTION_IDS)[number];
 
 const SUPPORTED_LANGS = ['en', 'nl', 'fr'] as const;

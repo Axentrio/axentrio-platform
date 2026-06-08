@@ -49,8 +49,15 @@ import {
 const DEFAULT_TZ =
   typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : 'UTC';
 
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
 function fmt(iso: string, tz: string, opts: Intl.DateTimeFormatOptions): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: tz, ...opts }).format(new Date(iso));
+  const key = `${tz}|${JSON.stringify(opts)}`;
+  let formatter = fmtCache.get(key);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-GB', { timeZone: tz, ...opts });
+    fmtCache.set(key, formatter);
+  }
+  return formatter.format(new Date(iso));
 }
 
 const dayLabel = (iso: string, tz: string) =>
@@ -237,8 +244,8 @@ function BookingRow({
         )}
         {booking.intakeAnswers && booking.intakeAnswers.length > 0 && (
           <dl className="mt-1.5 space-y-0.5">
-            {booking.intakeAnswers.map((qa, i) => (
-              <div key={i} className="text-sm">
+            {booking.intakeAnswers.map((qa) => (
+              <div key={qa.label} className="text-sm">
                 <dt className="inline text-text-muted">{qa.label}: </dt>
                 <dd className="inline text-text-secondary whitespace-pre-wrap">{qa.answer}</dd>
               </div>
@@ -351,6 +358,7 @@ function RescheduleDialog({
                   <div className="flex flex-wrap gap-2">
                     {slots.map((s) => (
                       <button
+                        type="button"
                         key={s.start}
                         disabled={reschedule.isPending}
                         onClick={() => {

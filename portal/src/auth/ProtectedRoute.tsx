@@ -54,6 +54,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
               You don't have permission to access this page.
             </p>
             <button
+              type="button"
               onClick={() => window.history.back()}
               className="text-primary-600 hover:text-primary-700 font-medium"
             >
@@ -77,6 +78,7 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
             You don't have the required permission to access this page.
           </p>
           <button
+            type="button"
             onClick={() => window.history.back()}
             className="text-primary-600 hover:text-primary-700 font-medium"
           >
@@ -96,16 +98,6 @@ export const SuperAdminRoute: React.FC<{ children?: React.ReactNode }> = ({ chil
   <ProtectedRoute requiredRoles={['super_admin']}>{children}</ProtectedRoute>
 );
 
-export const AdminRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRoles={['super_admin', 'admin']}>{children}</ProtectedRoute>
-);
-
 export const SupervisorRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
   <ProtectedRoute requiredRoles={['super_admin', 'admin', 'supervisor']}>{children}</ProtectedRoute>
 );
-
-export const AgentRoute: React.FC<{ children?: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute requiredRoles={['super_admin', 'admin', 'supervisor', 'agent']}>{children}</ProtectedRoute>
-);
-
-export default ProtectedRoute;

@@ -169,6 +169,7 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({ bot
                 ref={fileInputRef}
                 type="file"
                 accept=".pdf,.docx"
+                aria-label={t('bots.knowledge.add')}
                 className="hidden"
                 onChange={handleFile}
               />

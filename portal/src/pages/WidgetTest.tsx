@@ -82,6 +82,7 @@ function ChatWidget({
   if (!isOpen) {
     return (
       <button
+        type="button"
         onClick={onToggle}
         aria-label="Open chat"
         className="group w-14 h-14 rounded-full bg-[#4338ca] text-white flex items-center justify-center shadow-[0_4px_24px_rgba(67,56,202,0.35)] transition-transform duration-200 hover:scale-[1.06] active:scale-95 cursor-pointer"
@@ -115,10 +116,10 @@ function ChatWidget({
           </div>
         </div>
         <div className="flex items-center gap-0.5">
-          <button onClick={onClose} aria-label="Minimize" className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Minimize" className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer">
             <Minus size={13} className="text-white/60" />
           </button>
-          <button onClick={onClose} aria-label="Close" className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Close" className="w-7 h-7 rounded-lg hover:bg-white/10 flex items-center justify-center transition-colors cursor-pointer">
             <X size={13} className="text-white/60" />
           </button>
         </div>
@@ -172,6 +173,7 @@ function ChatWidget({
                   <div className="flex flex-wrap gap-2 pl-8 mt-1">
                     {quickReplies.map((qr: string) => (
                       <button
+                        type="button"
                         key={qr}
                         onClick={() => {
                           // Remove quick replies after click
@@ -213,11 +215,13 @@ function ChatWidget({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
+            aria-label="Write a message"
             placeholder={sessionStatus === 'closed' ? 'Session closed' : 'Write a message...'}
             disabled={sessionStatus === 'closed'}
             className="flex-1 bg-[#f5f3ee] text-[#2d2a23] text-[13px] rounded-xl px-3.5 py-2.5 border border-[#e8e5de] placeholder:text-[#b5ae9e] focus:outline-none focus:border-[#4338ca]/40 focus:ring-2 focus:ring-[#4338ca]/10 disabled:opacity-40 transition-all"
           />
           <button
+            type="button"
             onClick={onSend}
             disabled={!input.trim() || sessionStatus === 'closed'}
             aria-label="Send message"
@@ -239,6 +243,28 @@ function ChatWidget({
 // ==========================================================================
 // Developer Panel
 // ==========================================================================
+function CopyBtn({
+  text,
+  label,
+  copied,
+  copyText,
+}: {
+  text: string;
+  label: string;
+  copied: string | null;
+  copyText: (text: string, label: string) => void;
+}) {
+  return (
+    <button type="button" onClick={() => copyText(text, label)} className="flex items-center gap-1 text-[#78716c] hover:text-[#44403c] transition-colors cursor-pointer group" aria-label={`Copy ${label}`}>
+      <span className="font-mono text-[11px] truncate max-w-[140px]">{text.slice(0, 20)}...</span>
+      {copied === label
+        ? <Check size={10} className="text-emerald-500 shrink-0" />
+        : <Copy size={10} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+      }
+    </button>
+  );
+}
+
 function DevPanel({
   sessionId, tenantId, connected, sessionStatus, logs, apiKey,
 }: {
@@ -275,16 +301,6 @@ function DevPanel({
     socket: 'bg-[#d97706]',
   };
 
-  const CopyBtn = ({ text, label }: { text: string; label: string }) => (
-    <button onClick={() => copyText(text, label)} className="flex items-center gap-1 text-[#78716c] hover:text-[#44403c] transition-colors cursor-pointer group" aria-label={`Copy ${label}`}>
-      <span className="font-mono text-[11px] truncate max-w-[140px]">{text.slice(0, 20)}...</span>
-      {copied === label
-        ? <Check size={10} className="text-emerald-500 shrink-0" />
-        : <Copy size={10} className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-      }
-    </button>
-  );
-
   return (
     <div className="h-full flex flex-col bg-[#faf9f7] border-l border-[#e8e5de]">
       {/* Header */}
@@ -313,13 +329,13 @@ function DevPanel({
         {sessionId && (
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Session</span>
-            <CopyBtn text={sessionId} label="session" />
+            <CopyBtn text={sessionId} label="session" copied={copied} copyText={copyText} />
           </div>
         )}
         {tenantId && (
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-[#a8a29e] font-medium uppercase tracking-wider">Tenant</span>
-            <CopyBtn text={tenantId} label="tenant" />
+            <CopyBtn text={tenantId} label="tenant" copied={copied} copyText={copyText} />
           </div>
         )}
       </div>
@@ -327,6 +343,7 @@ function DevPanel({
       {/* Embed snippet */}
       <div className="px-5 py-3 border-b border-[#e8e5de]">
         <button
+          type="button"
           onClick={() => setShowEmbed(!showEmbed)}
           className="flex items-center justify-between w-full text-[#78716c] hover:text-[#44403c] transition-colors cursor-pointer"
         >
@@ -339,6 +356,7 @@ function DevPanel({
               {embedSnippet}
             </pre>
             <button
+              type="button"
               onClick={() => copyText(embedSnippet, 'embed')}
               className="absolute top-2 right-2 w-6 h-6 rounded-md bg-white/10 hover:bg-white/20 flex items-center justify-center transition-colors cursor-pointer"
               aria-label="Copy embed code"
@@ -665,7 +683,7 @@ const WidgetTest: React.FC = () => {
           <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 bg-red-50 border border-red-200 text-red-700 text-[12px] px-4 py-2 rounded-lg flex items-center gap-2">
             <WifiOff size={12} />
             {error}
-            <button onClick={() => setError(null)} className="ml-1 hover:text-red-900 cursor-pointer"><X size={12} /></button>
+            <button type="button" onClick={() => setError(null)} className="ml-1 hover:text-red-900 cursor-pointer"><X size={12} /></button>
           </div>
         )}
       </div>

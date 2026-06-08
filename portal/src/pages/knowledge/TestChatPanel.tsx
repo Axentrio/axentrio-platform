@@ -41,15 +41,26 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
   const testChat = useBotTestChat(botId);
 
-  // Reset on open
+  // Reset transient chat state when the panel opens — done during render
+  // (React's adjusting-state pattern) to avoid the extra commit + stale-UI
+  // flash of an effect.
+  const [wasOpen, setWasOpen] = useState(isOpen);
+  if (isOpen && !wasOpen) {
+    setWasOpen(true);
+    setMessages([]);
+    setInput('');
+    setUseKB(hasIndexedDocs);
+  } else if (!isOpen && wasOpen) {
+    setWasOpen(false);
+  }
+
+  // Focus the input shortly after the panel opens (DOM side effect — kept in
+  // an effect with cleanup so the timeout is cancelled on unmount/re-open).
   useEffect(() => {
-    if (isOpen) {
-      setMessages([]);
-      setInput('');
-      setUseKB(hasIndexedDocs);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [isOpen, hasIndexedDocs]);
+    if (!isOpen) return;
+    const timer = setTimeout(() => inputRef.current?.focus(), 100);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -66,8 +77,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
     setInput('');
 
     const history = updatedMessages
-      .filter((m) => m.role !== 'system')
-      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+      .flatMap((m) => (m.role !== 'system' ? [{ role: m.role as 'user' | 'assistant', content: m.content }] : []))
       .slice(-20);
 
     testChat.mutate(
@@ -106,7 +116,9 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
   return (
     <>
       {/* Backdrop */}
-      <div
+      <button
+        type="button"
+        aria-label="Close"
         className="fixed inset-0 bg-black/30 z-40"
         onClick={onClose}
       />
@@ -161,6 +173,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
           {messages.map((msg, i) => {
             if (msg.role === 'system') {
               return (
+                // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- append-only
                 <div key={i} className="flex justify-center">
                   <p className="text-xs text-red-400 bg-red-400/10 px-3 py-1.5 rounded-lg">
                     {msg.content}
@@ -171,6 +184,7 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
 
             const isUser = msg.role === 'user';
             return (
+              // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- append-only
               <div key={i} className={`flex gap-2 ${isUser ? 'flex-row-reverse' : 'flex-row'}`}>
                 <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${
                   isUser

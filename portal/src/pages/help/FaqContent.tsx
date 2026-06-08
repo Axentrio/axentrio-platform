@@ -55,6 +55,7 @@ const HighlightedText: React.FC<{ text: string; tokens: string[] }> = ({ text, t
     <>
       {parts.map((part, i) =>
         i % 2 === 1 ? (
+          // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- positional-split
           <span
             key={i}
             style={HIGHLIGHT_STYLE}

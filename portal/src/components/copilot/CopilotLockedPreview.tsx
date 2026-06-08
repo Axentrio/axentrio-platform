@@ -46,4 +46,3 @@ export function CopilotLockedPreview() {
   );
 }
 
-export default CopilotLockedPreview;

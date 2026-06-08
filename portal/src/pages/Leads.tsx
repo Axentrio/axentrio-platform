@@ -95,7 +95,7 @@ export default function Leads() {
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.contact')}</th>
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.source')}</th>
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.capturedAt')}</th>
-                  <th className="w-8"></th>
+                  <th className="w-8" aria-label="Expand"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-edge">

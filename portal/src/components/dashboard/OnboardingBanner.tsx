@@ -37,7 +37,7 @@ export const OnboardingBanner: React.FC = () => {
   // Map completed step keys from the API response (steps is an object: { aiEnabled: true, ... })
   const steps = status.steps;
   const completedKeys = new Set(
-    Object.entries(steps).filter(([, v]) => v).map(([k]) => k)
+    Object.entries(steps).flatMap(([k, v]) => (v ? [k] : []))
   );
 
   const handleDismiss = () => {
@@ -59,6 +59,7 @@ export const OnboardingBanner: React.FC = () => {
             {t('analytics.onboardingBanner.progress', { completed: status.completedCount, total: status.totalCount })}
           </span>
           <button
+            type="button"
             onClick={handleDismiss}
             className="text-text-muted hover:text-text-secondary transition-colors"
             aria-label={t('analytics.onboardingBanner.dismiss')}

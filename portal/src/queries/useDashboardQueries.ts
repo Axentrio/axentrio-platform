@@ -12,7 +12,7 @@ interface DashboardApiResponse {
   };
 }
 
-export const dashboardOptions = {
+const dashboardOptions = {
   metrics: () => queryOptions({
     queryKey: queryKeys.dashboard.metrics(),
     queryFn: () => api.get<DashboardApiResponse>('/analytics/dashboard'),

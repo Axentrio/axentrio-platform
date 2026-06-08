@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Modal } from '@/components/Modal';
 import { Input } from '@/components/ui/input';
@@ -49,7 +49,13 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
   const isFileType = docType === 'pdf' || docType === 'docx';
   const selectedType = docTypes.find((t) => t.value === docType)!;
 
-  useEffect(() => {
+  // Populate / reset form fields whenever the modal opens or the editing
+  // target changes — done during render (React's adjusting-state pattern) to
+  // avoid the extra commit + stale-UI flash of an effect.
+  const [syncKey, setSyncKey] = useState<string | null>(null);
+  const currentKey = `${isOpen}:${editingDocument?.id ?? ''}`;
+  if (syncKey !== currentKey) {
+    setSyncKey(currentKey);
     if (editingDocument) {
       setDocType(editingDocument.type);
       setTitle(editingDocument.title);
@@ -61,7 +67,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
       setContent('');
       setFile(null);
     }
-  }, [editingDocument, isOpen]);
+  }
 
   const MAX_FILE_SIZE = 25 * 1024 * 1024;
   const MAX_CONTENT_LENGTH = 500_000;
@@ -179,10 +185,18 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
           <div>
             <Label className="mb-1.5 text-text-secondary text-xs">{t('ai.knowledge.modal.fields.file.label')}</Label>
             <div
+              role="button"
+              tabIndex={0}
               onDrop={handleDrop}
               onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
               onDragLeave={() => setIsDragOver(false)}
               onClick={() => !file && fileInputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (!file) fileInputRef.current?.click();
+                }
+              }}
               className={cn(
                 'relative border-2 border-dashed rounded-xl transition-all overflow-hidden',
                 file
@@ -224,6 +238,7 @@ const AddDocumentModal: React.FC<AddDocumentModalProps> = ({ isOpen, onClose, ed
                 ref={fileInputRef}
                 type="file"
                 accept={docType === 'pdf' ? '.pdf' : '.docx'}
+                aria-label={t('ai.knowledge.modal.fields.file.label')}
                 onChange={handleFileSelect}
                 className="hidden"
               />

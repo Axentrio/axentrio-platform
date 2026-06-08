@@ -89,7 +89,7 @@ export const CannedResponsesContent: React.FC = () => {
   const responses: CannedResponse[] = data?.data ?? [];
 
   const categories = useMemo(() => {
-    const cats = new Set(responses.map((r) => r.category).filter(Boolean));
+    const cats = new Set(responses.flatMap((r) => (r.category ? [r.category] : [])));
     return Array.from(cats) as string[];
   }, [responses]);
 
@@ -138,7 +138,7 @@ export const CannedResponsesContent: React.FC = () => {
       shortcut: form.shortcut,
       content: form.content,
       category: form.category || undefined,
-      tags: form.tags ? form.tags.split(',').map((t) => t.trim()).filter(Boolean) : [],
+      tags: form.tags ? form.tags.split(',').flatMap((t) => { const v = t.trim(); return v ? [v] : []; }) : [],
       scope: form.scope,
     };
 
@@ -408,23 +408,3 @@ export const CannedResponsesContent: React.FC = () => {
     </div>
   );
 };
-
-const CannedResponses: React.FC = () => {
-  const { t } = useTranslation();
-  return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-text-primary">{t('ai.canned.page.title')}</h1>
-          <p className="text-sm text-text-secondary mt-1">
-            {t('ai.canned.page.subtitle')}
-          </p>
-        </div>
-      </div>
-      <CannedResponsesContent />
-    </div>
-  );
-};
-
-export default CannedResponses;

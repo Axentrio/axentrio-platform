@@ -34,7 +34,8 @@ export function TenantCommandPalette() {
   useEffect(() => {
     if (isTenantPaletteOpen) {
       setSearch('');
-      setTimeout(() => inputRef.current?.focus(), 0);
+      const timer = setTimeout(() => inputRef.current?.focus(), 0);
+      return () => clearTimeout(timer);
     }
   }, [isTenantPaletteOpen]);
 
@@ -78,6 +79,7 @@ export function TenantCommandPalette() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder={t('admin.tenantPalette.placeholder')}
+            aria-label={t('admin.tenantPalette.placeholder')}
             className="flex h-11 w-full bg-transparent py-3 text-sm text-text-primary outline-none placeholder:text-text-muted"
           />
         </div>
@@ -96,6 +98,7 @@ export function TenantCommandPalette() {
             <div className="py-6 text-center">
               <p className="text-sm text-text-muted mb-2">{t('admin.tenantPalette.errorLoading')}</p>
               <button
+                type="button"
                 onClick={() => refetch()}
                 className="text-sm text-primary-400 hover:text-primary-300 underline"
               >
@@ -118,6 +121,7 @@ export function TenantCommandPalette() {
 
             return (
               <button
+                type="button"
                 key={tenant.id}
                 onClick={() => handleSelect(tenant.id, tenant.name, tenant.status)}
                 disabled={isInactive}

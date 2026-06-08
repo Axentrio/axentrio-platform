@@ -300,16 +300,18 @@ export function SocialChannelsContent() {
                             <SelectItem value="__default__">
                               {t('ai.social.botPicker.default', { defaultValue: 'Default bot' })}
                             </SelectItem>
-                            {bots
-                              .filter((b) => b.status === 'active')
-                              .map((b) => (
-                                <SelectItem key={b.id} value={b.id}>
-                                  {b.name}
-                                  {b.isDefault
-                                    ? ` ${t('ai.social.botPicker.defaultSuffix', { defaultValue: '(default)' })}`
-                                    : ''}
-                                </SelectItem>
-                              ))}
+                            {bots.flatMap((b) =>
+                              b.status === 'active'
+                                ? [
+                                    <SelectItem key={b.id} value={b.id}>
+                                      {b.name}
+                                      {b.isDefault
+                                        ? ` ${t('ai.social.botPicker.defaultSuffix', { defaultValue: '(default)' })}`
+                                        : ''}
+                                    </SelectItem>,
+                                  ]
+                                : [],
+                            )}
                           </SelectContent>
                         </Select>
                       )}
@@ -545,4 +547,3 @@ export function SocialChannelsContent() {
   );
 }
 
-export default SocialChannelsContent;

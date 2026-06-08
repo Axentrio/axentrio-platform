@@ -340,17 +340,16 @@ const Team: React.FC = () => {
                 <div key={dayKey} className="border border-edge rounded-xl p-4">
                   <h4 className="font-medium text-text-primary mb-3">{t(`team.shifts.days.${dayKey}`)}</h4>
                   <div className="space-y-2">
-                    {shifts
-                      .filter((s: AgentShift) => s.dayOfWeek === index)
-                      .map((shift: AgentShift) => {
-                        const agent = agents.find((a) => a.id === shift.agentId);
-                        return (
-                          <div key={shift.id} className="text-sm bg-primary-600/10 p-2 rounded-lg">
-                            <p className="font-medium text-primary-400">{agent?.firstName}</p>
-                            <p className="text-primary-300">{shift.startTime} - {shift.endTime}</p>
-                          </div>
-                        );
-                      })}
+                    {shifts.flatMap((shift: AgentShift) => {
+                      if (shift.dayOfWeek !== index) return [];
+                      const agent = agents.find((a) => a.id === shift.agentId);
+                      return [
+                        <div key={shift.id} className="text-sm bg-primary-600/10 p-2 rounded-lg">
+                          <p className="font-medium text-primary-400">{agent?.firstName}</p>
+                          <p className="text-primary-300">{shift.startTime} - {shift.endTime}</p>
+                        </div>,
+                      ];
+                    })}
                   </div>
                 </div>
               ))}

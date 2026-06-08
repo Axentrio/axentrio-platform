@@ -174,6 +174,7 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
           <div className="flex flex-col items-center justify-center h-32 text-text-secondary">
             <p>{t('inbox.stream.errorLoading')}</p>
             <button
+              type="button"
               onClick={refresh}
               className="mt-2 text-primary-400 hover:text-primary-300 text-sm"
             >
@@ -190,7 +191,15 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
           chats.map((chat) => (
             <div
               key={chat.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onChatSelect(chat)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  onChatSelect(chat);
+                }
+              }}
               className={cn(
                 'px-4 py-3 border-b border-edge/50 cursor-pointer transition-colors hover:bg-surface-3',
                 selectedChatId === chat.id
@@ -260,4 +269,3 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
   );
 };
 
-export default ChatStream;

@@ -117,9 +117,9 @@ export function LockedPreview({
 
         {/* Bullets */}
         <ul className="space-y-2">
-          {bullets.map((bullet, i) => (
+          {bullets.map((bullet) => (
             <li
-              key={i}
+              key={bullet}
               className="flex items-start gap-2 text-sm text-text-secondary"
             >
               <span
@@ -194,4 +194,3 @@ export function LockedPreview({
   );
 }
 
-export default LockedPreview;

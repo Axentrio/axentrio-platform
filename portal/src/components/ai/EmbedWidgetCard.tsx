@@ -62,6 +62,7 @@ export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({ enabled = fals
               {embedSnippet}
             </pre>
             <button
+              type="button"
               onClick={() => {
                 navigator.clipboard.writeText(embedSnippet);
                 toast.success(t('settings.widget.embed.copied'));
@@ -100,4 +101,3 @@ export const EmbedWidgetCard: React.FC<EmbedWidgetCardProps> = ({ enabled = fals
   );
 };
 
-export default EmbedWidgetCard;

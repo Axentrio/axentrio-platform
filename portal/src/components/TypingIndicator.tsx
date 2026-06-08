@@ -77,4 +77,3 @@ export const CompactTypingIndicator: React.FC<{ className?: string }> = ({ class
   </div>
 );
 
-export default TypingIndicator;

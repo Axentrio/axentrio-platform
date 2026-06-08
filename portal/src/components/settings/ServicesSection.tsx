@@ -135,7 +135,7 @@ function toInput(f: FormState): ServiceInput {
       type: q.type,
       required: q.required,
       ...(q.type === 'choice'
-        ? { options: (q.options ?? []).map((o) => o.trim()).filter((o) => o.length > 0) }
+        ? { options: (q.options ?? []).flatMap((o) => { const t = o.trim(); return t.length > 0 ? [t] : []; }) }
         : {}),
     })),
   };
@@ -147,7 +147,7 @@ function questionsError(questions: IntakeQuestion[]): string | null {
   for (const q of questions) {
     if (!q.label.trim()) return 'Every question needs a label.';
     if (q.type === 'choice') {
-      const opts = (q.options ?? []).map((o) => o.trim()).filter((o) => o.length > 0);
+      const opts = (q.options ?? []).flatMap((o) => { const t = o.trim(); return t.length > 0 ? [t] : []; });
       if (opts.length < 2) return `"${q.label.trim() || 'Choice question'}" needs at least 2 options.`;
       if (opts.length > 10) return `"${q.label.trim()}" can have at most 10 options.`;
       const seen = new Set(opts.map((o) => o.toLowerCase()));
@@ -447,6 +447,7 @@ const QuestionsEditor: React.FC<{
       </p>
 
       {questions.map((q, i) => (
+        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
         <div key={i} className="rounded-lg border border-edge p-2.5 space-y-2">
           <div className="flex items-start gap-2">
             <Input
@@ -526,4 +527,3 @@ const QuestionsEditor: React.FC<{
   );
 };
 
-export default ServicesSection;

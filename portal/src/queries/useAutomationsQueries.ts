@@ -35,20 +35,3 @@ export function useUpdateAutomation() {
     },
   });
 }
-
-export function useTestAutomation() {
-  return useMutation({
-    mutationFn: ({ type, data }: { type: string; data?: Any }) =>
-      api.post(`/tenants/me/automations/email/${type}/test`, data),
-    onSuccess: () => {
-      toast.success('Test sent successfully');
-    },
-    onError: (err: Any) => {
-      const msg =
-        extractApiErrorMessage(err) ??
-        (err instanceof Error ? err.message : undefined) ??
-        'Failed to send test';
-      toast.error(msg);
-    },
-  });
-}

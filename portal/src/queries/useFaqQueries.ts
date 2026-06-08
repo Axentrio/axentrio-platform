@@ -56,7 +56,7 @@ interface ReorderInput {
   items?: Array<{ id: string; sectionId: string; position: number }>;
 }
 
-export const faqOptions = {
+const faqOptions = {
   tree: () =>
     queryOptions({
       queryKey: queryKeys.faq.tree(),

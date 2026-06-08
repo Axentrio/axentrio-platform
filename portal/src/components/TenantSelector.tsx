@@ -4,7 +4,7 @@
  * Uses shadcn Popover + Command (combobox pattern)
  */
 
-import React, { useState } from 'react';
+import React, { useState, useId } from 'react';
 import { ChevronDown, Building2, Check } from 'lucide-react';
 import type { Tenant } from '@app-types/index';
 import { cn } from '@/lib/utils';
@@ -39,6 +39,7 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   disabled = false,
 }) => {
   const [open, setOpen] = useState(false);
+  const listboxId = useId();
 
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId);
 
@@ -54,6 +55,8 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          aria-haspopup="listbox"
+          aria-controls={listboxId}
           disabled={disabled}
           className={cn('w-full justify-between gap-2 text-left text-sm', className)}
         >
@@ -72,7 +75,7 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
         </Button>
       </PopoverTrigger>
 
-      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+      <PopoverContent id={listboxId} className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
           <CommandInput placeholder="Search tenants..." />
           <CommandList>
@@ -134,4 +137,3 @@ export const TenantSelector: React.FC<TenantSelectorProps> = ({
   );
 };
 
-export default TenantSelector;

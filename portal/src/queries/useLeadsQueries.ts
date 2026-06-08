@@ -1,4 +1,4 @@
-import { useQuery, useInfiniteQuery, queryOptions } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
@@ -19,25 +19,6 @@ export interface Lead {
 export interface LeadsPage {
   leads: Lead[];
   nextCursor: string | null;
-}
-
-/**
- * Single-page query — used by the Leads page initial render. For
- * pagination beyond the first page use `useLeadsInfinite` below.
- */
-export const leadsOptions = {
-  list: (cursor?: string | null) =>
-    queryOptions({
-      queryKey: queryKeys.leads.list(cursor),
-      queryFn: () => {
-        const search = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
-        return api.get<LeadsPage>(`/leads${search}`);
-      },
-    }),
-};
-
-export function useLeads(cursor?: string | null) {
-  return useQuery(leadsOptions.list(cursor));
 }
 
 /**

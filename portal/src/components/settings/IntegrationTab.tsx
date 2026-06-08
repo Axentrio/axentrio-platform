@@ -535,4 +535,3 @@ export const IntegrationTab: React.FC = () => {
   );
 };
 
-export default IntegrationTab;

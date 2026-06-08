@@ -93,4 +93,3 @@ export function UpgradeCTA({
   );
 }
 
-export default UpgradeCTA;

@@ -43,7 +43,7 @@ interface UseCannedResponseResult {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-export const cannedResponseOptions = {
+const cannedResponseOptions = {
   list: (filters?: Record<string, unknown>) => queryOptions({
     queryKey: queryKeys.cannedResponses.list(filters),
     queryFn: () => api.get<Any>('/canned-responses', { params: filters }),
@@ -57,10 +57,6 @@ export const cannedResponseOptions = {
 
 export function useCannedResponses(filters?: Record<string, unknown>) {
   return useQuery(cannedResponseOptions.list(filters));
-}
-
-export function useCannedResponseDetail(id: string) {
-  return useQuery(cannedResponseOptions.detail(id));
 }
 
 export function useCreateCannedResponse() {

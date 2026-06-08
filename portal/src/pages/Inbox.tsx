@@ -311,6 +311,7 @@ const Inbox: React.FC = () => {
         <div className="flex items-center gap-1 mt-4">
           {tabs.map((tab) => (
             <button
+              type="button"
               key={tab.key}
               onClick={() => setActiveTab(tab.key)}
               className={cn(
@@ -459,6 +460,7 @@ const Inbox: React.FC = () => {
               <div className="px-4 py-3 border-b border-edge bg-surface-2 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <button
+                    type="button"
                     className="md:hidden p-1 rounded-lg hover:bg-surface-3 transition-colors"
                     onClick={() => setSelectedChat(null)}
                     aria-label={t('inbox.window.backToList')}
@@ -592,6 +594,7 @@ const Inbox: React.FC = () => {
             <div className="space-y-2">
               {agents.map((agent) => (
                 <button
+                  type="button"
                   key={agent.id}
                   onClick={() => handleTransfer(agent.id)}
                   className="w-full flex items-center gap-3 p-3 bg-surface-3 hover:bg-surface-4 rounded-xl transition-colors text-left"

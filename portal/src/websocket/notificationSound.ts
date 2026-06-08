@@ -128,7 +128,7 @@ class NotificationSound {
 }
 
 // Singleton instance
-export const notificationSound = new NotificationSound();
+const notificationSound = new NotificationSound();
 
 // React hook for notification sounds
 export const useNotificationSound = () => {
@@ -201,5 +201,3 @@ export const useNotificationSound = () => {
     initialize: () => soundRef.current.initialize(),
   };
 };
-
-export default notificationSound;

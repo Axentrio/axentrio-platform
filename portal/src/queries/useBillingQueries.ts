@@ -40,7 +40,7 @@ export interface BillingState {
   events: BillingHistoryEntry[];
 }
 
-export const billingOptions = {
+const billingOptions = {
   state: () =>
     queryOptions({
       queryKey: queryKeys.billing.state(),

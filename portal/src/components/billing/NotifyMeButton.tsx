@@ -100,4 +100,3 @@ export function NotifyMeButton({
   );
 }
 
-export default NotifyMeButton;

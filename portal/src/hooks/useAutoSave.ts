@@ -149,4 +149,3 @@ export function useAutoSave({
   return { status, isDirty, flush, retry };
 }
 
-export default useAutoSave;

@@ -403,8 +403,7 @@ const AdminFaqEditor: React.FC = () => {
             itemDialog.mode === 'create'
               ? sections.find((s) => s.id === itemDialog.sectionId)?.items.map((i) => i.slug) ?? []
               : sections.find((s) => s.id === itemDialog.item.sectionId)?.items
-                  .filter((i) => i.id !== itemDialog.item.id)
-                  .map((i) => i.slug) ?? []
+                  .flatMap((i) => (i.id !== itemDialog.item.id ? [i.slug] : [])) ?? []
           }
           onClose={() => setItemDialog(null)}
         />
@@ -612,10 +611,13 @@ const ItemsPane: React.FC<ItemsPaneProps> = ({
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   // Reset expansion whenever the section changes — different items, fresh
-  // collapsed state. Using section.id as the trigger.
-  useEffect(() => {
+  // collapsed state. Using section.id as the trigger, adjusted during render
+  // (React's adjusting-state pattern) so the chevrons never flash stale.
+  const [prevSectionId, setPrevSectionId] = useState(section?.id);
+  if (section?.id !== prevSectionId) {
+    setPrevSectionId(section?.id);
     setExpandedIds(new Set());
-  }, [section?.id]);
+  }
 
   if (!section) {
     return (

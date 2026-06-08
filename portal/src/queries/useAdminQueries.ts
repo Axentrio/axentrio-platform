@@ -1,12 +1,12 @@
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
-import apiClient, { api } from '../services/apiClient';
+import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 import { toast } from 'sonner';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 
-export const adminOptions = {
+const adminOptions = {
   tenants: () => queryOptions({
     queryKey: queryKeys.admin.tenants(),
     queryFn: async () => {
@@ -84,26 +84,6 @@ export function useAdminUsers() {
 
 export function useAdminAnalytics() {
   return useQuery(adminOptions.analytics());
-}
-
-interface AuditLogResponse {
-  data: unknown[];
-  meta?: { page: number; limit: number; total: number; totalPages: number; hasMore: boolean };
-}
-
-export function useAdminAuditLogs(params?: Record<string, unknown>) {
-  return useQuery({
-    queryKey: [...queryKeys.admin.auditLogs(), params],
-    queryFn: async () => {
-      const result = await api.get<AuditLogResponse>('/admin/audit-logs', { params });
-      // When meta is present, apiClient returns { data, meta }
-      if (result && typeof result === 'object' && 'meta' in result) {
-        return result as AuditLogResponse;
-      }
-      // Fallback: no meta (shouldn't happen after apiClient fix)
-      return { data: result as unknown as unknown[] };
-    },
-  });
 }
 
 // --- Mutations ---
@@ -194,29 +174,6 @@ export function useSetTenantTier() {
       toast.error(message);
     },
   });
-}
-
-/**
- * @deprecated Use {@link useSetTenantTier} with `tier: 'enterprise'` instead.
- * Kept as a thin wrapper for backwards compatibility — calls the new
- * /set-tier route under the hood.
- */
-export function useSetTenantEnterprise() {
-  const setTier = useSetTenantTier();
-  return {
-    ...setTier,
-    mutate: (input: {
-      id: string;
-      currentPeriodEnd?: string | null;
-      billingEmail?: string | null;
-    }, options?: Parameters<typeof setTier.mutate>[1]) =>
-      setTier.mutate({ ...input, tier: 'enterprise' }, options),
-    mutateAsync: (input: {
-      id: string;
-      currentPeriodEnd?: string | null;
-      billingEmail?: string | null;
-    }) => setTier.mutateAsync({ ...input, tier: 'enterprise' }),
-  };
 }
 
 export function useOptimisticActivateTenant() {
@@ -397,19 +354,3 @@ export function useAdminCancelInvite(tenantId: string) {
   });
 }
 
-// --- CSV Export ---
-
-export async function downloadAuditLogsCsv(params: Record<string, string>) {
-  const response = await apiClient.get('/admin/audit-logs/export', {
-    params,
-    responseType: 'blob',
-  });
-  const url = window.URL.createObjectURL(new Blob([response.data as BlobPart]));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
-}

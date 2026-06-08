@@ -129,8 +129,10 @@ export function CopilotDrawer() {
   return (
     <>
       {/* Overlay */}
-      <div
-        aria-hidden={!isOpen}
+      <button
+        type="button"
+        disabled={!isOpen}
+        aria-label="Close"
         onClick={close}
         className={cn(
           'fixed inset-0 z-50 bg-surface-0/40 backdrop-blur-sm transition-opacity',

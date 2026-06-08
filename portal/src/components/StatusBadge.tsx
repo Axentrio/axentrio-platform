@@ -37,7 +37,7 @@ const statusLabelKeys: Record<string, string> = {
   urgent: 'inbox.priorityBadge.urgent',
 };
 
-export const StatusBadge: React.FC<StatusBadgeProps> = ({
+const StatusBadge: React.FC<StatusBadgeProps> = ({
   status,
   type,
   size = 'md',
@@ -123,12 +123,6 @@ export const ChatStatusBadge: React.FC<Omit<StatusBadgeProps, 'type'>> = (props)
   <StatusBadge {...props} type="chat" />
 );
 
-export const UserStatusBadge: React.FC<Omit<StatusBadgeProps, 'type'>> = (props) => (
-  <StatusBadge {...props} type="user" />
-);
-
 export const PriorityBadge: React.FC<Omit<StatusBadgeProps, 'type'>> = (props) => (
   <StatusBadge {...props} type="priority" />
 );
-
-export default StatusBadge;

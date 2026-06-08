@@ -260,6 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
         {isSuperAdmin && !isImpersonating && (
           <button
+            type="button"
             onClick={openTenantPalette}
             className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
             title={t('sidebar.switchTenant')}
@@ -269,6 +270,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
         {isImpersonating && (
           <button
+            type="button"
             onClick={exitTenant}
             className="px-2 py-1 rounded-md text-xs font-medium text-orange-400 hover:bg-orange-500/10 transition-colors"
           >
@@ -363,4 +365,3 @@ export const Sidebar: React.FC<SidebarProps> = ({
   );
 };
 
-export default Sidebar;

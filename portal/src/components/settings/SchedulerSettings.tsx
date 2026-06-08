@@ -163,9 +163,11 @@ export const SchedulerSettings: React.FC = () => {
       const row = days[key];
       if (row.enabled) weeklyHours[key] = [{ start: row.start, end: row.end }];
     }
-    const dateOverrides = overrides
-      .filter((o) => o.date)
-      .map((o) => (o.closed ? { date: o.date, closed: true } : { date: o.date, windows: [{ start: o.start, end: o.end }] }));
+    const dateOverrides = overrides.flatMap((o) =>
+      o.date
+        ? [o.closed ? { date: o.date, closed: true } : { date: o.date, windows: [{ start: o.start, end: o.end }] }]
+        : [],
+    );
     update.mutate({
       provider: 'internal',
       availability: { timezone, weeklyHours, dateOverrides, slotGranularityMin },
@@ -237,13 +239,14 @@ export const SchedulerSettings: React.FC = () => {
                       <Label className="text-text-secondary mb-1 block">Timezone</Label>
                       <Input
                         list="scheduler-timezones"
+                        aria-label="Timezone"
                         value={timezone}
                         onChange={(e) => setTimezone(e.target.value)}
                         placeholder="Search timezone…"
                       />
                       <datalist id="scheduler-timezones">
                         {ALL_TIMEZONES.map((tz) => (
-                          <option key={tz} value={tz} />
+                          <option key={tz} value={tz} label={tz} />
                         ))}
                       </datalist>
                     </div>
@@ -297,6 +300,7 @@ export const SchedulerSettings: React.FC = () => {
                   ) : (
                     <div className="space-y-2">
                       {overrides.map((o, i) => (
+                        // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
                         <div key={i} className="flex items-center gap-3 flex-wrap">
                           <DatePicker
                             value={o.date}
@@ -305,8 +309,9 @@ export const SchedulerSettings: React.FC = () => {
                             }
                             className="w-44"
                           />
-                          <label className="flex items-center gap-2 cursor-pointer">
+                          <label htmlFor={`override-closed-${i}`} className="flex items-center gap-2 cursor-pointer">
                             <Checkbox
+                              id={`override-closed-${i}`}
                               checked={o.closed}
                               onCheckedChange={(c) =>
                                 setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, closed: c === true } : x)))
@@ -363,8 +368,8 @@ export const SchedulerSettings: React.FC = () => {
                   <AlertTriangle className="w-4 h-4" /> Fix before saving
                 </div>
                 <ul className="mt-1 list-disc pl-5 text-xs text-amber-300/90 space-y-0.5">
-                  {errors.map((e, i) => (
-                    <li key={i}>{e}</li>
+                  {errors.map((e) => (
+                    <li key={e}>{e}</li>
                   ))}
                 </ul>
               </div>
@@ -505,4 +510,3 @@ const NumberField: React.FC<{
   </div>
 );
 
-export default SchedulerSettings;

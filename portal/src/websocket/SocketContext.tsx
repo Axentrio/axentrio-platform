@@ -369,4 +369,3 @@ export const useSocket = (): SocketContextType => {
   return context;
 };
 
-export default SocketContext;

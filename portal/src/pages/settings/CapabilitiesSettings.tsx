@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Pencil, Trash2, Zap, Loader2, ToggleLeft, Bell } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -211,6 +211,7 @@ const SuperAdminSkillsView: React.FC<{
                         disabled={isToggling}
                       />
                       <button
+                        type="button"
                         onClick={() => onEdit(skill)}
                         className="p-1.5 rounded-lg text-text-muted hover:text-text-primary hover:bg-surface-3 transition-colors"
                         title={t('common.edit')}
@@ -218,6 +219,7 @@ const SuperAdminSkillsView: React.FC<{
                         <Pencil className="w-4 h-4" />
                       </button>
                       <button
+                        type="button"
                         onClick={() => setDeleteConfirm(skill.name)}
                         className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
                         title={t('common.delete')}
@@ -358,13 +360,16 @@ const NotificationCard: React.FC<{
   const [recipients, setRecipients] = useState('');
   const [dirty, setDirty] = useState(false);
 
-  useEffect(() => {
-    if (serverData) {
-      setEnabled(serverData.enabled ?? false);
-      setRecipients(Array.isArray(serverData.recipients) ? serverData.recipients.join(', ') : '');
-      setDirty(false);
-    }
-  }, [serverData]);
+  // Sync the editable form from server data whenever it changes — done during
+  // render (React's adjusting-state pattern) to avoid the stale-UI flash of an
+  // effect.
+  const [syncedData, setSyncedData] = useState<Any>(null);
+  if (serverData && serverData !== syncedData) {
+    setSyncedData(serverData);
+    setEnabled(serverData.enabled ?? false);
+    setRecipients(Array.isArray(serverData.recipients) ? serverData.recipients.join(', ') : '');
+    setDirty(false);
+  }
 
   const handleToggle = (checked: boolean) => {
     if (!isAdmin) return;
@@ -379,7 +384,7 @@ const NotificationCard: React.FC<{
   };
 
   const handleSave = () => {
-    const recipientList = recipients.split(',').map((r: string) => r.trim()).filter(Boolean);
+    const recipientList = recipients.split(',').flatMap((r: string) => { const v = r.trim(); return v ? [v] : []; });
     if (enabled && recipientList.length === 0) return;
     onUpdate({ enabled, recipients: recipientList });
   };

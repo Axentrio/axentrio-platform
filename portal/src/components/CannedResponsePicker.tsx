@@ -46,10 +46,15 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   const filteredRef = useRef(filtered);
   filteredRef.current = filtered;
 
-  useEffect(() => {
+  // Reset the highlighted option whenever the query changes — done during
+  // render (React's adjusting-state pattern) so the selection never lags a
+  // frame behind the filtered list.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
     setSelectedIndex(0);
     selectedIndexRef.current = 0;
-  }, [query]);
+  }
 
   // Keep ref in sync with state
   useEffect(() => {
@@ -121,12 +126,14 @@ export const SlashCommandDropdown: React.FC<SlashCommandDropdownProps> = ({
   return (
     <div
       ref={listRef}
+      // react-doctor-disable-next-line react-doctor/prefer-tag-over-role -- custom combobox listbox, native datalist not suitable here
       role="listbox"
       aria-label="Canned responses"
       className="absolute bottom-full left-0 right-0 mb-1 bg-surface-2 border border-edge rounded-lg shadow-lg max-h-[200px] overflow-y-auto z-50"
     >
       {filtered.map((cr, i) => (
         <button
+          type="button"
           key={cr.id}
           role="option"
           aria-selected={i === selectedIndex}
@@ -239,6 +246,7 @@ export const CannedResponsePickerButton: React.FC<CannedResponsePickerButtonProp
                 </div>
                 {items.map((cr) => (
                   <button
+                    type="button"
                     key={cr.id}
                     className="w-full px-3 min-h-[44px] py-2 text-left text-sm hover:bg-surface-3 flex items-center justify-between"
                     onClick={() => handleSelect(cr)}

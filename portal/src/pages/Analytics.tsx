@@ -339,7 +339,7 @@ const Analytics: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
         {stats.map((stat, index) => (
           <Card
-            key={index}
+            key={stat.label}
             variant="glass"
             className={cn("animate-fade-in-up", `stagger-${index + 1}`, stat.onClick && "cursor-pointer")}
             onClick={stat.onClick}
@@ -449,8 +449,8 @@ const Analytics: React.FC = () => {
                         paddingAngle={5}
                         dataKey="value"
                       >
-                        {resolutionData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        {resolutionData.map((entry) => (
+                          <Cell key={entry.name} fill={entry.color} />
                         ))}
                       </Pie>
                       <Tooltip contentStyle={chartTooltipStyle} />
@@ -501,8 +501,8 @@ const Analytics: React.FC = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {agentPerformanceData.map((agent, index) => (
-                      <TableRow key={index}>
+                    {agentPerformanceData.map((agent) => (
+                      <TableRow key={agent.name}>
                         <TableCell className="font-medium">{agent.name}</TableCell>
                         <TableCell>{agent.chats}</TableCell>
                         <TableCell>{agent.responseTime}s</TableCell>

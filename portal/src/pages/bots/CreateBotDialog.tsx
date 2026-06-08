@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
@@ -26,13 +26,16 @@ export const CreateBotDialog: React.FC<CreateBotDialogProps> = ({ open, onOpenCh
   const [planLimitHit, setPlanLimitHit] = useState(false);
   const createBot = useCreateBot();
 
-  // Reset transient state every time the dialog re-opens.
-  useEffect(() => {
-    if (open) {
-      setName('');
-      setPlanLimitHit(false);
-    }
-  }, [open]);
+  // Reset transient state every time the dialog re-opens, during render
+  // (avoids the extra commit + stale-UI flash of an effect).
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open && !wasOpen) {
+    setWasOpen(true);
+    setName('');
+    setPlanLimitHit(false);
+  } else if (!open && wasOpen) {
+    setWasOpen(false);
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

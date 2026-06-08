@@ -51,6 +51,7 @@ const CardTitle = React.forwardRef<
   HTMLParagraphElement,
   React.HTMLAttributes<HTMLHeadingElement>
 >(({ className, ...props }, ref) => (
+  // react-doctor-disable-next-line react-doctor/heading-has-content -- CardTitle renders children; content supplied by consumers
   <h3
     ref={ref}
     className={cn(

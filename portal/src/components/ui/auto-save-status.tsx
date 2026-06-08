@@ -23,9 +23,8 @@ export const AutoSaveStatusIndicator: React.FC<AutoSaveStatusIndicatorProps> = (
   }
 
   return (
-    <div
+    <output
       className={`flex items-center gap-1.5 text-xs h-5 ${className}`}
-      role="status"
       aria-live="polite"
     >
       {status === 'saving' && (
@@ -55,8 +54,7 @@ export const AutoSaveStatusIndicator: React.FC<AutoSaveStatusIndicatorProps> = (
           )}
         </>
       )}
-    </div>
+    </output>
   );
 };
 
-export default AutoSaveStatusIndicator;

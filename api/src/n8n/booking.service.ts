@@ -116,7 +116,7 @@ export async function cancelBooking(sessionId: string, bookingId: string, reason
 // provider — Cal.com bookings live in Cal.com and are managed there.
 // ---------------------------------------------------------------------------
 
-export type BookingScope = 'upcoming' | 'past';
+export type BookingScope = 'upcoming' | 'past' | 'requests';
 
 export interface AdminBookingRow {
   id: string;
@@ -127,6 +127,8 @@ export interface AdminBookingRow {
   attendeeEmail: string | null;
   notes: string | null;
   meetingUrl: string | null;
+  serviceName?: string | null;
+  bookingMode?: string | null;
 }
 
 /** Build a provider context for admin actions from a booking's own bot/session. */
@@ -165,6 +167,10 @@ export async function adminListBookings(
 
   if (scope === 'upcoming') {
     qb.andWhere("b.status = 'confirmed'").andWhere('b.endUtc >= :now', { now }).orderBy('b.startUtc', 'ASC');
+  } else if (scope === 'requests') {
+    // Captured requests awaiting owner follow-up. Same tenant/bot/provider scoping
+    // as upcoming/past — this scope must not widen access.
+    qb.andWhere("b.status = 'request_created'").orderBy('b.createdAt', 'DESC');
   } else {
     qb.andWhere("(b.status = 'cancelled' OR (b.status = 'confirmed' AND b.endUtc < :now))", { now }).orderBy(
       'b.startUtc',
@@ -183,6 +189,17 @@ export async function adminListBookings(
     : [];
   const meetByBooking = new Map(refs.map((r) => [r.bookingId, r.meetingUrl ?? null]));
 
+  // Service-name lookup for display (requests have no Meet URL but do name the service).
+  const serviceIds = [...new Set(rows.map((r) => r.eventTypeId).filter((v): v is string => !!v))];
+  const services = serviceIds.length
+    ? await AppDataSource.getRepository(ServiceType).find({
+        // Scope the name lookup to this tenant+bot so a stale/cross-linked event_type_id
+        // can never surface another tenant's service name.
+        where: { id: In(serviceIds), tenantId, botId: bot.id },
+      })
+    : [];
+  const nameByService = new Map(services.map((s) => [s.id, s.name]));
+
   return {
     total,
     bookings: rows.map((b) => ({
@@ -194,6 +211,8 @@ export async function adminListBookings(
       attendeeEmail: b.attendeeEmail ?? null,
       notes: b.notes ?? null,
       meetingUrl: meetByBooking.get(b.id) ?? null,
+      serviceName: b.eventTypeId ? nameByService.get(b.eventTypeId) ?? null : null,
+      bookingMode: b.bookingMode ?? null,
     })),
   };
 }

@@ -184,6 +184,9 @@ export async function listBookings(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   const { scope, limit, offset } = listBookingsQuerySchema.parse(req.query);
   try {
+    // Server-side entitlement gate: this endpoint returns attendee PII (email, notes,
+    // requests) — don't rely on the portal's client-side feature gate alone.
+    await requireFeature(tenantId, 'bookings', 'plan_limit_bookings');
     sendSuccess(res, await adminListBookings(tenantId, scope, limit, offset));
   } catch (err) {
     asApiError(err);

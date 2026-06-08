@@ -110,6 +110,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
           <TabsList>
             <TabsTrigger value="upcoming">Upcoming</TabsTrigger>
             <TabsTrigger value="past">Past</TabsTrigger>
+            <TabsTrigger value="requests">Requests</TabsTrigger>
           </TabsList>
         </div>
 
@@ -121,7 +122,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
           ) : bookings.length === 0 ? (
             <div className="p-10 text-center text-sm text-text-secondary">
               <Calendar className="mx-auto mb-2 h-6 w-6 opacity-40" />
-              No {scope} appointments.
+              {scope === 'requests' ? 'No appointment requests yet.' : `No ${scope} appointments.`}
             </div>
           ) : (
             <ul className="divide-y divide-edge">
@@ -191,6 +192,8 @@ function statusPill(status: string): { label: string; cls: string } {
       return { label: 'Cancelled', cls: 'bg-red-500/10 text-red-400' };
     case 'pending':
       return { label: 'Pending', cls: 'bg-amber-500/10 text-amber-400' };
+    case 'request_created':
+      return { label: 'Request', cls: 'bg-indigo-500/10 text-indigo-400' };
     default:
       return { label: status, cls: 'bg-surface-2 text-text-secondary' };
   }
@@ -227,7 +230,11 @@ function BookingRow({
         <div className="mt-1 text-sm text-text-secondary">
           {booking.attendeeName || 'Guest'}
           {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
+          {booking.serviceName ? ` · ${booking.serviceName}` : ''}
         </div>
+        {booking.notes && (
+          <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
+        )}
         {booking.meetingUrl && (
           <a
             href={booking.meetingUrl}

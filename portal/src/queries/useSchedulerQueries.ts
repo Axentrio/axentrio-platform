@@ -156,7 +156,7 @@ export function useDeleteService() {
 
 // --- Admin bookings management ---
 
-export type BookingScope = 'upcoming' | 'past';
+export type BookingScope = 'upcoming' | 'past' | 'requests';
 
 export interface AdminBooking {
   id: string;
@@ -167,6 +167,8 @@ export interface AdminBooking {
   attendeeEmail: string | null;
   notes: string | null;
   meetingUrl: string | null;
+  serviceName?: string | null;
+  bookingMode?: string | null;
 }
 
 export interface AvailabilitySlot {

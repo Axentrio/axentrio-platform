@@ -80,7 +80,7 @@ export type UpdateSchedulerInput = z.infer<typeof updateSchedulerSchema>;
 // --- Admin bookings management (portal) ---
 
 export const listBookingsQuerySchema = z.object({
-  scope: z.enum(['upcoming', 'past']).default('upcoming'),
+  scope: z.enum(['upcoming', 'past', 'requests']).default('upcoming'),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });

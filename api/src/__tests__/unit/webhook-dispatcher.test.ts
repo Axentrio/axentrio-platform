@@ -21,10 +21,16 @@ vi.mock('../../database/entities/WebhookDeliveryLog', () => ({
   WebhookDeliveryLog: class WebhookDeliveryLog {},
 }));
 
+// Dispatcher now sends via the SSRF-guarded helper (axios-shaped response).
+vi.mock('../../security/ssrf-guard', () => ({ safeOutboundRequest: vi.fn() }));
+
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { deliverWebhook } from '../../webhooks/webhook.dispatcher';
+import { safeOutboundRequest } from '../../security/ssrf-guard';
 import type { EventWebhookConfig, LeadCreatedEvent } from '../../webhooks/webhook.types';
+
+const mockSend = vi.mocked(safeOutboundRequest);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,8 +70,7 @@ describe('deliverWebhook', () => {
   });
 
   it('delivers webhook with correct HMAC signature and headers', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 200 } as never);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -74,67 +79,54 @@ describe('deliverWebhook', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockSend).toHaveBeenCalledOnce();
 
-    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe(config.url);
-    expect(init.method).toBe('POST');
+    const [cfg] = mockSend.mock.calls[0] as [{ url: string; method?: string; data: string; headers: Record<string, string> }];
+    expect(cfg.url).toBe(config.url);
+    expect(cfg.method).toBe('POST');
 
-    const headers = init.headers as Record<string, string>;
+    const headers = cfg.headers;
     expect(headers['X-Webhook-Event']).toBe('lead.created');
     expect(headers['X-Webhook-Id']).toBe('evt-001');
     expect(headers['X-Webhook-Signature']).toMatch(/^sha256=[a-f0-9]{64}$/);
     expect(headers['Content-Type']).toBe('application/json');
 
-    // Verify HMAC is deterministic
+    // Verify HMAC is deterministic over the exact body string that was sent
     const { createHmac } = await import('crypto');
     const body = JSON.stringify(event);
+    expect(cfg.data).toBe(body);
     const expected = `sha256=${createHmac('sha256', config.secret).update(body).digest('hex')}`;
     expect(headers['X-Webhook-Signature']).toBe(expected);
   });
 
   it('retries up to 3 times on 500 errors then gives up', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 500 } as never);
 
-    const config = makeConfig();
-    const event = makeEvent();
-
-    const promise = deliverWebhook(config, event);
+    const promise = deliverWebhook(makeConfig(), makeEvent());
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
   });
 
   it('does NOT retry on 400 client errors', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 400 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 400 } as never);
 
-    const config = makeConfig();
-    const event = makeEvent();
-
-    const promise = deliverWebhook(config, event);
+    const promise = deliverWebhook(makeConfig(), makeEvent());
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockSend).toHaveBeenCalledTimes(1);
   });
 
   it('handles network timeout gracefully without throwing', async () => {
-    const abortError = new Error('The operation was aborted');
-    abortError.name = 'AbortError';
-    const mockFetch = vi.fn().mockRejectedValue(abortError);
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockRejectedValue(new Error('timeout of 10000ms exceeded'));
 
-    const config = makeConfig();
-    const event = makeEvent();
-
-    const promise = deliverWebhook(config, event);
+    const promise = deliverWebhook(makeConfig(), makeEvent());
     await vi.runAllTimersAsync();
     await expect(promise).resolves.toBeUndefined();
 
     // All 3 retries attempted
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
   });
 });

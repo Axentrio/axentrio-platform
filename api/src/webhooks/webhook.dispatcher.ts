@@ -201,8 +201,12 @@ export async function deliverWebhook(
       });
     } catch (err) {
       const durationMs = Date.now() - startedAt;
-      const isAbort = err instanceof Error && err.name === 'AbortError';
-      const errorMessage = isAbort
+      const isTimeout =
+        err instanceof Error &&
+        (err.name === 'AbortError' ||
+          (err as { code?: string }).code === 'ECONNABORTED' ||
+          /timeout/i.test(err.message));
+      const errorMessage = isTimeout
         ? 'timeout'
         : err instanceof Error
           ? err.message

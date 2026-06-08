@@ -46,12 +46,18 @@ vi.mock('../../database/entities/WebhookDeliveryLog', () => ({
 
 vi.mock('../../utils/logger', () => ({ logger: hoisted.mockLogger }));
 
+// Dispatcher sends via the SSRF-guarded helper (axios-shaped response).
+vi.mock('../../security/ssrf-guard', () => ({ safeOutboundRequest: vi.fn() }));
+
 const { savedRows, mockSave, mockCreate, mockGetRepository, mockLogger } = hoisted;
 
 // ── Imports (after mocks) ────────────────────────────────────────────────────
 
 import { deliverWebhook } from '../../webhooks/webhook.dispatcher';
+import { safeOutboundRequest } from '../../security/ssrf-guard';
 import type { EventWebhookConfig, LeadCreatedEvent } from '../../webhooks/webhook.types';
+
+const mockSend = vi.mocked(safeOutboundRequest);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -99,12 +105,12 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     mockLogger.info.mockClear();
     mockLogger.warn.mockClear();
     mockLogger.error.mockClear();
+    mockSend.mockReset();
     vi.useFakeTimers();
   });
 
   it('success path: persists one row with status=success, attempt=1', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 200 } as never);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -113,7 +119,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(mockSend).toHaveBeenCalledOnce();
     expect(savedRows).toHaveLength(1);
     expect(savedRows[0]).toMatchObject({
       status: 'success',
@@ -131,12 +137,10 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
   });
 
   it('transient failure then success: two failed rows + one success row', async () => {
-    const mockFetch = vi
-      .fn()
-      .mockResolvedValueOnce({ ok: false, status: 503 })
-      .mockResolvedValueOnce({ ok: false, status: 502 })
-      .mockResolvedValueOnce({ ok: true, status: 200 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend
+      .mockResolvedValueOnce({ status: 503 } as never)
+      .mockResolvedValueOnce({ status: 502 } as never)
+      .mockResolvedValueOnce({ status: 200 } as never);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -145,7 +149,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
     expect(savedRows).toHaveLength(3);
 
     expect(savedRows[0]).toMatchObject({ status: 'failed', attempt: 1, httpStatus: 503 });
@@ -161,8 +165,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
   });
 
   it('permanent failure: three failed rows (attempt 1,2,3) + dead-letter log', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 500 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 500 } as never);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -171,7 +174,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
     expect(savedRows).toHaveLength(3);
     expect(savedRows.map((r) => r.attempt)).toEqual([1, 2, 3]);
     expect(savedRows.every((r) => r.status === 'failed')).toBe(true);
@@ -191,10 +194,8 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
   });
 
   it('network timeout dead-letters after 3 attempts', async () => {
-    const abortError = new Error('The operation was aborted');
-    abortError.name = 'AbortError';
-    const mockFetch = vi.fn().mockRejectedValue(abortError);
-    vi.stubGlobal('fetch', mockFetch);
+    const timeoutError = Object.assign(new Error('timeout of 10000ms exceeded'), { code: 'ECONNABORTED' });
+    mockSend.mockRejectedValue(timeoutError);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -203,7 +204,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockSend).toHaveBeenCalledTimes(3);
     expect(savedRows).toHaveLength(3);
     expect(savedRows.every((r) => r.status === 'failed' && r.error === 'timeout')).toBe(true);
 
@@ -214,8 +215,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
   });
 
   it('4xx client error: one failed row, no retries, no dead-letter', async () => {
-    const mockFetch = vi.fn().mockResolvedValue({ ok: false, status: 400 });
-    vi.stubGlobal('fetch', mockFetch);
+    mockSend.mockResolvedValue({ status: 400 } as never);
 
     const config = makeConfig();
     const event = makeEvent();
@@ -224,7 +224,7 @@ describe('deliverWebhook (M0 PR10 — outbound delivery logging)', () => {
     await vi.runAllTimersAsync();
     await promise;
 
-    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockSend).toHaveBeenCalledTimes(1);
     expect(savedRows).toHaveLength(1);
     expect(savedRows[0]).toMatchObject({ status: 'failed', attempt: 1, httpStatus: 400 });
 

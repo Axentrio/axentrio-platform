@@ -22,11 +22,12 @@ vi.mock('../../database/data-source', () => ({
 // bot-config service (hits the DB). Stub the resolvers so each test's
 // in-memory tenant.settings.ai is what reaches the LLM call.
 vi.mock('../../services/bot-config.service', () => ({
+  // AgentService.run resolves bot row + settings + AI slice + apiKey from a
+  // single getLlmRuntimeConfigForSession call. The behavioural slice + apiKey
+  // both come from the seeded `tenant.settings.ai`.
   getLlmRuntimeConfigForSession: async (_session: any) => ({
-    // The first call uses tenant arg from the test — but the test threads
-    // tenant through `agent.run(message, session, tenant, history)`. The
-    // agent now resolves config from the session/tenantId via the service.
-    // The behavioural slice + apiKey both come from the seeded `tenant.settings.ai`.
+    bot: { id: 'bot-anchor' } as any,
+    botSettings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } as any,
     botAiSettings: { enabled: true, provider: 'openai', model: 'gpt-4o' } as any,
     apiKey: 'sk-test',
   }),

@@ -7,8 +7,20 @@
 
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import { cached, invalidate } from '../utils/cache';
 import { PLANS } from './plans';
 import type { Entitlements, InternalPlanId } from './types';
+
+/**
+ * Entitlements are read on the hot path (feature gates + LLM rate limit run on
+ * effectively every request), but the underlying tier changes only on a
+ * subscription event. Cache the resolved entitlements for a short TTL and
+ * invalidate explicitly whenever `Tenant.tier` is written (see
+ * `invalidateEntitlements`). The TTL is the backstop; invalidation makes a
+ * plan change take effect immediately.
+ */
+const ENTITLEMENTS_TTL_SECONDS = 60;
+const entitlementsCacheKey = (tenantId: string) => `entitlements:${tenantId}`;
 
 /**
  * Resolve entitlements for a tenant. Reads the plan from `PLANS[tier]` and,
@@ -20,19 +32,30 @@ import type { Entitlements, InternalPlanId } from './types';
  * changes, not by directly editing tenant columns.
  */
 export async function getEntitlements(tenantId: string): Promise<Entitlements> {
-  const tenant = await AppDataSource.getRepository(Tenant).findOne({
-    where: { id: tenantId },
-    select: ['id', 'tier', 'maxSessions', 'dailyLlmCallLimit'],
-  });
+  return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({
+      where: { id: tenantId },
+      select: ['id', 'tier', 'maxSessions', 'dailyLlmCallLimit'],
+    });
 
-  if (!tenant) {
-    throw new Error(`getEntitlements: tenant ${tenantId} not found`);
-  }
+    if (!tenant) {
+      throw new Error(`getEntitlements: tenant ${tenantId} not found`);
+    }
 
-  return entitlementsFor(tenant.tier, {
-    maxSessions: tenant.maxSessions ?? null,
-    dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+    return entitlementsFor(tenant.tier, {
+      maxSessions: tenant.maxSessions ?? null,
+      dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+    });
   });
+}
+
+/**
+ * Drop the cached entitlements for a tenant. MUST be called after any write to
+ * `Tenant.tier` (or the Enterprise override columns) so plan changes take
+ * effect without waiting for the TTL.
+ */
+export async function invalidateEntitlements(tenantId: string): Promise<void> {
+  await invalidate(entitlementsCacheKey(tenantId));
 }
 
 /**

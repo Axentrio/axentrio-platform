@@ -34,6 +34,7 @@ import {
 import { User } from '../database/entities/User';
 import { getBillingProvider } from './provider-registry';
 import { getStripeClient } from './providers/stripe';
+import { invalidateEntitlements } from './entitlements';
 import { BillingProviderError, CheckoutablePlanId } from './types';
 
 const STRIPE = 'stripe' as const;
@@ -737,6 +738,7 @@ export async function setTierManual(
     // Step 3: tenant tier cascade.
     const previousTier = tenant.tier;
     await manager.update(Tenant, { id: tenantId }, { tier });
+    await invalidateEntitlements(tenantId);
 
     // Step 4: audit row.
     const event = manager.create(BillingEvent, {

@@ -22,9 +22,8 @@
 
 import { EntityManager } from 'typeorm';
 import { ApiError } from '../middleware/error-handler';
-import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
-import { entitlementsFor } from './entitlements';
+import { entitlementsFor, getEntitlements } from './entitlements';
 import type { Entitlements } from './types';
 
 export class PlanLimitError extends ApiError {
@@ -99,17 +98,17 @@ export async function requireFeature(
   feature: keyof Entitlements['features'],
   errorCode: string,
 ): Promise<void> {
-  const tenant = await AppDataSource.getRepository(Tenant).findOne({
-    where: { id: tenantId },
-    select: ['id', 'tier', 'maxSessions', 'dailyLlmCallLimit'],
-  });
-  if (!tenant) {
-    throw new ApiError(`Tenant ${tenantId} not found`, 404, 'tenant_not_found');
+  // Cached read (entitlements:<tenantId>) — same resolution as the count gates,
+  // but feature gates have no race window so they don't need the row lock.
+  let entitlements: Entitlements;
+  try {
+    entitlements = await getEntitlements(tenantId);
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('not found')) {
+      throw new ApiError(`Tenant ${tenantId} not found`, 404, 'tenant_not_found');
+    }
+    throw err;
   }
-  const entitlements = entitlementsFor(tenant.tier, {
-    maxSessions: tenant.maxSessions ?? null,
-    dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
-  });
   if (!entitlements.features[feature]) {
     throw new PlanLimitError(errorCode, null, { feature });
   }

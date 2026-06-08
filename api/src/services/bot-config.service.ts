@@ -153,6 +153,11 @@ export async function getBotConfigForSession(
  * just needs the bot's behavioural config should use `getBotConfigForSession`.
  */
 export interface LlmRuntimeConfig {
+  /** The resolved bot row — returned so callers don't re-fetch it. */
+  bot: Bot;
+  /** The bot's full settings blob (behavioural slice the tool registry +
+   *  prompt builder consume). Returned alongside to avoid a second lookup. */
+  botSettings: BotSettings;
   botAiSettings: NonNullable<BotSettings['ai']> | undefined;
   /** Tenant-wide LLM provider key. Never copy into Bot.settings. */
   apiKey: string | null | undefined;
@@ -161,7 +166,7 @@ export interface LlmRuntimeConfig {
 export async function getLlmRuntimeConfigForSession(
   session: Pick<ChatSession, 'id' | 'tenantId' | 'botId'>,
 ): Promise<LlmRuntimeConfig> {
-  const [{ settings }, tenant] = await Promise.all([
+  const [{ bot, settings }, tenant] = await Promise.all([
     getBotConfigForSession(session),
     ds().getRepository(Tenant).findOne({ where: { id: session.tenantId } }),
   ]);
@@ -169,6 +174,8 @@ export async function getLlmRuntimeConfigForSession(
     throw new BotConfigResolutionError(`Tenant ${session.tenantId} not found`);
   }
   return {
+    bot,
+    botSettings: settings,
     botAiSettings: settings.ai,
     apiKey: tenant.settings?.ai?.apiKey ?? null,
   };

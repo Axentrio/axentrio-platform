@@ -384,7 +384,7 @@ export async function forwardMessageToN8n(
   ) {
     try {
       logger.info(`[Fallback] Attempting native RAG for session ${session.id}`);
-      const history = await getConversationHistory(session.id);
+      const history = await getConversationHistory(session.id, savedMessage.id);
       const messageContent = savedMessage.contentEncrypted
         ? decrypt(savedMessage.content)
         : savedMessage.content;
@@ -494,8 +494,10 @@ async function platformAgentPath(
     ? decrypt(savedMessage.content)
     : savedMessage.content;
 
-  // Load conversation history for the agent loop
-  const history = await getConversationHistory(session.id);
+  // Load conversation history for the agent loop. Exclude the current message —
+  // it is passed separately as the live user turn (agent.service appends it),
+  // so including it here would duplicate it in the LLM context.
+  const history = await getConversationHistory(session.id, savedMessage.id);
 
     const result: AgentResult = await agentService!.run(
       messageContent,
@@ -589,17 +591,29 @@ async function ensureBotParticipant(
 }
 
 /**
- * Load last 10 messages with participant join to determine role
+ * Load last 10 messages with participant join to determine role.
+ *
+ * `excludeMessageId` drops the current inbound message from the history: it is
+ * already persisted before the agent runs, so callers that *also* pass it as
+ * the live user turn (agent loop / RAG fallback) would otherwise send it to the
+ * LLM twice. Exclude it here so it appears exactly once.
  */
 async function getConversationHistory(
-  sessionId: string
+  sessionId: string,
+  excludeMessageId?: string,
 ): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
-  const messages = await messageRepository
+  const qb = messageRepository
     .createQueryBuilder('message')
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type = :type', { type: 'text' })
+    .andWhere('message.type = :type', { type: 'text' });
+
+  if (excludeMessageId) {
+    qb.andWhere('message.id != :excludeMessageId', { excludeMessageId });
+  }
+
+  const messages = await qb
     .orderBy('message.createdAt', 'DESC')
     .take(10)
     .getMany();

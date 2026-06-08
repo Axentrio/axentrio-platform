@@ -80,12 +80,12 @@ export class AgentService {
     // The behavioural slice (brand voice / guardrails / integrations) lives on
     // Bot.settings; the LLM provider secret stays on Tenant.settings.ai.apiKey
     // and is returned alongside as `apiKey` by this resolver.
-    const { botAiSettings, apiKey } = await getLlmRuntimeConfigForSession(session);
+    // One resolve for the whole runtime config: bot row + its full settings
+    // (the integrations slice the tool registry needs, plus the prompt
+    // builder's skills/brandVoice), the AI behavioural slice, and the tenant
+    // LLM key — all from a single bot+tenant lookup.
+    const { bot, botSettings, botAiSettings, apiKey } = await getLlmRuntimeConfigForSession(session);
     const aiSettings = botAiSettings;
-    // Resolve the bot's full settings (for the integrations slice the tool
-    // registry needs, and the prompt builder's skills/brandVoice consumption).
-    const { getBotConfigForSession } = await import('../services/bot-config.service');
-    const { bot, settings: botSettings } = await getBotConfigForSession(session);
     const trace: AgentTrace = {
       sessionId: session.id,
       tenantId: tenant.id,
@@ -123,7 +123,7 @@ export class AgentService {
         // Budget check
         if (await this.metering.isOverBudget(tenant.id, (aiSettings as any)?.dailyTokenBudget)) {
           trace.finishReason = 'budget_exceeded';
-          await this.traceLogger.save(trace);
+          void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
           return {
             type: 'budget_exceeded',
             fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'I apologize, but I am temporarily unavailable.',
@@ -157,7 +157,7 @@ export class AgentService {
         if (response.finishReason === 'stop' || !response.toolCalls?.length) {
           trace.iterations.push(traceEntry);
           trace.finishReason = 'completed';
-          await this.traceLogger.save(trace);
+          void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
           return { type: 'response', content: response.content, quickReplies: buildSlotQuickReplies(pendingAvailability) };
         }
 
@@ -246,12 +246,12 @@ export class AgentService {
 
       // Max iterations reached
       trace.finishReason = 'max_iterations';
-      await this.traceLogger.save(trace);
+      void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       return { type: 'max_iterations', fallbackMessage: "Let me connect you with a human agent." };
 
     } catch (error) {
       trace.finishReason = 'error';
-      await this.traceLogger.save(trace);
+      void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       logger.error('Agent loop error', { sessionId: session.id, error });
       return {
         type: 'error',

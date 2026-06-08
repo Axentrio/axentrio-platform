@@ -192,6 +192,26 @@ describe('UploadService.ingestRemoteFile', () => {
     expect(quotaSpy).toHaveBeenCalledWith('ten-1', PNG_LEN);
   });
 
+  it('follows a Meta CDN 302 redirect (re-validated per hop) then downloads', async () => {
+    safeOutboundRequest.mockReset();
+    safeOutboundRequest
+      .mockResolvedValueOnce({ status: 302, headers: { location: 'https://scontent.example/real.png' }, data: new ArrayBuffer(0) })
+      .mockResolvedValueOnce({ status: 200, data: PNG_AB });
+    const svc = makeService();
+    const result = await svc.ingestRemoteFile(baseInput());
+    expect(result).not.toBeNull();
+    expect(result!.needsScan).toBe(true);
+    expect(safeOutboundRequest).toHaveBeenCalledTimes(2);
+    expect(safeOutboundRequest.mock.calls[1][0].url).toBe('https://scontent.example/real.png');
+  });
+
+  it('returns null if redirects never resolve to a 2xx (loop bound)', async () => {
+    safeOutboundRequest.mockReset();
+    safeOutboundRequest.mockResolvedValue({ status: 302, headers: { location: 'https://scontent.example/a.png' }, data: new ArrayBuffer(0) });
+    const svc = makeService();
+    expect(await svc.ingestRemoteFile(baseInput())).toBeNull();
+  });
+
   it('non-image (sharp throws) → null, no PUT', async () => {
     sharpMetadata.mockRejectedValue(new Error('unsupported'));
     const svc = makeService();

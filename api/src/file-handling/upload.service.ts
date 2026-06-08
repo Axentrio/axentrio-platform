@@ -722,19 +722,34 @@ export class UploadService {
       return null;
     }
 
-    // Download (SSRF-guarded, no redirects, bounded buffer).
+    // Download (SSRF-guarded, bounded buffer). safeOutboundRequest hardcodes
+    // maxRedirects:0, so follow redirects MANUALLY (≤3 hops) — re-calling
+    // safeOutboundRequest for each Location re-runs assertSafeOutboundUrl on the
+    // hop, so every redirect target is SSRF-validated. This is required because
+    // Meta attachment URLs (lookaside.fbsbx.com) 302-redirect to the real CDN.
     let buffer: Buffer;
     try {
-      const response = await safeOutboundRequest({
-        url: input.url,
-        method: 'GET',
-        responseType: 'arraybuffer',
-        timeout: 15_000,
-        maxContentLength: INGEST_MAX_BYTES,
-        maxBodyLength: INGEST_MAX_BYTES,
-        maxRedirects: 0,
-      });
-      if (response.status < 200 || response.status >= 300) {
+      let url = input.url;
+      let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
+      for (let hop = 0; hop < 4; hop++) {
+        response = await safeOutboundRequest({
+          url,
+          method: 'GET',
+          responseType: 'arraybuffer',
+          timeout: 15_000,
+          maxContentLength: INGEST_MAX_BYTES,
+          maxBodyLength: INGEST_MAX_BYTES,
+        });
+        if (response.status >= 300 && response.status < 400) {
+          const location = (response.headers as Record<string, string> | undefined)?.location;
+          if (!location) break; // 3xx with no Location → treat as failure below
+          url = new URL(location, url).toString(); // re-validated by the next safeOutboundRequest
+          response = undefined;
+          continue;
+        }
+        break;
+      }
+      if (!response || response.status < 200 || response.status >= 300) {
         return null;
       }
       buffer = Buffer.from(response.data as ArrayBuffer);

@@ -486,9 +486,10 @@ router.post(
       throw new NotFoundError('Session not found');
     }
 
-    // Verify target agent exists
+    // Verify target agent exists AND belongs to the caller's tenant — otherwise
+    // a session could be assigned to a foreign-tenant agent. See security audit #H.
     const targetAgent = await agentRepository.findOne({
-      where: { id: targetAgentId },
+      where: { id: targetAgentId, tenantId: req.user?.tenantId },
     });
 
     if (!targetAgent) {

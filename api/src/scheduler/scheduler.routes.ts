@@ -21,6 +21,10 @@ router.post('/services', requireRole('admin'), asyncHandler(ctrl.createService))
 router.put('/services/:id', requireRole('admin'), asyncHandler(ctrl.updateService));
 router.delete('/services/:id', requireRole('admin'), asyncHandler(ctrl.deleteService));
 
+// Business-type presets (P4). Read for admin/supervisor/agent; apply admin-only.
+router.get('/presets', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listPresets));
+router.post('/presets/:key/apply', requireRole('admin'), asyncHandler(ctrl.applyPreset));
+
 // Bookings management (internal provider). Reads for admin/supervisor/agent;
 // mutations admin-only.
 router.get('/bookings', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listBookings));

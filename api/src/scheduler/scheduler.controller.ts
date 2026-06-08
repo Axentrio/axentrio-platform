@@ -5,6 +5,7 @@
  * separately via the integrations endpoints.
  */
 import { randomUUID } from 'crypto';
+import { z } from 'zod';
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
@@ -20,13 +21,14 @@ import {
   cancelBookingBodySchema,
   rescheduleBookingBodySchema,
 } from '../schemas/scheduler.schema';
-import type { Repository } from 'typeorm';
+import type { Repository, EntityManager } from 'typeorm';
 import {
   adminListBookings,
   adminAvailability,
   adminCancelBooking,
   adminRescheduleBooking,
 } from '../n8n/booking.service';
+import { findPreset, listPresetSummaries, presetServiceSchema, presetAvailabilitySchema } from './presets';
 import { BookingError } from '../n8n/booking-providers/types';
 import { ApiError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
@@ -40,7 +42,8 @@ function asApiError(err: unknown): never {
 
 const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_integrations';
 
-function slugify(name: string): string {
+/** Exported for the P4 preset CI invariant test (intra-preset slug-collision check). */
+export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'appointment';
 }
 
@@ -166,17 +169,48 @@ export async function listServices(req: Request, res: Response): Promise<void> {
   sendSuccess(res, { services });
 }
 
+/**
+ * Helper data = the parsed service input minus catalog-state fields, which the
+ * callers supply explicitly: `isActive` falls to the entity default (true),
+ * `sortOrder` is set by the preset apply loop, and `intakeQuestions` is the
+ * already-reconciled value (manual path) or omitted (presets). A bespoke type
+ * (not `z.infer<typeof serviceInputSchema>`, whose `.default()` fields are
+ * required) so both callers type-check.
+ */
+type ServiceRowInput = Omit<z.infer<typeof serviceInputSchema>, 'isActive' | 'sortOrder' | 'intakeQuestions'> & {
+  isActive?: boolean;
+  sortOrder?: number;
+  intakeQuestions?: IntakeQuestion[] | null;
+};
+
+/**
+ * Single insert path for a ServiceType row, shared by manual create and preset apply
+ * (so create logic can't diverge). Parsing/reconciliation happen in the CALLER; this
+ * does only create + uniqueSlug + save on the given manager.
+ */
+async function createServiceRow(
+  manager: EntityManager,
+  tenantId: string,
+  botId: string,
+  data: ServiceRowInput
+): Promise<ServiceType> {
+  const repo = manager.getRepository(ServiceType);
+  const svc = repo.create({ tenantId, botId, ...data, slug: await uniqueSlug(repo, botId, data.name) });
+  return repo.save(svc);
+}
+
 export async function createService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
   const data = serviceInputSchema.parse(req.body);
   const { bot } = await getAnchorBotConfig(tenantId);
-  const repo = AppDataSource.getRepository(ServiceType);
   const { intakeQuestions, ...rest } = data;
-  const svc = repo.create({ tenantId, botId: bot.id, ...rest, slug: await uniqueSlug(repo, bot.id, data.name) });
-  // No stored set on create → every id is minted fresh; [] collapses to null.
-  if (intakeQuestions !== undefined) svc.intakeQuestions = reconcileIntakeQuestions(intakeQuestions, null);
-  await repo.save(svc);
+  // Reconcile intake ids before the shared insert (manual path only; presets carry none).
+  const reconciled = intakeQuestions !== undefined ? reconcileIntakeQuestions(intakeQuestions, null) : undefined;
+  const svc = await createServiceRow(AppDataSource.manager, tenantId, bot.id, {
+    ...rest,
+    ...(reconciled !== undefined ? { intakeQuestions: reconciled } : {}),
+  });
   logger.info('[Scheduler] service created', { tenantId, botId: bot.id, serviceId: svc.id });
   sendSuccess(res, svc);
 }
@@ -209,6 +243,71 @@ export async function deleteService(req: Request, res: Response): Promise<void> 
   svc.isActive = false;
   await repo.save(svc);
   sendSuccess(res, { id: svc.id, isActive: false });
+}
+
+// --- Business-type presets (P4) ---
+
+/** List presets for the picker (entitlement-gated read). */
+export async function listPresets(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  sendSuccess(res, { presets: listPresetSummaries() });
+}
+
+/**
+ * Seed a bot's catalog from a preset: one transaction, a per-bot advisory lock to
+ * serialize concurrent applies, an empty-catalog precondition (any row, active or
+ * inactive, → 409), bulk service create via the shared helper, and a conditional
+ * availability insert (only when the bot has none — owner's real hours always win).
+ */
+export async function applyPreset(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  const preset = findPreset(req.params.key);
+  if (!preset) throw new ApiError('Preset not found', 404, 'PRESET_NOT_FOUND');
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const botId = bot.id;
+
+  await AppDataSource.transaction(async (manager) => {
+    // Serialize concurrent applies for this bot (hash a text key → bigint the lock needs).
+    await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [`preset:${botId}`]);
+
+    // Empty-catalog precondition — inactive (soft-deleted) rows count, since they keep
+    // their (bot_id, slug) and would muddy a fresh seed.
+    const existing = await manager.getRepository(ServiceType).count({ where: { botId } });
+    if (existing > 0) throw new ApiError('This bot already has services', 409, 'CATALOG_NOT_EMPTY');
+
+    // Bulk-create the seed services in order (sortOrder = index).
+    for (let i = 0; i < preset.services.length; i++) {
+      const parsed = presetServiceSchema.parse(preset.services[i]);
+      await createServiceRow(manager, tenantId, botId, { ...parsed, sortOrder: i });
+    }
+
+    // Conditional availability: insert the preset default only if the bot has no rule.
+    if (preset.availability) {
+      const hasRule = await manager.getRepository(AvailabilityRule).findOne({ where: { botId } });
+      if (!hasRule) {
+        const a = presetAvailabilitySchema.parse(preset.availability);
+        // Raw targeted ON CONFLICT (bot_id) — jsonb params JSON.stringify'd so node-pg
+        // doesn't serialize the arrays/objects as Postgres array literals.
+        await manager.query(
+          `INSERT INTO chatbot_availability_rules
+             (tenant_id, bot_id, timezone, weekly_hours, date_overrides, slot_granularity_min)
+           VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6)
+           ON CONFLICT (bot_id) DO NOTHING`,
+          [tenantId, botId, a.timezone, JSON.stringify(a.weeklyHours), JSON.stringify(a.dateOverrides), a.slotGranularityMin]
+        );
+      }
+    }
+  });
+
+  // Re-read through the same query listServices uses, so the portal refresh is unchanged.
+  const services = await AppDataSource.getRepository(ServiceType).find({
+    where: { botId },
+    order: { sortOrder: 'ASC', createdAt: 'ASC' },
+  });
+  logger.info('[Scheduler] preset applied', { tenantId, botId, preset: preset.key, count: services.length });
+  sendSuccess(res, { services });
 }
 
 // --- Admin bookings management ---

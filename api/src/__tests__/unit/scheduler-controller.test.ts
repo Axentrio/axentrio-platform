@@ -12,16 +12,22 @@ vi.mock('../../billing/enforce', () => ({ requireFeature: (...a: any[]) => requi
 
 const etFindOne = vi.fn();
 const etSave = vi.fn((x) => x);
+const etCount = vi.fn(async () => 0);
+const etFind = vi.fn(async () => []);
 const ruleFindOne = vi.fn();
 const ruleSave = vi.fn((x) => x);
+const managerQuery = vi.fn(async (..._a: any[]) => [] as any[]);
+function repoFor(entity: any) {
+  const name = entity?.name || entity;
+  if (name === 'ServiceType') return { findOne: etFindOne, find: etFind, count: etCount, create: (d: any) => d, save: etSave };
+  if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
+  return {};
+}
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
-    getRepository: (entity: any) => {
-      const name = entity?.name || entity;
-      if (name === 'ServiceType') return { findOne: etFindOne, find: async () => [], create: (d: any) => d, save: etSave };
-      if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
-      return {};
-    },
+    getRepository: (entity: any) => repoFor(entity),
+    manager: { getRepository: (entity: any) => repoFor(entity) },
+    transaction: (cb: any) => cb({ query: managerQuery, getRepository: (entity: any) => repoFor(entity) }),
   },
 }));
 
@@ -29,7 +35,7 @@ const sendSuccess = vi.fn();
 vi.mock('../../utils/response', () => ({ sendSuccess: (...a: any[]) => sendSuccess(...a) }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { updateSchedulerConfig, getSchedulerConfig, createService, updateService } from '../../scheduler/scheduler.controller';
+import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset } from '../../scheduler/scheduler.controller';
 import { serviceInputSchema } from '../../schemas/scheduler.schema';
 
 const res: any = {};
@@ -191,5 +197,64 @@ describe('intake questions id reconciliation (P3a)', () => {
     expect(ids[0]).toBe('dup');
     expect(ids[1]).toMatch(UUID_RE);
     expect(ids[1]).not.toBe('dup');
+  });
+});
+
+describe('presets endpoints (P4a)', () => {
+  const res: any = {};
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    etFindOne.mockResolvedValue(null); // uniqueSlug → base slug first try
+    etCount.mockResolvedValue(0); // empty catalog
+    etFind.mockResolvedValue([]); // re-read
+    ruleFindOne.mockResolvedValue(null); // no existing availability
+    managerQuery.mockResolvedValue([]);
+  });
+
+  it('lists preset summaries (gated)', async () => {
+    await listPresets({ tenantId: 'ten-1' } as any, res);
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'calendarIntegrations', expect.any(String));
+    const payload = sendSuccess.mock.calls[0][1];
+    expect(payload.presets.length).toBeGreaterThanOrEqual(5);
+    expect(payload.presets[0]).toMatchObject({ key: expect.any(String), serviceCount: expect.any(Number) });
+  });
+
+  it('applies a preset on an empty catalog: seeds services in order + inserts availability', async () => {
+    await applyPreset({ tenantId: 'ten-1', params: { key: 'barber' } } as any, res);
+    // per-bot advisory lock taken to serialize concurrent applies
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('pg_advisory_xact_lock'))).toBe(true);
+    // Barber has 3 services, created with sortOrder 0,1,2
+    expect(etSave).toHaveBeenCalledTimes(3);
+    expect(etSave.mock.calls.map((c) => c[0].sortOrder)).toEqual([0, 1, 2]);
+    // availability inserted via raw ON CONFLICT, jsonb params JSON-stringified
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_availability_rules'));
+    expect(insert).toBeDefined();
+    expect(insert![1]).toContain('Europe/Brussels');
+    expect(insert![1].some((p: any) => typeof p === 'string' && p.startsWith('{') && p.includes('mon'))).toBe(true);
+  });
+
+  it('preserves an existing AvailabilityRule (no insert)', async () => {
+    ruleFindOne.mockResolvedValue({ id: 'r-1' });
+    await applyPreset({ tenantId: 'ten-1', params: { key: 'barber' } } as any, res);
+    expect(etSave).toHaveBeenCalledTimes(3); // services still seeded
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_availability_rules'));
+    expect(insert).toBeUndefined();
+  });
+
+  it('rejects a non-empty catalog with 409 CATALOG_NOT_EMPTY', async () => {
+    etCount.mockResolvedValue(2);
+    await expect(applyPreset({ tenantId: 'ten-1', params: { key: 'barber' } } as any, res)).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'CATALOG_NOT_EMPTY',
+    });
+    expect(etSave).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unknown preset key with 404 PRESET_NOT_FOUND', async () => {
+    await expect(applyPreset({ tenantId: 'ten-1', params: { key: 'nope' } } as any, res)).rejects.toMatchObject({
+      statusCode: 404,
+      code: 'PRESET_NOT_FOUND',
+    });
   });
 });

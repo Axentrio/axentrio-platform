@@ -140,7 +140,7 @@ describe('CheckAvailabilityTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(slots);
-    expect(mockCheckAvailability).toHaveBeenCalledWith('sess-1', '2026-04-01', '2026-04-07');
+    expect(mockCheckAvailability).toHaveBeenCalledWith('sess-1', '2026-04-01', '2026-04-07', undefined);
   });
 
   it('execute returns success=false with error on failure', async () => {
@@ -182,6 +182,7 @@ describe('CreateBookingTool', () => {
       'run-abc:create_booking:2026-04-01T10:00:00Z',
       '2026-04-01T10:00:00Z',
       { name: 'Alice', email: 'alice@test.com' },
+      undefined,
       undefined
     );
   });
@@ -201,7 +202,8 @@ describe('CreateBookingTool', () => {
       'run-xyz:create_booking:2026-04-02T09:00:00Z',
       '2026-04-02T09:00:00Z',
       { name: 'Bob', email: 'bob@test.com' },
-      'Need consultation'
+      'Need consultation',
+      undefined
     );
   });
 

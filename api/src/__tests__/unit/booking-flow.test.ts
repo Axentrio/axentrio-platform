@@ -232,7 +232,7 @@ describe('Booking Flow — Full Agent Loop', () => {
 
     expect(turn2.type).toBe('response');
     expect((turn2 as any).content).toContain('9:00 AM');
-    expect(mockCheckAvailability).toHaveBeenCalledWith('session-booking-test', '2026-04-07', '2026-04-08');
+    expect(mockCheckAvailability).toHaveBeenCalledWith('session-booking-test', '2026-04-07', '2026-04-08', undefined);
 
     // Turn 3: User picks 10am and gives info. LLM re-verifies availability then books.
     // The precondition requires check_availability in the SAME turn before create_booking.
@@ -297,6 +297,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       expect.stringContaining('create_booking'), // idempotency key
       '2026-04-07T10:00:00',
       { name: 'Sarah Connor', email: 'sarah@example.com' },
+      undefined,
       undefined,
     );
   });

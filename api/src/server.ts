@@ -9,6 +9,7 @@ import 'reflect-metadata';
 import express from 'express';
 import { createServer } from 'http';
 import cors from 'cors';
+import { resolveCorsDecision } from './security/cors';
 import helmet from 'helmet';
 
 import { clerkMiddleware } from '@clerk/express';
@@ -207,39 +208,20 @@ if (config.server.isProduction) {
   app.use(cspMiddleware);
   app.use(xssMiddleware);
 }
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-
-    const allowed = [
-      ...(Array.isArray(config.cors.origin) ? config.cors.origin : [config.cors.origin]),
-    ].filter(Boolean);
-
-    // In development, also allow common localhost origins
-    const devOrigins = config.server.isDevelopment
-      ? ['http://localhost:4080', 'http://localhost:3000', 'http://localhost:5173', 'http://localhost:8888']
-      : [];
-
-    const allAllowed = [...allowed, ...devOrigins];
-
-    if (
-      allAllowed.includes('*') ||
-      allAllowed.includes(origin) ||
-      origin.endsWith('.clerk.accounts.dev')
-    ) {
-      callback(null, true);
-    } else {
-      logger.warn(`CORS request blocked from origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: config.cors.credentials,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Session-ID', 'X-Tenant-Context'],
+// Per-request CORS options so `credentials` is decided per origin — a static
+// `credentials:true` would emit Access-Control-Allow-Credentials even for `*`.
+// Wildcard never yields credentials; explicit allowlist (+ Clerk) does. See #D.
+app.use(cors((req, callback) => {
+  const decision = resolveCorsDecision(req.headers.origin);
+  if (decision.origin === false) {
+    logger.warn(`CORS request blocked from origin: ${req.headers.origin}`);
+  }
+  callback(null, {
+    origin: decision.origin,
+    credentials: decision.credentials,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Session-ID', 'X-Tenant-Context'],
+  });
 }));
 
 // Health check (no prefix, for Railway). Placed AFTER cors() so the

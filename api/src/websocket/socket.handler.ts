@@ -9,6 +9,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { Server as HttpServer } from 'http';
 import { logger } from '../utils/logger';
 import { getPubClient, getSubClient, isRedisAvailable } from '../config/redis';
+import { isOriginAllowed, isWildcardCors } from '../security/cors';
 import { validateSocketTenant, TenantSocket } from '../middleware/tenant.middleware';
 import { checkEventRateLimit } from './socket-rate-limit';
 import { verifyToken } from '@clerk/backend';
@@ -173,9 +174,10 @@ async function authenticateSocket(socket: TenantSocket): Promise<void> {
 export function initializeSocketIO(httpServer: HttpServer): SocketIOServer {
   io = new SocketIOServer(httpServer, {
     cors: {
-      origin: '*', // Configure based on your needs
+      // Same allowlist as the HTTP layer; never wildcard-with-credentials (#D).
+      origin: (origin, cb) => cb(null, !origin || isWildcardCors() || isOriginAllowed(origin)),
       methods: ['GET', 'POST'],
-      credentials: true,
+      credentials: isWildcardCors() ? false : !!config.cors.credentials,
     },
     pingTimeout: 60000,
     pingInterval: 25000,

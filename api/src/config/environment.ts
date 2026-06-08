@@ -210,6 +210,17 @@ if (env.NODE_ENV === 'production') {
   if (env.WIDGET_API_KEY === 'widget-dev-key') {
     throw new Error('WIDGET_API_KEY must be set in production');
   }
+  // CORS must be an explicit allowlist in production — never wildcard, and not
+  // even a wildcard token inside a list (e.g. 'https://app,*'). See audit #D.
+  const corsTokens = env.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  if (corsTokens.length === 0 || corsTokens.includes('*')) {
+    throw new Error('CORS_ORIGIN must be an explicit allowlist (no "*") in production');
+  }
+  // Signs the public booking-manage links AND Google OAuth state — must be set
+  // (no dev fallback). See audit #E.
+  if (!env.META_OAUTH_JWT_SECRET || env.META_OAUTH_JWT_SECRET.length < 32) {
+    throw new Error('META_OAUTH_JWT_SECRET must be 32+ chars in production');
+  }
 }
 
 // Billing fail-fast — Stripe is REQUIRED in production. Development and

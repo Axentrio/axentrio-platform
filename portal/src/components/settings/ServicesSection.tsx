@@ -4,7 +4,7 @@
  * separate, shared section in SchedulerSettings.
  */
 import React, { useState } from 'react';
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -39,6 +39,8 @@ import {
   useCreateService,
   useUpdateService,
   useDeleteService,
+  usePresets,
+  useApplyPreset,
   type Service,
   type ServiceInput,
   type IntakeQuestion,
@@ -172,8 +174,9 @@ function priceLabel(s: Service): string {
   }
 }
 
-export const ServicesSection: React.FC = () => {
-  const { data, isLoading } = useServices();
+/** `onApplied` lets the parent (SchedulerSettings) re-hydrate seeded availability after a preset. */
+export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplied }) => {
+  const { data, isLoading, isSuccess } = useServices();
   const create = useCreateService();
   const update = useUpdateService();
   const remove = useDeleteService();
@@ -181,6 +184,7 @@ export const ServicesSection: React.FC = () => {
   const [editing, setEditing] = useState<Service | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(BLANK);
   const [pendingDelete, setPendingDelete] = useState<Service | null>(null);
+  const [showPresets, setShowPresets] = useState(false);
 
   const services = data?.services ?? [];
   const saving = create.isPending || update.isPending;
@@ -223,9 +227,17 @@ export const ServicesSection: React.FC = () => {
           <Loader2 className="w-4 h-4 animate-spin" /> Loading…
         </div>
       ) : services.length === 0 ? (
-        <p className="text-xs text-text-muted">
-          No services yet. Add the services customers can book (e.g. “Men’s haircut”, “Consultation”).
-        </p>
+        <div className="space-y-2">
+          <p className="text-xs text-text-muted">
+            No services yet. Add the services customers can book (e.g. “Men’s haircut”, “Consultation”), or start
+            from a preset.
+          </p>
+          {isSuccess && (
+            <Button variant="outline" size="sm" type="button" onClick={() => setShowPresets(true)}>
+              <Sparkles className="w-3.5 h-3.5" /> Start from a preset
+            </Button>
+          )}
+        </div>
       ) : (
         <div className="divide-y divide-edge rounded-lg border border-edge">
           {services.map((s) => (
@@ -398,7 +410,70 @@ export const ServicesSection: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <PresetDialog
+        open={showPresets}
+        onClose={() => setShowPresets(false)}
+        onApplied={onApplied}
+      />
     </div>
+  );
+};
+
+/** Preset picker — lists presets and applies the chosen one (empty-catalog seeding). */
+const PresetDialog: React.FC<{ open: boolean; onClose: () => void; onApplied?: () => void }> = ({
+  open,
+  onClose,
+  onApplied,
+}) => {
+  const { data, isLoading, isError } = usePresets(open);
+  const apply = useApplyPreset();
+  const presets = data?.presets ?? [];
+
+  const onApply = (key: string) =>
+    apply.mutate(key, {
+      onSuccess: () => {
+        onApplied?.();
+        onClose();
+      },
+    });
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && !apply.isPending && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Start from a preset</DialogTitle>
+          <DialogDescription>
+            Pick your business type to add a starter set of services (and default hours). Prices and hours are
+            starting points you can edit afterwards.
+          </DialogDescription>
+        </DialogHeader>
+
+        {isLoading ? (
+          <div className="flex items-center gap-2 p-4 text-sm text-text-muted">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+          </div>
+        ) : isError ? (
+          <p className="p-4 text-sm text-red-400">Couldn’t load presets. Close and try again.</p>
+        ) : (
+          <div className="divide-y divide-edge rounded-lg border border-edge">
+            {presets.map((p) => (
+              <div key={p.key} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-text-primary">{p.label}</div>
+                  <div className="mt-0.5 text-xs text-text-secondary">
+                    {p.description} · {p.serviceCount} services
+                  </div>
+                </div>
+                <Button size="sm" type="button" disabled={apply.isPending} onClick={() => onApply(p.key)}>
+                  {apply.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Apply'}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 };
 

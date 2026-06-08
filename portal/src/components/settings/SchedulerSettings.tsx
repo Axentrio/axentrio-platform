@@ -99,7 +99,7 @@ function rowsFromWeeklyHours(weekly: WeeklyHours | undefined): DayState {
 }
 
 export const SchedulerSettings: React.FC = () => {
-  const { data, isLoading } = useSchedulerConfig();
+  const { data, isLoading, refetch } = useSchedulerConfig();
   const update = useUpdateSchedulerConfig();
   const queryClient = useQueryClient();
   const googleStatus = useGoogleCalendarStatus();
@@ -229,7 +229,15 @@ export const SchedulerSettings: React.FC = () => {
                 </div>
 
                 {/* Services catalog (multi-service) */}
-                <ServicesSection />
+                <ServicesSection
+                  onApplied={async () => {
+                    // Re-hydrate the availability form from the POST-apply config: refetch
+                    // FIRST, then flip `hydrated` so the hydrate effect sees fresh data
+                    // (flipping before the refetch resolves would re-hydrate the stale cache).
+                    await refetch();
+                    setHydrated(false);
+                  }}
+                />
 
                 {/* Availability (shared across all services) */}
                 <div className="space-y-3 border-t border-edge pt-4">

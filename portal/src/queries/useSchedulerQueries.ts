@@ -165,6 +165,35 @@ export function useDeleteService() {
   });
 }
 
+// --- Business-type presets (P4) ---
+
+export interface Preset {
+  key: string;
+  label: string;
+  description: string;
+  serviceCount: number;
+}
+
+export function usePresets(enabled: boolean) {
+  return useQuery({
+    queryKey: ['scheduler', 'presets'] as const,
+    enabled,
+    queryFn: async () => (await api.get<Any>('/scheduler/presets')) as { presets: Preset[] },
+  });
+}
+
+export function useApplyPreset() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (key: string) => api.post<{ services: Service[] }>(`/scheduler/presets/${key}/apply`, {}),
+    onSuccess: () => {
+      invalidateServices(queryClient);
+      toast.success('Services added from preset');
+    },
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to apply preset'),
+  });
+}
+
 // --- Admin bookings management ---
 
 export type BookingScope = 'upcoming' | 'past' | 'requests';

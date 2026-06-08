@@ -18,9 +18,44 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { v4 as uuidv4 } from 'uuid';
+import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { createHash } from 'crypto';
+import sharp from 'sharp';
 import { logger } from '../utils/logger';
+import { safeOutboundRequest } from '../security/ssrf-guard';
+
+/**
+ * Fixed namespace UUID for deriving a deterministic upload-session id from a
+ * channel event's dedupe key, so a webhook retry yields the same PK + S3 key
+ * (idempotent ingestion).
+ */
+const CHANNEL_MEDIA_NAMESPACE = '6f9b1d2c-3a4e-5f60-8b1a-2c3d4e5f6a7b';
+
+/** Sniffed image formats accepted for channel-media ingestion (v1). */
+const INGEST_FORMAT_TO_MIME: Record<string, string> = {
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  gif: 'image/gif',
+};
+const INGEST_MAX_BYTES = 25 * 1024 * 1024;
+
+export interface IngestRemoteFileInput {
+  url: string;
+  tenantId: string;
+  chatSessionId: string;
+  botId: string;
+  externalUserId: string;
+  fileName?: string;
+  eventDedupeKey: string;
+  eventTimestamp: Date;
+}
+
+export interface IngestRemoteFileResult {
+  sessionId: string;
+  fileKey: string;
+  needsScan: boolean;
+}
 
 // ============================================================================
 // Types & Interfaces
@@ -642,6 +677,183 @@ export class UploadService {
       take: 5,
     });
     return (rows as Array<{ sessionId: string }>).map((r) => r.sessionId);
+  }
+
+  // ==========================================================================
+  // Remote-File Ingestion (inbound channel media)
+  // ==========================================================================
+
+  /**
+   * True when S3 is configured (bucket + creds). Mirrors the route-local
+   * `isS3Configured()` in `routes/files.routes.ts` so the ingestion path can
+   * skip cleanly when storage isn't set up rather than throwing.
+   */
+  isConfigured(): boolean {
+    return Boolean(
+      this.config.bucketName &&
+        process.env.AWS_ACCESS_KEY_ID &&
+        process.env.AWS_SECRET_ACCESS_KEY,
+    );
+  }
+
+  /**
+   * Download a remote image (an inbound Meta Messenger/Instagram attachment),
+   * sniff + validate it, store it under a deterministic key, and persist a
+   * `pending` UploadSession so the existing scan + booking-attach path can take
+   * over. Returns `null` on any rejection (unconfigured S3, SSRF/over-cap/
+   * non-2xx download, non-image, over-quota). Never throws.
+   *
+   * Idempotent: the session id + key are derived from `eventDedupeKey`, so a
+   * webhook retry re-uses the same row/object. An already-existing row is never
+   * re-downloaded/re-put/re-quota'd — `needsScan` only reflects whether it still
+   * needs scanning (terminal `ready`/`quarantined` → false; otherwise true).
+   */
+  async ingestRemoteFile(input: IngestRemoteFileInput): Promise<IngestRemoteFileResult | null> {
+    const sessionId = uuidv5(input.eventDedupeKey, CHANNEL_MEDIA_NAMESPACE);
+
+    // Idempotency short-circuit FIRST — never re-do work for an existing row.
+    const existing = await this.getSession(sessionId);
+    if (existing) {
+      const terminal = existing.status === 'ready' || existing.status === 'quarantined';
+      return { sessionId, fileKey: existing.fileKey, needsScan: !terminal };
+    }
+
+    if (!this.isConfigured()) {
+      return null;
+    }
+
+    // Download (SSRF-guarded, no redirects, bounded buffer).
+    let buffer: Buffer;
+    try {
+      const response = await safeOutboundRequest({
+        url: input.url,
+        method: 'GET',
+        responseType: 'arraybuffer',
+        timeout: 15_000,
+        maxContentLength: INGEST_MAX_BYTES,
+        maxBodyLength: INGEST_MAX_BYTES,
+        maxRedirects: 0,
+      });
+      if (response.status < 200 || response.status >= 300) {
+        return null;
+      }
+      buffer = Buffer.from(response.data as ArrayBuffer);
+    } catch (err) {
+      logger.warn('[ingest] remote-file download failed', {
+        tenantId: input.tenantId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+
+    // Authoritative image sniff via sharp.
+    let format: string | undefined;
+    try {
+      format = (await sharp(buffer).metadata()).format;
+    } catch {
+      return null;
+    }
+    const mimeType = format ? INGEST_FORMAT_TO_MIME[format] : undefined;
+    const ext = format && INGEST_FORMAT_TO_MIME[format] ? format : undefined;
+    if (!mimeType || !ext) {
+      return null;
+    }
+
+    // Quota (over → null, no throw).
+    try {
+      await this.validateQuota(input.tenantId, buffer.length);
+    } catch {
+      return null;
+    }
+
+    // Deterministic key from the event's date + sniffed ext.
+    const d = input.eventTimestamp;
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    const fileKey = `uploads/${input.tenantId}/${year}/${month}/${day}/${sessionId}.${ext}`;
+
+    const fileHash = createHash('sha256').update(buffer).digest('hex').substring(0, 16);
+    const originalName = input.fileName
+      ? this.sanitizeFileName(input.fileName)
+      : `messenger-${sessionId.slice(0, 8)}.${ext}`;
+
+    const metadata: Record<string, string> = {
+      'tenant-id': input.tenantId,
+      'user-id': `meta:${input.externalUserId}`,
+      'session-id': input.chatSessionId,
+      'original-name': originalName,
+      'file-hash': fileHash,
+      'upload-date': new Date().toISOString(),
+      'gdpr-delete-after': this.calculateGDPRDeleteDate(),
+      'content-type': mimeType,
+    };
+
+    await this.putObjectBuffer(fileKey, buffer, mimeType, metadata);
+
+    const session: UploadSession = {
+      sessionId,
+      uploadUrl: '',
+      publicUrl: await this.generatePublicUrl(fileKey),
+      expiresAt: new Date(Date.now() + this.config.retentionDays * 24 * 60 * 60 * 1000),
+      fileKey,
+      fileHash,
+      status: 'pending',
+      tenantId: input.tenantId,
+      // userId = botId (a UUID) so performScan's logAudit gets a UUID actor —
+      // audit_logs.actor_id is NOT-NULL UUID. The Meta id lives only in S3
+      // metadata as user-id: 'meta:<externalUserId>'.
+      userId: input.botId,
+      originalName,
+      fileSize: buffer.length,
+      mimeType,
+      createdAt: new Date(),
+    };
+
+    try {
+      await this.persistSession(session, input.chatSessionId);
+    } catch (err) {
+      // Best-effort cleanup of the just-written object so a failed persist
+      // doesn't leak an orphan + un-accounted object.
+      try {
+        await this.deleteFile(fileKey);
+      } catch {
+        /* best-effort */
+      }
+      logger.warn('[ingest] persistSession failed; cleaned up S3 object', {
+        tenantId: input.tenantId,
+        fileKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+
+    await this.updateTenantQuota(input.tenantId, buffer.length);
+
+    return { sessionId, fileKey, needsScan: true };
+  }
+
+  /**
+   * PUT a buffer directly to S3 with SSE + the same metadata keys the presigned
+   * path sets. Used by {@link ingestRemoteFile} (server-side upload, no client
+   * PUT).
+   */
+  private async putObjectBuffer(
+    fileKey: string,
+    buffer: Buffer,
+    mimeType: string,
+    metadata: Record<string, string>,
+  ): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.config.bucketName,
+      Key: fileKey,
+      Body: buffer,
+      ContentType: mimeType,
+      ContentLength: buffer.length,
+      Metadata: metadata,
+      ServerSideEncryption: 'AES256',
+    });
+    await this.s3Client.send(command);
   }
 
   /**

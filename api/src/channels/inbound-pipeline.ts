@@ -19,7 +19,9 @@ import { encrypt } from '../utils/encryption';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
-import { enforceCountLimit } from '../billing/enforce';
+import { enforceCountLimit, requireFeature } from '../billing/enforce';
+import { ServiceType } from '../database/entities/ServiceType';
+import { getUploadService } from '../file-handling/upload.service';
 import { Not, IsNull } from 'typeorm';
 
 /**
@@ -107,6 +109,17 @@ export async function processInboundEvent(
     };
 
     const savedMessage = await messageRepo.save(messageRepo.create(messageData)) as Message;
+
+    // ── 5b. Ingest inbound media (fire-and-forget) ───────────────────────
+    // Download/scan an inbound image into a `ready` upload_session so it
+    // auto-attaches to a later booking. NEVER awaited — must not delay the
+    // webhook ack or forwarding, and must never throw into the pipeline.
+    void maybeIngestInboundMedia(event, connection, session).catch((err) =>
+      logger.warn('[inbound] media ingestion failed', {
+        sessionId: session.id,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
 
     // Update session activity
     session.incrementMessageCount();
@@ -412,6 +425,76 @@ export async function findOrCreateConversation(
       binding: savedBinding,
     };
   });
+}
+
+/**
+ * True when the tenant's bot has at least one active, file-upload-accepting
+ * service — i.e. an inbound image could actually attach to a booking. Cheap
+ * COUNT, no rows loaded.
+ */
+export async function botHasActiveFileService(tenantId: string, botId: string): Promise<boolean> {
+  const repo = getRepository(ServiceType);
+  const count = await repo.count({
+    where: { tenantId, botId, isActive: true, fileUploadAllowed: true },
+  });
+  return count > 0;
+}
+
+/**
+ * Gate + ingest an inbound channel image into a `ready` upload_session.
+ *
+ * Ingest only when ALL hold: a media URL is present and normalized
+ * `type === 'image'` and it is NOT a sticker; the channel is messenger or
+ * instagram; the tenant is entitled to file upload; and the bot has an active
+ * file-accepting service. On a successful new/interrupted ingest, runs the scan
+ * so the row converges to `ready`. Launched fire-and-forget by the caller.
+ */
+export async function maybeIngestInboundMedia(
+  event: NormalizedEvent,
+  connection: ChannelConnection,
+  session: ChatSession,
+): Promise<void> {
+  // (a) media + image + not a sticker (cheapest)
+  const msg = event.message;
+  if (!msg?.mediaUrl || msg.type !== 'image' || msg.mediaMetadata?.stickerId) {
+    return;
+  }
+
+  // (b) channel
+  if (connection.channel !== 'messenger' && connection.channel !== 'instagram') {
+    return;
+  }
+
+  // (c) entitlement — requireFeature throws if not entitled.
+  try {
+    await requireFeature(connection.tenantId, 'fileUpload', 'plan_limit_file_upload');
+  } catch {
+    return;
+  }
+
+  // (d) bot has an active file-accepting service.
+  if (!(await botHasActiveFileService(connection.tenantId, session.botId))) {
+    return;
+  }
+
+  const result = await getUploadService().ingestRemoteFile({
+    url: msg.mediaUrl,
+    tenantId: connection.tenantId,
+    chatSessionId: session.id,
+    botId: session.botId,
+    externalUserId: event.sender.externalUserId,
+    fileName: typeof msg.mediaMetadata?.fileName === 'string' ? msg.mediaMetadata.fileName : undefined,
+    eventDedupeKey: event.dedupeKey,
+    eventTimestamp: event.timestamp,
+  });
+
+  if (result && result.needsScan) {
+    // Dynamic import: virus-scan-trigger pulls in the optional native `clamscan`
+    // dep, which isn't present in all environments — keep it off the module-load
+    // path (matches the widget upload-complete handler's pattern).
+    const { performScan } = await import('../file-handling/virus-scan-trigger');
+    await performScan(result.sessionId, result.fileKey);
+  }
 }
 
 /**

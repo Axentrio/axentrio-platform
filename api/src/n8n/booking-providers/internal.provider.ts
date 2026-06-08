@@ -23,7 +23,7 @@ import {
   CancelResult,
 } from './types';
 import { computeSlots, BusyInterval } from './slot-engine';
-import { sendBookingEmail } from './booking-email';
+import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
 import { scheduleReminders, cancelReminders } from './reminders';
 import {
   getGoogleBusyForBot,
@@ -577,6 +577,37 @@ export class InternalProvider implements BookingProvider {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // Owner email — fire-and-forget. Skipped (and logged) when no supportEmail is set;
+    // that's an accepted degraded state — the portal Requests tab is the guaranteed surface
+    // and the webhook above still fires.
+    const ownerEmail = ctx.botSettings.ai?.supportEmail;
+    if (!ownerEmail) {
+      logger.info('[Booking] request owner email skipped — no supportEmail configured', {
+        bookingId: req.bookingId,
+        botId: ctx.bot.id,
+      });
+      return;
+    }
+    void (async () => {
+      let timezone = 'UTC';
+      try {
+        const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.bot.id } });
+        if (rule?.timezone) timezone = rule.timezone;
+      } catch {
+        // non-fatal — fall back to UTC
+      }
+      await sendRequestNotificationEmail({
+        ownerEmail,
+        serviceName: service.name,
+        start: req.start,
+        timezone,
+        attendeeName: req.attendee.name,
+        attendeeEmail: req.attendee.email,
+        notes: req.notes,
+        aiSummary: req.aiSummary,
+      });
+    })();
   }
 
   /** Schedule reminders and persist their job ids; non-fatal on failure. */

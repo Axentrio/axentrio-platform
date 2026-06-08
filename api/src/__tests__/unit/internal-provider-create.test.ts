@@ -32,8 +32,10 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const sendBookingEmail = vi.fn();
+const sendRequestNotificationEmail = vi.fn();
 vi.mock('../../n8n/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
+  sendRequestNotificationEmail: (...args: any[]) => sendRequestNotificationEmail(...args),
 }));
 
 const getGoogleBusyForBot = vi.fn().mockResolvedValue(null);
@@ -338,5 +340,35 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     await expect(
       provider.requestAppointment(ctx, 'idem-r4', 'not-a-date', { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'INVALID_START_TIME' });
+  });
+
+  // ── Owner notification email (P2b) ─────────────────────────────────────────
+
+  it('emails the owner (no ICS) when supportEmail is configured', async () => {
+    ruleFindOne.mockResolvedValue(RULE);
+    const ctxWithEmail = { ...ctx, botSettings: { ai: { supportEmail: 'owner@example.com' } } };
+    await provider.requestAppointment(
+      ctxWithEmail, 'idem-r5', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, 'note', undefined, 'summary'
+    );
+    // fire-and-forget — let the queued microtask run
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sendRequestNotificationEmail).toHaveBeenCalledOnce();
+    expect(sendRequestNotificationEmail.mock.calls[0][0]).toMatchObject({
+      ownerEmail: 'owner@example.com',
+      serviceName: 'Consultation',
+      attendeeName: 'Ada',
+      notes: 'note',
+      aiSummary: 'summary',
+    });
+  });
+
+  it('skips the owner email (degraded state) when no supportEmail is set', async () => {
+    await provider.requestAppointment(
+      ctx, 'idem-r6', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sendRequestNotificationEmail).not.toHaveBeenCalled();
+    // the request + webhook still happened
+    expect(emitWebhookEvent).toHaveBeenCalledOnce();
   });
 });

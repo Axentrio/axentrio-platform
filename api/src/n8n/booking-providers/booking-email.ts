@@ -41,6 +41,16 @@ function formatWhen(start: Date, timezone: string): string {
   return `${dt.toFormat('cccc d LLLL yyyy, HH:mm')} (${timezone})`;
 }
 
+/** Escape user-supplied text before interpolating it into an HTML email body. */
+function esc(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
   const organizerEmail = params.ownerEmail ?? config.email.fromAddress;
   const ics = buildIcs({
@@ -120,6 +130,43 @@ export async function sendReminderEmail(params: ReminderEmailParams): Promise<vo
     });
   } catch (err) {
     logger.error('[Booking] reminder email failed (non-fatal)', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+export interface RequestNotificationParams {
+  ownerEmail: string;
+  serviceName: string;
+  start: Date;
+  timezone: string;
+  attendeeName: string;
+  attendeeEmail: string;
+  notes?: string;
+  aiSummary?: string;
+}
+
+/**
+ * Owner-only notification that a customer captured an appointment **request**
+ * (not a confirmed booking). Plain HTML, NO ICS — there is nothing to add to a
+ * calendar until the owner reviews it. Non-fatal: the request stands if email fails.
+ */
+export async function sendRequestNotificationEmail(params: RequestNotificationParams): Promise<void> {
+  const body =
+    `<p>You have a new appointment <strong>request</strong> to review.</p>` +
+    `<p><strong>${esc(params.serviceName)}</strong><br/>Preferred time: ${formatWhen(params.start, params.timezone)}</p>` +
+    `<p>From: ${esc(params.attendeeName)} (${esc(params.attendeeEmail)})</p>` +
+    (params.aiSummary ? `<p>Summary: ${esc(params.aiSummary)}</p>` : '') +
+    (params.notes ? `<p>Notes: ${esc(params.notes)}</p>` : '') +
+    `<p>Follow up with the customer to confirm or decline.</p>`;
+  try {
+    await getEmailService().send({
+      to: params.ownerEmail,
+      subject: `New appointment request: ${params.serviceName}`,
+      body,
+    });
+  } catch (err) {
+    logger.error('[Booking] request notification email failed (non-fatal)', {
       error: err instanceof Error ? err.message : String(err),
     });
   }

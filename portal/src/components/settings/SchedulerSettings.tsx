@@ -431,15 +431,58 @@ const SlotPreview: React.FC<{ timezone: string }> = ({ timezone }) => {
   return (
     <div className="space-y-2">
       <p className="text-xs text-text-muted">
-        {total} slot{total === 1 ? '' : 's'} in the next 7 days (reflects saved settings · {data?.timezone ?? timezone}).
+        {total} open slot{total === 1 ? '' : 's'} in the next 7 days · reflects saved settings · {data?.timezone ?? timezone}
       </p>
-      {grouped.map(([day, times]) => (
-        <div key={day} className="text-sm">
-          <span className="text-text-secondary">{day}: </span>
-          <span className="text-text-primary">{times.slice(0, 8).join(', ')}</span>
-          {times.length > 8 && <span className="text-text-muted"> +{times.length - 8} more</span>}
+      {grouped.length === 0 ? (
+        <p className="text-xs text-text-muted">No open slots in this window.</p>
+      ) : (
+        <div className="space-y-1.5">
+          {grouped.map(([day, times]) => (
+            <SlotPreviewDay key={day} day={day} times={times} />
+          ))}
         </div>
-      ))}
+      )}
+    </div>
+  );
+};
+
+/** One day's row in the preview: label + wrapping time chips, expandable. */
+const SlotPreviewDay: React.FC<{ day: string; times: string[] }> = ({ day, times }) => {
+  const [expanded, setExpanded] = useState(false);
+  const LIMIT = 8;
+  const shown = expanded ? times : times.slice(0, LIMIT);
+  const hidden = times.length - shown.length;
+  return (
+    <div className="flex items-start gap-3 rounded-lg border border-edge bg-surface-1/40 px-3 py-2">
+      <span className="w-24 shrink-0 pt-0.5 text-xs font-medium text-text-secondary">{day}</span>
+      <div className="flex flex-wrap gap-1.5">
+        {shown.map((t) => (
+          <span
+            key={t}
+            className="rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs tabular-nums text-text-primary"
+          >
+            {t}
+          </span>
+        ))}
+        {hidden > 0 && (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            className="rounded-md px-2 py-0.5 text-xs font-medium text-primary-400 hover:text-primary-300"
+          >
+            +{hidden} more
+          </button>
+        )}
+        {expanded && times.length > LIMIT && (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            className="rounded-md px-2 py-0.5 text-xs text-text-muted hover:text-text-secondary"
+          >
+            show less
+          </button>
+        )}
+      </div>
     </div>
   );
 };

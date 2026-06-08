@@ -30,7 +30,7 @@ export type AgentResult =
 
 const MAX_ITERATIONS = 10;
 
-const BOOKING_MUTATION_TOOLS = ['create_booking', 'reschedule_booking', 'cancel_booking'];
+const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'];
 
 interface PendingAvailability {
   slots: Array<{ start: string; end: string }>;

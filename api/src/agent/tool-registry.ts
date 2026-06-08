@@ -3,6 +3,7 @@ import { KbSearchTool } from './tools/kb-search.tool';
 import {
   CheckAvailabilityTool,
   CreateBookingTool,
+  RequestAppointmentTool,
   ListBookingsTool,
   RescheduleBookingTool,
   CancelBookingTool,
@@ -18,6 +19,7 @@ import { isCalcomAvailableForTier } from '../billing/calcom-access';
 const BOOKING_TOOLS = [
   'check_availability',
   'create_booking',
+  'request_appointment',
   'list_bookings',
   'reschedule_booking',
   'cancel_booking',
@@ -31,6 +33,7 @@ export class ToolRegistry {
     this.registerBuiltin(new KbSearchTool());
     this.registerBuiltin(new CheckAvailabilityTool());
     this.registerBuiltin(new CreateBookingTool());
+    this.registerBuiltin(new RequestAppointmentTool());
     this.registerBuiltin(new ListBookingsTool());
     this.registerBuiltin(new RescheduleBookingTool());
     this.registerBuiltin(new CancelBookingTool());

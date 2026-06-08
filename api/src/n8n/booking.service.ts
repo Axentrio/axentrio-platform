@@ -79,6 +79,24 @@ export async function createBooking(
   return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId);
 }
 
+/**
+ * Capture an appointment request (the agent's `request_appointment` fallback).
+ * Internal-only — `requestAppointment` is not on the `BookingProvider` interface,
+ * so we go straight to the in-house provider (mirrors the admin functions below).
+ */
+export async function requestBooking(
+  sessionId: string,
+  idempotencyKey: string,
+  preferredTime: string,
+  attendee: { name: string; email: string },
+  notes?: string,
+  serviceId?: string,
+  aiSummary?: string
+) {
+  const ctx = await resolveContext(sessionId);
+  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary);
+}
+
 export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {
   const ctx = await resolveContext(sessionId);
   return selectProvider().rescheduleBooking(ctx, bookingId, newStartTime);

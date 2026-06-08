@@ -98,10 +98,10 @@ export class PromptBuilder {
         .join('\n');
       sections.push(
         `\n## SERVICES (bookable)
-When the customer wants to book, identify which service they mean and pass its id as serviceId to check_availability and create_booking. Use the SAME service whose availability you checked.
-- If their request matches no service or is ambiguous, ask which one — never guess.
-- "auto-book": you may confirm the appointment once the customer picks a time.
-- "request-only": do NOT promise a confirmed appointment. Collect the details, then tell the customer it's a request the business owner will review (create_booking returns it as a request, not a confirmation).
+When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
+1. If their request matches no service or is ambiguous, ask a disambiguating question FIRST — do not confirm and do not capture a request until you know the service. Never guess.
+2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
+3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.
 ${lines}`
       );
     }

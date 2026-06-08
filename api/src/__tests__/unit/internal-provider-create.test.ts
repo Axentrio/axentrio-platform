@@ -49,6 +49,19 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
   resolveCalendarIdentity: (...args: any[]) => resolveCalendarIdentity(...args),
 }));
 
+const emitWebhookEvent = vi.fn();
+vi.mock('../../webhooks/webhook.emitter', () => ({
+  emitWebhookEvent: (...args: any[]) => emitWebhookEvent(...args),
+  buildEventBase: (type: string, tenantId: string, session: any) => ({
+    id: 'evt-1',
+    type,
+    tenantId,
+    sessionId: session.id,
+    timestamp: '2026-06-05T00:00:00.000Z',
+    session,
+  }),
+}));
+
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
 import { BookingError } from '../../n8n/booking-providers/types';
 
@@ -240,5 +253,90 @@ describe('InternalProvider.createBooking', () => {
     expect(sendBookingEmail).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
     expect(createCalendarEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('InternalProvider.requestAppointment (P2a)', () => {
+  let provider: InternalProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, name: 'Consultation' });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, name: 'Consultation' }]); // sole active service
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('captures a request without touching the calendar, lock, or email; fires the webhook once', async () => {
+    const res = await provider.requestAppointment(
+      ctx, 'idem-r1', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, 'flexible on timing', undefined, 'New client wants a consult'
+    );
+    expect(res.success).toBe(true);
+    expect(res.requested).toBe(true);
+    expect(res.booking.id).toBe('req-1');
+    // request side effects: webhook, but no calendar/email/lock
+    expect(emitWebhookEvent).toHaveBeenCalledOnce();
+    expect(emitWebhookEvent.mock.calls[0][0]).toMatchObject({
+      type: 'booking.request_created',
+      booking: { bookingId: 'req-1', attendeeName: 'Ada' },
+      service: { name: 'Consultation' },
+    });
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+    expect(transaction).not.toHaveBeenCalled();
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(logSave).toHaveBeenCalledOnce();
+  });
+
+  it('persists source_channel + ai_summary on the request row', async () => {
+    await provider.requestAppointment(
+      { ...ctx, session: { id: 'sess-1', channel: 'messenger' } },
+      'idem-r2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, 'summary text'
+    );
+    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insert).toBeDefined();
+    const params = insert![1] as any[];
+    expect(params).toContain('messenger'); // source_channel
+    expect(params).toContain('summary text'); // ai_summary
+  });
+
+  it('returns the existing request on idempotent retry without re-notifying', async () => {
+    bookingFindOne.mockResolvedValue({
+      id: 'req-existing',
+      status: 'request_created',
+      startUtc: new Date(OFFERED_START),
+      endUtc: new Date('2026-06-10T07:30:00Z'),
+      attendeeName: 'Ada',
+      attendeeEmail: 'ada@example.com',
+    });
+    const res = await provider.requestAppointment(
+      ctx, 'idem-r1', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
+    );
+    expect(res.idempotent).toBe(true);
+    expect(res.requested).toBe(true);
+    expect(res.booking.id).toBe('req-existing');
+    expect(emitWebhookEvent).not.toHaveBeenCalled();
+    expect(bookingQuery).not.toHaveBeenCalled(); // no INSERT
+  });
+
+  it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE, { ...EVENT_TYPE, id: 'et-2' }]);
+    await expect(
+      provider.requestAppointment(ctx, 'idem-r3', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'SERVICE_REQUIRED' });
+    expect(emitWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid preferred time', async () => {
+    await expect(
+      provider.requestAppointment(ctx, 'idem-r4', 'not-a-date', { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'INVALID_START_TIME' });
   });
 });

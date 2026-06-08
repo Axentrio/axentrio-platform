@@ -49,18 +49,19 @@ import { ToolRegistry } from '../../agent/tool-registry';
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe('ToolRegistry', () => {
-  it('registers all 8 built-in tools on construction', () => {
+  it('registers all 9 built-in tools on construction', () => {
     const registry = new ToolRegistry();
     const builtins = registry.getBuiltinToolNames();
     expect(builtins).toContain('kb_search');
     expect(builtins).toContain('check_availability');
     expect(builtins).toContain('create_booking');
+    expect(builtins).toContain('request_appointment');
     expect(builtins).toContain('list_bookings');
     expect(builtins).toContain('reschedule_booking');
     expect(builtins).toContain('cancel_booking');
     expect(builtins).toContain('escalate_to_human');
     expect(builtins).toContain('capture_lead');
-    expect(builtins).toHaveLength(8);
+    expect(builtins).toHaveLength(9);
   });
 
   it('returns KB search + booking tools + escalation for tenant with calcom integration', async () => {

@@ -2,6 +2,7 @@ import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import {
   checkAvailability,
   createBooking,
+  requestBooking,
   listBookings,
   rescheduleBooking,
   cancelBooking,
@@ -96,8 +97,12 @@ export class CreateBookingTool implements ToolAdapter {
         args.serviceId as string | undefined
       );
 
-      // Fire-and-forget: emit appointment.booked + lead.created webhook events
-      void (async () => {
+      // Fire-and-forget: emit appointment.booked + lead.created — confirmed bookings only.
+      // A request-mode service short-circuits to a request inside the provider, which fires
+      // booking.request_created itself; emitting appointment.booked here would wrongly
+      // signal a confirmation (and would re-fire on idempotent re-returns).
+      const isRequest = (result as { requested?: boolean })?.requested === true;
+      if (!isRequest) void (async () => {
         try {
           let session: ChatSession | null = null;
           try {
@@ -149,6 +154,63 @@ export class CreateBookingTool implements ToolAdapter {
       return { success: true, data: result };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to create booking' };
+    }
+  }
+}
+
+export class RequestAppointmentTool implements ToolAdapter {
+  name = 'request_appointment';
+  description =
+    'Capture an appointment REQUEST (not a confirmed booking) for the customer to be reviewed by the business. Use this — never create_booking — when the service is request-only, the scope/duration is unclear, the job sounds complex/urgent/risky, or you are not confident you can safely confirm a time. The owner is notified and follows up. Only call once the service is identified.';
+  parameters = {
+    type: 'object',
+    properties: {
+      preferredTime: {
+        type: 'string',
+        description: "The customer's preferred appointment time in ISO 8601 format.",
+      },
+      attendeeName: {
+        type: 'string',
+        description: 'Full name of the person requesting the appointment.',
+      },
+      attendeeEmail: {
+        type: 'string',
+        description: 'Email address of the person requesting the appointment.',
+      },
+      notes: {
+        type: 'string',
+        description: 'Optional notes or details the customer provided about the request.',
+      },
+      serviceId: {
+        type: 'string',
+        description:
+          'The id of the requested service (from the SERVICES list). Identify the service first; omit only when the business has a single service.',
+      },
+      aiSummary: {
+        type: 'string',
+        description:
+          'A short one-line summary of the request for the business owner (e.g. "New client wants a deep-clean for a 3-bed flat, flexible on timing").',
+      },
+    },
+    required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
+  };
+  hasSideEffects = true;
+
+  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+    try {
+      const idempotencyKey = `${ctx.runId}:request_appointment:${args.preferredTime as string}`;
+      const result = await requestBooking(
+        ctx.sessionId,
+        idempotencyKey,
+        args.preferredTime as string,
+        { name: args.attendeeName as string, email: args.attendeeEmail as string },
+        args.notes as string | undefined,
+        args.serviceId as string | undefined,
+        args.aiSummary as string | undefined
+      );
+      return { success: true, data: result };
+    } catch (err) {
+      return { success: false, error: err instanceof Error ? err.message : 'Failed to capture request' };
     }
   }
 }

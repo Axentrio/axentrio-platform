@@ -35,6 +35,8 @@ import {
 import { BookingReference } from '../../database/entities/BookingReference';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
+import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
+import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
@@ -396,18 +398,21 @@ export class InternalProvider implements BookingProvider {
     start: Date,
     end: Date,
     attendee: { name: string; email: string },
-    notes?: string
+    notes?: string,
+    aiSummary?: string
   ): Promise<CreateBookingResult> {
     const bookingRepo = AppDataSource.getRepository(Booking);
     const icsUid = `${uuidv4()}@axentrio`;
+    const sourceChannel = ctx.session?.channel ?? null;
     let bookingId: string;
     try {
       const rows: Array<{ id: string }> = await bookingRepo.query(
         `INSERT INTO chatbot_bookings
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
-            attendee_name, attendee_email, notes, ics_uid, idempotency_key)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12)
+            attendee_name, attendee_email, notes, ics_uid, idempotency_key,
+            source_channel, ai_summary)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -422,6 +427,8 @@ export class InternalProvider implements BookingProvider {
           notes ?? null,
           icsUid,
           idempotencyKey,
+          sourceChannel,
+          aiSummary ?? null,
         ]
       );
       bookingId = rows[0].id;
@@ -435,23 +442,43 @@ export class InternalProvider implements BookingProvider {
       throw err;
     }
 
-    const logRepo = AppDataSource.getRepository(BookingLog);
-    await logRepo.save(
-      logRepo.create({
-        tenantId: ctx.tenant.id,
-        sessionId: ctx.session.id,
-        idempotencyKey,
-        calBookingId: bookingId,
-        eventType: 'created',
-        attendeeName: attendee.name,
-        attendeeEmail: attendee.email,
-        startTime: start,
-        endTime: end,
-        notes,
-      })
-    );
+    // Audit log is best-effort — a log failure must not abort the request (the row is
+    // already committed) nor block the single "exactly once per new row" notification below.
+    try {
+      const logRepo = AppDataSource.getRepository(BookingLog);
+      await logRepo.save(
+        logRepo.create({
+          tenantId: ctx.tenant.id,
+          sessionId: ctx.session.id,
+          idempotencyKey,
+          calBookingId: bookingId,
+          eventType: 'created',
+          attendeeName: attendee.name,
+          attendeeEmail: attendee.email,
+          startTime: start,
+          endTime: end,
+          notes,
+        })
+      );
+    } catch (err) {
+      logger.warn('[Booking] request audit log failed (non-fatal)', {
+        bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     logger.info('[Booking] Internal request captured', { bookingId, botId: ctx.bot.id, service: service.name });
+
+    // Single, idempotent post-create notification path (fires once per NEW request only —
+    // the idempotent re-return above short-circuits before reaching here).
+    this.notifyRequestCreated(ctx, service, {
+      bookingId,
+      start,
+      end,
+      attendee,
+      notes,
+      aiSummary,
+    });
 
     return {
       success: true,
@@ -463,6 +490,93 @@ export class InternalProvider implements BookingProvider {
         attendee,
       },
     };
+  }
+
+  /**
+   * Capture an appointment **request** (the agent's `request_appointment` fallback).
+   * A request always has a resolved service + preferred time; it is NOT a confirmed
+   * slot, so we deliberately skip slot re-validation and never touch the calendar.
+   * Routes through the same `createRequest()` as the auto-flow's request-mode
+   * short-circuit, so both share one idempotent notification path.
+   */
+  async requestAppointment(
+    ctx: BookingContext,
+    idempotencyKey: string,
+    preferredTime: string,
+    attendee: { name: string; email: string },
+    notes?: string,
+    serviceId?: string,
+    aiSummary?: string
+  ): Promise<CreateBookingResult> {
+    // Idempotency FIRST: a live (non-failed) row with this key → return it (no re-notify),
+    // before resolving the service — a catalog change must not turn a retry into an error.
+    const bookingRepo = AppDataSource.getRepository(Booking);
+    const existing = await bookingRepo.findOne({
+      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+    });
+    if (existing && existing.status !== 'failed') {
+      return this.toResult(existing, true);
+    }
+
+    // Resolve the service (sole-active default / SERVICE_REQUIRED / SERVICE_NOT_FOUND).
+    const service = await this.resolveService(ctx.bot.id, serviceId);
+    const calendarKey = await this.calendarKey(ctx);
+
+    const start = new Date(preferredTime);
+    if (Number.isNaN(start.getTime())) {
+      throw new BookingError('Invalid preferred time', 'INVALID_START_TIME', 400);
+    }
+    const end = new Date(start.getTime() + service.durationMin * 60_000);
+
+    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary);
+  }
+
+  /**
+   * Fire-and-forget owner notification for a NEWLY created request. The single place
+   * request side effects live, so the auto-flow short-circuit and `request_appointment`
+   * notify identically and exactly once. Webhook now (P2a); owner email lands in P2b.
+   */
+  private notifyRequestCreated(
+    ctx: BookingContext,
+    service: ServiceType,
+    req: {
+      bookingId: string;
+      start: Date;
+      end: Date;
+      attendee: { name: string; email: string };
+      notes?: string;
+      aiSummary?: string;
+    }
+  ): void {
+    try {
+      const sessionCtx = {
+        id: ctx.session.id,
+        channel: ctx.session?.channel ?? 'widget',
+        visitorId: ctx.session?.visitorId ?? 'unknown',
+        startedAt: ctx.session?.startedAt?.toISOString() ?? new Date().toISOString(),
+        messageCount: ctx.session?.messageCount ?? 0,
+        tags: ctx.session?.tags,
+      };
+      const event: BookingRequestCreatedEvent = {
+        ...buildEventBase('booking.request_created', ctx.tenant.id, sessionCtx),
+        type: 'booking.request_created',
+        booking: {
+          bookingId: req.bookingId,
+          startTime: req.start.toISOString(),
+          endTime: req.end.toISOString(),
+          attendeeName: req.attendee.name,
+          attendeeEmail: req.attendee.email,
+          notes: req.notes,
+        },
+        service: { id: service.id, name: service.name },
+      };
+      emitWebhookEvent(event);
+    } catch (err) {
+      logger.warn('[Booking] request_created webhook emit failed (non-fatal)', {
+        bookingId: req.bookingId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /** Schedule reminders and persist their job ids; non-fatal on failure. */

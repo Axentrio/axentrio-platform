@@ -265,6 +265,56 @@ describe('AgentService', () => {
     if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
   });
 
+  it('drops slot chips once a request is captured in the same run', async () => {
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+      }),
+    };
+    const requestAppointment: ToolAdapter = {
+      name: 'request_appointment',
+      description: 'Request',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({ success: true, data: { requested: true, booking: { id: 'r1' } } }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability, requestAppointment]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 60, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_2', name: 'request_appointment', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: "I've sent your request to the owner.",
+        usage: { promptTokens: 70, completionTokens: 10 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'request the 8am',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(result.type).toBe('response');
+    if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
+  });
+
   it('enforces preconditions — blocks tool if prerequisite not called', async () => {
     const createBooking: ToolAdapter = {
       name: 'create_booking',

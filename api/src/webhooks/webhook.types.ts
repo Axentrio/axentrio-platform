@@ -1,4 +1,8 @@
-export type WebhookEventType = 'lead.created' | 'appointment.booked' | 'conversation.ended';
+export type WebhookEventType =
+  | 'lead.created'
+  | 'appointment.booked'
+  | 'booking.request_created'
+  | 'conversation.ended';
 
 export interface WebhookEventBase {
   id: string;
@@ -31,6 +35,19 @@ export interface AppointmentBookedEvent extends WebhookEventBase {
   };
 }
 
+export interface BookingRequestCreatedEvent extends WebhookEventBase {
+  type: 'booking.request_created';
+  booking: {
+    bookingId: string;
+    startTime: string;
+    endTime: string;
+    attendeeName: string;
+    attendeeEmail: string;
+    notes?: string;
+  };
+  service: { id: string; name: string };
+}
+
 export interface ConversationEndedEvent extends WebhookEventBase {
   type: 'conversation.ended';
   conversation: {
@@ -41,7 +58,11 @@ export interface ConversationEndedEvent extends WebhookEventBase {
   };
 }
 
-export type WebhookEvent = LeadCreatedEvent | AppointmentBookedEvent | ConversationEndedEvent;
+export type WebhookEvent =
+  | LeadCreatedEvent
+  | AppointmentBookedEvent
+  | BookingRequestCreatedEvent
+  | ConversationEndedEvent;
 
 export interface EventWebhookConfig {
   url: string;

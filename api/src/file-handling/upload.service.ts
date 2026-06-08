@@ -18,6 +18,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createS3Client } from '../config/s3.config';
 import { v4 as uuidv4, v5 as uuidv5 } from 'uuid';
 import { createHash } from 'crypto';
 import sharp from 'sharp';
@@ -170,14 +171,12 @@ export class UploadService {
   constructor(config?: Partial<UploadConfig>) {
     this.config = { ...DEFAULT_UPLOAD_CONFIG, ...config };
 
-    this.s3Client = new S3Client({
-      region: this.config.region,
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
-      },
-      maxAttempts: 3,
-    });
+    // Use the centralized builder so S3-compatible endpoints (S3_ENDPOINT +
+    // forcePathStyle, e.g. the prod object store on region 'auto') are honored.
+    // Building a bare S3Client here ignored S3_ENDPOINT and resolved the invalid
+    // host `<bucket>.s3.auto.amazonaws.com` (ENOTFOUND), breaking every real
+    // upload/PutObject — presigned URLs and server-side ingestion alike.
+    this.s3Client = createS3Client();
 
     // Start GDPR cleanup scheduler
     this.startGDPRCleanupScheduler();

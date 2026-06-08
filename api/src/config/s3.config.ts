@@ -27,6 +27,7 @@ export function createS3Client(): S3Client {
       accessKeyId: config.s3.accessKeyId!,
       secretAccessKey: config.s3.secretAccessKey!,
     },
+    maxAttempts: 3,
   };
 
   // Support S3-compatible services (MinIO, DigitalOcean Spaces, etc.)

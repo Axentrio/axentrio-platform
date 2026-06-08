@@ -47,6 +47,7 @@ router.get(
   requireClerkAuth, autoProvision,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
+    const isAdmin = req.user?.role === 'admin' || req.user?.role === 'super_admin';
 
     const tenantRepository = AppDataSource.getRepository(Tenant);
     const tenant = await tenantRepository.findOne({
@@ -101,7 +102,11 @@ router.get(
       maxSessions: tenant.maxSessions,
       currentSessions: tenant.currentSessions,
       webhookUrl: tenant.webhookUrl,
-      webhookSecret: tenant.webhookSecret,
+      // The inbound-webhook HMAC secret is returned ONLY to admins (the portal
+      // Integrations page surfaces it); non-admin members previously received it
+      // here and could forge inbound webhooks. See security audit #3.
+      hasWebhookSecret: !!tenant.webhookSecret,
+      ...(isAdmin ? { webhookSecret: tenant.webhookSecret } : {}),
       customDomain: tenant.customDomain,
       createdAt: tenant.createdAt,
       onboarding: {

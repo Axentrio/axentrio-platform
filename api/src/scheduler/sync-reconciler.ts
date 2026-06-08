@@ -24,6 +24,8 @@ import {
   updateCalendarEvent,
   deleteCalendarEvent,
 } from '../integrations/google/google-calendar.service';
+import { buildBookingEventContent } from '../n8n/booking-providers/booking-content';
+import { buildManageUrl } from './booking-token';
 
 const LEASE_MINUTES = 2;
 const MAX_ATTEMPTS = 6;
@@ -101,14 +103,18 @@ async function processOne(row: ClaimedRow): Promise<void> {
   if (row.status !== 'confirmed') return clear(row);
 
   const meta = await loadEventMeta(row);
-  if (!meta.summary || !meta.timezone) {
+  if (!meta.content || !meta.timezone) {
     return terminal(row, 'event type or availability rule missing');
   }
+  // `description` is only consumed by createCalendarEvent (re)creates;
+  // updateCalendarEvent Picks start/end/timezone, so a reschedule never PATCHes
+  // the body (owner edits to an existing event survive).
   const input = {
     startISO: new Date(row.start_utc).toISOString(),
     endISO: new Date(row.end_utc).toISOString(),
     timezone: meta.timezone,
-    summary: meta.summary,
+    summary: meta.content.summary,
+    description: meta.content.description,
   };
 
   if (ref) {
@@ -146,13 +152,52 @@ async function processOne(row: ClaimedRow): Promise<void> {
   return clear(row);
 }
 
-async function loadEventMeta(row: ClaimedRow): Promise<{ summary?: string; timezone?: string }> {
+/**
+ * Resolve the rich event body + timezone for a row. Builds `content` from the
+ * SAME P6a builder the inline create uses (loading the booking row's
+ * customer/intake fields) so a reconciler-retried event is byte-identical to an
+ * inline one. Returns `content: undefined` when the service type or availability
+ * rule is missing (caller marks terminal).
+ */
+async function loadEventMeta(
+  row: ClaimedRow
+): Promise<{ content?: { summary: string; description: string }; timezone?: string }> {
   const etRepo = AppDataSource.getRepository(ServiceType);
   const eventType = row.event_type_id
     ? await etRepo.findOne({ where: { id: row.event_type_id } })
     : await etRepo.findOne({ where: { botId: row.bot_id, isActive: true } });
   const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: row.bot_id } });
-  return { summary: eventType?.name, timezone: rule?.timezone };
+  if (!eventType || !rule) return { timezone: rule?.timezone };
+
+  const bookingRows: Array<{
+    attendee_name: string | null;
+    attendee_email: string | null;
+    customer_phone: string | null;
+    customer_address: string | null;
+    ai_summary: string | null;
+    notes: string | null;
+    intake_answers: unknown;
+  }> = await AppDataSource.query(
+    `SELECT attendee_name, attendee_email, customer_phone, customer_address,
+            ai_summary, notes, intake_answers
+       FROM chatbot_bookings WHERE id = $1`,
+    [row.id]
+  );
+  const b = bookingRows[0];
+  const content = buildBookingEventContent(
+    {
+      attendeeName: b?.attendee_name,
+      attendeeEmail: b?.attendee_email,
+      customerPhone: b?.customer_phone,
+      customerAddress: b?.customer_address,
+      aiSummary: b?.ai_summary,
+      notes: b?.notes,
+      intakeAnswers: b?.intake_answers,
+    },
+    { name: eventType.name, description: eventType.description },
+    buildManageUrl(row.id)
+  );
+  return { content, timezone: rule.timezone };
 }
 
 async function clear(row: ClaimedRow): Promise<void> {

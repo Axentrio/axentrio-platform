@@ -81,6 +81,7 @@ const ctx: any = {
 
 const EVENT_TYPE = {
   id: 'et-1',
+  name: 'Consultation',
   durationMin: 30,
   bufferBeforeMin: 0,
   bufferAfterMin: 0,
@@ -303,7 +304,7 @@ describe('InternalProvider.createBooking', () => {
   it('persists booked_duration_min = service.durationMin for a fixed service', async () => {
     await provider.createBooking(ctx, 'idem-dur-fixed', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-2)).toBe(30); // booked_duration_min (uploaded_files last)
+    expect((insert![1] as any[]).at(-3)).toBe(30); // booked_duration_min (uploaded_files, source_channel after)
   });
 
   it('books a range service at the chosen 60-min duration', async () => {
@@ -315,7 +316,7 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
     expect(res.booking.endTime).toBe('2026-06-10T08:00:00.000Z'); // start + 60min
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-2)).toBe(60);
+    expect((insert![1] as any[]).at(-3)).toBe(60); // booked_duration_min (uploaded_files, source_channel after)
   });
 
   it('defaults a range service to minDurationMin when no duration is given', async () => {
@@ -359,7 +360,7 @@ describe('InternalProvider.createBooking', () => {
     getUploadSession.mockResolvedValue(readySession());
     await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1', 'f-1'] });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const files = JSON.parse((insert![1] as any[]).at(-1)); // uploaded_files last
+    const files = JSON.parse((insert![1] as any[]).at(-2)); // uploaded_files (source_channel last)
     expect(files).toEqual([{ fileSessionId: 'f-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
 

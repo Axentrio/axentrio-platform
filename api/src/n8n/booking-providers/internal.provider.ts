@@ -26,6 +26,7 @@ import {
   CancelResult,
 } from './types';
 import { computeSlots, BusyInterval } from './slot-engine';
+import { buildBookingEventContent } from './booking-content';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
 import { scheduleReminders, cancelReminders } from './reminders';
 import {
@@ -449,8 +450,8 @@ export class InternalProvider implements BookingProvider {
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
-              customer_address, customer_phone, booked_duration_min, uploaded_files)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb)
+              customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -472,6 +473,7 @@ export class InternalProvider implements BookingProvider {
             contact.phone,
             effectiveDuration,
             uploadedFiles ? JSON.stringify(uploadedFiles) : null,
+            ctx.session?.channel ?? null,
           ]
         );
         return rows[0].id;
@@ -517,8 +519,23 @@ export class InternalProvider implements BookingProvider {
 
     // Mirror to the owner's Google calendar (best-effort). The booking is the
     // source of truth — if the mirror fails the booking still stands and is
-    // flagged sync_pending for later reconciliation.
-    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, service.name, start, end, rule.timezone, notes);
+    // flagged sync_pending for later reconciliation. The rich event body comes
+    // from the single P6a builder (ai_summary stays null on the auto path — no
+    // value flows in here yet, the builder simply omits that line).
+    const eventContent = buildBookingEventContent(
+      {
+        attendeeName: attendee.name,
+        attendeeEmail: attendee.email,
+        customerPhone: contact.phone,
+        customerAddress: contact.address,
+        aiSummary: null,
+        notes,
+        intakeAnswers: intakeJson,
+      },
+      service,
+      buildManageUrl(bookingId),
+    );
+    const meetUrl = await this.syncGoogleCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
@@ -530,7 +547,7 @@ export class InternalProvider implements BookingProvider {
       end,
       summary: service.name,
       location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
-      description: meetUrl ? `Join with Google Meet: ${meetUrl}` : undefined,
+      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
       timezone: rule.timezone,
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
@@ -869,15 +886,16 @@ export class InternalProvider implements BookingProvider {
       .catch(() => undefined);
   }
 
-  /** Mirror a new booking to Google (best-effort). Returns the Meet URL if any. */
+  /** Mirror a new booking to Google (best-effort). Returns the Meet URL if any.
+   *  `content` is the P6a builder output ({ summary, description }); the join URL
+   *  rides Google's native conferenceData, not the text body. */
   private async syncGoogleCreate(
     ctx: BookingContext,
     bookingId: string,
-    summary: string,
+    content: { summary: string; description: string },
     start: Date,
     end: Date,
-    timezone: string,
-    notes?: string
+    timezone: string
   ): Promise<string | null> {
     try {
       const ev = await createCalendarEvent(
@@ -886,8 +904,8 @@ export class InternalProvider implements BookingProvider {
           startISO: start.toISOString(),
           endISO: end.toISOString(),
           timezone,
-          summary,
-          description: notes,
+          summary: content.summary,
+          description: content.description,
         },
         { eventId: this.googleEventId(bookingId) }
       );

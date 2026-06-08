@@ -162,6 +162,11 @@ const envSchema = z.object({
   GOOGLE_CLIENT_SECRET: z.string().optional(),
   GOOGLE_REDIRECT_URI: z.string().optional(),
 
+  // Microsoft / Outlook Calendar (internal scheduler, P6)
+  MICROSOFT_CLIENT_ID: z.string().optional(),
+  MICROSOFT_CLIENT_SECRET: z.string().optional(),
+  MICROSOFT_REDIRECT_URI: z.string().optional(),
+
   // WhatsApp Cloud API. App secret falls back to META_APP_SECRET (same Meta app);
   // verify token falls back to META_VERIFY_TOKEN. Override only if WhatsApp lives
   // in a separate app or you want a distinct webhook verify token.
@@ -441,6 +446,16 @@ export const config = {
     clientSecret: env.GOOGLE_CLIENT_SECRET || '',
     redirectUri: env.GOOGLE_REDIRECT_URI || '',
     // Reuse the Meta OAuth JWT secret to sign the short-lived connect `state`.
+    stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
+  },
+
+  microsoft: {
+    clientId: env.MICROSOFT_CLIENT_ID || '',
+    clientSecret: env.MICROSOFT_CLIENT_SECRET || '',
+    redirectUri: env.MICROSOFT_REDIRECT_URI || '',
+    // Reuse the SAME Meta OAuth JWT secret as Google to sign the connect `state`;
+    // a per-callback `provider` claim keeps Google/Microsoft states from being
+    // replayed against the other callback.
     stateJwtSecret: env.META_OAUTH_JWT_SECRET || '',
   },
 

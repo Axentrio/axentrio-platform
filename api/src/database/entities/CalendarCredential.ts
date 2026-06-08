@@ -1,10 +1,10 @@
 /**
- * CalendarCredential — a bot owner's connected external calendar (Phase 1).
+ * CalendarCredential — a bot owner's connected external calendar.
  *
- * v1 is Google-only and single-calendar: one active credential per bot, whose
- * `calendarId` is both the write target (destination) and the calendar checked
- * for busy times. Tokens are encrypted at rest. The model can later split into
- * Cal.com-style credential / selected / destination rows for multi-calendar.
+ * Multi-provider (Google + Microsoft) but single-calendar and AT MOST ONE active
+ * credential per bot, regardless of provider (the active unique index is keyed on
+ * `bot_id` alone). The `calendarId` is both the write target (destination) and
+ * the calendar checked for busy times. Tokens are encrypted at rest.
  */
 import {
   Entity,
@@ -15,10 +15,10 @@ import {
   Index,
 } from 'typeorm';
 
-export type CalendarProviderType = 'google';
+export type CalendarProviderType = 'google' | 'microsoft';
 export type CalendarCredentialStatus = 'active' | 'revoked';
 
-@Index(['botId', 'provider'], { unique: true, where: "status = 'active'" })
+@Index(['botId'], { unique: true, where: "status = 'active'" })
 @Entity('chatbot_calendar_credentials')
 export class CalendarCredential {
   @PrimaryGeneratedColumn('uuid')
@@ -38,6 +38,18 @@ export class CalendarCredential {
 
   @Column({ type: 'varchar', length: 320, name: 'account_email', nullable: true })
   accountEmail?: string | null;
+
+  /**
+   * Provider-stable account identity (Microsoft Graph user object id from `/me`;
+   * null for Google rows, which identify by `accountEmail`/`calendarId`). Used to
+   * build the `mscal:<account_id>` conflict key so it survives an email alias.
+   */
+  @Column({ type: 'varchar', length: 320, name: 'account_id', nullable: true })
+  accountId?: string | null;
+
+  /** Owner must reconnect (refresh failed / consent revoked). Cleared on reconnect. */
+  @Column({ type: 'boolean', name: 'reauth_required', default: false })
+  reauthRequired!: boolean;
 
   /** Encrypted OAuth tokens. */
   @Column({ type: 'text', name: 'access_token_enc' })

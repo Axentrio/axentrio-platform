@@ -73,6 +73,7 @@ export async function getGoogleStatus(req: Request, res: Response): Promise<void
     connected: !!cred,
     accountEmail: cred?.accountEmail ?? null,
     calendarId: cred?.calendarId ?? null,
+    needsReauth: cred?.reauthRequired ?? false,
   });
 }
 

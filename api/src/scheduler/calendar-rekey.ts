@@ -12,9 +12,19 @@ import { AppDataSource } from '../database/data-source';
 import { Booking } from '../database/entities/Booking';
 import { logger } from '../utils/logger';
 
-/** Normalized conflict key from a resolved calendar identity (or null → bot-scoped). */
-export function conflictKeyFor(botId: string, identity: string | null): string {
-  return identity ? `gcal:${identity}` : `bot:${botId}`;
+/**
+ * Normalized conflict key from a resolved calendar identity (or null → bot-scoped).
+ * The prefix is provider-scoped so the same identity string under different
+ * providers can never collide: `gcal:<identity>` (Google), `mscal:<account_id>`
+ * (Microsoft), or `bot:<botId>` when there is no resolved identity.
+ */
+export function conflictKeyFor(
+  botId: string,
+  identity: string | null,
+  provider: 'google' | 'microsoft' = 'google'
+): string {
+  if (!identity) return `bot:${botId}`;
+  return `${provider === 'microsoft' ? 'mscal' : 'gcal'}:${identity}`;
 }
 
 /**

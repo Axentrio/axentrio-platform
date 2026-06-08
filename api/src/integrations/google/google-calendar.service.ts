@@ -67,7 +67,11 @@ export async function withGoogleRetry<T>(fn: () => Promise<T>, retries = 3): Pro
 /** Build the consent URL; `state` is a signed JWT binding the connect to a bot. */
 export function buildConnectUrl(tenantId: string, botId: string): string {
   const client = oauthClient();
-  const state = jwt.sign({ tenantId, botId }, config.google.stateJwtSecret, { expiresIn: '30m' });
+  const state = jwt.sign(
+    { tenantId, botId, provider: 'google' },
+    config.google.stateJwtSecret,
+    { expiresIn: '30m' }
+  );
   return client.generateAuthUrl({
     access_type: 'offline', // returns a refresh token
     prompt: 'consent', // force refresh-token issuance on reconnect
@@ -78,7 +82,17 @@ export function buildConnectUrl(tenantId: string, botId: string): string {
 }
 
 export function validateState(state: string): { tenantId: string; botId: string } {
-  return jwt.verify(state, config.google.stateJwtSecret) as { tenantId: string; botId: string };
+  const claims = jwt.verify(state, config.google.stateJwtSecret) as {
+    tenantId: string;
+    botId: string;
+    provider?: string;
+  };
+  // Reject a Microsoft-minted state replayed against the Google callback. Older
+  // Google states carry no `provider` claim, so only an explicit mismatch fails.
+  if (claims.provider && claims.provider !== 'google') {
+    throw new Error('calendar connect state provider mismatch');
+  }
+  return { tenantId: claims.tenantId, botId: claims.botId };
 }
 
 /**

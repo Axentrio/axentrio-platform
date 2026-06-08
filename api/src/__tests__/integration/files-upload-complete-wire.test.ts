@@ -169,7 +169,7 @@ describe('POST /files/:sessionId/upload-complete — validation', () => {
 // ─── Tenant scoping ────────────────────────────────────────────────────────
 
 describe('POST /files/:sessionId/upload-complete — tenant scoping', () => {
-  it('returns 403 when the file belongs to a different tenant', async () => {
+  it('returns 404 (SAME as missing — no cross-tenant oracle) when the file belongs to a different tenant', async () => {
     getSessionMock.mockReturnValue({
       sessionId: FILE_SESSION_ID,
       fileKey: FILE_KEY,
@@ -181,8 +181,10 @@ describe('POST /files/:sessionId/upload-complete — tenant scoping', () => {
 
     const res = await request(makeApp()).post(`/files/${FILE_SESSION_ID}/upload-complete`);
 
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+    // Indistinguishable from a nonexistent session so a visitor can't probe
+    // upload-session ids across tenants/chats.
+    expect(res.status).toBe(404);
+    expect(res.body.error.message).toBe('Upload session not found');
     expect(scanFileMock).not.toHaveBeenCalled();
     expect(fileExistsMock).not.toHaveBeenCalled();
   });

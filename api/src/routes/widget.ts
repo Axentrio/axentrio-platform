@@ -632,10 +632,16 @@ router.post(
     const { getUploadService } = await import('../file-handling/upload.service');
     const uploadService = getUploadService();
     const session = await uploadService.getSession(sessionId);
-    if (!session) throw new NotFoundError('Upload session not found');
-    // Ownership: a widget session may only complete/probe ITS OWN upload.
-    if (session.tenantId !== w.tenantId || session.chatSessionId !== w.sessionId) {
-      throw new ForbiddenError('Access denied');
+    // Ownership: a widget session may only complete/probe ITS OWN upload. A
+    // missing session AND a foreign-tenant/foreign-chat session both throw the
+    // SAME 404 so a visitor can't use this endpoint as a cross-tenant existence
+    // oracle for upload-session ids.
+    if (
+      !session ||
+      session.tenantId !== w.tenantId ||
+      session.chatSessionId !== w.sessionId
+    ) {
+      throw new NotFoundError('Upload session not found');
     }
     // Terminal-state idempotency (never re-scan / re-transition).
     if (session.status === 'ready' || session.status === 'quarantined') {

@@ -50,6 +50,11 @@ vi.mock('../../middleware/clerk.middleware', () => ({
   autoProvision: (req: any, _res: unknown, next: () => void) => {
     // Mirror what the real autoProvision attaches.
     req.userId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'; // User entity id
+    // Effective tenant (real autoProvision sets req.tenantId = ids.tenantId).
+    // Here it's the FILE's tenant — modelling a super-admin whose
+    // resolveTenantContext swapped req.tenantId to the target tenant — so the
+    // preview/download tenant gate passes and audit logs the file's tenant.
+    req.tenantId = '99999999-9999-4999-8999-999999999999';
     req.user = {
       id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', // Agent id (different on purpose)
       email: 'agent@x.test',
@@ -162,7 +167,8 @@ describe('GET /files/:id/preview audit', () => {
       originalName: 'doc.pdf',
       mimeType: 'application/pdf',
       fileSize: 2048,
-      tenantId: FILE_TENANT_ID, // different from actor's tenant
+      tenantId: FILE_TENANT_ID, // matches the caller's effective tenant
+      status: 'ready',
     });
     generatePublicUrlMock.mockResolvedValue('https://s3/preview-signed');
 
@@ -202,6 +208,7 @@ describe('GET /files/:id/download audit', () => {
       mimeType: 'application/pdf',
       fileSize: 4096,
       tenantId: FILE_TENANT_ID,
+      status: 'ready',
     });
     generateDownloadUrlMock.mockResolvedValue('https://s3/download-signed');
 
@@ -229,4 +236,51 @@ describe('GET /files/:id/download audit', () => {
     expect(getSessionMock).not.toHaveBeenCalled();
     expect(logAuditMock).not.toHaveBeenCalled();
   });
+});
+
+// ─── Tenant + readiness gate (cross-tenant IDOR fix) ───────────────────────
+
+describe('file read endpoints enforce tenant + ready gate', () => {
+  // The caller's effective tenant is 99999999… (set in the autoProvision mock).
+  const OTHER_TENANT_ID = '88888888-8888-4888-8888-888888888888';
+
+  for (const kind of ['preview', 'download'] as const) {
+    it(`${kind}: returns 404 (no signed URL, no audit) for a file owned by another tenant`, async () => {
+      getSessionMock.mockReturnValue({
+        sessionId: FILE_SESSION_ID,
+        fileKey: 'uploads/88888/2026/01/15/hash.pdf',
+        originalName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 4096,
+        tenantId: OTHER_TENANT_ID, // foreign tenant
+        status: 'ready',
+      });
+
+      const res = await request(makeApp()).get(`/files/${FILE_SESSION_ID}/${kind}`);
+
+      expect(res.status).toBe(404);
+      expect(generatePublicUrlMock).not.toHaveBeenCalled();
+      expect(generateDownloadUrlMock).not.toHaveBeenCalled();
+      expect(logAuditMock).not.toHaveBeenCalled();
+    });
+
+    it(`${kind}: returns the SAME 404 for an own-tenant file that is not yet 'ready'`, async () => {
+      getSessionMock.mockReturnValue({
+        sessionId: FILE_SESSION_ID,
+        fileKey: 'uploads/99999/2026/01/15/hash.pdf',
+        originalName: 'doc.pdf',
+        mimeType: 'application/pdf',
+        fileSize: 4096,
+        tenantId: FILE_TENANT_ID, // own tenant
+        status: 'scanning', // not cleared yet
+      });
+
+      const res = await request(makeApp()).get(`/files/${FILE_SESSION_ID}/${kind}`);
+
+      expect(res.status).toBe(404);
+      expect(generatePublicUrlMock).not.toHaveBeenCalled();
+      expect(generateDownloadUrlMock).not.toHaveBeenCalled();
+      expect(logAuditMock).not.toHaveBeenCalled();
+    });
+  }
 });

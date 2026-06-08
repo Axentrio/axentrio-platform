@@ -3,7 +3,7 @@
  * Upload, preview, and download endpoints
  */
 import { Router, Request, Response } from 'express';
-import { asyncHandler, ApiError, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess } from '../utils/response';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
@@ -29,6 +29,25 @@ function isUuid(value: unknown): value is string {
  */
 function isS3Configured(): boolean {
   return !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET);
+}
+
+/**
+ * Tenant + readiness gate for the file read endpoints (preview/download).
+ *
+ * A signed URL may only be minted for a file owned by the caller's EFFECTIVE
+ * tenant (`authReq.tenantId` — set by autoProvision, switched by
+ * resolveTenantContext for super-admins) and only once virus scanning has
+ * cleared it to `ready`. Foreign-tenant and not-yet-ready files throw the SAME
+ * 404 as a missing file, so a caller cannot use these endpoints as a
+ * cross-tenant existence oracle for file ids.
+ */
+function assertReadableFile(
+  session: { tenantId: string; status: string },
+  authReq: ProvisionedRequest,
+): void {
+  if (session.tenantId !== authReq.tenantId || session.status !== 'ready') {
+    throw new NotFoundError('File not found');
+  }
 }
 
 /**
@@ -132,10 +151,12 @@ router.get(
       throw new BadRequestError('Invalid file id');
     }
 
+    const authReq = req as ProvisionedRequest;
     const session = await uploadService.getSession(id);
     if (!session) {
       throw new NotFoundError('File not found');
     }
+    assertReadableFile(session, authReq);
 
     const previewUrl = await uploadService.generatePublicUrl(session.fileKey, 3600);
 
@@ -150,7 +171,6 @@ router.get(
     // operate on other tenants, so the actor's home tenant can differ from
     // the file's. Using the file's tenant keeps tenant-scoped audit queries
     // accurate.
-    const authReq = req as ProvisionedRequest;
     logAudit(
       authReq.userId!,
       'FILE_PREVIEW_REQUESTED',
@@ -190,10 +210,12 @@ router.get(
       throw new BadRequestError('Invalid file id');
     }
 
+    const authReq = req as ProvisionedRequest;
     const session = await uploadService.getSession(id);
     if (!session) {
       throw new NotFoundError('File not found');
     }
+    assertReadableFile(session, authReq);
 
     const downloadUrl = await uploadService.generateDownloadUrl(
       session.fileKey,
@@ -213,7 +235,6 @@ router.get(
     // unmounted route has never had its audit calls exercised). Here we use
     // the file session id as entityId (UUID by construction) and put fileKey
     // in metadata for cross-queryability. Same shape as the preview audit.
-    const authReq = req as ProvisionedRequest;
     logAudit(
       authReq.userId!,
       'FILE_DOWNLOAD_REQUESTED',
@@ -268,18 +289,16 @@ router.post(
     const { getUploadService } = await import('../file-handling/upload.service');
     const uploadService = getUploadService();
 
-    const session = await uploadService.getSession(sessionId);
-    if (!session) {
-      throw new NotFoundError('Upload session not found');
-    }
-
     // Tenant scoping. `req.tenantId` honors `resolveTenantContext` (so
     // super-admins can complete uploads in a tenant they've switched into).
-    // For non-super-admins it equals their home tenant.
+    // For non-super-admins it equals their home tenant. A missing session AND
+    // a foreign-tenant session both throw the SAME 404 so the endpoint isn't a
+    // cross-tenant existence oracle for upload-session ids.
     const authReq = req as ProvisionedRequest;
     const callerTenantId = authReq.tenantId ?? authReq.user?.tenantId;
-    if (session.tenantId !== callerTenantId) {
-      throw new ForbiddenError('Access denied');
+    const session = await uploadService.getSession(sessionId);
+    if (!session || session.tenantId !== callerTenantId) {
+      throw new NotFoundError('Upload session not found');
     }
 
     // Idempotency: if the session already reached a terminal state, return

@@ -305,6 +305,25 @@ function withRateLimit(
 }
 
 /**
+ * Reject agent-only events from non-agent (widget visitor) sockets. Without this,
+ * a widget socket can impersonate agents and accept/reject handoffs on any
+ * session. Returns true (and emits an error) when the caller is not an agent.
+ * See security audit — widget Socket.IO IDOR (issue #19).
+ */
+export function denyIfNotAgent(socket: TenantSocket, event: string): boolean {
+  if (socket.data.user?.type !== 'agent') {
+    socket.emit('error', { code: 'FORBIDDEN', event, message: 'Agent-only event' });
+    logger.warn(`Blocked agent-only socket event '${event}' from non-agent socket`, {
+      socketId: socket.id,
+      type: socket.data.user?.type,
+      tenantId: socket.data.tenantId,
+    });
+    return true;
+  }
+  return false;
+}
+
+/**
  * Setup socket event handlers
  */
 function setupEventHandlers(socket: TenantSocket): void {
@@ -312,15 +331,16 @@ function setupEventHandlers(socket: TenantSocket): void {
   withRateLimit(socket, 'message:read', (data) => handleMessageRead(socket, data as { messageId: string }));
   withRateLimit(socket, 'typing:indicator', (data) => handleTypingIndicator(socket, data as TypingIndicatorData));
   withRateLimit(socket, 'handoff:request', (data) => handleHandoffRequest(socket, data as HandoffRequestData));
-  withRateLimit(socket, 'handoff:accept', (data) => handleHandoffAccept(socket, data as HandoffResponseData));
-  withRateLimit(socket, 'handoff:reject', (data) => handleHandoffReject(socket, data as HandoffResponseData));
   withRateLimit(socket, 'session:join', (data) => handleSessionJoin(socket, data as { sessionId: string }));
   withRateLimit(socket, 'session:leave', (data) => handleSessionLeave(socket, data as { sessionId: string }));
   withRateLimit(socket, 'presence:update', (data) => handlePresenceUpdate(socket, data as { status: string }));
-  withRateLimit(socket, 'agent:join', (data) => handleAgentJoin(socket, data as { sessionId: string }));
-  withRateLimit(socket, 'agent:leave', (data) => handleAgentLeave(socket, data as { sessionId: string }));
-  withRateLimit(socket, 'agent:status', (data) => handlePresenceUpdate(socket, data as { status: string }));
-  withRateLimit(socket, 'handoff:decline', (data) => handleHandoffReject(socket, data as HandoffResponseData));
+  // Agent-only events — reject widget/visitor sockets (issue #19).
+  withRateLimit(socket, 'handoff:accept', (data) => denyIfNotAgent(socket, 'handoff:accept') ? undefined : handleHandoffAccept(socket, data as HandoffResponseData));
+  withRateLimit(socket, 'handoff:reject', (data) => denyIfNotAgent(socket, 'handoff:reject') ? undefined : handleHandoffReject(socket, data as HandoffResponseData));
+  withRateLimit(socket, 'handoff:decline', (data) => denyIfNotAgent(socket, 'handoff:decline') ? undefined : handleHandoffReject(socket, data as HandoffResponseData));
+  withRateLimit(socket, 'agent:join', (data) => denyIfNotAgent(socket, 'agent:join') ? undefined : handleAgentJoin(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'agent:leave', (data) => denyIfNotAgent(socket, 'agent:leave') ? undefined : handleAgentLeave(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'agent:status', (data) => denyIfNotAgent(socket, 'agent:status') ? undefined : handlePresenceUpdate(socket, data as { status: string }));
 }
 
 /**

@@ -45,9 +45,29 @@ export async function applyPagination<T extends ObjectLiteral>(
   const page = params.page || 1;
   const limit = Math.min(params.limit || DEFAULT_LIMIT, MAX_LIMIT);
 
-  if (params.sortBy) {
-    const alias = queryBuilder.alias;
-    queryBuilder.orderBy(`${alias}.${params.sortBy}`, params.sortOrder === 'asc' ? 'ASC' : 'DESC');
+  // SQL-injection guard (#B): never interpolate a raw `sortBy` into ORDER BY.
+  // Accept it only if it matches a real column of the queried entity, and emit
+  // the vetted metadata property (never the raw string). `sortOrder` is already
+  // normalized to 'asc'|'desc' by parsePaginationParams.
+  const alias = queryBuilder.alias;
+  const dir: 'ASC' | 'DESC' = params.sortOrder === 'asc' ? 'ASC' : 'DESC';
+  const columns = queryBuilder.expressionMap.mainAlias?.metadata?.columns ?? [];
+  const vettedProp = params.sortBy
+    ? columns.find((c) => c.propertyName === params.sortBy || c.databaseName === params.sortBy)?.propertyName
+    : undefined;
+  const hasExistingOrder = Object.keys(queryBuilder.expressionMap.orderBys ?? {}).length > 0;
+
+  if (vettedProp) {
+    // Valid, explicit user sort — replaces any default order.
+    queryBuilder.orderBy(`${alias}.${vettedProp}`, dir);
+  } else if (!hasExistingOrder) {
+    // No (valid) sort and no caller-defined order: apply a safe default if the
+    // entity has one. An INVALID `sortBy` never reaches ORDER BY and never
+    // clobbers a caller's existing order.
+    const fallback =
+      columns.find((c) => c.propertyName === 'createdAt')?.propertyName ??
+      columns.find((c) => c.propertyName === 'id')?.propertyName;
+    if (fallback) queryBuilder.orderBy(`${alias}.${fallback}`, dir);
   }
 
   queryBuilder.skip((page - 1) * limit).take(limit);

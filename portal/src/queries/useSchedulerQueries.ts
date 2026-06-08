@@ -180,6 +180,7 @@ export interface AdminBooking {
   meetingUrl: string | null;
   serviceName?: string | null;
   bookingMode?: string | null;
+  intakeAnswers?: Array<{ label: string; answer: string }> | null;
 }
 
 export interface AvailabilitySlot {

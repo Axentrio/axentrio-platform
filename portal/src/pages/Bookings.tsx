@@ -235,6 +235,16 @@ function BookingRow({
         {booking.notes && (
           <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
         )}
+        {booking.intakeAnswers && booking.intakeAnswers.length > 0 && (
+          <dl className="mt-1.5 space-y-0.5">
+            {booking.intakeAnswers.map((qa, i) => (
+              <div key={i} className="text-sm">
+                <dt className="inline text-text-muted">{qa.label}: </dt>
+                <dd className="inline text-text-secondary whitespace-pre-wrap">{qa.answer}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
         {booking.meetingUrl && (
           <a
             href={booking.meetingUrl}

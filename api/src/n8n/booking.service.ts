@@ -15,7 +15,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
-import { ServiceType } from '../database/entities/ServiceType';
+import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
@@ -131,6 +131,56 @@ export interface AdminBookingRow {
   meetingUrl: string | null;
   serviceName?: string | null;
   bookingMode?: string | null;
+  /** P3: ordered, pre-labeled intake answers for display (null if none). */
+  intakeAnswers?: Array<{ label: string; answer: string }> | null;
+}
+
+/**
+ * P3: read-side coercion of a stored intake answer — MUST mirror the write-side
+ * `normalizeIntakeAnswers` so reads/writes agree on a "displayable answer".
+ * string→trim; number/boolean→String; null/undefined/array/object→null; cap 2000.
+ */
+function coerceAnswer(value: unknown): string | null {
+  let str: string;
+  if (typeof value === 'string') str = value;
+  else if (typeof value === 'number' || typeof value === 'boolean') str = String(value);
+  else return null;
+  const trimmed = str.trim();
+  return trimmed ? trimmed.slice(0, 2000) : null;
+}
+
+/**
+ * Build the ordered, pre-labeled answer list for one booking row: walk the
+ * service's questions IN ARRAY ORDER (current label), then append any answer
+ * keyed by a now-deleted/unknown question id sorted by key (deterministic) with
+ * the raw id as label. A malformed/non-array `questions` degrades to "no
+ * questions" (all answers fall through to the deleted branch); a non-object
+ * stored value reads as no answers. Returns null when nothing displays.
+ */
+export function buildIntakeAnswers(
+  questions: IntakeQuestion[] | null | undefined,
+  stored: unknown
+): Array<{ label: string; answer: string }> | null {
+  if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return null;
+  const answers = stored as Record<string, unknown>;
+  const qs = Array.isArray(questions) ? questions : [];
+  const out: Array<{ label: string; answer: string }> = [];
+  const usedKeys = new Set<string>();
+  for (const q of qs) {
+    if (!q || typeof q.id !== 'string' || !(q.id in answers)) continue;
+    const answer = coerceAnswer(answers[q.id]);
+    if (answer === null) continue;
+    out.push({ label: q.label, answer });
+    usedKeys.add(q.id);
+  }
+  // Deleted/unknown question ids: append sorted by key (jsonb key order isn't guaranteed).
+  for (const key of Object.keys(answers).sort()) {
+    if (usedKeys.has(key)) continue;
+    const answer = coerceAnswer(answers[key]);
+    if (answer === null) continue;
+    out.push({ label: key, answer });
+  }
+  return out.length ? out : null;
 }
 
 /** Build a provider context for admin actions from a booking's own bot/session. */
@@ -201,6 +251,8 @@ export async function adminListBookings(
       })
     : [];
   const nameByService = new Map(services.map((s) => [s.id, s.name]));
+  // Reuse the already-loaded service rows for the per-row intake-answer labels (no extra query).
+  const questionsByService = new Map(services.map((s) => [s.id, s.intakeQuestions]));
 
   return {
     total,
@@ -215,6 +267,10 @@ export async function adminListBookings(
       meetingUrl: meetByBooking.get(b.id) ?? null,
       serviceName: b.eventTypeId ? nameByService.get(b.eventTypeId) ?? null : null,
       bookingMode: b.bookingMode ?? null,
+      intakeAnswers: buildIntakeAnswers(
+        b.eventTypeId ? questionsByService.get(b.eventTypeId) : null,
+        b.intakeAnswers
+      ),
     })),
   };
 }

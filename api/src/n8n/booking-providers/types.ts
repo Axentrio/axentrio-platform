@@ -99,7 +99,8 @@ export interface BookingProvider {
     startTime: string,
     attendee: { name: string; email: string },
     notes?: string,
-    serviceId?: string
+    serviceId?: string,
+    intakeAnswers?: unknown
   ): Promise<CreateBookingResult>;
   rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult>;
   cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult>;

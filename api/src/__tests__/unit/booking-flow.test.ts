@@ -299,6 +299,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       { name: 'Sarah Connor', email: 'sarah@example.com' },
       undefined,
       undefined,
+      undefined,
     );
   });
 

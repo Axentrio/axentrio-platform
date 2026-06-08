@@ -73,10 +73,11 @@ export async function createBooking(
   startTime: string,
   attendee: { name: string; email: string },
   notes?: string,
-  serviceId?: string
+  serviceId?: string,
+  intakeAnswers?: unknown
 ) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId);
+  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers);
 }
 
 /**
@@ -91,10 +92,11 @@ export async function requestBooking(
   attendee: { name: string; email: string },
   notes?: string,
   serviceId?: string,
-  aiSummary?: string
+  aiSummary?: string,
+  intakeAnswers?: unknown
 ) {
   const ctx = await resolveContext(sessionId);
-  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary);
+  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers);
 }
 
 export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {

@@ -342,6 +342,40 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     ).rejects.toMatchObject({ code: 'INVALID_START_TIME' });
   });
 
+  // ── Intake answers normalization (P3b) ─────────────────────────────────────
+
+  it('normalizes + persists intake answers keyed by current question id', async () => {
+    eventTypeFindOne.mockResolvedValue({
+      ...EVENT_TYPE, name: 'Consultation',
+      intakeQuestions: [
+        { id: 'q-1', label: 'Occasion?', type: 'text', required: true },
+        { id: 'q-2', label: 'Size?', type: 'choice', required: false, options: ['S', 'L'] },
+      ],
+    });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, intakeQuestions: [] }, { ...EVENT_TYPE, id: 'svc-2' }]); // ≥2 → serviceId required
+    await provider.requestAppointment(
+      ctx, 'idem-iq', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-1',
+      undefined,
+      { 'q-1': '  Birthday  ', 'q-2': 7, 'q-unknown': 'dropped', 'q-3-empty': '   ' }
+    );
+    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const params = insert![1] as any[];
+    const intakeParam = params[params.length - 1]; // intake_answers is the last bound value
+    const parsed = JSON.parse(intakeParam);
+    expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
+  });
+
+  it('stores null intake_answers when the service has no questions', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, intakeQuestions: [] });
+    await provider.requestAppointment(
+      ctx, 'idem-iq2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { 'whatever': 'x' }
+    );
+    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const params = insert![1] as any[];
+    expect(params[params.length - 1]).toBeNull();
+  });
+
   // ── Owner notification email (P2b) ─────────────────────────────────────────
 
   it('emails the owner (no ICS) when supportEmail is configured', async () => {

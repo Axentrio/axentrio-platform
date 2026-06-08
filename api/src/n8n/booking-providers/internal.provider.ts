@@ -38,6 +38,36 @@ import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
+/**
+ * P3: normalize an LLM-supplied intake-answers object against a RESOLVED service's
+ * questions — the single place answers are sanitized before persistence. Keeps only
+ * entries whose key matches a current question id, coerces the value to a trimmed
+ * non-empty string (string→trim; number/boolean→String; null/undefined/array/object
+ * dropped — never `"[object Object]"`), caps at 2000 chars. Returns a flat
+ * `{ id: string }` map or `null` if nothing remains. A malformed/non-array
+ * `intakeQuestions` (legacy/hand-edited) degrades to "no questions" → null.
+ */
+function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<string, string> | null {
+  const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
+  if (!questions.length) return null;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const validIds = new Set(
+    questions.map((q) => q?.id).filter((id): id is string => typeof id === 'string')
+  );
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (!validIds.has(key)) continue;
+    let str: string;
+    if (typeof value === 'string') str = value;
+    else if (typeof value === 'number' || typeof value === 'boolean') str = String(value);
+    else continue; // null/undefined/array/object → dropped
+    const trimmed = str.trim();
+    if (!trimmed) continue;
+    out[key] = trimmed.slice(0, 2000);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
   private async loadRule(botId: string): Promise<AvailabilityRule> {
@@ -223,7 +253,8 @@ export class InternalProvider implements BookingProvider {
     startTime: string,
     attendee: { name: string; email: string },
     notes?: string,
-    serviceId?: string
+    serviceId?: string,
+    intakeAnswers?: unknown
   ): Promise<CreateBookingResult> {
     const rule = await this.loadRule(ctx.bot.id);
     // Create-time revalidation: the service must still exist, belong to this bot,
@@ -247,10 +278,13 @@ export class InternalProvider implements BookingProvider {
     }
     const end = new Date(start.getTime() + service.durationMin * 60_000);
 
+    // P3: normalize intake answers against THIS resolved service (the row's real service).
+    const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
+
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
     if (service.bookingMode === 'request') {
-      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes);
+      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers);
     }
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
@@ -287,8 +321,8 @@ export class InternalProvider implements BookingProvider {
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
-              attendee_name, attendee_email, notes, ics_uid, idempotency_key)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14)
+              attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -305,6 +339,7 @@ export class InternalProvider implements BookingProvider {
             notes ?? null,
             icsUid,
             idempotencyKey,
+            intakeJson ? JSON.stringify(intakeJson) : null,
           ]
         );
         return rows[0].id;
@@ -399,11 +434,14 @@ export class InternalProvider implements BookingProvider {
     end: Date,
     attendee: { name: string; email: string },
     notes?: string,
-    aiSummary?: string
+    aiSummary?: string,
+    intakeAnswers?: unknown
   ): Promise<CreateBookingResult> {
     const bookingRepo = AppDataSource.getRepository(Booking);
     const icsUid = `${uuidv4()}@axentrio`;
     const sourceChannel = ctx.session?.channel ?? null;
+    // P3: normalize intake answers against this resolved (request-mode) service.
+    const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
     let bookingId: string;
     try {
       const rows: Array<{ id: string }> = await bookingRepo.query(
@@ -411,8 +449,8 @@ export class InternalProvider implements BookingProvider {
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
-            source_channel, ai_summary)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14)
+            source_channel, ai_summary, intake_answers)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -429,6 +467,7 @@ export class InternalProvider implements BookingProvider {
           idempotencyKey,
           sourceChannel,
           aiSummary ?? null,
+          intakeJson ? JSON.stringify(intakeJson) : null,
         ]
       );
       bookingId = rows[0].id;
@@ -506,7 +545,8 @@ export class InternalProvider implements BookingProvider {
     attendee: { name: string; email: string },
     notes?: string,
     serviceId?: string,
-    aiSummary?: string
+    aiSummary?: string,
+    intakeAnswers?: unknown
   ): Promise<CreateBookingResult> {
     // Idempotency FIRST: a live (non-failed) row with this key → return it (no re-notify),
     // before resolving the service — a catalog change must not turn a retry into an error.
@@ -528,7 +568,7 @@ export class InternalProvider implements BookingProvider {
     }
     const end = new Date(start.getTime() + service.durationMin * 60_000);
 
-    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary);
+    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers);
   }
 
   /**

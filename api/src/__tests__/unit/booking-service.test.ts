@@ -159,6 +159,7 @@ describe('Booking Service (internal dispatcher)', () => {
         attendee,
         'notes',
         undefined,
+        undefined,
       );
     });
 

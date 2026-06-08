@@ -52,7 +52,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
 
 export class CreateBookingTool implements ToolAdapter {
   name = 'create_booking';
-  description = 'Create an appointment booking for the customer. You can call this directly if availability was already checked in a recent conversation turn.';
+  description = 'Create an appointment booking for the customer. You can call this directly if availability was already checked in a recent conversation turn. If the service has intake questions, ask them first and pass the answers in intakeAnswers.';
   parameters = {
     type: 'object',
     properties: {
@@ -77,6 +77,12 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           'The id of the service being booked (from the SERVICES list). Use the same service whose availability you checked. Omit only when the business has a single service.',
       },
+      intakeAnswers: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description:
+          "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block (e.g. {\"<question-id>\": \"answer\"}). Include every answer you collected; omit unanswered questions.",
+      },
     },
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -94,7 +100,8 @@ export class CreateBookingTool implements ToolAdapter {
         args.startTime as string,
         { name: args.attendeeName as string, email: args.attendeeEmail as string },
         args.notes as string | undefined,
-        args.serviceId as string | undefined
+        args.serviceId as string | undefined,
+        args.intakeAnswers
       );
 
       // Fire-and-forget: emit appointment.booked + lead.created — confirmed bookings only.
@@ -191,6 +198,12 @@ export class RequestAppointmentTool implements ToolAdapter {
         description:
           'A short one-line summary of the request for the business owner (e.g. "New client wants a deep-clean for a 3-bed flat, flexible on timing").',
       },
+      intakeAnswers: {
+        type: 'object',
+        additionalProperties: { type: 'string' },
+        description:
+          "The customer's answers to the service's intake questions, as a flat object keyed by the question id shown in the SERVICES block. Include every answer you collected; omit unanswered questions.",
+      },
     },
     required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -206,7 +219,8 @@ export class RequestAppointmentTool implements ToolAdapter {
         { name: args.attendeeName as string, email: args.attendeeEmail as string },
         args.notes as string | undefined,
         args.serviceId as string | undefined,
-        args.aiSummary as string | undefined
+        args.aiSummary as string | undefined,
+        args.intakeAnswers
       );
       return { success: true, data: result };
     } catch (err) {

@@ -18,6 +18,27 @@ function priceHint(s: ServiceType): string {
       return '';
   }
 }
+
+/** One-line hygiene for owner text in the prompt: collapse whitespace → drop `·`/`"` → trim. */
+function sanitizeForLine(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
+}
+
+/** Indented `Intake questions:` sub-block for a service, in array order (≤8 short lines). */
+function intakeLines(s: ServiceType): string {
+  const questions = Array.isArray(s.intakeQuestions) ? s.intakeQuestions : [];
+  if (!questions.length) return '';
+  const lines = questions.map((q) => {
+    const label = sanitizeForLine(q.label ?? '');
+    const req = q.required ? 'required' : 'optional';
+    const opts =
+      q.type === 'choice' && Array.isArray(q.options) && q.options.length
+        ? ` · options: ${q.options.map(sanitizeForLine).join(', ')}`
+        : '';
+    return `    - ${q.id} · "${label}" · ${q.type} · ${req}${opts}`;
+  });
+  return `\n  Intake questions:\n${lines.join('\n')}`;
+}
 import { substituteVariables } from '../llm/prompt-builder';
 import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from '../llm/platform-rules';
 
@@ -89,11 +110,13 @@ export class PromptBuilder {
 
     // Bookable services catalog (multi-service). Only when booking is configured.
     if (services && services.length) {
+      const hasIntake = services.some((s) => Array.isArray(s.intakeQuestions) && s.intakeQuestions.length);
       const lines = services
         .map((s) => {
           const price = priceHint(s);
           const mode = s.bookingMode === 'request' ? 'request-only' : 'auto-book';
-          return `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}`;
+          const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}`;
+          return `${head}${intakeLines(s)}`;
         })
         .join('\n');
       sections.push(
@@ -101,7 +124,12 @@ export class PromptBuilder {
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
 1. If their request matches no service or is ambiguous, ask a disambiguating question FIRST — do not confirm and do not capture a request until you know the service. Never guess.
 2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
-3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.
+3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.${
+          hasIntake
+            ? `
+4. If the chosen service lists "Intake questions", ask any required question the customer hasn't already answered before calling the booking tool (you may ask optional ones too, but never block the booking on them). Pass every answer you have in the tool's intakeAnswers object, keyed by the question id shown before each question. If a booking tool returns an error, fix it and re-call the tool, re-including the answers you already collected.`
+            : ''
+        }
 ${lines}`
       );
     }

@@ -183,6 +183,7 @@ describe('CreateBookingTool', () => {
       '2026-04-01T10:00:00Z',
       { name: 'Alice', email: 'alice@test.com' },
       undefined,
+      undefined,
       undefined
     );
   });
@@ -203,6 +204,7 @@ describe('CreateBookingTool', () => {
       '2026-04-02T09:00:00Z',
       { name: 'Bob', email: 'bob@test.com' },
       'Need consultation',
+      undefined,
       undefined
     );
   });

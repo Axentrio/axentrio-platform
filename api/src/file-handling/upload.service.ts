@@ -628,6 +628,23 @@ export class UploadService {
   }
 
   /**
+   * Ready (scanned-clean) upload-session ids for a chat session — how the booking
+   * agent attaches a customer's uploaded files to a booking, since the LLM never
+   * sees upload ids. Scoped to tenant + chat session; oldest first; capped at 5
+   * (the booking validator's max).
+   */
+  async getReadySessionFileIds(chatSessionId: string, tenantId: string): Promise<string[]> {
+    if (!chatSessionId || !tenantId) return [];
+    const repo = this.getUploadSessionRepo();
+    const rows = await repo.find({
+      where: { chatSessionId, tenantId, status: 'ready' },
+      order: { createdAt: 'ASC' },
+      take: 5,
+    });
+    return (rows as Array<{ sessionId: string }>).map((r) => r.sessionId);
+  }
+
+  /**
    * Update upload session status. Persists to DB.
    *
    * NOTE: this is per-row UPDATE; concurrent callers across replicas could

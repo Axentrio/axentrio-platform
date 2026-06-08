@@ -406,7 +406,8 @@ export class InternalProvider implements BookingProvider {
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
     const contact = resolveContactFields(service, extras);
     // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
-    const uploadedFiles = await this.validateUploadedFiles(ctx, service, extras?.fileSessionIds);
+    const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
+    const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
 
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
@@ -593,7 +594,8 @@ export class InternalProvider implements BookingProvider {
     // P5a: required address/phone gate (request path).
     const contact = resolveContactFields(service, extras);
     // P5e: validate + snapshot attached files for the request row too.
-    const uploadedFiles = await this.validateUploadedFiles(ctx, service, extras?.fileSessionIds);
+    const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
+    const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
     let bookingId: string;
     try {
       const rows: Array<{ id: string }> = await bookingRepo.query(
@@ -819,6 +821,26 @@ export class InternalProvider implements BookingProvider {
    *    well-formed snapshot fields — else FILE_NOT_READY.
    * Returns the JSON array (immutable snapshot) or null when no files were attached.
    */
+  /**
+   * Resolve which file-session ids to attach. If the tool passed explicit ids, use
+   * them (strict-validated below). Otherwise, for a file-accepting service,
+   * auto-collect the chat session's ready uploads — the agent never surfaces
+   * upload ids to the LLM, so this is how a customer's uploaded file actually
+   * reaches the booking. A no-file service auto-collects nothing, so a stray
+   * upload elsewhere in the chat can't block a booking with FILE_UPLOAD_NOT_ALLOWED.
+   */
+  private async resolveFileSessionIds(
+    ctx: BookingContext,
+    service: ServiceType,
+    explicit?: string[]
+  ): Promise<string[] | undefined> {
+    if (Array.isArray(explicit) && explicit.length) return explicit;
+    if (!service.fileUploadAllowed) return undefined;
+    const { getUploadService } = await import('../../file-handling/upload.service');
+    const ids = await getUploadService().getReadySessionFileIds(ctx.session.id, ctx.tenant.id);
+    return ids.length ? ids : undefined;
+  }
+
   private async validateUploadedFiles(
     ctx: BookingContext,
     service: ServiceType,

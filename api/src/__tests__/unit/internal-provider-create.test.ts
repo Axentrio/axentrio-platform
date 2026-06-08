@@ -70,8 +70,9 @@ vi.mock('../../scheduler/calendar-provider', () => {
 });
 
 const getUploadSession = vi.fn();
+const getReadyFileIds = vi.fn();
 vi.mock('../../file-handling/upload.service', () => ({
-  getUploadService: () => ({ getSession: getUploadSession }),
+  getUploadService: () => ({ getSession: getUploadSession, getReadySessionFileIds: getReadyFileIds }),
 }));
 
 const emitWebhookEvent = vi.fn();
@@ -397,6 +398,24 @@ describe('InternalProvider.createBooking', () => {
     await expect(
       provider.createBooking(ctx, 'idem-many', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['a','b','c','d','e','f'] })
     ).rejects.toMatchObject({ code: 'TOO_MANY_FILES' });
+  });
+
+  it('auto-collects the chat session ready uploads for a file-accepting service when the tool passes none', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: true }]);
+    getReadyFileIds.mockResolvedValue(['auto-1']); // the agent never surfaces upload ids to the LLM
+    getUploadSession.mockResolvedValue(readySession());
+    await provider.createBooking(ctx, 'idem-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }); // no extras
+    expect(getReadyFileIds).toHaveBeenCalledWith('sess-1', 'ten-1');
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const files = JSON.parse((insert![1] as any[]).at(-2)); // uploaded_files (source_channel last)
+    expect(files).toEqual([{ fileSessionId: 'auto-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
+  });
+
+  it('does NOT auto-collect (so a stray upload never blocks) for a no-file service', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, fileUploadAllowed: false }]);
+    const res = await provider.createBooking(ctx, 'idem-nofile', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(getReadyFileIds).not.toHaveBeenCalled();
   });
 });
 

@@ -46,10 +46,11 @@ function runBootCheck(envOverrides: Record<string, string | undefined>): {
     ENCRYPTION_KEY: 'a'.repeat(32),
     CLERK_SECRET_KEY: 'sk_test_dummy_clerk_secret_for_boot_test',
     WIDGET_API_KEY: 'widget-prod-dummy',
-    // Production also requires an explicit CORS allowlist (no "*") — set a valid one
-    // (instead of inheriting the runner's CORS_ORIGIN) so the boot reaches the Stripe
-    // check rather than throwing on CORS first.
+    // Production also requires an explicit CORS allowlist (no "*") and a 32+ char
+    // META_OAUTH_JWT_SECRET — set valid dummies (instead of inheriting the runner's
+    // env) so the boot reaches the Stripe check rather than throwing on those first.
     CORS_ORIGIN: 'https://app.example.com',
+    META_OAUTH_JWT_SECRET: 'a'.repeat(32),
     ...envOverrides,
   };
   // Remove keys explicitly set to undefined so dotenv defaults don't refill.

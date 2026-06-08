@@ -7,6 +7,7 @@
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
 import { Request } from 'express';
 import { logger } from '../utils/logger';
+import { assertSafeOutboundUrl, ssrfHttpsAgent } from '../security/ssrf-guard';
 import { CircuitBreaker } from './circuit-breaker';
 import { RetryService } from './retry.service';
 import { FallbackService } from './fallback.service';
@@ -411,11 +412,17 @@ export class OutboundService {
     message: OutboundMessage,
     timeout: number
   ): Promise<AxiosResponse> {
+    // SSRF guard: reject non-public / non-https targets before any I/O, and pin
+    // the connection to public IPs via the SSRF agent (DNS-rebind safe). #A
+    assertSafeOutboundUrl(webhookConfig.url);
     const config: AxiosRequestConfig = {
       method: 'POST',
       url: webhookConfig.url,
       data: message,
       timeout,
+      httpsAgent: ssrfHttpsAgent,
+      maxRedirects: 0,
+      proxy: false,
       headers: {
         ...webhookConfig.headers,
         'X-Webhook-ID': webhookConfig.id,

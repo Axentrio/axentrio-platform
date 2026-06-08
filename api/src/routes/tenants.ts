@@ -4,7 +4,7 @@
  */
 
 import crypto from 'crypto';
-import axios from 'axios';
+import { safeOutboundRequest, assertSafeOutboundUrl } from '../security/ssrf-guard';
 import { Router, Request, Response } from 'express';
 import { IsNull } from 'typeorm';
 import { clerkClient } from '@clerk/express';
@@ -140,6 +140,15 @@ router.patch(
     // Update fields
     if (name) tenant.name = name;
     if (webhookUrl !== undefined) {
+      // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
+      // string clears the webhook (preserved).
+      if (webhookUrl) {
+        try {
+          assertSafeOutboundUrl(webhookUrl);
+        } catch {
+          throw new BadRequestError('Webhook URL must be a public https:// URL');
+        }
+      }
       tenant.webhookUrl = webhookUrl;
       // Auto-generate webhook secret on first webhookUrl save
       if (webhookUrl && !tenant.webhookSecret) {
@@ -467,26 +476,25 @@ router.post(
 
     const startTime = Date.now();
     try {
-      const response = await axios.post(
-        tenant.webhookUrl,
-        {
+      const response = await safeOutboundRequest({
+        method: 'POST',
+        url: tenant.webhookUrl,
+        data: {
           event: 'webhook.test',
           tenantId: tenant.id,
           timestamp: new Date().toISOString(),
           payload: { type: 'test', content: 'Webhook connectivity test' },
         },
-        {
-          timeout: 5000,
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Tenant-ID': tenant.id,
-            ...(tenant.webhookSecret ? {
-              'X-Webhook-Secret': tenant.webhookSecret,
-            } : {}),
-          },
-          validateStatus: () => true,
-        }
-      );
+        timeout: 5000,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Tenant-ID': tenant.id,
+          ...(tenant.webhookSecret ? {
+            'X-Webhook-Secret': tenant.webhookSecret,
+          } : {}),
+        },
+        validateStatus: () => true,
+      });
 
       const responseTimeMs = Date.now() - startTime;
 

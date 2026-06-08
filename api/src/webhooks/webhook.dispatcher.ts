@@ -2,6 +2,7 @@ import { createHmac } from 'crypto';
 import { AppDataSource } from '../database/data-source';
 import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
 import { logger } from '../utils/logger';
+import { safeOutboundRequest } from '../security/ssrf-guard';
 import type { EventWebhookConfig, WebhookEvent } from './webhook.types';
 
 const TIMEOUT_MS = 10_000;
@@ -126,29 +127,26 @@ export async function deliverWebhook(
 
     const startedAt = Date.now();
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-
-      let response: Response;
-      try {
-        response = await fetch(config.url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Webhook-Signature': `sha256=${signature}`,
-            'X-Webhook-Event': event.type,
-            'X-Webhook-Id': event.id,
-          },
-          body,
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timer);
-      }
+      // Guarded outbound (SSRF #A): https-only, public-IP-pinned, no redirects.
+      // validateStatus:()=>true preserves the 4xx=no-retry / 5xx=retry semantics
+      // below (the body string is sent verbatim so the signature stays valid).
+      const response = await safeOutboundRequest({
+        method: 'POST',
+        url: config.url,
+        data: body,
+        timeout: TIMEOUT_MS,
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Webhook-Signature': `sha256=${signature}`,
+          'X-Webhook-Event': event.type,
+          'X-Webhook-Id': event.id,
+        },
+        validateStatus: () => true,
+      });
 
       const durationMs = Date.now() - startedAt;
 
-      if (response.ok) {
+      if (response.status >= 200 && response.status < 300) {
         recordSuccess(config.url);
         logger.info('Webhook delivered', { url: config.url, eventId: event.id, status: response.status, attempt });
         await persistAttempt({

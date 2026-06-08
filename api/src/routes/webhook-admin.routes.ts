@@ -4,7 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
-import axios from 'axios';
+import { safeOutboundRequest } from '../security/ssrf-guard';
 import { AppDataSource } from '../database/data-source';
 import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
 import { Tenant } from '../database/entities/Tenant';
@@ -83,12 +83,15 @@ router.post('/test', asyncHandler(async (req: Request, res: Response) => {
 
   const startTime = Date.now();
   try {
-    const response = await axios.post(tenant.webhookUrl, {
-      event: 'webhook.test',
-      tenantId,
-      payload: { message: 'Test ping from chatbot platform' },
-      timestamp: new Date().toISOString(),
-    }, {
+    const response = await safeOutboundRequest({
+      method: 'POST',
+      url: tenant.webhookUrl,
+      data: {
+        event: 'webhook.test',
+        tenantId,
+        payload: { message: 'Test ping from chatbot platform' },
+        timestamp: new Date().toISOString(),
+      },
       timeout: 10000,
       headers: {
         'Content-Type': 'application/json',

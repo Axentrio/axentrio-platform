@@ -124,7 +124,15 @@ vi.mock('../../database/data-source', () => ({
 
 // Stub axios so the webhook-test handler hits our controlled failure path.
 vi.mock('axios', () => ({
-  default: { post: axiosPost },
+  default: { post: axiosPost, request: axiosPost },
+}));
+
+// The SSRF guard (#A) now routes the webhook test through `safeOutboundRequest`
+// (which asserts the URL then calls axios.request). Mock just that seam so the
+// existing axiosPost setups drive the outbound result without real DNS/SSRF checks.
+vi.mock('../../security/ssrf-guard', async (orig) => ({
+  ...(await orig<typeof import('../../security/ssrf-guard')>()),
+  safeOutboundRequest: (...args: unknown[]) => axiosPost(...args),
 }));
 
 // Stub logger / Sentry so noise doesn't reach the console.

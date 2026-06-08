@@ -471,6 +471,19 @@ describe('tenants.ts — GET /me/users paginated success envelope', () => {
       skip: () => qb,
       take: () => qb,
       getManyAndCount: () => Promise.resolve([rows, rows.length]),
+      // The SQL-injection guard (#B) reads entity column metadata + existing orderBys
+      // off the query builder; provide them so applyPagination's default-sort path works.
+      expressionMap: {
+        mainAlias: {
+          metadata: {
+            columns: [
+              { propertyName: 'createdAt', databaseName: 'created_at' },
+              { propertyName: 'id', databaseName: 'id' },
+            ],
+          },
+        },
+        orderBys: {},
+      },
     });
     userCreateQB.mockReturnValue(qb);
 

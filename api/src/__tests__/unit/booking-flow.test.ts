@@ -54,9 +54,10 @@ vi.mock('../../database/data-source', () => ({
 // Multi-bot Phase 4 (#16d): AgentService now resolves bot config via the
 // bot-config service. Stub it to surface the test's `tenant.settings.ai`
 // and the same calcom integration so the booking tools register as usual.
-vi.mock('../../services/bot-config.service', () => ({
-  getLlmRuntimeConfigForSession: async (_s: any) => ({
-    botAiSettings: {
+vi.mock('../../services/bot-config.service', () => {
+  const bot = { id: 'bot-anchor' };
+  const settings = {
+    ai: {
       enabled: true,
       provider: 'openai',
       model: 'gpt-4o',
@@ -71,38 +72,26 @@ vi.mock('../../services/bot-config.service', () => ({
         offHoursMessage: '',
       },
     },
-    apiKey: 'sk-test',
-  }),
-  getBotConfigForSession: async (_s: any) => ({
-    bot: { id: 'bot-anchor' },
-    settings: {
-      ai: {
-        enabled: true,
-        provider: 'openai',
-        model: 'gpt-4o',
-        brandVoice: { name: 'ClinicBot', tone: 'friendly', customInstructions: '' },
-        guardrails: {
-          topicsToAvoid: [],
-          escalationKeywords: [],
-          confidenceThreshold: 0.7,
-          maxResponseLength: 500,
-          fallbackMessage: 'Let me connect you with our team.',
-          greetingMessage: '',
-          offHoursMessage: '',
-        },
-      },
-      integrations: { calcom: { apiKey: 'encrypted_key', eventTypeId: 42 } },
-      skills: [{
-        name: 'booking',
-        trigger: 'User wants to schedule an appointment',
-        tools: ['check_availability', 'create_booking', 'list_bookings'],
-        instructions: 'Always check availability before creating. Collect name and email.',
-        maxSteps: 8,
-        enabled: true,
-      }],
-    },
-  }),
-}));
+    integrations: { calcom: { apiKey: 'encrypted_key', eventTypeId: 42 } },
+    skills: [{
+      name: 'booking',
+      trigger: 'User wants to schedule an appointment',
+      tools: ['check_availability', 'create_booking', 'list_bookings'],
+      instructions: 'Always check availability before creating. Collect name and email.',
+      maxSteps: 8,
+      enabled: true,
+    }],
+  };
+  return {
+    getLlmRuntimeConfigForSession: async (_s: any) => ({
+      bot,
+      botSettings: settings,
+      botAiSettings: settings.ai,
+      apiKey: 'sk-test',
+    }),
+    getBotConfigForSession: async (_s: any) => ({ bot, settings }),
+  };
+});
 
 // ── Test fixtures ───────────────────────────────────────────────────
 const tenant: Partial<Tenant> = {
@@ -232,7 +221,7 @@ describe('Booking Flow — Full Agent Loop', () => {
 
     expect(turn2.type).toBe('response');
     expect((turn2 as any).content).toContain('9:00 AM');
-    expect(mockCheckAvailability).toHaveBeenCalledWith('session-booking-test', '2026-04-07', '2026-04-08', undefined);
+    expect(mockCheckAvailability).toHaveBeenCalledWith('session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined);
 
     // Turn 3: User picks 10am and gives info. LLM re-verifies availability then books.
     // The precondition requires check_availability in the SAME turn before create_booking.
@@ -300,6 +289,7 @@ describe('Booking Flow — Full Agent Loop', () => {
       undefined,
       undefined,
       undefined,
+      { customerAddress: undefined, customerPhone: undefined, durationMin: undefined },
     );
   });
 

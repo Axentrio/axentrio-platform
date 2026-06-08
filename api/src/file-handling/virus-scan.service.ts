@@ -13,7 +13,11 @@
 import { createConnection } from 'net';
 import { Readable } from 'stream';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import NodeClam from 'clamscan';
+// `clamscan` is an OPTIONAL native dep, absent in dev and in deployments without
+// ClamAV. It is require()'d lazily in initializeClamScan() (only reached when
+// scanning is enabled), so importing this module never fails when clamscan isn't
+// installed — otherwise the whole upload/scan path (widget + channel) breaks at
+// import time and files never leave 'pending'.
 import { config as appConfig } from '../config/environment';
 import { logger } from '../utils/logger';
 
@@ -80,7 +84,7 @@ const DEFAULT_CONFIG: VirusScanConfig = {
 export class VirusScanService {
   private config: VirusScanConfig;
   private s3Client: S3Client;
-  private clamscan: NodeClam | null = null;
+  private clamscan: unknown = null;
   private scanCache: Map<string, { result: ScanResult; expiresAt: Date }> = new Map();
   private quarantineRecords: Map<string, QuarantineRecord> = new Map();
   private healthStatus: ClamAVHealth = {
@@ -117,6 +121,9 @@ export class VirusScanService {
 
   private async initializeClamScan(): Promise<void> {
     try {
+      // Lazy require — only loaded when scanning is enabled (CLAMAV_HOST set).
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const NodeClam = require('clamscan');
       this.clamscan = await new NodeClam().init({
         removeInfected: false,
         quarantineInfected: false,

@@ -126,6 +126,7 @@ describe('Booking Service (internal dispatcher)', () => {
         '2026-04-01',
         '2026-04-02',
         undefined,
+        undefined,
       );
     });
 
@@ -140,6 +141,7 @@ describe('Booking Service (internal dispatcher)', () => {
         expect.any(Object),
         '2026-04-01',
         '2026-04-02',
+        undefined,
         undefined,
       );
     });

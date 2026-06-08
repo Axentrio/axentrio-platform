@@ -61,10 +61,11 @@ export async function checkAvailability(
   sessionId: string,
   startDate: string,
   endDate: string,
-  serviceId?: string
+  serviceId?: string,
+  durationMin?: number
 ) {
   const ctx = await resolveContext(sessionId);
-  return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId);
+  return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId, durationMin);
 }
 
 export async function createBooking(

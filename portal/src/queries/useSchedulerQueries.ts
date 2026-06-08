@@ -54,6 +54,8 @@ export interface Service {
   onlineBookable: boolean;
   durationMode: DurationMode;
   durationMin: number;
+  minDurationMin?: number | null;
+  maxDurationMin?: number | null;
   bufferBeforeMin: number;
   bufferAfterMin: number;
   minNoticeMin: number;

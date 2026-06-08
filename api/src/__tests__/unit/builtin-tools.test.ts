@@ -140,7 +140,7 @@ describe('CheckAvailabilityTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(slots);
-    expect(mockCheckAvailability).toHaveBeenCalledWith('sess-1', '2026-04-01', '2026-04-07', undefined);
+    expect(mockCheckAvailability).toHaveBeenCalledWith('sess-1', '2026-04-01', '2026-04-07', undefined, undefined);
   });
 
   it('execute returns success=false with error on failure', async () => {
@@ -185,8 +185,7 @@ describe('CreateBookingTool', () => {
       undefined,
       undefined,
       undefined,
-      { customerAddress: undefined, customerPhone: undefined }
-    );
+      { customerAddress: undefined, customerPhone: undefined, durationMin: undefined }    );
   });
 
   it('passes notes when provided', async () => {
@@ -207,8 +206,7 @@ describe('CreateBookingTool', () => {
       'Need consultation',
       undefined,
       undefined,
-      { customerAddress: undefined, customerPhone: undefined }
-    );
+      { customerAddress: undefined, customerPhone: undefined, durationMin: undefined }    );
   });
 
   it('execute returns success=false with error on failure', async () => {

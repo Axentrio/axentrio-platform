@@ -290,6 +290,48 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('count(*)'))).toBe(false);
   });
+
+  // ── Duration modes (P5c) ───────────────────────────────────────────────────
+
+  const RANGE_SERVICE = { ...EVENT_TYPE, durationMode: 'range', minDurationMin: 30, maxDurationMin: 90 };
+
+  it('persists booked_duration_min = service.durationMin for a fixed service', async () => {
+    await provider.createBooking(ctx, 'idem-dur-fixed', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect((insert![1] as any[]).at(-1)).toBe(30); // booked_duration_min last
+  });
+
+  it('books a range service at the chosen 60-min duration', async () => {
+    serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    const res = await provider.createBooking(
+      ctx, 'idem-dur-60', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { durationMin: 60 }
+    );
+    expect(res.success).toBe(true);
+    expect(res.booking.endTime).toBe('2026-06-10T08:00:00.000Z'); // start + 60min
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect((insert![1] as any[]).at(-1)).toBe(60);
+  });
+
+  it('defaults a range service to minDurationMin when no duration is given', async () => {
+    serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    const res = await provider.createBooking(ctx, 'idem-dur-def', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z'); // start + 30 (min)
+  });
+
+  it('rejects DURATION_OUT_OF_RANGE for a range service when the chosen length is outside bounds', async () => {
+    serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    await expect(
+      provider.createBooking(ctx, 'idem-dur-oob', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { durationMin: 120 })
+    ).rejects.toMatchObject({ code: 'DURATION_OUT_OF_RANGE' });
+  });
+
+  it('falls back to fixed durationMin for an invalid range config (min>max)', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, durationMode: 'range', minDurationMin: 90, maxDurationMin: 30 }]);
+    const res = await provider.createBooking(ctx, 'idem-dur-bad', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { durationMin: 60 });
+    expect(res.success).toBe(true);
+    expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z'); // fixed 30
+  });
 });
 
 describe('InternalProvider.requestAppointment (P2a)', () => {
@@ -395,7 +437,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
     // createRequest column tail: …, intake_answers, customer_address, customer_phone
-    const intakeParam = params[params.length - 3];
+    const intakeParam = params[params.length - 4];
     const parsed = JSON.parse(intakeParam);
     expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
   });
@@ -408,7 +450,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    expect(params[params.length - 3]).toBeNull(); // intake_answers (before address, phone)
+    expect(params[params.length - 4]).toBeNull(); // intake_answers (before address, phone)
   });
 
   // ── Owner notification email (P2b) ─────────────────────────────────────────
@@ -466,7 +508,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const params = insert![1] as any[];
-    expect(params[params.length - 2]).toBe('221B Baker Street'); // customer_address (trimmed)
-    expect(params[params.length - 1]).toBe('+44 20 7946 0000'); // customer_phone
+    expect(params[params.length - 3]).toBe('221B Baker Street'); // customer_address
+    expect(params[params.length - 2]).toBe('+44 20 7946 0000'); // customer_phone
   });
 });

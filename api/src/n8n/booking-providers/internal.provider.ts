@@ -131,6 +131,54 @@ async function enforceServiceDayCapacity(
   }
 }
 
+/** True only when the service is configured for a variable duration with a valid range. */
+function hasValidRange(service: ServiceType): boolean {
+  if (service.durationMode !== 'range' && service.durationMode !== 'ai') return false;
+  const { minDurationMin: min, maxDurationMin: max } = service;
+  return !!min && !!max && min > 0 && max > 0 && min <= max;
+}
+
+/**
+ * P5c — resolve the effective booked length (create authority, THROWS on violation).
+ * 'fixed' (or an invalid range config) → service.durationMin. 'range'/'ai' → the
+ * agent-supplied minutes, defaulting to minDurationMin when absent; out of
+ * [min,max] → DURATION_OUT_OF_RANGE (recoverable, never silently clamped).
+ */
+function resolveDuration(service: ServiceType, requestedDurationMin?: number): number {
+  if (!hasValidRange(service)) {
+    if (service.durationMode === 'range' || service.durationMode === 'ai') {
+      logger.warn('[Booking] invalid duration range config — treating as fixed', {
+        serviceId: service.id,
+        min: service.minDurationMin,
+        max: service.maxDurationMin,
+      });
+    }
+    return service.durationMin;
+  }
+  const min = service.minDurationMin as number;
+  const max = service.maxDurationMin as number;
+  const effective = requestedDurationMin ?? min; // absent → conservative shortest job
+  if (effective < min || effective > max) {
+    throw new BookingError("Requested duration is outside this service's allowed range", 'DURATION_OUT_OF_RANGE', 400);
+  }
+  return effective;
+}
+
+/**
+ * P5c — lenient duration for AVAILABILITY (never throws): a within-bounds requested
+ * value when known, else minDurationMin (shortest plausible job). The create path is
+ * the authority that rejects an out-of-range request.
+ */
+function effectiveDurationForAvailability(service: ServiceType, requestedDurationMin?: number): number {
+  if (!hasValidRange(service)) return service.durationMin;
+  const min = service.minDurationMin as number;
+  const max = service.maxDurationMin as number;
+  if (typeof requestedDurationMin === 'number' && requestedDurationMin >= min && requestedDurationMin <= max) {
+    return requestedDurationMin;
+  }
+  return min;
+}
+
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
   private async loadRule(botId: string): Promise<AvailabilityRule> {
@@ -224,15 +272,19 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     startDate: string,
     endDate: string,
-    serviceId?: string
+    serviceId?: string,
+    durationMin?: number
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
     const { rangeStart, rangeEnd } = this.normalizeRange(startDate, endDate);
     const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
+    // P5c: for a range/ai service, fit slots to the chosen length when known, else the
+    // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
+    const availDuration = effectiveDurationForAvailability(service, durationMin);
     const slots = computeSlots({
       rule,
-      eventType: service,
+      eventType: { ...service, durationMin: availDuration },
       rangeStart,
       rangeEnd,
       now: new Date(),
@@ -335,12 +387,14 @@ export class InternalProvider implements BookingProvider {
       return this.toResult(existing, true);
     }
 
-    // 2. Compute times.
+    // 2. Compute times. P5c: effective length depends on durationMode (range/ai use
+    //    the agent-supplied minutes; fixed ignores it). Throws DURATION_OUT_OF_RANGE.
     const start = new Date(startTime);
     if (Number.isNaN(start.getTime())) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
-    const end = new Date(start.getTime() + service.durationMin * 60_000);
+    const effectiveDuration = resolveDuration(service, extras?.durationMin);
+    const end = new Date(start.getTime() + effectiveDuration * 60_000);
 
     // P3: normalize intake answers against THIS resolved service (the row's real service).
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
@@ -348,7 +402,7 @@ export class InternalProvider implements BookingProvider {
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
     if (service.bookingMode === 'request') {
-      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras);
+      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras, effectiveDuration);
     }
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
@@ -367,7 +421,8 @@ export class InternalProvider implements BookingProvider {
     );
     const offered = computeSlots({
       rule,
-      eventType: service,
+      // P5c: validate the slot against the EFFECTIVE length (a longer job must still fit).
+      eventType: { ...service, durationMin: effectiveDuration },
       rangeStart: start.toISOString(),
       rangeEnd: new Date(start.getTime() + 1000).toISOString(),
       now: new Date(),
@@ -392,8 +447,8 @@ export class InternalProvider implements BookingProvider {
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
-              customer_address, customer_phone)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+              customer_address, customer_phone, booked_duration_min)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -413,6 +468,7 @@ export class InternalProvider implements BookingProvider {
             intakeJson ? JSON.stringify(intakeJson) : null,
             contact.address,
             contact.phone,
+            effectiveDuration,
           ]
         );
         return rows[0].id;
@@ -509,7 +565,8 @@ export class InternalProvider implements BookingProvider {
     notes?: string,
     aiSummary?: string,
     intakeAnswers?: unknown,
-    extras?: BookingExtras
+    extras?: BookingExtras,
+    bookedDurationMin?: number
   ): Promise<CreateBookingResult> {
     const bookingRepo = AppDataSource.getRepository(Booking);
     const icsUid = `${uuidv4()}@axentrio`;
@@ -525,8 +582,8 @@ export class InternalProvider implements BookingProvider {
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
-            source_channel, ai_summary, intake_answers, customer_address, customer_phone)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17)
+            source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -546,6 +603,7 @@ export class InternalProvider implements BookingProvider {
           intakeJson ? JSON.stringify(intakeJson) : null,
           contact.address,
           contact.phone,
+          bookedDurationMin ?? null,
         ]
       );
       bookingId = rows[0].id;
@@ -645,9 +703,12 @@ export class InternalProvider implements BookingProvider {
     if (Number.isNaN(start.getTime())) {
       throw new BookingError('Invalid preferred time', 'INVALID_START_TIME', 400);
     }
-    const end = new Date(start.getTime() + service.durationMin * 60_000);
+    // P5c: requests validate the duration BOUNDS (DURATION_OUT_OF_RANGE) but not slot-fit;
+    // the end + persisted length are purely informational for the owner.
+    const effectiveDuration = resolveDuration(service, extras?.durationMin);
+    const end = new Date(start.getTime() + effectiveDuration * 60_000);
 
-    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras);
+    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras, effectiveDuration);
   }
 
   /**
@@ -914,7 +975,10 @@ export class InternalProvider implements BookingProvider {
     if (Number.isNaN(start.getTime())) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
-    const end = new Date(start.getTime() + service.durationMin * 60_000);
+    // P5c: carry the booking's FROZEN length forward (grandfathered — never re-validated
+    // against the service's current bounds). Legacy rows fall back to service.durationMin.
+    const effectiveDuration = booking.bookedDurationMin ?? service.durationMin;
+    const end = new Date(start.getTime() + effectiveDuration * 60_000);
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
@@ -928,7 +992,7 @@ export class InternalProvider implements BookingProvider {
     );
     const offered = computeSlots({
       rule,
-      eventType: service,
+      eventType: { ...service, durationMin: effectiveDuration },
       rangeStart: start.toISOString(),
       rangeEnd: new Date(start.getTime() + 1000).toISOString(),
       now: new Date(),

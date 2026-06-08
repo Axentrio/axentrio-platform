@@ -93,6 +93,8 @@ export interface BookingExtras {
   customerAddress?: string;
   /** P5a — required when service.customerLocationRequired (a callback phone). */
   customerPhone?: string;
+  /** P5c — chosen/estimated length for a range/ai service (ignored for fixed). */
+  durationMin?: number;
 }
 
 export interface BookingProvider {
@@ -103,7 +105,8 @@ export interface BookingProvider {
     ctx: BookingContext,
     startDate: string,
     endDate: string,
-    serviceId?: string
+    serviceId?: string,
+    durationMin?: number
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

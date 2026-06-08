@@ -92,6 +92,10 @@ export class Booking {
   @Column({ type: 'varchar', length: 512, name: 'customer_address', nullable: true })
   customerAddress?: string | null;
 
+  /** P5c — frozen effective length in minutes (null only for pre-P5c rows). */
+  @Column({ type: 'int', name: 'booked_duration_min', nullable: true })
+  bookedDurationMin?: number | null;
+
   /** Which channel the booking originated from (widget/messenger/instagram/…). */
   @Column({ type: 'varchar', length: 32, name: 'source_channel', nullable: true })
   sourceChannel?: string | null;

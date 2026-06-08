@@ -15,6 +15,7 @@ import { requireFeature } from '../billing/enforce';
 import {
   updateSchedulerSchema,
   serviceInputSchema,
+  serviceCreateSchema,
   serviceUpdateSchema,
   listBookingsQuerySchema,
   availabilityQuerySchema,
@@ -202,7 +203,7 @@ async function createServiceRow(
 export async function createService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
-  const data = serviceInputSchema.parse(req.body);
+  const data = serviceCreateSchema.parse(req.body);
   const { bot } = await getAnchorBotConfig(tenantId);
   const { intakeQuestions, ...rest } = data;
   // Reconcile intake ids before the shared insert (manual path only; presets carry none).

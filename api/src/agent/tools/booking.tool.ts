@@ -41,6 +41,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
         description:
           'The id of the service to check (from the SERVICES list). Omit only when the business has a single service.',
       },
+      durationMin: {
+        type: 'number',
+        description:
+          "For a service whose duration is a range or AI-estimated (flagged in the SERVICES list), the chosen/estimated length in minutes, so the offered slots fit. Omit for fixed-duration services.",
+      },
     },
     required: ['startDate', 'endDate'],
   };
@@ -52,7 +57,8 @@ export class CheckAvailabilityTool implements ToolAdapter {
         ctx.sessionId,
         args.startDate as string,
         args.endDate as string,
-        args.serviceId as string | undefined
+        args.serviceId as string | undefined,
+        args.durationMin as number | undefined
       );
       return { success: true, data: result };
     } catch (err) {
@@ -102,6 +108,11 @@ export class CreateBookingTool implements ToolAdapter {
         type: 'string',
         description: "The customer's contact phone number. Required only if the SERVICES entry flags 'needs phone'.",
       },
+      durationMin: {
+        type: 'number',
+        description:
+          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes — pass the SAME value you checked availability with. Omit for fixed-duration services.",
+      },
     },
     required: ['startTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -124,6 +135,7 @@ export class CreateBookingTool implements ToolAdapter {
         {
           customerAddress: args.customerAddress as string | undefined,
           customerPhone: args.customerPhone as string | undefined,
+          durationMin: args.durationMin as number | undefined,
         }
       );
 
@@ -235,6 +247,11 @@ export class RequestAppointmentTool implements ToolAdapter {
         type: 'string',
         description: "The customer's contact phone number. Required only if the SERVICES entry flags 'needs phone'.",
       },
+      durationMin: {
+        type: 'number',
+        description:
+          "For a range/AI-duration service (flagged in SERVICES), the chosen/estimated length in minutes. Omit for fixed-duration services.",
+      },
     },
     required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
   };
@@ -255,6 +272,7 @@ export class RequestAppointmentTool implements ToolAdapter {
         {
           customerAddress: args.customerAddress as string | undefined,
           customerPhone: args.customerPhone as string | undefined,
+          durationMin: args.durationMin as number | undefined,
         }
       );
       return { success: true, data: result };

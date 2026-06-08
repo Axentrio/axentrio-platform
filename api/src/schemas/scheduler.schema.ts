@@ -100,8 +100,28 @@ export const serviceInputSchema = z.object({
   intakeQuestions: intakeQuestionsSchema.optional(),
 });
 
-/** Partial for PUT — any subset of fields. */
-export const serviceUpdateSchema = serviceInputSchema.partial();
+/**
+ * P5c — a range/ai duration must carry a valid min ≤ max (the schema validates each
+ * bound independently; this adds the cross-field + presence check). On a partial
+ * update it only fires when `durationMode` is in the payload.
+ */
+const durationRangeRefine = (
+  s: { durationMode?: string; minDurationMin?: number; maxDurationMin?: number },
+  ctx: z.RefinementCtx
+) => {
+  if (s.durationMode !== 'range' && s.durationMode !== 'ai') return;
+  if (s.minDurationMin == null || s.maxDurationMin == null) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['minDurationMin'], message: 'range/ai duration needs minDurationMin and maxDurationMin' });
+  } else if (s.minDurationMin > s.maxDurationMin) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['minDurationMin'], message: 'minDurationMin must be ≤ maxDurationMin' });
+  }
+};
+
+/** Create payload (full object) with the duration cross-field check. */
+export const serviceCreateSchema = serviceInputSchema.superRefine(durationRangeRefine);
+
+/** Partial for PUT — any subset of fields, with the same duration check. */
+export const serviceUpdateSchema = serviceInputSchema.partial().superRefine(durationRangeRefine);
 
 export const availabilityInputSchema = z.object({
   timezone: z.string().min(1).max(64),

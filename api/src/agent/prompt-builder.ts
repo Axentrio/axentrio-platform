@@ -126,7 +126,17 @@ export class PromptBuilder {
           const contact = [s.customerAddressRequired ? 'needs address' : '', s.customerLocationRequired ? 'needs phone' : '']
             .filter(Boolean)
             .join(' · ');
-          const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${s.durationMin} min · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''}`;
+          // P5c: show the duration RANGE for range/ai services (the agent passes durationMin).
+          const isRange =
+            (s.durationMode === 'range' || s.durationMode === 'ai') &&
+            typeof s.minDurationMin === 'number' &&
+            typeof s.maxDurationMin === 'number' &&
+            s.minDurationMin > 0 &&
+            s.maxDurationMin >= s.minDurationMin;
+          const durationLabel = isRange
+            ? `${s.minDurationMin}-${s.maxDurationMin} min (${s.durationMode === 'ai' ? 'AI-estimated' : 'choose length'})`
+            : `${s.durationMin} min`;
+          const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${durationLabel} · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''}`;
           return `${head}${intakeLines(s)}`;
         })
         .join('\n');
@@ -135,6 +145,7 @@ export class PromptBuilder {
       const hasIntake = services.some((s) => intakeLines(s) !== '');
       const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
       const hasCapacity = services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
+      const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
       sections.push(
         `\n## SERVICES (bookable)
 When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
@@ -154,6 +165,11 @@ When the customer wants to book, identify which service they mean and pass its i
           hasCapacity
             ? `
 6. If create_booking returns CAPACITY_REACHED, that service is fully booked for that day — offer the customer the next available day instead; do not retry the same day.`
+            : ''
+        }${
+          hasDuration
+            ? `
+7. For a service shown with a duration RANGE (e.g. "30-90 min"), establish the length FIRST — ask the customer how long they need ("choose length"), or estimate it from the conversation ("AI-estimated") — then pass that as durationMin to check_availability AND the booking tool (same value). If a tool returns DURATION_OUT_OF_RANGE, pick a length within the shown range. If create_booking returns SLOT_UNAVAILABLE for a range service, the chosen length didn't fit that start — offer a different start or a shorter length within range; don't retry the same start+length.`
             : ''
         }
 ${lines}`

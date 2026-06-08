@@ -51,7 +51,10 @@ interface FormState {
   category: string;
   description: string;
   bookingMode: 'auto' | 'request';
+  durationMode: 'fixed' | 'range' | 'ai';
   durationMin: number;
+  minDurationMin: string;
+  maxDurationMin: string;
   bufferBeforeMin: number;
   bufferAfterMin: number;
   minNoticeMin: number;
@@ -74,7 +77,10 @@ const BLANK: FormState = {
   category: '',
   description: '',
   bookingMode: 'auto',
+  durationMode: 'fixed',
   durationMin: 30,
+  minDurationMin: '',
+  maxDurationMin: '',
   bufferBeforeMin: 0,
   bufferAfterMin: 0,
   minNoticeMin: 60,
@@ -98,7 +104,12 @@ function formFromService(s: Service): FormState {
     category: s.category ?? '',
     description: s.description ?? '',
     bookingMode: s.bookingMode,
+    durationMode: s.durationMode ?? 'fixed',
     durationMin: s.durationMin,
+    // Defensive: a range/ai row with null bounds pre-fills from durationMin so the
+    // form never renders blank/NaN and the owner must enter valid bounds before saving.
+    minDurationMin: s.minDurationMin != null ? String(s.minDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
+    maxDurationMin: s.maxDurationMin != null ? String(s.maxDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
     bufferBeforeMin: s.bufferBeforeMin,
     bufferAfterMin: s.bufferAfterMin,
     minNoticeMin: s.minNoticeMin,
@@ -127,7 +138,10 @@ function toInput(f: FormState): ServiceInput {
     category: f.category.trim() || undefined,
     description: f.description.trim() || undefined,
     bookingMode: f.bookingMode,
+    durationMode: f.durationMode,
     durationMin: f.durationMin,
+    minDurationMin: f.durationMode === 'fixed' ? undefined : (f.minDurationMin.trim() === '' ? undefined : Number(f.minDurationMin)),
+    maxDurationMin: f.durationMode === 'fixed' ? undefined : (f.maxDurationMin.trim() === '' ? undefined : Number(f.maxDurationMin)),
     bufferBeforeMin: f.bufferBeforeMin,
     bufferAfterMin: f.bufferAfterMin,
     minNoticeMin: f.minNoticeMin,
@@ -215,8 +229,17 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
 
   const qError = questionsError(form.intakeQuestions);
 
+  // P5c: a range/ai duration needs valid 5 ≤ min ≤ max before save.
+  const durationError =
+    form.durationMode !== 'fixed' &&
+    (() => {
+      const lo = Number(form.minDurationMin);
+      const hi = Number(form.maxDurationMin);
+      return !(lo >= 5 && hi >= 5 && lo <= hi);
+    })();
+
   const save = () => {
-    if (!form.name.trim() || !(form.durationMin >= 5) || qError) return;
+    if (!form.name.trim() || !(form.durationMin >= 5) || qError || durationError) return;
     const input = toInput(form);
     if (editing === 'new') {
       create.mutate(input, { onSuccess: close });
@@ -334,8 +357,34 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
               />
             </div>
 
+            <div>
+              <Label className="text-text-secondary mb-1 block">Duration</Label>
+              <select
+                value={form.durationMode}
+                onChange={(e) => set('durationMode', e.target.value as FormState['durationMode'])}
+                className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
+              >
+                <option value="fixed">Fixed length</option>
+                <option value="range">Customer chooses a length (range)</option>
+                <option value="ai">AI estimates the length (within a range)</option>
+              </select>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
-              <NumberField label="Duration (min)" value={form.durationMin} onChange={(v) => set('durationMin', v)} min={5} />
+              {form.durationMode === 'fixed' ? (
+                <NumberField label="Duration (min)" value={form.durationMin} onChange={(v) => set('durationMin', v)} min={5} />
+              ) : (
+                <>
+                  <div>
+                    <Label className="text-text-secondary mb-1 block">Min (min)</Label>
+                    <Input type="number" min={5} value={form.minDurationMin} onChange={(e) => set('minDurationMin', e.target.value)} />
+                  </div>
+                  <div>
+                    <Label className="text-text-secondary mb-1 block">Max (min)</Label>
+                    <Input type="number" min={5} value={form.maxDurationMin} onChange={(e) => set('maxDurationMin', e.target.value)} />
+                  </div>
+                </>
+              )}
               <NumberField label="Buffer before" value={form.bufferBeforeMin} onChange={(v) => set('bufferBeforeMin', v)} min={0} />
               <NumberField label="Buffer after" value={form.bufferAfterMin} onChange={(v) => set('bufferAfterMin', v)} min={0} />
             </div>
@@ -417,11 +466,14 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
             </label>
           </div>
 
+          {durationError && (
+            <p className="text-xs text-red-400">Enter a valid duration range (5 ≤ min ≤ max).</p>
+          )}
           <DialogFooter>
             <Button variant="outline" type="button" onClick={close}>
               Cancel
             </Button>
-            <Button type="button" onClick={save} disabled={saving || !form.name.trim() || !!qError}>
+            <Button type="button" onClick={save} disabled={saving || !form.name.trim() || !!qError || durationError}>
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
               {editing === 'new' ? 'Add service' : 'Save'}
             </Button>

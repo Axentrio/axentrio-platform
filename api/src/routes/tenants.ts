@@ -22,6 +22,7 @@ import { inviteToClerkOrganization, revokeAndResendClerkInvitation, removeFromCl
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
+import { invalidate } from '../utils/cache';
 import { releaseAgentSessions } from '../utils/releaseAgentSessions';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { requireFeature } from '../billing/enforce';
@@ -545,6 +546,10 @@ router.post(
 
     tenant.webhookSecret = crypto.randomBytes(32).toString('hex');
     await tenantRepository.save(tenant);
+
+    // Drop the cached secret (see n8n/webhook.controller verifyPerTenantSecret)
+    // so inbound webhooks validate against the new secret immediately.
+    await invalidate(`tenant:webhook-secret:${tenantId}`);
 
     logger.info('Webhook secret regenerated', { tenantId });
 

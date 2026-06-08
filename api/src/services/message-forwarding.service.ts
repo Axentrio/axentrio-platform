@@ -9,6 +9,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
+import { cached } from '../utils/cache';
 import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { BotSettings } from '../database/entities/Bot';
 import { isCalcomAvailableForTier } from '../billing/calcom-access';
@@ -136,12 +137,18 @@ export function buildTenantAiConfig(
 
 export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<KnowledgeBaseMetadata> {
   try {
-    const result = await AppDataSource.query(
-      `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
-      [tenantId]
-    );
-    const docCount = result[0]?.count || 0;
-    return { enabled: docCount > 0, documentCount: docCount };
+    // Cached per tenant (kb:meta:<tenantId>) — this COUNT runs on every
+    // forwarded message. The count only moves when a document finishes indexing
+    // or is removed, so a short TTL with no explicit invalidation is fine: a
+    // freshly-indexed doc becomes visible within the TTL.
+    return await cached(`kb:meta:${tenantId}`, 60, async () => {
+      const result = await AppDataSource.query(
+        `SELECT COUNT(*)::int AS count FROM knowledge_documents WHERE "tenantId" = $1 AND status = 'indexed'`,
+        [tenantId]
+      );
+      const docCount = result[0]?.count || 0;
+      return { enabled: docCount > 0, documentCount: docCount };
+    });
   } catch {
     return { enabled: false, documentCount: 0 };
   }

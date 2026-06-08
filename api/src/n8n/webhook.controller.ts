@@ -17,6 +17,7 @@ import { FallbackService } from './fallback.service';
 import { inboundMessageSchema, inboundMessageValidationOptions } from './schemas';
 import { InboundMessage, WebhookResponse, HandoffPayload, FileRequestPayload } from './types';
 import { validateJsonSchema } from '../utils/validation';
+import { cached } from '../utils/cache';
 import { MetricsService } from '../services/metrics.service';
 import { WebhookDeliveryLog } from '../database/entities/WebhookDeliveryLog';
 import { sendSuccess } from '../utils/response';
@@ -421,16 +422,26 @@ export class WebhookController {
     }
 
     try {
-      const tenantRepo = AppDataSource.getRepository(Tenant);
-      const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+      // Cached per tenant (tenant:webhook-secret:<tenantId>) — this lookup runs
+      // on every inbound webhook. Invalidated on secret rotation in
+      // routes/tenants.ts (/me/webhook-secret/regenerate); the 60s TTL is the
+      // backstop. We cache only `{ found, secret }` so a not-found vs no-secret
+      // tenant keep their distinct behaviour below.
+      const lookup = await cached(`tenant:webhook-secret:${tenantId}`, 60, async () => {
+        const tenant = await AppDataSource.getRepository(Tenant).findOne({
+          where: { id: tenantId },
+          select: ['id', 'webhookSecret'],
+        });
+        return { found: !!tenant, secret: tenant?.webhookSecret ?? null };
+      });
 
-      if (!tenant) {
+      if (!lookup.found) {
         logger.warn(`Tenant not found for webhook verification: ${tenantId}`);
         return false;
       }
 
       // If no webhookSecret set on tenant, reject in production, warn in dev
-      if (!tenant.webhookSecret) {
+      if (!lookup.secret) {
         if (config.server.isProduction) {
           logger.warn(`Tenant ${tenantId} has no webhookSecret configured — rejecting webhook in production`);
           return false;
@@ -442,7 +453,7 @@ export class WebhookController {
       const providedSecret = req.headers['x-webhook-secret'] as string ||
                             req.headers['authorization']?.replace('Bearer ', '');
 
-      return this.timingSafeCompare(providedSecret || '', tenant.webhookSecret);
+      return this.timingSafeCompare(providedSecret || '', lookup.secret);
     } catch (error) {
       logger.error('Error during per-tenant secret verification', error);
       return false;

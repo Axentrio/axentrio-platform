@@ -147,7 +147,10 @@ beforeEach(() => {
 // → s3Send and the orchestration stay real.
 
 function makeService(config?: Record<string, unknown>) {
-  const svc = new UploadService(config as any);
+  // Pass bucketName via config so `isConfigured()` doesn't depend on the
+  // import-time AWS_S3_BUCKET (absent in CI). The "unconfigured" test overrides
+  // it back to '' via its own config arg.
+  const svc = new UploadService({ bucketName: 'test-bucket', ...config } as any);
   vi.spyOn(svc, 'getSession').mockResolvedValue(undefined);
   vi.spyOn(svc as any, 'persistSession').mockResolvedValue(undefined);
   vi.spyOn(svc, 'generatePublicUrl').mockResolvedValue('https://public/url');

@@ -9,6 +9,7 @@ const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();
 const managerQuery = vi.fn();
 const bookingRefFind = vi.fn();
+const chatSessionFindOne = vi.fn();
 const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
 
 vi.mock('../../database/data-source', () => ({
@@ -20,6 +21,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
       if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
+      if (name === 'ChatSession') return { findOne: chatSessionFindOne };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -61,7 +63,7 @@ vi.mock('../../scheduler/calendar-provider', () => {
 import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
 
 const ctx: any = {
-  session: { id: 'sess-1' },
+  session: { id: 'sess-1', visitorId: 'psid-1' },
   tenant: { id: 'ten-1' },
   bot: { id: 'bot-1' },
   botSettings: { ai: { supportEmail: 'owner@axentrio.be' } },
@@ -115,6 +117,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(confirmedBooking());
     bookingRefFind.mockResolvedValue([]); // no calendar ref by default
+    chatSessionFindOne.mockResolvedValue(null); // owning session not found by default
     providerGetBusy.mockResolvedValue(null); // no external busy by default
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('lower(blocked_range)')) return []; // busy
@@ -192,9 +195,19 @@ describe('InternalProvider reschedule / cancel / list', () => {
   // ── H1: cross-customer IDOR within the same tenant ────────────────────────
   it("rejects reschedule/cancel of another customer's booking in the same tenant (different session → 404)", async () => {
     bookingFindOne.mockResolvedValue({ ...confirmedBooking(), sessionId: 'other-customer-session' });
+    chatSessionFindOne.mockResolvedValue({ id: 'other-customer-session', visitorId: 'psid-OTHER' });
     await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
     await expect(provider.cancelBooking(ctx, 'bk-1')).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('a returning customer (new session, SAME visitor identity) can manage their booking', async () => {
+    // e.g. a Messenger/IG user back the next day: new session, same PSID. The booking
+    // was made in an earlier session but shares the caller's stable visitor identity.
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), sessionId: 'earlier-session' });
+    chatSessionFindOne.mockResolvedValue({ id: 'earlier-session', visitorId: 'psid-1' });
+    const res = await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(res.success).toBe(true);
   });
 
   it('an admin context (portal / signed manage-link) may manage a booking from any session', async () => {
@@ -203,14 +216,13 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(res.success).toBe(true);
   });
 
-  it("listBookings is scoped to the caller's own session", async () => {
-    bookingFind.mockResolvedValue([]);
-    await provider.listBookings(ctx, 'ada@example.com');
-    expect(bookingFind).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ sessionId: 'sess-1', tenantId: 'ten-1', botId: 'bot-1' }),
-      })
-    );
+  it('listBookings falls back to the current session when there is no visitor id', async () => {
+    const ctxNoVisitor = { ...ctx, session: { id: 'sess-1' } };
+    bookingQuery.mockResolvedValueOnce([]);
+    await provider.listBookings(ctxNoVisitor as any, 'ada@example.com');
+    const call = bookingQuery.mock.calls.at(-1)!;
+    expect(String(call[0])).not.toMatch(/JOIN chat_sessions/);
+    expect(call[1]).toContain('sess-1');
   });
 
   it('cancels a confirmed booking and sends a CANCEL invite', async () => {
@@ -228,11 +240,16 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(logSave).not.toHaveBeenCalled();
   });
 
-  it('lists upcoming confirmed bookings for an attendee', async () => {
-    bookingFind.mockResolvedValue([confirmedBooking()]);
+  it('lists confirmed bookings scoped to the caller\'s visitor identity (across sessions)', async () => {
+    bookingQuery.mockResolvedValueOnce([
+      { id: 'bk-1', start_utc: new Date('2026-06-10T07:00:00Z'), end_utc: new Date('2026-06-10T07:30:00Z'), attendee_name: 'Ada', attendee_email: 'ada@example.com', status: 'confirmed' },
+    ]);
     const res = await provider.listBookings(ctx, 'ada@example.com');
     expect(res.bookings).toHaveLength(1);
     expect(res.bookings[0]).toMatchObject({ id: 'bk-1', status: 'confirmed' });
+    const call = bookingQuery.mock.calls.at(-1)!;
+    expect(String(call[0])).toMatch(/JOIN chat_sessions/);
+    expect(call[1]).toContain('psid-1'); // scoped by the stable visitor id, not the session
   });
 
   // ── accept / decline request ──────────────────────────────────────────────

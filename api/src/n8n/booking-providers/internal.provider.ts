@@ -31,6 +31,7 @@ import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email'
 import { scheduleReminders, cancelReminders } from './reminders';
 import { resolveCalendarProvider, providerFor } from '../../scheduler/calendar-provider';
 import { BookingReference } from '../../database/entities/BookingReference';
+import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
@@ -1240,25 +1241,42 @@ export class InternalProvider implements BookingProvider {
   }
 
   async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
-    const bookings = await AppDataSource.getRepository(Booking).find({
-      where: {
-        // listBookings is the customer/widget path only (admin uses
-        // adminListBookings); scope to the caller's own session so a visitor
-        // can't enumerate another customer's bookings by typing their email.
-        tenantId: ctx.tenant.id,
-        botId: ctx.bot.id,
-        sessionId: ctx.session.id,
-        attendeeEmail,
-        status: 'confirmed',
-      },
-      order: { startUtc: 'ASC' },
-    });
+    // Customer/widget path only (admin uses adminListBookings). Scope to the caller's
+    // STABLE visitor identity on this bot (channel PSID / persisted widget visitorId)
+    // so a returning customer sees the bookings they made in earlier sessions too —
+    // never another visitor's. Falls back to the current session when no visitor id.
+    const visitor = ctx.session.visitorId;
+    const rows: Array<{
+      id: string;
+      start_utc: Date;
+      end_utc: Date;
+      attendee_name: string | null;
+      attendee_email: string | null;
+      status: string;
+    }> = visitor
+      ? await AppDataSource.getRepository(Booking).query(
+          `SELECT b.id, b.start_utc, b.end_utc, b.attendee_name, b.attendee_email, b.status
+             FROM chatbot_bookings b
+             JOIN chat_sessions s ON s.id = b.session_id
+            WHERE b.tenant_id = $1 AND b.bot_id = $2 AND b.status = 'confirmed'
+              AND s.visitor_id = $3 AND b.attendee_email = $4
+            ORDER BY b.start_utc ASC`,
+          [ctx.tenant.id, ctx.bot.id, visitor, attendeeEmail]
+        )
+      : await AppDataSource.getRepository(Booking).query(
+          `SELECT id, start_utc, end_utc, attendee_name, attendee_email, status
+             FROM chatbot_bookings
+            WHERE tenant_id = $1 AND bot_id = $2 AND status = 'confirmed'
+              AND session_id = $3 AND attendee_email = $4
+            ORDER BY start_utc ASC`,
+          [ctx.tenant.id, ctx.bot.id, ctx.session.id, attendeeEmail]
+        );
     return {
-      bookings: bookings.map((b) => ({
+      bookings: rows.map((b) => ({
         id: b.id,
-        startTime: b.startUtc.toISOString(),
-        endTime: b.endUtc.toISOString(),
-        attendee: { name: b.attendeeName ?? undefined, email: b.attendeeEmail ?? undefined },
+        startTime: new Date(b.start_utc).toISOString(),
+        endTime: new Date(b.end_utc).toISOString(),
+        attendee: { name: b.attendee_name ?? undefined, email: b.attendee_email ?? undefined },
         status: b.status,
       })),
     };
@@ -1270,14 +1288,31 @@ export class InternalProvider implements BookingProvider {
     if (!booking || booking.tenantId !== ctx.tenant.id || booking.botId !== ctx.bot.id) {
       throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
     }
-    // Customer/widget path: a visitor may only manage a booking created in their
-    // OWN chat session — never another customer's, even within the same tenant
-    // (the attendee email is an unverified tool arg). The admin/portal + signed
-    // manage-link paths (isAdmin) may manage any booking in the tenant.
-    if (!ctx.isAdmin && booking.sessionId !== ctx.session.id) {
+    // Customer/widget path: a visitor may manage a booking from their own session
+    // OR an earlier session sharing their STABLE visitor identity on this bot
+    // (channel = the platform PSID from Meta's signed webhook; widget = the
+    // persisted visitorId). A different identity (different PSID/visitorId) is still
+    // walled off, even within the same tenant — the attendee email is an unverified
+    // tool arg. The admin/portal + signed manage-link paths (isAdmin) bypass this.
+    if (!ctx.isAdmin && !(await this.callerOwnsBooking(booking, ctx))) {
       throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
     }
     return booking;
+  }
+
+  /** True when the customer caller owns this booking: their own session, or an
+   *  earlier session with the same stable visitor identity on the same bot (channel
+   *  PSID / persisted widget visitorId). Bot ownership is already checked by the
+   *  caller (loadOwned). */
+  private async callerOwnsBooking(booking: Booking, ctx: BookingContext): Promise<boolean> {
+    if (booking.sessionId && booking.sessionId === ctx.session.id) return true;
+    const visitor = ctx.session.visitorId;
+    if (!visitor || !booking.sessionId) return false;
+    const owning = await AppDataSource.getRepository(ChatSession).findOne({
+      where: { id: booking.sessionId },
+      select: ['id', 'visitorId'],
+    });
+    return !!owning?.visitorId && owning.visitorId === visitor;
   }
 
   async rescheduleBooking(ctx: BookingContext, bookingId: string, newStartTime: string): Promise<RescheduleResult> {

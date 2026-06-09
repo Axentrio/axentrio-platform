@@ -9,6 +9,7 @@ import { getProvider } from '../llm/provider-factory';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
+import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { Tenant } from '../database/entities/Tenant';
 import { ServiceType } from '../database/entities/ServiceType';
 import { AppDataSource } from '../database/data-source';
@@ -102,7 +103,18 @@ export class AgentService {
             order: { sortOrder: 'ASC' },
           })
         : [];
-      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, services);
+      // Pre-fill the customer's name from their messaging-channel profile (channel
+      // sessions only) so the agent can confirm it rather than ask cold. Widget
+      // sessions have no binding/profile name.
+      let customerName: string | undefined;
+      if (session.channel && session.channel !== 'widget') {
+        const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
+          where: { sessionId: session.id },
+          select: { externalUserName: true },
+        });
+        customerName = binding?.externalUserName ?? undefined;
+      }
+      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, services, customerName);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

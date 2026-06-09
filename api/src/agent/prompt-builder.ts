@@ -72,7 +72,8 @@ export class PromptBuilder {
     botSettings: BotSettings,
     tools: ToolAdapter[],
     kbContext?: string,
-    services?: ServiceType[]
+    services?: ServiceType[],
+    customerName?: string
   ): string {
     const ai = botSettings.ai;
     const brandVoice = ai?.brandVoice;
@@ -86,6 +87,16 @@ export class PromptBuilder {
     sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);
     if (ai && brandVoice?.customInstructions) {
       sections.push(substituteVariables(brandVoice.customInstructions, ai, { businessName: tenant.name }));
+    }
+
+    // Customer identity known from the messaging channel (e.g. WhatsApp profile
+    // name). Lets the agent greet/book by name and CONFIRM it instead of asking
+    // for the name from scratch. It's a self-set profile name, so confirm, don't
+    // assume — and defer to any different name the customer gives.
+    if (customerName && customerName.trim()) {
+      sections.push(
+        `\n## CUSTOMER\nThe customer's name from their messaging profile is "${customerName.trim()}". Greet them by it when natural, and when booking use it as their name but confirm it first (e.g. "I'll put this under ${customerName.trim()} — is that right?") rather than asking for their name from scratch. If they give a different name, use that instead.`
+      );
     }
 
     // Guardrails
@@ -154,7 +165,7 @@ export class PromptBuilder {
       const hasFileUpload = services.some((s) => s.fileUploadAllowed);
       sections.push(
         `\n## SERVICES (bookable)
-When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Before you call create_booking or request_appointment, make sure you have the customer's name and a specific date/time (their preferred date/time for a request) — ASK for either if you don't have it, and NEVER invent a name or time. Pass exactly what the customer gave you, and confirm that same time back to them — never state a time you didn't capture. Also ask for the customer's email so we can send a calendar invite, but if they don't have one, proceed without it — never invent an email. Then follow these rules IN ORDER:
+When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Before you call create_booking or request_appointment, make sure you have the customer's name and a specific date/time (their preferred date/time for a request) — ASK for either if you don't have it (if the customer's name is already known from their profile above, confirm it rather than asking from scratch), and NEVER invent a name or time. Pass exactly what the customer gave you, and confirm that same time back to them — never state a time you didn't capture. Also ask for the customer's email so we can send a calendar invite, but if they don't have one, proceed without it — never invent an email. Then follow these rules IN ORDER:
 1. If their request matches no service or is ambiguous, ask a disambiguating question FIRST — do not confirm and do not capture a request until you know the service. Never guess.
 2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
 3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.${

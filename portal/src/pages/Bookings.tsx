@@ -109,9 +109,13 @@ export default function Bookings() {
 
   // First-run owners (no services configured yet) land on Setup so they're guided
   // to connect a calendar + add services; configured owners land on Appointments.
-  // Gate the Tabs render on the services query so the uncontrolled defaultValue is
-  // computed from real data (not the initial undefined).
+  // Returning from a calendar OAuth callback (?google=/?outlook=) also opens Setup
+  // so the just-connected calendar + its toast are visible (SchedulerSettings, which
+  // shows the toast + strips the param, lives in that tab). Gate the Tabs render on
+  // the services query so the uncontrolled defaultValue is computed from real data.
   const hasServices = (servicesData?.services?.length ?? 0) > 0;
+  const returnedFromCalendarOAuth = /[?&](google|outlook)=/.test(window.location.search);
+  const defaultTab = returnedFromCalendarOAuth || !hasServices ? 'setup' : 'appointments';
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
@@ -124,7 +128,7 @@ export default function Bookings() {
           <Loader2 className="w-6 h-6 animate-spin text-text-secondary" />
         </div>
       ) : (
-        <Tabs defaultValue={hasServices ? 'appointments' : 'setup'} className="space-y-4">
+        <Tabs defaultValue={defaultTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="appointments">Appointments</TabsTrigger>
             <TabsTrigger value="setup">Setup</TabsTrigger>

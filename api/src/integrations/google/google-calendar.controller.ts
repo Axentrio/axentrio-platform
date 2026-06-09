@@ -47,7 +47,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
   const portal = portalBase();
   const { code, state, error } = req.query as Record<string, string | undefined>;
   if (error || !code || !state) {
-    return void res.redirect(`${portal}/settings?google=error`);
+    return void res.redirect(`${portal}/bookings?google=error`);
   }
   try {
     const { tenantId, botId } = validateState(state);
@@ -56,12 +56,12 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
     await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
     await exchangeAndStore(tenantId, botId, code);
-    return void res.redirect(`${portal}/settings?google=connected`);
+    return void res.redirect(`${portal}/bookings?google=connected`);
   } catch (err) {
     logger.error('[Google] OAuth callback failed', {
       error: err instanceof Error ? err.message : String(err),
     });
-    return void res.redirect(`${portal}/settings?google=error`);
+    return void res.redirect(`${portal}/bookings?google=error`);
   }
 }
 

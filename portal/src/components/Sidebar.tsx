@@ -21,6 +21,7 @@ import {
   Bot,
   Share2,
   UserPlus,
+  Users,
   Calendar,
   Gauge,
   Settings,
@@ -68,6 +69,12 @@ interface MenuItem {
   requiredFeature?: keyof PlanFeatures;
   /** Tier that unlocks `requiredFeature`. Drives the badge + tooltip copy. */
   requiredTier?: RequiredTier;
+  /**
+   * Roles allowed to see this item. When omitted, the item is visible to
+   * everyone. Mirrors the `<SupervisorRoute>` guard on the actual route — the
+   * sidebar link is hidden for roles that would be bounced anyway.
+   */
+  roles?: UserRole[];
 }
 
 interface AdminMenuItem {
@@ -96,9 +103,11 @@ const menuItems: MenuItem[] = [
   },
   // 6. Success Meter — sidebar alias for Insights/Analytics (Deviation 5)
   { path: '/success-meter', labelKey: 'nav.successMeter', icon: Gauge },
-  // 7. General Settings — all roles
+  // 7. Team — admins & supervisors only (route guarded by <SupervisorRoute>)
+  { path: '/team', labelKey: 'nav.team', icon: Users, roles: ['super_admin', 'admin', 'supervisor'] },
+  // 8. General Settings — all roles
   { path: '/settings', labelKey: 'nav.settings', icon: Settings },
-  // 8. Help & FAQ — all roles
+  // 9. Help & FAQ — all roles
   { path: '/help', labelKey: 'nav.helpFaq', icon: HelpCircle },
 ];
 
@@ -207,6 +216,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const filteredAdminItems = adminMenuItems.filter((item) => hasAdminAccess(item.roles));
 
+  // Role-gated main-nav items (e.g. Team) hide for roles the route would bounce.
+  // Items without `roles` stay visible to everyone.
+  const filteredMenuItems = menuItems.filter((item) =>
+    item.roles ? hasAdminAccess(item.roles) : true
+  );
+
   return (
     <aside className={cn(
       'flex flex-col w-full h-full bg-surface-0 border-r border-edge',
@@ -283,7 +298,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <nav className="flex-1 px-2 py-4 overflow-y-auto">
         <TooltipProvider>
           <ul className="space-y-1">
-            {menuItems.map((item) => (
+            {filteredMenuItems.map((item) => (
               <li key={item.path}>
                 <SidebarMenuEntry
                   item={item}

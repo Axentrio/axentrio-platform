@@ -121,6 +121,28 @@ function resolveContactFields(service: ServiceType, extras?: BookingExtras): { a
 }
 
 /**
+ * P5a — server-side gate for REQUIRED intake questions, mirroring the
+ * ADDRESS_REQUIRED / PHONE_REQUIRED contact gate. The LLM is told to ask them, but
+ * a model slip must not silently persist a booking missing a required answer.
+ * `normalized` is the output of normalizeIntakeAnswers (keyed by question id).
+ * Recoverable (INTAKE_REQUIRED, 400): the agent re-asks and re-calls the tool.
+ */
+function assertRequiredIntake(service: ServiceType, normalized: Record<string, string> | null): void {
+  const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
+  const required = questions.filter((q) => q && q.required && typeof q.id === 'string');
+  if (!required.length) return;
+  const answers = normalized ?? {};
+  const missing = required.filter((q) => !String(answers[q.id] ?? '').trim());
+  if (missing.length) {
+    throw new BookingError(
+      `Please provide the required intake answer(s): ${missing.map((q) => q.label).join(', ')}`,
+      'INTAKE_REQUIRED',
+      400
+    );
+  }
+}
+
+/**
  * P5b — enforce `maxBookingsPerDay` for a service on the slot's local calendar day.
  * Counts only HELD rows (`status IN ('pending','confirmed')`) for the same service,
  * by `start_utc` in the half-open `[dayStart, nextDay)` window of `timezone` (Luxon,
@@ -414,6 +436,7 @@ export class InternalProvider implements BookingProvider {
 
     // P3: normalize intake answers against THIS resolved service (the row's real service).
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
+    assertRequiredIntake(service, intakeJson);
 
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
@@ -609,6 +632,7 @@ export class InternalProvider implements BookingProvider {
     const sourceChannel = ctx.session?.channel ?? null;
     // P3: normalize intake answers against this resolved (request-mode) service.
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
+    assertRequiredIntake(service, intakeJson);
     // P5a: required address/phone gate (request path).
     const contact = resolveContactFields(service, extras);
     // P5e: validate + snapshot attached files for the request row too.

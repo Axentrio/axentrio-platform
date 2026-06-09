@@ -157,6 +157,31 @@ describe('InternalProvider.createBooking', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 0 });
   });
 
+  it('rejects INTAKE_REQUIRED when a required intake question is unanswered (M5)', async () => {
+    const svc = { ...EVENT_TYPE, intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true }] };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    await expect(
+      provider.createBooking(ctx, 'idem-intake', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'INTAKE_REQUIRED' });
+  });
+
+  it('books when the required intake question is answered (M5)', async () => {
+    const svc = { ...EVENT_TYPE, intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true }] };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    const res = await provider.createBooking(
+      ctx,
+      'idem-intake-ok',
+      OFFERED_START,
+      { name: 'Ada', email: 'ada@example.com' },
+      undefined,
+      undefined,
+      { 'q-bed': '3' }
+    );
+    expect(res.success).toBe(true);
+  });
+
   it('returns the existing booking on idempotent retry without inserting', async () => {
     bookingFindOne.mockResolvedValue({
       id: 'bk-existing',

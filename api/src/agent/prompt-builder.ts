@@ -160,7 +160,7 @@ When the customer wants to book, identify which service they mean and pass its i
 3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.${
           hasIntake
             ? `
-4. If the chosen service lists "Intake questions", ask any required question the customer hasn't already answered before calling the booking tool (you may ask optional ones too, but never block the booking on them). Pass every answer you have in the tool's intakeAnswers object, keyed by the question id shown before each question. If a booking tool returns an error, fix it and re-call the tool, re-including the answers you already collected.`
+4. If the chosen service lists "Intake questions", ask any required question the customer hasn't already answered before calling the booking tool (you may ask optional ones too, but never block the booking on them). Pass every answer you have in the tool's intakeAnswers object, keyed by the question id shown before each question. If a booking tool returns INTAKE_REQUIRED, ask the customer for the missing answer(s) and re-call the tool, re-including the answers you already collected.`
             : ''
         }${
           hasContact

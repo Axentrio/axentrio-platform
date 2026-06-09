@@ -9,6 +9,7 @@ const refFind = vi.fn();
 const refSave = vi.fn();
 const etFindOne = vi.fn();
 const ruleFindOne = vi.fn();
+const loggerInfo = vi.fn();
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
@@ -22,7 +23,7 @@ vi.mock('../../database/data-source', () => ({
     },
   },
 }));
-vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../../utils/logger', () => ({ logger: { info: (...a: any[]) => loggerInfo(...a), warn: vi.fn(), error: vi.fn() } }));
 
 const createCalendarEvent = vi.fn();
 const updateCalendarEvent = vi.fn();
@@ -57,9 +58,14 @@ const EVID = '111111112222333344445555 55555555'.replace(/\s/g, ''); // hyphens 
 
 function claim(row: Record<string, unknown>) {
   // First query() = the claim (FOR UPDATE SKIP LOCKED); rest = post-processing UPDATEs.
-  queryMock.mockImplementation(async (sql: string) =>
-    String(sql).includes('FOR UPDATE SKIP LOCKED') ? [row] : []
-  );
+  // The optimistic clear (sync_pending=false ... RETURNING id) returns its row to
+  // signal the guard matched; everything else returns [].
+  queryMock.mockImplementation(async (sql: string) => {
+    const q = String(sql);
+    if (q.includes('FOR UPDATE SKIP LOCKED')) return [row];
+    if (q.includes('sync_pending = false') && q.includes('RETURNING id')) return [{ id: row.id }];
+    return [];
+  });
 }
 function postUpdateSqls(): string[] {
   return queryMock.mock.calls.map((c) => String(c[0])).filter((s) => !s.includes('FOR UPDATE SKIP LOCKED'));
@@ -75,7 +81,7 @@ beforeEach(() => {
   ruleFindOne.mockResolvedValue({ timezone: 'UTC' });
 });
 
-const baseRow = { id: BID, bot_id: 'b1', start_utc: '2026-07-01T10:00:00Z', end_utc: '2026-07-01T10:30:00Z', event_type_id: null, sync_attempts: 0 };
+const baseRow = { id: BID, bot_id: 'b1', start_utc: '2026-07-01T10:00:00Z', end_utc: '2026-07-01T10:30:00Z', event_type_id: null, sync_attempts: 0, updated_at: '2026-06-09 05:00:00+00' };
 
 describe('reconcilePendingBookingSyncs', () => {
   it('creates a Google event for a confirmed booking with no reference (deterministic id)', async () => {
@@ -155,6 +161,23 @@ describe('reconcilePendingBookingSyncs', () => {
     createCalendarEvent.mockRejectedValue(new Error('google 503'));
     await reconcilePendingBookingSyncs();
     expect(scheduledRetry()).toBe(true);
+  });
+
+  it('re-asserts the claim: does NOT clear sync_pending when the row changed since claim', async () => {
+    // Claim a confirmed row, but make the optimistic clear match no row (a concurrent
+    // reschedule bumped updated_at). The reconciler must leave sync_pending set.
+    queryMock.mockImplementation(async (sql: string) => {
+      const q = String(sql);
+      if (q.includes('FOR UPDATE SKIP LOCKED')) return [{ ...baseRow, status: 'confirmed' }];
+      return []; // clear RETURNING [] = guard didn't match
+    });
+    createCalendarEvent.mockResolvedValue({ eventId: EVID, calendarId: 'primary', meetUrl: 'm' });
+
+    await reconcilePendingBookingSyncs();
+
+    // clear was issued WITH the optimistic guard, and the skip path fired.
+    expect(postUpdateSqls().some((s) => s.includes('updated_at::text = $2'))).toBe(true);
+    expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('skipped clear'), expect.anything());
   });
 
   it('does nothing when no rows are claimed', async () => {

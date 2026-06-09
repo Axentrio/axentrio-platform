@@ -39,6 +39,9 @@ interface ClaimedRow {
   end_utc: string;
   event_type_id: string | null;
   sync_attempts: number;
+  /** Claim-time updated_at (::text for exact equality — node-pg truncates
+   *  timestamptz to ms, which would break an optimistic compare). */
+  updated_at: string;
 }
 
 /** Deterministic Google event id — MUST match InternalProvider.googleEventId. */
@@ -66,7 +69,7 @@ export async function reconcilePendingBookingSyncs(): Promise<void> {
            LIMIT ${BATCH}
            FOR UPDATE SKIP LOCKED
         )
-      RETURNING id, bot_id, status, start_utc, end_utc, event_type_id, sync_attempts`
+      RETURNING id, bot_id, status, start_utc, end_utc, event_type_id, sync_attempts, updated_at::text AS updated_at`
     );
     if (!claimed.length) return;
     logger.info('[Booking] reconciler claimed pending syncs', { count: claimed.length });
@@ -133,8 +136,10 @@ async function processOne(row: ClaimedRow): Promise<void> {
   // updateCalendarEvent Picks start/end/timezone, so a reschedule never PATCHes
   // the body (owner edits to an existing event survive).
   const input = {
-    startISO: new Date(row.start_utc).toISOString(),
-    endISO: new Date(row.end_utc).toISOString(),
+    // Live times (re-read in loadEventMeta), so a reschedule that landed after the
+    // claim is pushed as the CURRENT time, not the stale snapshot.
+    startISO: new Date(meta.startUtc!).toISOString(),
+    endISO: new Date(meta.endUtc!).toISOString(),
     timezone: meta.timezone,
     summary: meta.content.summary,
     description: meta.content.description,
@@ -191,7 +196,7 @@ async function processOne(row: ClaimedRow): Promise<void> {
  */
 async function loadEventMeta(
   row: ClaimedRow
-): Promise<{ content?: { summary: string; description: string }; timezone?: string }> {
+): Promise<{ content?: { summary: string; description: string }; timezone?: string; startUtc?: string; endUtc?: string }> {
   const etRepo = AppDataSource.getRepository(ServiceType);
   const eventType = row.event_type_id
     ? await etRepo.findOne({ where: { id: row.event_type_id } })
@@ -207,9 +212,11 @@ async function loadEventMeta(
     ai_summary: string | null;
     notes: string | null;
     intake_answers: unknown;
+    start_utc: string;
+    end_utc: string;
   }> = await AppDataSource.query(
     `SELECT attendee_name, attendee_email, customer_phone, customer_address,
-            ai_summary, notes, intake_answers
+            ai_summary, notes, intake_answers, start_utc, end_utc
        FROM chatbot_bookings WHERE id = $1`,
     [row.id]
   );
@@ -227,16 +234,27 @@ async function loadEventMeta(
     { name: eventType.name, description: eventType.description, intakeQuestions: eventType.intakeQuestions },
     buildManageUrl(row.id)
   );
-  return { content, timezone: rule.timezone };
+  return { content, timezone: rule.timezone, startUtc: b?.start_utc ?? row.start_utc, endUtc: b?.end_utc ?? row.end_utc };
 }
 
 async function clear(row: ClaimedRow): Promise<void> {
-  await AppDataSource.query(
+  // Re-assert the claim: only clear the dirty flag if the row hasn't changed since
+  // we claimed it. A concurrent reschedule/cancel bumps updated_at (and drives its
+  // own calendar update), so if it raced us we must NOT clear sync_pending — leave
+  // it for the next tick to reconcile against the new state, else the mirror could
+  // be stranded at a stale time with no re-sync flag.
+  const cleared: Array<{ id: string }> = await AppDataSource.query(
     `UPDATE chatbot_bookings
         SET sync_pending = false, sync_claimed_until = null, sync_last_error = null, updated_at = now()
-      WHERE id = $1`,
-    [row.id]
+      WHERE id = $1 AND updated_at::text = $2
+      RETURNING id`,
+    [row.id, row.updated_at]
   );
+  if (!cleared.length) {
+    logger.info('[Booking] reconciler skipped clear — row changed since claim (will re-reconcile)', {
+      bookingId: row.id,
+    });
+  }
 }
 
 async function terminal(row: ClaimedRow, reason: string): Promise<void> {

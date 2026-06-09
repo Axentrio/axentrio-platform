@@ -552,6 +552,8 @@ const WidgetTest: React.FC = () => {
         } catch { /* history load failed, continue without */ }
 
         socket = io(WS_BASE_URL, {
+          // Session-bound widget JWT — required for session ops (issue #19).
+          auth: { widgetToken: token },
           query: { apiKey, visitorId: visitorIdRef.current },
           transports: ['websocket', 'polling'],
         });

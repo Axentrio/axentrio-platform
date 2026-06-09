@@ -8,7 +8,6 @@ import { ForbiddenError } from './error-handler';
 export {
   authenticateAgent,
   authenticateWidget,
-  authenticateSocket,
   requireRole,
   verifyToken,
   generateAgentToken,

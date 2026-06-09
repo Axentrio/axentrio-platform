@@ -1583,14 +1583,44 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.flushPendingMessages();
     }
 
+    // One-shot recovery: tear down the socket, re-init the session (this.visitorId
+    // stays in memory so /widget/init resumes the SAME active session → fresh
+    // token), then reconnect with the new token. The bound session is fixed at the
+    // handshake, so a new token needs a new socket — never a re-emit. Issue #19.
+    _recoverWidgetSession(reason) {
+      if (this._recovering) return; // one-shot — avoid init/connect loops
+      this._recovering = true;
+      this.log('Recovering widget session:', reason);
+      try {
+        if (this.socket) { this.socket.removeAllListeners(); this.socket.disconnect(); }
+      } catch (e) { /* ignore */ }
+      this.socket = null;
+      this.clearStoredSession();
+      this.token = null;
+      this.setConnectionState('connecting');
+      this._initSession()
+        .then(() => { this._connectSocketIO(); })
+        .catch((err) => { this.log('Session recovery failed:', err && err.message); });
+    }
+
     _connectSocketIO() {
       if (!window.io) {
         this.log('Socket.IO not loaded');
         return;
       }
+      // The socket must carry the session-bound widget JWT (issue #19): without
+      // it the server leaves the socket unbound and rejects session ops. The
+      // token is set by _initSession before this runs; if it's missing, defer.
+      if (!this.token) {
+        this.log('No widget token yet; deferring socket connect');
+        return;
+      }
 
       this.socket = window.io(this.config.apiUrl, {
         transports: ['websocket', 'polling'],
+        auth: {
+          widgetToken: this.token,
+        },
         query: {
           apiKey: this.config.apiKey,
           visitorId: this.visitorId,
@@ -1605,12 +1635,20 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.socket.on('connect', () => {
         this.log('Socket.IO connected');
         this._connected = true;
+        this._recovering = false; // successful connect clears the one-shot guard
         this.setConnectionState('connected');
         this.emit('connected');
 
         // Join session room
         this.socket.emit('session:join', { sessionId: this.sessionId });
         this.flushPendingMessages();
+      });
+
+      // Server denied a session op (bound session ≠ requested) — recover once.
+      this.socket.on('error', (data) => {
+        if (data && data.code === 'FORBIDDEN') {
+          this._recoverWidgetSession('forbidden');
+        }
       });
 
       this.socket.on('session:joined', (data) => {
@@ -1628,17 +1666,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       });
 
       this.socket.on('session:join:error', () => {
-        // Session expired — clear and re-init
-        this.log('Session expired, re-initializing...');
-        this.clearStoredSession();
-        this.setConnectionState('connecting');
-        this._initSession().then(() => {
-          this.socket.emit('session:join', { sessionId: this.sessionId });
-          this.flushPendingMessages();
-        }).catch((err) => {
-          this.log('Session re-init failed:', err.message);
-          this.setConnectionState('offline');
-        });
+        // Session expired/invalid — recover (new token requires a new socket, not
+        // a re-emit, since the bound session is fixed at the handshake). Issue #19.
+        this.log('Session join error, re-initializing...');
+        this._recoverWidgetSession('session_join_error');
       });
 
       this.socket.on('connection:ack', (data) => {
@@ -1705,8 +1736,20 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       });
 
       this.socket.on('connect_error', (err) => {
-        this.setConnectionState('connecting');
-        this.log('Socket.IO connect error:', err.message);
+        var code = err && err.data && err.data.code;
+        this.log('Socket.IO connect error:', err.message, code || '');
+        if (code === 'WIDGET_TOKEN_EXPIRED') {
+          // Expired token — re-init (same visitorId resumes the session) + reconnect.
+          this._recoverWidgetSession('token_expired');
+          return;
+        }
+        if (code === 'WIDGET_TOKEN_INVALID') {
+          // A bad/forged token won't fix itself — stop retrying, go offline.
+          try { this.socket.disconnect(); } catch (e) { /* ignore */ }
+          this.setConnectionState('offline');
+          return;
+        }
+        this.setConnectionState('connecting'); // transient — socket.io keeps retrying
       });
     }
 

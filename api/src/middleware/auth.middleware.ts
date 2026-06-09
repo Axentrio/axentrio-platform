@@ -6,7 +6,6 @@ import { Request, Response, NextFunction } from 'express';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { Socket } from 'socket.io';
 import { config } from '../config/environment';
-import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { Agent } from '../database/entities/Agent';
 import type { RequestUser, UserRole } from '../types';
@@ -23,6 +22,10 @@ export interface AuthenticatedSocket extends Socket {
     botId?: string;
     sessionId?: string;
     participantId?: string;
+    // Authoritative session bound at handshake from the widget JWT. Widget
+    // sockets may only act on this session; undefined for agent / apiKey-only
+    // sockets. See security audit — widget Socket.IO IDOR (issue #19).
+    boundSessionId?: string;
   };
 }
 
@@ -233,59 +236,10 @@ export async function authenticateWidget(
   }
 }
 
-/**
- * WebSocket Middleware: Authenticate socket connections
- */
-export async function authenticateSocket(
-  socket: AuthenticatedSocket,
-  next: (err?: Error) => void
-): Promise<void> {
-  try {
-    const token = socket.handshake.auth.token as string;
-
-    if (!token) {
-      return next(new Error('Authentication error: No token provided'));
-    }
-
-    const payload = verifyToken(token);
-
-    // For agent connections, verify agent exists and is active
-    if (payload.type === 'agent') {
-      const agent = await agentRepository.findOne({
-        where: { id: payload.userId },
-      });
-
-      if (!agent) {
-        return next(new Error('Authentication error: Agent not found or inactive'));
-      }
-    }
-
-    // Attach user info to socket data
-    socket.data.user = {
-      id: payload.userId,
-      email: payload.email,
-      role: payload.role as UserRole,
-      tenantId: payload.tenantId,
-      type: payload.type,
-    };
-
-    logger.debug(`Socket authenticated: ${payload.type} - ${payload.userId}`);
-    next();
-  } catch (error) {
-    // TokenExpiredError must be checked BEFORE JsonWebTokenError because
-    // TokenExpiredError extends JsonWebTokenError; reversing the order makes
-    // the expired branch unreachable. (codex round 1 #12)
-    // Socket.IO middleware contract: keep next(new Error(...)). (plan §6.3)
-    if (error instanceof jwt.TokenExpiredError) {
-      return next(new Error('Authentication error: Token expired'));
-    }
-    if (error instanceof jwt.JsonWebTokenError) {
-      return next(new Error('Authentication error: Invalid token'));
-    }
-    logger.error('Socket authentication error:', error);
-    next(new Error('Authentication error: Internal server error'));
-  }
-}
+// NOTE: the socket authentication middleware lives in websocket/socket.handler.ts
+// (it binds the widget JWT's sessionId to the socket — issue #19). A previously
+// duplicated, unbound `authenticateSocket` was removed from here to prevent it
+// being wired up and bypassing that binding.
 
 /**
  * Middleware: Require specific role

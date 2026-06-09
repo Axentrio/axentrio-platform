@@ -13,6 +13,16 @@ import { isOriginAllowed, isWildcardCors } from '../security/cors';
 import { validateSocketTenant, TenantSocket } from '../middleware/tenant.middleware';
 import { checkEventRateLimit } from './socket-rate-limit';
 import { verifyToken } from '@clerk/backend';
+import { verifyToken as verifyAppJwt } from '../middleware/auth.middleware';
+
+/** Auth error that carries a machine-readable code to the client's connect_error. */
+function authError(message: string, code: string): Error {
+  const e = new Error(message) as Error & { data?: { code: string } };
+  e.data = { code };
+  return e;
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 import { config } from '../config/environment';
 import { resolveClerkIds } from '../middleware/clerk.middleware';
 import { DeepPartial } from 'typeorm';
@@ -80,6 +90,57 @@ let io: SocketIOServer | null = null;
  * Throws on failure instead of calling next() — the caller handles next().
  */
 async function authenticateSocket(socket: TenantSocket): Promise<void> {
+  const widgetToken = socket.handshake.auth?.widgetToken as string | undefined;
+
+  // Ambiguous: a Clerk agent token AND a widget token both present.
+  if (socket.handshake.auth?.token && widgetToken) {
+    throw authError('Authentication error: conflicting credentials', 'WIDGET_TOKEN_INVALID');
+  }
+
+  // Mode 1.5: Widget JWT — binds an authoritative sessionId to the socket (#19).
+  if (widgetToken) {
+    let payload;
+    try {
+      payload = verifyAppJwt(widgetToken);
+    } catch (err) {
+      const code = (err as Error)?.name === 'TokenExpiredError' ? 'WIDGET_TOKEN_EXPIRED' : 'WIDGET_TOKEN_INVALID';
+      throw authError('Authentication error: widget token rejected', code);
+    }
+    if (
+      payload.type !== 'widget' ||
+      !UUID_RE.test(payload.sessionId || '') ||
+      !payload.tenantId ||
+      !payload.userId
+    ) {
+      throw authError('Authentication error: invalid widget token claims', 'WIDGET_TOKEN_INVALID');
+    }
+    // If an apiKey is also supplied, it must resolve and match the token's tenant
+    // (same-tenant different-bot is fine). Invalid/paused apiKey alongside a token → reject.
+    if (socket.handshake.query?.apiKey) {
+      try {
+        const resolved = await resolveBotKeyStrict(socket.handshake.query.apiKey as string);
+        if (resolved.tenant.id !== payload.tenantId) {
+          throw authError('Authentication error: apiKey/token tenant mismatch', 'WIDGET_TOKEN_INVALID');
+        }
+      } catch (err) {
+        if (err instanceof BotPausedError || err instanceof BotNotFoundError) {
+          throw authError('Authentication error: apiKey rejected', 'WIDGET_TOKEN_INVALID');
+        }
+        throw err;
+      }
+    }
+    socket.data.user = {
+      id: payload.userId,
+      email: '',
+      role: 'agent' as const,
+      tenantId: payload.tenantId,
+      type: 'widget' as const,
+    };
+    socket.data.tenantId = payload.tenantId;
+    socket.data.boundSessionId = payload.sessionId;
+    return;
+  }
+
   // Mode 1: Portal agent (Clerk token)
   if (socket.handshake.auth?.token) {
     let verified;
@@ -324,15 +385,51 @@ export function denyIfNotAgent(socket: TenantSocket, event: string): boolean {
 }
 
 /**
+ * A widget socket may only act on the session bound to it at handshake; agent
+ * sockets may serve any session. Emits FORBIDDEN and returns false on violation.
+ * Issue #19.
+ */
+export function assertSocketSession(socket: TenantSocket, sessionId: string): boolean {
+  const user = socket.data.user;
+  if (user?.type === 'agent') return true;
+  if (user?.type === 'widget' && socket.data.boundSessionId && socket.data.boundSessionId === sessionId) {
+    return true;
+  }
+  socket.emit('error', { code: 'FORBIDDEN', message: 'Session access denied' });
+  logger.warn('Blocked widget socket acting on a non-bound session', {
+    socketId: socket.id,
+    boundSessionId: socket.data.boundSessionId,
+    requestedSessionId: sessionId,
+    tenantId: socket.data.tenantId,
+  });
+  return false;
+}
+
+/**
+ * Registration guard for session-scoped visitor events: validate `data.sessionId`
+ * is a UUID and the socket owns it. Returns the sessionId when allowed, else null
+ * (after emitting an error).
+ */
+function guardSessionEvent(socket: TenantSocket, event: string, data: unknown): string | null {
+  const sessionId = data && typeof data === 'object' ? (data as { sessionId?: unknown }).sessionId : undefined;
+  if (typeof sessionId !== 'string' || !UUID_RE.test(sessionId)) {
+    socket.emit('error', { code: 'BAD_REQUEST', event, message: 'Invalid sessionId' });
+    return null;
+  }
+  return assertSocketSession(socket, sessionId) ? sessionId : null;
+}
+
+/**
  * Setup socket event handlers
  */
 function setupEventHandlers(socket: TenantSocket): void {
-  withRateLimit(socket, 'message:send', (data) => handleMessageSend(socket, data as MessageSendData));
+  // Visitor-accessible, session-scoped events: validate + enforce the bound session (#19).
+  withRateLimit(socket, 'message:send', (data) => guardSessionEvent(socket, 'message:send', data) ? handleMessageSend(socket, data as MessageSendData) : undefined);
   withRateLimit(socket, 'message:read', (data) => handleMessageRead(socket, data as { messageId: string }));
-  withRateLimit(socket, 'typing:indicator', (data) => handleTypingIndicator(socket, data as TypingIndicatorData));
-  withRateLimit(socket, 'handoff:request', (data) => handleHandoffRequest(socket, data as HandoffRequestData));
-  withRateLimit(socket, 'session:join', (data) => handleSessionJoin(socket, data as { sessionId: string }));
-  withRateLimit(socket, 'session:leave', (data) => handleSessionLeave(socket, data as { sessionId: string }));
+  withRateLimit(socket, 'typing:indicator', (data) => guardSessionEvent(socket, 'typing:indicator', data) ? handleTypingIndicator(socket, data as TypingIndicatorData) : undefined);
+  withRateLimit(socket, 'handoff:request', (data) => guardSessionEvent(socket, 'handoff:request', data) ? handleHandoffRequest(socket, data as HandoffRequestData) : undefined);
+  withRateLimit(socket, 'session:join', (data) => guardSessionEvent(socket, 'session:join', data) ? handleSessionJoin(socket, data as { sessionId: string }) : undefined);
+  withRateLimit(socket, 'session:leave', (data) => guardSessionEvent(socket, 'session:leave', data) ? handleSessionLeave(socket, data as { sessionId: string }) : undefined);
   withRateLimit(socket, 'presence:update', (data) => handlePresenceUpdate(socket, data as { status: string }));
   // Agent-only events — reject widget/visitor sockets (issue #19).
   withRateLimit(socket, 'handoff:accept', (data) => denyIfNotAgent(socket, 'handoff:accept') ? undefined : handleHandoffAccept(socket, data as HandoffResponseData));
@@ -503,6 +600,12 @@ async function handleMessageRead(
     const { messageId } = data;
     const tenantId = socket.data.tenantId;
 
+    // Validate before the DB lookup (UUID column) and before leaking existence.
+    if (typeof messageId !== 'string' || !UUID_RE.test(messageId)) {
+      socket.emit('error', { code: 'BAD_REQUEST', event: 'message:read', message: 'Invalid messageId' });
+      return;
+    }
+
     const message = await messageRepository.findOne({
       where: { id: messageId },
       relations: ['session'],
@@ -512,6 +615,10 @@ async function handleMessageRead(
       socket.emit('error', { message: 'Message not found' });
       return;
     }
+
+    // Enforce the socket's bound session before mutating (#19). Only reached for
+    // a valid, same-tenant message — so no existence leak.
+    if (!assertSocketSession(socket, message.sessionId)) return;
 
     message.markAsRead();
     await messageRepository.save(message);

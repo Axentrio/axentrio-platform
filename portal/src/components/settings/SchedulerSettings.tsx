@@ -26,6 +26,11 @@ import {
   useConnectGoogleCalendar,
   useDisconnectGoogleCalendar,
 } from '../../queries/useGoogleCalendarQueries';
+import {
+  useOutlookCalendarStatus,
+  useConnectOutlookCalendar,
+  useDisconnectOutlookCalendar,
+} from '../../queries/useOutlookCalendarQueries';
 import { ServicesSection } from './ServicesSection';
 
 const DAYS: { key: string; label: string }[] = [
@@ -105,19 +110,32 @@ export const SchedulerSettings: React.FC = () => {
   const googleStatus = useGoogleCalendarStatus();
   const connectGoogle = useConnectGoogleCalendar();
   const disconnectGoogle = useDisconnectGoogleCalendar();
+  const outlookStatus = useOutlookCalendarStatus();
+  const connectOutlook = useConnectOutlookCalendar();
+  const disconnectOutlook = useDisconnectOutlookCalendar();
 
-  // Toast + refresh after the OAuth callback redirects back with ?google=...
+  // Toast + refresh after a calendar OAuth callback redirects back with
+  // ?google=connected|error or ?outlook=connected|error.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const g = params.get('google');
-    if (!g) return;
-    if (g === 'connected') {
-      toast.success('Google Calendar connected');
-      queryClient.invalidateQueries({ queryKey: ['google', 'status'] });
-    } else if (g === 'error') {
-      toast.error('Google Calendar connection failed');
+    const providers: Array<{ key: 'google' | 'outlook'; label: string }> = [
+      { key: 'google', label: 'Google Calendar' },
+      { key: 'outlook', label: 'Outlook Calendar' },
+    ];
+    let changed = false;
+    for (const { key, label } of providers) {
+      const v = params.get(key);
+      if (!v) continue;
+      if (v === 'connected') {
+        toast.success(`${label} connected`);
+        queryClient.invalidateQueries({ queryKey: [key, 'status'] });
+      } else if (v === 'error') {
+        toast.error(`${label} connection failed`);
+      }
+      params.delete(key);
+      changed = true;
     }
-    params.delete('google');
+    if (!changed) return;
     const qs = params.toString();
     window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''));
   }, [queryClient]);
@@ -223,6 +241,44 @@ export const SchedulerSettings: React.FC = () => {
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
                         ) : null}
                         Connect Google Calendar
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Outlook Calendar connection (Phase 6b) */}
+                <div className="space-y-2 border-t border-edge pt-4">
+                  <h3 className="text-sm font-medium text-text-primary">Outlook Calendar</h3>
+                  {outlookStatus.data?.connected ? (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-text-secondary flex items-center gap-2">
+                        <Check className="w-4 h-4 text-status-online" />
+                        Connected{outlookStatus.data.accountEmail ? ` · ${outlookStatus.data.accountEmail}` : ''} — bookings sync to your calendar and the bot won't double-book over your events.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => disconnectOutlook.mutate()}
+                        disabled={disconnectOutlook.isPending}
+                      >
+                        Disconnect
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-text-muted">
+                        Optional: connect Outlook so bookings land on your calendar and respect your existing events.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => connectOutlook.mutate()}
+                        disabled={connectOutlook.isPending}
+                      >
+                        {connectOutlook.isPending ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+                        ) : null}
+                        Connect Outlook Calendar
                       </Button>
                     </div>
                   )}

@@ -39,7 +39,12 @@ const credSave = vi.fn();
 const credFindOne = vi.fn();
 const credUpdate = vi.fn();
 vi.mock('../../database/data-source', () => ({
-  AppDataSource: { getRepository: () => ({ save: credSave, findOne: credFindOne, update: credUpdate, create: (x: any) => x }) },
+  AppDataSource: {
+    getRepository: () => ({ save: credSave, findOne: credFindOne, update: credUpdate, create: (x: any) => x }),
+    // exchangeAndStore now swaps the credential inside a transaction; route the
+    // manager's save/update/create to the same spies so assertions still hold.
+    transaction: async (cb: any) => cb({ save: credSave, update: credUpdate, create: (_entity: any, x: any) => x }),
+  },
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 

@@ -143,21 +143,32 @@ export async function exchangeAndStore(tenantId: string, botId: string, code: st
       ? prior.calendarId
       : 'primary';
 
-  // Replace any existing active credential for this bot (reconnect).
-  await repo.update({ botId, provider: 'google', status: 'active' }, { status: 'revoked' });
+  // Encrypt BEFORE opening the transaction: a failed encrypt then aborts before the
+  // revoke runs (vs. after it commits), and const-captured values keep their types
+  // inside the transaction callback.
+  const accessTokenEnc = encrypt(tokens.access_token);
+  const refreshTokenEnc = tokens.refresh_token ? encrypt(tokens.refresh_token) : null;
+  const tokenExpiry = tokens.expiry_date ? new Date(tokens.expiry_date) : null;
 
-  const cred = repo.create({
-    tenantId,
-    botId,
-    provider: 'google',
-    status: 'active',
-    accountEmail,
-    accessTokenEnc: encrypt(tokens.access_token),
-    refreshTokenEnc: tokens.refresh_token ? encrypt(tokens.refresh_token) : null,
-    tokenExpiry: tokens.expiry_date ? new Date(tokens.expiry_date) : null,
-    calendarId: preservedCalendarId,
+  // Replace any existing active credential for this bot (reconnect) in ONE
+  // transaction, so a failure can't leave the bot with zero active credentials.
+  // Mirrors the Outlook adapter.
+  await AppDataSource.transaction(async (manager) => {
+    await manager.update(CalendarCredential, { botId, provider: 'google', status: 'active' }, { status: 'revoked' });
+    await manager.save(
+      manager.create(CalendarCredential, {
+        tenantId,
+        botId,
+        provider: 'google',
+        status: 'active',
+        accountEmail,
+        accessTokenEnc,
+        refreshTokenEnc,
+        tokenExpiry,
+        calendarId: preservedCalendarId,
+      })
+    );
   });
-  await repo.save(cred);
   logger.info('[Google] calendar connected', {
     botId,
     hasRefresh: !!tokens.refresh_token,

@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { draftStore } from '@/lib/draft-store';
 import { timeAgo } from '@/lib/format';
+import { useIsOnline } from '@/lib/online';
 import { useApi } from '@/providers/api-provider';
 import { useConversation } from '@/hooks/use-conversation';
 import { useSocket, useSocketEvent } from '@/providers/socket-provider';
@@ -26,6 +27,7 @@ export default function ConversationScreen() {
   const api = useApi();
   const socket = useSocket();
 
+  const online = useIsOnline();
   const { data: conv, isLoading, isError } = useConversation(id);
   const sessionId = conv?.sessionId;
 
@@ -76,7 +78,7 @@ export default function ConversationScreen() {
 
   const onSend = () => {
     const content = input.trim();
-    if (!content || !socket || !sessionId) return;
+    if (!content || !socket || !sessionId || !online) return;
     socket.emit('message:send', { sessionId, content, type: 'text' });
     setInput('');
     draftStore.set(sessionId, '');
@@ -119,6 +121,12 @@ export default function ConversationScreen() {
             renderItem={({ item }) => <MessageBubble message={item} />}
           />
 
+          {!online ? (
+            <View className="bg-amber-50 px-4 py-1">
+              <Text className="text-xs text-amber-700">You’re offline — sending is paused.</Text>
+            </View>
+          ) : null}
+
           <View className="flex-row items-end gap-2 border-t border-gray-100 p-2">
             <TextInput
               value={input}
@@ -129,9 +137,9 @@ export default function ConversationScreen() {
             />
             <Pressable
               onPress={onSend}
-              disabled={!input.trim() || !socket}
+              disabled={!input.trim() || !socket || !online}
               className={`items-center justify-center rounded-full px-4 py-3 ${
-                input.trim() && socket ? 'bg-brand' : 'bg-gray-300'
+                input.trim() && socket && online ? 'bg-brand' : 'bg-gray-300'
               }`}
             >
               <Text className="font-semibold text-white">Send</Text>

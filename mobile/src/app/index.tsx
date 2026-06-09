@@ -1,106 +1,56 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { useAuth } from '@clerk/expo';
+import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { resources } from '@axentrio/i18n';
+import { OrgGate } from '@/components/org-gate';
+import { useAuthMe } from '@/hooks/use-auth-me';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+function HomeContent() {
+  const { data, isLoading, error } = useAuthMe();
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
+  if (isLoading) {
     return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
+      <View className="flex-1 items-center justify-center">
+        <ActivityIndicator />
+      </View>
     );
   }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
+
+  if (error || !data) {
+    return (
+      <View className="flex-1 items-center justify-center">
+        <Text className="text-red-600">Couldn’t load your account.</Text>
+      </View>
+    );
+  }
+
   return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
+    <View className="gap-2">
+      <Text className="text-2xl font-bold">{data.tenantName}</Text>
+      <Text className="text-base text-gray-600">{data.email}</Text>
+      <View className="self-start rounded-full bg-brand px-3 py-1">
+        <Text className="text-xs font-semibold uppercase text-white">{data.role}</Text>
+      </View>
+    </View>
   );
 }
 
 export default function HomeScreen() {
+  const { signOut } = useAuth();
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
-          </ThemedText>
-          {/* Proves NativeWind (brand token) + a shared workspace package import. */}
-          <View className="rounded-xl bg-brand px-4 py-2">
-            <Text className="text-base font-semibold text-white">
-              {resources.en.app.name} · NativeWind ✓
-            </Text>
-          </View>
-        </ThemedView>
-
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
-
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
-      </SafeAreaView>
-    </ThemedView>
+    <SafeAreaView className="flex-1 bg-white">
+      <OrgGate>
+        <View className="flex-1 justify-between p-6">
+          <HomeContent />
+          <Pressable
+            onPress={() => signOut()}
+            className="items-center rounded-xl bg-gray-900 py-3"
+          >
+            <Text className="font-semibold text-white">Sign out</Text>
+          </Pressable>
+        </View>
+      </OrgGate>
+    </SafeAreaView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  safeArea: {
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
-    maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-    paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
-  },
-  title: {
-    textAlign: 'center',
-  },
-  code: {
-    textTransform: 'uppercase',
-  },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
-  },
-});

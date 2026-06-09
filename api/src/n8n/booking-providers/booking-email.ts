@@ -51,8 +51,23 @@ function esc(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Split a possibly-"Name <email>" address into a bare email + optional name.
+ *  Exported for the ICS-organizer regression test. */
+export function parseAddress(addr: string): { email: string; name?: string } {
+  const m = addr.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
+  if (m) {
+    const name = m[1].replace(/^"|"$/g, '').trim();
+    return { email: m[2].trim(), name: name || undefined };
+  }
+  return { email: addr.trim() };
+}
+
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
-  const organizerEmail = params.ownerEmail ?? config.email.fromAddress;
+  // The organizer source may be a full RFC5322 "Name <email>" string (e.g.
+  // EMAIL_FROM_ADDRESS). The ICS ORGANIZER must be a BARE email in the mailto:
+  // (the display name goes in CN) — otherwise the mailto is malformed and Gmail
+  // shows "Unable to load event" for the invite.
+  const organizer = parseAddress(params.ownerEmail ?? config.email.fromAddress);
   const ics = buildIcs({
     uid: params.uid,
     sequence: params.sequence,
@@ -62,7 +77,8 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     summary: params.summary,
     description: params.description,
     location: params.location,
-    organizerEmail,
+    organizerEmail: organizer.email,
+    organizerName: organizer.name,
     attendeeEmail: params.attendeeEmail,
     attendeeName: params.attendeeName,
   });

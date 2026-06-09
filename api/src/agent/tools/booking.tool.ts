@@ -83,7 +83,8 @@ export class CreateBookingTool implements ToolAdapter {
       },
       attendeeEmail: {
         type: 'string',
-        description: 'Email address of the person being booked.',
+        description:
+          'Email address of the person being booked. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
       },
       notes: {
         type: 'string',
@@ -120,7 +121,7 @@ export class CreateBookingTool implements ToolAdapter {
           'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
       },
     },
-    required: ['startTime', 'attendeeName', 'attendeeEmail'],
+    required: ['startTime', 'attendeeName'],
   };
   hasSideEffects = true;
   // Precondition removed — the skill instructions tell the LLM to check availability first.
@@ -134,7 +135,7 @@ export class CreateBookingTool implements ToolAdapter {
         ctx.sessionId,
         idempotencyKey,
         args.startTime as string,
-        { name: args.attendeeName as string, email: args.attendeeEmail as string },
+        { name: args.attendeeName as string, email: args.attendeeEmail as string | undefined },
         args.notes as string | undefined,
         args.serviceId as string | undefined,
         args.intakeAnswers,
@@ -179,7 +180,7 @@ export class CreateBookingTool implements ToolAdapter {
               bookingId: (bookingData?.bookingId as string) ?? idempotencyKey,
               startTime: args.startTime as string,
               attendeeName: args.attendeeName as string,
-              attendeeEmail: args.attendeeEmail as string,
+              attendeeEmail: (args.attendeeEmail as string | undefined) ?? '',
               notes: args.notes as string | undefined,
             },
           };
@@ -190,7 +191,7 @@ export class CreateBookingTool implements ToolAdapter {
             type: 'lead.created',
             lead: {
               name: args.attendeeName as string,
-              email: args.attendeeEmail as string,
+              email: (args.attendeeEmail as string | undefined) ?? '',
               source: 'booking',
             },
           };
@@ -224,7 +225,8 @@ export class RequestAppointmentTool implements ToolAdapter {
       },
       attendeeEmail: {
         type: 'string',
-        description: 'Email address of the person requesting the appointment.',
+        description:
+          'Email address of the person requesting the appointment. Optional — ask for it so we can email a calendar invite, but proceed without it if the customer has none. Never invent one.',
       },
       notes: {
         type: 'string',
@@ -266,7 +268,7 @@ export class RequestAppointmentTool implements ToolAdapter {
           'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
       },
     },
-    required: ['preferredTime', 'attendeeName', 'attendeeEmail'],
+    required: ['preferredTime', 'attendeeName'],
   };
   hasSideEffects = true;
 
@@ -277,7 +279,7 @@ export class RequestAppointmentTool implements ToolAdapter {
         ctx.sessionId,
         idempotencyKey,
         args.preferredTime as string,
-        { name: args.attendeeName as string, email: args.attendeeEmail as string },
+        { name: args.attendeeName as string, email: args.attendeeEmail as string | undefined },
         args.notes as string | undefined,
         args.serviceId as string | undefined,
         args.aiSummary as string | undefined,

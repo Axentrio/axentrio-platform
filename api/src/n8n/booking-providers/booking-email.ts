@@ -29,7 +29,10 @@ export interface BookingEmailParams {
   location?: string;
   timezone: string;
   attendeeName: string;
-  attendeeEmail: string;
+  /** Optional — absent for channel bookings (WhatsApp/Messenger) where the
+   *  customer gives no email. The invite email is then skipped (they're
+   *  confirmed in-channel and the owner sees it on their calendar). */
+  attendeeEmail?: string;
   /** Additional recipient (Phase 0: owner gets the invite too). */
   ownerEmail?: string;
   /** Self-service manage link (reschedule/cancel). Omitted on cancellation. */
@@ -63,6 +66,11 @@ export function parseAddress(addr: string): { email: string; name?: string } {
 }
 
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
+  // No customer email (e.g. WhatsApp/Messenger booking) → skip the invite email.
+  // The customer is confirmed in-channel and the owner sees it on their calendar.
+  if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
+    return;
+  }
   // The organizer source may be a full RFC5322 "Name <email>" string (e.g.
   // EMAIL_FROM_ADDRESS). The ICS ORGANIZER must be a BARE email in the mailto:
   // (the display name goes in CN) — otherwise the mailto is malformed and Gmail
@@ -134,6 +142,10 @@ export interface ReminderEmailParams {
 
 /** Plain appointment reminder (no ICS — the invite was sent on confirmation). */
 export async function sendReminderEmail(params: ReminderEmailParams): Promise<void> {
+  // No email on file (channel booking) → nothing to remind by email.
+  if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
+    return;
+  }
   const body =
     `<p>Reminder: your appointment is ${params.leadLabel}.</p>` +
     `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>` +
@@ -157,7 +169,8 @@ export interface RequestNotificationParams {
   start: Date;
   timezone: string;
   attendeeName: string;
-  attendeeEmail: string;
+  /** Optional — absent for channel bookings with no customer email. */
+  attendeeEmail?: string;
   notes?: string;
   aiSummary?: string;
 }
@@ -171,7 +184,7 @@ export async function sendRequestNotificationEmail(params: RequestNotificationPa
   const body =
     `<p>You have a new appointment <strong>request</strong> to review.</p>` +
     `<p><strong>${esc(params.serviceName)}</strong><br/>Preferred time: ${formatWhen(params.start, params.timezone)}</p>` +
-    `<p>From: ${esc(params.attendeeName)} (${esc(params.attendeeEmail)})</p>` +
+    `<p>From: ${esc(params.attendeeName)}${params.attendeeEmail ? ` (${esc(params.attendeeEmail)})` : ''}</p>` +
     (params.aiSummary ? `<p>Summary: ${esc(params.aiSummary)}</p>` : '') +
     (params.notes ? `<p>Notes: ${esc(params.notes)}</p>` : '') +
     `<p>Follow up with the customer to confirm or decline.</p>`;

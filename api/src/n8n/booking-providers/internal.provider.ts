@@ -112,10 +112,20 @@ function cleanContact(v: string | undefined, max: number): string | null {
  * P5a — resolve the address/phone to persist, enforcing the service's required-field
  * gates (recoverable errors the agent re-asks on). Whitespace-only counts as absent.
  */
-function resolveContactFields(service: ServiceType, extras?: BookingExtras): { address: string | null; phone: string | null } {
+function resolveContactFields(
+  service: ServiceType,
+  extras?: BookingExtras,
+  session?: { channel?: string | null; visitorId?: string | null }
+): { address: string | null; phone: string | null } {
   const req = requiredContactFields(service);
   const address = cleanContact(extras?.customerAddress, 512);
-  const phone = cleanContact(extras?.customerPhone, 64);
+  let phone = cleanContact(extras?.customerPhone, 64);
+  // Channel fallback: on WhatsApp the customer's own number IS the session identity
+  // (visitorId = wa_id), so capture it as the contact phone when none was provided.
+  // Other channels (Messenger/Instagram) use a PSID/IGSID here, not a phone — skip them.
+  if (!phone && session?.channel === 'whatsapp' && session.visitorId) {
+    phone = cleanContact(`+${session.visitorId.replace(/^\+/, '')}`, 64);
+  }
   if (req.address && !address) throw new BookingError('Address is required for this service', 'ADDRESS_REQUIRED', 400);
   if (req.phone && !phone) throw new BookingError('A contact phone number is required for this service', 'PHONE_REQUIRED', 400);
   return { address, phone };
@@ -405,7 +415,7 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     idempotencyKey: string,
     startTime: string,
-    attendee: { name: string; email: string },
+    attendee: { name: string; email?: string },
     notes?: string,
     serviceId?: string,
     intakeAnswers?: unknown,
@@ -446,7 +456,7 @@ export class InternalProvider implements BookingProvider {
     }
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
-    const contact = resolveContactFields(service, extras);
+    const contact = resolveContactFields(service, extras, ctx.session);
     // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
@@ -504,7 +514,7 @@ export class InternalProvider implements BookingProvider {
             blockedEnd.toISOString(),
             calendarKey,
             attendee.name,
-            attendee.email,
+            attendee.email ?? null,
             notes ?? null,
             icsUid,
             idempotencyKey,
@@ -621,7 +631,7 @@ export class InternalProvider implements BookingProvider {
     calendarKey: string,
     start: Date,
     end: Date,
-    attendee: { name: string; email: string },
+    attendee: { name: string; email?: string },
     notes?: string,
     aiSummary?: string,
     intakeAnswers?: unknown,
@@ -635,7 +645,7 @@ export class InternalProvider implements BookingProvider {
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);
     assertRequiredIntake(service, intakeJson);
     // P5a: required address/phone gate (request path).
-    const contact = resolveContactFields(service, extras);
+    const contact = resolveContactFields(service, extras, ctx.session);
     // P5e: validate + snapshot attached files for the request row too.
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
@@ -658,7 +668,7 @@ export class InternalProvider implements BookingProvider {
           end.toISOString(),
           calendarKey,
           attendee.name,
-          attendee.email,
+          attendee.email ?? null,
           notes ?? null,
           icsUid,
           idempotencyKey,
@@ -743,7 +753,7 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     idempotencyKey: string,
     preferredTime: string,
-    attendee: { name: string; email: string },
+    attendee: { name: string; email?: string },
     notes?: string,
     serviceId?: string,
     aiSummary?: string,
@@ -788,7 +798,7 @@ export class InternalProvider implements BookingProvider {
       bookingId: string;
       start: Date;
       end: Date;
-      attendee: { name: string; email: string };
+      attendee: { name: string; email?: string };
       notes?: string;
       aiSummary?: string;
     }
@@ -810,7 +820,7 @@ export class InternalProvider implements BookingProvider {
           startTime: req.start.toISOString(),
           endTime: req.end.toISOString(),
           attendeeName: req.attendee.name,
-          attendeeEmail: req.attendee.email,
+          attendeeEmail: req.attendee.email ?? '',
           notes: req.notes,
         },
         service: { id: service.id, name: service.name },

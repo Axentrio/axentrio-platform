@@ -154,7 +154,7 @@ export class PromptBuilder {
       const hasFileUpload = services.some((s) => s.fileUploadAllowed);
       sections.push(
         `\n## SERVICES (bookable)
-When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Follow these rules IN ORDER:
+When the customer wants to book, identify which service they mean and pass its id as serviceId. Use the SAME service whose availability you checked. Before you call create_booking or request_appointment, make sure you have the customer's name and a specific date/time (their preferred date/time for a request) — ASK for either if you don't have it, and NEVER invent a name or time. Pass exactly what the customer gave you, and confirm that same time back to them — never state a time you didn't capture. Also ask for the customer's email so we can send a calendar invite, but if they don't have one, proceed without it — never invent an email. Then follow these rules IN ORDER:
 1. If their request matches no service or is ambiguous, ask a disambiguating question FIRST — do not confirm and do not capture a request until you know the service. Never guess.
 2. Once the service is known: use create_booking (auto-confirm) ONLY for an "auto-book" service when the customer has chosen an available time you checked.
 3. Otherwise use request_appointment (and tell the customer it is a request the business owner will review — not a confirmation): when the service is "request-only", the scope/duration is unclear, the job sounds complex/urgent/risky, or you are otherwise not confident you can safely confirm. Never invent a confirmation.${

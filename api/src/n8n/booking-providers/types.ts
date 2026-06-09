@@ -119,7 +119,7 @@ export interface BookingProvider {
     ctx: BookingContext,
     idempotencyKey: string,
     startTime: string,
-    attendee: { name: string; email: string },
+    attendee: { name: string; email?: string },
     notes?: string,
     serviceId?: string,
     intakeAnswers?: unknown,

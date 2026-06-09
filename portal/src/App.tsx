@@ -267,55 +267,10 @@ const DefaultRedirect: React.FC = () => {
 
 const LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion'];
 
-const App: React.FC = () => {
-  // If on widget-test path, render only the widget test page (no Clerk)
-  if (window.location.pathname === '/widget-test') {
-    return (
-      <ThemeProvider>
-        <QueryClientProvider client={queryClient}>
-          <WidgetTestRouter />
-          <Toaster />
-        </QueryClientProvider>
-      </ThemeProvider>
-    );
-  }
-
-  // Public legal pages — must be reachable logged-out (Meta's crawler reads them)
-  if (LEGAL_PATHS.includes(window.location.pathname)) {
-    return (
-      <ThemeProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/privacy" element={<PrivacyPolicy />} />
-            <Route path="/terms" element={<Terms />} />
-            <Route path="/data-deletion" element={<DataDeletion />} />
-          </Routes>
-        </BrowserRouter>
-      </ThemeProvider>
-    );
-  }
-
+/** Lifted out of App so the provider/layout JSX stays under the depth limit.
+ *  Identical routes — pure extraction, no behavior change. */
+function AppRoutes() {
   return (
-    <ThemeProvider>
-      <ThemedClerkProvider>
-      <QueryClientProvider client={queryClient}>
-        <SignedOut>
-          <div className="flex items-center justify-center h-screen bg-surface-1">
-            <SignIn
-              forceRedirectUrl="/"
-              signUpForceRedirectUrl="/"
-            />
-          </div>
-        </SignedOut>
-
-        <SignedIn>
-          <AppAuthProvider>
-            <BrowserRouter>
-              <SocketProvider>
-              <ErrorBoundary>
-              <CopilotDrawerProvider>
-              <AuthenticatedLayout>
-                <OrganizationRequired>
                   <Routes>
                     {/* New navigation structure */}
                     <Route element={<ProtectedRoute />}>
@@ -370,6 +325,59 @@ const App: React.FC = () => {
                     {/* Catch all */}
                     <Route path="*" element={<Navigate to="/inbox" replace />} />
                   </Routes>
+  );
+}
+
+const App: React.FC = () => {
+  // If on widget-test path, render only the widget test page (no Clerk)
+  if (window.location.pathname === '/widget-test') {
+    return (
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <WidgetTestRouter />
+          <Toaster />
+        </QueryClientProvider>
+      </ThemeProvider>
+    );
+  }
+
+  // Public legal pages — must be reachable logged-out (Meta's crawler reads them)
+  if (LEGAL_PATHS.includes(window.location.pathname)) {
+    return (
+      <ThemeProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
+          </Routes>
+        </BrowserRouter>
+      </ThemeProvider>
+    );
+  }
+
+  return (
+    <ThemeProvider>
+      <ThemedClerkProvider>
+      <QueryClientProvider client={queryClient}>
+        <SignedOut>
+          <div className="flex items-center justify-center h-screen bg-surface-1">
+            <SignIn
+              forceRedirectUrl="/"
+              signUpForceRedirectUrl="/"
+            />
+          </div>
+        </SignedOut>
+
+        <SignedIn>
+          <AppAuthProvider>
+            <BrowserRouter>
+              <SocketProvider>
+              <ErrorBoundary>
+              <CopilotDrawerProvider>
+              <AuthenticatedLayout>
+                <OrganizationRequired>
+                  <AppRoutes />
                 </OrganizationRequired>
               </AuthenticatedLayout>
               </CopilotDrawerProvider>

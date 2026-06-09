@@ -408,6 +408,8 @@ function RescheduleDialog({
     window?.start ?? '',
     window?.end ?? '',
     !!booking,
+    booking?.serviceId,
+    booking?.durationMin,
   );
 
   // Group slots by day (in the owner's timezone).

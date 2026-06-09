@@ -133,6 +133,10 @@ export interface AdminBookingRow {
   notes: string | null;
   meetingUrl: string | null;
   serviceName?: string | null;
+  /** The booking's service id + frozen length — the reschedule picker needs both
+   *  to compute availability for the right service when several are active. */
+  serviceId?: string | null;
+  durationMin?: number | null;
   bookingMode?: string | null;
   /** P3: ordered, pre-labeled intake answers for display (null if none). */
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
@@ -277,6 +281,8 @@ export async function adminListBookings(
       notes: b.notes ?? null,
       meetingUrl: meetByBooking.get(b.id) ?? null,
       serviceName: b.eventTypeId ? nameByService.get(b.eventTypeId) ?? null : null,
+      serviceId: b.eventTypeId ?? null,
+      durationMin: b.bookedDurationMin ?? null,
       bookingMode: b.bookingMode ?? null,
       intakeAnswers: buildIntakeAnswers(
         b.eventTypeId ? questionsByService.get(b.eventTypeId) : null,
@@ -294,7 +300,13 @@ export async function adminListBookings(
 }
 
 /** Real available slots for the anchor bot (powers the admin reschedule picker). */
-export async function adminAvailability(tenantId: string, startDate: string, endDate: string) {
+export async function adminAvailability(
+  tenantId: string,
+  startDate: string,
+  endDate: string,
+  serviceId?: string,
+  durationMin?: number
+) {
   const { bot, settings } = await getAnchorBotConfig(tenantId);
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
@@ -305,7 +317,10 @@ export async function adminAvailability(tenantId: string, startDate: string, end
     bot,
     botSettings: settings,
   };
-  return internalProvider.checkAvailability(ctx, startDate, endDate);
+  // Pass the booking's service + frozen length so the reschedule picker resolves
+  // the right service (no SERVICE_REQUIRED when several are active) and shows
+  // slots sized to the existing booking.
+  return internalProvider.checkAvailability(ctx, startDate, endDate, serviceId, durationMin);
 }
 
 /** Load a tenant-owned internal booking or throw a 404 (no cross-tenant leak). */

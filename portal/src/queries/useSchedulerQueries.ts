@@ -213,6 +213,8 @@ export interface AdminBooking {
   notes: string | null;
   meetingUrl: string | null;
   serviceName?: string | null;
+  serviceId?: string | null;
+  durationMin?: number | null;
   bookingMode?: string | null;
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
   customerAddress?: string | null;
@@ -236,14 +238,25 @@ export function useAdminBookings(scope: BookingScope) {
 }
 
 /** Available slots between two ISO datetimes — drives the reschedule picker. */
-export function useBookingAvailability(startDate: string, endDate: string, enabled: boolean) {
+export function useBookingAvailability(
+  startDate: string,
+  endDate: string,
+  enabled: boolean,
+  serviceId?: string | null,
+  durationMin?: number | null,
+) {
   return useQuery({
-    queryKey: ['scheduler', 'availability', startDate, endDate],
+    queryKey: ['scheduler', 'availability', startDate, endDate, serviceId, durationMin],
     enabled,
-    queryFn: async () =>
-      (await api.get<Any>(
-        `/scheduler/availability?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`
-      )) as { slots: AvailabilitySlot[]; timezone: string },
+    queryFn: async () => {
+      const params = new URLSearchParams({ startDate, endDate });
+      if (serviceId) params.set('serviceId', serviceId);
+      if (durationMin) params.set('durationMin', String(durationMin));
+      return (await api.get<Any>(`/scheduler/availability?${params.toString()}`)) as {
+        slots: AvailabilitySlot[];
+        timezone: string;
+      };
+    },
   });
 }
 

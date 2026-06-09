@@ -153,6 +153,10 @@ export const listBookingsQuerySchema = z.object({
 export const availabilityQuerySchema = z.object({
   startDate: z.string().datetime(),
   endDate: z.string().datetime(),
+  // Reschedule picker passes the booking's service + frozen length so the right
+  // service is resolved (no SERVICE_REQUIRED with multiple active services).
+  serviceId: z.string().uuid().optional(),
+  durationMin: z.coerce.number().int().positive().optional(),
 });
 
 export const cancelBookingBodySchema = z.object({

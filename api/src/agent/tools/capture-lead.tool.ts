@@ -2,6 +2,7 @@ import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { Lead } from '../../database/entities/Lead';
+import { notificationService } from '../../services/notification.service';
 import type { LeadCreatedEvent } from '../../webhooks/webhook.types';
 
 export class CaptureLeadTool implements ToolAdapter {
@@ -88,6 +89,18 @@ export class CaptureLeadTool implements ToolAdapter {
       };
 
       emitWebhookEvent(event);
+
+      // Push notification to operators (fire-and-forget; never blocks capture).
+      void notificationService
+        .createForTenant({
+          tenantId: ctx.tenantId,
+          type: 'lead_created',
+          title: 'New lead captured',
+          message: `${name} (${email})`,
+          data: { leadId: lead.id, sessionId: ctx.sessionId },
+          dedupeBase: `lead:${lead.id}`,
+        })
+        .catch(() => {});
 
       return {
         success: true,

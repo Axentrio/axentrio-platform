@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
+import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { Booking } from '../../database/entities/Booking';
@@ -832,6 +833,18 @@ export class InternalProvider implements BookingProvider {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // Push notification to operators (fire-and-forget; never blocks the booking).
+    void notificationService
+      .createForTenant({
+        tenantId: ctx.tenant.id,
+        type: 'booking_request',
+        title: 'New booking request',
+        message: `${req.attendee.name} requested ${service.name}`,
+        data: { bookingId: req.bookingId, sessionId: ctx.session.id },
+        dedupeBase: `booking_request:${req.bookingId}`,
+      })
+      .catch(() => {});
 
     // Owner email — fire-and-forget. Skipped (and logged) when no supportEmail is set;
     // that's an accepted degraded state — the portal Requests tab is the guaranteed surface

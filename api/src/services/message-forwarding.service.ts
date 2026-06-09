@@ -6,6 +6,7 @@
 
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
+import { notificationService } from './notification.service';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
@@ -737,6 +738,20 @@ async function handleBotHandoff(
     reason,
     requestedAt: new Date().toISOString(),
   });
+
+  // Push notification to operators (fire-and-forget; never blocks handoff).
+  void notificationService
+    .createForTenant({
+      tenantId: session.tenantId,
+      type: 'handoff_requested',
+      title: 'New handoff request',
+      message: reason
+        ? `A visitor needs help: ${reason}`
+        : 'A visitor is requesting a human agent.',
+      data: { sessionId: session.id, handoffId: handoff.id },
+      dedupeBase: `handoff:${handoff.id}`,
+    })
+    .catch(() => {});
 
   logger.info(`Bot handoff triggered for session ${session.id}`, { reason });
 }

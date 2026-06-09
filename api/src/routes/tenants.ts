@@ -794,8 +794,38 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
 
-    const invites = await AppDataSource.getRepository(PendingInvite)
-      .find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+    let invites = await inviteRepo.find({ where: { tenantId }, order: { createdAt: 'DESC' } });
+
+    // Reconcile against Clerk: drop invites whose invitee already joined the org.
+    // The pending row otherwise only clears when the invitee logs into the portal
+    // (autoProvision), so an invite accepted via the Clerk dashboard — or before the
+    // redirectUrl fix — lingers as a stale "pending" row. One membership-list call,
+    // fail-open if Clerk is slow/down so the page still renders.
+    if (invites.length > 0) {
+      try {
+        const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+        if (tenant?.clerkOrgId) {
+          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
+            organizationId: tenant.clerkOrgId,
+            limit: 100,
+          });
+          const memberEmails = new Set(
+            (memberships.data ?? [])
+              .map((m: any) => m.publicUserData?.identifier?.toLowerCase())
+              .filter(Boolean)
+          );
+          const accepted = invites.filter(inv => memberEmails.has(inv.email.toLowerCase()));
+          if (accepted.length > 0) {
+            await inviteRepo.remove(accepted);
+            invites = invites.filter(inv => !memberEmails.has(inv.email.toLowerCase()));
+            logger.info('Cleared stale pending invites (already org members)', { tenantId, count: accepted.length });
+          }
+        }
+      } catch (err) {
+        logger.warn('Pending-invite reconcile against Clerk failed; returning DB list', { tenantId, err });
+      }
+    }
 
     // Resolve inviter names
     const inviterIds = [...new Set(invites.map(i => i.invitedBy).filter(Boolean))] as string[];

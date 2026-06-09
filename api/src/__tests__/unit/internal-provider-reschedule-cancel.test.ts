@@ -8,6 +8,7 @@ const bookingQuery = vi.fn();
 const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();
 const managerQuery = vi.fn();
+const bookingRefFind = vi.fn();
 const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
 
 vi.mock('../../database/data-source', () => ({
@@ -18,7 +19,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
       if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
-      if (name === 'BookingReference') return { find: vi.fn().mockResolvedValue([]), save: vi.fn(), create: (x: any) => x };
+      if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -112,6 +113,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
     eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(confirmedBooking());
+    bookingRefFind.mockResolvedValue([]); // no calendar ref by default
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('lower(blocked_range)')) return []; // busy
       if (sql.includes("status='cancelled'")) return [{ sequence: 1 }]; // cancel update
@@ -134,6 +136,18 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail).toHaveBeenCalledOnce();
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 1, uid: 'uid-1@axentrio' });
     expect(logSave).toHaveBeenCalledOnce();
+  });
+
+  it('reschedule invite keeps the meeting join link (location + description)', async () => {
+    bookingRefFind.mockResolvedValue([
+      { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },
+    ]);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({
+      method: 'REQUEST',
+      location: 'https://meet.google.com/abc-defg-hij',
+      description: 'Join the meeting: https://meet.google.com/abc-defg-hij',
+    });
   });
 
   it('rejects rescheduling to a non-offered time', async () => {

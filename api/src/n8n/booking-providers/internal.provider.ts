@@ -1318,6 +1318,13 @@ export class InternalProvider implements BookingProvider {
 
     await this.writeLog(ctx, 'rescheduled', booking, start, end);
 
+    // Carry the meeting join URL onto the rescheduled invite. The ICS reuses the
+    // same UID with a bumped SEQUENCE (an in-place UPDATE), so omitting LOCATION/
+    // DESCRIPTION here would BLANK the join link on the attendee's calendar event.
+    // The mirrored event is updated (not recreated) on reschedule, so the stored
+    // meetingUrl is still valid. Mirror the create path's location/description.
+    const ref = await this.canonicalRef(ctx.bot.id, bookingId);
+    const meetUrl = ref?.meetingUrl ?? null;
     await sendBookingEmail({
       method: 'REQUEST',
       uid: booking.icsUid,
@@ -1325,6 +1332,8 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: service.name,
+      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
+      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',

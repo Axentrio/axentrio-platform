@@ -212,7 +212,7 @@ async function buildAdminContext(tenantId: string, booking: Booking): Promise<Bo
   if (!session) {
     session = { id: booking.sessionId ?? booking.id, tenantId, botId: bot.id } as ChatSession;
   }
-  return { session, tenant, bot, botSettings: bot.settings ?? ({} as BotSettings) };
+  return { session, tenant, bot, botSettings: bot.settings ?? ({} as BotSettings), isAdmin: true };
 }
 
 /** List the tenant anchor bot's internal bookings, upcoming or past. */

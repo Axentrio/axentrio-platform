@@ -87,6 +87,7 @@ const confirmedBooking = () => ({
   id: 'bk-1',
   tenantId: 'ten-1',
   botId: 'bot-1',
+  sessionId: 'sess-1', // matches ctx.session.id — the customer owns this booking
   provider: 'internal',
   eventTypeId: 'et-1',
   status: 'confirmed',
@@ -157,6 +158,30 @@ describe('InternalProvider reschedule / cancel / list', () => {
     bookingFindOne.mockResolvedValue({ ...confirmedBooking(), tenantId: 'other-tenant' });
     await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
     await expect(provider.cancelBooking(ctx, 'bk-1')).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
+  });
+
+  // ── H1: cross-customer IDOR within the same tenant ────────────────────────
+  it("rejects reschedule/cancel of another customer's booking in the same tenant (different session → 404)", async () => {
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), sessionId: 'other-customer-session' });
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
+    await expect(provider.cancelBooking(ctx, 'bk-1')).rejects.toMatchObject({ code: 'BOOKING_NOT_FOUND' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('an admin context (portal / signed manage-link) may manage a booking from any session', async () => {
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), sessionId: 'other-customer-session' });
+    const res = await provider.rescheduleBooking({ ...ctx, isAdmin: true }, 'bk-1', NEW_START);
+    expect(res.success).toBe(true);
+  });
+
+  it("listBookings is scoped to the caller's own session", async () => {
+    bookingFind.mockResolvedValue([]);
+    await provider.listBookings(ctx, 'ada@example.com');
+    expect(bookingFind).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ sessionId: 'sess-1', tenantId: 'ten-1', botId: 'bot-1' }),
+      })
+    );
   });
 
   it('cancels a confirmed booking and sends a CANCEL invite', async () => {

@@ -30,6 +30,11 @@ export interface BookingContext {
   /** The resolved bot (session's bot, or the tenant anchor). */
   bot: Bot;
   botSettings: BotSettings;
+  /** True only for the Clerk-authenticated admin/portal path and the
+   *  signed-token manage-link path, which may manage ANY booking in the tenant.
+   *  The customer/widget path leaves this false so it is scoped to its own chat
+   *  session (see loadOwned / listBookings in the internal provider). */
+  isAdmin?: boolean;
 }
 
 export interface BookingSlot {

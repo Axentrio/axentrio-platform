@@ -1203,8 +1203,12 @@ export class InternalProvider implements BookingProvider {
   async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
     const bookings = await AppDataSource.getRepository(Booking).find({
       where: {
+        // listBookings is the customer/widget path only (admin uses
+        // adminListBookings); scope to the caller's own session so a visitor
+        // can't enumerate another customer's bookings by typing their email.
         tenantId: ctx.tenant.id,
         botId: ctx.bot.id,
+        sessionId: ctx.session.id,
         attendeeEmail,
         status: 'confirmed',
       },
@@ -1225,6 +1229,13 @@ export class InternalProvider implements BookingProvider {
   private async loadOwned(ctx: BookingContext, bookingId: string): Promise<Booking> {
     const booking = await AppDataSource.getRepository(Booking).findOne({ where: { id: bookingId } });
     if (!booking || booking.tenantId !== ctx.tenant.id || booking.botId !== ctx.bot.id) {
+      throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
+    }
+    // Customer/widget path: a visitor may only manage a booking created in their
+    // OWN chat session — never another customer's, even within the same tenant
+    // (the attendee email is an unverified tool arg). The admin/portal + signed
+    // manage-link paths (isAdmin) may manage any booking in the tenant.
+    if (!ctx.isAdmin && booking.sessionId !== ctx.session.id) {
       throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
     }
     return booking;

@@ -1,10 +1,29 @@
 import { clerkClient } from '@clerk/express';
 import { logger } from '../utils/logger';
+import { config } from '../config/environment';
 
 /**
  * Thin wrapper around Clerk API calls for tenant/user lifecycle operations.
  * All methods are non-throwing — they log errors and return success/failure.
  */
+
+/**
+ * Where an invited user should land after accepting a Clerk org invite.
+ *
+ * Without an explicit `redirectUrl`, Clerk falls back to the instance's
+ * configured Home URL — which points at the marketing site (axentrio.com),
+ * not the portal. Invitees would sign up, join the org, then get dumped on
+ * the marketing page, never hitting the portal where `autoProvision` runs —
+ * so their `PendingInvite` never clears and they stay stuck as "pending".
+ *
+ * `config.cors.origin` is the portal origin in every environment (the SPA
+ * must be a CORS origin to call the API), so it's the correct landing URL.
+ */
+function portalRedirectUrl(): string | undefined {
+  const origin = config.cors.origin;
+  if (origin === '*') return undefined;
+  return origin[0]?.trim() || undefined;
+}
 
 export async function createClerkOrganization(name: string): Promise<{ id: string } | null> {
   try {
@@ -28,6 +47,7 @@ export async function inviteToClerkOrganization(
       emailAddress: email,
       role: 'org:member', // Always org:member — DB owns authorization
       inviterUserId: inviterClerkUserId || undefined,
+      redirectUrl: portalRedirectUrl(),
     });
     logger.info('Sent Clerk organization invite', { clerkOrgId, email });
     return true;
@@ -72,6 +92,7 @@ export async function revokeAndResendClerkInvitation(
       emailAddress: email,
       role: 'org:member',
       inviterUserId: inviterClerkUserId || undefined,
+      redirectUrl: portalRedirectUrl(),
     });
     logger.info('Resent Clerk organization invite', { clerkOrgId, email });
     return { ok: true };

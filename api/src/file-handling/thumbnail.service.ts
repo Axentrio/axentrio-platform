@@ -247,43 +247,55 @@ export class ThumbnailService {
       // Generate the sizes in parallel — Sharp encode + S3 upload per size are
       // independent. The size list is a small fixed config so this is bounded;
       // Sharp's native work is already spread across libuv's threadpool.
-      const thumbnails: ThumbnailResult['thumbnails'] = (
-        await Promise.all(
-          this.config.sizes.map(async (size) => {
-            // Skip if original is smaller than target
-            if (originalWidth < size.width && originalHeight < size.height) {
-              return null;
-            }
+      const settled = await Promise.allSettled(
+        this.config.sizes.map(async (size) => {
+          // Skip if original is smaller than target
+          if (originalWidth < size.width && originalHeight < size.height) {
+            return null;
+          }
 
-            const thumbnailKey = this.getThumbnailKey(fileKey, size.name);
-            const outputPath = join(tempDir, `${size.name}.${this.config.format}`);
+          const thumbnailKey = this.getThumbnailKey(fileKey, size.name);
+          const outputPath = join(tempDir, `${size.name}.${this.config.format}`);
 
-            // Generate thumbnail with Sharp
-            await this.processImageWithSharp(inputPath, outputPath, size);
+          // Generate thumbnail with Sharp
+          await this.processImageWithSharp(inputPath, outputPath, size);
 
-            // Upload to S3
-            const fileBuffer = await fs.readFile(outputPath);
-            await this.uploadToS3(thumbnailKey, fileBuffer, this.getContentType());
+          // Upload to S3
+          const fileBuffer = await fs.readFile(outputPath);
+          await this.uploadToS3(thumbnailKey, fileBuffer, this.getContentType());
 
-            // Get dimensions of generated thumbnail
-            const thumbMetadata = await sharp(outputPath).metadata();
+          // Get dimensions of generated thumbnail
+          const thumbMetadata = await sharp(outputPath).metadata();
 
-            // Generate URL
-            const url = await this.generateThumbnailUrl(thumbnailKey);
+          // Generate URL
+          const url = await this.generateThumbnailUrl(thumbnailKey);
 
-            // Clean up temp file
-            await fs.unlink(outputPath).catch(() => {});
+          // Clean up temp file
+          await fs.unlink(outputPath).catch(() => {});
 
-            return {
-              size: size.name,
-              url,
-              width: thumbMetadata.width || size.width,
-              height: thumbMetadata.height || size.height,
-              fileSize: fileBuffer.length,
-            };
-          }),
-        )
-      ).filter((t): t is NonNullable<typeof t> => t !== null);
+          return {
+            size: size.name,
+            url,
+            width: thumbMetadata.width || size.width,
+            height: thumbMetadata.height || size.height,
+            fileSize: fileBuffer.length,
+          };
+        }),
+      );
+
+      // allSettled (not all): every task must finish before the finally block
+      // cleans up tempDir, otherwise a single rejection would let cleanup race
+      // tasks still reading/writing inputPath/outputPath. Then re-throw the
+      // first failure to preserve the prior "a failing size throws" contract —
+      // callers treat thumbnails as best-effort and log it.
+      const rejected = settled.find((r) => r.status === 'rejected');
+      if (rejected && rejected.status === 'rejected') {
+        throw rejected.reason;
+      }
+
+      const thumbnails: ThumbnailResult['thumbnails'] = settled.flatMap((r) =>
+        r.status === 'fulfilled' && r.value ? [r.value] : [],
+      );
 
       return {
         originalKey: fileKey,

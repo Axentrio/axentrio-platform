@@ -332,6 +332,18 @@ export async function adminRescheduleBooking(tenantId: string, bookingId: string
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
+export async function adminAcceptRequest(tenantId: string, bookingId: string) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.acceptRequest(ctx, bookingId);
+}
+
+export async function adminDeclineRequest(tenantId: string, bookingId: string, reason?: string) {
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.declineRequest(ctx, bookingId, reason);
+}
+
 /** Booking + display context for the public self-service manage page. */
 export async function getManageBooking(
   bookingId: string

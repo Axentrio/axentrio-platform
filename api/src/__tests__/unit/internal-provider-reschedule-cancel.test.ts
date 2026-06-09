@@ -87,6 +87,7 @@ const confirmedBooking = () => ({
   id: 'bk-1',
   tenantId: 'ten-1',
   botId: 'bot-1',
+  provider: 'internal',
   eventTypeId: 'et-1',
   status: 'confirmed',
   icsUid: 'uid-1@axentrio',
@@ -178,5 +179,84 @@ describe('InternalProvider reschedule / cancel / list', () => {
     const res = await provider.listBookings(ctx, 'ada@example.com');
     expect(res.bookings).toHaveLength(1);
     expect(res.bookings[0]).toMatchObject({ id: 'bk-1', status: 'confirmed' });
+  });
+
+  // ── accept / decline request ──────────────────────────────────────────────
+  // requestBooking start 07:00Z = 09:00 Brussels (an offered Wed slot), future.
+  const requestBooking = (over: Record<string, unknown> = {}) => ({
+    ...confirmedBooking(),
+    status: 'request_created',
+    bookedDurationMin: 30,
+    ...over,
+  });
+
+  it('acceptRequest confirms a request → calendar + email + log, returns success', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking());
+    const res = await provider.acceptRequest(ctx, 'bk-1');
+    expect(res.success).toBe(true);
+    expect(res.booking.startTime).toBe('2026-06-10T07:00:00.000Z');
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+    expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST' });
+    expect(logSave).toHaveBeenCalled(); // created log
+    // the confirm UPDATE flipped status under the lock
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(true);
+  });
+
+  it('acceptRequest rejects a non-request (confirmed) booking', async () => {
+    bookingFindOne.mockResolvedValue(confirmedBooking());
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'NOT_A_REQUEST' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('acceptRequest rejects a request whose time is in the past', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking({ startUtc: new Date('2026-06-04T07:00:00Z'), endUtc: new Date('2026-06-04T07:30:00Z') }));
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'REQUEST_EXPIRED' });
+  });
+
+  it('acceptRequest rejects when the requested time is no longer offered', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking({ startUtc: new Date('2026-06-10T08:05:00Z'), endUtc: new Date('2026-06-10T08:35:00Z') }));
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('acceptRequest → REQUEST_ALREADY_HANDLED when the conditional update matches no row', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking());
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('UPDATE chatbot_bookings')) return []; // already handled / raced
+      return [];
+    });
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'REQUEST_ALREADY_HANDLED' });
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('acceptRequest maps an exclusion violation (23P01) to SLOT_UNAVAILABLE', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking());
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('UPDATE chatbot_bookings')) throw Object.assign(new Error('excl'), { code: '23P01' });
+      return [];
+    });
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
+  });
+
+  it('declineRequest closes a request (cancelled + log, no email/calendar)', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking());
+    const res = await provider.declineRequest(ctx, 'bk-1', 'cannot accommodate');
+    expect(res).toEqual({ success: true, cancelled: true });
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+    expect(logSave).toHaveBeenCalledOnce();
+  });
+
+  it('declineRequest rejects a non-request booking', async () => {
+    bookingFindOne.mockResolvedValue(confirmedBooking());
+    await expect(provider.declineRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'NOT_A_REQUEST' });
+  });
+
+  it('declineRequest is idempotent for an already-cancelled row', async () => {
+    bookingFindOne.mockResolvedValue(requestBooking({ status: 'cancelled' }));
+    const res = await provider.declineRequest(ctx, 'bk-1');
+    expect(res).toEqual({ success: true, cancelled: true });
+    expect(logSave).not.toHaveBeenCalled();
   });
 });

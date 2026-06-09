@@ -14,6 +14,7 @@ import {
   Loader2,
   CalendarClock,
   XCircle,
+  CheckCircle2,
   Paperclip,
 } from 'lucide-react';
 import { api, extractApiErrorMessage } from '../services/apiClient';
@@ -25,6 +26,8 @@ import {
   useAdminBookings,
   useCancelBooking,
   useRescheduleBooking,
+  useAcceptRequest,
+  useDeclineRequest,
   useBookingAvailability,
   type AdminBooking,
   type BookingScope,
@@ -119,8 +122,11 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
   const { data, isLoading } = useAdminBookings(scope);
   const [cancelTarget, setCancelTarget] = useState<AdminBooking | null>(null);
   const [rescheduleTarget, setRescheduleTarget] = useState<AdminBooking | null>(null);
+  const [declineTarget, setDeclineTarget] = useState<AdminBooking | null>(null);
 
   const cancel = useCancelBooking();
+  const accept = useAcceptRequest();
+  const decline = useDeclineRequest();
   const bookings = data?.bookings ?? [];
 
   return (
@@ -152,8 +158,12 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
                   booking={b}
                   timezone={timezone}
                   canManage={scope === 'upcoming'}
+                  isRequest={scope === 'requests'}
+                  acting={accept.isPending || decline.isPending}
                   onCancel={() => setCancelTarget(b)}
                   onReschedule={() => setRescheduleTarget(b)}
+                  onAccept={() => accept.mutate(b.id)}
+                  onDecline={() => setDeclineTarget(b)}
                 />
               ))}
             </ul>
@@ -192,6 +202,36 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Decline request confirmation */}
+      <AlertDialog open={!!declineTarget} onOpenChange={(o) => !o && setDeclineTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Decline this request?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {declineTarget && (
+                <>
+                  {declineTarget.attendeeName || declineTarget.attendeeEmail} —{' '}
+                  {dayLabel(declineTarget.startTime, timezone)} at {timeLabel(declineTarget.startTime, timezone)}.
+                  This closes the request. No appointment is created and the customer is not emailed.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              onClick={() => {
+                if (declineTarget) decline.mutate({ id: declineTarget.id });
+                setDeclineTarget(null);
+              }}
+            >
+              Decline request
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* Reschedule picker */}
       <RescheduleDialog
         booking={rescheduleTarget}
@@ -223,14 +263,22 @@ function BookingRow({
   booking,
   timezone,
   canManage,
+  isRequest,
+  acting,
   onCancel,
   onReschedule,
+  onAccept,
+  onDecline,
 }: {
   booking: AdminBooking;
   timezone: string;
   canManage: boolean;
+  isRequest: boolean;
+  acting: boolean;
   onCancel: () => void;
   onReschedule: () => void;
+  onAccept: () => void;
+  onDecline: () => void;
 }) {
   const pill = statusPill(booking.status);
   return (
@@ -310,6 +358,24 @@ function BookingRow({
           >
             <XCircle className="mr-1 h-3.5 w-3.5" />
             Cancel
+          </Button>
+        </div>
+      )}
+      {isRequest && (
+        <div className="flex shrink-0 items-center gap-2">
+          <Button size="sm" disabled={acting} onClick={onAccept}>
+            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+            Accept
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={acting}
+            className="text-red-400 hover:text-red-300"
+            onClick={onDecline}
+          >
+            <XCircle className="mr-1 h-3.5 w-3.5" />
+            Decline
           </Button>
         </div>
       )}

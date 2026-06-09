@@ -262,6 +262,37 @@ export function useCancelBooking() {
   });
 }
 
+/** Accept a request_created lead → confirm it (creates the calendar event + email). */
+export function useAcceptRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/scheduler/bookings/${id}/accept`, {}),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bookingsKey });
+      toast.success('Request accepted — appointment confirmed');
+    },
+    onError: (err: Any) => {
+      toast.error(extractApiErrorMessage(err) ?? 'Failed to accept request');
+    },
+  });
+}
+
+/** Decline a request_created lead → close it. */
+export function useDeclineRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
+      api.post(`/scheduler/bookings/${id}/decline`, { reason }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: bookingsKey });
+      toast.success('Request declined');
+    },
+    onError: (err: Any) => {
+      toast.error(extractApiErrorMessage(err) ?? 'Failed to decline request');
+    },
+  });
+}
+
 export function useRescheduleBooking() {
   const queryClient = useQueryClient();
   return useMutation({

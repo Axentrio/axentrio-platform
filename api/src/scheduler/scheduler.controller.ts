@@ -28,6 +28,8 @@ import {
   adminAvailability,
   adminCancelBooking,
   adminRescheduleBooking,
+  adminAcceptRequest,
+  adminDeclineRequest,
 } from '../n8n/booking.service';
 import { findPreset, listPresetSummaries, presetServiceSchema, presetAvailabilitySchema } from './presets';
 import { BookingError } from '../n8n/booking-providers/types';
@@ -351,6 +353,27 @@ export async function rescheduleBooking(req: Request, res: Response): Promise<vo
   const { newStartTime } = rescheduleBookingBodySchema.parse(req.body);
   try {
     sendSuccess(res, await adminRescheduleBooking(tenantId, req.params.id, newStartTime));
+  } catch (err) {
+    asApiError(err);
+  }
+}
+
+/** Accept a request_created lead → confirm it (creates the calendar event + email). */
+export async function acceptRequest(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  try {
+    sendSuccess(res, await adminAcceptRequest(tenantId, req.params.id));
+  } catch (err) {
+    asApiError(err);
+  }
+}
+
+/** Decline a request_created lead → close it. */
+export async function declineRequest(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  const { reason } = cancelBookingBodySchema.parse(req.body ?? {});
+  try {
+    sendSuccess(res, await adminDeclineRequest(tenantId, req.params.id, reason));
   } catch (err) {
     asApiError(err);
   }

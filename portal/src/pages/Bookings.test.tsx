@@ -134,12 +134,12 @@ describe('Bookings — locked (Essential tenant)', () => {
 });
 
 describe('Bookings — unlocked (Pro tenant)', () => {
-  it('renders the M5 placeholder, not the LockedPreview', () => {
+  it('renders the bookings dashboard, not the LockedPreview', () => {
     hasFeatureMock.mockReturnValue(true);
     renderUI();
 
     expect(screen.getByRole('heading', { name: /^bookings$/i })).toBeInTheDocument();
-    expect(screen.getByText(/landing here in M5/i)).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /requests/i })).toBeInTheDocument();
 
     // LockedPreview-only copy should NOT be present.
     expect(screen.queryByText(/let customers schedule appointments/i)).not.toBeInTheDocument();

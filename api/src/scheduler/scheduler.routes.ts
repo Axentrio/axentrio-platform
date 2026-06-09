@@ -31,5 +31,7 @@ router.get('/bookings', requireRole('admin', 'supervisor', 'agent'), asyncHandle
 router.get('/availability', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getBookingAvailability));
 router.post('/bookings/:id/cancel', requireRole('admin'), asyncHandler(ctrl.cancelBooking));
 router.post('/bookings/:id/reschedule', requireRole('admin'), asyncHandler(ctrl.rescheduleBooking));
+router.post('/bookings/:id/accept', requireRole('admin'), asyncHandler(ctrl.acceptRequest));
+router.post('/bookings/:id/decline', requireRole('admin'), asyncHandler(ctrl.declineRequest));
 
 export default router;

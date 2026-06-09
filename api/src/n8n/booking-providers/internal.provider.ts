@@ -1055,6 +1055,142 @@ export class InternalProvider implements BookingProvider {
     }
   }
 
+  /**
+   * Owner accepts a `request_created` lead → confirm it. Uses the request's FROZEN
+   * start/end + booked duration; refreshes the conflict key + buffer-expanded range
+   * to current; re-checks availability + capacity under the per-calendar lock; then
+   * creates the calendar event, sends the confirmation, and schedules reminders. The
+   * request's already-snapshotted uploaded_files ride along unchanged.
+   */
+  async acceptRequest(ctx: BookingContext, bookingId: string): Promise<CreateBookingResult> {
+    const booking = await this.loadOwned(ctx, bookingId);
+    if (booking.provider !== 'internal' || booking.status !== 'request_created') {
+      throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
+    }
+    const start = booking.startUtc;
+    const end = booking.endUtc;
+    if (start.getTime() <= Date.now()) {
+      throw new BookingError('This request is for a time in the past', 'REQUEST_EXPIRED', 409);
+    }
+    const rule = await this.loadRule(ctx.bot.id);
+    const service = await this.serviceForBooking(booking);
+    // Frozen length (stored span for legacy rows; never recompute from the service).
+    const effectiveDuration = booking.bookedDurationMin ?? Math.round((end.getTime() - start.getTime()) / 60_000);
+    // Refresh the conflict key (owner may have connected/switched/disconnected since)
+    // and the buffer-expanded range (request rows store the RAW start/end).
+    const calendarKey = await this.calendarKey(ctx);
+    const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
+    const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
+
+    // Re-validate the stored slot at the frozen duration (the lead may be days old).
+    const busy = await this.loadAllBusy(
+      ctx,
+      calendarKey,
+      new Date(start.getTime() - 24 * 3600_000).toISOString(),
+      new Date(end.getTime() + 24 * 3600_000).toISOString(),
+      bookingId
+    );
+    const offered = computeSlots({
+      rule,
+      eventType: { ...service, durationMin: effectiveDuration },
+      rangeStart: start.toISOString(),
+      rangeEnd: new Date(start.getTime() + 1000).toISOString(),
+      now: new Date(),
+      busy,
+    }).some((s) => new Date(s.start).getTime() === start.getTime());
+    if (!offered) {
+      throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
+    }
+
+    // Flip request → confirmed under the lock (capacity + exclusion guard).
+    let updatedRows: Array<{ id: string }>;
+    try {
+      updatedRows = await AppDataSource.transaction(async (manager) => {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
+        return manager.query(
+          `UPDATE chatbot_bookings
+              SET status='confirmed', calendar_key=$2, blocked_range=tstzrange($3,$4,'[)'), updated_at=now()
+            WHERE id=$1 AND tenant_id=$5 AND status='request_created'
+            RETURNING id`,
+          [bookingId, calendarKey, blockedStart.toISOString(), blockedEnd.toISOString(), ctx.tenant.id]
+        );
+      });
+    } catch (err) {
+      if ((err as { code?: string })?.code === '23P01') {
+        throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
+      }
+      throw err;
+    }
+    if (!updatedRows.length) {
+      throw new BookingError('This request was already handled', 'REQUEST_ALREADY_HANDLED', 409);
+    }
+
+    const confirmed = await this.loadOwned(ctx, bookingId);
+    await this.writeLog(ctx, 'created', confirmed, start, end).catch(() => undefined);
+
+    // Mirror to the connected calendar (best-effort), P6a rich body from the row.
+    const eventContent = buildBookingEventContent(
+      {
+        attendeeName: confirmed.attendeeName,
+        attendeeEmail: confirmed.attendeeEmail,
+        customerPhone: confirmed.customerPhone,
+        customerAddress: confirmed.customerAddress,
+        aiSummary: confirmed.aiSummary,
+        notes: confirmed.notes,
+        intakeAnswers: confirmed.intakeAnswers,
+      },
+      service,
+      buildManageUrl(bookingId)
+    );
+    const meetUrl = await this.syncCalendarCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
+
+    await sendBookingEmail({
+      method: 'REQUEST',
+      uid: confirmed.icsUid,
+      sequence: 0,
+      start,
+      end,
+      summary: service.name,
+      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
+      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      timezone: rule.timezone,
+      attendeeName: confirmed.attendeeName ?? '',
+      attendeeEmail: confirmed.attendeeEmail ?? '',
+      ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      manageUrl: buildManageUrl(bookingId),
+    });
+
+    await this.scheduleAndPersistReminders(bookingId, start, 0);
+
+    return this.toResult(confirmed, false);
+  }
+
+  /** Owner declines a `request_created` lead → close it (no calendar event existed,
+   *  no customer email in v1). Idempotent on a row that's already cancelled/handled. */
+  async declineRequest(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult> {
+    const booking = await this.loadOwned(ctx, bookingId);
+    if (booking.status === 'cancelled') {
+      return { success: true, cancelled: true };
+    }
+    if (booking.provider !== 'internal' || booking.status !== 'request_created') {
+      throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
+    }
+    const rows: Array<{ id: string }> = await AppDataSource.getRepository(Booking).query(
+      `UPDATE chatbot_bookings
+          SET status='cancelled', notes=COALESCE($3, notes), updated_at=now()
+        WHERE id=$1 AND tenant_id=$2 AND status='request_created'
+        RETURNING id`,
+      [bookingId, ctx.tenant.id, reason ?? null]
+    );
+    if (!rows.length) {
+      // Lost a race / already handled — idempotent success.
+      return { success: true, cancelled: true };
+    }
+    await this.writeLog(ctx, 'cancelled', booking, booking.startUtc, booking.endUtc, reason).catch(() => undefined);
+    return { success: true, cancelled: true };
+  }
+
   async listBookings(ctx: BookingContext, attendeeEmail: string): Promise<ListBookingsResult> {
     const bookings = await AppDataSource.getRepository(Booking).find({
       where: {
@@ -1239,7 +1375,7 @@ export class InternalProvider implements BookingProvider {
 
   private async writeLog(
     ctx: BookingContext,
-    eventType: 'rescheduled' | 'cancelled',
+    eventType: 'rescheduled' | 'cancelled' | 'created',
     booking: Booking,
     start: Date,
     end: Date,

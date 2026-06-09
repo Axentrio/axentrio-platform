@@ -919,7 +919,13 @@ export class InternalProvider implements BookingProvider {
 
   private async markSyncPending(bookingId: string): Promise<void> {
     await AppDataSource.getRepository(Booking)
-      .query(`UPDATE chatbot_bookings SET sync_pending=true, updated_at=now() WHERE id=$1`, [bookingId])
+      .query(
+        // Reset the retry budget: a re-flag (reschedule/cancel/create) is a NEW sync
+        // episode and must not inherit a prior episode's attempt count (else it can go
+        // terminal after only a couple of fresh failures).
+        `UPDATE chatbot_bookings SET sync_pending=true, sync_attempts=0, sync_next_attempt_at=null, updated_at=now() WHERE id=$1`,
+        [bookingId]
+      )
       .catch(() => undefined);
   }
 

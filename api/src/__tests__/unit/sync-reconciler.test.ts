@@ -163,6 +163,13 @@ describe('reconcilePendingBookingSyncs', () => {
     expect(scheduledRetry()).toBe(true);
   });
 
+  it('resets sync_attempts to 0 on a successful sync (fresh budget for a later re-flag)', async () => {
+    claim({ ...baseRow, status: 'confirmed', sync_attempts: 4 });
+    createCalendarEvent.mockResolvedValue({ eventId: EVID, calendarId: 'primary', meetUrl: 'm' });
+    await reconcilePendingBookingSyncs();
+    expect(postUpdateSqls().some((s) => s.includes('sync_attempts = 0'))).toBe(true);
+  });
+
   it('re-asserts the claim: does NOT clear sync_pending when the row changed since claim', async () => {
     // Claim a confirmed row, but make the optimistic clear match no row (a concurrent
     // reschedule bumped updated_at). The reconciler must leave sync_pending set.

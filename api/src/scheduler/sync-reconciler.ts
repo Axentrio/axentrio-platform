@@ -245,7 +245,8 @@ async function clear(row: ClaimedRow): Promise<void> {
   // be stranded at a stale time with no re-sync flag.
   const cleared: Array<{ id: string }> = await AppDataSource.query(
     `UPDATE chatbot_bookings
-        SET sync_pending = false, sync_claimed_until = null, sync_last_error = null, updated_at = now()
+        SET sync_pending = false, sync_claimed_until = null, sync_last_error = null,
+            sync_attempts = 0, sync_next_attempt_at = null, updated_at = now()
       WHERE id = $1 AND updated_at::text = $2
       RETURNING id`,
     [row.id, row.updated_at]

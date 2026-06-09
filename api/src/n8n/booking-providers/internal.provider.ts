@@ -331,7 +331,8 @@ export class InternalProvider implements BookingProvider {
     calendarKey: string,
     rangeStartIso: string,
     rangeEndIso: string,
-    excludeId?: string
+    excludeId?: string,
+    excludeExternalInterval?: { start: Date; end: Date }
   ): Promise<BusyInterval[]> {
     const internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
     let external: BusyInterval[] | null = null;
@@ -348,6 +349,14 @@ export class InternalProvider implements BookingProvider {
         'BOOKING_TEMPORARILY_UNAVAILABLE',
         503
       );
+    }
+    // On reschedule the booking's OWN mirrored external event sits at its old time;
+    // drop it (exact raw start/end match — the mirror carries no buffer) so a nearby
+    // move doesn't conflict with itself. excludeId only covers the internal copy.
+    if (external && excludeExternalInterval) {
+      const xs = excludeExternalInterval.start.getTime();
+      const xe = excludeExternalInterval.end.getTime();
+      external = external.filter((iv) => !(iv.start.getTime() === xs && iv.end.getTime() === xe));
     }
     return external ? [...internal, ...external] : internal;
   }
@@ -1267,7 +1276,8 @@ export class InternalProvider implements BookingProvider {
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
-      bookingId
+      bookingId,
+      { start: booking.startUtc, end: booking.endUtc }
     );
     const offered = computeSlots({
       rule,

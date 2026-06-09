@@ -45,10 +45,11 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
 
 // InternalProvider routes calendar work through the port; these tests focus on
 // reschedule/cancel LOGIC, so a benign "no connection" adapter suffices.
+const providerGetBusy = vi.fn();
 vi.mock('../../scheduler/calendar-provider', () => {
   const adapter = {
     providerType: 'google',
-    getBusy: vi.fn().mockResolvedValue(null),
+    getBusy: (...a: any[]) => providerGetBusy(...a),
     createEvent: vi.fn().mockResolvedValue(null),
     updateEvent: vi.fn().mockResolvedValue('no_connection'),
     deleteEvent: vi.fn().mockResolvedValue('ok'),
@@ -114,6 +115,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(confirmedBooking());
     bookingRefFind.mockResolvedValue([]); // no calendar ref by default
+    providerGetBusy.mockResolvedValue(null); // no external busy by default
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('lower(blocked_range)')) return []; // busy
       if (sql.includes("status='cancelled'")) return [{ sequence: 1 }]; // cancel update
@@ -155,6 +157,19 @@ describe('InternalProvider reschedule / cancel / list', () => {
       code: 'SLOT_UNAVAILABLE',
     });
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('reschedule to a nearby slot is not blocked by the booking\'s OWN external event (M3)', async () => {
+    // Finer granularity so 07:15Z (09:15 Brussels) is a candidate that overlaps the
+    // old event [07:00,07:30). The booking's mirror sits at its old time; getBusy
+    // returns it as foreign busy. Without the self-exclusion this move is rejected.
+    ruleFindOne.mockResolvedValue({ ...RULE, slotGranularityMin: 15 });
+    providerGetBusy.mockResolvedValue([
+      { start: new Date('2026-06-10T07:00:00Z'), end: new Date('2026-06-10T07:30:00Z') },
+    ]);
+    const res = await provider.rescheduleBooking(ctx, 'bk-1', '2026-06-10T07:15:00Z');
+    expect(res.success).toBe(true);
+    expect(res.booking.startTime).toBe('2026-06-10T07:15:00.000Z');
   });
 
   it('maps a reschedule exclusion violation to SLOT_UNAVAILABLE', async () => {

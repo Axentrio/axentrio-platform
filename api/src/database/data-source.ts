@@ -49,6 +49,9 @@ import { AvailabilityRule } from './entities/AvailabilityRule';
 import { Booking } from './entities/Booking';
 import { CalendarCredential } from './entities/CalendarCredential';
 import { BookingReference } from './entities/BookingReference';
+import { Notification } from './entities/Notification';
+import { MobileDevice } from './entities/MobileDevice';
+import { NotificationDelivery } from './entities/NotificationDelivery';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -105,6 +108,9 @@ export const AppDataSource = new DataSource({
     Booking,
     CalendarCredential,
     BookingReference,
+    Notification,
+    MobileDevice,
+    NotificationDelivery,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

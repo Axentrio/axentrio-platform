@@ -1,4 +1,10 @@
 {
+  "name": "axentrio-platform",
+  "private": true,
+  "workspaces": [
+    "mobile",
+    "packages/*"
+  ],
   "devDependencies": {
     "shadcn": "^4.1.0"
   }

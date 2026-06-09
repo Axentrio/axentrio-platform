@@ -71,7 +71,7 @@ packages/api-client/  # shared Axios client + react-query hook factories + query
 packages/i18n/        # shared translation JSON
 ```
 
-- **Workspaces:** npm workspaces (repo is already on `package-lock.json`; pnpm is optional, not required for v1).
+- **Workspaces:** npm workspaces **scoped to `mobile` + `packages/*` only** — `api/` and `portal/` are deliberately excluded from the root `workspaces` array so their existing isolated lockfiles and Railway/Docker builds stay untouched (verified: their `package-lock.json` files are unchanged after the mobile install). pnpm is optional, not required for v1.
 - **Reuse:** response-envelope Axios client, query keys, TanStack Query hook factories, shared DTOs/contracts, date/status helpers, role-permission map, i18n JSON.
 - **Do NOT reuse:** shadcn / Radix DOM components, React Router screens, browser notifications/audio, Recharts, Tailwind DOM classes.
 - **RN UI approach:** **NativeWind** to reuse color/spacing **design tokens** (not portal components) + a small RN component layer (buttons, lists, chips, sheets, forms). `expo-router` for navigation, `FlashList` for long lists, native bottom sheets for actions, `lucide-react-native` for icons.

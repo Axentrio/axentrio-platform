@@ -116,7 +116,9 @@ export const AppDataSource = new DataSource({
   // Migration configuration (disabled in test — tests use synchronize from entities)
   migrations: config.server.isTest ? [] : [__dirname + '/migrations/*{.ts,.js}'],
   migrationsTableName: 'migrations',
-  migrationsRun: process.env.NODE_ENV !== 'test',
+  // Run migrations on boot, except in test or when building the schema from
+  // entities via DB_SYNCHRONIZE (local dev — migrations-from-scratch aren't supported).
+  migrationsRun: process.env.DB_SYNCHRONIZE !== 'true' && process.env.NODE_ENV !== 'test',
 
   // Connection pool settings
   extra: {
@@ -130,8 +132,9 @@ export const AppDataSource = new DataSource({
   logging: ['error'],
   logger: 'advanced-console',
 
-  // Synchronization disabled — always use migrations instead
-  synchronize: false,
+  // Off in prod (use migrations). Opt-in for local dev via DB_SYNCHRONIZE=true,
+  // which builds the schema from entities (extensions must pre-exist).
+  synchronize: process.env.DB_SYNCHRONIZE === 'true',
 });
 
 // Initialize database connection

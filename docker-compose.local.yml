@@ -1,0 +1,24 @@
+# Local-only Postgres (pgvector) + Redis for running the API against a
+# throwaway DB. Starts empty; the API builds the full schema via migrations on
+# boot (migrationsRun is on in development).
+#
+#   docker compose -f docker-compose.local.yml up -d
+#   cd api && ./scripts/dev-local.sh
+services:
+  db:
+    image: pgvector/pgvector:pg15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: axentrio
+    ports:
+      - '5432:5432'
+    volumes:
+      - axentrio_pg:/var/lib/postgresql/data
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '6379:6379'
+
+volumes:
+  axentrio_pg:

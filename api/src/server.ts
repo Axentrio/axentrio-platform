@@ -336,14 +336,19 @@ async function startServer(): Promise<void> {
     await AppDataSource.initialize();
     logger.info('Database connection established');
 
-    // Run pending migrations on startup
-    const pending = await AppDataSource.showMigrations();
-    if (pending) {
-      logger.info('Running pending database migrations...');
-      await AppDataSource.runMigrations();
-      logger.info('Database migrations completed');
+    // Run pending migrations on startup — skipped when the schema is built from
+    // entities via DB_SYNCHRONIZE (local dev; migrate-from-scratch isn't supported).
+    if (process.env.DB_SYNCHRONIZE === 'true') {
+      logger.info('DB_SYNCHRONIZE=true — schema synchronized from entities; skipping migrations');
     } else {
-      logger.info('Database schema is up to date');
+      const pending = await AppDataSource.showMigrations();
+      if (pending) {
+        logger.info('Running pending database migrations...');
+        await AppDataSource.runMigrations();
+        logger.info('Database migrations completed');
+      } else {
+        logger.info('Database schema is up to date');
+      }
     }
 
     // Hydrate Copilot docs corpus from the build-time bundle. Throws

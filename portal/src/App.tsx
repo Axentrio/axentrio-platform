@@ -56,6 +56,11 @@ import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
 
+// Public legal pages — rendered outside the Clerk auth gate (see early return in App)
+import PrivacyPolicy from '@pages/legal/PrivacyPolicy';
+import Terms from '@pages/legal/Terms';
+import DataDeletion from '@pages/legal/DataDeletion';
+
 // Copilot (AI Platform Assistant) — Pro+ feature, locked-but-visible
 import { CopilotDrawerProvider } from '@components/copilot/CopilotDrawerProvider';
 import { CopilotLauncher } from '@components/copilot/CopilotLauncher';
@@ -260,6 +265,8 @@ const DefaultRedirect: React.FC = () => {
   return <Navigate to="/analytics" replace />;
 };
 
+const LEGAL_PATHS = ['/privacy', '/terms', '/data-deletion'];
+
 const App: React.FC = () => {
   // If on widget-test path, render only the widget test page (no Clerk)
   if (window.location.pathname === '/widget-test') {
@@ -269,6 +276,21 @@ const App: React.FC = () => {
           <WidgetTestRouter />
           <Toaster />
         </QueryClientProvider>
+      </ThemeProvider>
+    );
+  }
+
+  // Public legal pages — must be reachable logged-out (Meta's crawler reads them)
+  if (LEGAL_PATHS.includes(window.location.pathname)) {
+    return (
+      <ThemeProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/data-deletion" element={<DataDeletion />} />
+          </Routes>
+        </BrowserRouter>
       </ThemeProvider>
     );
   }

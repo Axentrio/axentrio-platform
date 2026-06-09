@@ -566,6 +566,59 @@ router.post(
 );
 
 /**
+ * Ensure a user who is already a member of the tenant's Clerk org is provisioned
+ * in our DB. Returns true if the email belongs to a current Clerk org member
+ * (provisioning them if needed, no-op if already in our DB); false if they are
+ * NOT a member — i.e. an invite failure was something other than "already a member".
+ */
+async function provisionExistingOrgMember(
+  tenantId: string,
+  clerkOrgId: string,
+  email: string,
+  role: 'admin' | 'supervisor' | 'agent'
+): Promise<boolean> {
+  let memberships;
+  try {
+    memberships = await clerkClient.organizations.getOrganizationMembershipList({
+      organizationId: clerkOrgId,
+      limit: 100,
+    });
+  } catch (err: any) {
+    logger.warn('Could not check Clerk org membership', { email, error: err?.message });
+    return false;
+  }
+
+  const membership = memberships.data?.find(
+    (m: any) => m.publicUserData?.identifier?.toLowerCase() === email.toLowerCase()
+  );
+  if (!membership?.publicUserData?.userId) return false; // not a member — real failure
+
+  const userRepo = AppDataSource.getRepository(User);
+  const existing = await userRepo.findOne({ where: { email, tenantId } });
+  if (existing) return true; // already synced
+
+  const clerkUserId = membership.publicUserData.userId;
+  let name = email.split('@')[0];
+  try {
+    const clerkUser = await clerkClient.users.getUser(clerkUserId);
+    name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
+  } catch { /* use fallback name */ }
+
+  await userRepo.createQueryBuilder().insert().into(User).values({
+    tenantId, clerkUserId, email, name, role: role as any, isActive: true,
+  }).orIgnore().execute();
+
+  const newUser = await userRepo.findOne({ where: { clerkUserId } });
+  if (newUser) {
+    await AppDataSource.getRepository(Agent).createQueryBuilder().insert().into(Agent).values({
+      tenantId, userId: newUser.id, status: 'offline', maxConcurrentChats: 5, skills: [], languages: ['en'],
+    }).orIgnore().execute();
+    logger.info('Provisioned already-member user', { email, userId: newUser.id });
+  }
+  return true;
+}
+
+/**
  * Invite user to tenant
  * POST /api/v1/tenants/me/invite
  */
@@ -597,6 +650,16 @@ router.post(
       req.user!.clerkUserId
     );
     if (!invited) {
+      // The most common cause is the invitee already being a member of the org
+      // (e.g. they accepted an earlier invite but never logged into the portal,
+      // so they never got provisioned into our DB). In that case, sync them into
+      // the members list instead of erroring. Only a genuine Clerk failure 502s.
+      const alreadyMember = await provisionExistingOrgMember(tenant.id, tenant.clerkOrgId, email.toLowerCase(), role);
+      if (alreadyMember) {
+        await logAudit(req.userId!, 'invite.cleaned', 'invite', tenant.id, tenantId, { email, role, reason: 'already_member' });
+        sendSuccess(res, { message: 'User has already joined — synced to members list' });
+        return;
+      }
       throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
     }
 
@@ -881,56 +944,8 @@ router.post(
     const result = await revokeAndResendClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
 
     if (!result.ok && result.code === 'already_member') {
-      // Provision the user in our DB since they're already in Clerk org
-      const userRepo = AppDataSource.getRepository(User);
-      const agentRepo = AppDataSource.getRepository(Agent);
-      const existingUser = await userRepo.findOne({ where: { email: invite.email, tenantId } });
-
-      if (!existingUser) {
-        try {
-          // Find their Clerk userId from org membership
-          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-            organizationId: tenant.clerkOrgId!,
-            limit: 100,
-          });
-          const membership = memberships.data?.find(
-            (m: any) => m.publicUserData?.identifier?.toLowerCase() === invite.email.toLowerCase()
-          );
-
-          if (membership?.publicUserData?.userId) {
-            const clerkUserId = membership.publicUserData.userId;
-            let name = invite.email.split('@')[0];
-            try {
-              const clerkUser = await clerkClient.users.getUser(clerkUserId);
-              name = [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(' ') || name;
-            } catch { /* use fallback name */ }
-
-            await userRepo.createQueryBuilder().insert().into(User).values({
-              tenantId,
-              clerkUserId,
-              email: invite.email,
-              name,
-              role: invite.role as any,
-              isActive: true,
-            }).orIgnore().execute();
-
-            const newUser = await userRepo.findOne({ where: { clerkUserId } });
-            if (newUser) {
-              await agentRepo.createQueryBuilder().insert().into(Agent).values({
-                tenantId,
-                userId: newUser.id,
-                status: 'offline',
-                maxConcurrentChats: 5,
-                skills: [],
-                languages: ['en'],
-              }).orIgnore().execute();
-              logger.info('Provisioned already-member user from stale invite', { email: invite.email, userId: newUser.id });
-            }
-          }
-        } catch (provisionErr: any) {
-          logger.warn('Could not auto-provision already-member user', { error: provisionErr?.message, email: invite.email });
-        }
-      }
+      // Already in the Clerk org — sync them into our DB (best-effort) and drop the invite.
+      await provisionExistingOrgMember(tenantId, tenant.clerkOrgId, invite.email, invite.role as 'admin' | 'supervisor' | 'agent');
 
       await inviteRepo.remove(invite);
       await logAudit(req.userId!, 'invite.cleaned', 'invite', invite.id, tenantId, { email: invite.email, reason: 'already_member' });

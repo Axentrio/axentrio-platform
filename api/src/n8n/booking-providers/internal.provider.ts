@@ -317,6 +317,16 @@ export class InternalProvider implements BookingProvider {
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
+    // Request-only services aren't booked against the calendar — there are no
+    // bookable slots to offer. Hard-stop here so the agent can't present times or
+    // run an availability check for them (a prompt nudge alone wasn't enough).
+    if (service.bookingMode === 'request') {
+      throw new BookingError(
+        `"${service.name}" is request-only and has no bookable time slots. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment.`,
+        'REQUEST_ONLY_SERVICE',
+        400
+      );
+    }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
     const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the

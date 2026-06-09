@@ -66,6 +66,34 @@ function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<stri
   return Object.keys(out).length ? out : null;
 }
 
+/**
+ * Coerce a possibly-loose date range into a UTC [start, end) window. The LLM
+ * usually passes date-only strings ("2026-06-08", sometimes start === end); a
+ * date-only value is anchored to the BUSINESS timezone's calendar day — NOT UTC
+ * (`new Date("2026-06-08")` is UTC midnight, which offsets the window by the
+ * zone's UTC offset and makes the slot engine clip real evening slots in
+ * negative-offset zones / leak next-day slots in positive-offset zones, drifting
+ * with DST). A date-only end includes that whole local day; a zero/negative
+ * window becomes a single day. Datetime strings with an explicit offset/Z keep
+ * their instant; zoneless datetimes are read as business-local. Output is RFC3339
+ * UTC (Google events.list 400s on date-only values).
+ */
+export function normalizeDateRange(
+  startDate: string,
+  endDate: string,
+  timezone: string,
+): { rangeStart: string; rangeEnd: string } {
+  const start = DateTime.fromISO(startDate, { zone: timezone });
+  if (!start.isValid) {
+    throw new BookingError('Invalid start date', 'INVALID_RANGE', 400);
+  }
+  const endDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(endDate);
+  let end = DateTime.fromISO(endDate, { zone: timezone });
+  if (endDateOnly && end.isValid) end = end.plus({ days: 1 }); // include the whole end day (local)
+  if (!end.isValid || end <= start) end = start.plus({ days: 1 });
+  return { rangeStart: start.toUTC().toISO()!, rangeEnd: end.toUTC().toISO()! };
+}
+
 /** P5a — which contact fields a service requires. Single mapping for the column-name
  *  wart: customerLocationRequired maps to PHONE (a callback number), not address. */
 function requiredContactFields(service: ServiceType): { address: boolean; phone: boolean } {
@@ -246,25 +274,6 @@ export class InternalProvider implements BookingProvider {
     return conflictKeyFor(ctx.bot.id, identity, provider.providerType);
   }
 
-  /**
-   * Coerce a possibly-loose date range (the LLM often passes date-only strings
-   * like "2026-06-08", sometimes with start === end) into a sane RFC3339 window:
-   * a date-only end is extended to include that whole day, and a zero/negative
-   * window becomes a single day. This keeps the slot engine non-empty and feeds
-   * Google's events.list valid RFC3339 timestamps (it 400s on date-only values).
-   */
-  private normalizeRange(startDate: string, endDate: string): { rangeStart: string; rangeEnd: string } {
-    const start = new Date(startDate);
-    if (Number.isNaN(start.getTime())) {
-      throw new BookingError('Invalid start date', 'INVALID_RANGE', 400);
-    }
-    const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(endDate);
-    let end = new Date(endDate);
-    if (dateOnly) end = new Date(end.getTime() + 24 * 3600_000); // include the whole end day
-    if (Number.isNaN(end.getTime()) || end <= start) end = new Date(start.getTime() + 24 * 3600_000);
-    return { rangeStart: start.toISOString(), rangeEnd: end.toISOString() };
-  }
-
   async checkAvailability(
     ctx: BookingContext,
     startDate: string,
@@ -274,7 +283,7 @@ export class InternalProvider implements BookingProvider {
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
-    const { rangeStart, rangeEnd } = this.normalizeRange(startDate, endDate);
+    const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
     const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.

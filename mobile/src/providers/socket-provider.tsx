@@ -21,6 +21,10 @@ const SocketContext = createContext<Socket | null>(null);
 export function SocketProvider({ children }: { children: ReactNode }) {
   const { isSignedIn, getToken } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
+  // getToken is a fresh ref each render; keep it in a ref so the effect only
+  // re-runs when sign-in state changes (not every render → infinite loop).
+  const getTokenRef = useRef(getToken);
+  getTokenRef.current = getToken;
 
   useEffect(() => {
     if (!isSignedIn) return;
@@ -28,7 +32,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
     const s = io(env.wsUrl, {
       transports: ['websocket'],
       auth: (cb) => {
-        getToken()
+        getTokenRef.current()
           .then((token) => cb({ token: token ?? '' }))
           .catch(() => cb({ token: '' }));
       },
@@ -39,7 +43,7 @@ export function SocketProvider({ children }: { children: ReactNode }) {
       s.disconnect();
       setSocket(null);
     };
-  }, [isSignedIn, getToken]);
+  }, [isSignedIn]);
 
   return <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>;
 }

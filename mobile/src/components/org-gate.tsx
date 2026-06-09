@@ -1,5 +1,5 @@
 import { useAuth, useOrganizationList } from '@clerk/expo';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
 
 /**
@@ -14,13 +14,16 @@ export function OrgGate({ children }: { children: ReactNode }) {
   });
 
   const memberships = userMemberships?.data ?? [];
+  // Depend on a stable primitive (not the array ref) and guard with a ref so we
+  // call setActive at most once — otherwise the effect loops every render.
+  const soleOrgId = memberships.length === 1 ? memberships[0].organization.id : null;
+  const autoSelected = useRef(false);
 
   useEffect(() => {
-    if (!isLoaded || orgId || !setActive) return;
-    if (memberships.length === 1) {
-      void setActive({ organization: memberships[0].organization.id });
-    }
-  }, [isLoaded, orgId, memberships, setActive]);
+    if (!isLoaded || orgId || !setActive || autoSelected.current || !soleOrgId) return;
+    autoSelected.current = true;
+    void setActive({ organization: soleOrgId });
+  }, [isLoaded, orgId, setActive, soleOrgId]);
 
   if (!authLoaded || !isLoaded) {
     return (

@@ -1,0 +1,29 @@
+# Sign-in e2e (Maestro). Drives a real simulator/device through the full auth
+# flow: credentials -> email-code MFA -> lands on the Inbox.
+#
+# Run (credentials passed as env, never committed):
+#   maestro test mobile/.maestro/sign-in.yaml \
+#     -e EMAIL="you+clerk_test@example.com" \
+#     -e PASSWORD="..." \
+#     -e MFA_CODE="424242"   # 424242 is Clerk's fixed code for +clerk_test emails
+#
+# Requires a dev build installed (npx expo run:ios) + Metro running.
+appId: com.ianneooo.mobile
+---
+- launchApp:
+    clearState: true
+- assertVisible: "Sign in to manage your bot."
+- tapOn: "Email"
+- inputText: ${EMAIL}
+- tapOn: "Password"
+- inputText: ${PASSWORD}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Enter the verification code sent to your email."
+    timeout: 25000
+- tapOn: "123456"
+- inputText: ${MFA_CODE}
+- pressKey: Enter
+- extendedWaitUntil:
+    visible: "Inbox"
+    timeout: 30000

@@ -118,7 +118,8 @@ export default function Bookings() {
   const defaultTab = returnedFromCalendarOAuth || !hasServices ? 'setup' : 'appointments';
 
   return (
-    <div className="p-6 max-w-3xl mx-auto space-y-4">
+    <div className="h-full overflow-y-auto">
+      <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
         <h1 className="text-2xl font-semibold text-text-primary">{t('bookings.title')}</h1>
         <p className="text-sm text-text-secondary mt-1">{t('bookings.intro')}</p>
@@ -141,6 +142,7 @@ export default function Bookings() {
           </TabsContent>
         </Tabs>
       )}
+      </div>
     </div>
   );
 }

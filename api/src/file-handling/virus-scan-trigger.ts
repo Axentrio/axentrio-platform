@@ -146,23 +146,26 @@ async function doScan(
       },
     );
 
-    // Thumbnail is best-effort — its failure does NOT downgrade the scan
-    // result. Errors are logged for observability but swallowed.
+    // Thumbnail is best-effort and slow (Sharp + S3), so generate it OFF the
+    // scan-response path: the client gets its 'ready' result as soon as the
+    // scan clears, and the thumbnail lands shortly after. Failure is logged,
+    // never fatal, and never downgrades the scan result.
     if (thumbnailService.shouldGenerateThumbnail(session.mimeType)) {
-      try {
-        const thumbnailUrl = await thumbnailService.generateThumbnail(
-          fileKey,
-          session.mimeType,
-        );
-        session.thumbnailUrl = thumbnailUrl;
-      } catch (error) {
-        logger.error('Thumbnail generation error', {
-          error,
-          fileKey,
-          sessionId,
-          mimeType: session.mimeType,
-        });
-      }
+      void (async () => {
+        try {
+          session.thumbnailUrl = await thumbnailService.generateThumbnail(
+            fileKey,
+            session.mimeType,
+          );
+        } catch (error) {
+          logger.error('Thumbnail generation error', {
+            error,
+            fileKey,
+            sessionId,
+            mimeType: session.mimeType,
+          });
+        }
+      })();
     }
   } else {
     await uploadService.updateSessionStatus(sessionId, 'quarantined', scanResult);

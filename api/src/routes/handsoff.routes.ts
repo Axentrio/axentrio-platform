@@ -344,28 +344,36 @@ router.get(
 
     const result = await applyPagination(qb, params);
 
-    const sessionsWithPreview = await Promise.all(
-      result.data.map(async (session) => {
-        const lastMessage = await messageRepository.findOne({
-          where: { sessionId: session.id },
-          order: { createdAt: 'DESC' },
-        });
+    // Latest message per session in ONE query (DISTINCT ON) instead of an
+    // N+1 of per-session findOne calls.
+    const sessionIds = result.data.map((s) => s.id);
+    const lastMessages = sessionIds.length
+      ? await messageRepository
+          .createQueryBuilder('m')
+          .distinctOn(['m.sessionId'])
+          .where('m.sessionId IN (:...sessionIds)', { sessionIds })
+          .orderBy('m.sessionId', 'ASC')
+          .addOrderBy('m.createdAt', 'DESC')
+          .getMany()
+      : [];
+    const lastBySession = new Map(lastMessages.map((m) => [m.sessionId, m]));
 
-        return {
-          id: session.id,
-          status: session.status,
-          metadata: session.metadata,
-          createdAt: session.createdAt,
-          lastMessage: lastMessage
-            ? {
-                content: lastMessage.content?.substring(0, 100) || '',
-                type: lastMessage.type,
-                createdAt: lastMessage.createdAt,
-              }
-            : null,
-        };
-      })
-    );
+    const sessionsWithPreview = result.data.map((session) => {
+      const lastMessage = lastBySession.get(session.id);
+      return {
+        id: session.id,
+        status: session.status,
+        metadata: session.metadata,
+        createdAt: session.createdAt,
+        lastMessage: lastMessage
+          ? {
+              content: lastMessage.content?.substring(0, 100) || '',
+              type: lastMessage.type,
+              createdAt: lastMessage.createdAt,
+            }
+          : null,
+      };
+    });
 
     sendSuccess(res, { pendingRequests: sessionsWithPreview }, { pagination: result.meta });
   })

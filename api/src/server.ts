@@ -33,6 +33,7 @@ import { widgetRouter as widgetRoutes } from './routes/widget';
 import fileRoutes from './routes/files.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import notificationRoutes from './routes/notifications.routes';
+import mobileDevicesRoutes from './routes/mobile-devices.routes';
 import userRoutes from './routes/users.routes';
 import clerkWebhookRoutes from './routes/clerk-webhook.routes';
 import webhookAdminRoutes from './routes/webhook-admin.routes';
@@ -298,6 +299,7 @@ apiRouter.use('/tenants', tenantRoutes);
 apiRouter.use('/widget', widgetRoutes);
 apiRouter.use('/files', fileRoutes);
 apiRouter.use('/notifications', notificationRoutes);
+apiRouter.use('/mobile/devices', mobileDevicesRoutes);
 apiRouter.use('/tenants/me/webhooks', requireClerkAuth, autoProvision, webhookAdminRoutes);
 apiRouter.use('/admin', adminRoutes);
 apiRouter.use('/billing', billingRoutes);
@@ -375,6 +377,10 @@ async function startServer(): Promise<void> {
       const s3Client = config.s3?.bucket ? createS3Client() : null;
       registerProcessor('knowledge-processing', createIngestionProcessor(AppDataSource, s3Client));
       logger.info('Knowledge ingestion processor registered');
+
+      const { createNotificationProcessor } = await import('./notifications/notification.worker');
+      registerProcessor('notifications', createNotificationProcessor(AppDataSource));
+      logger.info('Notification push processor registered');
 
       const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./n8n/booking-providers/reminders');
       registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());

@@ -24,6 +24,13 @@ interface ChatWindowProps {
   className?: string;
 }
 
+/** Auto-grow a textarea up to a max height. Pure — hoisted to module scope. */
+function handleTextareaResize(e: React.ChangeEvent<HTMLTextAreaElement>): void {
+  const textarea = e.target;
+  textarea.style.height = 'auto';
+  textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
+}
+
 export const ChatWindow: React.FC<ChatWindowProps> = ({
   chat,
   onClose,
@@ -101,12 +108,6 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   // Auto-resize textarea
-  const handleTextareaResize = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const textarea = e.target;
-    textarea.style.height = 'auto';
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`;
-  };
-
   const renderMessage = (message: Message) => {
     const isAgent = message.sender === 'agent';
     const isBot = message.sender === 'bot';

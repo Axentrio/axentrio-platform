@@ -35,6 +35,9 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'destructive'> = 
   failed: 'destructive',
 };
 
+/** Toast an API error with a fallback message. Pure — hoisted to module scope. */
+const fail = (err: unknown, fallback: string) => toast.error(extractApiErrorMessage(err) ?? fallback);
+
 const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({ botId, readOnly }) => {
   const { t } = useTranslation();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,8 +51,6 @@ const BotKnowledgePanel: React.FC<{ botId: string; readOnly: boolean }> = ({ bot
 
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
-
-  const fail = (err: unknown, fallback: string) => toast.error(extractApiErrorMessage(err) ?? fallback);
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

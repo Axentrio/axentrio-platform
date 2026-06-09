@@ -106,7 +106,7 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     // assume — and defer to any different name the customer gives.
     if (customerName && customerName.trim()) {
       sections.push(
-        `\n## CUSTOMER\nThe customer's name from their messaging profile is "${customerName.trim()}". Greet them by it when natural, and when booking use it as their name but confirm it first (e.g. "I'll put this under ${customerName.trim()} — is that right?") rather than asking for their name from scratch. If they give a different name, use that instead.`
+        `\n## CUSTOMER\nYou already know the customer's name from their messaging profile: "${customerName.trim()}". Do NOT ask them what their name is — you have it. Use "${customerName.trim()}" as their name, and when booking, state it and ask them to confirm (e.g. "I'll book this under ${customerName.trim()} — is that correct?"). If they give a different name, use that instead.`
       );
     }
 

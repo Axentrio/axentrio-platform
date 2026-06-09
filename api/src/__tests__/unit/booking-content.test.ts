@@ -11,13 +11,14 @@ import { describe, it, expect } from 'vitest';
 import {
   buildBookingEventContent,
   type BookingContentInput,
+  type ServiceContentInput,
 } from '../../n8n/booking-providers/booking-content';
 
 const MANAGE = 'https://app.axentrio.com/m/abc';
 
 function build(
   booking: BookingContentInput,
-  service: { name: string; description?: string | null } = { name: 'Haircut' },
+  service: ServiceContentInput = { name: 'Haircut' },
 ) {
   return buildBookingEventContent(booking, service, MANAGE);
 }
@@ -115,6 +116,35 @@ describe('buildBookingEventContent — intake value rendering', () => {
     for (const omit of ['nul', 'undef', 'blank', 'emptyArr', 'emptyObj']) {
       expect(description).not.toContain(`  ${omit}:`);
     }
+  });
+
+  it('renders intake answers under their question label (answers are keyed by question id)', () => {
+    const id1 = '11111111-1111-1111-1111-111111111111';
+    const id2 = '22222222-2222-2222-2222-222222222222';
+    const { description } = build(
+      { attendeeName: 'Ada', attendeeEmail: 'a@x.io', intakeAnswers: { [id1]: 'blue', [id2]: 'large' } },
+      {
+        name: 'Haircut',
+        intakeQuestions: [
+          { id: id1, label: 'Favourite colour' },
+          { id: id2, label: 'Size' },
+        ],
+      },
+    );
+    const intake = description.split('\n').filter((l) => l.startsWith('  '));
+    // sorted on the raw id keys (id1 < id2), rendered under their human labels.
+    expect(intake).toEqual(['  Favourite colour: blue', '  Size: large']);
+    expect(description).not.toContain(id1);
+  });
+
+  it('falls back to the raw key for an answer whose question id is unknown/deleted', () => {
+    const known = '11111111-1111-1111-1111-111111111111';
+    const { description } = build(
+      { attendeeName: 'Ada', attendeeEmail: 'a@x.io', intakeAnswers: { [known]: 'blue', 'zz-deleted': 'x' } },
+      { name: 'Haircut', intakeQuestions: [{ id: known, label: 'Colour' }] },
+    );
+    const intake = description.split('\n').filter((l) => l.startsWith('  '));
+    expect(intake).toEqual(['  Colour: blue', '  zz-deleted: x']);
   });
 
   it('sorts intake entries by RAW key, not by normalized label', () => {

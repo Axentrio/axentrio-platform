@@ -41,6 +41,11 @@ export interface BookingContentInput {
 export interface ServiceContentInput {
   name: string;
   description?: string | null;
+  /** Intake question definitions for this service. Answer maps are keyed by the
+   *  server-minted question id, so these are used to render each answer under its
+   *  human label instead of the raw uuid. Defensively typed; malformed entries are
+   *  skipped and unknown/deleted ids fall back to the raw key. */
+  intakeQuestions?: ReadonlyArray<{ id?: unknown; label?: unknown }> | null;
 }
 
 /**
@@ -90,18 +95,28 @@ function customerLine(name?: string | null, email?: string | null): string | nul
 }
 
 /** The `Intake:` block lines (header + one indented line per rendered entry), or
- *  [] when there are no renderable entries. Sort is on RAW keys for a stable
- *  order independent of label normalization. */
-function intakeLines(intakeAnswers: unknown): string[] {
+ *  [] when there are no renderable entries. Answer keys are question ids; each is
+ *  mapped to its human label via `questions` (raw key kept for deleted/unknown
+ *  ids). Sort is on RAW keys for a stable order independent of label normalization. */
+function intakeLines(
+  intakeAnswers: unknown,
+  questions?: ServiceContentInput['intakeQuestions'],
+): string[] {
   if (!intakeAnswers || typeof intakeAnswers !== 'object' || Array.isArray(intakeAnswers)) {
     return [];
   }
   const obj = intakeAnswers as Record<string, unknown>;
+  const labelById = new Map<string, string>();
+  if (Array.isArray(questions)) {
+    for (const q of questions) {
+      if (q && typeof q.id === 'string' && typeof q.label === 'string') labelById.set(q.id, q.label);
+    }
+  }
   const entries: string[] = [];
   for (const key of Object.keys(obj).sort()) {
     const rendered = renderIntakeValue(obj[key]);
     if (rendered === null) continue;
-    const label = normalizeField(key);
+    const label = normalizeField(labelById.get(key) ?? key);
     const value = normalizeField(rendered);
     entries.push(`  ${label}: ${value}`);
   }
@@ -151,7 +166,7 @@ export function buildBookingEventContent(
   const middle: string[] = [];
   if (present(booking.aiSummary)) middle.push(`Summary: ${normalizeField(booking.aiSummary)}`);
   if (present(booking.notes)) middle.push(`Notes: ${normalizeField(booking.notes)}`);
-  middle.push(...intakeLines(booking.intakeAnswers));
+  middle.push(...intakeLines(booking.intakeAnswers, service.intakeQuestions));
 
   // TAIL - never dropped.
   const tail: string[] = [`Manage: ${manageUrl}`];

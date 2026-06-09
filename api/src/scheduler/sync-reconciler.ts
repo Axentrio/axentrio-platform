@@ -224,7 +224,7 @@ async function loadEventMeta(
       notes: b?.notes,
       intakeAnswers: b?.intake_answers,
     },
-    { name: eventType.name, description: eventType.description },
+    { name: eventType.name, description: eventType.description, intakeQuestions: eventType.intakeQuestions },
     buildManageUrl(row.id)
   );
   return { content, timezone: rule.timezone };

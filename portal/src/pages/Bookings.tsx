@@ -29,9 +29,11 @@ import {
   useAcceptRequest,
   useDeclineRequest,
   useBookingAvailability,
+  useServices,
   type AdminBooking,
   type BookingScope,
 } from '../queries/useSchedulerQueries';
+import { SchedulerSettings } from '../components/settings/SchedulerSettings';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { Button } from '../components/ui/button';
 import {
@@ -87,6 +89,7 @@ export default function Bookings() {
   const { t } = useTranslation();
   const hasBookings = useHasFeature('bookings');
   const { data: config } = useSchedulerConfig();
+  const { data: servicesData, isLoading: servicesLoading } = useServices();
 
   if (!hasBookings) {
     return (
@@ -104,13 +107,36 @@ export default function Bookings() {
     );
   }
 
+  // First-run owners (no services configured yet) land on Setup so they're guided
+  // to connect a calendar + add services; configured owners land on Appointments.
+  // Gate the Tabs render on the services query so the uncontrolled defaultValue is
+  // computed from real data (not the initial undefined).
+  const hasServices = (servicesData?.services?.length ?? 0) > 0;
+
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
       <div>
         <h1 className="text-2xl font-semibold text-text-primary">{t('bookings.title')}</h1>
         <p className="text-sm text-text-secondary mt-1">{t('bookings.intro')}</p>
       </div>
-      <InternalBookingsDashboard timezone={config?.availability?.timezone ?? DEFAULT_TZ} />
+      {servicesLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-text-secondary" />
+        </div>
+      ) : (
+        <Tabs defaultValue={hasServices ? 'appointments' : 'setup'} className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="appointments">Appointments</TabsTrigger>
+            <TabsTrigger value="setup">Setup</TabsTrigger>
+          </TabsList>
+          <TabsContent value="appointments">
+            <InternalBookingsDashboard timezone={config?.availability?.timezone ?? DEFAULT_TZ} />
+          </TabsContent>
+          <TabsContent value="setup">
+            <SchedulerSettings />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   );
 }

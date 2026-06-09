@@ -23,7 +23,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@services/apiClient';
 import { toast } from 'sonner';
 import { useTenantSettings } from '../../queries/useTenantQueries';
-import { SchedulerSettings } from './SchedulerSettings';
 import { useWebhookStatus, useWebhookDeliveries, useSaveWebhookUrl, useTestWebhook } from '../../queries/useWebhookQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { cn } from '@/lib/utils';
@@ -212,9 +211,6 @@ export const IntegrationTab: React.FC = () => {
           </div>
         </CardContent>
       </Card>
-
-      {/* Appointment booking: built-in scheduler config */}
-      <SchedulerSettings />
 
       {/* Webhook URL */}
       <Card variant="glass">

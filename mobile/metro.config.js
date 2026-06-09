@@ -8,8 +8,9 @@ const workspaceRoot = path.resolve(projectRoot, '..');
 
 const config = getDefaultConfig(projectRoot);
 
-// Watch the workspace so Metro can transform @axentrio/* source in packages/.
-config.watchFolders = [workspaceRoot];
+// Also watch the workspace root so Metro can transform @axentrio/* source in
+// packages/ (append, keeping Expo's defaults).
+config.watchFolders = [...(config.watchFolders ?? []), workspaceRoot];
 // Resolve hoisted deps from the root node_modules as well as the app's own.
 config.resolver.nodeModulesPaths = [
   path.resolve(projectRoot, 'node_modules'),

@@ -5,6 +5,10 @@
     "mobile",
     "packages/*"
   ],
+  "overrides": {
+    "react": "19.2.0",
+    "react-dom": "19.2.0"
+  },
   "devDependencies": {
     "shadcn": "^4.1.0"
   }

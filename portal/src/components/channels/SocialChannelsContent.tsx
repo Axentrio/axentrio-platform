@@ -36,7 +36,6 @@ import {
 } from '@/components/ui/alert-dialog';
 import {
   useChannelConnections,
-  useConnectTelegram,
   useConnectWhatsApp,
   useMetaOAuthUrl,
   useMetaOAuthPages,
@@ -113,17 +112,14 @@ export function SocialChannelsContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const channelEntitled: Record<string, boolean> = {
+    // telegram connect is removed from the UI, but the entitlement is kept so any
+    // pre-existing telegram connection row still computes its plan-locked state.
     telegram: useHasFeature('channelTelegram'),
     whatsapp: useHasFeature('channelWhatsapp'),
     messenger: useHasFeature('channelMessenger'),
     instagram: useHasFeature('channelInstagram'),
   };
   const anyMetaEntitled = channelEntitled.messenger || channelEntitled.instagram;
-
-  // Telegram connect state
-  const [showTelegramModal, setShowTelegramModal] = useState(false);
-  const [botToken, setBotToken] = useState('');
-  const connectTelegram = useConnectTelegram();
 
   // WhatsApp connect state
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -166,13 +162,6 @@ export function SocialChannelsContent() {
       );
     }
     setSearchParams({});
-  };
-
-  const handleConnectTelegram = async () => {
-    if (!botToken.trim()) return;
-    await connectTelegram.mutateAsync({ botToken: botToken.trim() });
-    setBotToken('');
-    setShowTelegramModal(false);
   };
 
   const handleConnectWhatsApp = async () => {
@@ -263,16 +252,6 @@ export function SocialChannelsContent() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowTelegramModal(true)}
-              disabled={!channelEntitled.telegram}
-              title={!channelEntitled.telegram ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
-            >
-              {!channelEntitled.telegram && <Lock className="h-3 w-3 mr-1" />}
-              <SiTelegram className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
-            </Button>
             <Button
               size="sm"
               variant="outline"
@@ -427,68 +406,6 @@ export function SocialChannelsContent() {
           )}
         </CardContent>
       </Card>
-
-      {/* Telegram connect modal */}
-      <AlertDialog open={showTelegramModal} onOpenChange={setShowTelegramModal}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('ai.social.telegram.modal.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('ai.social.telegram.modal.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <details className="mt-2 rounded-lg bg-white/5 px-3 py-2 text-xs text-zinc-400">
-            <summary className="cursor-pointer select-none text-zinc-300">
-              {t('ai.social.telegram.modal.help.summary')}
-            </summary>
-            <ol className="mt-2 list-decimal space-y-1 pl-5">
-              <li>
-                {t('ai.social.telegram.modal.help.step1.prefix')}{' '}
-                <a
-                  href="https://t.me/BotFather"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary-400 underline"
-                >
-                  @BotFather
-                </a>
-                {t('ai.social.telegram.modal.help.step1.suffix')}
-              </li>
-              <li>
-                {t('ai.social.telegram.modal.help.step2.prefix')}{' '}
-                <code className="rounded bg-white/10 px-1">/newbot</code>{' '}
-                {t('ai.social.telegram.modal.help.step2.suffix')}
-              </li>
-              <li>
-                {t('ai.social.telegram.modal.help.step3.prefix')}{' '}
-                <code className="rounded bg-white/10 px-1">123456:ABC-DEF...</code>
-                {t('ai.social.telegram.modal.help.step3.suffix')}
-              </li>
-              <li>{t('ai.social.telegram.modal.help.step4')}</li>
-            </ol>
-          </details>
-          <div className="py-4">
-            <Label htmlFor="botToken">{t('ai.social.telegram.modal.tokenLabel')}</Label>
-            <Input
-              id="botToken"
-              type="password"
-              placeholder="123456:ABC-DEF..."
-              value={botToken}
-              onChange={(e) => setBotToken(e.target.value)}
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => { e.preventDefault(); handleConnectTelegram(); }}
-              disabled={!botToken.trim() || connectTelegram.isPending}
-            >
-              {connectTelegram.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {connectTelegram.isPending ? t('ai.social.telegram.modal.connecting') : t('ai.social.telegram.modal.connect')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       {/* WhatsApp connect modal */}
       <AlertDialog open={showWhatsAppModal} onOpenChange={setShowWhatsAppModal}>

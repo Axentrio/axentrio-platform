@@ -27,7 +27,6 @@ const { connectionsRef, healthCheckMutate } = vi.hoisted(() => ({
 
 vi.mock('../../queries/useChannelQueries', () => ({
   useChannelConnections: () => ({ data: connectionsRef.current, isLoading: false }),
-  useConnectTelegram: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useConnectWhatsApp: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMetaOAuthUrl: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useMetaOAuthPages: () => ({ data: undefined }),
@@ -80,9 +79,8 @@ describe('SocialChannelsContent', () => {
     renderUI();
     expect(screen.getByText(/no channels connected yet/i)).toBeInTheDocument();
     expect(
-      screen.getByText(/connect a telegram bot or facebook page to get started/i),
+      screen.getByText(/connect a facebook page or whatsapp number to get started/i),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /telegram/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /facebook/i })).toBeInTheDocument();
   });
 
@@ -106,8 +104,9 @@ describe('SocialChannelsContent', () => {
     ];
     renderUI();
     expect(screen.getByText('Support Bot')).toBeInTheDocument();
-    // "Telegram" appears in both the connect button and the row label.
-    expect(screen.getAllByText('Telegram').length).toBeGreaterThanOrEqual(2);
+    // The telegram connect button was removed; "Telegram" now appears only as the
+    // row label of the existing connection.
+    expect(screen.getAllByText('Telegram').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText(/1 channel connected/i)).toBeInTheDocument();
   });
@@ -137,19 +136,6 @@ describe('SocialChannelsContent', () => {
     expect(screen.getByText(/Sent\s+10m ago/i)).toBeInTheDocument();
   });
 
-  it('shows the BotFather quick-start help in the Telegram modal', async () => {
-    const user = userEvent.setup();
-    renderUI();
-    await user.click(screen.getByRole('button', { name: /telegram/i }));
-    // Disclosure summary is visible immediately.
-    expect(screen.getByText(/Don't have a bot token yet/i)).toBeInTheDocument();
-    // Link to BotFather is present and points at the right URL with safe rel.
-    const link = screen.getByRole('link', { name: /@BotFather/i });
-    expect(link).toHaveAttribute('href', 'https://t.me/BotFather');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link.getAttribute('rel') ?? '').toMatch(/noopener/);
-  });
-
   it('locks connect buttons and shows plan-locked on connections when channels are unentitled', () => {
     entitledRef.current = {
       channelTelegram: false,
@@ -175,7 +161,6 @@ describe('SocialChannelsContent', () => {
       },
     ];
     renderUI();
-    expect(screen.getByRole('button', { name: /telegram/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /facebook/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /whatsapp/i })).toBeDisabled();
     // Connected-but-locked row explains why it went quiet (D4).

@@ -945,7 +945,7 @@
       },
       "empty": {
         "title": "No channels connected yet.",
-        "description": "Connect a Telegram bot or Facebook Page to get started."
+        "description": "Connect a Facebook Page or WhatsApp number to get started."
       },
       "activity": {
         "received": "Received {{time}}",

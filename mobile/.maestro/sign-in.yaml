@@ -8,7 +8,7 @@
 #     -e MFA_CODE="424242"   # 424242 is Clerk's fixed code for +clerk_test emails
 #
 # Requires a dev build installed (npx expo run:ios) + Metro running.
-appId: com.ianneooo.mobile
+appId: com.axentrio.admin
 ---
 - launchApp:
     clearState: true

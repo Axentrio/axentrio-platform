@@ -23,6 +23,7 @@ import { logger } from '../utils/logger';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
 import { ServiceType } from '../database/entities/ServiceType';
 import { getUploadService } from '../file-handling/upload.service';
+import { upsertLead } from '../leads/lead-capture.service';
 import { Not, IsNull } from 'typeorm';
 
 /**
@@ -97,7 +98,25 @@ export async function processInboundEvent(
     }
 
     // ── 4. Message / postback events ─────────────────────────────────────
-    const { session, participant } = await findOrCreateConversation(event, connection);
+    const { session, participant, binding, created } = await findOrCreateConversation(event, connection);
+
+    // Hook 1 (leads-across-all-channels): a brand-new binding = a new contact
+    // reachable on this channel → capture a Lead deterministically, no LLM.
+    // Gated by the per-channel auto-capture toggle (default on). Fire-and-forget:
+    // the service logs its own failures and must never block message processing
+    // or the (already-sent) webhook ACK.
+    if (created && (connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads !== false) {
+      void upsertLead({
+        dataSource: AppDataSource,
+        tenantId: connection.tenantId,
+        sessionId: session.id,
+        botId: session.botId ?? null,
+        source: 'channel',
+        channel: connection.channel,
+        externalUserId: binding.externalUserId,
+        name: binding.externalUserName,
+      }).catch(() => {});
+    }
 
     // ── 5. Save the message (encrypted) to DB ────────────────────────────
     const messageRepo = getRepository(Message);
@@ -253,7 +272,7 @@ async function resolveChannelBotId(connection: ChannelConnection): Promise<strin
 export async function findOrCreateConversation(
   event: NormalizedEvent,
   connection: ChannelConnection,
-): Promise<{ session: ChatSession; participant: Participant; binding: ConversationBinding }> {
+): Promise<{ session: ChatSession; participant: Participant; binding: ConversationBinding; created: boolean }> {
   const bindingRepo = getRepository(ConversationBinding);
 
   // Look for existing binding
@@ -292,6 +311,7 @@ export async function findOrCreateConversation(
         session: existingBinding.session as ChatSession,
         participant: participant as Participant,
         binding: existingBinding as ConversationBinding,
+        created: false,
       };
     }
   }
@@ -371,6 +391,7 @@ export async function findOrCreateConversation(
         session: savedSession,
         participant: savedParticipant,
         binding: updatedBinding,
+        created: false, // binding pre-existed (returning contact) — not a new lead
       };
     });
   }
@@ -441,6 +462,7 @@ export async function findOrCreateConversation(
       session: savedSession,
       participant: savedParticipant,
       binding: savedBinding,
+      created: true, // brand-new binding → Hook 1 captures a Lead
     };
   });
 }

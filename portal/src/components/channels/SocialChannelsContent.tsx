@@ -24,6 +24,7 @@ import {
   SelectItem,
   SelectValue,
 } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -43,6 +44,7 @@ import {
   useDisconnectChannel,
   useHealthCheckChannel,
   useUpdateChannelBot,
+  useUpdateChannelAutoCapture,
 } from '../../queries/useChannelQueries';
 import { useBots } from '@/queries/useBotsQueries';
 import { useHasFeature } from '../../queries/useEntitlementsQueries';
@@ -98,6 +100,7 @@ export function SocialChannelsContent() {
   const disconnectMutation = useDisconnectChannel();
   const healthCheckMutation = useHealthCheckChannel();
   const updateChannelBot = useUpdateChannelBot();
+  const updateAutoCapture = useUpdateChannelAutoCapture();
   const { data: botsData } = useBots();
   const bots = botsData?.bots ?? [];
   const metaOAuthUrl = useMetaOAuthUrl();
@@ -332,6 +335,20 @@ export function SocialChannelsContent() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3 shrink-0">
+                      {conn.channel !== 'widget' && (
+                        <label
+                          className="flex items-center gap-1.5 text-xs text-zinc-400"
+                          title={t('ai.social.autoCapture.hint', { defaultValue: 'Auto-create a lead from each new conversation on this channel' })}
+                        >
+                          <Switch
+                            checked={(conn.config as Any)?.autoCaptureLeads !== false}
+                            disabled={updateAutoCapture.isPending}
+                            onCheckedChange={(c) => updateAutoCapture.mutate({ connectionId: conn.id, enabled: c })}
+                            aria-label={t('ai.social.autoCapture.aria', { defaultValue: 'Auto-capture leads' })}
+                          />
+                          {t('ai.social.autoCapture.label', { defaultValue: 'Capture leads' })}
+                        </label>
+                      )}
                       {conn.channel !== 'widget' && (
                         <Select
                           value={conn.botId ?? '__default__'}

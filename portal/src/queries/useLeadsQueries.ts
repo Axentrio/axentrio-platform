@@ -2,15 +2,19 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
-export type LeadSource = 'tool' | 'manual' | 'import' | 'webhook';
+export type LeadSource = 'channel' | 'tool' | 'booking' | 'manual' | 'import' | 'webhook';
 
 export interface Lead {
   id: string;
   sessionId: string | null;
   botId: string | null;
-  name: string;
-  email: string;
+  /** Null when the channel never provided one (Meta/Telegram users hide names). */
+  name: string | null;
+  /** Null for channel leads — social platforms never provide email. */
+  email: string | null;
   phone: string | null;
+  /** Channel of origin (widget/whatsapp/messenger/instagram/telegram), null for legacy. */
+  channel: string | null;
   source: LeadSource;
   notes: string | null;
   createdAt: string;

@@ -21,6 +21,7 @@ import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
+import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
@@ -123,7 +124,9 @@ export async function createBooking(
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
+  const result = await selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
+  captureLeadFromBooking(ctx, attendee, extras);
+  return result;
 }
 
 /**
@@ -145,7 +148,41 @@ export async function requestBooking(
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
+  const result = await internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
+  captureLeadFromBooking(ctx, attendee, extras);
+  return result;
+}
+
+/**
+ * Hook 2 (leads-across-all-channels): a customer who books or requests an
+ * appointment is a Lead — they've handed over name + email (and on a channel,
+ * a reachable handle). Fire-and-forget after a successful create/request.
+ *
+ * On a channel session, `session.visitorId` IS the binding's `externalUserId`
+ * (set identically in the inbound pipeline), so the channel-keyed dedup
+ * collapses this onto the Lead Hook 1 already created and upgrades its source
+ * to `booking`. On the widget it keys on the booking email/phone. This is the
+ * deterministic path that finally captures the "29-type" booking customers.
+ */
+function captureLeadFromBooking(
+  ctx: BookingContext,
+  attendee: { name: string; email?: string },
+  extras?: BookingExtras,
+): void {
+  const channel = ctx.session.channel ?? 'widget';
+  const isChannel = channel !== 'widget' && !!ctx.session.channelConnectionId;
+  void upsertLead({
+    dataSource: AppDataSource,
+    tenantId: ctx.tenant.id,
+    sessionId: ctx.session.id,
+    botId: ctx.bot.id,
+    source: 'booking',
+    channel,
+    externalUserId: isChannel ? ctx.session.visitorId : null,
+    name: attendee.name,
+    email: attendee.email ?? null,
+    phone: extras?.customerPhone ?? null,
+  }).catch(() => {});
 }
 
 export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {

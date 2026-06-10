@@ -109,18 +109,32 @@ export default function Leads() {
                         onClick={() => setExpanded((s) => ({ ...s, [lead.id]: !s[lead.id] }))}
                       >
                         <td className="px-4 py-3 text-sm text-text-primary font-medium">
-                          {lead.name}
+                          <span className="flex items-center gap-2">
+                            {lead.name || <span className="text-text-muted italic">{t('leads.table.noName', { defaultValue: 'No name' })}</span>}
+                            {lead.channel && lead.channel !== 'widget' && (
+                              <span className="inline-flex items-center rounded bg-surface-3 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-text-muted">
+                                {lead.channel}
+                              </span>
+                            )}
+                          </span>
                         </td>
                         <td className="px-4 py-3 text-sm text-text-secondary">
-                          <div className="flex items-center gap-1.5">
-                            <Mail className="h-3.5 w-3.5 text-text-muted" />
-                            <span className="truncate">{lead.email}</span>
-                          </div>
+                          {lead.email && (
+                            <div className="flex items-center gap-1.5">
+                              <Mail className="h-3.5 w-3.5 text-text-muted" />
+                              <span className="truncate">{lead.email}</span>
+                            </div>
+                          )}
                           {lead.phone && (
                             <div className="flex items-center gap-1.5 mt-0.5">
                               <Phone className="h-3.5 w-3.5 text-text-muted" />
                               <span>{lead.phone}</span>
                             </div>
+                          )}
+                          {!lead.email && !lead.phone && (
+                            <span className="text-text-muted">
+                              {t('leads.table.reachVia', { defaultValue: 'Reply via {{channel}}', channel: lead.channel ?? 'chat' })}
+                            </span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-sm text-text-secondary">

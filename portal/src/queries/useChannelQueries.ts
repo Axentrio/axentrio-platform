@@ -142,6 +142,22 @@ export function useUpdateChannelBot() {
   });
 }
 
+export function useUpdateChannelAutoCapture() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => {
+      return api.patch(`/channels/${connectionId}/auto-capture`, { enabled });
+    },
+    onSuccess: (_d, vars) => {
+      queryClient.invalidateQueries({ queryKey: ['channels'] });
+      toast.success(vars.enabled ? 'Auto-capturing leads on this channel' : 'Lead auto-capture off for this channel');
+    },
+    onError: (error: Any) => {
+      toast.error(extractApiErrorMessage(error) ?? 'Failed to update lead capture');
+    },
+  });
+}
+
 export function useHealthCheckChannel() {
   const queryClient = useQueryClient();
   return useMutation({

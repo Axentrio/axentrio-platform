@@ -265,6 +265,38 @@ router.patch(
   }),
 );
 
+/**
+ * PATCH /:connectionId/auto-capture
+ * Toggle whether inbound conversations on this channel auto-create Leads
+ * (leads-across-all-channels D5 — volume control + GDPR consent lever).
+ * Body: { enabled: boolean }. Stored on `connection.config.autoCaptureLeads`;
+ * absent/true ⇒ capture (default on).
+ */
+router.patch(
+  '/:connectionId/auto-capture',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user!.tenantId;
+    const { connectionId } = req.params;
+    const { enabled } = (req.body ?? {}) as { enabled?: unknown };
+
+    if (typeof enabled !== 'boolean') {
+      throw new BadRequestError('enabled must be a boolean');
+    }
+
+    const repo = getRepository(ChannelConnection);
+    const connection = await repo.findOne({ where: { id: connectionId, tenantId } });
+    if (!connection) {
+      throw new NotFoundError('Channel connection not found');
+    }
+
+    connection.config = { ...(connection.config ?? {}), autoCaptureLeads: enabled };
+    const saved = (await repo.save(connection)) as ChannelConnection;
+    const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = saved;
+    sendSuccess(res, safeConnection);
+  }),
+);
+
 type ConnectionWithActivity = Record<string, unknown> & {
   id: string;
   lastInboundAt: Date | null;

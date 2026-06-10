@@ -105,6 +105,7 @@ router.get(
         name: l.name,
         email: l.email,
         phone: l.phone,
+        channel: l.channel ?? null,
         source: l.source,
         notes: l.notes,
         createdAt: l.createdAt.toISOString(),

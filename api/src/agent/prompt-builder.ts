@@ -98,6 +98,17 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
       );
     }
 
+    // Lead capture. Same failure mode as KB: the tool existed but the model
+    // never volunteered it (0 captures across hundreds of conversations), so
+    // make it a hard rule. Channel conversations capture deterministically in
+    // code; this rule covers the widget, where contact info must be extracted
+    // from what the visitor types.
+    if (tools.some((t) => t.name === 'capture_lead')) {
+      sections.push(
+        `\n## CONTACT DETAILS\nThe moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.`
+      );
+    }
+
     // Escalation
     if (tools.some((t) => t.name === 'escalate_to_human')) {
       sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');

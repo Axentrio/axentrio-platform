@@ -1,205 +1,94 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Mocks (must come before imports) ────────────────────────────────────────
-
-const mockEmitWebhookEvent = vi.fn();
-const mockBuildEventBase = vi.fn();
-
-vi.mock('../../webhooks/webhook.emitter', () => ({
-  emitWebhookEvent: (...args: unknown[]) => mockEmitWebhookEvent(...args),
-  buildEventBase: (...args: unknown[]) => mockBuildEventBase(...args),
+// The tool now delegates to the lead-capture service (the single write path
+// across all channels). These tests pin the tool's contract: validation, the
+// args it hands the service, and how it maps the service result back to the
+// model. The upsert mechanics themselves live in lead-capture-service.test.ts
+// + the DB-backed integration test.
+const upsertLead = vi.fn();
+vi.mock('../../leads/lead-capture.service', () => ({
+  upsertLead: (...args: unknown[]) => upsertLead(...args),
 }));
-
-// ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { CaptureLeadTool } from '../../agent/tools/capture-lead.tool';
 import type { ToolContext } from '../../agent/tool-adapter';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
-
-const mockQuery = vi.fn().mockResolvedValue([]);
-
-// Mock ChatSession repository — for the agent-context session lookup.
-const mockSessionRepo = {
-  findOne: vi.fn().mockResolvedValue({
-    id: 'session-abc',
-    botId: 'bot-1',
-    channel: 'widget',
-    visitorId: 'v1',
-    startedAt: new Date(),
-    messageCount: 0,
-  }),
-};
-
-// Mock Lead repository — M6 primary write path.
-const mockLeadRepo = {
-  create: vi.fn((data: Record<string, unknown>) => data),
-  save: vi.fn((data: Record<string, unknown>) =>
-    Promise.resolve({
-      ...data,
-      id: 'lead-test-id',
-      createdAt: new Date('2026-05-26T00:00:00.000Z'),
-    }),
-  ),
+const sessionRepo = {
+  findOne: vi.fn().mockResolvedValue({ id: 'session-abc', botId: 'bot-1', channel: 'widget' }),
 };
 
 function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
-  // Dispatch repositories by entity name so the tool's two
-  // getRepository calls (ChatSession + Lead) each get the right mock.
-  const getRepository = vi.fn((entity: { name?: string }) => {
-    const name = entity?.name ?? '';
-    if (name === 'ChatSession') return mockSessionRepo;
-    if (name === 'Lead') return mockLeadRepo;
-    return { findOne: vi.fn(), save: vi.fn(), create: vi.fn() };
-  });
   return {
     tenantId: 'tenant-123',
     sessionId: 'session-abc',
     runId: 'run-xyz',
     toolsCalledThisTurn: [],
-    dataSource: {
-      query: mockQuery,
-      getRepository,
-    } as any,
+    dataSource: { getRepository: () => sessionRepo } as never,
     conversationHistory: [],
     ...overrides,
   };
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
-
 describe('CaptureLeadTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockQuery.mockResolvedValue([]);
-    mockBuildEventBase.mockReturnValue({
-      id: 'evt-1',
-      tenantId: 'tenant-123',
-      sessionId: 'session-abc',
-      timestamp: new Date().toISOString(),
-      session: { channel: 'widget', visitorId: 'v1', startedAt: new Date().toISOString(), messageCount: 0 },
-    });
+    upsertLead.mockResolvedValue({ leadId: 'lead-1', inserted: true });
   });
 
-  it('has correct name', () => {
+  it('is named capture_lead with side effects', () => {
     const tool = new CaptureLeadTool();
     expect(tool.name).toBe('capture_lead');
-  });
-
-  it('has hasSideEffects=true', () => {
-    const tool = new CaptureLeadTool();
     expect(tool.hasSideEffects).toBe(true);
   });
 
-  it('has description and required parameters defined', () => {
+  it('requires neither name nor email up front (email OR phone is enough)', () => {
     const tool = new CaptureLeadTool();
-    expect(typeof tool.description).toBe('string');
-    expect(tool.description.length).toBeGreaterThan(0);
-    expect((tool.parameters as any).required).toContain('name');
-    expect((tool.parameters as any).required).toContain('email');
+    expect((tool.parameters as { required: string[] }).required).toEqual([]);
   });
 
-  it('execute returns success with lead data', async () => {
+  it('rejects when the visitor gave neither email nor phone', async () => {
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    const result = await tool.execute({ name: 'Alice Smith', email: 'alice@example.com' }, ctx);
-
-    expect(result.success).toBe(true);
-    expect((result.data as any).message).toBe('Lead captured');
-    expect((result.data as any).name).toBe('Alice Smith');
-    expect((result.data as any).email).toBe('alice@example.com');
+    const res = await tool.execute({ name: 'Anon' }, makeCtx());
+    expect(res.success).toBe(false);
+    expect(upsertLead).not.toHaveBeenCalled();
   });
 
-  it('execute writes a Lead row to chatbot_leads (M6 primary)', async () => {
+  it('captures on email alone — no name needed', async () => {
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    await tool.execute({ name: 'Bob Jones', email: 'bob@example.com' }, ctx);
-
-    expect(mockLeadRepo.save).toHaveBeenCalledTimes(1);
-    const saved = mockLeadRepo.save.mock.calls[0][0];
-    expect(saved).toMatchObject({
-      tenantId: 'tenant-123',
-      sessionId: 'session-abc',
-      botId: 'bot-1',
-      name: 'Bob Jones',
-      email: 'bob@example.com',
-      source: 'tool',
-    });
+    const res = await tool.execute({ email: 'alice@example.com' }, makeCtx());
+    expect(res.success).toBe(true);
+    expect((res.data as { leadId?: string }).leadId).toBe('lead-1');
+    expect(upsertLead).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-123', sessionId: 'session-abc', source: 'tool', channel: 'widget', email: 'alice@example.com', name: null }),
+    );
   });
 
-  it('execute also mirrors to session.metadata.lead (legacy n8n compat)', async () => {
+  it('captures on phone alone', async () => {
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    await tool.execute({ name: 'Bob Jones', email: 'bob@example.com' }, ctx);
-
-    expect(mockQuery).toHaveBeenCalledTimes(1);
-    const [sql, params] = mockQuery.mock.calls[0];
-    expect(sql).toContain('UPDATE chat_sessions');
-    expect(sql).toContain('jsonb_set');
-    expect(params[1]).toBe('session-abc');
-    // Mirror payload includes the new Lead row id so consumers can
-    // walk from the legacy field to the first-class table if they need.
-    const payload = JSON.parse(params[0]);
-    expect(payload.leadId).toBe('lead-test-id');
-    expect(payload.email).toBe('bob@example.com');
+    const res = await tool.execute({ phone: '+32 475 11 22 33' }, makeCtx());
+    expect(res.success).toBe(true);
+    expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ phone: '+32 475 11 22 33', email: null }));
   });
 
-  it('execute returns the new Lead id in the tool result', async () => {
+  it('passes the session channel through (so a channel widget-tool call dedups correctly)', async () => {
+    sessionRepo.findOne.mockResolvedValueOnce({ id: 'session-abc', botId: 'bot-1', channel: 'whatsapp' });
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    const result = await tool.execute({ name: 'X', email: 'x@example.com' }, ctx);
-
-    expect((result.data as { leadId?: string }).leadId).toBe('lead-test-id');
+    await tool.execute({ email: 'x@y.com' }, makeCtx());
+    expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ channel: 'whatsapp' }));
   });
 
-  it('execute calls emitWebhookEvent with a lead.created event', async () => {
+  it('reports a friendly "noted" (not an error) when the service no-ops (gated/no key)', async () => {
+    upsertLead.mockResolvedValueOnce(null);
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    await tool.execute({ name: 'Alice Smith', email: 'alice@example.com' }, ctx);
-
-    expect(mockEmitWebhookEvent).toHaveBeenCalledTimes(1);
-    const emittedEvent = mockEmitWebhookEvent.mock.calls[0][0];
-    expect(emittedEvent.type).toBe('lead.created');
-    expect(emittedEvent.lead.name).toBe('Alice Smith');
-    expect(emittedEvent.lead.email).toBe('alice@example.com');
-    expect(emittedEvent.lead.source).toBe('tool');
+    const res = await tool.execute({ email: 'a@b.com' }, makeCtx());
+    expect(res.success).toBe(true); // never surface gating as a tool error to the model
   });
 
-  it('execute includes phone in lead event when provided', async () => {
+  it('surfaces a thrown service error as success=false', async () => {
+    upsertLead.mockRejectedValueOnce(new Error('boom'));
     const tool = new CaptureLeadTool();
-    const ctx = makeCtx();
-
-    await tool.execute({ name: 'Carol', email: 'carol@example.com', phone: '+1-555-0100' }, ctx);
-
-    const emittedEvent = mockEmitWebhookEvent.mock.calls[0][0];
-    expect(emittedEvent.lead.phone).toBe('+1-555-0100');
-  });
-
-  it('execute returns success=false with error when the Lead write fails', async () => {
-    const tool = new CaptureLeadTool();
-    const failingLeadRepo = {
-      create: vi.fn((d: Record<string, unknown>) => d),
-      save: vi.fn().mockRejectedValue(new Error('DB write failed')),
-    };
-    const ctx = makeCtx({
-      dataSource: {
-        query: mockQuery,
-        getRepository: vi.fn((entity: { name?: string }) => {
-          if (entity?.name === 'ChatSession') return mockSessionRepo;
-          if (entity?.name === 'Lead') return failingLeadRepo;
-          return { findOne: vi.fn() };
-        }),
-      } as any,
-    });
-
-    const result = await tool.execute({ name: 'Dave', email: 'dave@example.com' }, ctx);
-
-    expect(result.success).toBe(false);
-    expect(result.error).toBe('DB write failed');
+    const res = await tool.execute({ email: 'a@b.com' }, makeCtx());
+    expect(res.success).toBe(false);
+    expect(res.error).toBe('boom');
   });
 });

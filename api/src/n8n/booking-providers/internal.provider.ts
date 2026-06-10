@@ -804,6 +804,24 @@ export class InternalProvider implements BookingProvider {
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
 
+    // Dedup on the PARSED time (#35): a rapid re-confirm in another turn resolves to
+    // the same normalized start, but the LLM may pass a slightly different raw
+    // preferredTime string, so the idempotency-key check above can miss. Catch it on
+    // (session, service, startUtc) within the dedup window. Requests don't block
+    // calendar time, so without this they'd double up; auto-bookings are already
+    // guarded by the calendar conflict constraint.
+    const recentDup = await bookingRepo.findOne({
+      where: {
+        tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
+        eventTypeId: service.id, startUtc: start,
+        createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (recentDup && !['failed', 'cancelled', 'declined'].includes(recentDup.status)) {
+      return this.toResult(recentDup, true);
+    }
+
     return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras, effectiveDuration);
   }
 

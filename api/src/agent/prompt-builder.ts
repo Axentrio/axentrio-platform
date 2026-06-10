@@ -88,6 +88,16 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     // Shared platform safety rules (non-negotiable, applied to every flow).
     sections.push(`\n${PLATFORM_RULES_HEADING}\n${platformSafetyPreambleLines().join('\n')}`);
 
+    // Knowledge base usage. The agent historically NEVER volunteered a
+    // kb_search call (0 calls across 60 production turns) and answered
+    // "I don't know" to questions whose answers sat in the KB — so this is a
+    // hard rule, mirroring the booking egress rule's firmness.
+    if (tools.some((t) => t.name === 'kb_search')) {
+      sections.push(
+        `\n## KNOWLEDGE\nWhen the customer asks anything factual about the business — services, opening hours, prices, policies, location, contact details, or anything you don't already know from this conversation — you MUST call the kb_search tool BEFORE answering. NEVER tell the customer you don't know, don't have that information, or suggest they check elsewhere unless kb_search returned nothing relevant THIS turn. If the search comes back empty, say so honestly and offer to connect them with the team.`
+      );
+    }
+
     // Escalation
     if (tools.some((t) => t.name === 'escalate_to_human')) {
       sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');

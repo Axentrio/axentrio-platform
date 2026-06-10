@@ -4,7 +4,8 @@ import { getBotKnowledgeBaseIds } from '../../knowledge/bot-knowledge-bases';
 
 export class KbSearchTool implements ToolAdapter {
   name = 'kb_search';
-  description = 'Search the knowledge base for information relevant to the customer query.';
+  description =
+    "Search the business's knowledge base. Call this FIRST whenever the customer asks anything factual about the business — services, opening hours, prices, policies, location, contact details, or any question you cannot answer from the conversation itself. Never tell the customer you don't know or lack information without having searched first.";
   parameters = {
     type: 'object',
     properties: {

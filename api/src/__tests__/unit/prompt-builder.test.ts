@@ -49,6 +49,16 @@ describe('PromptBuilder', () => {
     expect(prompt).toContain('escalate_to_human');
   });
 
+  it('includes the hard KNOWLEDGE rule when kb_search is available, omits it otherwise', () => {
+    const prompt = builder.build(baseTenant, baseTenant.settings as any, mockTools);
+    expect(prompt).toContain('## KNOWLEDGE');
+    expect(prompt).toContain('MUST call the kb_search tool BEFORE answering');
+
+    const noKb = mockTools.filter((t) => t.name !== 'kb_search');
+    const promptNoKb = builder.build(baseTenant, baseTenant.settings as any, noKb);
+    expect(promptNoKb).not.toContain('## KNOWLEDGE');
+  });
+
   it('includes skill instructions when skills are configured', () => {
     const tenantWithSkills = {
       ...baseTenant,

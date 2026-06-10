@@ -241,7 +241,13 @@ export async function updateService(req: Request, res: Response): Promise<void> 
   sendSuccess(res, svc);
 }
 
-/** Soft-deactivate (keep the row so existing bookings keep their service context). */
+/**
+ * Hard-delete the service row. Existing bookings survive: the FK on
+ * chatbot_bookings.event_type_id is ON DELETE SET NULL, so they keep their
+ * date/customer and fall back to the bot's active service for reschedule/cancel.
+ * To retire a service without removing it (e.g. a seasonal/recurring one), set
+ * isActive=false via updateService instead.
+ */
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
@@ -249,9 +255,9 @@ export async function deleteService(req: Request, res: Response): Promise<void> 
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
-  svc.isActive = false;
-  await repo.save(svc);
-  sendSuccess(res, { id: svc.id, isActive: false });
+  await repo.remove(svc);
+  logger.info('[Scheduler] service deleted', { tenantId, botId: bot.id, serviceId: req.params.id });
+  sendSuccess(res, { id: req.params.id, deleted: true });
 }
 
 // --- Business-type presets (P4) ---

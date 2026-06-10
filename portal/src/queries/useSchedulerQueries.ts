@@ -169,9 +169,9 @@ export function useDeleteService() {
     mutationFn: (id: string) => api.delete(`/scheduler/services/${id}`),
     onSuccess: () => {
       invalidateServices(queryClient);
-      toast.success('Service removed');
+      toast.success('Service deleted');
     },
-    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to remove service'),
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to delete service'),
   });
 }
 

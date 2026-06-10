@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import {
   Dialog,
   DialogContent,
@@ -300,6 +301,13 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
                   {s.category ? ` · ${s.category}` : ''}
                 </div>
               </div>
+              <Switch
+                checked={s.isActive}
+                disabled={update.isPending}
+                onCheckedChange={(c) => update.mutate({ id: s.id, input: { isActive: c } })}
+                aria-label={s.isActive ? `Disable ${s.name}` : `Enable ${s.name}`}
+                title={s.isActive ? 'Disable (hide from customers)' : 'Enable (offer to customers)'}
+              />
               <Button variant="ghost" size="sm" type="button" onClick={() => openEdit(s)}>
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
@@ -333,7 +341,9 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
           <AlertDialogHeader>
             <AlertDialogTitle>Delete service?</AlertDialogTitle>
             <AlertDialogDescription>
-              {pendingDelete ? `"${pendingDelete.name}" will be removed and can no longer be booked. This can't be undone.` : ''}
+              {pendingDelete
+                ? `"${pendingDelete.name}" will be permanently deleted. Existing bookings are kept but lose their link to this service. To hide it from customers without deleting, use the toggle instead. This can't be undone.`
+                : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

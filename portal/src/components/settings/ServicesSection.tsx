@@ -317,6 +317,62 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
         </div>
       )}
 
+      <ServiceEditorDialog
+        editing={editing}
+        form={form}
+        set={set}
+        save={save}
+        close={close}
+        saving={saving}
+        qError={qError}
+        durationError={durationError}
+      />
+
+      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete service?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingDelete ? `"${pendingDelete.name}" will be removed and can no longer be booked. This can't be undone.` : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (pendingDelete) remove.mutate(pendingDelete.id);
+                setPendingDelete(null);
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <PresetDialog
+        open={showPresets}
+        onClose={() => setShowPresets(false)}
+        onApplied={onApplied}
+      />
+    </div>
+  );
+};
+
+/** The add/edit service form, lifted out of ServicesSection (no-giant-component).
+ *  Verbatim JSX — form state stays in ServicesSection, passed as props. */
+const ServiceEditorDialog: React.FC<{
+  editing: Service | 'new' | null;
+  form: FormState;
+  set: <K extends keyof FormState>(k: K, v: FormState[K]) => void;
+  save: () => void;
+  close: () => void;
+  saving: boolean;
+  qError: ReturnType<typeof questionsError>;
+  durationError: boolean;
+}> = ({ editing, form, set, save, close, saving, qError, durationError }) => {
+  return (
       <Dialog open={!!editing} onOpenChange={(o) => !o && close()}>
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
@@ -503,36 +559,6 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog open={!!pendingDelete} onOpenChange={(o) => !o && setPendingDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete service?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {pendingDelete ? `"${pendingDelete.name}" will be removed and can no longer be booked. This can't be undone.` : ''}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (pendingDelete) remove.mutate(pendingDelete.id);
-                setPendingDelete(null);
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <PresetDialog
-        open={showPresets}
-        onClose={() => setShowPresets(false)}
-        onApplied={onApplied}
-      />
-    </div>
   );
 };
 

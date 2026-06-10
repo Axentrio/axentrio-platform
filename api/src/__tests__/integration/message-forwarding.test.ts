@@ -1032,4 +1032,102 @@ describe('forwardMessageToN8n', () => {
       expect(await forwardMessageToN8n(session, message)).toBe(false);
     });
   });
+
+  // ── Burst coalescing (rapid-fire messages) ─────────────────────────────────
+  // A visitor firing several messages before the bot replies ("Hi" / "I want to
+  // book" / "my pipe" / "Tomorrow") must be answered as ONE coherent turn — not
+  // one reply per message, and not just a reply to the first message.
+  describe('burst coalescing', () => {
+    async function makeBurst(tenantId: string, contents: string[]) {
+      const session = await createTestSession(tenantId, { status: 'bot' });
+      const participant = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+      const base = Date.now();
+      const msgs: Message[] = [];
+      for (let i = 0; i < contents.length; i++) {
+        const m = await createTestMessage(session.id, tenantId, participant.id, {
+          content: contents[i],
+          type: 'text',
+          status: 'sent',
+        });
+        // @CreateDateColumn auto-stamps on insert; force strictly increasing
+        // timestamps so "latest unanswered" is deterministic.
+        await messageRepo.update(m.id, { createdAt: new Date(base + i * 1000) });
+        msgs.push(m);
+      }
+      return { session, msgs };
+    }
+
+    it('answers a rapid burst as ONE turn, with the whole burst as history', async () => {
+      const runMock = vi.fn().mockResolvedValue({
+        type: 'response',
+        content: 'Got it — let me help you book that.',
+      });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+        const { session, msgs } = await makeBurst(tenant.id, [
+          'Hi',
+          'I want to make a booking',
+          'I need help with my pipe',
+          'Tomorrow',
+        ]);
+
+        // The first message wins the lock; the siblings were already persisted.
+        // A single invocation must drain the whole burst.
+        await forwardMessageToN8n(session, msgs[0]);
+
+        // Coalesced: the agent ran once, not once per message.
+        expect(runMock).toHaveBeenCalledTimes(1);
+
+        // Live turn = the latest message; the earlier burst rides along as history.
+        const call = runMock.mock.calls[0];
+        const content = call[0] as string;
+        const history = call[3] as Array<{ role: string; content: string }>;
+        expect(content).toBe('Tomorrow');
+        expect(history.map((h) => h.content)).toEqual(
+          expect.arrayContaining(['Hi', 'I want to make a booking', 'I need help with my pipe']),
+        );
+
+        // Exactly ONE bot reply for the whole burst.
+        expect(await getBotMessages(session.id)).toEqual(['Got it — let me help you book that.']);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+
+    it('drains a message that arrives during the agent run (second turn)', async () => {
+      const tenant = await createTestTenant({ settings: { ai: aiSettings() } });
+      const { session, msgs } = await makeBurst(tenant.id, ['First question']);
+
+      // First run: while "thinking", the visitor sends another message. We
+      // simulate that by inserting it inside the agent mock, so the drain loop
+      // finds it on its next pass and answers it too.
+      const runMock = vi
+        .fn()
+        .mockImplementationOnce(async () => {
+          const p = await createTestParticipant(session.id, { type: 'user', name: 'Visitor2' });
+          const late = await createTestMessage(session.id, tenant.id, p.id, {
+            content: 'Actually, also this',
+            type: 'text',
+            status: 'sent',
+          });
+          await messageRepo.update(late.id, {
+            createdAt: new Date(Date.now() + 60_000),
+          });
+          return { type: 'response', content: 'Answer 1' };
+        })
+        .mockResolvedValueOnce({ type: 'response', content: 'Answer 2' });
+      initializeAgentService({ run: runMock } as unknown as AgentService);
+      try {
+        await forwardMessageToN8n(session, msgs[0]);
+
+        // Both the original and the mid-run message were answered — no message
+        // is silently dropped.
+        expect(runMock).toHaveBeenCalledTimes(2);
+        expect(await getBotMessages(session.id)).toEqual(['Answer 1', 'Answer 2']);
+      } finally {
+        initializeAgentService(null as unknown as AgentService);
+      }
+    });
+  });
 });

@@ -446,9 +446,22 @@ export async function forwardMessageToN8n(
   return true;
 }
 
-// ── Per-Session Lock ────────────────────────────────────────────────────
-// Prevents concurrent agent runs on the same session.
+// ── Per-Session Lock + Burst Coalescing ─────────────────────────────────
+// Prevents concurrent agent runs on the same session, and coalesces a rapid
+// burst of user messages ("Hi" / "I want to book" / "my pipe" / "tomorrow")
+// into a single coherent turn instead of answering only the first.
 // Uses Redis SET NX with TTL. Falls back to no-lock if Redis is down.
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Quiet-window the lock holder waits before running, so messages typed in quick
+// succession are handled together. 0 in tests to keep the suite fast / avoid
+// fake-timer stalls. Tunable in prod via AGENT_BURST_DEBOUNCE_MS without a code change.
+const BURST_DEBOUNCE_MS = Number(
+  process.env.AGENT_BURST_DEBOUNCE_MS ?? (process.env.NODE_ENV === 'test' ? 0 : 1000),
+);
+// Safety cap on the drain loop — bounds work even if a user keeps bursting.
+const MAX_DRAIN_TURNS = 6;
 
 async function acquireSessionLock(sessionId: string, ttlMs: number = 60000): Promise<boolean> {
   try {
@@ -462,6 +475,18 @@ async function acquireSessionLock(sessionId: string, ttlMs: number = 60000): Pro
   }
 }
 
+// Extend the lock while a multi-turn drain is in progress, so a slow burst
+// doesn't let the TTL lapse and admit a concurrent run.
+async function refreshSessionLock(sessionId: string, ttlMs: number = 60000): Promise<void> {
+  try {
+    const { getRedisClient } = await import('../config/redis');
+    const redis = getRedisClient();
+    if (redis) await redis.pexpire(`agent:lock:${sessionId}`, ttlMs);
+  } catch {
+    // ignore
+  }
+}
+
 async function releaseSessionLock(sessionId: string): Promise<void> {
   try {
     const { getRedisClient } = await import('../config/redis');
@@ -472,81 +497,124 @@ async function releaseSessionLock(sessionId: string): Promise<void> {
   }
 }
 
+// The most recent user text message that has no bot reply after it — i.e. the
+// live turn to answer. Returns null when the latest message is already a bot
+// reply (everything answered). Earlier burst messages are still picked up: they
+// ride along as conversation history for whichever message is the live turn.
+async function getLatestUnansweredUserMessage(sessionId: string): Promise<Message | null> {
+  const latest = await messageRepository
+    .createQueryBuilder('message')
+    .leftJoinAndSelect('message.participant', 'participant')
+    .where('message.sessionId = :sessionId', { sessionId })
+    .andWhere('message.isDeleted = false')
+    .andWhere('message.type = :type', { type: 'text' })
+    .orderBy('message.createdAt', 'DESC')
+    .getOne();
+  return latest && latest.participant?.type === 'user' ? latest : null;
+}
+
 // ── Platform Agent Path ──────────────────────────────────────────────────
 
 async function platformAgentPath(
   session: ChatSession,
-  savedMessage: Message,
+  _savedMessage: Message,
   tenant: Tenant,
   aiSettings: BotAiSettings,
 ): Promise<boolean> {
-  // Acquire per-session lock — prevents concurrent agent runs
+  // Acquire per-session lock — prevents concurrent agent runs. The message that
+  // wins the lock drives the turn; rapid-fire siblings fail to acquire, return
+  // here (already persisted by the /message handler), and get picked up by the
+  // drain loop below as part of the same coalesced turn.
   const locked = await acquireSessionLock(session.id);
   if (!locked) {
-    logger.info(`Agent already processing session ${session.id}, skipping duplicate`);
-    return true; // message is saved, agent will see it in history on current run
+    logger.info(`Agent already processing session ${session.id}; message queued for the in-flight run`);
+    return true;
   }
 
   try {
-  const botParticipant = await ensureBotParticipant(session, aiSettings);
+    const botParticipant = await ensureBotParticipant(session, aiSettings);
 
-  // Show typing indicator while AI processes
-  emitToTenantAgents(session.tenantId, 'typing:indicator', {
-    sessionId: session.id, isTyping: true, participantType: 'bot',
-  });
-  // Also emit to the session room so the widget sees it
-  emitToSession(session.tenantId, session.id, 'typing:start', {});
+    // Debounce: wait a quiet-window so a burst of messages typed in quick
+    // succession settles before we run, and is answered as ONE coherent turn
+    // instead of replying only to the first message.
+    if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
 
-  // Decrypt message content
-  const messageContent = savedMessage.contentEncrypted
-    ? decrypt(savedMessage.content)
-    : savedMessage.content;
+    // Drain loop: answer the latest unanswered user message (with the rest of
+    // the burst as history) and keep going while new user messages land —
+    // including any that arrive *while* the agent is thinking. `processed`
+    // guards against re-answering the same message (and any infinite loop if a
+    // bot reply fails to persist).
+    const processed = new Set<string>();
 
-  // Load conversation history for the agent loop. Exclude the current message —
-  // it is passed separately as the live user turn (agent.service appends it),
-  // so including it here would duplicate it in the LLM context.
-  const history = await getConversationHistory(session.id, savedMessage.id);
+    for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
+      await refreshSessionLock(session.id);
+      const pending = await getLatestUnansweredUserMessage(session.id);
+      if (!pending || processed.has(pending.id)) break;
+      processed.add(pending.id);
 
-    const result: AgentResult = await agentService!.run(
-      messageContent,
-      session,
-      tenant,
-      history,
-    );
+      // Show typing indicator while AI processes
+      emitToTenantAgents(session.tenantId, 'typing:indicator', {
+        sessionId: session.id, isTyping: true, participantType: 'bot',
+      });
+      emitToSession(session.tenantId, session.id, 'typing:start', {});
 
-    switch (result.type) {
-      case 'response':
-        await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
-        break;
+      const messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
+      // Exclude the live turn itself; earlier burst messages remain in history
+      // so the agent sees the whole burst.
+      const history = await getConversationHistory(session.id, pending.id);
 
-      case 'error':
-        logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
-        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
-        await handleBotHandoff(session, botParticipant.id, 'bot_error');
-        break;
+      const result: AgentResult = await agentService!.run(
+        messageContent,
+        session,
+        tenant,
+        history,
+      );
 
-      case 'budget_exceeded':
-        logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
-        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
-        await handleBotHandoff(session, botParticipant.id, 'bot_error');
-        break;
+      let handedOff = false;
+      switch (result.type) {
+        case 'response':
+          await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
+          break;
 
-      case 'max_iterations':
-        logger.warn(`Platform agent max iterations for session ${session.id}`);
-        await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
-        await handleBotHandoff(session, botParticipant.id, 'bot_error');
-        break;
+        case 'error':
+          logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
+          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await handleBotHandoff(session, botParticipant.id, 'bot_error');
+          handedOff = true;
+          break;
 
-      case 'awaiting_confirmation':
-        // Confirmation gate — just send the preview message, don't handoff
-        await sendBotMessage(session, botParticipant.id, result.message);
-        break;
+        case 'budget_exceeded':
+          logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
+          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await handleBotHandoff(session, botParticipant.id, 'bot_error');
+          handedOff = true;
+          break;
+
+        case 'max_iterations':
+          logger.warn(`Platform agent max iterations for session ${session.id}`);
+          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await handleBotHandoff(session, botParticipant.id, 'bot_error');
+          handedOff = true;
+          break;
+
+        case 'awaiting_confirmation':
+          // Confirmation gate — just send the preview message, don't handoff
+          await sendBotMessage(session, botParticipant.id, result.message);
+          break;
+      }
+
+      // Stop typing indicator
+      emitToSession(session.tenantId, session.id, 'typing:stop', {});
+
+      // Once handed to a human, stop draining — the bot no longer owns the session.
+      if (handedOff) break;
+
+      // Brief settle so a message typed right after this reply joins the same
+      // drain rather than racing the lock release.
+      if (BURST_DEBOUNCE_MS > 0) await sleep(BURST_DEBOUNCE_MS);
     }
 
-    // Stop typing indicator
-    emitToSession(session.tenantId, session.id, 'typing:stop', {});
-
-    // Transition waiting → bot on first message
+    // Transition waiting → bot on first message (no-op if a handoff moved it on).
     if (session.status === 'waiting') {
       await sessionRepository
         .createQueryBuilder()

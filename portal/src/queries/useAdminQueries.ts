@@ -354,3 +354,84 @@ export function useAdminCancelInvite(tenantId: string) {
   });
 }
 
+
+// --- Entitlement controls (feature overrides + bespoke modules) ---
+
+export interface FeatureOverrideEntry {
+  value: boolean;
+  reason: string;
+  setBy: string;
+  setAt: string;
+}
+
+export interface TenantOverridesResponse {
+  tier: string;
+  tierDefaults: Record<string, boolean>;
+  overrides: Record<string, FeatureOverrideEntry>;
+}
+
+export interface TenantModuleRow {
+  id: string;
+  displayName: string;
+  hasConfigSchema: boolean;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  reason: string | null;
+  setBy: string | null;
+  updatedAt: string | null;
+  active: boolean;
+}
+
+export function useTenantOverrides(id: string) {
+  return useQuery({
+    queryKey: queryKeys.admin.tenantOverrides(id),
+    queryFn: () => api.get<TenantOverridesResponse>(`/admin/tenants/${id}/feature-overrides`),
+    enabled: !!id,
+  });
+}
+
+/** Replaces the FULL override map — absent features return to tier default. */
+export function useSetTenantOverrides(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (overrides: Record<string, { value: boolean; reason: string }>) =>
+      api.put<TenantOverridesResponse>(`/admin/tenants/${id}/feature-overrides`, overrides),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantOverrides(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(id) });
+      toast.success('Feature overrides saved');
+    },
+    onError: (err: Any) =>
+      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to save overrides'),
+  });
+}
+
+export function useTenantModules(id: string) {
+  return useQuery({
+    queryKey: queryKeys.admin.tenantModules(id),
+    queryFn: async () => {
+      const res = await api.get<Any>(`/admin/tenants/${id}/modules`);
+      return (res?.modules ?? res?.data?.modules ?? []) as TenantModuleRow[];
+    },
+    enabled: !!id,
+  });
+}
+
+export function useSetTenantModule(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { moduleId: string; enabled: boolean; reason: string; config?: Record<string, unknown> }) =>
+      api.put(`/admin/tenants/${id}/modules/${input.moduleId}`, {
+        enabled: input.enabled,
+        reason: input.reason,
+        ...(input.config !== undefined ? { config: input.config } : {}),
+      }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantModules(id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(id) });
+      toast.success(`Module ${vars.enabled ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: Any) =>
+      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to update module'),
+  });
+}

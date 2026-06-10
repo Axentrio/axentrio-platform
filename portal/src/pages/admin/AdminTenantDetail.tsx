@@ -43,6 +43,7 @@ import {
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { TenantEntitlementsPanel } from '../../components/admin/TenantEntitlementsPanel';
 import {
   Table,
   TableHeader,
@@ -348,6 +349,9 @@ const AdminTenantDetail: React.FC = () => {
           </div>
         </Card>
       </div>
+
+      {/* Entitlement controls — feature overrides + bespoke modules */}
+      <TenantEntitlementsPanel tenantId={tenant.id} />
 
       {/* Members */}
       <Card variant="glass" className="overflow-hidden">

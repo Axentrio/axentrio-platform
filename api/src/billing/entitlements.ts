@@ -11,6 +11,7 @@ import type { FeatureOverride, TenantStatus } from '../database/entities/Tenant'
 import { cached, invalidate } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { PLANS } from './plans';
+import { enforceFeatureDependencies } from './feature-taxonomy';
 import type { Entitlements, FeatureKey, InternalPlanId } from './types';
 
 /**
@@ -144,6 +145,11 @@ export function entitlementsFor(
       features[key as FeatureKey] = entry.value;
     }
   }
+
+  // Dependency pass (taxonomy `requires`): a child feature can never be on
+  // while its parent is off, regardless of tier defaults or overrides —
+  // e.g. calendarIntegrations without bookings has nothing to sync.
+  enforceFeatureDependencies(features);
 
   return {
     planId: plan.id,

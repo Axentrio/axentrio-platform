@@ -364,10 +364,18 @@ export interface FeatureOverrideEntry {
   setAt: string;
 }
 
+export interface FeatureMeta {
+  label: string;
+  group: string;
+  requires?: string;
+}
+
 export interface TenantOverridesResponse {
   tier: string;
   tierDefaults: Record<string, boolean>;
   overrides: Record<string, FeatureOverrideEntry>;
+  taxonomy?: Record<string, FeatureMeta>;
+  groups?: Record<string, { label: string; collapsed?: boolean }>;
 }
 
 export interface TenantModuleRow {

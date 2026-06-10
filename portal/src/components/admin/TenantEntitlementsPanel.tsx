@@ -6,8 +6,8 @@
  * Admin-internal surface — intentionally not i18n'd (English-only, matches
  * the operator-facing backend reasons/audit strings).
  */
-import { useEffect, useMemo, useState } from 'react';
-import { Loader2, ShieldCheck, Boxes } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2, ShieldCheck, Boxes, ChevronDown } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -34,18 +34,8 @@ interface OverrideDraft {
   reason: string;
 }
 
-const FEATURE_LABELS: Record<string, string> = {
-  unifiedInbox: 'Unified inbox',
-  bookings: 'Bookings',
-  calendarIntegrations: 'Calendar sync (Google/Outlook)',
-  leadCapture: 'Lead capture',
-  platformAssistant: 'AI Platform Assistant',
-  crm: 'CRM',
-  hideWidgetAttribution: 'Hide widget attribution',
-  customWidgetAppearance: 'Custom widget appearance',
-  handoff: 'Human handoff',
-  fileUpload: 'File upload',
-};
+/** Fallbacks while the (taxonomy-bearing) response loads or for older API. */
+const FALLBACK_GROUP = { label: 'Other' };
 
 export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
   const { data: overridesData, isLoading: overridesLoading } = useTenantOverrides(tenantId);
@@ -111,50 +101,11 @@ export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
         {overridesLoading || !overridesData ? (
           <div className="p-6 text-sm text-text-muted">Loading…</div>
         ) : (
-          <div className="divide-y divide-edge">
-            {Object.entries(overridesData.tierDefaults).map(([key, tierDefault]) => {
-              const draft = drafts[key] ?? { state: 'default' as TriState, reason: '' };
-              const existing = overridesData.overrides[key];
-              return (
-                <div key={key} className="px-6 py-3 flex flex-wrap items-center gap-3">
-                  <div className="min-w-[220px] flex-1">
-                    <p className="text-sm text-text-primary">{FEATURE_LABELS[key] ?? key}</p>
-                    <p className="text-xs text-text-muted">
-                      Tier default ({overridesData.tier}): {tierDefault ? 'on' : 'off'}
-                      {existing && draft.state !== 'default' && (
-                        <> · overridden by {existing.setBy} on {existing.setAt.slice(0, 10)}</>
-                      )}
-                    </p>
-                  </div>
-                  <Select
-                    value={draft.state}
-                    onValueChange={(state: TriState) =>
-                      setDrafts((prev) => ({ ...prev, [key]: { ...draft, state } }))
-                    }
-                  >
-                    <SelectTrigger className="w-[150px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="default">Tier default</SelectItem>
-                      <SelectItem value="on">Force on</SelectItem>
-                      <SelectItem value="off">Force off</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {draft.state !== 'default' && (
-                    <Input
-                      className="w-[260px]"
-                      placeholder="Reason (required)"
-                      value={draft.reason}
-                      onChange={(e) =>
-                        setDrafts((prev) => ({ ...prev, [key]: { ...draft, reason: e.target.value } }))
-                      }
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
+          <GroupedOverrideRows
+            data={overridesData}
+            drafts={drafts}
+            setDrafts={setDrafts}
+          />
         )}
       </Card>
 
@@ -180,6 +131,124 @@ export function TenantEntitlementsPanel({ tenantId }: { tenantId: string }) {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+/**
+ * Grouped renderer for the override rows: features cluster by taxonomy group;
+ * a child feature (`requires`) renders indented and is locked to "off" while
+ * its parent is effectively off (the backend enforces the same rule in the
+ * resolver — this is the matching affordance). "Plan traits" starts collapsed.
+ */
+function GroupedOverrideRows({
+  data,
+  drafts,
+  setDrafts,
+}: {
+  data: import('../../queries/useAdminQueries').TenantOverridesResponse;
+  drafts: Record<string, OverrideDraft>;
+  setDrafts: React.Dispatch<React.SetStateAction<Record<string, OverrideDraft>>>;
+}) {
+  const taxonomy = data.taxonomy ?? {};
+  const groups = data.groups ?? {};
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(Object.entries(groups).map(([id, g]) => [id, !g.collapsed])),
+  );
+
+  // Effective value of a feature under the current drafts (tier default unless forced).
+  const effective = (key: string): boolean => {
+    const d = drafts[key];
+    if (!d || d.state === 'default') return data.tierDefaults[key] ?? false;
+    return d.state === 'on';
+  };
+
+  // Group ids in taxonomy declaration order; unknown features fall into 'other'.
+  const groupIds = [...new Set(Object.values(taxonomy).map((m) => m.group))];
+  const ungrouped = Object.keys(data.tierDefaults).filter((k) => !taxonomy[k]);
+  const ordered: Array<{ id: string; label: string; keys: string[] }> = groupIds.map((gid) => ({
+    id: gid,
+    label: groups[gid]?.label ?? gid,
+    // Parents before their children within a group.
+    keys: Object.keys(data.tierDefaults)
+      .filter((k) => taxonomy[k]?.group === gid)
+      .sort((a, b) => Number(!!taxonomy[a]?.requires) - Number(!!taxonomy[b]?.requires)),
+  }));
+  if (ungrouped.length) ordered.push({ id: 'other', label: FALLBACK_GROUP.label, keys: ungrouped });
+
+  return (
+    <div>
+      {ordered.map((g) => {
+        const open = openGroups[g.id] ?? true;
+        return (
+          <div key={g.id} className="border-b border-edge last:border-b-0">
+            <button
+              type="button"
+              className="w-full px-6 py-2.5 flex items-center gap-2 text-left bg-surface-2/40 hover:bg-surface-2/70"
+              onClick={() => setOpenGroups((p) => ({ ...p, [g.id]: !open }))}
+            >
+              <ChevronDown className={`w-3.5 h-3.5 text-text-muted transition-transform ${open ? '' : '-rotate-90'}`} />
+              <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{g.label}</span>
+            </button>
+            {open && (
+              <div className="divide-y divide-edge/50">
+                {g.keys.map((key) => {
+                  const meta = taxonomy[key];
+                  const isChild = !!meta?.requires;
+                  const parentOn = !isChild || effective(meta!.requires!);
+                  const draft = drafts[key] ?? { state: 'default' as TriState, reason: '' };
+                  const existing = data.overrides[key];
+                  return (
+                    <div key={key} className={`px-6 py-3 flex flex-wrap items-center gap-3 ${isChild ? 'pl-12' : ''}`}>
+                      <div className="min-w-[220px] flex-1">
+                        <p className="text-sm text-text-primary">{meta?.label ?? key}</p>
+                        <p className="text-xs text-text-muted">
+                          {!parentOn ? (
+                            <>off — requires {taxonomy[meta!.requires!]?.label ?? meta!.requires}</>
+                          ) : (
+                            <>
+                              Tier default ({data.tier}): {data.tierDefaults[key] ? 'on' : 'off'}
+                              {existing && draft.state !== 'default' && (
+                                <> · overridden by {existing.setBy} on {existing.setAt.slice(0, 10)}</>
+                              )}
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      <Select
+                        value={parentOn ? draft.state : 'default'}
+                        disabled={!parentOn}
+                        onValueChange={(state: TriState) =>
+                          setDrafts((prev) => ({ ...prev, [key]: { ...draft, state } }))
+                        }
+                      >
+                        <SelectTrigger className="w-[150px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="default">Tier default</SelectItem>
+                          <SelectItem value="on">Force on</SelectItem>
+                          <SelectItem value="off">Force off</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {parentOn && draft.state !== 'default' && (
+                        <Input
+                          className="w-[260px]"
+                          placeholder="Reason (required)"
+                          value={draft.reason}
+                          onChange={(e) =>
+                            setDrafts((prev) => ({ ...prev, [key]: { ...draft, reason: e.target.value } }))
+                          }
+                        />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

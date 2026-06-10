@@ -24,14 +24,14 @@ function override(value: boolean): FeatureOverride {
 }
 
 describe('entitlementsFor — per-tenant feature overrides', () => {
-  it('pro with bookings:false override loses booking (and only booking)', () => {
+  it('pro with bookings:false override loses booking + its dependent calendar sync', () => {
     const e = entitlementsFor('pro', NO_LIMITS, {
       status: 'active',
       featureOverrides: { bookings: override(false) },
     });
     expect(e.features.bookings).toBe(false);
-    expect(e.features.calendarIntegrations).toBe(true); // untouched
-    expect(e.features.platformAssistant).toBe(true);
+    expect(e.features.calendarIntegrations).toBe(false); // taxonomy: requires bookings
+    expect(e.features.platformAssistant).toBe(true); // unrelated features untouched
   });
 
   it('essential with bookings:true override gains booking (comp)', () => {
@@ -121,6 +121,43 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
       );
       expect(e.limits.sessions).toBe(999);
       expect(e.limits.dailyLlmCalls).toBe(5000);
+      expect(e.features.crm).toBe(false);
+    });
+  });
+
+  describe('taxonomy dependencies — a child feature never outlives its parent', () => {
+    it('calendarIntegrations override cannot turn on without bookings (essential)', () => {
+      const e = entitlementsFor('essential', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: { calendarIntegrations: override(true) }, // bookings stays false
+      });
+      expect(e.features.calendarIntegrations).toBe(false); // forced off — nothing to sync
+    });
+
+    it('forcing bookings off also forces calendarIntegrations off (pro)', () => {
+      const e = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: { bookings: override(false) }, // calendarIntegrations default true
+      });
+      expect(e.features.bookings).toBe(false);
+      expect(e.features.calendarIntegrations).toBe(false);
+    });
+
+    it('comping bookings + calendarIntegrations together works (essential)', () => {
+      const e = entitlementsFor('essential', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: { bookings: override(true), calendarIntegrations: override(true) },
+      });
+      expect(e.features.bookings).toBe(true);
+      expect(e.features.calendarIntegrations).toBe(true);
+    });
+
+    it('crm requires leadCapture', () => {
+      const e = entitlementsFor('enterprise', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: { leadCapture: override(false) }, // crm default true on enterprise
+      });
+      expect(e.features.leadCapture).toBe(false);
       expect(e.features.crm).toBe(false);
     });
   });

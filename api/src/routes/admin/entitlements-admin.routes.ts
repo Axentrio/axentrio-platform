@@ -13,6 +13,7 @@ import { Tenant } from '../../database/entities/Tenant';
 import type { FeatureOverride } from '../../database/entities/Tenant';
 import { TenantModule } from '../../database/entities/TenantModule';
 import { PLANS } from '../../billing/plans';
+import { FEATURE_TAXONOMY, FEATURE_GROUPS } from '../../billing/feature-taxonomy';
 import { invalidateEntitlements } from '../../billing/entitlements';
 import { allModules, getModule, invalidateModules, listActiveModules } from '../../modules';
 import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/error-handler';
@@ -46,6 +47,9 @@ router.get(
       tier: tenant.tier,
       tierDefaults: PLANS[tenant.tier].features,
       overrides: tenant.featureOverrides ?? {},
+      // UI structure: labels, logical groups, parent dependencies.
+      taxonomy: FEATURE_TAXONOMY,
+      groups: FEATURE_GROUPS,
     });
   }),
 );
@@ -100,6 +104,8 @@ router.put(
       tier: tenant.tier,
       tierDefaults: PLANS[tenant.tier].features,
       overrides: next,
+      taxonomy: FEATURE_TAXONOMY,
+      groups: FEATURE_GROUPS,
     });
   }),
 );

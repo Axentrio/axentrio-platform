@@ -8,6 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
+import { MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
@@ -37,6 +38,15 @@ import { buildManageUrl } from '../../scheduler/booking-token';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
+
+/**
+ * Idempotency/dedup window (#35). The booking idempotency key is stable per
+ * session+service+time, so we only treat a matching row as "the same booking" when
+ * it was created within this window — collapsing a rapid re-confirm ("yes go ahead"
+ * seconds later) while still allowing a genuine re-booking of the same service+time
+ * later in a long-lived (Messenger/WhatsApp) session.
+ */
+const BOOKING_DEDUP_WINDOW_MS = 5 * 60 * 1000;
 
 /**
  * P3: normalize an LLM-supplied intake-answers object against a RESOLVED service's
@@ -441,7 +451,7 @@ export class InternalProvider implements BookingProvider {
 
     // 1. Idempotency: a live (non-failed) booking with this key → return it.
     const existing = await bookingRepo.findOne({
-      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
     });
     if (existing && existing.status !== 'failed') {
       return this.toResult(existing, true);
@@ -547,7 +557,7 @@ export class InternalProvider implements BookingProvider {
       if (code === '23505') {
         // Idempotency race: a concurrent create inserted the same key.
         const dup = await bookingRepo.findOne({
-          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
         if (dup && dup.status !== 'failed') return this.toResult(dup, true);
         throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
@@ -696,7 +706,7 @@ export class InternalProvider implements BookingProvider {
     } catch (err) {
       if ((err as { code?: string })?.code === '23505') {
         const dup = await bookingRepo.findOne({
-          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
         if (dup && dup.status !== 'failed') return this.toResult(dup, true);
       }
@@ -775,7 +785,7 @@ export class InternalProvider implements BookingProvider {
     // before resolving the service — a catalog change must not turn a retry into an error.
     const bookingRepo = AppDataSource.getRepository(Booking);
     const existing = await bookingRepo.findOne({
-      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey },
+      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
     });
     if (existing && existing.status !== 'failed') {
       return this.toResult(existing, true);

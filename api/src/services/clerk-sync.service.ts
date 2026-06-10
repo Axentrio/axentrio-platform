@@ -113,6 +113,48 @@ export async function revokeAndResendClerkInvitation(
   }
 }
 
+/**
+ * Revoke a pending Clerk org invitation by email. Used when cancelling an invite
+ * so the email's accept link stops working (deleting only our local row would
+ * leave the Clerk invitation live and still acceptable).
+ *
+ * Returns true if there is no longer a live invitation (revoked, or none was
+ * pending). Returns false on a genuine failure, so the caller can surface it
+ * instead of falsely reporting the invite cancelled.
+ */
+export async function revokeClerkInvitation(
+  clerkOrgId: string,
+  email: string,
+  requestingUserId?: string
+): Promise<boolean> {
+  try {
+    const invitations = await clerkClient.organizations.getOrganizationInvitationList({
+      organizationId: clerkOrgId,
+      status: ['pending'],
+    });
+    const existing = invitations.data.find(
+      (inv: any) => inv.emailAddress.toLowerCase() === email.toLowerCase()
+    );
+    if (!existing) return true; // nothing pending to revoke — already accepted/revoked/expired
+
+    if (!requestingUserId) {
+      logger.warn('Cannot revoke Clerk invite without requestingUserId', { clerkOrgId, email });
+      return false;
+    }
+
+    await clerkClient.organizations.revokeOrganizationInvitation({
+      organizationId: clerkOrgId,
+      invitationId: existing.id,
+      requestingUserId,
+    });
+    logger.info('Revoked Clerk organization invite', { clerkOrgId, email, invitationId: existing.id });
+    return true;
+  } catch (error: any) {
+    logger.error('Failed to revoke Clerk invite', { error: error?.message || error, clerkOrgId, email });
+    return false;
+  }
+}
+
 export async function addMemberToClerkOrganization(
   clerkOrgId: string,
   clerkUserId: string,

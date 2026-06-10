@@ -18,7 +18,7 @@ import { requireAdmin, asyncHandler, ValidationError, NotFoundError, BadRequestE
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization, revokeAndResendClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
+import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -984,6 +984,17 @@ router.delete(
 
     if (!invite) {
       throw new NotFoundError('Invite not found');
+    }
+
+    // Revoke the Clerk-side invitation too — otherwise its email link stays live
+    // and the recipient could still accept after we delete our local row. Only
+    // report success once Clerk confirms there's no longer a live invitation.
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (tenant?.clerkOrgId) {
+      const revoked = await revokeClerkInvitation(tenant.clerkOrgId, invite.email, req.user?.clerkUserId);
+      if (!revoked) {
+        throw new ApiError('Failed to revoke invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
+      }
     }
 
     await logAudit(req.userId!, 'invite.cancelled', 'invite', invite.id, tenantId, { email: invite.email });

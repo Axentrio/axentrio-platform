@@ -140,6 +140,11 @@ const chartTooltipStyle = {
   color: '#f1f3f9',
 };
 
+const handleExport = (format: 'csv' | 'json' | 'xlsx'): void => {
+  // Implement export functionality
+  console.log('Exporting as', format);
+};
+
 const Analytics: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -289,11 +294,6 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-primary-600/10',
     },
   ];
-
-  const handleExport = (format: 'csv' | 'json' | 'xlsx') => {
-    // Implement export functionality
-    console.log('Exporting as', format);
-  };
 
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">

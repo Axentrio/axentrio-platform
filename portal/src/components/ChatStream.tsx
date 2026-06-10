@@ -39,6 +39,19 @@ const statusFilters: { value: ChatStatus | 'all'; labelKey: string }[] = [
   { value: 'closed', labelKey: 'inbox.stream.filters.status.closed' },
 ];
 
+/** Last-message preview for a chat row. Pure — hoisted to module scope. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const getLastMessage = (chat: any): string => {
+  if (chat.lastMessage) {
+    return chat.lastMessage.length > 60 ? chat.lastMessage.substring(0, 60) + '...' : chat.lastMessage;
+  }
+  if (chat.messages && chat.messages.length > 0) {
+    const lastMsg = chat.messages[chat.messages.length - 1];
+    return lastMsg.content.substring(0, 60) + (lastMsg.content.length > 60 ? '...' : '');
+  }
+  return '';
+};
+
 export const ChatStream: React.FC<ChatStreamProps> = ({
   tenants,
   onChatSelect,
@@ -90,18 +103,6 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
     }
 
     return date.toLocaleDateString();
-  };
-
-  const getLastMessage = (chat: any) => {
-    // Use lastMessage from enriched API response
-    if (chat.lastMessage) {
-      return chat.lastMessage.length > 60 ? chat.lastMessage.substring(0, 60) + '...' : chat.lastMessage;
-    }
-    if (chat.messages && chat.messages.length > 0) {
-      const lastMsg = chat.messages[chat.messages.length - 1];
-      return lastMsg.content.substring(0, 60) + (lastMsg.content.length > 60 ? '...' : '');
-    }
-    return '';
   };
 
   return (

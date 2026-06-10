@@ -265,6 +265,22 @@ function CopyBtn({
   );
 }
 
+const logColors: Record<LogEntry['type'], string> = {
+  info: 'text-[#6366f1]',
+  send: 'text-[#059669]',
+  receive: 'text-[#7c3aed]',
+  error: 'text-[#dc2626]',
+  socket: 'text-[#d97706]',
+};
+
+const logDots: Record<LogEntry['type'], string> = {
+  info: 'bg-[#6366f1]',
+  send: 'bg-[#059669]',
+  receive: 'bg-[#7c3aed]',
+  error: 'bg-[#dc2626]',
+  socket: 'bg-[#d97706]',
+};
+
 function DevPanel({
   sessionId, tenantId, connected, sessionStatus, logs, apiKey,
 }: {
@@ -284,22 +300,6 @@ function DevPanel({
   };
 
   const embedSnippet = `<script\n  src="${window.location.origin}/widget.js"\n  data-api-key="${apiKey}"\n  async\n></script>`;
-
-  const logColors: Record<LogEntry['type'], string> = {
-    info: 'text-[#6366f1]',
-    send: 'text-[#059669]',
-    receive: 'text-[#7c3aed]',
-    error: 'text-[#dc2626]',
-    socket: 'text-[#d97706]',
-  };
-
-  const logDots: Record<LogEntry['type'], string> = {
-    info: 'bg-[#6366f1]',
-    send: 'bg-[#059669]',
-    receive: 'bg-[#7c3aed]',
-    error: 'bg-[#dc2626]',
-    socket: 'bg-[#d97706]',
-  };
 
   return (
     <div className="h-full flex flex-col bg-[#faf9f7] border-l border-[#e8e5de]">

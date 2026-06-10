@@ -47,11 +47,11 @@ const ThemePreview: React.FC<{ mode: 'light' | 'dark' | 'system' }> = ({ mode })
   );
 };
 
+const themeModes: ThemeMode[] = ['light', 'dark', 'system'];
+
 const AppearanceSettings: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const { t } = useTranslation();
-
-  const themeModes: ThemeMode[] = ['light', 'dark', 'system'];
 
   return (
     <div className="space-y-6">

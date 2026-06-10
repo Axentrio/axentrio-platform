@@ -310,7 +310,7 @@ export const SchedulerSettings: React.FC = () => {
                       />
                       <datalist id="scheduler-timezones">
                         {ALL_TIMEZONES.map((tz) => (
-                          <option key={tz} value={tz} label={tz} />
+                          <option key={tz} value={tz}>{tz}</option>
                         ))}
                       </datalist>
                     </div>

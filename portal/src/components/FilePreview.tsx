@@ -46,7 +46,7 @@ export const FileAttachment: React.FC<FileAttachmentProps> = ({
       </div>
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-text-secondary truncate">{fileName}</p>
-        {fileSize && (
+        {!!fileSize && (
           <p className="text-xs text-text-muted">
             {fileService.formatFileSize(fileSize)}
           </p>

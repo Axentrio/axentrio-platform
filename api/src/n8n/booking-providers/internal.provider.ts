@@ -40,6 +40,7 @@ import {
 import { BookingReference } from '../../database/entities/BookingReference';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
+import { returningRows } from '../../utils/raw-sql';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
@@ -1228,7 +1229,8 @@ export class InternalProvider implements BookingProvider {
     // Flip request → confirmed under the lock (capacity + exclusion guard).
     let updatedRows: Array<{ id: string }>;
     try {
-      updatedRows = await AppDataSource.transaction(async (manager) => {
+      // UPDATE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
+      updatedRows = returningRows<{ id: string }>(await AppDataSource.transaction(async (manager) => {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
         await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
         return manager.query(
@@ -1238,7 +1240,7 @@ export class InternalProvider implements BookingProvider {
             RETURNING id`,
           [bookingId, calendarKey, blockedStart.toISOString(), blockedEnd.toISOString(), ctx.tenant.id]
         );
-      });
+      }));
     } catch (err) {
       if ((err as { code?: string })?.code === '23P01') {
         throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
@@ -1299,13 +1301,13 @@ export class InternalProvider implements BookingProvider {
     if (booking.provider !== 'internal' || booking.status !== 'request_created') {
       throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
     }
-    const rows: Array<{ id: string }> = await AppDataSource.getRepository(Booking).query(
+    const rows = returningRows<{ id: string }>(await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
           SET status='cancelled', notes=COALESCE($3, notes), updated_at=now()
         WHERE id=$1 AND tenant_id=$2 AND status='request_created'
         RETURNING id`,
       [bookingId, ctx.tenant.id, reason ?? null]
-    );
+    ));
     if (!rows.length) {
       // Lost a race / already handled — idempotent success.
       return { success: true, cancelled: true };
@@ -1444,14 +1446,14 @@ export class InternalProvider implements BookingProvider {
         if (oldDay !== newDay) {
           await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
         }
-        const rows: Array<{ sequence: number }> = await manager.query(
+        const rows = returningRows<{ sequence: number }>(await manager.query(
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
                   sequence=sequence+1, updated_at=now()
             WHERE id=$5 AND tenant_id=$6 AND status='confirmed'
             RETURNING sequence`,
           [start.toISOString(), end.toISOString(), blockedStart.toISOString(), blockedEnd.toISOString(), bookingId, ctx.tenant.id]
-        );
+        ));
         if (!rows.length) {
           throw new BookingError('Booking is no longer reschedulable', 'BOOKING_NOT_RESCHEDULABLE', 409);
         }
@@ -1512,13 +1514,13 @@ export class InternalProvider implements BookingProvider {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.serviceForBooking(booking);
 
-    const rows: Array<{ sequence: number }> = await AppDataSource.getRepository(Booking).query(
+    const rows = returningRows<{ sequence: number }>(await AppDataSource.getRepository(Booking).query(
       `UPDATE chatbot_bookings
           SET status='cancelled', sequence=sequence+1, notes=COALESCE($3, notes), updated_at=now()
         WHERE id=$1 AND tenant_id=$2 AND status='confirmed'
         RETURNING sequence`,
       [bookingId, ctx.tenant.id, reason ?? null]
-    );
+    ));
     if (!rows.length) {
       // Lost a race with another cancel — treat as idempotent success.
       return { success: true, cancelled: true };

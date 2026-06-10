@@ -30,6 +30,7 @@
 import { EntityManager } from 'typeorm';
 import Stripe from 'stripe';
 import { logger } from '../utils/logger';
+import { returningRows } from '../utils/raw-sql';
 import { AppDataSource } from '../database/data-source';
 import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { TenantBillingAccount } from '../database/entities/TenantBillingAccount';
@@ -752,14 +753,15 @@ async function handleCheckoutSessionExpired(
     return { outcome: 'checkout_expired_no_tenant_id', meta: { sessionId } };
   }
 
-  const result: Array<{ tenant_id: string }> = await manager.query(
+  // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
+  const result = returningRows<{ tenant_id: string }>(await manager.query(
     `DELETE FROM chatbot_tenant_trial_reservations
        WHERE tenant_id = $1
          AND checkout_session_id = $2
          AND subscription_id IS NULL
        RETURNING tenant_id`,
     [tenantId, sessionId],
-  );
+  ));
 
   if (result.length === 0) {
     // Either: claimed elsewhere (subscription_id is non-null), already

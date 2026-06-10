@@ -15,6 +15,7 @@ import helmet from 'helmet';
 import { clerkMiddleware } from '@clerk/express';
 import { config } from './config/environment';
 import { logger } from './utils/logger';
+import { returningRows } from './utils/raw-sql';
 import { AppDataSource, checkDatabaseHealth } from './database/data-source';
 import { initializeRedis, closeRedis, isRedisAvailable, getRedisClient } from './config/redis';
 import { initializeSocketIO } from './websocket/socket.handler';
@@ -506,7 +507,8 @@ async function startServer(): Promise<void> {
         let batchDeleted: number;
 
         do {
-          const deletedRows: Array<{ id: string }> = await AppDataSource.query(
+          // DELETE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
+          const deletedRows = returningRows<{ id: string }>(await AppDataSource.query(
             `DELETE FROM audit_logs WHERE id IN (
               SELECT id FROM audit_logs
               WHERE created_at < NOW() - ($1 || ' days')::INTERVAL
@@ -515,7 +517,7 @@ async function startServer(): Promise<void> {
             )
             RETURNING id`,
             [config.audit.retentionDays]
-          );
+          ));
           batchDeleted = deletedRows.length;
           totalDeleted += batchDeleted;
         } while (batchDeleted === 1000);
@@ -543,7 +545,7 @@ async function startServer(): Promise<void> {
         let batchClosed: number;
         let batches = 0;
         do {
-          const rows: Array<{ id: string }> = await AppDataSource.query(
+          const rows = returningRows<{ id: string }>(await AppDataSource.query(
             `UPDATE chat_sessions
              SET status = 'closed', ended_at = NOW(), updated_at = NOW()
              WHERE id IN (
@@ -556,8 +558,8 @@ async function startServer(): Promise<void> {
              )
              RETURNING id`,
             [cutoff, STALE_BATCH_SIZE]
-          );
-          batchClosed = Array.isArray(rows) ? rows.length : 0;
+          ));
+          batchClosed = rows.length;
           totalClosed += batchClosed;
           batches++;
         } while (batchClosed === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);
@@ -576,7 +578,7 @@ async function startServer(): Promise<void> {
         let returnedBatch: number;
         batches = 0;
         do {
-          const rows: Array<{ id: string }> = await AppDataSource.query(
+          const rows = returningRows<{ id: string }>(await AppDataSource.query(
             `UPDATE chat_sessions
              SET status = 'bot', assigned_agent_id = NULL, updated_at = NOW()
              WHERE id IN (
@@ -589,8 +591,8 @@ async function startServer(): Promise<void> {
              )
              RETURNING id`,
             [handoffCutoff, STALE_BATCH_SIZE]
-          );
-          returnedBatch = Array.isArray(rows) ? rows.length : 0;
+          ));
+          returnedBatch = rows.length;
           totalReturned += returnedBatch;
           batches++;
         } while (returnedBatch === STALE_BATCH_SIZE && batches < STALE_MAX_BATCHES);

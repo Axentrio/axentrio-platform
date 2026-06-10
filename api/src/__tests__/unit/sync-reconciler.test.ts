@@ -71,9 +71,11 @@ function claim(row: Record<string, unknown>) {
   // signal the guard matched; everything else returns [].
   queryMock.mockImplementation(async (sql: string) => {
     const q = String(sql);
-    if (q.includes('FOR UPDATE SKIP LOCKED')) return [row];
-    if (q.includes('sync_pending = false') && q.includes('RETURNING id')) return [{ id: row.id }];
-    return [];
+    // Real TypeORM shape for UPDATE/DELETE…RETURNING: [rows, affectedCount].
+    // Mocking bare rows here previously HID the phantom-row bug (raw-sql.ts).
+    if (q.includes('FOR UPDATE SKIP LOCKED')) return [[row], 1];
+    if (q.includes('sync_pending = false') && q.includes('RETURNING id')) return [[{ id: row.id }], 1];
+    return [[], 0];
   });
 }
 function postUpdateSqls(): string[] {
@@ -89,6 +91,9 @@ beforeEach(() => {
   etFindOne.mockResolvedValue({ name: 'Intro call' });
   ruleFindOne.mockResolvedValue({ timezone: 'UTC' });
 });
+
+// Empty-claim shape: what the DB returns when nothing is pending.
+const EMPTY_UPDATE: [unknown[], number] = [[], 0];
 
 const baseRow = { id: BID, bot_id: 'b1', start_utc: '2026-07-01T10:00:00Z', end_utc: '2026-07-01T10:30:00Z', event_type_id: null, sync_attempts: 0, updated_at: '2026-06-09 05:00:00+00' };
 
@@ -184,8 +189,8 @@ describe('reconcilePendingBookingSyncs', () => {
     // reschedule bumped updated_at). The reconciler must leave sync_pending set.
     queryMock.mockImplementation(async (sql: string) => {
       const q = String(sql);
-      if (q.includes('FOR UPDATE SKIP LOCKED')) return [{ ...baseRow, status: 'confirmed' }];
-      return []; // clear RETURNING [] = guard didn't match
+      if (q.includes('FOR UPDATE SKIP LOCKED')) return [[{ ...baseRow, status: 'confirmed' }], 1];
+      return EMPTY_UPDATE; // clear RETURNING [] = guard didn't match
     });
     createCalendarEvent.mockResolvedValue({ eventId: EVID, calendarId: 'primary', meetUrl: 'm' });
 
@@ -196,10 +201,15 @@ describe('reconcilePendingBookingSyncs', () => {
     expect(loggerInfo).toHaveBeenCalledWith(expect.stringContaining('skipped clear'), expect.anything());
   });
 
-  it('does nothing when no rows are claimed', async () => {
-    queryMock.mockResolvedValue([]);
+  it('does nothing when no rows are claimed — including the [emptyRows, 0] UPDATE shape', async () => {
+    // Regression: TypeORM returns [rows, count] for UPDATE…RETURNING. Treating
+    // that wrapper as the row list produced two phantom "claims" per tick in
+    // prod (looping terminal warns) — the claim MUST resolve to zero rows here.
+    queryMock.mockResolvedValue(EMPTY_UPDATE);
     await reconcilePendingBookingSyncs();
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(updateCalendarEvent).not.toHaveBeenCalled();
+    // No terminal/clear writes happened either — only the claim ran.
+    expect(postUpdateSqls()).toEqual([]);
   });
 });

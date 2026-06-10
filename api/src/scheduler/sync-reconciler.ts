@@ -20,6 +20,7 @@ import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
+import { returningRows } from '../utils/raw-sql';
 import { buildBookingEventContent } from '../n8n/booking-providers/booking-content';
 import { buildManageUrl } from './booking-token';
 
@@ -58,7 +59,10 @@ export async function reconcilePendingBookingSyncs(): Promise<void> {
   if (running) return;
   running = true;
   try {
-    const claimed: ClaimedRow[] = await AppDataSource.query(
+    // NOTE: UPDATE…RETURNING through .query() yields [rows, count], NOT rows —
+    // consuming it raw produced two phantom "rows" per tick forever (see
+    // utils/raw-sql.ts).
+    const claimed = returningRows<ClaimedRow>(await AppDataSource.query(
       `UPDATE chatbot_bookings
           SET sync_claimed_until = now() + interval '${LEASE_MINUTES} minutes'
         WHERE id IN (
@@ -71,7 +75,7 @@ export async function reconcilePendingBookingSyncs(): Promise<void> {
            FOR UPDATE SKIP LOCKED
         )
       RETURNING id, tenant_id, bot_id, status, start_utc, end_utc, event_type_id, sync_attempts, updated_at::text AS updated_at`
-    );
+    ));
     if (!claimed.length) return;
     logger.info('[Booking] reconciler claimed pending syncs', { count: claimed.length });
     for (const row of claimed) {
@@ -251,14 +255,14 @@ async function clear(row: ClaimedRow): Promise<void> {
   // own calendar update), so if it raced us we must NOT clear sync_pending — leave
   // it for the next tick to reconcile against the new state, else the mirror could
   // be stranded at a stale time with no re-sync flag.
-  const cleared: Array<{ id: string }> = await AppDataSource.query(
+  const cleared = returningRows<{ id: string }>(await AppDataSource.query(
     `UPDATE chatbot_bookings
         SET sync_pending = false, sync_claimed_until = null, sync_last_error = null,
             sync_attempts = 0, sync_next_attempt_at = null, updated_at = now()
       WHERE id = $1 AND updated_at::text = $2
       RETURNING id`,
     [row.id, row.updated_at]
-  );
+  ));
   if (!cleared.length) {
     logger.info('[Booking] reconciler skipped clear — row changed since claim (will re-reconcile)', {
       bookingId: row.id,

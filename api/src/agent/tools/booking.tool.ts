@@ -130,7 +130,9 @@ export class CreateBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const idempotencyKey = `${ctx.runId}:create_booking:${args.startTime as string}`;
+      // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
+      // to the same booking instead of inserting a duplicate (#35).
+      const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}`;
       const result = await createBooking(
         ctx.sessionId,
         idempotencyKey,
@@ -274,7 +276,9 @@ export class RequestAppointmentTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const idempotencyKey = `${ctx.runId}:request_appointment:${args.preferredTime as string}`;
+      // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
+      // to the same request instead of inserting a duplicate (#35).
+      const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
       const result = await requestBooking(
         ctx.sessionId,
         idempotencyKey,

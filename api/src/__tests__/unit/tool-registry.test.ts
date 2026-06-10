@@ -151,7 +151,7 @@ describe('ToolRegistry', () => {
 
   it('keeps booking tools off below Pro+ even with legacy Cal.com config (inert)', async () => {
     // Shelved Cal.com creds left on a sub-Pro bot must not enable booking — the
-    // tier gate (calendarIntegrations) is the only thing that matters now.
+    // tier gate (calendarSync) is the only thing that matters now.
     const registry = new ToolRegistry();
     const tenant = {
       id: 'tenant-5',

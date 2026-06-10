@@ -153,10 +153,15 @@ async function doScan(
     if (thumbnailService.shouldGenerateThumbnail(session.mimeType)) {
       void (async () => {
         try {
-          session.thumbnailUrl = await thumbnailService.generateThumbnail(
+          const thumbnailUrl = await thumbnailService.generateThumbnail(
             fileKey,
             session.mimeType,
           );
+          // generateThumbnail returns '' when the source was smaller than every
+          // configured size (nothing generated) — only persist a real URL.
+          if (thumbnailUrl) {
+            await uploadService.setThumbnailUrl(sessionId, thumbnailUrl);
+          }
         } catch (error) {
           logger.error('Thumbnail generation error', {
             error,

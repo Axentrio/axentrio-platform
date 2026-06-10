@@ -52,7 +52,7 @@ function renderUI() {
       features: {
         unifiedInbox: true,
         bookings: false,
-        calendarIntegrations: false,
+        calendarSync: false,
         leadCapture: true,
         platformAssistant: false,
         crm: false,

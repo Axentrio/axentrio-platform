@@ -164,7 +164,7 @@ describe('GET /api/v1/entitlements — current per tier', () => {
     const cur = res.body.data.current;
     expect(cur.planId).toBe('pro');
     expect(cur.features.bookings).toBe(true);
-    expect(cur.features.calendarIntegrations).toBe(true);
+    expect(cur.features.calendarSync).toBe(true);
     expect(cur.features.platformAssistant).toBe(true);
     expect(cur.features.crm).toBe(false);
     expect(cur.features.hideWidgetAttribution).toBe(true);

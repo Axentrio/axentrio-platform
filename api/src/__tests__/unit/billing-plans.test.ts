@@ -70,7 +70,7 @@ describe('PLANS catalog', () => {
     // Essential: basic feature set, watermark visible, no bookings/CRM/assistant.
     expect(PLANS.essential.features.unifiedInbox).toBe(true);
     expect(PLANS.essential.features.bookings).toBe(false);
-    expect(PLANS.essential.features.calendarIntegrations).toBe(false);
+    expect(PLANS.essential.features.calendarSync).toBe(false);
     expect(PLANS.essential.features.platformAssistant).toBe(false);
     expect(PLANS.essential.features.crm).toBe(false);
     expect(PLANS.essential.features.hideWidgetAttribution).toBe(false);
@@ -79,7 +79,7 @@ describe('PLANS catalog', () => {
 
     // Pro: bookings + assistant on; watermark off; CRM still off.
     expect(PLANS.pro.features.bookings).toBe(true);
-    expect(PLANS.pro.features.calendarIntegrations).toBe(true);
+    expect(PLANS.pro.features.calendarSync).toBe(true);
     expect(PLANS.pro.features.platformAssistant).toBe(true);
     expect(PLANS.pro.features.crm).toBe(false);
     expect(PLANS.pro.features.hideWidgetAttribution).toBe(true);

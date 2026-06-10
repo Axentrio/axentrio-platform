@@ -148,7 +148,7 @@ export function entitlementsFor(
 
   // Dependency pass (taxonomy `requires`): a child feature can never be on
   // while its parent is off, regardless of tier defaults or overrides —
-  // e.g. calendarIntegrations without bookings has nothing to sync.
+  // e.g. calendarSync without bookings has nothing to sync.
   enforceFeatureDependencies(features);
 
   return {

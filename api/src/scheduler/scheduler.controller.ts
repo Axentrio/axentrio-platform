@@ -45,7 +45,7 @@ function asApiError(err: unknown): never {
 
 /**
  * Single booking gate (plan D6/D7): every scheduler route checks the
- * `bookings` feature. `calendarIntegrations` now means external calendar
+ * `bookings` feature. `calendarSync` now means external calendar
  * sync only and is never read here.
  */
 const BOOKINGS_FEATURE_ERROR = 'plan_limit_bookings';

@@ -26,7 +26,7 @@ import {
   MicrosoftNotConfiguredError,
 } from './outlook-calendar.service';
 
-const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_integrations';
+const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_sync';
 
 /** Where to send the browser after the OAuth callback. */
 function portalBase(): string {
@@ -38,7 +38,7 @@ function portalBase(): string {
 
 export async function getOutlookConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   try {
     sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
@@ -60,7 +60,7 @@ export async function outlookCallback(req: Request, res: Response): Promise<void
     const { tenantId, botId } = validateState(state);
     // The connect-url was gated, but this public callback can land later — re-check
     // the entitlement and that the bot still belongs to the tenant before storing.
-    await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+    await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
     await exchangeAndStore(tenantId, botId, code);
     return void res.redirect(`${portal}/bookings?outlook=connected`);

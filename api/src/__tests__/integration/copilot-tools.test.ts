@@ -335,12 +335,12 @@ describe('getEntitlements', () => {
       manager: a.manager,
     });
     expect(result.features.platformAssistant).toBe(true);
-    expect(result.features.calendarIntegrations).toBe(true);
+    expect(result.features.calendarSync).toBe(true);
     expect(result.features.crm).toBe(false); // Pro doesn't include CRM
     expect(Object.keys(result.features).sort()).toEqual(
       [
         'bookings',
-        'calendarIntegrations',
+        'calendarSync',
         'crm',
         'customWidgetAppearance',
         'fileUpload',
@@ -361,7 +361,7 @@ describe('getEntitlements', () => {
       manager: a.manager,
     });
     expect(result.features.platformAssistant).toBe(false);
-    expect(result.features.calendarIntegrations).toBe(false);
+    expect(result.features.calendarSync).toBe(false);
     expect(result.features.leadCapture).toBe(true);
   });
 

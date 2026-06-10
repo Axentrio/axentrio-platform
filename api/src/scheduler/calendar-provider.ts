@@ -81,7 +81,7 @@ export function providerFor(provider: CalendarProviderType): CalendarProvider {
 
 /**
  * Is external calendar sync allowed for this tenant right now? Resolved
- * entitlements (`calendarIntegrations`), so per-tenant overrides and the
+ * entitlements (`calendarSync`), so per-tenant overrides and the
  * free/non-active deny apply. Fail closed: a resolution error means no
  * external calendar calls (plan D9).
  *
@@ -91,7 +91,7 @@ export function providerFor(provider: CalendarProviderType): CalendarProvider {
  */
 export async function isCalendarSyncAllowed(tenantId: string): Promise<boolean> {
   try {
-    return (await getEntitlements(tenantId)).features.calendarIntegrations;
+    return (await getEntitlements(tenantId)).features.calendarSync;
   } catch (error) {
     logger.warn('[Calendar] sync entitlement resolution failed — failing closed', { tenantId, error });
     return false;

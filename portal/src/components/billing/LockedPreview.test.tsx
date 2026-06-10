@@ -45,7 +45,7 @@ function entitlements(): EntitlementsResponse {
       features: {
         unifiedInbox: true,
         bookings: false,
-        calendarIntegrations: false,
+        calendarSync: false,
         leadCapture: true,
         platformAssistant: false,
         crm: false,
@@ -67,7 +67,7 @@ function entitlements(): EntitlementsResponse {
         features: {
           unifiedInbox: true,
           bookings: false,
-          calendarIntegrations: false,
+          calendarSync: false,
           leadCapture: true,
           platformAssistant: false,
           crm: false,
@@ -88,7 +88,7 @@ function entitlements(): EntitlementsResponse {
         features: {
           unifiedInbox: true,
           bookings: true,
-          calendarIntegrations: true,
+          calendarSync: true,
           leadCapture: true,
           platformAssistant: true,
           crm: true,
@@ -109,7 +109,7 @@ function entitlements(): EntitlementsResponse {
         features: {
           unifiedInbox: true,
           bookings: true,
-          calendarIntegrations: true,
+          calendarSync: true,
           leadCapture: true,
           platformAssistant: true,
           crm: true,

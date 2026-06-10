@@ -909,6 +909,24 @@ export class UploadService {
   }
 
   /**
+   * Persist the generated thumbnail URL onto the session row.
+   *
+   * Thumbnailing runs after the scan result is returned (best-effort, off the
+   * response path), so the URL is written here in its own UPDATE rather than as
+   * part of `updateSessionStatus` — which has already committed `status='ready'`
+   * by the time the thumbnail exists.
+   */
+  async setThumbnailUrl(sessionId: string, thumbnailUrl: string): Promise<void> {
+    const repo = this.getUploadSessionRepo();
+    await repo
+      .createQueryBuilder()
+      .update()
+      .set({ thumbnailUrl })
+      .where('session_id = :sessionId', { sessionId })
+      .execute();
+  }
+
+  /**
    * Clean up expired sessions. Single DELETE rather than per-row work.
    * Keeps terminal-state rows (ready/quarantined) because they have audit
    * value (a quarantined upload's row is the durable record of the

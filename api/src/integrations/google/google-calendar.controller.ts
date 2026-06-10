@@ -26,7 +26,7 @@ import {
   CalendarNotWritableError,
 } from './google-calendar.service';
 
-const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_integrations';
+const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_sync';
 
 /** Where to send the browser after the OAuth callback. */
 function portalBase(): string {
@@ -38,7 +38,7 @@ function portalBase(): string {
 
 export async function getGoogleConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
 }
@@ -53,7 +53,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
     const { tenantId, botId } = validateState(state);
     // The connect-url was gated, but this public callback can land later — re-check
     // the entitlement and that the bot still belongs to the tenant before storing.
-    await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+    await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
     await exchangeAndStore(tenantId, botId, code);
     return void res.redirect(`${portal}/bookings?google=connected`);
@@ -88,7 +88,7 @@ export async function disconnectGoogle(req: Request, res: Response): Promise<voi
 export async function listGoogleCalendars(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   // Calls the Google API — gated like every other external calendar call (D9).
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   const calendars = await listWritableCalendars(bot.id);
   sendSuccess(res, { calendars });
@@ -97,7 +97,7 @@ export async function listGoogleCalendars(req: Request, res: Response): Promise<
 /** PUT /integrations/google/calendar — set the bot's write-target calendar. */
 export async function setGoogleCalendar(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
   const calendarId = (req.body as { calendarId?: unknown })?.calendarId;
   if (!calendarId || typeof calendarId !== 'string') {
     throw new ValidationError('calendarId is required');

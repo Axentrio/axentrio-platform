@@ -7,7 +7,13 @@
  * the operator-facing backend reasons/audit strings).
  */
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, ShieldCheck, Boxes, ChevronDown } from 'lucide-react';
+import { Loader2, ShieldCheck, Boxes } from 'lucide-react';
+import {
+  Accordion,
+  AccordionItem,
+  AccordionTrigger,
+  AccordionContent,
+} from '@/components/ui/accordion';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -152,9 +158,6 @@ function GroupedOverrideRows({
 }) {
   const taxonomy = data.taxonomy ?? {};
   const groups = data.groups ?? {};
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(Object.entries(groups).map(([id, g]) => [id, !g.collapsed])),
-  );
 
   // Effective value of a feature under the current drafts (tier default unless forced).
   const effective = (key: string): boolean => {
@@ -176,21 +179,26 @@ function GroupedOverrideRows({
   }));
   if (ungrouped.length) ordered.push({ id: 'other', label: FALLBACK_GROUP.label, keys: ungrouped });
 
+  // Multi-open accordion; groups flagged `collapsed` in the taxonomy start closed.
+  const defaultOpen = ordered.filter((g) => !(groups[g.id]?.collapsed ?? false)).map((g) => g.id);
+
   return (
-    <div>
+    <Accordion type="multiple" defaultValue={defaultOpen} className="w-full">
       {ordered.map((g) => {
-        const open = openGroups[g.id] ?? true;
+        const overrideCount = g.keys.filter((k) => (drafts[k]?.state ?? 'default') !== 'default').length;
         return (
-          <div key={g.id} className="border-b border-edge last:border-b-0">
-            <button
-              type="button"
-              className="w-full px-6 py-2.5 flex items-center gap-2 text-left bg-surface-2/40 hover:bg-surface-2/70"
-              onClick={() => setOpenGroups((p) => ({ ...p, [g.id]: !open }))}
-            >
-              <ChevronDown className={`w-3.5 h-3.5 text-text-muted transition-transform ${open ? '' : '-rotate-90'}`} />
-              <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{g.label}</span>
-            </button>
-            {open && (
+          <AccordionItem key={g.id} value={g.id} className="border-b border-edge last:border-b-0">
+            <AccordionTrigger className="px-6 py-2.5 hover:no-underline bg-surface-2/40 hover:bg-surface-2/70">
+              <span className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                {g.label}
+                {overrideCount > 0 && (
+                  <span className="ml-2 normal-case font-normal text-primary-400">
+                    {overrideCount} override{overrideCount > 1 ? 's' : ''}
+                  </span>
+                )}
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="p-0">
               <div className="divide-y divide-edge/50">
                 {g.keys.map((key) => {
                   const meta = taxonomy[key];
@@ -245,11 +253,11 @@ function GroupedOverrideRows({
                   );
                 })}
               </div>
-            )}
-          </div>
+            </AccordionContent>
+          </AccordionItem>
         );
       })}
-    </div>
+    </Accordion>
   );
 }
 

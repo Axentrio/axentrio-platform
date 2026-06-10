@@ -122,7 +122,7 @@ export class BillingProviderError extends Error {
  *   - `customBranding` → split into `hideWidgetAttribution` (Pro+ removes
  *     "Powered by Axentrio" watermark) and `customWidgetAppearance` (color/
  *     title/avatar config — all paid tiers).
- *   - New flags: `unifiedInbox`, `bookings`, `calendarIntegrations`,
+ *   - New flags: `unifiedInbox`, `bookings`, `calendarSync`,
  *     `leadCapture`, `platformAssistant`, `crm`. `handoff` retained.
  *   - Dropped: `fileUpload` (implicit in all paid tiers), `byoLlmKey` (unused),
  *     `limits.channels` (channels are per-tier-by-feature, not numeric).
@@ -162,7 +162,7 @@ export interface Entitlements {
   features: {
     unifiedInbox: boolean;
     bookings: boolean;
-    calendarIntegrations: boolean;
+    calendarSync: boolean;
     leadCapture: boolean;
     platformAssistant: boolean;
     crm: boolean;

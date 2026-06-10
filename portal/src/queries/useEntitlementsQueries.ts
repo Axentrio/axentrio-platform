@@ -24,7 +24,7 @@ export interface PlanLimits {
 export interface PlanFeatures {
   unifiedInbox: boolean;
   bookings: boolean;
-  calendarIntegrations: boolean;
+  calendarSync: boolean;
   leadCapture: boolean;
   platformAssistant: boolean;
   crm: boolean;

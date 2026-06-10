@@ -50,7 +50,7 @@ function essentialResponse(overrides?: Partial<EntitlementsResponse>): Entitleme
       features: {
         unifiedInbox: true,
         bookings: false,
-        calendarIntegrations: false,
+        calendarSync: false,
         leadCapture: true,
         platformAssistant: false,
         crm: false,

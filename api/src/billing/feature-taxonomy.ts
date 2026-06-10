@@ -31,7 +31,7 @@ export const FEATURE_GROUPS: Record<FeatureMeta['group'], { label: string; colla
 
 export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   bookings: { label: 'Bookings', group: 'bookings' },
-  calendarIntegrations: {
+  calendarSync: {
     label: 'Calendar sync (Google/Outlook)',
     group: 'bookings',
     requires: 'bookings',

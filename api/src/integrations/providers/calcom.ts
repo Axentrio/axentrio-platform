@@ -30,8 +30,8 @@ interface CalcomPatch {
  */
 class CalcomIntegrationProvider implements IntegrationProvider {
   readonly kind = 'calcom';
-  readonly feature = 'calendarIntegrations' as const;
-  readonly errorCode = 'plan_limit_calendar_integrations';
+  readonly feature = 'calendarSync' as const;
+  readonly errorCode = 'plan_limit_calendar_sync';
 
   redact(config: IntegrationConfig): Record<string, unknown> {
     const { apiKey, ...rest } = config as { apiKey?: string };

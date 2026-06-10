@@ -27,7 +27,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     features: {
       unifiedInbox: false,
       bookings: false,
-      calendarIntegrations: false,
+      calendarSync: false,
       leadCapture: false,
       platformAssistant: false,
       crm: false,
@@ -49,7 +49,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     features: {
       unifiedInbox: true,
       bookings: false,
-      calendarIntegrations: false,
+      calendarSync: false,
       leadCapture: true, // basic — module-level access
       platformAssistant: false,
       crm: false,
@@ -73,7 +73,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     features: {
       unifiedInbox: true,
       bookings: true,
-      calendarIntegrations: true, // Cal.com only in v1 per D23
+      calendarSync: true, // Cal.com only in v1 per D23
       leadCapture: true, // advanced semantics — custom fields, routing, export — gated at PR/M6 layer
       platformAssistant: true,
       crm: false,
@@ -95,7 +95,7 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     features: {
       unifiedInbox: true,
       bookings: true,
-      calendarIntegrations: true,
+      calendarSync: true,
       leadCapture: true,
       platformAssistant: true,
       crm: true, // entitlement gate true; UI shows Coming Soon per D25

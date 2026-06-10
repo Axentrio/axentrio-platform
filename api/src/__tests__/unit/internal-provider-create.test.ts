@@ -28,7 +28,7 @@ vi.mock('../../database/data-source', () => ({
 }));
 
 // Calendar sync now gates on resolved entitlements (D9); resolve via the
-// real pure resolver on 'pro' (calendarIntegrations on) so sync stays live.
+// real pure resolver on 'pro' (calendarSync on) so sync stays live.
 vi.mock('../../billing/entitlements', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../billing/entitlements')>();
   return { ...actual, getEntitlements: vi.fn(async () => actual.entitlementsFor('pro')) };

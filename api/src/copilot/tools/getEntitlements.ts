@@ -4,7 +4,7 @@
  * Returns the current tenant's RESOLVED feature flags (tier ⊕ per-tenant
  * overrides ⊕ status deny). The LLM uses this to answer questions like:
  *   - "Can my chatbot take bookings?" → check `features.bookings`
- *   - "Can I connect my Google/Outlook calendar?" → check `features.calendarIntegrations`
+ *   - "Can I connect my Google/Outlook calendar?" → check `features.calendarSync`
  *   - "Why can't I use custom widget colours?" → check `features.customWidgetAppearance`
  *
  * Only the `features` slice is exposed. Limits (max sessions, daily
@@ -18,7 +18,7 @@ import type { CopilotTool, CopilotToolContext } from './types';
 export interface EntitlementsResult {
   features: {
     bookings: boolean;
-    calendarIntegrations: boolean;
+    calendarSync: boolean;
     hideWidgetAttribution: boolean;
     customWidgetAppearance: boolean;
     leadCapture: boolean;
@@ -33,7 +33,7 @@ export interface EntitlementsResult {
 export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsResult> = {
   name: 'getEntitlements',
   description:
-    'Return the current tenant\'s resolved feature flags as a flat boolean map: bookings (the chatbot can take appointments via the built-in scheduler, and the Bookings page is available), calendarIntegrations (the tenant can connect an external Google/Outlook calendar so bookings are mirrored there), hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox. Flags reflect the plan tier plus any admin-set per-tenant overrides.',
+    'Return the current tenant\'s resolved feature flags as a flat boolean map: bookings (the chatbot can take appointments via the built-in scheduler, and the Bookings page is available), calendarSync (the tenant can connect an external Google/Outlook calendar so bookings are mirrored there), hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox. Flags reflect the plan tier plus any admin-set per-tenant overrides.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<EntitlementsResult> {
@@ -42,7 +42,7 @@ export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsRes
     return {
       features: {
         bookings: e.features.bookings,
-        calendarIntegrations: e.features.calendarIntegrations,
+        calendarSync: e.features.calendarSync,
         hideWidgetAttribution: e.features.hideWidgetAttribution,
         customWidgetAppearance: e.features.customWidgetAppearance,
         leadCapture: e.features.leadCapture,

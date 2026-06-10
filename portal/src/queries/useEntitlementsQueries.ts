@@ -36,9 +36,13 @@ export interface PlanFeatures {
 
 export interface Entitlements {
   planId: InternalPlanId;
+  /** False for free/suspended/cancelled tenants — everything below is off. */
+  billable: boolean;
   limits: PlanLimits;
   features: PlanFeatures;
   support: SupportTier;
+  /** Ids of modules active for this tenant (feature- or enablement-gated). */
+  activeModules: string[];
 }
 
 export interface PlanDefinition {
@@ -81,6 +85,17 @@ export function useEntitlements() {
 export function useHasFeature(feature: keyof PlanFeatures): boolean {
   const { data } = useEntitlements();
   return data?.current.features[feature] ?? false;
+}
+
+/**
+ * Returns true when the named Module is active for the current tenant —
+ * feature-gated modules (e.g. 'booking') follow the plan/overrides;
+ * enablement-gated (bespoke) modules follow their per-tenant switch. Use this
+ * to show/hide bespoke module UI. Fails closed while loading or on error.
+ */
+export function useHasModule(moduleId: string): boolean {
+  const { data } = useEntitlements();
+  return data?.current.activeModules?.includes(moduleId) ?? false;
 }
 
 /**

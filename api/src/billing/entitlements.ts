@@ -147,6 +147,7 @@ export function entitlementsFor(
 
   return {
     planId: plan.id,
+    billable,
     limits,
     features,
     support: plan.support,

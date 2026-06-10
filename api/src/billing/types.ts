@@ -140,6 +140,12 @@ export type FeatureKey = keyof Entitlements['features'];
 
 export interface Entitlements {
   planId: InternalPlanId;
+  /**
+   * D2 signal: false when `tier === 'free'` OR `Tenant.status !== 'active'`.
+   * When false, every boolean feature below is also forced false, and the
+   * module resolver activates nothing (feature- or enablement-gated alike).
+   */
+  billable: boolean;
   limits: {
     /** Human support-agent seats (rows in `support_agents`). NOT the AI chatbot count. */
     agents: number | null;

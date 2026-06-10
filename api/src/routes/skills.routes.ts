@@ -7,6 +7,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ValidationError, NotFoundError } from '../middleware';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { ToolRegistry } from '../agent/tool-registry';
+import { listActiveModules } from '../modules';
 
 const router = Router();
 const toolRegistry = new ToolRegistry();
@@ -67,6 +68,24 @@ export function validateToolNames(tools: string[]): { valid: boolean; invalidToo
   return invalid.length > 0 ? { valid: false, invalidTools: invalid } : { valid: true };
 }
 
+/**
+ * Tenant-aware tool validation for skill WRITES: a new/updated skill may only
+ * reference tools the tenant's agent actually has right now (core built-ins +
+ * active modules' tools). Existing saved skills referencing inactive-module
+ * tools are grandfathered — filtered at prompt time, never failing a read.
+ */
+export async function validateToolNamesForTenant(
+  tenantId: string,
+  tools: string[],
+): Promise<{ valid: boolean; invalidTools?: string[] }> {
+  const known = new Set<string>(['kb_search', 'escalate_to_human', 'capture_lead']);
+  for (const active of await listActiveModules(tenantId)) {
+    for (const tool of active.module.tools) known.add(tool.name);
+  }
+  const invalid = tools.filter((t) => !known.has(t));
+  return invalid.length > 0 ? { valid: false, invalidTools: invalid } : { valid: true };
+}
+
 // GET /api/v1/tenants/me/skills
 router.get(
   '/me/skills',
@@ -94,8 +113,10 @@ router.post(
     const validation = validateSkill(req.body);
     if (!validation.valid) throw new ValidationError(validation.error!);
 
-    const toolValidation = validateToolNames(req.body.tools);
-    if (!toolValidation.valid) throw new ValidationError(`Unknown tools: ${toolValidation.invalidTools!.join(', ')}`);
+    const toolValidation = await validateToolNamesForTenant(tenantId, req.body.tools);
+    if (!toolValidation.valid) {
+      throw new ValidationError(`Tools not available on your plan: ${toolValidation.invalidTools!.join(', ')}`);
+    }
 
     const skills: Skill[] = (tenant.settings as any)?.skills || [];
     if (skills.length >= MAX_SKILLS) throw new ValidationError(`Maximum ${MAX_SKILLS} skills allowed`);
@@ -136,8 +157,10 @@ router.put(
     if (index === -1) throw new NotFoundError(`Skill "${name}" not found`);
 
     if (req.body.tools) {
-      const toolValidation = validateToolNames(req.body.tools);
-      if (!toolValidation.valid) throw new ValidationError(`Unknown tools: ${toolValidation.invalidTools!.join(', ')}`);
+      const toolValidation = await validateToolNamesForTenant(tenantId, req.body.tools);
+      if (!toolValidation.valid) {
+        throw new ValidationError(`Tools not available on your plan: ${toolValidation.invalidTools!.join(', ')}`);
+      }
     }
 
     const updated: Skill = { ...skills[index], ...req.body, name };

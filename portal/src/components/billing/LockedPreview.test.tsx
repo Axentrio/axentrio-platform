@@ -39,6 +39,8 @@ function entitlements(): EntitlementsResponse {
   return {
     current: {
       planId: 'essential',
+      billable: true,
+      activeModules: [],
       limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
       features: {
         unifiedInbox: true,

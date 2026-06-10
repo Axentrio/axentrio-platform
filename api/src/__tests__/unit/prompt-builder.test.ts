@@ -1,6 +1,7 @@
 // api/src/__tests__/unit/prompt-builder.test.ts
 import { describe, it, expect } from 'vitest';
 import { PromptBuilder } from '../../agent/prompt-builder';
+import { buildServicesSection } from '../../modules/booking.module';
 import { buildSystemPrompt, substituteVariables } from '../../llm/prompt-builder';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { Tenant } from '../../database/entities/Tenant';
@@ -21,9 +22,13 @@ describe('PromptBuilder', () => {
     },
   } as unknown as Tenant;
 
+  // Includes the booking tools so skills referencing them survive the
+  // availability filter (mirrors a booking-entitled tenant's composed set).
   const mockTools: ToolAdapter[] = [
     { name: 'kb_search', description: 'Search KB', parameters: {}, hasSideEffects: false, execute: async () => ({ success: true }) },
     { name: 'escalate_to_human', description: 'Escalate', parameters: {}, hasSideEffects: true, execute: async () => ({ success: true }) },
+    { name: 'check_availability', description: 'Slots', parameters: {}, hasSideEffects: false, execute: async () => ({ success: true }) },
+    { name: 'create_booking', description: 'Book', parameters: {}, hasSideEffects: true, execute: async () => ({ success: true }) },
   ];
 
   it('includes brand voice in system prompt', () => {
@@ -248,7 +253,10 @@ describe('buildSystemPrompt (llm)', () => {
   });
 });
 
-describe('PromptBuilder — intake questions (P3b)', () => {
+// The services catalog moved into the booking module (Phase 2, D15) — these
+// tests target the module's section builder, plus PromptBuilder's composition
+// of module sections.
+describe('booking module — services section (intake questions, P3b)', () => {
   const builder = new PromptBuilder();
   const tenant = { name: 'TestCo', settings: { ai: { enabled: true } } } as unknown as Tenant;
   const tools: ToolAdapter[] = [
@@ -263,14 +271,15 @@ describe('PromptBuilder — intake questions (P3b)', () => {
           { id: 'q-2', label: 'Guests?', type: 'choice', required: false, options: ['1-2', '3+'] },
         ] },
     ] as any;
-    const prompt = builder.build(tenant, tenant.settings as any, tools, undefined, services);
+    const section = buildServicesSection(services)!;
+    const prompt = builder.build(tenant, tenant.settings as any, tools, undefined, [section]);
     expect(prompt).toContain('Intake questions:');
     expect(prompt).toContain('q-1 · "Occasion?" · text · required');
     expect(prompt).toContain('q-2 · "Guests?" · choice · optional · options: 1-2, 3+');
     expect(prompt).toContain('intakeAnswers');
   });
 
-  it('degrades malformed question entries without crashing prompt construction', () => {
+  it('degrades malformed question entries without crashing section construction', () => {
     const services = [
       { id: 'svc-1', name: 'Consult', durationMin: 30, bookingMode: 'auto', priceDisplayType: 'none',
         intakeQuestions: [
@@ -279,10 +288,34 @@ describe('PromptBuilder — intake questions (P3b)', () => {
           { id: 42, label: 'numeric id', type: 'text', required: false }, // non-string id
         ] },
     ] as any;
-    let prompt = '';
-    expect(() => { prompt = builder.build(tenant, tenant.settings as any, tools, undefined, services); }).not.toThrow();
-    expect(prompt).toContain('q-ok · "Fine?"');
-    expect(prompt).not.toContain('nested');
-    expect(prompt).not.toContain('numeric id');
+    let section: string | null = '';
+    expect(() => { section = buildServicesSection(services); }).not.toThrow();
+    expect(section).toContain('q-ok · "Fine?"');
+    expect(section).not.toContain('nested');
+    expect(section).not.toContain('numeric id');
+  });
+
+  it('returns null for an empty catalog (no dangling SERVICES section)', () => {
+    expect(buildServicesSection([])).toBeNull();
+  });
+
+  it('drops a skill referencing tools the agent does not have (grandfather filter)', () => {
+    const tenantWithSkills = {
+      name: 'TestCo',
+      settings: {
+        ai: { enabled: true },
+        skills: [{
+          name: 'booking_skill', trigger: 'wants to book',
+          tools: ['check_availability', 'create_booking'],
+          instructions: 'LEGACY-BOOKING-RULES', maxSteps: 8, enabled: true,
+        }],
+      },
+    } as unknown as Tenant;
+    // Agent has NO booking tools (module inactive for this tenant).
+    const noBookingTools: ToolAdapter[] = [
+      { name: 'kb_search', description: 'KB', parameters: {}, hasSideEffects: false, execute: async () => ({ success: true }) },
+    ];
+    const prompt = builder.build(tenantWithSkills, tenantWithSkills.settings as any, noBookingTools);
+    expect(prompt).not.toContain('LEGACY-BOOKING-RULES');
   });
 });

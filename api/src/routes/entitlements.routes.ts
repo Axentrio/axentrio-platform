@@ -27,6 +27,7 @@ import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
 import { PLANS, selfServeCheckoutablePlans } from '../billing/plans';
 import type { InternalPlanId } from '../billing/types';
+import { listActiveModules } from '../modules';
 
 const router = Router();
 
@@ -37,6 +38,11 @@ router.get(
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const tenantId = req.tenantId!;
     const current = await getEntitlements(tenantId);
+    // Active module ids for `useHasModule` (D13). [] for free/non-active
+    // tenants even when enablement rows exist (the resolver enforces D2).
+    // The resolver's internal entitlement read hits the cache — the double
+    // read here is one DB query per TTL window, no recursion.
+    const activeModules = (await listActiveModules(tenantId)).map((m) => m.module.id);
 
     // Catalog of all marketed plans (excludes the `free` cancellation sink).
     // The frontend uses this to render the locked-feature previews and the
@@ -49,7 +55,7 @@ router.get(
     const selfServePlans = selfServeCheckoutablePlans().map((p) => p.id);
 
     sendSuccess(res, {
-      current,
+      current: { ...current, activeModules },
       plans: marketedPlans,
       selfServePlans,
     });

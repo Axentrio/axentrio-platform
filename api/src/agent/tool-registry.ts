@@ -1,42 +1,21 @@
 import type { ToolAdapter } from './tool-adapter';
 import { KbSearchTool } from './tools/kb-search.tool';
-import {
-  CheckAvailabilityTool,
-  CreateBookingTool,
-  RequestAppointmentTool,
-  ListBookingsTool,
-  RescheduleBookingTool,
-  CancelBookingTool,
-} from './tools/booking.tool';
 import { EscalationTool } from './tools/escalation.tool';
 import { CaptureLeadTool } from './tools/capture-lead.tool';
 import type { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
-import { getEntitlements } from '../billing/entitlements';
-
-const BOOKING_TOOLS = [
-  'check_availability',
-  'create_booking',
-  'request_appointment',
-  'list_bookings',
-  'reschedule_booking',
-  'cancel_booking',
-];
+import { listActiveModules, allModules } from '../modules';
 
 export class ToolRegistry {
   private builtinTools: Map<string, ToolAdapter>;
 
   constructor() {
+    // Core tools every tenant gets. Capability tools (booking, future bespoke
+    // work) live on Modules and are composed per tenant by the resolver.
     this.builtinTools = new Map();
     this.registerBuiltin(new KbSearchTool());
-    this.registerBuiltin(new CheckAvailabilityTool());
-    this.registerBuiltin(new CreateBookingTool());
-    this.registerBuiltin(new RequestAppointmentTool());
-    this.registerBuiltin(new ListBookingsTool());
-    this.registerBuiltin(new RescheduleBookingTool());
-    this.registerBuiltin(new CancelBookingTool());
     this.registerBuiltin(new EscalationTool());
     this.registerBuiltin(new CaptureLeadTool());
   }
@@ -45,15 +24,21 @@ export class ToolRegistry {
     this.builtinTools.set(tool.name, tool);
   }
 
+  /** Every tool the platform ships: core built-ins + all catalog modules' tools. */
   getBuiltinToolNames(): string[] {
-    return Array.from(this.builtinTools.keys());
+    return [
+      ...this.builtinTools.keys(),
+      ...allModules().flatMap((m) => m.tools.map((t) => t.name)),
+    ];
   }
 
   /**
-   * Multi-bot Phase 4 (#16d): integrations config lives on Bot.settings, not
-   * Tenant.settings. `_botSettings` is kept on the signature (callers still
-   * pass the resolved bot settings) but booking is now tier-gated only — Cal.com
-   * is shelved, so per-bot integration creds no longer affect tool selection.
+   * Compose the tenant's tool set: core built-ins + the tools of every Module
+   * the resolver says is active (feature-gated modules follow the tenant's
+   * resolved entitlements — overrides and the free/non-active deny included;
+   * enablement-gated modules follow their tenant_modules row). Fails closed
+   * on resolution errors. `_botSettings` is kept on the signature (callers
+   * still pass the resolved bot settings).
    */
   async getToolsForTenant(tenant: Tenant, _botSettings: BotSettings): Promise<ToolAdapter[]> {
     const tools: ToolAdapter[] = [];
@@ -67,22 +52,11 @@ export class ToolRegistry {
     const captureLead = this.builtinTools.get('capture_lead');
     if (captureLead) tools.push(captureLead);
 
-    // Booking tools gate on the resolved `bookings` feature (plan D6/D10) —
-    // resolved entitlements, not raw tier, so per-tenant overrides and the
-    // free/non-active deny apply. Mirrors buildIntegrationsConfig in
-    // message-forwarding so the platform agent and the n8n payload stay in
-    // lockstep on which bots can book. Fails closed on resolution errors.
-    let bookingEnabled = false;
     try {
-      bookingEnabled = (await getEntitlements(tenant.id)).features.bookings;
+      const active = await listActiveModules(tenant.id);
+      for (const m of active) tools.push(...m.module.tools);
     } catch (error) {
-      logger.warn(`Booking entitlement resolution failed for tenant ${tenant.id}`, { error });
-    }
-    if (bookingEnabled) {
-      for (const name of BOOKING_TOOLS) {
-        const tool = this.builtinTools.get(name);
-        if (tool) tools.push(tool);
-      }
+      logger.warn(`Module resolution failed for tenant ${tenant.id} — no module tools`, { error });
     }
 
     try {

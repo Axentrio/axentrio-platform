@@ -11,8 +11,8 @@ import { ChatMessage, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { Tenant } from '../database/entities/Tenant';
-import { ServiceType } from '../database/entities/ServiceType';
 import { AppDataSource } from '../database/data-source';
+import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 
@@ -130,13 +130,29 @@ export class AgentService {
 
     try {
       const tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
-      // Load the bookable services catalog for the prompt (only when booking is on).
-      const services = tools.some((t) => t.name === 'check_availability')
-        ? await AppDataSource.getRepository(ServiceType).find({
-            where: { botId: bot.id, isActive: true },
-            order: { sortOrder: 'ASC' },
-          })
-        : [];
+      // Booking activeness drives the egress guard below (a bot without the
+      // booking tools can't be nudged to "actually call create_booking").
+      const bookingActive = tools.some((t) => t.name === 'create_booking');
+      // Module prompt contributions (e.g. booking's bookable-services catalog).
+      // Each active module builds (and loads data for) its own section; the
+      // resolver call hits the same per-tenant caches the tool registry used.
+      const moduleSections: string[] = [];
+      for (const active of await listActiveModules(tenant.id)) {
+        if (!active.module.buildPromptSection) continue;
+        try {
+          const section = await active.module.buildPromptSection({
+            tenantId: tenant.id,
+            botId: bot.id,
+            config: active.config,
+          });
+          if (section) moduleSections.push(section);
+        } catch (error) {
+          logger.warn(`Module prompt section failed for ${active.module.id} — skipped`, {
+            tenantId: tenant.id,
+            error,
+          });
+        }
+      }
       // Pre-fill the customer's name from their messaging-channel profile (channel
       // sessions only) so the agent can confirm it rather than ask cold. Widget
       // sessions have no binding/profile name.
@@ -148,7 +164,7 @@ export class AgentService {
         });
         customerName = binding?.externalUserName ?? undefined;
       }
-      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, services, customerName);
+      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, moduleSections, customerName);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);
@@ -209,7 +225,7 @@ export class AgentService {
           const finalContent = response.content ?? '';
           // Egress guard (issue #35): never let the model tell the customer a
           // booking/request happened unless one was actually recorded this run.
-          if (services.length > 0 && !bookingRecorded && claimsBookingDone(finalContent)) {
+          if (bookingActive && !bookingRecorded && claimsBookingDone(finalContent)) {
             if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
               correctionAttempted = true;
               logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });

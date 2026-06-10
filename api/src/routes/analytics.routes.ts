@@ -121,6 +121,13 @@ router.get(
       .andWhere('session.status = :status', { status: 'closed' })
       .getCount();
 
+    // Closed sessions resolved by a human agent — same definition as the
+    // dashboard endpoint (closed AND an agent was assigned).
+    const humanResolved = await qb.clone()
+      .andWhere('session.status = :status', { status: 'closed' })
+      .andWhere('session.assigned_agent_id IS NOT NULL')
+      .getCount();
+
     // Average duration for closed sessions
     const avgResult = await qb.clone()
       .select('AVG(session.duration_seconds)', 'avgDuration')
@@ -133,6 +140,7 @@ router.get(
         total,
         closed,
         open: total - closed,
+        humanResolved,
         avgDurationSeconds: Math.round(avgResult?.avgDuration || 0),
       },
     });

@@ -49,6 +49,8 @@ interface ChatMetrics {
   total: number;
   closed: number;
   open: number;
+  /** Closed sessions a human agent resolved (assigned_agent_id set). */
+  humanResolved: number;
   avgDurationSeconds: number;
 }
 
@@ -160,26 +162,29 @@ const Analytics: React.FC = () => {
     [agentsRes],
   );
 
-  // Resolution pie: bot resolved = closed minus human-handled, human = rest
+  // Resolution pie over closed sessions: human = closed with an agent
+  // assigned (from the API), bot = the remaining closed sessions.
   const resolutionData = useMemo(() => {
-    if (!metrics) return [];
-    const humanResolved = metrics.open; // open tickets still with humans
+    if (!metrics || metrics.closed === 0) return [];
+    const humanResolved = metrics.humanResolved ?? 0;
     const botResolved = Math.max(metrics.closed - humanResolved, 0);
-    const total = botResolved + humanResolved || 1;
+    const total = metrics.closed;
     return [
       { name: t('analytics.charts.resolutionDistribution.botResolved'), value: Math.round((botResolved / total) * 100), color: '#a78bfa' },
       { name: t('analytics.charts.resolutionDistribution.humanResolved'), value: Math.round((humanResolved / total) * 100), color: '#34d399' },
     ];
   }, [metrics, t]);
 
-  // Agent table data mapped to the shape used by the table
+  // Agent table data mapped to the shape used by the table.
+  // Response-time and CSAT columns are omitted: nothing populates
+  // Agent.avgResponseTimeSeconds / satisfactionScore yet (see
+  // .scratch/plan-success-meter.md) — showing them reads as 0s/0★ for
+  // every agent.
   const agentPerformanceData = useMemo(
     () =>
       agents.map((a) => ({
         name: a.name,
         chats: a.totalChatsHandled,
-        responseTime: a.avgResponseTimeSeconds,
-        csat: a.satisfactionScore,
       })),
     [agents],
   );
@@ -408,8 +413,6 @@ const Analytics: React.FC = () => {
                     <TableRow>
                       <TableHead>{t('analytics.agentPerformance.columns.agent')}</TableHead>
                       <TableHead>{t('analytics.agentPerformance.columns.chatsHandled')}</TableHead>
-                      <TableHead>{t('analytics.agentPerformance.columns.avgResponseTime')}</TableHead>
-                      <TableHead>{t('analytics.agentPerformance.columns.csatScore')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -417,13 +420,6 @@ const Analytics: React.FC = () => {
                       <TableRow key={agent.name}>
                         <TableCell className="font-medium">{agent.name}</TableCell>
                         <TableCell>{agent.chats}</TableCell>
-                        <TableCell>{agent.responseTime}s</TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
-                            <span>{agent.csat}</span>
-                          </div>
-                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

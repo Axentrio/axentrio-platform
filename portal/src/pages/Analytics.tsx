@@ -1,6 +1,8 @@
 /**
  * Analytics Page
- * Response times, CSAT, bot vs human ratio
+ * Chat volume, bot vs human resolution, agent performance.
+ * Response-time and CSAT visuals return once their data sources are
+ * actually instrumented (see .scratch/plan-success-meter.md).
  */
 
 import React, { useState, useMemo } from 'react';
@@ -10,10 +12,6 @@ import { useAnalyticsTimeseries, useAnalyticsChatMetrics, useAnalyticsAgents } f
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
   PieChart,
   Pie,
   Cell,
@@ -26,7 +24,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { Download, TrendingUp, Users, MessageSquare, Clock, Star, Headphones } from 'lucide-react';
+import { TrendingUp, Users, MessageSquare, Clock, Star, Headphones } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -35,12 +33,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -113,36 +105,11 @@ const TableSkeleton: React.FC = () => (
   </div>
 );
 
-// TODO: wire responseTimeData when daily breakdown API available
-const responseTimeDataRaw = [
-  { dayKey: 'mon', avg: 32, target: 30 },
-  { dayKey: 'tue', avg: 28, target: 30 },
-  { dayKey: 'wed', avg: 35, target: 30 },
-  { dayKey: 'thu', avg: 25, target: 30 },
-  { dayKey: 'fri', avg: 40, target: 30 },
-  { dayKey: 'sat', avg: 22, target: 30 },
-  { dayKey: 'sun', avg: 20, target: 30 },
-];
-
-// TODO: wire csatData when daily breakdown API available
-const csatDataRaw = [
-  { ratingKey: 'fiveStars', count: 145 },
-  { ratingKey: 'fourStars', count: 68 },
-  { ratingKey: 'threeStars', count: 23 },
-  { ratingKey: 'twoStars', count: 12 },
-  { ratingKey: 'oneStar', count: 8 },
-];
-
 const chartTooltipStyle = {
   backgroundColor: '#1e2030',
   border: '1px solid #2a2d3e',
   borderRadius: '12px',
   color: '#f1f3f9',
-};
-
-const handleExport = (format: 'csv' | 'json' | 'xlsx'): void => {
-  // Implement export functionality
-  console.log('Exporting as', format);
 };
 
 const Analytics: React.FC = () => {
@@ -205,18 +172,6 @@ const Analytics: React.FC = () => {
     ];
   }, [metrics, t]);
 
-  // Localised response-time data (day labels for chart x-axis)
-  const responseTimeData = useMemo(
-    () => responseTimeDataRaw.map((p) => ({ ...p, date: t(`analytics.days.${p.dayKey}`) })),
-    [t],
-  );
-
-  // Localised CSAT data (rating labels for chart x-axis)
-  const csatData = useMemo(
-    () => csatDataRaw.map((p) => ({ ...p, rating: t(`analytics.csat.${p.ratingKey}`) })),
-    [t],
-  );
-
   // Agent table data mapped to the shape used by the table
   const agentPerformanceData = useMemo(
     () =>
@@ -230,7 +185,12 @@ const Analytics: React.FC = () => {
   );
 
 
-  // Stats cards — 6 real-time metrics combining Dashboard + Analytics data
+  // Stats cards — real-time metrics combining Dashboard + Analytics data.
+  // Avg Response Time and CSAT are hidden until their data sources are
+  // actually populated (response-time instrumentation / rating collection);
+  // they reappear automatically once real values exist.
+  const hasResponseTimeData = (dashboard?.avgResponseTimeSeconds ?? 0) > 0;
+  const hasCsatData = dashboard?.csatScore != null;
   const stats: Array<{
     label: string;
     value: string;
@@ -266,25 +226,26 @@ const Analytics: React.FC = () => {
       color: 'text-status-online',
       bgColor: 'bg-status-online/10',
     },
-    {
-      label: t('analytics.kpis.avgResponseTime'),
-      value: dashboard ? `${dashboard?.avgResponseTimeSeconds ?? 0}s` : '—',
-      change: '',
-      icon: Clock,
-      color: 'text-chat-bot',
-      bgColor: 'bg-chat-bot/10',
-    },
-    {
-      label: t('analytics.kpis.csatScore'),
-      value:
-        dashboard?.csatScore != null
-          ? `${dashboard.csatScore}/5`
-          : '—',
-      change: '',
-      icon: Star,
-      color: 'text-accent-400',
-      bgColor: 'bg-accent-500/10',
-    },
+    ...(hasResponseTimeData
+      ? [{
+          label: t('analytics.kpis.avgResponseTime'),
+          value: `${dashboard.avgResponseTimeSeconds}s`,
+          change: '',
+          icon: Clock,
+          color: 'text-chat-bot',
+          bgColor: 'bg-chat-bot/10',
+        }]
+      : []),
+    ...(hasCsatData
+      ? [{
+          label: t('analytics.kpis.csatScore'),
+          value: `${dashboard.csatScore}/5`,
+          change: '',
+          icon: Star,
+          color: 'text-accent-400',
+          bgColor: 'bg-accent-500/10',
+        }]
+      : []),
     {
       label: t('analytics.kpis.totalChats'),
       value: metrics ? metrics.total.toLocaleString() : '—',
@@ -320,26 +281,16 @@ const Analytics: React.FC = () => {
               <SelectItem value="90d">{t('analytics.timeRange.last90Days')}</SelectItem>
             </SelectContent>
           </Select>
-
-          {/* Export Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <Download className="w-4 h-4" />
-                {t('analytics.export.button')}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport('csv')}>{t('analytics.export.csv')}</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('json')}>{t('analytics.export.json')}</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport('xlsx')}>{t('analytics.export.excel')}</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+      <div
+        className={cn(
+          'grid grid-cols-1 md:grid-cols-2 gap-4',
+          { 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }[stats.length] ?? 'lg:grid-cols-6',
+        )}
+      >
         {stats.map((stat, index) => (
           <Card
             key={stat.label}
@@ -410,77 +361,35 @@ const Analytics: React.FC = () => {
             </CardContent>
           </Card>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Response Time Chart */}
-            <Card variant="glass">
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.responseTime.title')}</h3>
-              </CardHeader>
-              <CardContent>
-                {/* TODO: wire when daily breakdown API available */}
-                <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={responseTimeData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-                    <XAxis dataKey="date" stroke="#6b7194" />
-                    <YAxis stroke="#6b7194" />
-                    <Tooltip contentStyle={chartTooltipStyle} />
-                    <Legend />
-                    <Line type="monotone" dataKey="avg" stroke="#818cf8" strokeWidth={2} name={t('analytics.charts.responseTime.legend.actual')} />
-                    <Line type="monotone" dataKey="target" stroke="#34d399" strokeWidth={2} strokeDasharray="5 5" name={t('analytics.charts.responseTime.legend.target')} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </CardContent>
-            </Card>
-
-            {/* Resolution Distribution */}
-            <Card variant="glass">
-              <CardHeader>
-                <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.resolutionDistribution.title')}</h3>
-              </CardHeader>
-              <CardContent>
-                {isLoadingMetrics ? (
-                  <ChartSkeleton height={250} />
-                ) : (
-                  <ResponsiveContainer width="100%" height={250}>
-                    <PieChart>
-                      <Pie
-                        data={resolutionData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {resolutionData.map((entry) => (
-                          <Cell key={entry.name} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip contentStyle={chartTooltipStyle} />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* CSAT Distribution */}
+          {/* Resolution Distribution */}
           <Card variant="glass">
             <CardHeader>
-              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.csatDistribution.title')}</h3>
+              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.charts.resolutionDistribution.title')}</h3>
             </CardHeader>
             <CardContent>
-              {/* TODO: wire when daily breakdown API available */}
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={csatData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
-                  <XAxis dataKey="rating" stroke="#6b7194" />
-                  <YAxis stroke="#6b7194" />
-                  <Tooltip contentStyle={chartTooltipStyle} />
-                  <Bar dataKey="count" fill="#fbbf24" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              {isLoadingMetrics ? (
+                <ChartSkeleton height={250} />
+              ) : (
+                <ResponsiveContainer width="100%" height={250}>
+                  <PieChart>
+                    <Pie
+                      data={resolutionData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {resolutionData.map((entry) => (
+                        <Cell key={entry.name} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={chartTooltipStyle} />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

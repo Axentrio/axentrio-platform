@@ -15,6 +15,7 @@ import { Message } from '../database/entities/Message';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { NormalizedEvent } from './types';
+import { isChannelEntitled } from './channel-entitlement';
 import { encrypt } from '../utils/encryption';
 import { forwardMessageToN8n } from '../services/message-forwarding.service';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
@@ -38,8 +39,10 @@ export async function processInboundEvent(
     where: { dedupeKey: event.dedupeKey },
   });
 
-  if (existing && existing.status === 'processed') {
-    logger.debug(`[inbound-pipeline] Skipping already-processed event ${event.dedupeKey}`);
+  // `skipped` (entitlement-gated) is terminal like `processed` — a provider
+  // redelivery of a skipped event must dedupe, not reprocess.
+  if (existing && (existing.status === 'processed' || existing.status === 'skipped')) {
+    logger.debug(`[inbound-pipeline] Skipping already-${existing.status} event ${event.dedupeKey}`);
     return;
   }
 
@@ -61,6 +64,21 @@ export async function processInboundEvent(
       status: 'received',
     });
     eventLogEntry = await eventLogRepo.save(newEntry);
+  }
+
+  // ── 2b. Channel entitlement gate (channels plan D3/D9) ─────────────────
+  // The webhook was already ACKed 200 upstream, so provider delivery health
+  // never sees this. An unentitled channel is fully inert: no session, no
+  // message, no n8n forward, no media ingest. Terminal skip → redeliveries
+  // dedupe at step 1.
+  if (!(await isChannelEntitled(connection.tenantId, connection.channel))) {
+    eventLogEntry.status = 'skipped';
+    eventLogEntry.error = 'channel_not_entitled';
+    await eventLogRepo.save(eventLogEntry);
+    logger.debug(
+      `[inbound-pipeline] ${connection.channel} not entitled for tenant ${connection.tenantId} — event skipped`,
+    );
+    return;
   }
 
   try {

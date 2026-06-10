@@ -32,6 +32,10 @@ export interface PlanFeatures {
   customWidgetAppearance: boolean;
   handoff: boolean;
   fileUpload: boolean;
+  channelWhatsapp: boolean;
+  channelMessenger: boolean;
+  channelInstagram: boolean;
+  channelTelegram: boolean;
 }
 
 export interface Entitlements {

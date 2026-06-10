@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-  MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2,
+  MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2, Lock,
 } from 'lucide-react';
 import { SiTelegram, SiMessenger, SiInstagram, SiWhatsapp, SiFacebook } from 'react-icons/si';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -46,6 +46,10 @@ import {
   useUpdateChannelBot,
 } from '../../queries/useChannelQueries';
 import { useBots } from '@/queries/useBotsQueries';
+import { useHasFeature } from '../../queries/useEntitlementsQueries';
+import { queryKeys } from '../../queries/queryKeys';
+import { useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { timeAgo } from '@/utils/timeAgo';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -100,6 +104,22 @@ export function SocialChannelsContent() {
   const metaOAuthUrl = useMetaOAuthUrl();
   const connectMeta = useConnectMeta();
 
+  // Per-channel plan entitlements. The entitlements query caches for 5
+  // minutes; refetch on mount so a just-changed plan/override is reflected
+  // the moment the tenant lands here.
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.entitlements.all() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const channelEntitled: Record<string, boolean> = {
+    telegram: useHasFeature('channelTelegram'),
+    whatsapp: useHasFeature('channelWhatsapp'),
+    messenger: useHasFeature('channelMessenger'),
+    instagram: useHasFeature('channelInstagram'),
+  };
+  const anyMetaEntitled = channelEntitled.messenger || channelEntitled.instagram;
+
   // Telegram connect state
   const [showTelegramModal, setShowTelegramModal] = useState(false);
   const [botToken, setBotToken] = useState('');
@@ -134,7 +154,17 @@ export function SocialChannelsContent() {
 
   const handleConnectMetaPages = async () => {
     if (!metaSetupToken || selectedPageIds.length === 0) return;
-    await connectMeta.mutateAsync({ pageIds: selectedPageIds, sessionToken: metaSetupToken });
+    const result = await connectMeta.mutateAsync({ pageIds: selectedPageIds, sessionToken: metaSetupToken });
+    // Surface entitlement-filtered channel types so the skip is never silent.
+    const skipped: string[] = (result as Any)?.skipped ?? [];
+    if (skipped.length > 0) {
+      toast.info(
+        t('ai.social.metaPages.skippedNotice', {
+          defaultValue: 'Not included in your plan (skipped): {{channels}}',
+          channels: skipped.map((s) => CHANNEL_LABELS[s] ?? s).join(', '),
+        }),
+      );
+    }
     setSearchParams({});
   };
 
@@ -192,10 +222,22 @@ export function SocialChannelsContent() {
                   }}
                 />
                 <span className="text-sm text-white">{page.name}</span>
+                {!channelEntitled.messenger && (
+                  <Badge variant="outline" className="text-xs text-amber-400 border-amber-400/40">
+                    <Lock className="h-3 w-3 mr-1" />
+                    {t('ai.social.metaPages.messengerLocked', { defaultValue: 'Messenger locked on your plan' })}
+                  </Badge>
+                )}
                 {page.instagramAccount && (
-                  <Badge variant="outline" className="text-xs">
+                  <Badge
+                    variant="outline"
+                    className={`text-xs ${!channelEntitled.instagram ? 'text-amber-400 border-amber-400/40' : ''}`}
+                  >
+                    {!channelEntitled.instagram && <Lock className="h-3 w-3 mr-1" />}
                     <SiInstagram className="h-3 w-3 mr-1" />
                     @{page.instagramAccount.username}
+                    {!channelEntitled.instagram &&
+                      ` — ${t('ai.social.metaPages.igLocked', { defaultValue: 'locked on your plan' })}`}
                   </Badge>
                 )}
               </label>
@@ -221,10 +263,24 @@ export function SocialChannelsContent() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => setShowTelegramModal(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowTelegramModal(true)}
+              disabled={!channelEntitled.telegram}
+              title={!channelEntitled.telegram ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
+            >
+              {!channelEntitled.telegram && <Lock className="h-3 w-3 mr-1" />}
               <SiTelegram className="h-4 w-4 mr-1" /> {t('ai.social.telegram.title')}
             </Button>
-            <Button size="sm" variant="outline" onClick={handleConnectFacebook} disabled={metaOAuthUrl.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handleConnectFacebook}
+              disabled={metaOAuthUrl.isPending || !anyMetaEntitled}
+              title={!anyMetaEntitled ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
+            >
+              {!anyMetaEntitled && <Lock className="h-3 w-3 mr-1" />}
               {metaOAuthUrl.isPending
                 ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                 : <SiFacebook className="h-4 w-4 mr-1" />}
@@ -232,7 +288,14 @@ export function SocialChannelsContent() {
                 ? t('ai.social.facebook.connecting', { defaultValue: 'Connecting…' })
                 : t('ai.social.facebook.title')}
             </Button>
-            <Button size="sm" variant="outline" onClick={() => setShowWhatsAppModal(true)}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowWhatsAppModal(true)}
+              disabled={!channelEntitled.whatsapp}
+              title={!channelEntitled.whatsapp ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
+            >
+              {!channelEntitled.whatsapp && <Lock className="h-3 w-3 mr-1" />}
               <SiWhatsapp className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
             </Button>
           </div>
@@ -248,6 +311,10 @@ export function SocialChannelsContent() {
             <div className="space-y-2">
               {connections.map((conn) => {
                 const Icon = CHANNEL_ICONS[conn.channel] || MessageSquare;
+                // Connected but plan-locked (channels plan D4): credentials are
+                // preserved and everything reactivates on upgrade — show WHY it
+                // went quiet, not an error state.
+                const planLocked = conn.channel !== 'widget' && channelEntitled[conn.channel] === false;
                 const activityParts: string[] = [];
                 if (conn.lastInboundAt) activityParts.push(t('ai.social.activity.received', { time: timeAgo(conn.lastInboundAt) }));
                 if (conn.lastOutboundAt) activityParts.push(t('ai.social.activity.sent', { time: timeAgo(conn.lastOutboundAt) }));
@@ -256,7 +323,7 @@ export function SocialChannelsContent() {
                 return (
                   <div
                     key={conn.id}
-                    className="group flex items-center justify-between gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors"
+                    className={`group flex items-center justify-between gap-3 p-3 rounded-lg bg-white/5 hover:bg-white/[0.07] transition-colors ${planLocked ? 'opacity-70' : ''}`}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${CHANNEL_COLORS[conn.channel] || 'bg-white/10 text-zinc-400'}`}>
@@ -265,6 +332,12 @@ export function SocialChannelsContent() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-white truncate">
                           {conn.label || conn.platformAccountId}
+                          {planLocked && (
+                            <Badge variant="outline" className="ml-2 text-xs text-amber-400 border-amber-400/40">
+                              <Lock className="h-3 w-3 mr-1" />
+                              {t('ai.social.planLocked', { defaultValue: 'Plan locked — upgrade to reactivate' })}
+                            </Badge>
+                          )}
                         </p>
                         <p className="text-xs text-zinc-500 truncate">
                           {CHANNEL_LABELS[conn.channel] || conn.channel}

@@ -16,13 +16,14 @@ import type { FeatureKey } from './types';
 
 export interface FeatureMeta {
   label: string;
-  group: 'bookings' | 'leads' | 'inbox' | 'platform' | 'plan-traits';
+  group: 'bookings' | 'channels' | 'leads' | 'inbox' | 'platform' | 'plan-traits';
   /** Parent feature this one depends on — forced off when the parent is off. */
   requires?: FeatureKey;
 }
 
 export const FEATURE_GROUPS: Record<FeatureMeta['group'], { label: string; collapsed?: boolean }> = {
   bookings: { label: 'Bookings' },
+  channels: { label: 'Channels' },
   leads: { label: 'Leads & CRM' },
   inbox: { label: 'Inbox & support' },
   platform: { label: 'Platform' },
@@ -36,6 +37,11 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
     group: 'bookings',
     requires: 'bookings',
   },
+  // The widget is the native channel — always on, no key, never listed here.
+  channelWhatsapp: { label: 'WhatsApp', group: 'channels' },
+  channelMessenger: { label: 'Facebook Messenger', group: 'channels' },
+  channelInstagram: { label: 'Instagram DMs', group: 'channels' },
+  channelTelegram: { label: 'Telegram', group: 'channels' },
   leadCapture: { label: 'Lead capture', group: 'leads' },
   crm: { label: 'CRM', group: 'leads', requires: 'leadCapture' },
   unifiedInbox: { label: 'Unified inbox', group: 'inbox' },

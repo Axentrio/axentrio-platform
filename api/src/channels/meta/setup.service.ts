@@ -4,6 +4,8 @@ import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { encryptCredential } from '../credential-utils';
 import { logger } from '../../utils/logger';
 import { FB_GRAPH_API as GRAPH_API } from './graph-api';
+import { isChannelEntitled } from '../channel-entitlement';
+import { PlanLimitError } from '../../billing/enforce';
 
 interface PageToConnect {
   id: string;
@@ -23,12 +25,30 @@ interface PageToConnect {
 export async function setupMetaConnections(
   tenantId: string,
   pages: PageToConnect[],
-): Promise<ChannelConnection[]> {
+): Promise<{ connections: ChannelConnection[]; skipped: Array<'messenger' | 'instagram'> }> {
   const repo = AppDataSource.getRepository(ChannelConnection);
   const connections: ChannelConnection[] = [];
 
+  // Per-channel entitlement filter (channels plan D8): resolved ONCE before
+  // any external side effect — a locked channel type is never externally
+  // subscribed and never gets a (re)activated connection row.
+  const [messengerEntitled, instagramEntitled] = await Promise.all([
+    isChannelEntitled(tenantId, 'messenger'),
+    isChannelEntitled(tenantId, 'instagram'),
+  ]);
+  const skipped: Array<'messenger' | 'instagram'> = [];
+  if (!messengerEntitled) skipped.push('messenger');
+  if (!instagramEntitled) skipped.push('instagram');
+  if (!messengerEntitled && !instagramEntitled) {
+    // Callers gate on "any Meta channel entitled" before invoking, but the
+    // entitlement may change mid-OAuth — never return a "successful" no-op.
+    throw new PlanLimitError('plan_limit_channel_meta', null, { channel: 'messenger|instagram' });
+  }
+
   for (const page of pages) {
-    // 1. Subscribe page to webhooks
+    // 1. Subscribe page to webhooks — the page-level subscription is the
+    // transport for BOTH Messenger and IG DMs, so it runs when either type
+    // is entitled (and we get here only if at least one is).
     try {
       await axios.post(
         `${GRAPH_API}/${page.id}/subscribed_apps`,
@@ -46,7 +66,35 @@ export async function setupMetaConnections(
       throw new Error(`Failed to subscribe Page "${page.name}" to webhooks`);
     }
 
-    // 2. Create or reuse Messenger connection (reactivate if previously disconnected)
+    // 2. Create or reuse Messenger connection (reactivate if previously
+    // disconnected) — entitled tenants only.
+    if (!messengerEntitled) {
+      logger.info('[meta-setup] messenger not entitled — skipping connection', { tenantId, pageId: page.id });
+    } else {
+      await upsertMessengerConnection(repo, tenantId, page, connections);
+    }
+
+    // 3. If IG account linked, subscribe and create IG connection.
+    if (page.instagramAccount && instagramEntitled) {
+      await upsertInstagramConnection(repo, tenantId, page, connections);
+    } else if (page.instagramAccount && !instagramEntitled) {
+      logger.info('[meta-setup] instagram not entitled — skipping IG connection', {
+        tenantId,
+        igId: page.instagramAccount.id,
+      });
+    }
+  }
+
+  return { connections, skipped };
+}
+
+async function upsertMessengerConnection(
+  repo: ReturnType<typeof AppDataSource.getRepository<ChannelConnection>>,
+  tenantId: string,
+  page: PageToConnect,
+  connections: ChannelConnection[],
+): Promise<void> {
+  {
     let messengerConn = await repo.findOne({
       where: { platformAccountId: page.id, channel: 'messenger' as any },
     });
@@ -84,8 +132,16 @@ export async function setupMetaConnections(
     }
     const savedMessenger = await repo.save(messengerConn);
     connections.push(savedMessenger);
+  }
+}
 
-    // 3. If IG account linked, subscribe and create IG connection
+async function upsertInstagramConnection(
+  repo: ReturnType<typeof AppDataSource.getRepository<ChannelConnection>>,
+  tenantId: string,
+  page: PageToConnect,
+  connections: ChannelConnection[],
+): Promise<void> {
+  {
     if (page.instagramAccount) {
       try {
         await axios.post(
@@ -150,6 +206,4 @@ export async function setupMetaConnections(
       }
     }
   }
-
-  return connections;
 }

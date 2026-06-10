@@ -12,6 +12,7 @@ import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { ResponsePayload } from '../n8n/types/message.types';
 import { getChannelAdapter } from './channel-registry';
+import { isChannelEntitled } from './channel-entitlement';
 import { formatResponseForChannel, DeliveryResult } from './types';
 import { emitToSession } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
@@ -56,7 +57,29 @@ export async function routeOutboundMessage(
     return { success: true };
   }
 
-  // External channel — route through adapter
+  // External channel: load the connection and check entitlement FIRST
+  // (channels plan D10) — an unentitled channel must answer
+  // `channel_not_entitled`, never an incidental adapter/binding error,
+  // and no external API call of any kind may happen past this point.
+  const connection = await connectionRepository.findOne({
+    where: { id: session.channelConnectionId },
+  });
+  if (!connection || !connection.isActive()) {
+    logger.warn('[outbound] Channel connection not active — cannot deliver', {
+      sessionId: session.id, channel: session.channel,
+      channelConnectionId: session.channelConnectionId,
+      connectionStatus: connection?.status ?? 'not-found', messageId: context.messageId,
+    });
+    return { success: false, error: 'Channel connection not active' };
+  }
+
+  if (!(await isChannelEntitled(connection.tenantId, connection.channel))) {
+    logger.warn('[outbound] Channel not entitled — delivery suppressed', {
+      sessionId: session.id, channel: connection.channel, messageId: context.messageId,
+    });
+    return { success: false, error: 'channel_not_entitled' };
+  }
+
   const adapter = getChannelAdapter(session.channel);
   if (!adapter) {
     logger.warn('[outbound] No adapter for channel — cannot deliver', {
@@ -74,18 +97,6 @@ export async function routeOutboundMessage(
       channelConnectionId: session.channelConnectionId, messageId: context.messageId,
     });
     return { success: false, error: 'No conversation binding found' };
-  }
-
-  const connection = await connectionRepository.findOne({
-    where: { id: session.channelConnectionId },
-  });
-  if (!connection || !connection.isActive()) {
-    logger.warn('[outbound] Channel connection not active — cannot deliver', {
-      sessionId: session.id, channel: session.channel,
-      channelConnectionId: session.channelConnectionId,
-      connectionStatus: connection?.status ?? 'not-found', messageId: context.messageId,
-    });
-    return { success: false, error: 'Channel connection not active' };
   }
 
   logger.info('[outbound] Delivering to channel', {
@@ -168,6 +179,9 @@ export async function routeTypingIndicator(
   });
 
   if (binding && connection?.isActive()) {
+    // Same gate as message delivery (channels plan D10) — typing indicators
+    // are external API calls too.
+    if (!(await isChannelEntitled(connection.tenantId, connection.channel))) return;
     try {
       await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection);
     } catch {

@@ -22,7 +22,7 @@ import {
   disconnectWhatsAppConnection,
 } from './whatsapp/setup.service';
 import { runHealthCheck } from './health-check.service';
-import { requireFeature } from '../billing/enforce';
+import { requireChannelEntitled } from './channel-entitlement';
 import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 
 const router = Router();
@@ -87,12 +87,9 @@ router.post(
       throw new BadRequestError('botToken is required');
     }
 
-    // Plan-gate. The legacy numeric `channels` count cap was retired in the
-    // M0 plan-catalog reshape — channel availability is per-tier-by-feature
-    // now. `unifiedInbox` is the proxy: paid tiers have it, the `free`
-    // cancellation sink does not. A cancelled tenant cannot connect new
-    // channels; everyone else can connect any supported channel.
-    await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
+    // Per-channel plan gate (channels plan D7) — replaces the old
+    // `unifiedInbox` proxy now that channel availability has real keys.
+    await requireChannelEntitled(tenantId, 'telegram');
 
     const baseUrl = `${req.protocol}://${req.get('host')}`;
 
@@ -134,8 +131,8 @@ router.post(
       throw new BadRequestError('accessToken is required');
     }
 
-    // Same plan gate as other channels — see /telegram/connect note.
-    await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
+    // Per-channel plan gate — see /telegram/connect note.
+    await requireChannelEntitled(tenantId, 'whatsapp');
 
     const connection = await setupWhatsAppConnection(tenantId, {
       phoneNumberId,
@@ -166,6 +163,10 @@ router.post(
     if (!existing) {
       throw new NotFoundError('Channel connection not found');
     }
+
+    // runHealthCheck calls the provider's API — an unentitled channel must be
+    // fully inert (channels plan D3), so the gate covers health checks too.
+    await requireChannelEntitled(tenantId!, existing.channel);
 
     const updated = await runHealthCheck(connectionId);
     const { credentials: _creds, webhookSecret: _secret, ...safeConnection } = updated;

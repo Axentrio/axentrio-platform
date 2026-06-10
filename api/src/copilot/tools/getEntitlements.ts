@@ -27,13 +27,17 @@ export interface EntitlementsResult {
     handoff: boolean;
     fileUpload: boolean;
     unifiedInbox: boolean;
+    channelWhatsapp: boolean;
+    channelMessenger: boolean;
+    channelInstagram: boolean;
+    channelTelegram: boolean;
   };
 }
 
 export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsResult> = {
   name: 'getEntitlements',
   description:
-    'Return the current tenant\'s resolved feature flags as a flat boolean map: bookings (the chatbot can take appointments via the built-in scheduler, and the Bookings page is available), calendarSync (the tenant can connect an external Google/Outlook calendar so bookings are mirrored there), hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox. Flags reflect the plan tier plus any admin-set per-tenant overrides.',
+    'Return the current tenant\'s resolved feature flags as a flat boolean map: bookings (the chatbot can take appointments via the built-in scheduler, and the Bookings page is available), calendarSync (the tenant can connect an external Google/Outlook calendar so bookings are mirrored there), hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox, channelWhatsapp/channelMessenger/channelInstagram/channelTelegram (whether each external messaging channel is included — the website chat widget is always available and has no flag). Flags reflect the plan tier plus any admin-set per-tenant overrides.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<EntitlementsResult> {
@@ -51,6 +55,10 @@ export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsRes
         handoff: e.features.handoff,
         fileUpload: e.features.fileUpload,
         unifiedInbox: e.features.unifiedInbox,
+        channelWhatsapp: e.features.channelWhatsapp,
+        channelMessenger: e.features.channelMessenger,
+        channelInstagram: e.features.channelInstagram,
+        channelTelegram: e.features.channelTelegram,
       },
     };
   },

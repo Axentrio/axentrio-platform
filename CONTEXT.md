@@ -44,6 +44,10 @@ _Avoid_: verdict, analysis, review.
 A Tenant's subscription level, stored on `Tenant.tier`. Marketed values are **Essential**, **Pro**, **Enterprise**. The DB enum additionally contains **`free`** as an internal-only cancellation terminal state — never offered for signup, never shown in upgrade UI, never sold. Cancellation lands a Tenant on `free`; reactivation moves them back to a marketed tier via Stripe.
 _Avoid_: plan, subscription level, account type (use Tier).
 
+**Channel**:
+A messaging surface a Tenant's customers reach the Agent through. The **widget** is the native channel (always available — it is the product); **WhatsApp, Messenger, Instagram, and Telegram** are external channels, each connected via a `ChannelConnection` and individually gated by a Feature (Pro+ tiers). Which bot answers a channel is the connection's routing assignment, not an entitlement.
+_Avoid_: integration (that's calendar/Cal.com territory), platform, social (the sidebar label "Social Media" is a UI alias).
+
 **Feature**:
 A sellable on/off capability defined in the plan catalog (e.g. bookings, crm). A Tenant's effective Features are the Tier's defaults adjusted by any Feature Overrides. Features answer "is this Tenant entitled to this capability?"
 _Avoid_: flag, entitlement (informally OK, but the catalog term is Feature), toggle, module (a Module is a different thing).

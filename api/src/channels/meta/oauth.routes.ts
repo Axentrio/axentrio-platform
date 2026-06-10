@@ -10,7 +10,7 @@ import {
   getCachedPageToken,
 } from './oauth.service';
 import { setupMetaConnections } from './setup.service';
-import { requireFeature } from '../../billing/enforce';
+import { requireAnyMetaChannelEntitled } from '../channel-entitlement';
 import {
   ApiError,
   asyncHandler,
@@ -46,6 +46,10 @@ router.get(
         ERROR_CODES.UPSTREAM_FAILED,
       );
     }
+
+    // The OAuth flow serves Messenger AND Instagram — entitled to either is
+    // enough to start it; per-type filtering happens at connect time.
+    await requireAnyMetaChannelEntitled(tenantId);
 
     const url = buildOAuthUrl(tenantId);
     sendSuccess(res, { url });
@@ -151,16 +155,16 @@ router.post(
         throw new BadRequestError('No valid pages found. OAuth session may have expired.');
       }
 
-      // Plan-gate. The legacy numeric `channels` cap was retired in the M0
-      // plan-catalog reshape. Channel availability is now feature-gated:
-      // paid tiers (which all have `unifiedInbox: true`) can connect; the
-      // `free` cancellation sink cannot.
-      await requireFeature(tenantId, 'unifiedInbox', 'plan_limit_channels');
+      // Per-channel plan gate (channels plan D7/D8): entitled to at least one
+      // Meta channel to proceed; setupMetaConnections filters per type and
+      // never creates/subscribes a locked channel.
+      await requireAnyMetaChannelEntitled(tenantId);
 
-      // Create connections
-      const connections = await setupMetaConnections(tenantId, selectedPages);
+      // Create connections (only the entitled channel types; `skipped` lists
+      // the entitlement-locked ones so the portal can surface the filtering).
+      const { connections, skipped } = await setupMetaConnections(tenantId, selectedPages);
 
-      sendCreated(res, { connections });
+      sendCreated(res, { connections, skipped });
     } catch (err) {
       logger.error('[meta-oauth] Connect error:', err);
       // If the underlying service threw a typed ApiError (plan-limit 402,

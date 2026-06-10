@@ -171,6 +171,15 @@ export interface Entitlements {
     handoff: boolean;
     /** File upload to KnowledgeBase. False on `free` cancellation sink; true on all paid tiers. */
     fileUpload: boolean;
+    /**
+     * External messaging channels (the widget is the native channel and is
+     * never gated). Pro+ per the channels plan; enforced at connect, inbound
+     * webhook processing, and outbound sends.
+     */
+    channelWhatsapp: boolean;
+    channelMessenger: boolean;
+    channelInstagram: boolean;
+    channelTelegram: boolean;
   };
   support: 'none' | 'email' | 'priority';
 }

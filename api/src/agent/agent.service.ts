@@ -62,6 +62,40 @@ function buildSlotQuickReplies(av: PendingAvailability | null): QuickReply[] | u
   });
 }
 
+/**
+ * Best-effort detector for a final reply that CLAIMS a booking/request was made
+ * (or is being made right now). Used ONLY as a hazard signal — what authorizes a
+ * confirmation is whether a booking mutation actually succeeded this run (see the
+ * egress guard). Patterns are narrow to avoid firing on "you requested X" or a
+ * conditional "I'll book it once you confirm". English phrasings only; the prompt
+ * rule is the backstop for other languages.
+ */
+function claimsBookingDone(text: string): boolean {
+  const t = text.toLowerCase();
+  // Narrow, "the bot just did / is about to do it" phrasings. We deliberately
+  // avoid ambiguous wording like "your appointment is confirmed" that could refer
+  // to an EXISTING booking — the bookingRecorded flag already prevents firing on a
+  // legitimate fresh confirmation, so the patterns only need to catch the
+  // hallucinated "I did this" claims.
+  return [
+    /\bi'?ve (successfully )?(booked|scheduled|requested|submitted|placed|created)\b/,
+    /\bi'?ll (go ahead and (book|request|submit|schedule)|proceed( with (the|your|this))?)\b/,
+    /\bsuccessfully (requested|booked|scheduled|submitted|created)\b/,
+    /\byour (booking|request) (has been|is) (submitted|created|placed|received|sent|booked)\b/,
+  ].some((re) => re.test(t));
+}
+
+/** Internal nudge (user role — the Anthropic adapter only honours the FIRST system
+ *  message) telling the model to actually call the booking tool instead of claiming
+ *  a booking it never made. */
+const BOOKING_CORRECTION_NOTE =
+  "(Internal note, not from the customer.) You just told the customer their booking or request was made, but you did not call create_booking or request_appointment this turn, so nothing was recorded. If you already have the service, the customer's name, and a time, call the correct tool now. If a required detail is still missing, ask the customer for it. Do NOT tell the customer it's done until the tool has actually succeeded.";
+
+/** Safe reply when the model keeps claiming a booking that wasn't recorded (after
+ *  one correction, or out of iteration budget) — anything but a false confirmation. */
+const BOOKING_SAFE_FALLBACK =
+  "Sorry, let me just confirm a couple of details before I put that through — could you confirm the date and time you'd like?";
+
 export class AgentService {
   constructor(
     private toolRegistry: ToolRegistry,
@@ -130,6 +164,10 @@ export class AgentService {
       // Latest availability offered this run — surfaced as slot chips on the
       // reply, unless a booking mutation later consumes/invalidates the offer.
       let pendingAvailability: PendingAvailability | null = null;
+      // Egress guard state: was a booking/request actually recorded this run, and
+      // have we already nudged the model once for claiming one that wasn't?
+      let bookingRecorded = false;
+      let correctionAttempted = false;
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         // Budget check
@@ -168,9 +206,25 @@ export class AgentService {
         // No tool calls — final response
         if (response.finishReason === 'stop' || !response.toolCalls?.length) {
           trace.iterations.push(traceEntry);
+          const finalContent = response.content ?? '';
+          // Egress guard (issue #35): never let the model tell the customer a
+          // booking/request happened unless one was actually recorded this run.
+          if (services.length > 0 && !bookingRecorded && claimsBookingDone(finalContent)) {
+            if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
+              correctionAttempted = true;
+              logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });
+              messages.push({ role: 'assistant', content: finalContent });
+              messages.push({ role: 'user', content: BOOKING_CORRECTION_NOTE });
+              continue; // re-run: model should call the tool or ask for the missing detail
+            }
+            trace.finishReason = 'completed';
+            void this.traceLogger.save(trace);
+            logger.warn('[agent] persistent unrecorded booking claim; returning safe fallback', { sessionId: session.id });
+            return { type: 'response', content: BOOKING_SAFE_FALLBACK };
+          }
           trace.finishReason = 'completed';
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
-          return { type: 'response', content: response.content, quickReplies: buildSlotQuickReplies(pendingAvailability) };
+          return { type: 'response', content: finalContent, quickReplies: buildSlotQuickReplies(pendingAvailability) };
         }
 
         // Process tool calls
@@ -225,6 +279,7 @@ export class AgentService {
               }
             } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
               pendingAvailability = null;
+              bookingRecorded = true;
             }
             let resultJson = JSON.stringify(result.data ?? { error: result.error });
             if (resultJson.length > 4000) {

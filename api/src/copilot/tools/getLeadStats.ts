@@ -9,9 +9,8 @@
  * Returns ONLY aggregate counts — no names, emails, phones, notes,
  * timestamps of specific leads, or custom fields (per invariant #8).
  *
- * `bySource` is exhaustive and zero-filled across the four known
- * sources (`tool | manual | import | webhook`) so the LLM never
- * misreads absence as "unknown."
+ * `bySource` is exhaustive and zero-filled across every known
+ * source so the LLM never misreads absence as "unknown."
  */
 import { IsNull, MoreThanOrEqual } from 'typeorm';
 import { Lead, type LeadSource } from '../../database/entities/Lead';
@@ -21,12 +20,7 @@ export interface LeadStatsResult {
   totalCount: number;
   last7Days: number;
   last30Days: number;
-  bySource: {
-    tool: number;
-    manual: number;
-    import: number;
-    webhook: number;
-  };
+  bySource: Record<LeadSource, number>;
 }
 
 const KNOWN_SOURCES: readonly LeadSource[] = ['tool', 'manual', 'import', 'webhook'];
@@ -71,7 +65,9 @@ export const getLeadStats: CopilotTool<Record<string, never>, LeadStatsResult> =
     ]);
 
     const bySource: LeadStatsResult['bySource'] = {
+      channel: 0,
       tool: 0,
+      booking: 0,
       manual: 0,
       import: 0,
       webhook: 0,

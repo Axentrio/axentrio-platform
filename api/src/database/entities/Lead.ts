@@ -7,8 +7,16 @@
  * `ON DELETE SET NULL` so a lead survives the conversation that
  * captured it.
  *
- * Sources (extensible via the `source` column):
- *   - `'tool'` — `CaptureLeadTool` fired by the agent during a chat
+ * Identity-polymorphic (leads-across-all-channels): a Lead is identified by
+ * whatever durable contact the conversation provided. `dedupe_key` is the
+ * single per-identity upsert anchor (`<channel>:<externalUserId>` for channel
+ * conversations, `email:<…>` / `phone:<…>` for the widget). `email` and `name`
+ * are nullable; a DB CHECK guarantees at least one of email/phone/externalUserId.
+ *
+ * Sources (extensible via the `source` column), strongest-signal last:
+ *   - `'channel'` — auto-captured from a channel conversation at first message
+ *   - `'tool'` — `CaptureLeadTool` fired by the agent during a widget chat
+ *   - `'booking'` — captured when a booking was made/requested
  *   - `'manual'` — created by a portal user (future)
  *   - `'import'` — bulk-imported via CSV (future)
  *   - `'webhook'` — pushed from n8n (future)
@@ -31,7 +39,8 @@ import { Tenant } from './Tenant';
 import { ChatSession } from './ChatSession';
 import { Bot } from './Bot';
 
-export type LeadSource = 'tool' | 'manual' | 'import' | 'webhook';
+export type LeadSource = 'channel' | 'tool' | 'booking' | 'manual' | 'import' | 'webhook';
+export type LeadStatus = 'new' | 'archived';
 
 @Entity('chatbot_leads')
 @Index(['tenantId', 'createdAt'])
@@ -50,14 +59,29 @@ export class Lead {
   @Column({ type: 'uuid', name: 'bot_id', nullable: true })
   botId?: string | null;
 
-  @Column({ type: 'varchar', length: 255 })
-  name!: string;
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  name?: string | null;
 
-  @Column({ type: 'varchar', length: 320 })
-  email!: string;
+  @Column({ type: 'varchar', length: 320, nullable: true })
+  email?: string | null;
 
   @Column({ type: 'varchar', length: 64, nullable: true })
   phone?: string | null;
+
+  /** Channel this lead originated from (widget/whatsapp/messenger/instagram/telegram). */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  channel?: string | null;
+
+  /** Channel-side durable handle (wa_id / PSID / telegram id); null for widget. */
+  @Column({ type: 'varchar', length: 255, name: 'external_user_id', nullable: true })
+  externalUserId?: string | null;
+
+  /** Per-identity dedup anchor, e.g. `whatsapp:32475…` / `email:a@b.com`. */
+  @Column({ type: 'varchar', length: 400, name: 'dedupe_key', nullable: true })
+  dedupeKey?: string | null;
+
+  @Column({ type: 'varchar', length: 32, default: 'new' })
+  status!: LeadStatus;
 
   @Column({ type: 'varchar', length: 32, default: 'tool' })
   source!: LeadSource;

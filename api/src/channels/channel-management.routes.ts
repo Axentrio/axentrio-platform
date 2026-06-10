@@ -4,6 +4,7 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { Not } from 'typeorm';
 import { getRepository } from '../database/data-source';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { WebhookEventLog } from '../database/entities/WebhookEventLog';
@@ -43,7 +44,9 @@ router.get(
 
     const repo = getRepository(ChannelConnection);
     const connections = (await repo.find({
-      where: { tenantId },
+      // Disconnected connections are treated as deleted from the user's view;
+      // the row is retained in the DB for audit/webhook-cleanup history.
+      where: { tenantId, status: Not('disconnected') },
       order: { createdAt: 'DESC' },
       select: [
         'id',

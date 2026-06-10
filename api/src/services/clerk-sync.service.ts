@@ -36,6 +36,28 @@ export async function createClerkOrganization(name: string): Promise<{ id: strin
   }
 }
 
+/**
+ * Fetch ALL members of a Clerk org, paging past the 100-per-call API limit.
+ * Callers that match/reconcile against the full membership must use this rather
+ * than a single getOrganizationMembershipList({ limit: 100 }) call.
+ */
+export async function getAllOrgMemberships(clerkOrgId: string): Promise<any[]> {
+  const all: any[] = [];
+  const limit = 100;
+  let offset = 0;
+  for (;;) {
+    const page = await clerkClient.organizations.getOrganizationMembershipList({
+      organizationId: clerkOrgId,
+      limit,
+      offset,
+    });
+    all.push(...(page.data ?? []));
+    if (!page.data || page.data.length < limit) break;
+    offset += limit;
+  }
+  return all;
+}
+
 export async function inviteToClerkOrganization(
   clerkOrgId: string,
   email: string,

@@ -262,6 +262,16 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
         existingByEmail.clerkUserId = clerkUserId;
         await userRepo.save(existingByEmail);
         user = existingByEmail;
+        // Clear any pending invite for this email — they're a provisioned member now.
+        // (The else-branch below already does this; mirror it here so a re-invited
+        // existing user doesn't leave a stale "pending" row.)
+        const stalePendingRepo = AppDataSource.getRepository(PendingInvite);
+        const stale = await stalePendingRepo
+          .createQueryBuilder('pi')
+          .where('pi.tenantId = :tenantId', { tenantId: tenant.id })
+          .andWhere('pi.email IN (:...emails)', { emails: clerkEmails })
+          .getMany();
+        if (stale.length > 0) await stalePendingRepo.remove(stale);
         logger.info('Linked existing user to Clerk', { userId: user.id, email });
       } else {
         // Check for PendingInvite — bridges invite→signup role assignment

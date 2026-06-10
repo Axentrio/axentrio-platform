@@ -65,6 +65,7 @@ export function createAuthMocks() {
   vi.mock('../../services/clerk-sync.service', () => ({
     inviteToClerkOrganization: () => Promise.resolve(true),
     removeFromClerkOrganization: () => Promise.resolve(true),
+    getAllOrgMemberships: () => Promise.resolve([]),
   }));
 
   return { auth };

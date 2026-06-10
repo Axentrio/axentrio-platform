@@ -51,6 +51,7 @@ vi.mock('@clerk/express', () => ({
 vi.mock('../../services/clerk-sync.service', () => ({
   createClerkOrganization,
   inviteToClerkOrganization,
+  getAllOrgMemberships: vi.fn().mockResolvedValue([]),
   addMemberToClerkOrganization: vi.fn(),
   removeFromClerkOrganization: vi.fn(),
   deleteClerkOrganization: vi.fn(),

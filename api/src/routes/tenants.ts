@@ -18,7 +18,7 @@ import { requireAdmin, asyncHandler, ValidationError, NotFoundError, BadRequestE
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization } from '../services/clerk-sync.service';
+import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization, getAllOrgMemberships } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -264,6 +264,13 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.user!.tenantId;
     const params = parsePaginationParams(req.query as Record<string, unknown>);
+
+    // Reconcile against Clerk so members who joined the org but never logged into
+    // the portal still appear here (otherwise they're invisible until first login).
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
+    if (tenant?.clerkOrgId) {
+      await syncOrgMembersToDb(tenantId, tenant.clerkOrgId);
+    }
 
     const userRepository = AppDataSource.getRepository(User);
 
@@ -577,18 +584,15 @@ async function provisionExistingOrgMember(
   email: string,
   role: 'admin' | 'supervisor' | 'agent'
 ): Promise<boolean> {
-  let memberships;
+  let memberships: any[];
   try {
-    memberships = await clerkClient.organizations.getOrganizationMembershipList({
-      organizationId: clerkOrgId,
-      limit: 100,
-    });
+    memberships = await getAllOrgMemberships(clerkOrgId);
   } catch (err: any) {
     logger.warn('Could not check Clerk org membership', { email, error: err?.message });
     return false;
   }
 
-  const membership = memberships.data?.find(
+  const membership = memberships.find(
     (m: any) => m.publicUserData?.identifier?.toLowerCase() === email.toLowerCase()
   );
   if (!membership?.publicUserData?.userId) return false; // not a member — real failure
@@ -616,6 +620,61 @@ async function provisionExistingOrgMember(
     logger.info('Provisioned already-member user', { email, userId: newUser.id });
   }
   return true;
+}
+
+/**
+ * Make our User table reflect the Clerk org: provision any Clerk member missing
+ * locally so "ghost members" (joined the Clerk org but never logged into the
+ * portal) still appear in the members list. Role comes from a matching
+ * PendingInvite if one exists (which is then consumed), else defaults to 'agent'
+ * — matching what autoProvision assigns on a member's first login. Fetches the
+ * full membership once (paginated). Best-effort / fail-open.
+ */
+async function syncOrgMembersToDb(tenantId: string, clerkOrgId: string): Promise<void> {
+  try {
+    const memberships = await getAllOrgMemberships(clerkOrgId);
+    if (memberships.length === 0) return;
+
+    const userRepo = AppDataSource.getRepository(User);
+    const inviteRepo = AppDataSource.getRepository(PendingInvite);
+
+    // withDeleted so a soft-deleted member is not resurrected as a new row.
+    const existing = await userRepo.find({ where: { tenantId }, withDeleted: true });
+    const existingEmails = new Set(existing.map((u) => u.email.toLowerCase()));
+
+    const invites = await inviteRepo.find({ where: { tenantId } });
+    const inviteByEmail = new Map(invites.map((i) => [i.email.toLowerCase(), i]));
+
+    const consumedInviteIds: string[] = [];
+    let provisioned = 0;
+    for (const m of memberships) {
+      const email = m.publicUserData?.identifier?.toLowerCase();
+      const clerkUserId = m.publicUserData?.userId;
+      if (!email || !clerkUserId || existingEmails.has(email)) continue;
+
+      const invite = inviteByEmail.get(email);
+      const role = (invite?.role as 'admin' | 'supervisor' | 'agent') ?? 'agent';
+      const name = [m.publicUserData?.firstName, m.publicUserData?.lastName].filter(Boolean).join(' ') || email.split('@')[0];
+
+      await userRepo.createQueryBuilder().insert().into(User).values({
+        tenantId, clerkUserId, email, name, role: role as any, isActive: true,
+      }).orIgnore().execute();
+
+      const newUser = await userRepo.findOne({ where: { clerkUserId } });
+      if (newUser) {
+        await AppDataSource.getRepository(Agent).createQueryBuilder().insert().into(Agent).values({
+          tenantId, userId: newUser.id, status: 'offline', maxConcurrentChats: 5, skills: [], languages: ['en'],
+        }).orIgnore().execute();
+        provisioned++;
+      }
+      if (invite) consumedInviteIds.push(invite.id);
+    }
+
+    if (consumedInviteIds.length > 0) await inviteRepo.delete(consumedInviteIds);
+    if (provisioned > 0) logger.info('Synced Clerk org members to DB', { tenantId, provisioned, invitesConsumed: consumedInviteIds.length });
+  } catch (err: any) {
+    logger.warn('syncOrgMembersToDb failed; returning members list as-is', { tenantId, error: err?.message });
+  }
 }
 
 /**
@@ -869,12 +928,9 @@ router.get(
       try {
         const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
         if (tenant?.clerkOrgId) {
-          const memberships = await clerkClient.organizations.getOrganizationMembershipList({
-            organizationId: tenant.clerkOrgId,
-            limit: 100,
-          });
+          const memberships = await getAllOrgMemberships(tenant.clerkOrgId);
           const memberEmails = new Set(
-            (memberships.data ?? [])
+            memberships
               .map((m: any) => m.publicUserData?.identifier?.toLowerCase())
               .filter(Boolean)
           );

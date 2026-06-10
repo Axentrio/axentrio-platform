@@ -65,11 +65,19 @@ export function useInviteMember() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (data: { email: string; name: string; role: string }) =>
-      api.post('/tenants/me/invite', data),
-    onSuccess: () => {
+      api.post<{ message?: string }>('/tenants/me/invite', data),
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.members() });
       queryClient.invalidateQueries({ queryKey: queryKeys.tenants.invites() });
-      toast.success('Invitation sent');
+      // The backend returns an explanatory message when no email was sent —
+      // e.g. "User has already joined — synced to members list" (the invitee
+      // already accepted an earlier Clerk invite). Surface it instead of a
+      // misleading "Invitation sent".
+      if (data?.message) {
+        toast.info(data.message);
+      } else {
+        toast.success('Invitation sent');
+      }
     },
   });
 }

@@ -33,6 +33,7 @@ vi.mock('../queries/useHandoffQueries', () => ({
 vi.mock('@clerk/clerk-react', () => ({
   useClerk: () => ({ signOut: vi.fn() }),
   useOrganization: () => ({ organization: { name: 'Acme', hasImage: false } }),
+  useOrganizationList: () => ({ isLoaded: true, userMemberships: { data: [] }, setActive: vi.fn() }),
 }));
 
 vi.mock('@auth/useAppAuth', () => ({

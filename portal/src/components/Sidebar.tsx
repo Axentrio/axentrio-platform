@@ -33,7 +33,13 @@ import {
   ChevronDown,
   Lock,
 } from 'lucide-react';
-import { useClerk, useOrganization } from '@clerk/clerk-react';
+import { useClerk, useOrganization, useOrganizationList } from '@clerk/clerk-react';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { useAppAuth } from '@auth/useAppAuth';
 import { useTenantContextStore } from '../stores/tenantContextStore';
 import { useUiStore } from '../stores/uiStore';
@@ -208,6 +214,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isSuperAdmin = user?.role === 'super_admin';
   const isImpersonating = isSuperAdmin && !!activeTenant;
 
+  // Clerk org switching for multi-org members. Super admins use the tenant
+  // palette (impersonation) instead; everyone else previously had NO way to
+  // change their active organization once one was set — the OrganizationList
+  // only renders pre-selection. A full navigation after setActive guarantees
+  // fresh JWT claims + queries for the new org.
+  const { isLoaded: orgListLoaded, userMemberships, setActive } = useOrganizationList({
+    userMemberships: { infinite: true },
+  });
+  const otherOrgs = orgListLoaded
+    ? (userMemberships?.data ?? []).filter((m) => m.organization.id !== organization?.id)
+    : [];
+  const handleSwitchOrg = async (orgId: string) => {
+    if (!setActive) return;
+    await setActive({ organization: orgId });
+    window.location.assign('/inbox');
+  };
+
   const hasAdminAccess = (roles: UserRole[]) => {
     // While user is loading, show all items — route guards handle actual access
     if (!user) return true;
@@ -282,6 +305,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <ChevronDown className="w-4 h-4" />
           </button>
+        )}
+        {!isSuperAdmin && otherOrgs.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="p-1 rounded-md hover:bg-surface-2 text-text-muted hover:text-text-primary transition-colors"
+                title={t('sidebar.switchOrganization', { defaultValue: 'Switch organization' })}
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              {otherOrgs.map((m) => (
+                <DropdownMenuItem key={m.organization.id} onClick={() => handleSwitchOrg(m.organization.id)}>
+                  {m.organization.name}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {isImpersonating && (
           <button

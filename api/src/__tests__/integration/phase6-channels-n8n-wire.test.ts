@@ -41,6 +41,7 @@ const {
   setupMetaConnections,
   enforceCountLimit,
   requireFeature,
+  requireAnyMetaChannelEntitled,
   metaAppId,
   metaRedirect,
   n8nInboundSecret,
@@ -55,6 +56,7 @@ const {
   setupMetaConnections: vi.fn(),
   enforceCountLimit: vi.fn(),
   requireFeature: vi.fn(),
+  requireAnyMetaChannelEntitled: vi.fn(),
   metaAppId: { value: 'app123' },
   metaRedirect: { value: 'https://example.com/cb' },
   n8nInboundSecret: { value: 'secret-token-xyz' },
@@ -101,6 +103,15 @@ vi.mock('../../channels/meta/setup.service', () => ({
 vi.mock('../../billing/enforce', () => ({
   enforceCountLimit,
   requireFeature,
+}));
+
+// Channels plan: the meta routes now gate via the channel-entitlement helper
+// (per-channel keys), not requireFeature('unifiedInbox'). Default = entitled.
+vi.mock('../../channels/channel-entitlement', () => ({
+  requireAnyMetaChannelEntitled,
+  requireChannelEntitled: vi.fn(),
+  isChannelEntitled: vi.fn().mockResolvedValue(true),
+  channelFeatureKey: vi.fn(),
 }));
 
 vi.mock('../../database/data-source', () => ({
@@ -203,9 +214,12 @@ beforeEach(() => {
   getSessionPages.mockReset();
   getCachedPageToken.mockReset();
   setupMetaConnections.mockReset();
+  setupMetaConnections.mockResolvedValue({ connections: [], skipped: [] });
   enforceCountLimit.mockReset();
   requireFeature.mockReset();
   requireFeature.mockResolvedValue(undefined);
+  requireAnyMetaChannelEntitled.mockReset();
+  requireAnyMetaChannelEntitled.mockResolvedValue(undefined);
   circuitBreakerReset.mockReset();
   circuitBreakerGetState.mockReset();
   circuitBreakerGetStats.mockReset();
@@ -291,10 +305,9 @@ describe('meta/oauth.routes — POST /connect catch-all adapter', () => {
       { id: 'p1', name: 'Page 1', accessToken: 't1', tasks: [] },
     ]);
     getCachedPageToken.mockReturnValue('cached-token-1');
-    // M0 plan-catalog reshape retired the numeric `channels` count gate in
-    // favour of the `unifiedInbox` feature gate. The route now calls
-    // `requireFeature(tenantId, 'unifiedInbox', ...)` — mock that throw path.
-    requireFeature.mockImplementation(() => {
+    // Channels plan: the route now gates via requireAnyMetaChannelEntitled
+    // (per-channel entitlements) — mock that throw path.
+    requireAnyMetaChannelEntitled.mockImplementation(() => {
       throw new ApiError('plan limit reached', 402, 'PLAN_LIMIT_CHANNELS');
     });
 

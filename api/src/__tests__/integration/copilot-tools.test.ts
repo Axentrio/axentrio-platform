@@ -341,6 +341,10 @@ describe('getEntitlements', () => {
       [
         'bookings',
         'calendarSync',
+        'channelInstagram',
+        'channelMessenger',
+        'channelTelegram',
+        'channelWhatsapp',
         'crm',
         'customWidgetAppearance',
         'fileUpload',

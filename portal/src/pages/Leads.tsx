@@ -59,7 +59,7 @@ export default function Leads() {
   const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-4">
+    <div className="h-full overflow-y-auto p-6 max-w-5xl mx-auto space-y-4">
       <div>
         <h1 className="text-2xl font-semibold text-text-primary">
           {t('leads.title')}

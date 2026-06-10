@@ -44,16 +44,15 @@ export async function createClerkOrganization(name: string): Promise<{ id: strin
 export async function getAllOrgMemberships(clerkOrgId: string): Promise<any[]> {
   const all: any[] = [];
   const limit = 100;
-  let offset = 0;
-  for (;;) {
-    const page = await clerkClient.organizations.getOrganizationMembershipList({
+  const maxPages = 100; // hard cap (10k members) so a misbehaving offset can't loop forever
+  for (let page = 0; page < maxPages; page++) {
+    const res = await clerkClient.organizations.getOrganizationMembershipList({
       organizationId: clerkOrgId,
       limit,
-      offset,
+      offset: page * limit,
     });
-    all.push(...(page.data ?? []));
-    if (!page.data || page.data.length < limit) break;
-    offset += limit;
+    all.push(...(res.data ?? []));
+    if (!res.data || res.data.length < limit) break;
   }
   return all;
 }

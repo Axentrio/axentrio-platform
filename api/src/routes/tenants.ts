@@ -584,6 +584,7 @@ async function provisionExistingOrgMember(
   email: string,
   role: 'admin' | 'supervisor' | 'agent'
 ): Promise<boolean> {
+  email = email.toLowerCase(); // emails can be stored mixed-case (e.g. POST /me/users); match consistently
   let memberships: any[];
   try {
     memberships = await getAllOrgMemberships(clerkOrgId);

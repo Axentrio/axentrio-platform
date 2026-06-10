@@ -167,7 +167,7 @@ describe('CreateBookingTool', () => {
     expect(tool.preconditions).toBeUndefined();
   });
 
-  it('generates idempotency key from runId', async () => {
+  it('generates a stable session+service idempotency key (not per-runId, so re-confirms dedupe)', async () => {
     const tool = new CreateBookingTool();
     const ctx = makeCtx({ runId: 'run-abc', sessionId: 'sess-1' });
     mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-1' } });
@@ -179,7 +179,7 @@ describe('CreateBookingTool', () => {
 
     expect(mockCreateBooking).toHaveBeenCalledWith(
       'sess-1',
-      'run-abc:create_booking:2026-04-01T10:00:00Z',
+      'create_booking:sess-1:default:2026-04-01T10:00:00Z',
       '2026-04-01T10:00:00Z',
       { name: 'Alice', email: 'alice@test.com' },
       undefined,
@@ -200,7 +200,7 @@ describe('CreateBookingTool', () => {
 
     expect(mockCreateBooking).toHaveBeenCalledWith(
       'sess-2',
-      'run-xyz:create_booking:2026-04-02T09:00:00Z',
+      'create_booking:sess-2:default:2026-04-02T09:00:00Z',
       '2026-04-02T09:00:00Z',
       { name: 'Bob', email: 'bob@test.com' },
       'Need consultation',

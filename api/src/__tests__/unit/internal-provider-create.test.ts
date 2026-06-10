@@ -27,6 +27,13 @@ vi.mock('../../database/data-source', () => ({
   },
 }));
 
+// Calendar sync now gates on resolved entitlements (D9); resolve via the
+// real pure resolver on 'pro' (calendarIntegrations on) so sync stays live.
+vi.mock('../../billing/entitlements', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../billing/entitlements')>();
+  return { ...actual, getEntitlements: vi.fn(async () => actual.entitlementsFor('pro')) };
+});
+
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -66,6 +73,13 @@ vi.mock('../../scheduler/calendar-provider', () => {
   return {
     resolveCalendarProvider: async () => googleAdapter,
     providerFor: () => googleAdapter,
+    // D9 additions: sync allowed in these tests; stored identity delegates to
+    // the same resolveCalendarIdentity stub so conflict-key assertions hold.
+    isCalendarSyncAllowed: async () => true,
+    resolveStoredCalendarIdentity: async (...a: any[]) => ({
+      identity: await resolveCalendarIdentity(...a),
+      providerType: 'google',
+    }),
   };
 });
 

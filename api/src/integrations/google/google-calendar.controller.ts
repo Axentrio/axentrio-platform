@@ -87,6 +87,8 @@ export async function disconnectGoogle(req: Request, res: Response): Promise<voi
 /** GET /integrations/google/calendars — writable calendars for the picker. */
 export async function listGoogleCalendars(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  // Calls the Google API — gated like every other external calendar call (D9).
+  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   const calendars = await listWritableCalendars(bot.id);
   sendSuccess(res, { calendars });

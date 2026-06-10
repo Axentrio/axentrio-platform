@@ -14,7 +14,7 @@ import type { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
-import { isCalcomAvailableForTier } from '../billing/calcom-access';
+import { getEntitlements } from '../billing/entitlements';
 
 const BOOKING_TOOLS = [
   'check_availability',
@@ -67,11 +67,17 @@ export class ToolRegistry {
     const captureLead = this.builtinTools.get('capture_lead');
     if (captureLead) tools.push(captureLead);
 
-    // Booking tools: Cal.com is shelved, so the in-house scheduler is the only
-    // backend. Gate on the same calendar-integrations tier (Pro+) as before.
-    // Mirrors buildIntegrationsConfig in message-forwarding so the platform
-    // agent and the n8n payload stay in lockstep on which bots can book.
-    const bookingEnabled = isCalcomAvailableForTier(tenant.tier);
+    // Booking tools gate on the resolved `bookings` feature (plan D6/D10) —
+    // resolved entitlements, not raw tier, so per-tenant overrides and the
+    // free/non-active deny apply. Mirrors buildIntegrationsConfig in
+    // message-forwarding so the platform agent and the n8n payload stay in
+    // lockstep on which bots can book. Fails closed on resolution errors.
+    let bookingEnabled = false;
+    try {
+      bookingEnabled = (await getEntitlements(tenant.id)).features.bookings;
+    } catch (error) {
+      logger.warn(`Booking entitlement resolution failed for tenant ${tenant.id}`, { error });
+    }
     if (bookingEnabled) {
       for (const name of BOOKING_TOOLS) {
         const tool = this.builtinTools.get(name);

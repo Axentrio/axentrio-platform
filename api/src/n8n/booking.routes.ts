@@ -77,7 +77,7 @@ router.post('/list', verifyInternalAuth, [
   body('attendeeEmail').isEmail(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await listBookings(req.body.sessionId, req.body.attendeeEmail);
+    const result = await listBookings('internal-n8n', req.body.sessionId, req.body.attendeeEmail);
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
@@ -89,7 +89,7 @@ router.post('/availability', verifyInternalAuth, [
   body('endDate').isISO8601(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await checkAvailability(req.body.sessionId, req.body.startDate, req.body.endDate);
+    const result = await checkAvailability('internal-n8n', req.body.sessionId, req.body.startDate, req.body.endDate);
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
@@ -105,7 +105,7 @@ router.post('/create', verifyInternalAuth, [
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
     const { sessionId, idempotencyKey, startTime, attendee, notes } = req.body;
-    const result = await createBooking(sessionId, idempotencyKey, startTime, attendee, notes);
+    const result = await createBooking('internal-n8n', sessionId, idempotencyKey, startTime, attendee, notes);
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
@@ -117,7 +117,7 @@ router.post('/reschedule', verifyInternalAuth, [
   body('newStartTime').isISO8601(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await rescheduleBooking(req.body.sessionId, req.body.bookingId, req.body.newStartTime);
+    const result = await rescheduleBooking('internal-n8n', req.body.sessionId, req.body.bookingId, req.body.newStartTime);
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });
@@ -129,7 +129,7 @@ router.post('/cancel', verifyInternalAuth, [
   body('reason').optional().isString(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await cancelBooking(req.body.sessionId, req.body.bookingId, req.body.reason);
+    const result = await cancelBooking('internal-n8n', req.body.sessionId, req.body.bookingId, req.body.reason);
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });

@@ -19,6 +19,19 @@ import { Agent } from './Agent';
 export type TenantTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type TenantStatus = 'active' | 'suspended' | 'cancelled';
 
+/**
+ * One per-tenant feature override (explicit super-admin exception). `value`
+ * alone governs behavior; the audit fields are provenance for the admin UI.
+ * Written exclusively through the admin override endpoints — never via the
+ * generic tenant PATCH. See .scratch/plan-entitlements-modules.md (D4/D5).
+ */
+export interface FeatureOverride {
+  value: boolean;
+  reason: string;
+  setBy: string;
+  setAt: string;
+}
+
 @Entity('tenants')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid')
@@ -133,6 +146,15 @@ export class Tenant {
       }>;
     };
   };
+
+  /**
+   * Per-tenant boolean feature overrides, merged over PLANS[tier].features by
+   * the entitlement resolver (ignored entirely for free/non-active tenants).
+   * Keys are FeatureKeys; unknown keys and malformed entries are ignored at
+   * read time. Defaults to {} (no overrides).
+   */
+  @Column({ type: 'jsonb', default: {}, name: 'feature_overrides' })
+  featureOverrides!: Record<string, FeatureOverride>;
 
   @Column({ type: 'int', default: 100, name: 'max_sessions' })
   maxSessions!: number;

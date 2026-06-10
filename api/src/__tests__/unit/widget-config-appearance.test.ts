@@ -11,6 +11,23 @@ vi.mock('../../database/data-source', () => ({
   },
 }));
 
+// Attribution now resolves via getEntitlements (DB + cache); resolve through
+// the real pure resolver against the scripted tenant so tier semantics stay
+// the plan catalog's. `currentTenant` is set by mockResolvedBotAndTenant.
+const scripted = vi.hoisted(() => ({ tenant: null as any }));
+vi.mock('../../billing/entitlements', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../billing/entitlements')>();
+  return {
+    ...actual,
+    getEntitlements: vi.fn(async () =>
+      actual.entitlementsFor((scripted.tenant?.tier ?? 'free') as never, undefined, {
+        status: scripted.tenant?.status,
+        featureOverrides: scripted.tenant?.featureOverrides ?? {},
+      })
+    ),
+  };
+});
+
 import { widgetRouter } from '../../routes/widget';
 
 // Helper: extract the GET /config route handler from the Express router stack
@@ -63,6 +80,7 @@ function mockResolvedBotAndTenant(
   bot: any | null = null,
   anchorSettings: Record<string, unknown> = {},
 ) {
+  scripted.tenant = tenant;
   // First call (Bot lookup by publicKey)
   mockFindOne.mockResolvedValueOnce(bot);
   // Second call (Tenant lookup by apiKey) — only fires if bot is null

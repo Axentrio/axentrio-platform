@@ -12,6 +12,7 @@
  */
 import { AppDataSource } from '../database/data-source';
 import { CalendarCredential, CalendarProviderType } from '../database/entities/CalendarCredential';
+import { getEntitlements } from '../billing/entitlements';
 import { logger } from '../utils/logger';
 import {
   getGoogleBusyForBot,
@@ -79,11 +80,55 @@ export function providerFor(provider: CalendarProviderType): CalendarProvider {
 }
 
 /**
- * Resolve the adapter for the bot's single active credential, or null when the
- * bot has no connection. If somehow more than one active credential exists
- * (the active unique index should prevent it), the most recent wins and we log.
+ * Is external calendar sync allowed for this tenant right now? Resolved
+ * entitlements (`calendarIntegrations`), so per-tenant overrides and the
+ * free/non-active deny apply. Fail closed: a resolution error means no
+ * external calendar calls (plan D9).
+ *
+ * Scope: booking/sync flows only. Explicit user-initiated disconnect may
+ * still revoke tokens at the provider — credential revocation is a security
+ * action, not a capability use.
  */
-export async function resolveCalendarProvider(botId: string): Promise<CalendarProvider | null> {
+export async function isCalendarSyncAllowed(tenantId: string): Promise<boolean> {
+  try {
+    return (await getEntitlements(tenantId)).features.calendarIntegrations;
+  } catch (error) {
+    logger.warn('[Calendar] sync entitlement resolution failed — failing closed', { tenantId, error });
+    return false;
+  }
+}
+
+/**
+ * DB-only stored calendar identity for the conflict key (plan D9): reads the
+ * bot's active credential and derives the account-unique identity WITHOUT any
+ * external API call, so conflict keys stay stable even when sync is disabled
+ * by entitlement. Mirrors resolveCalendarIdentity / resolveOutlookIdentity
+ * semantics. Malformed/partial identity → null (callers fall back to the
+ * bot-scoped key, warning logged) — never throw, never repair via the API.
+ */
+export async function resolveStoredCalendarIdentity(
+  botId: string
+): Promise<{ identity: string | null; providerType: CalendarProviderType } | null> {
+  const cred = await loadActiveCredential(botId);
+  if (!cred) return null;
+  if (cred.provider === 'microsoft') {
+    if (typeof cred.accountId === 'string' && cred.accountId) {
+      return { identity: cred.accountId, providerType: 'microsoft' };
+    }
+    logger.warn('[Calendar] stored microsoft identity malformed — using bot-scoped conflict key', { botId });
+    return { identity: null, providerType: 'microsoft' };
+  }
+  if (typeof cred.calendarId === 'string' && cred.calendarId && cred.calendarId !== 'primary') {
+    return { identity: cred.calendarId, providerType: 'google' };
+  }
+  if (typeof cred.accountEmail === 'string' && cred.accountEmail) {
+    return { identity: cred.accountEmail, providerType: 'google' };
+  }
+  // Legacy creds (primary + unknown email) legitimately have no identity.
+  return { identity: null, providerType: 'google' };
+}
+
+async function loadActiveCredential(botId: string): Promise<CalendarCredential | null> {
   const active = await AppDataSource.getRepository(CalendarCredential).find({
     where: { botId, status: 'active' },
     order: { createdAt: 'DESC' },
@@ -95,5 +140,22 @@ export async function resolveCalendarProvider(botId: string): Promise<CalendarPr
       count: active.length,
     });
   }
-  return providerFor(active[0].provider);
+  return active[0];
+}
+
+/**
+ * Resolve the adapter for the bot's single active credential, or null when the
+ * bot has no connection — or when the tenant's entitlements disallow external
+ * calendar sync (stored credentials stay as inert config that re-activates on
+ * upgrade/re-enable; plan D9). Conflict keys must NOT come from this resolver —
+ * use resolveStoredCalendarIdentity, which ignores the entitlement gate.
+ */
+export async function resolveCalendarProvider(botId: string): Promise<CalendarProvider | null> {
+  const cred = await loadActiveCredential(botId);
+  if (!cred) return null;
+  if (!(await isCalendarSyncAllowed(cred.tenantId))) {
+    logger.debug('[Calendar] sync disabled by entitlement — credential inert', { botId });
+    return null;
+  }
+  return providerFor(cred.provider);
 }

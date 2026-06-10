@@ -59,7 +59,7 @@ describe('scheduler.controller', () => {
     };
     await updateSchedulerConfig(req, res);
 
-    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'calendarIntegrations', expect.any(String));
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
     expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
     // event type saved with a derived slug + schema defaults
     expect(etSave).toHaveBeenCalledOnce();
@@ -74,7 +74,7 @@ describe('scheduler.controller', () => {
     // persisted as internal rather than re-enabling the Cal.com path.
     const req: any = { tenantId: 'ten-1', body: { provider: 'calcom' } };
     await updateSchedulerConfig(req, res);
-    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'calendarIntegrations', expect.any(String));
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
     expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
   });
 
@@ -214,7 +214,7 @@ describe('presets endpoints (P4a)', () => {
 
   it('lists preset summaries (gated)', async () => {
     await listPresets({ tenantId: 'ten-1' } as any, res);
-    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'calendarIntegrations', expect.any(String));
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
     const payload = sendSuccess.mock.calls[0][1];
     expect(payload.presets.length).toBeGreaterThanOrEqual(5);
     expect(payload.presets[0]).toMatchObject({ key: expect.any(String), serviceCount: expect.any(Number) });

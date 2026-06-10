@@ -35,6 +35,16 @@ vi.mock('../../n8n/booking.service', () => ({
 }));
 
 // ── Mock RAG service ────────────────────────────────────────────────
+// Booking tools gate on resolved entitlements; resolve via the real pure
+// resolver for the fixture tenant's tier (pro → bookings on).
+vi.mock('../../billing/entitlements', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../billing/entitlements')>();
+  return {
+    ...actual,
+    getEntitlements: vi.fn(async () => actual.entitlementsFor('pro')),
+  };
+});
+
 vi.mock('../../llm/rag.service', () => ({
   searchKnowledge: vi.fn().mockResolvedValue({ chunks: [], totalChunks: 0 }),
 }));
@@ -221,7 +231,7 @@ describe('Booking Flow — Full Agent Loop', () => {
 
     expect(turn2.type).toBe('response');
     expect((turn2 as any).content).toContain('9:00 AM');
-    expect(mockCheckAvailability).toHaveBeenCalledWith('session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined);
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined);
 
     // Turn 3: User picks 10am and gives info. LLM re-verifies availability then books.
     // The precondition requires check_availability in the SAME turn before create_booking.
@@ -282,6 +292,7 @@ describe('Booking Flow — Full Agent Loop', () => {
     expect((turn3 as any).content).toContain('booked');
     expect((turn3 as any).content).toContain('Sarah');
     expect(mockCreateBooking).toHaveBeenCalledWith(
+      'agent',
       'session-booking-test',
       expect.stringContaining('create_booking'), // idempotency key
       '2026-04-07T10:00:00',

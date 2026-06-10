@@ -238,7 +238,7 @@ describe('Booking Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
-      expect(mockListBookings).toHaveBeenCalledWith(VALID_UUID, 'a@b.com');
+      expect(mockListBookings).toHaveBeenCalledWith('internal-n8n', VALID_UUID, 'a@b.com');
     });
 
     it('should return service result from /availability', async () => {
@@ -257,7 +257,7 @@ describe('Booking Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
       expect(mockCheckAvailability).toHaveBeenCalledWith(
-        VALID_UUID, '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z'
+        'internal-n8n', VALID_UUID, '2026-04-01T00:00:00Z', '2026-04-02T00:00:00Z'
       );
     });
 
@@ -279,7 +279,7 @@ describe('Booking Routes', () => {
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
       expect(mockCreateBooking).toHaveBeenCalledWith(
-        VALID_UUID, 'key-abc', '2026-04-01T10:00:00Z',
+        'internal-n8n', VALID_UUID, 'key-abc', '2026-04-01T10:00:00Z',
         { name: 'Alice', email: 'alice@test.com' }, 'Hello'
       );
     });
@@ -299,7 +299,7 @@ describe('Booking Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
-      expect(mockRescheduleBooking).toHaveBeenCalledWith(VALID_UUID, '42', '2026-04-02T10:00:00Z');
+      expect(mockRescheduleBooking).toHaveBeenCalledWith('internal-n8n', VALID_UUID, '42', '2026-04-02T10:00:00Z');
     });
 
     it('should return service result from /cancel', async () => {
@@ -317,7 +317,7 @@ describe('Booking Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ data: result });
-      expect(mockCancelBooking).toHaveBeenCalledWith(VALID_UUID, '42', 'Changed plans');
+      expect(mockCancelBooking).toHaveBeenCalledWith('internal-n8n', VALID_UUID, '42', 'Changed plans');
     });
   });
 });

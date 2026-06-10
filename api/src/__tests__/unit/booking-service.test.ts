@@ -25,6 +25,14 @@ vi.mock('../../services/bot-config.service', () => ({
   getBotConfigForSession: (...args: unknown[]) => mockGetBotConfigForSession(...args),
 }));
 
+// The service-boundary gate (D7) resolves entitlements; stub it here so these
+// dispatcher tests stay DB-free. The gate's own deny behavior is covered by
+// the entitlement contract tests.
+const mockRequireFeature = vi.fn().mockResolvedValue(undefined);
+vi.mock('../../billing/enforce', () => ({
+  requireFeature: (...args: unknown[]) => mockRequireFeature(...args),
+}));
+
 // Cal.com is shelved — the service dispatches every operation to the internal
 // provider. Mock it so these tests verify routing (resolve context → dispatch),
 // not the slot-engine internals (covered by the internal-provider unit tests).
@@ -53,6 +61,8 @@ import {
   createBooking,
   rescheduleBooking,
   cancelBooking,
+  adminCancelBooking,
+  adminAcceptRequest,
 } from '../../n8n/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -77,8 +87,8 @@ describe('Booking Service (internal dispatcher)', () => {
   describe('resolveContext (via public functions)', () => {
     it('throws SESSION_NOT_FOUND when the session does not exist', async () => {
       mockSessionFindOne.mockResolvedValue(null);
-      await expect(listBookings(VALID_UUID, 'a@b.com')).rejects.toBeInstanceOf(BookingError);
-      await expect(listBookings(VALID_UUID, 'a@b.com')).rejects.toMatchObject({
+      await expect(listBookings('agent', VALID_UUID, 'a@b.com')).rejects.toBeInstanceOf(BookingError);
+      await expect(listBookings('agent', VALID_UUID, 'a@b.com')).rejects.toMatchObject({
         code: 'SESSION_NOT_FOUND',
       });
     });
@@ -86,7 +96,7 @@ describe('Booking Service (internal dispatcher)', () => {
     it('throws TENANT_NOT_FOUND when the tenant does not exist', async () => {
       mockSessionFindOne.mockResolvedValue({ id: VALID_UUID, tenantId: TENANT_ID });
       mockTenantFindOne.mockResolvedValue(null);
-      await expect(listBookings(VALID_UUID, 'a@b.com')).rejects.toMatchObject({
+      await expect(listBookings('agent', VALID_UUID, 'a@b.com')).rejects.toMatchObject({
         code: 'TENANT_NOT_FOUND',
       });
     });
@@ -99,7 +109,7 @@ describe('Booking Service (internal dispatcher)', () => {
       setupValidContext();
       internalMethods.listBookings.mockResolvedValue(['ok']);
 
-      const res = await listBookings(VALID_UUID, 'a@b.com');
+      const res = await listBookings('agent', VALID_UUID, 'a@b.com');
 
       expect(res).toEqual(['ok']);
       expect(internalMethods.listBookings).toHaveBeenCalledWith(
@@ -119,7 +129,7 @@ describe('Booking Service (internal dispatcher)', () => {
       });
       internalMethods.checkAvailability.mockResolvedValue({ slots: [] });
 
-      await checkAvailability(VALID_UUID, '2026-04-01', '2026-04-02');
+      await checkAvailability('agent', VALID_UUID, '2026-04-01', '2026-04-02');
 
       expect(internalMethods.checkAvailability).toHaveBeenCalledWith(
         expect.any(Object),
@@ -134,7 +144,7 @@ describe('Booking Service (internal dispatcher)', () => {
       setupValidContext();
       internalMethods.checkAvailability.mockResolvedValue({ slots: [] });
 
-      const res = await checkAvailability(VALID_UUID, '2026-04-01', '2026-04-02');
+      const res = await checkAvailability('agent', VALID_UUID, '2026-04-01', '2026-04-02');
 
       expect(res).toEqual({ slots: [] });
       expect(internalMethods.checkAvailability).toHaveBeenCalledWith(
@@ -151,7 +161,7 @@ describe('Booking Service (internal dispatcher)', () => {
       internalMethods.createBooking.mockResolvedValue({ success: true });
       const attendee = { name: 'Alice', email: 'alice@test.com' };
 
-      const res = await createBooking(VALID_UUID, 'key-1', '2026-04-01T10:00:00Z', attendee, 'notes');
+      const res = await createBooking('agent', VALID_UUID, 'key-1', '2026-04-01T10:00:00Z', attendee, 'notes');
 
       expect(res).toEqual({ success: true });
       expect(internalMethods.createBooking).toHaveBeenCalledWith(
@@ -170,7 +180,7 @@ describe('Booking Service (internal dispatcher)', () => {
       setupValidContext();
       internalMethods.rescheduleBooking.mockResolvedValue({ success: true });
 
-      await rescheduleBooking(VALID_UUID, 'b-1', '2026-04-02T10:00:00Z');
+      await rescheduleBooking('agent', VALID_UUID, 'b-1', '2026-04-02T10:00:00Z');
 
       expect(internalMethods.rescheduleBooking).toHaveBeenCalledWith(
         expect.any(Object),
@@ -183,13 +193,105 @@ describe('Booking Service (internal dispatcher)', () => {
       setupValidContext();
       internalMethods.cancelBooking.mockResolvedValue({ success: true });
 
-      await cancelBooking(VALID_UUID, 'b-1', 'No reason');
+      await cancelBooking('agent', VALID_UUID, 'b-1', 'No reason');
 
       expect(internalMethods.cancelBooking).toHaveBeenCalledWith(
         expect.any(Object),
         'b-1',
         'No reason',
       );
+    });
+  });
+
+  // ── boundary gate (plan D7/D8) ─────────────────────────────────────────
+
+  describe('bookings feature gate at the service boundary', () => {
+    it('enforces the gate for agent / internal-n8n callers', async () => {
+      setupValidContext();
+      internalMethods.checkAvailability.mockResolvedValue({ slots: [] });
+
+      await checkAvailability('agent', VALID_UUID, '2026-04-01', '2026-04-02');
+      expect(mockRequireFeature).toHaveBeenCalledWith(TENANT_ID, 'bookings', 'plan_limit_bookings');
+
+      mockRequireFeature.mockClear();
+      internalMethods.listBookings.mockResolvedValue([]);
+      await listBookings('internal-n8n', VALID_UUID, 'a@b.com');
+      expect(mockRequireFeature).toHaveBeenCalledWith(TENANT_ID, 'bookings', 'plan_limit_bookings');
+    });
+
+    it('a denied gate propagates and the provider is never reached', async () => {
+      setupValidContext();
+      mockRequireFeature.mockRejectedValueOnce(Object.assign(new Error('plan'), { statusCode: 402 }));
+
+      await expect(createBooking('internal-n8n', VALID_UUID, 'k', 't', { name: 'A' })).rejects.toMatchObject({
+        statusCode: 402,
+      });
+      expect(internalMethods.createBooking).not.toHaveBeenCalled();
+    });
+
+    it('public-manage with a MATCHING verified booking id is exempt (D8)', async () => {
+      setupValidContext();
+      internalMethods.cancelBooking.mockResolvedValue({ success: true });
+
+      await cancelBooking(
+        { kind: 'public-manage', verifiedBookingId: 'b-1' },
+        VALID_UUID,
+        'b-1',
+        'Customer cancelled',
+      );
+
+      expect(mockRequireFeature).not.toHaveBeenCalled();
+      expect(internalMethods.cancelBooking).toHaveBeenCalled();
+    });
+
+    it('public-manage with a MISMATCHED id gets the full gate', async () => {
+      setupValidContext();
+      internalMethods.cancelBooking.mockResolvedValue({ success: true });
+
+      await cancelBooking(
+        { kind: 'public-manage', verifiedBookingId: 'b-OTHER' },
+        VALID_UUID,
+        'b-1',
+      );
+
+      expect(mockRequireFeature).toHaveBeenCalledWith(TENANT_ID, 'bookings', 'plan_limit_bookings');
+    });
+
+    it('public-manage is never exempt for creation', async () => {
+      setupValidContext();
+      internalMethods.createBooking.mockResolvedValue({ success: true });
+
+      await createBooking(
+        { kind: 'public-manage', verifiedBookingId: 'b-1' },
+        VALID_UUID,
+        'k',
+        '2026-04-01T10:00:00Z',
+        { name: 'A' },
+      );
+
+      // createBooking passes no bookingId to the gate, so the claim cannot match.
+      expect(mockRequireFeature).toHaveBeenCalledWith(TENANT_ID, 'bookings', 'plan_limit_bookings');
+    });
+
+    it('owner actions (accept) are never public-manage-exempt', async () => {
+      // adminAcceptRequest hits the gate BEFORE loading the booking, so a
+      // denied/checked gate is observable without scripting the admin repos.
+      mockRequireFeature.mockRejectedValueOnce(Object.assign(new Error('plan'), { statusCode: 402 }));
+      await expect(
+        adminAcceptRequest({ kind: 'public-manage', verifiedBookingId: 'b-1' }, TENANT_ID, 'b-1'),
+      ).rejects.toMatchObject({ statusCode: 402 });
+    });
+
+    it('admin cancel via public-manage exemption skips the gate with a matching id', async () => {
+      // Gate is checked first; with the exemption it resolves without touching
+      // requireFeature (booking loading then fails on the unscripted repo,
+      // which is fine — we only assert the gate behavior).
+      await adminCancelBooking(
+        { kind: 'public-manage', verifiedBookingId: 'b-1' },
+        TENANT_ID,
+        'b-1',
+      ).catch(() => undefined);
+      expect(mockRequireFeature).not.toHaveBeenCalled();
     });
   });
 });

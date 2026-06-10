@@ -21,7 +21,7 @@ import { logger } from '../utils/logger';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { widgetVersionHash } from '../widget/widget-version';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
-import { entitlementsFor } from '../billing/entitlements';
+import { getEntitlements } from '../billing/entitlements';
 import { Not } from 'typeorm';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
@@ -139,10 +139,7 @@ router.get(
     // malformed DB row defaults to showing the attribution.
     let hideAttribution = false;
     try {
-      hideAttribution = entitlementsFor(tenant.tier, {
-        maxSessions: null,
-        dailyLlmCallLimit: null,
-      }).features.hideWidgetAttribution;
+      hideAttribution = (await getEntitlements(tenant.id)).features.hideWidgetAttribution;
     } catch {
       hideAttribution = false;
     }

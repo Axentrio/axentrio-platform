@@ -11,9 +11,9 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
 import { cached } from '../utils/cache';
-import { Tenant, TenantTier } from '../database/entities/Tenant';
+import { Tenant } from '../database/entities/Tenant';
 import { BotSettings } from '../database/entities/Bot';
-import { isCalcomAvailableForTier } from '../billing/calcom-access';
+import { getEntitlements } from '../billing/entitlements';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
@@ -158,24 +158,28 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
 /**
  * Build the integrations slice of the n8n outbound payload from the bot's
  * settings. Multi-bot Phase 4 (#16d): reads from `BotSettings` only — no
- * tenant fall-through. Tier gate is the canonical egress chokepoint: stored
- * Cal.com creds are inert config that re-activates on upgrade, so a tenant
- * who downgrades stops sending Cal.com to n8n without any DB cleanup.
+ * tenant fall-through. The entitlement gate is the canonical egress
+ * chokepoint: a tenant who loses the feature stops sending the booking block
+ * to n8n without any DB cleanup.
  */
-function buildIntegrationsConfig(
+async function buildIntegrationsConfig(
   botSettings: BotSettings,
-  tier: TenantTier,
-): IntegrationsConfig | undefined {
+  tenantId: string,
+): Promise<IntegrationsConfig | undefined> {
   const timezone = botSettings.businessHours?.timezone || 'UTC';
 
-  // Cal.com is shelved — the in-house scheduler is the only booking backend,
-  // gated by the calendar-integrations entitlement (Pro+). The n8n flow is
-  // provider-agnostic: it only needs the booking block (under the `calcom` key)
-  // to activate the booking prompt + tools; those tools hit /internal/booking/*
-  // which dispatch to the internal provider. Per-slot config lives in the
-  // event_types/availability_rules tables, validated at booking time, so here
-  // we gate on tier only.
-  if (!isCalcomAvailableForTier(tier)) return undefined;
+  // Gated on the resolved `bookings` feature (plan D6/D10/D11) — resolved
+  // entitlements, not raw tier, so per-tenant overrides and the free/
+  // non-active deny apply. The `calcom` key name is load-bearing for external
+  // custom n8n workflows and is kept verbatim; the n8n flow is
+  // provider-agnostic and only needs the block to activate the booking
+  // prompt + tools, which hit /internal/booking/* (internal provider).
+  // Fails closed on resolution errors.
+  try {
+    if (!(await getEntitlements(tenantId)).features.bookings) return undefined;
+  } catch {
+    return undefined;
+  }
   return {
     calcom: {
       enabled: true,
@@ -355,7 +359,7 @@ export async function forwardMessageToN8n(
     },
     tenantConfig: buildTenantAiConfig(tenant.name, aiSettings),
     knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
-    integrations: buildIntegrationsConfig(botSettings, tenant.tier),
+    integrations: await buildIntegrationsConfig(botSettings, tenant.id),
     context: {
       previousMessages: await getConversationHistoryForPayload(session.id),
     },

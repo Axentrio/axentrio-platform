@@ -54,10 +54,21 @@ export async function lockTenantEntitlements(
   if (!tenant) {
     throw new ApiError(`Tenant ${tenantId} not found`, 404, 'tenant_not_found');
   }
-  const entitlements = entitlementsFor(tenant.tier, {
-    maxSessions: tenant.maxSessions ?? null,
-    dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
-  });
+  const entitlements = entitlementsFor(
+    tenant.tier,
+    {
+      maxSessions: tenant.maxSessions ?? null,
+      dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+    },
+    // Count gates only read .limits (feature overrides can't touch limits),
+    // but resolve with full feature context so the returned .features is
+    // never a stale tier-only view for any caller that inspects it.
+    {
+      status: tenant.status,
+      featureOverrides: tenant.featureOverrides ?? {},
+      tenantId,
+    },
+  );
   return { tenant, entitlements };
 }
 

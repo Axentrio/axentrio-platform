@@ -19,7 +19,7 @@ import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
-import { resolveCalendarProvider, providerFor } from './calendar-provider';
+import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
 import { buildBookingEventContent } from '../n8n/booking-providers/booking-content';
 import { buildManageUrl } from './booking-token';
 
@@ -33,6 +33,7 @@ let running = false;
 
 interface ClaimedRow {
   id: string;
+  tenant_id: string;
   bot_id: string;
   status: string;
   start_utc: string;
@@ -69,7 +70,7 @@ export async function reconcilePendingBookingSyncs(): Promise<void> {
            LIMIT ${BATCH}
            FOR UPDATE SKIP LOCKED
         )
-      RETURNING id, bot_id, status, start_utc, end_utc, event_type_id, sync_attempts, updated_at::text AS updated_at`
+      RETURNING id, tenant_id, bot_id, status, start_utc, end_utc, event_type_id, sync_attempts, updated_at::text AS updated_at`
     );
     if (!claimed.length) return;
     logger.info('[Booking] reconciler claimed pending syncs', { count: claimed.length });
@@ -105,6 +106,13 @@ async function canonicalRef(botId: string, bookingId: string): Promise<BookingRe
 }
 
 async function processOne(row: ClaimedRow): Promise<void> {
+  // Plan D9: no external calendar calls when sync is entitlement-disabled.
+  // One check here covers every reconciler path (ref-routed deletes/updates
+  // included). Terminal (not clear) so sync_last_error records why the mirror
+  // is suspended; re-enabling the entitlement resumes future syncs.
+  if (!(await isCalendarSyncAllowed(row.tenant_id))) {
+    return terminal(row, 'calendar sync disabled by plan entitlements');
+  }
   const refRepo = AppDataSource.getRepository(BookingReference);
   const ref = await canonicalRef(row.bot_id, row.id);
 

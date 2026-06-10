@@ -44,6 +44,18 @@ _Avoid_: verdict, analysis, review.
 A Tenant's subscription level, stored on `Tenant.tier`. Marketed values are **Essential**, **Pro**, **Enterprise**. The DB enum additionally contains **`free`** as an internal-only cancellation terminal state — never offered for signup, never shown in upgrade UI, never sold. Cancellation lands a Tenant on `free`; reactivation moves them back to a marketed tier via Stripe.
 _Avoid_: plan, subscription level, account type (use Tier).
 
+**Feature**:
+A sellable on/off capability defined in the plan catalog (e.g. bookings, crm). A Tenant's effective Features are the Tier's defaults adjusted by any Feature Overrides. Features answer "is this Tenant entitled to this capability?"
+_Avoid_: flag, entitlement (informally OK, but the catalog term is Feature), toggle, module (a Module is a different thing).
+
+**Feature Override**:
+An explicit per-Tenant admin exception that turns a single Feature on or off regardless of Tier (e.g. a comped capability, or one disabled by contract). Overrides persist across Tier changes until removed, and are entirely ignored on the `free` cancellation sink — cancellation is an absolute deny.
+_Avoid_: custom flag, tenant setting, exception (use Feature Override).
+
+**Module**:
+A deployable unit of Agent capability — the tools, prompt contribution, and optional config the Agent composes at runtime. Each Module has exactly one gate: **feature-gated** (active when the Tenant's effective Feature is on; e.g. Booking) or **enablement-gated** (bespoke per-Tenant work, active only when explicitly enabled for that Tenant). No Module is active for a non-billable Tenant (`free` Tier or non-active status).
+_Avoid_: plugin, extension, skill (Agent skills are a different existing concept), feature (a Feature is the entitlement, a Module is the capability).
+
 **Lead**:
 A contact captured during a ChatSession by the agent's `capture_lead` tool. Promoted to its own entity (rather than ChatSession metadata) at Essential tier. Holds `name`, `email`, `normalizedEmail`, `phone`, `source`, `status`, `notes`, `capturedAt`, `customFields` (Pro+ tier), and optional `assignedUserId` / `score` / `scoreReason` (Pro+/Enterprise). Upserted by `(tenantId, normalizedEmail)` so a returning visitor doesn't create duplicates. The sidebar surface is **Leads** (the things); the agent-behaviour setting/toggle is called **Lead Capture**.
 _Avoid_: contact, prospect, customer, visitor (use Lead).

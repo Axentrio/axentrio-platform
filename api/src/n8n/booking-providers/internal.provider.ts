@@ -31,7 +31,12 @@ import { computeSlots, BusyInterval } from './slot-engine';
 import { buildBookingEventContent } from './booking-content';
 import { sendBookingEmail, sendRequestNotificationEmail } from './booking-email';
 import { scheduleReminders, cancelReminders } from './reminders';
-import { resolveCalendarProvider, providerFor } from '../../scheduler/calendar-provider';
+import {
+  resolveCalendarProvider,
+  providerFor,
+  isCalendarSyncAllowed,
+  resolveStoredCalendarIdentity,
+} from '../../scheduler/calendar-provider';
 import { BookingReference } from '../../database/entities/BookingReference';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
@@ -312,10 +317,12 @@ export class InternalProvider implements BookingProvider {
    * connection) — never `gcal:primary`, which would collide globally.
    */
   private async calendarKey(ctx: BookingContext): Promise<string> {
-    const provider = await resolveCalendarProvider(ctx.bot.id);
-    if (!provider) return conflictKeyFor(ctx.bot.id, null);
-    const identity = await provider.resolveIdentity(ctx.bot.id);
-    return conflictKeyFor(ctx.bot.id, identity, provider.providerType);
+    // DB-only stored identity (plan D9): conflict keys keep the connected
+    // calendar's identity even when external sync is entitlement-disabled, so
+    // existing conflict records never silently weaken to bot-scoped keys.
+    const stored = await resolveStoredCalendarIdentity(ctx.bot.id);
+    if (!stored) return conflictKeyFor(ctx.bot.id, null);
+    return conflictKeyFor(ctx.bot.id, stored.identity, stored.providerType);
   }
 
   async checkAvailability(
@@ -1090,6 +1097,10 @@ export class InternalProvider implements BookingProvider {
     end: Date,
     timezone: string
   ): Promise<void> {
+    // Plan D9: no external calendar calls when sync is entitlement-disabled.
+    // The booking itself is already updated internally; the mirror is
+    // intentionally suspended (re-enables with the entitlement).
+    if (!(await isCalendarSyncAllowed(ctx.tenant.id))) return;
     const refRepo = AppDataSource.getRepository(BookingReference);
     const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     try {
@@ -1149,6 +1160,8 @@ export class InternalProvider implements BookingProvider {
   }
 
   private async syncCalendarCancel(ctx: BookingContext, bookingId: string): Promise<void> {
+    // Plan D9: no external calendar calls when sync is entitlement-disabled.
+    if (!(await isCalendarSyncAllowed(ctx.tenant.id))) return;
     const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     if (!ref) return;
     try {

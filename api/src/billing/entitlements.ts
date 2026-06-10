@@ -7,9 +7,11 @@
 
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
+import type { FeatureOverride, TenantStatus } from '../database/entities/Tenant';
 import { cached, invalidate } from '../utils/cache';
+import { logger } from '../utils/logger';
 import { PLANS } from './plans';
-import type { Entitlements, InternalPlanId } from './types';
+import type { Entitlements, FeatureKey, InternalPlanId } from './types';
 
 /**
  * Entitlements are read on the hot path (feature gates + LLM rate limit run on
@@ -43,17 +45,25 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
   return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
-      select: ['id', 'tier', 'maxSessions', 'dailyLlmCallLimit'],
+      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides'],
     });
 
     if (!tenant) {
       throw new TenantNotFoundError(tenantId);
     }
 
-    return entitlementsFor(tenant.tier, {
-      maxSessions: tenant.maxSessions ?? null,
-      dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
-    });
+    return entitlementsFor(
+      tenant.tier,
+      {
+        maxSessions: tenant.maxSessions ?? null,
+        dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
+      },
+      {
+        status: tenant.status,
+        featureOverrides: tenant.featureOverrides ?? {},
+        tenantId,
+      },
+    );
   });
 }
 
@@ -69,12 +79,29 @@ export async function invalidateEntitlements(tenantId: string): Promise<void> {
 /**
  * Pure resolver — useful for tests and synchronous code paths that already
  * have the tier in hand.
+ *
+ * `featureCtx` carries the per-tenant feature-override state:
+ *   - When `tier === 'free'` or `status !== 'active'`, ALL boolean features
+ *     resolve `false` (absolute deny — D2). Overrides are ignored entirely.
+ *   - Otherwise each well-formed override entry's `value` is merged over a
+ *     CLONE of the plan's features. Unknown keys and non-boolean values are
+ *     ignored with a warning (manual JSONB drift must never throw or apply).
+ *   - Limits are never affected by feature overrides (D3).
+ *
+ * Callers without `featureCtx` (tests, pure tier math) get plan defaults with
+ * an implicit `active` status and no overrides.
  */
 export function entitlementsFor(
   tier: InternalPlanId,
   overrides: { maxSessions: number | null; dailyLlmCallLimit: number | null } = {
     maxSessions: null,
     dailyLlmCallLimit: null,
+  },
+  featureCtx?: {
+    status?: TenantStatus;
+    featureOverrides?: Record<string, FeatureOverride>;
+    /** Only used to make warnings attributable. */
+    tenantId?: string;
   },
 ): Entitlements {
   const plan = PLANS[tier];
@@ -88,10 +115,40 @@ export function entitlementsFor(
     if (overrides.dailyLlmCallLimit !== null) limits.dailyLlmCalls = overrides.dailyLlmCallLimit;
   }
 
+  // Clone before any mutation — plan.features is the shared catalog object;
+  // writing through it would leak one tenant's state into every tenant on
+  // the tier.
+  const features = { ...plan.features };
+
+  const billable = tier !== 'free' && (featureCtx?.status ?? 'active') === 'active';
+  if (!billable) {
+    for (const key of Object.keys(features) as FeatureKey[]) {
+      features[key] = false;
+    }
+  } else if (featureCtx?.featureOverrides) {
+    for (const [key, entry] of Object.entries(featureCtx.featureOverrides)) {
+      if (!(key in features)) {
+        logger.warn('entitlementsFor: ignoring unknown feature override key', {
+          tenantId: featureCtx.tenantId,
+          key,
+        });
+        continue;
+      }
+      if (typeof entry?.value !== 'boolean') {
+        logger.warn('entitlementsFor: ignoring malformed feature override', {
+          tenantId: featureCtx.tenantId,
+          key,
+        });
+        continue;
+      }
+      features[key as FeatureKey] = entry.value;
+    }
+  }
+
   return {
     planId: plan.id,
     limits,
-    features: plan.features,
+    features,
     support: plan.support,
   };
 }

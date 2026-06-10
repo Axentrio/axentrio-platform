@@ -42,6 +42,20 @@ vi.mock('../../utils/logger', () => ({
   },
 }));
 
+// Booking tools now gate on resolved entitlements (getEntitlements hits the
+// DB + cache). Resolve through the real pure resolver against each test
+// tenant's tier so the gate semantics stay the plan catalog's, not a stub's.
+const tierById = vi.hoisted(() => new Map<string, string>());
+vi.mock('../../billing/entitlements', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../billing/entitlements')>();
+  return {
+    ...actual,
+    getEntitlements: vi.fn(async (tenantId: string) =>
+      actual.entitlementsFor((tierById.get(tenantId) ?? 'free') as never)
+    ),
+  };
+});
+
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { ToolRegistry } from '../../agent/tool-registry';
@@ -74,6 +88,7 @@ describe('ToolRegistry', () => {
         integrations: { calcom: { apiKey: 'enc_key', eventTypeId: 1 } },
       },
     };
+    tierById.set(tenant.id, tenant.tier);
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('kb_search');
@@ -91,6 +106,7 @@ describe('ToolRegistry', () => {
     // eligible-tier tenant gets booking tools without any stored integration.
     const registry = new ToolRegistry();
     const tenant = { id: 'tenant-2', tier: 'pro', settings: { ai: { enabled: true } } };
+    tierById.set(tenant.id, tenant.tier);
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('kb_search');
@@ -110,6 +126,7 @@ describe('ToolRegistry', () => {
       tier: 'pro',
       settings: { ai: { enabled: true }, integrations: { provider: 'internal' } },
     };
+    tierById.set(tenant.id, tenant.tier);
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('check_availability');
@@ -125,6 +142,7 @@ describe('ToolRegistry', () => {
       tier: 'free',
       settings: { ai: { enabled: true }, integrations: { provider: 'internal' } },
     };
+    tierById.set(tenant.id, tenant.tier);
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain('check_availability');
@@ -140,6 +158,7 @@ describe('ToolRegistry', () => {
       tier: 'essential',
       settings: { ai: { enabled: true }, integrations: { calcom: { apiKey: 'enc', eventTypeId: 1 } } },
     };
+    tierById.set(tenant.id, tenant.tier);
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain('check_availability');

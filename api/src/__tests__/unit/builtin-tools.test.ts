@@ -140,7 +140,7 @@ describe('CheckAvailabilityTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(slots);
-    expect(mockCheckAvailability).toHaveBeenCalledWith('sess-1', '2026-04-01', '2026-04-07', undefined, undefined);
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined);
   });
 
   it('execute returns success=false with error on failure', async () => {
@@ -178,6 +178,7 @@ describe('CreateBookingTool', () => {
     );
 
     expect(mockCreateBooking).toHaveBeenCalledWith(
+      'agent',
       'sess-1',
       'create_booking:sess-1:default:2026-04-01T10:00:00Z',
       '2026-04-01T10:00:00Z',
@@ -199,6 +200,7 @@ describe('CreateBookingTool', () => {
     );
 
     expect(mockCreateBooking).toHaveBeenCalledWith(
+      'agent',
       'sess-2',
       'create_booking:sess-2:default:2026-04-02T09:00:00Z',
       '2026-04-02T09:00:00Z',
@@ -241,7 +243,7 @@ describe('ListBookingsTool', () => {
     const result = await tool.execute({ attendeeEmail: 'user@test.com' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(mockListBookings).toHaveBeenCalledWith('sess-3', 'user@test.com');
+    expect(mockListBookings).toHaveBeenCalledWith('agent', 'sess-3', 'user@test.com');
   });
 });
 
@@ -261,7 +263,7 @@ describe('RescheduleBookingTool', () => {
     const result = await tool.execute({ bookingId: 'bk-3', newStartTime: '2026-04-10T14:00:00Z' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(mockRescheduleBooking).toHaveBeenCalledWith('sess-4', 'bk-3', '2026-04-10T14:00:00Z');
+    expect(mockRescheduleBooking).toHaveBeenCalledWith('agent', 'sess-4', 'bk-3', '2026-04-10T14:00:00Z');
   });
 });
 
@@ -281,7 +283,7 @@ describe('CancelBookingTool', () => {
     const result = await tool.execute({ bookingId: 'bk-4', reason: 'Not needed' }, ctx);
 
     expect(result.success).toBe(true);
-    expect(mockCancelBooking).toHaveBeenCalledWith('sess-5', 'bk-4', 'Not needed');
+    expect(mockCancelBooking).toHaveBeenCalledWith('agent', 'sess-5', 'bk-4', 'Not needed');
   });
 });
 

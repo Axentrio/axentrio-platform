@@ -1,9 +1,10 @@
 /**
  * Copilot tool: getEntitlements
  *
- * Returns the current tenant's feature flags. The LLM uses this to
- * answer questions like:
- *   - "Can I connect Cal.com?" → check `features.calendarIntegrations`
+ * Returns the current tenant's RESOLVED feature flags (tier ⊕ per-tenant
+ * overrides ⊕ status deny). The LLM uses this to answer questions like:
+ *   - "Can my chatbot take bookings?" → check `features.bookings`
+ *   - "Can I connect my Google/Outlook calendar?" → check `features.calendarIntegrations`
  *   - "Why can't I use custom widget colours?" → check `features.customWidgetAppearance`
  *
  * Only the `features` slice is exposed. Limits (max sessions, daily
@@ -11,8 +12,7 @@
  * metrics, not admin-facing facts, and the prompt template can lean
  * on getTenantSummary + plan docs instead.
  */
-import { Tenant } from '../../database/entities/Tenant';
-import { entitlementsFor } from '../../billing/entitlements';
+import { getEntitlements as resolveEntitlements } from '../../billing/entitlements';
 import type { CopilotTool, CopilotToolContext } from './types';
 
 export interface EntitlementsResult {
@@ -33,22 +33,11 @@ export interface EntitlementsResult {
 export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsResult> = {
   name: 'getEntitlements',
   description:
-    'Return the current tenant\'s feature flags as a flat boolean map: bookings, calendarIntegrations, hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox.',
+    'Return the current tenant\'s resolved feature flags as a flat boolean map: bookings (the chatbot can take appointments via the built-in scheduler, and the Bookings page is available), calendarIntegrations (the tenant can connect an external Google/Outlook calendar so bookings are mirrored there), hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox. Flags reflect the plan tier plus any admin-set per-tenant overrides.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<EntitlementsResult> {
-    const tenant = await ctx.manager.findOne(Tenant, {
-      where: { id: ctx.tenantId },
-      select: ['id', 'tier', 'maxSessions', 'dailyLlmCallLimit'],
-    });
-    if (!tenant) {
-      throw new Error(`getEntitlements: tenant ${ctx.tenantId} not found`);
-    }
-
-    const e = entitlementsFor(tenant.tier, {
-      maxSessions: tenant.maxSessions ?? null,
-      dailyLlmCallLimit: tenant.dailyLlmCallLimit ?? null,
-    });
+    const e = await resolveEntitlements(ctx.tenantId);
 
     return {
       features: {

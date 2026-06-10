@@ -131,6 +131,13 @@ export class BillingProviderError extends Error {
  * cancellation sink, never a marketed plan. `'sla'` removed because
  * Enterprise support is sold per-deal alongside the sales-led contract.
  */
+/**
+ * Canonical key set for boolean feature flags — the only keys a per-tenant
+ * feature override may target. Derived from the entitlement shape so the
+ * catalog, overrides, and gates can never disagree on what a "feature" is.
+ */
+export type FeatureKey = keyof Entitlements['features'];
+
 export interface Entitlements {
   planId: InternalPlanId;
   limits: {

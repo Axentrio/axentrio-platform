@@ -92,7 +92,9 @@ export async function postCancel(req: Request, res: Response): Promise<void> {
     const { bookingId } = verifyBookingToken(String(req.body?.token ?? ''));
     const view = await getManageBooking(bookingId);
     if (!view) return errorPage(res, 'We couldn’t find this appointment.');
-    await adminCancelBooking(view.booking.tenantId, bookingId);
+    // D8: token-verified self-service management of an existing appointment —
+    // exempt from the bookings feature gate (the verified id IS the proof).
+    await adminCancelBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId);
     res.status(200).send(
       page(
         'Appointment cancelled',
@@ -118,7 +120,13 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
 
     const start = new Date();
     const end = new Date(start.getTime() + 30 * 24 * 3600_000);
-    const { slots } = await adminAvailability(booking.tenantId, start.toISOString(), end.toISOString());
+    // D8: slot lookup inside the token-verified reschedule flow.
+    const { slots } = await adminAvailability(
+      { kind: 'public-manage', verifiedBookingId: bookingId },
+      booking.tenantId,
+      start.toISOString(),
+      end.toISOString()
+    );
 
     // Group slots by day in the owner's timezone.
     const groups = new Map<string, string[]>();
@@ -171,7 +179,8 @@ export async function postReschedule(req: Request, res: Response): Promise<void>
     const newStartTime = String(req.body?.newStartTime ?? '');
     const view = await getManageBooking(bookingId);
     if (!view) return errorPage(res, 'We couldn’t find this appointment.');
-    await adminRescheduleBooking(view.booking.tenantId, bookingId, newStartTime);
+    // D8: token-verified self-service management of an existing appointment.
+    await adminRescheduleBooking({ kind: 'public-manage', verifiedBookingId: bookingId }, view.booking.tenantId, bookingId, newStartTime);
     const updated = await getManageBooking(bookingId);
     const when = updated ? whenLabel(updated.booking.startUtc.toISOString(), updated.timezone) : '';
     res.status(200).send(

@@ -88,8 +88,8 @@ async function downloadFile(fileSessionId: string): Promise<void> {
 export default function Bookings() {
   const { t } = useTranslation();
   const hasBookings = useHasFeature('bookings');
-  const { data: config } = useSchedulerConfig();
-  const { data: servicesData, isLoading: servicesLoading } = useServices();
+  const { data: config } = useSchedulerConfig(hasBookings);
+  const { data: servicesData, isLoading: servicesLoading } = useServices(hasBookings);
 
   if (!hasBookings) {
     return (

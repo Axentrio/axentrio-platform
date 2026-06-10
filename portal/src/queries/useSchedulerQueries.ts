@@ -94,10 +94,14 @@ export interface UpdateSchedulerPayload {
 
 const schedulerKey = ['scheduler', 'config'] as const;
 
-export function useSchedulerConfig() {
+export function useSchedulerConfig(enabled = true) {
   return useQuery({
     queryKey: schedulerKey,
     queryFn: async () => (await api.get<Any>('/scheduler/config')) as SchedulerConfig,
+    // Locked tenants render a preview without firing the (now feature-gated)
+    // endpoint — otherwise the mount fires a guaranteed 402 before the
+    // LockedPreview early-return.
+    enabled,
   });
 }
 
@@ -121,10 +125,11 @@ export function useUpdateSchedulerConfig() {
 
 const servicesKey = ['scheduler', 'services'] as const;
 
-export function useServices() {
+export function useServices(enabled = true) {
   return useQuery({
     queryKey: servicesKey,
     queryFn: async () => (await api.get<Any>('/scheduler/services')) as { services: Service[] },
+    enabled,
   });
 }
 

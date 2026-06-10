@@ -43,7 +43,12 @@ function asApiError(err: unknown): never {
   throw err;
 }
 
-const CALENDAR_FEATURE_ERROR = 'plan_feature_calendar_integrations';
+/**
+ * Single booking gate (plan D6/D7): every scheduler route checks the
+ * `bookings` feature. `calendarIntegrations` now means external calendar
+ * sync only and is never read here.
+ */
+const BOOKINGS_FEATURE_ERROR = 'plan_limit_bookings';
 
 /** Exported for the P4 preset CI invariant test (intra-preset slug-collision check). */
 export function slugify(name: string): string {
@@ -118,6 +123,7 @@ async function readConfig(tenantId: string) {
 
 export async function getSchedulerConfig(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   sendSuccess(res, await readConfig(tenantId));
 }
 
@@ -125,11 +131,10 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   const tenantId = (req as { tenantId?: string }).tenantId!;
   const data = updateSchedulerSchema.parse(req.body);
 
-  // Cal.com is shelved — the internal scheduler is the only backend and stays
-  // gated by the same Pro+ entitlement, so every config write (provider, event
-  // type, or availability) requires it. Closes the path where a sub-Pro tenant
-  // could persist scheduler config by omitting `provider` from the payload.
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  // Every config write (provider, event type, or availability) requires the
+  // bookings feature. Closes the path where an unentitled tenant could persist
+  // scheduler config by omitting `provider` from the payload.
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { bot, settings } = await getAnchorBotConfig(tenantId);
 
   if (data.provider) {
@@ -164,6 +169,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
 export async function listServices(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   const services = await AppDataSource.getRepository(ServiceType).find({
     where: { botId: bot.id },
@@ -204,7 +210,7 @@ async function createServiceRow(
 
 export async function createService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceCreateSchema.parse(req.body);
   const { bot } = await getAnchorBotConfig(tenantId);
   const { intakeQuestions, ...rest } = data;
@@ -220,7 +226,7 @@ export async function createService(req: Request, res: Response): Promise<void> 
 
 export async function updateService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceUpdateSchema.parse(req.body);
   const { bot } = await getAnchorBotConfig(tenantId);
   const repo = AppDataSource.getRepository(ServiceType);
@@ -238,7 +244,7 @@ export async function updateService(req: Request, res: Response): Promise<void> 
 /** Soft-deactivate (keep the row so existing bookings keep their service context). */
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { bot } = await getAnchorBotConfig(tenantId);
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
@@ -253,7 +259,7 @@ export async function deleteService(req: Request, res: Response): Promise<void> 
 /** List presets for the picker (entitlement-gated read). */
 export async function listPresets(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   sendSuccess(res, { presets: listPresetSummaries() });
 }
 
@@ -265,7 +271,7 @@ export async function listPresets(req: Request, res: Response): Promise<void> {
  */
 export async function applyPreset(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'calendarIntegrations', CALENDAR_FEATURE_ERROR);
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const preset = findPreset(req.params.key);
   if (!preset) throw new ApiError('Preset not found', 404, 'PRESET_NOT_FOUND');
   const { bot } = await getAnchorBotConfig(tenantId);
@@ -322,7 +328,7 @@ export async function listBookings(req: Request, res: Response): Promise<void> {
     // Server-side entitlement gate: this endpoint returns attendee PII (email, notes,
     // requests) — don't rely on the portal's client-side feature gate alone.
     await requireFeature(tenantId, 'bookings', 'plan_limit_bookings');
-    sendSuccess(res, await adminListBookings(tenantId, scope, limit, offset));
+    sendSuccess(res, await adminListBookings('scheduler-admin', tenantId, scope, limit, offset));
   } catch (err) {
     asApiError(err);
   }
@@ -330,9 +336,10 @@ export async function listBookings(req: Request, res: Response): Promise<void> {
 
 export async function getBookingAvailability(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { startDate, endDate, serviceId, durationMin } = availabilityQuerySchema.parse(req.query);
   try {
-    sendSuccess(res, await adminAvailability(tenantId, startDate, endDate, serviceId, durationMin));
+    sendSuccess(res, await adminAvailability('scheduler-admin', tenantId, startDate, endDate, serviceId, durationMin));
   } catch (err) {
     asApiError(err);
   }
@@ -340,9 +347,10 @@ export async function getBookingAvailability(req: Request, res: Response): Promi
 
 export async function cancelBooking(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { reason } = cancelBookingBodySchema.parse(req.body ?? {});
   try {
-    sendSuccess(res, await adminCancelBooking(tenantId, req.params.id, reason));
+    sendSuccess(res, await adminCancelBooking('scheduler-admin', tenantId, req.params.id, reason));
   } catch (err) {
     asApiError(err);
   }
@@ -350,9 +358,10 @@ export async function cancelBooking(req: Request, res: Response): Promise<void> 
 
 export async function rescheduleBooking(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { newStartTime } = rescheduleBookingBodySchema.parse(req.body);
   try {
-    sendSuccess(res, await adminRescheduleBooking(tenantId, req.params.id, newStartTime));
+    sendSuccess(res, await adminRescheduleBooking('scheduler-admin', tenantId, req.params.id, newStartTime));
   } catch (err) {
     asApiError(err);
   }
@@ -361,8 +370,9 @@ export async function rescheduleBooking(req: Request, res: Response): Promise<vo
 /** Accept a request_created lead → confirm it (creates the calendar event + email). */
 export async function acceptRequest(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   try {
-    sendSuccess(res, await adminAcceptRequest(tenantId, req.params.id));
+    sendSuccess(res, await adminAcceptRequest('scheduler-admin', tenantId, req.params.id));
   } catch (err) {
     asApiError(err);
   }
@@ -371,9 +381,10 @@ export async function acceptRequest(req: Request, res: Response): Promise<void> 
 /** Decline a request_created lead → close it. */
 export async function declineRequest(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const { reason } = cancelBookingBodySchema.parse(req.body ?? {});
   try {
-    sendSuccess(res, await adminDeclineRequest(tenantId, req.params.id, reason));
+    sendSuccess(res, await adminDeclineRequest('scheduler-admin', tenantId, req.params.id, reason));
   } catch (err) {
     asApiError(err);
   }

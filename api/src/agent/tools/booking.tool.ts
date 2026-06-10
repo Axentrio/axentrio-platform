@@ -54,6 +54,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const result = await checkAvailability(
+        'agent',
         ctx.sessionId,
         args.startDate as string,
         args.endDate as string,
@@ -134,6 +135,7 @@ export class CreateBookingTool implements ToolAdapter {
       // to the same booking instead of inserting a duplicate (#35).
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}`;
       const result = await createBooking(
+        'agent',
         ctx.sessionId,
         idempotencyKey,
         args.startTime as string,
@@ -280,6 +282,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       // to the same request instead of inserting a duplicate (#35).
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
       const result = await requestBooking(
+        'agent',
         ctx.sessionId,
         idempotencyKey,
         args.preferredTime as string,
@@ -319,7 +322,7 @@ export class ListBookingsTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const result = await listBookings(ctx.sessionId, args.attendeeEmail as string);
+      const result = await listBookings('agent', ctx.sessionId, args.attendeeEmail as string);
       return { success: true, data: result };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to list bookings' };
@@ -349,6 +352,7 @@ export class RescheduleBookingTool implements ToolAdapter {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const result = await rescheduleBooking(
+        'agent',
         ctx.sessionId,
         args.bookingId as string,
         args.newStartTime as string
@@ -382,6 +386,7 @@ export class CancelBookingTool implements ToolAdapter {
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
       const result = await cancelBooking(
+        'agent',
         ctx.sessionId,
         args.bookingId as string,
         args.reason as string | undefined

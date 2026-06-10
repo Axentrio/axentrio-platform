@@ -21,12 +21,51 @@ import type { BotSettings } from '../database/entities/Bot';
 import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
+import { requireFeature } from '../billing/enforce';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
 // keep working unchanged.
 export { BookingError } from './booking-providers/types';
 
 const internalProvider = new InternalProvider();
+
+/**
+ * Booking-service boundary gate (plan D7/D8). Every entry point passes an
+ * explicit caller context; the `bookings` feature is enforced here once so
+ * agent tools, /internal/booking/* n8n routes, and the scheduler admin
+ * routes can't drift apart. Tool absence is not authorization.
+ *
+ * `public-manage` is the ONLY exemption (D8): token-verified self-service
+ * management of an EXISTING appointment. The controller constructs the
+ * object only after verifying the manage token, and the carried
+ * `verifiedBookingId` must match the booking being acted on — a bare claim
+ * without the verified id gets the full gate. Creation is never exempt.
+ *
+ * Unknown/missing caller context fails closed (the parameter is required —
+ * a new entry point that forgets it doesn't compile).
+ */
+export type PublicManageCaller = { kind: 'public-manage'; verifiedBookingId: string };
+export type BookingCaller = 'agent' | 'internal-n8n' | 'scheduler-admin' | PublicManageCaller;
+
+async function enforceBookingsFeature(
+  tenantId: string,
+  caller: BookingCaller,
+  exemption?: { manageableBookingId: string } | { tokenVerifiedLookup: true },
+): Promise<void> {
+  if (typeof caller === 'object' && caller.kind === 'public-manage' && exemption) {
+    // The exemption is an explicit per-call-site opt-in — a public-manage
+    // caller reaching a function that doesn't opt in (creation, owner
+    // accept/decline, lists) always gets the full gate.
+    if ('manageableBookingId' in exemption && caller.verifiedBookingId === exemption.manageableBookingId) {
+      return; // mutating the exact booking the token was issued for
+    }
+    if ('tokenVerifiedLookup' in exemption) {
+      return; // slot lookup inside the token-verified public reschedule flow
+    }
+  }
+  // Same envelope as every other feature gate: HTTP 402, plan_limit_bookings.
+  await requireFeature(tenantId, 'bookings', 'plan_limit_bookings');
+}
 
 /**
  * The booking backend. Cal.com is shelved — the in-house scheduler is the only
@@ -52,12 +91,14 @@ async function resolveContext(sessionId: string): Promise<BookingContext> {
   return { session, tenant, bot, botSettings };
 }
 
-export async function listBookings(sessionId: string, attendeeEmail: string) {
+export async function listBookings(caller: BookingCaller, sessionId: string, attendeeEmail: string) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
   return selectProvider().listBookings(ctx, attendeeEmail);
 }
 
 export async function checkAvailability(
+  caller: BookingCaller,
   sessionId: string,
   startDate: string,
   endDate: string,
@@ -65,10 +106,12 @@ export async function checkAvailability(
   durationMin?: number
 ) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
   return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId, durationMin);
 }
 
 export async function createBooking(
+  caller: BookingCaller,
   sessionId: string,
   idempotencyKey: string,
   startTime: string,
@@ -79,6 +122,7 @@ export async function createBooking(
   extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
   return selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
 }
 
@@ -88,6 +132,7 @@ export async function createBooking(
  * so we go straight to the in-house provider (mirrors the admin functions below).
  */
 export async function requestBooking(
+  caller: BookingCaller,
   sessionId: string,
   idempotencyKey: string,
   preferredTime: string,
@@ -99,16 +144,19 @@ export async function requestBooking(
   extras?: BookingExtras
 ) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller);
   return internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
 }
 
-export async function rescheduleBooking(sessionId: string, bookingId: string, newStartTime: string) {
+export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return selectProvider().rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
-export async function cancelBooking(sessionId: string, bookingId: string, reason?: string) {
+export async function cancelBooking(caller: BookingCaller, sessionId: string, bookingId: string, reason?: string) {
   const ctx = await resolveContext(sessionId);
+  await enforceBookingsFeature(ctx.tenant.id, caller, { manageableBookingId: bookingId });
   return selectProvider().cancelBooking(ctx, bookingId, reason);
 }
 
@@ -217,11 +265,13 @@ async function buildAdminContext(tenantId: string, booking: Booking): Promise<Bo
 
 /** List the tenant anchor bot's internal bookings, upcoming or past. */
 export async function adminListBookings(
+  caller: BookingCaller,
   tenantId: string,
   scope: BookingScope,
   limit: number,
   offset: number
 ): Promise<{ bookings: AdminBookingRow[]; total: number }> {
+  await enforceBookingsFeature(tenantId, caller);
   const { bot } = await getAnchorBotConfig(tenantId);
   const repo = AppDataSource.getRepository(Booking);
   const now = new Date();
@@ -301,12 +351,16 @@ export async function adminListBookings(
 
 /** Real available slots for the anchor bot (powers the admin reschedule picker). */
 export async function adminAvailability(
+  caller: BookingCaller,
   tenantId: string,
   startDate: string,
   endDate: string,
   serviceId?: string,
   durationMin?: number
 ) {
+  // public-manage may reach this (slot lookup inside the token-verified
+  // reschedule flow, scoped to the booking's service) — D8.
+  await enforceBookingsFeature(tenantId, caller, { tokenVerifiedLookup: true });
   const { bot, settings } = await getAnchorBotConfig(tenantId);
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
@@ -335,31 +389,44 @@ async function loadAdminBooking(tenantId: string, bookingId: string): Promise<Bo
   return booking;
 }
 
-export async function adminCancelBooking(tenantId: string, bookingId: string, reason?: string) {
+export async function adminCancelBooking(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {
+  await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.cancelBooking(ctx, bookingId, reason);
 }
 
-export async function adminRescheduleBooking(tenantId: string, bookingId: string, newStartTime: string) {
+export async function adminRescheduleBooking(caller: BookingCaller, tenantId: string, bookingId: string, newStartTime: string) {
+  await enforceBookingsFeature(tenantId, caller, { manageableBookingId: bookingId });
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
-export async function adminAcceptRequest(tenantId: string, bookingId: string) {
+export async function adminAcceptRequest(caller: BookingCaller, tenantId: string, bookingId: string) {
+  // Owner action — never public-manage-exempt (D8 is cancel/reschedule only),
+  // so no bookingId is passed to the gate.
+  await enforceBookingsFeature(tenantId, caller);
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.acceptRequest(ctx, bookingId);
 }
 
-export async function adminDeclineRequest(tenantId: string, bookingId: string, reason?: string) {
+export async function adminDeclineRequest(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {
+  // Owner action — never public-manage-exempt (D8 is cancel/reschedule only).
+  await enforceBookingsFeature(tenantId, caller);
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.declineRequest(ctx, bookingId, reason);
 }
 
-/** Booking + display context for the public self-service manage page. */
+/**
+ * Booking + display context for the public self-service manage page.
+ * Intentionally ungated (D8): the manage page must render for the customer
+ * even after the tenant loses the bookings feature — existing appointments
+ * stay manageable; only NEW bookings are gated. Access control is the manage
+ * token, verified by the public controller before this is called.
+ */
 export async function getManageBooking(
   bookingId: string
 ): Promise<{ booking: Booking; timezone: string; eventName: string } | null> {

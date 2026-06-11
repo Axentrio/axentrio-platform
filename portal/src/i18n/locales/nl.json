@@ -1610,7 +1610,7 @@
         "label": "Nu online"
       },
       "totalChatsMtd": {
-        "label": "Totaal chats (MTD)"
+        "label": "Afgehandelde chats"
       },
       "avgCsat": {
         "label": "Gem. CSAT"
@@ -1724,6 +1724,12 @@
         "saveChanges": "Wijzigingen opslaan",
         "create": "Aanmaken"
       }
+    },
+    "agentsEmpty": {
+      "title": "Nog geen agenten",
+      "agents": "Agenten zijn mensen die gesprekken overnemen wanneer de AI ze doorgeeft. De meeste teams hebben er geen nodig — voeg er alleen een toe als je live overname wilt.",
+      "shifts": "Met diensten plan je wanneer elke agent beschikbaar is — voeg eerst een agent toe.",
+      "performance": "Agentprestaties verschijnen hier zodra agenten doorgegeven gesprekken afhandelen."
     }
   },
   "insights": {

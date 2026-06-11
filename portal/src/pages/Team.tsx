@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Edit2, Trash2, Clock, Star, MessageSquare, Calendar } from 'lucide-react';
+import { Plus, Edit2, Trash2, MessageSquare, Calendar, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
@@ -108,6 +108,47 @@ function mapApiAgent(a: ApiAgent): Agent {
 
 const dayKeys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const;
 
+/**
+ * Shared empty state for the Agents/Shifts/Performance tabs — these are all
+ * meaningless without agents, so instead of header-only tables they explain
+ * what agents are for and point at the Add Agent action.
+ */
+function AgentsEmptyState({
+  onAdd,
+  variant = 'agents',
+}: {
+  onAdd: () => void;
+  variant?: 'agents' | 'shifts' | 'performance';
+}) {
+  const { t } = useTranslation();
+  return (
+    <Card variant="glass" className="p-10 text-center">
+      <Users className="h-8 w-8 mx-auto mb-3 text-text-muted opacity-60" />
+      <p className="text-sm font-medium text-text-primary">
+        {t('team.agentsEmpty.title', { defaultValue: 'No agents yet' })}
+      </p>
+      <p className="text-sm text-text-secondary mt-1 max-w-md mx-auto">
+        {variant === 'shifts'
+          ? t('team.agentsEmpty.shifts', {
+              defaultValue: 'Shifts let you schedule when each agent is available — add an agent first.',
+            })
+          : variant === 'performance'
+            ? t('team.agentsEmpty.performance', {
+                defaultValue: 'Agent performance appears here once agents are handling handed-off conversations.',
+              })
+            : t('team.agentsEmpty.agents', {
+                defaultValue:
+                  'Agents are humans who take over conversations when the AI hands off. Most teams run fine without any — add one only if you want live takeover.',
+              })}
+      </p>
+      <Button className="mt-4" variant="outline" onClick={onAdd}>
+        <Plus className="w-4 h-4" />
+        {t('team.agents.actions.add')}
+      </Button>
+    </Card>
+  );
+}
+
 const Team: React.FC = () => {
   const { t } = useTranslation();
   const [isAgentModalOpen, setIsAgentModalOpen] = useState(false);
@@ -188,8 +229,14 @@ const Team: React.FC = () => {
   const totalChats = performanceMap
     ? Object.values(performanceMap).reduce((sum, p) => sum + (p.totalChatsHandled || 0), 0)
     : 0;
-  const avgCsat = performanceMap && Object.keys(performanceMap).length > 0
-    ? Object.values(performanceMap).reduce((sum, p) => sum + (p.satisfactionScore || 0), 0) / Object.keys(performanceMap).length
+  // CSAT is only shown once rating collection actually populates it —
+  // averaging never-written satisfactionScore columns reads as "0.0" forever.
+  const csatScores = performanceMap
+    ? Object.values(performanceMap).filter((p) => (p.satisfactionScore || 0) > 0)
+    : [];
+  const hasCsatData = csatScores.length > 0;
+  const avgCsat = hasCsatData
+    ? csatScores.reduce((sum, p) => sum + p.satisfactionScore, 0) / csatScores.length
     : 0;
 
   if (agentsLoading) {
@@ -210,25 +257,31 @@ const Team: React.FC = () => {
         </Button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalAgents.label')}</p>
-          <p className="text-2xl font-bold font-mono text-text-primary">{agents.length}</p>
-        </Card>
-        <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">{t('team.stats.onlineNow.label')}</p>
-          <p className="text-2xl font-bold font-mono text-status-online">{onlineAgents}</p>
-        </Card>
-        <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalChatsMtd.label')}</p>
-          <p className="text-2xl font-bold font-mono text-text-primary">{totalChats}</p>
-        </Card>
-        <Card variant="glass" className="p-6">
-          <p className="text-sm font-medium text-text-secondary">{t('team.stats.avgCsat.label')}</p>
-          <p className="text-2xl font-bold font-mono text-accent-400">{avgCsat.toFixed(1)}</p>
-        </Card>
-      </div>
+      {/* Stats — agent KPIs only render once agents exist; the CSAT card
+          stays hidden until satisfaction data is actually collected (same
+          honesty rule as the Analytics surface: no fabricated zeros). */}
+      {agents.length > 0 && (
+        <div className={cn('grid grid-cols-1 gap-4', hasCsatData ? 'md:grid-cols-4' : 'md:grid-cols-3')}>
+          <Card variant="glass" className="p-6">
+            <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalAgents.label')}</p>
+            <p className="text-2xl font-bold font-mono text-text-primary">{agents.length}</p>
+          </Card>
+          <Card variant="glass" className="p-6">
+            <p className="text-sm font-medium text-text-secondary">{t('team.stats.onlineNow.label')}</p>
+            <p className="text-2xl font-bold font-mono text-status-online">{onlineAgents}</p>
+          </Card>
+          <Card variant="glass" className="p-6">
+            <p className="text-sm font-medium text-text-secondary">{t('team.stats.totalChatsMtd.label')}</p>
+            <p className="text-2xl font-bold font-mono text-text-primary">{totalChats}</p>
+          </Card>
+          {hasCsatData && (
+            <Card variant="glass" className="p-6">
+              <p className="text-sm font-medium text-text-secondary">{t('team.stats.avgCsat.label')}</p>
+              <p className="text-2xl font-bold font-mono text-accent-400">{avgCsat.toFixed(1)}</p>
+            </Card>
+          )}
+        </div>
+      )}
 
       {/* Tabs */}
       <Tabs defaultValue="members">
@@ -245,6 +298,9 @@ const Team: React.FC = () => {
         </TabsContent>
 
         <TabsContent value="agents">
+          {agents.length === 0 ? (
+            <AgentsEmptyState onAdd={handleCreateAgent} />
+          ) : (
           <Card variant="glass" className="overflow-hidden">
             <Table>
               <TableHeader>
@@ -330,9 +386,13 @@ const Team: React.FC = () => {
               </TableBody>
             </Table>
           </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="shifts">
+          {agents.length === 0 ? (
+            <AgentsEmptyState onAdd={handleCreateAgent} variant="shifts" />
+          ) : (
           <Card variant="glass" className="p-6">
             <h3 className="text-lg font-semibold text-text-primary mb-4">{t('team.shifts.weeklySchedule')}</h3>
             <div className="grid grid-cols-7 gap-4">
@@ -355,10 +415,17 @@ const Team: React.FC = () => {
               ))}
             </div>
           </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="performance">
+          {agents.length === 0 ? (
+            <AgentsEmptyState onAdd={handleCreateAgent} variant="performance" />
+          ) : (
           <Card variant="glass" className="overflow-hidden">
+            {/* Avg-response and CSAT columns are omitted until their data
+                sources are actually instrumented (same fix as the Analytics
+                agent table) — they could only ever render 0s/0.0★. */}
             <Table>
               <TableHeader>
                 <TableRow>
@@ -367,16 +434,7 @@ const Team: React.FC = () => {
                     <MessageSquare className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
                     {t('team.performance.columns.totalChats')}
                   </TableHead>
-                  <TableHead>
-                    <Clock className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
-                    {t('team.performance.columns.avgResponse')}
-                  </TableHead>
-                  <TableHead>
-                    <Star className="w-3.5 h-3.5 inline mr-1.5 -mt-px" />
-                    {t('team.performance.columns.csat')}
-                  </TableHead>
                   <TableHead>{t('team.performance.columns.activeChats')}</TableHead>
-                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -388,23 +446,16 @@ const Team: React.FC = () => {
                         <p className="font-medium text-text-primary">{agent.firstName} {agent.lastName}</p>
                       </TableCell>
                       <TableCell className="text-text-secondary">{perf?.totalChatsHandled ?? 0}</TableCell>
-                      <TableCell className="text-text-secondary">{t('team.performance.responseSeconds', { count: perf?.avgResponseTimeSeconds ?? 0 })}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1">
-                          <Star className="w-4 h-4 text-accent-400 fill-accent-400" />
-                          <span className="text-text-primary">{perf?.satisfactionScore?.toFixed(1) ?? '0.0'}</span>
-                        </div>
-                      </TableCell>
                       <TableCell className="text-text-secondary">
                         {perf?.currentChatCount ?? 0}
                       </TableCell>
-                      <TableCell className="text-text-secondary">-</TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
           </Card>
+          )}
         </TabsContent>
       </Tabs>
 

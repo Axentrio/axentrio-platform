@@ -1609,7 +1609,7 @@
         "label": "En ligne maintenant"
       },
       "totalChatsMtd": {
-        "label": "Total des chats (MTD)"
+        "label": "Chats traités"
       },
       "avgCsat": {
         "label": "CSAT moyen"
@@ -1723,6 +1723,12 @@
         "saveChanges": "Enregistrer les modifications",
         "create": "Créer"
       }
+    },
+    "agentsEmpty": {
+      "title": "Pas encore d'agents",
+      "agents": "Les agents sont des humains qui reprennent les conversations transférées par l'IA. La plupart des équipes s'en passent — ajoutez-en un seulement si vous voulez une reprise en direct.",
+      "shifts": "Les plannings définissent la disponibilité de chaque agent — ajoutez d'abord un agent.",
+      "performance": "Les performances des agents apparaissent ici dès qu'ils traitent des conversations transférées."
     }
   },
   "insights": {

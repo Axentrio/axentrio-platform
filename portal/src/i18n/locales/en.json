@@ -1615,7 +1615,7 @@
         "label": "Online Now"
       },
       "totalChatsMtd": {
-        "label": "Total Chats (MTD)"
+        "label": "Chats handled"
       },
       "avgCsat": {
         "label": "Avg CSAT"
@@ -1729,6 +1729,12 @@
         "saveChanges": "Save Changes",
         "create": "Create"
       }
+    },
+    "agentsEmpty": {
+      "title": "No agents yet",
+      "agents": "Agents are humans who take over conversations when the AI hands off. Most teams run fine without any — add one only if you want live takeover.",
+      "shifts": "Shifts let you schedule when each agent is available — add an agent first.",
+      "performance": "Agent performance appears here once agents are handling handed-off conversations."
     }
   },
   "insights": {

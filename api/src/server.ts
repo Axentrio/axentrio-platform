@@ -33,6 +33,7 @@ import { tenantRouter as tenantRoutes } from './routes/tenants';
 import { widgetRouter as widgetRoutes } from './routes/widget';
 import fileRoutes from './routes/files.routes';
 import analyticsRoutes from './routes/analytics.routes';
+import insightsRoutes from './routes/insights.routes';
 import notificationRoutes from './routes/notifications.routes';
 import mobileDevicesRoutes from './routes/mobile-devices.routes';
 import userRoutes from './routes/users.routes';
@@ -285,6 +286,7 @@ app.use(clerkMiddleware());
 // API routes under /api/v1
 const apiRouter = express.Router();
 apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
+apiRouter.use('/insights', insightsRoutes);
 // Copilot SSE stream can run up to 60s (agent loop hard timeout) plus a
 // few hundred ms for the final UPDATE + trace INSERT + clean SSE close.
 // 90s leaves headroom without letting a runaway loop hang the connection.
@@ -627,6 +629,12 @@ async function startServer(): Promise<void> {
         logger.error('Booking sync reconciliation failed', { error })
       );
     }, 5 * 60 * 1000); // Every 5 minutes
+
+    // Nightly Insights refresh — judges closed/handoff sessions and
+    // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
+    // gapInsights Feature per ADR-0013).
+    const { registerInsightsRefreshJob } = await import('./insights/refresh-insights.job');
+    registerInsightsRefreshJob();
 
     const PORT = config.server.port;
     httpServer.listen(PORT, () => {

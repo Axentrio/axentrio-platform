@@ -16,7 +16,7 @@ import type { FeatureKey } from './types';
 
 export interface FeatureMeta {
   label: string;
-  group: 'bookings' | 'channels' | 'leads' | 'inbox' | 'platform' | 'plan-traits';
+  group: 'bookings' | 'channels' | 'leads' | 'inbox' | 'platform' | 'insights' | 'plan-traits';
   /** Parent feature this one depends on — forced off when the parent is off. */
   requires?: FeatureKey;
 }
@@ -27,6 +27,7 @@ export const FEATURE_GROUPS: Record<FeatureMeta['group'], { label: string; colla
   leads: { label: 'Leads & CRM' },
   inbox: { label: 'Inbox & support' },
   platform: { label: 'Platform' },
+  insights: { label: 'AI Insights' },
   'plan-traits': { label: 'Plan traits', collapsed: true },
 };
 
@@ -47,6 +48,15 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   unifiedInbox: { label: 'Unified inbox', group: 'inbox' },
   handoff: { label: 'Human handoff', group: 'inbox' },
   platformAssistant: { label: 'AI Platform Assistant', group: 'platform' },
+  // Tiered Insights ladder (ADR-0013 / Deviation 36). Tier→flag mapping
+  // lives in plans.ts — never branch on tier names in insights code.
+  gapInsights: { label: 'AI Insights (Gaps)', group: 'insights' },
+  gapEvidence: { label: 'Gap evidence drill-down', group: 'insights', requires: 'gapInsights' },
+  aiBusinessInsights: {
+    label: 'AI Business Insights (digest, correlation, sentiment, export)',
+    group: 'insights',
+    requires: 'gapInsights',
+  },
   hideWidgetAttribution: { label: 'Hide widget attribution', group: 'plan-traits' },
   customWidgetAppearance: { label: 'Custom widget appearance', group: 'plan-traits' },
   fileUpload: { label: 'File upload', group: 'plan-traits' },

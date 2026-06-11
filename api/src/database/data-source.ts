@@ -53,6 +53,10 @@ import { BookingReference } from './entities/BookingReference';
 import { Notification } from './entities/Notification';
 import { MobileDevice } from './entities/MobileDevice';
 import { NotificationDelivery } from './entities/NotificationDelivery';
+import { CanonicalTopic } from './entities/CanonicalTopic';
+import { Judgment } from './entities/Judgment';
+import { Gap } from './entities/Gap';
+import { InsightsRefreshState } from './entities/InsightsRefreshState';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -113,6 +117,10 @@ export const AppDataSource = new DataSource({
     Notification,
     MobileDevice,
     NotificationDelivery,
+    CanonicalTopic,
+    Judgment,
+    Gap,
+    InsightsRefreshState,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

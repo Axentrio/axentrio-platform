@@ -180,6 +180,17 @@ export interface Entitlements {
     channelMessenger: boolean;
     channelInstagram: boolean;
     channelTelegram: boolean;
+    /**
+     * Tiered Insights ladder (ADR-0013 / Deviation 36). `gapInsights` gates
+     * the Insights surface + gap endpoints + nightly judge (all paid tiers);
+     * `gapEvidence` gates evidence drill-down (Pro+); `aiBusinessInsights`
+     * gates digest/correlation/sentiment/365d retention/export (Enterprise).
+     * Tier→flag mapping lives in plans.ts only — insights code must never
+     * branch on tier names (catalog-row reversibility).
+     */
+    gapInsights: boolean;
+    gapEvidence: boolean;
+    aiBusinessInsights: boolean;
   };
   support: 'none' | 'email' | 'priority';
 }

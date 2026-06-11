@@ -36,6 +36,10 @@ export interface PlanFeatures {
   channelMessenger: boolean;
   channelInstagram: boolean;
   channelTelegram: boolean;
+  /** Tiered Insights ladder (ADR-0013): surface / evidence drill-down / intelligence layer. */
+  gapInsights: boolean;
+  gapEvidence: boolean;
+  aiBusinessInsights: boolean;
 }
 
 export interface Entitlements {

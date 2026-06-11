@@ -27,6 +27,7 @@ import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service'
 import { canonicalizeTopic } from './topics.service';
 import { aggregateGaps } from './gap-aggregation.service';
 import { logger } from '../utils/logger';
+import { decrypt } from '../utils/encryption';
 
 const BACKFILL_DAYS = 7;
 const BACKFILL_CAP = 500;
@@ -66,19 +67,27 @@ async function loadEligibleSessions(
 }
 
 async function loadTranscript(sessionId: string): Promise<TranscriptMessage[]> {
-  const rows: Array<{ id: string; content: string; sender: string }> = await AppDataSource.query(
-    `SELECT m.id, m.content, p.type AS sender
-     FROM messages m
-     JOIN participants p ON p.id = m.participant_id
-     WHERE m.session_id = $1 AND m.type = 'text'
-     ORDER BY m.created_at ASC`,
-    [sessionId],
-  );
-  return rows.map((r) => ({
-    id: r.id,
-    content: r.content,
-    sender: (['user', 'agent', 'bot', 'system'].includes(r.sender) ? r.sender : 'system') as TranscriptMessage['sender'],
-  }));
+  const rows: Array<{ id: string; content: string; contentEncrypted: boolean; sender: string }> =
+    await AppDataSource.query(
+      `SELECT m.id, m.content, m.content_encrypted AS "contentEncrypted", p.type AS sender
+       FROM messages m
+       JOIN participants p ON p.id = m.participant_id
+       WHERE m.session_id = $1 AND m.type = 'text'
+       ORDER BY m.created_at ASC`,
+      [sessionId],
+    );
+  return rows.map((r) => {
+    // Message content is encrypted at rest — the judge must see plaintext.
+    // (Caught live: the first prod run judged ciphertext and reported
+    // "no questions" for every session.) A row that fails to decrypt
+    // throws, failing this session's judgment → watermark freezes → retried.
+    const content = r.contentEncrypted ? decrypt(r.content) : r.content;
+    return {
+      id: r.id,
+      content,
+      sender: (['user', 'agent', 'bot', 'system'].includes(r.sender) ? r.sender : 'system') as TranscriptMessage['sender'],
+    };
+  });
 }
 
 /** Refresh one tenant. Exported for tests and manual (admin) triggering. */

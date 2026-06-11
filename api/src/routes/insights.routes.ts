@@ -16,6 +16,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
+import { decrypt } from '../utils/encryption';
 
 const router = Router();
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
@@ -127,16 +128,19 @@ router.get(
       .getMany();
 
     const allMessageIds = judgments.flatMap((j) => j.evidenceMessageIds ?? []);
-    const messages: Array<{ id: string; content: string; sender: string; created_at: Date }> =
+    const messages: Array<{ id: string; content: string; contentEncrypted: boolean; sender: string; created_at: Date }> =
       allMessageIds.length > 0
         ? await AppDataSource.query(
-            `SELECT m.id, m.content, p.type AS sender, m.created_at
+            `SELECT m.id, m.content, m.content_encrypted AS "contentEncrypted", p.type AS sender, m.created_at
              FROM messages m JOIN participants p ON p.id = m.participant_id
              WHERE m.id = ANY($1)`,
             [allMessageIds],
           )
         : [];
-    const messageById = new Map(messages.map((m) => [m.id, m]));
+    // Message content is encrypted at rest — evidence must render plaintext.
+    const messageById = new Map(
+      messages.map((m) => [m.id, { ...m, content: m.contentEncrypted ? decrypt(m.content) : m.content }]),
+    );
 
     sendSuccess(res, {
       evidence: judgments.map((j) => ({

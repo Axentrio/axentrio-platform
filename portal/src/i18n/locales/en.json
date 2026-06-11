@@ -1736,6 +1736,27 @@
       "title": "Analytics",
       "subtitle": "Performance metrics and insights"
     },
+    "outcomes": {
+      "kpis": {
+        "conversations": "Conversations",
+        "bookings": "Bookings",
+        "leads": "Leads captured"
+      },
+      "vsPrevious": "vs previous period",
+      "deltaNew": "new",
+      "charts": {
+        "overTime": { "title": "Outcomes over time" },
+        "byChannel": { "title": "Conversations by channel" }
+      },
+      "channels": {
+        "widget": "Website widget",
+        "whatsapp": "WhatsApp",
+        "messenger": "Messenger",
+        "instagram": "Instagram",
+        "telegram": "Telegram",
+        "direct": "Direct"
+      }
+    },
     "onboardingBanner": {
       "title": "Finish setting up your chatbot",
       "subtitle": "Complete these steps to get the most out of your assistant",

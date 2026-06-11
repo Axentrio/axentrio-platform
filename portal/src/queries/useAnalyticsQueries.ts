@@ -15,6 +15,14 @@ const analyticsOptions = {
     queryKey: queryKeys.analytics.agents(),
     queryFn: () => api.get('/analytics/agents'),
   }),
+  outcomes: (from: string, to: string) => queryOptions({
+    queryKey: queryKeys.analytics.outcomes(from, to),
+    queryFn: () => api.get('/analytics/outcomes', { params: { from, to } }),
+  }),
+  outcomesTimeseries: (from: string, to: string) => queryOptions({
+    queryKey: queryKeys.analytics.outcomesTimeseries(from, to),
+    queryFn: () => api.get('/analytics/outcomes/timeseries', { params: { from, to } }),
+  }),
 };
 
 export function useAnalyticsTimeseries(startDate: string, endDate: string, enabled: boolean) {
@@ -27,4 +35,12 @@ export function useAnalyticsChatMetrics(from: string, to: string, enabled: boole
 
 export function useAnalyticsAgents(enabled: boolean) {
   return useQuery({ ...analyticsOptions.agents(), enabled });
+}
+
+export function useAnalyticsOutcomes(from: string, to: string, enabled: boolean) {
+  return useQuery({ ...analyticsOptions.outcomes(from, to), enabled });
+}
+
+export function useAnalyticsOutcomesTimeseries(from: string, to: string, enabled: boolean) {
+  return useQuery({ ...analyticsOptions.outcomesTimeseries(from, to), enabled });
 }

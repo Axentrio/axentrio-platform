@@ -44,6 +44,8 @@ export const queryKeys = {
     timeseries: (startDate?: string, endDate?: string) => [...queryKeys.analytics.all(), 'timeseries', startDate, endDate] as const,
     chatMetrics: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'chat-metrics', from, to] as const,
     agents: () => [...queryKeys.analytics.all(), 'agents'] as const,
+    outcomes: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'outcomes', from, to] as const,
+    outcomesTimeseries: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'outcomes-timeseries', from, to] as const,
   },
   knowledge: {
     all: () => ['knowledge'] as const,

@@ -1731,6 +1731,27 @@
       "title": "Analyse",
       "subtitle": "Prestatiemetingen en inzichten"
     },
+    "outcomes": {
+      "kpis": {
+        "conversations": "Gesprekken",
+        "bookings": "Boekingen",
+        "leads": "Vastgelegde leads"
+      },
+      "vsPrevious": "t.o.v. vorige periode",
+      "deltaNew": "nieuw",
+      "charts": {
+        "overTime": { "title": "Resultaten in de tijd" },
+        "byChannel": { "title": "Gesprekken per kanaal" }
+      },
+      "channels": {
+        "widget": "Website-widget",
+        "whatsapp": "WhatsApp",
+        "messenger": "Messenger",
+        "instagram": "Instagram",
+        "telegram": "Telegram",
+        "direct": "Direct"
+      }
+    },
     "onboardingBanner": {
       "title": "Maak je chatbot af",
       "subtitle": "Doorloop deze stappen om het maximale uit je assistent te halen",

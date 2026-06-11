@@ -6,10 +6,12 @@ import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Agent } from '../database/entities/Agent';
+import { Booking } from '../database/entities/Booking';
+import { Lead } from '../database/entities/Lead';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
-import { asyncHandler, ApiError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
@@ -18,6 +20,8 @@ import { analyticsQuerySchema } from '../schemas';
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 const agentRepository = AppDataSource.getRepository(Agent);
+const bookingRepository = AppDataSource.getRepository(Booking);
+const leadRepository = AppDataSource.getRepository(Lead);
 
 // All routes require agent authentication
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
@@ -213,6 +217,211 @@ router.get(
       human: parseInt(row.human, 10) || 0,
       handoff: parseInt(row.handoff, 10) || 0,
     }));
+
+    sendSuccess(res, { timeseries });
+  })
+);
+
+/* ------------------------------------------------------------------ */
+/*  Outcome metrics (Deviation 36 / ADR-0013 P1)                       */
+/*  Same response shape for every paying tier — no tier gating here;   */
+/*  bookings/channel sections simply contain what the tenant's plan    */
+/*  generates (see .scratch/plan-insights-tiering.md Principle 2/3).   */
+/* ------------------------------------------------------------------ */
+
+interface OutcomeWindow {
+  from: Date;
+  to: Date;
+  prevFrom: Date;
+  prevTo: Date;
+}
+
+/**
+ * Resolve [from, to) plus the same-length window immediately before it
+ * (for vs-previous-period deltas). Half-open so boundary rows are never
+ * double-counted across the two windows. Defaults to the last 7 days.
+ */
+function resolveOutcomeWindow(fromStr?: string, toStr?: string): OutcomeWindow {
+  const to = toStr ? new Date(toStr) : new Date();
+  const from = fromStr ? new Date(fromStr) : new Date(to.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const spanMs = Math.max(to.getTime() - from.getTime(), 1);
+  return {
+    from,
+    to,
+    prevFrom: new Date(from.getTime() - spanMs),
+    prevTo: from,
+  };
+}
+
+/** Sum the COUNT column of a grouped raw result. */
+function sumCounts(rows: Array<{ count: string }>): number {
+  return rows.reduce((acc, r) => acc + (parseInt(r.count, 10) || 0), 0);
+}
+
+/** Fold grouped rows into a { key: count } record. */
+function toBreakdown(rows: Array<{ key: string; count: string }>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) out[r.key] = parseInt(r.count, 10) || 0;
+  return out;
+}
+
+/** Compute the outcome aggregates for one [from, to) window. */
+async function computeOutcomes(tenantId: string, from: Date, to: Date) {
+  const [conversationRows, bookingRows, leadRows] = await Promise.all([
+    sessionRepository
+      .createQueryBuilder('s')
+      .select('s.channel', 'key')
+      .addSelect('COUNT(*)', 'count')
+      .where('s.tenant_id = :tenantId', { tenantId })
+      .andWhere('s.created_at >= :from', { from })
+      .andWhere('s.created_at < :to', { to })
+      .groupBy('s.channel')
+      .getRawMany(),
+    bookingRepository
+      .createQueryBuilder('b')
+      // Manual/unattributed bookings have no source_channel.
+      .select("COALESCE(b.source_channel, 'direct')", 'key')
+      .addSelect('COUNT(*)', 'count')
+      .where('b.tenant_id = :tenantId', { tenantId })
+      .andWhere("b.status NOT IN ('cancelled', 'failed')")
+      .andWhere('b.created_at >= :from', { from })
+      .andWhere('b.created_at < :to', { to })
+      .groupBy("COALESCE(b.source_channel, 'direct')")
+      .getRawMany(),
+    leadRepository
+      .createQueryBuilder('l')
+      .select('l.source', 'key')
+      .addSelect('COUNT(*)', 'count')
+      .where('l.tenant_id = :tenantId', { tenantId })
+      .andWhere('l.deleted_at IS NULL')
+      .andWhere('l.created_at >= :from', { from })
+      .andWhere('l.created_at < :to', { to })
+      .groupBy('l.source')
+      .getRawMany(),
+  ]);
+
+  return {
+    conversations: { total: sumCounts(conversationRows), byChannel: toBreakdown(conversationRows) },
+    bookings: { total: sumCounts(bookingRows), byChannel: toBreakdown(bookingRows) },
+    leads: { total: sumCounts(leadRows), bySource: toBreakdown(leadRows) },
+  };
+}
+
+/**
+ * GET /analytics/outcomes
+ * Business-outcome aggregates (conversations, bookings, leads) for a date
+ * range, plus the same aggregates for the preceding same-length window so
+ * the portal can render vs-previous-period deltas.
+ */
+router.get(
+  '/outcomes',
+  validate(analyticsQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+
+    const { from, to, prevFrom, prevTo } = resolveOutcomeWindow(
+      req.query.from as string | undefined,
+      req.query.to as string | undefined,
+    );
+
+    const payload = await cached(
+      `outcomes:${tenantId}:${from.toISOString()}:${to.toISOString()}`,
+      60,
+      async () => {
+        const [current, previous] = await Promise.all([
+          computeOutcomes(tenantId, from, to),
+          computeOutcomes(tenantId, prevFrom, prevTo),
+        ]);
+        return {
+          range: { from: from.toISOString(), to: to.toISOString() },
+          previousRange: { from: prevFrom.toISOString(), to: prevTo.toISOString() },
+          current,
+          previous,
+        };
+      },
+    );
+
+    sendSuccess(res, payload);
+  })
+);
+
+/**
+ * GET /analytics/outcomes/timeseries
+ * Daily conversations/bookings/leads counts for the range. Days with no
+ * activity are absent (same sparse convention as /chats/timeseries).
+ */
+router.get(
+  '/outcomes/timeseries',
+  validate(analyticsQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) {
+      throw new BadRequestError('Tenant context required');
+    }
+
+    const { from, to } = resolveOutcomeWindow(
+      req.query.from as string | undefined,
+      req.query.to as string | undefined,
+    );
+
+    const [convRows, bookingRows, leadRows] = await Promise.all([
+      sessionRepository
+        .createQueryBuilder('s')
+        .select('DATE(s.created_at)', 'date')
+        .addSelect('COUNT(*)', 'count')
+        .where('s.tenant_id = :tenantId', { tenantId })
+        .andWhere('s.created_at >= :from', { from })
+        .andWhere('s.created_at < :to', { to })
+        .groupBy('DATE(s.created_at)')
+        .orderBy('DATE(s.created_at)', 'ASC')
+        .limit(366)
+        .getRawMany(),
+      bookingRepository
+        .createQueryBuilder('b')
+        .select('DATE(b.created_at)', 'date')
+        .addSelect('COUNT(*)', 'count')
+        .where('b.tenant_id = :tenantId', { tenantId })
+        .andWhere("b.status NOT IN ('cancelled', 'failed')")
+        .andWhere('b.created_at >= :from', { from })
+        .andWhere('b.created_at < :to', { to })
+        .groupBy('DATE(b.created_at)')
+        .orderBy('DATE(b.created_at)', 'ASC')
+        .limit(366)
+        .getRawMany(),
+      leadRepository
+        .createQueryBuilder('l')
+        .select('DATE(l.created_at)', 'date')
+        .addSelect('COUNT(*)', 'count')
+        .where('l.tenant_id = :tenantId', { tenantId })
+        .andWhere('l.deleted_at IS NULL')
+        .andWhere('l.created_at >= :from', { from })
+        .andWhere('l.created_at < :to', { to })
+        .groupBy('DATE(l.created_at)')
+        .orderBy('DATE(l.created_at)', 'ASC')
+        .limit(366)
+        .getRawMany(),
+    ]);
+
+    // Merge the three sparse series into one row per active day.
+    const byDate = new Map<string, { date: string; conversations: number; bookings: number; leads: number }>();
+    const ensure = (date: string) => {
+      let row = byDate.get(date);
+      if (!row) {
+        row = { date, conversations: 0, bookings: 0, leads: 0 };
+        byDate.set(date, row);
+      }
+      return row;
+    };
+    for (const r of convRows) ensure(r.date).conversations = parseInt(r.count, 10) || 0;
+    for (const r of bookingRows) ensure(r.date).bookings = parseInt(r.count, 10) || 0;
+    for (const r of leadRows) ensure(r.date).leads = parseInt(r.count, 10) || 0;
+
+    const timeseries = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 
     sendSuccess(res, { timeseries });
   })

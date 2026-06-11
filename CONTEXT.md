@@ -40,6 +40,10 @@ _Avoid_: signal, threshold, trigger.
 One LLM verdict on one ChatSession, produced during the nightly `RefreshInsightsJob`. Stores `{ hadQuestion, satisfied, topicPhrase, canonicalTopicId, evidenceMessageIds, reasoning }`. Gap evidence is sourced exclusively from Judgments. See [ADR-0004](./docs/adr/0004-unsatisfied-detection-via-llm-judge.md).
 _Avoid_: verdict, analysis, review.
 
+**Outcome**:
+A rollup count of business-valued events on the Analytics surface — conversations handled, Bookings created, Leads captured — for a date range, with a vs-previous-period delta. Served by `GET /analytics/outcomes`. Outcomes are *reporting* (plain aggregation, identical shape for every paying tier), distinct from Insights (detected findings with lifecycle). See [ADR-0013](./docs/adr/0013-tiered-insights-ladder.md).
+_Avoid_: KPI, success metric, business result, outcome insight (an Outcome is not an Insight).
+
 **Tier**:
 A Tenant's subscription level, stored on `Tenant.tier`. Marketed values are **Essential**, **Pro**, **Enterprise**. The DB enum additionally contains **`free`** as an internal-only cancellation terminal state — never offered for signup, never shown in upgrade UI, never sold. Cancellation lands a Tenant on `free`; reactivation moves them back to a marketed tier via Stripe.
 _Avoid_: plan, subscription level, account type (use Tier).

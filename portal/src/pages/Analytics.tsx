@@ -1,20 +1,29 @@
 /**
  * Analytics Page
- * Chat volume, bot vs human resolution, agent performance.
- * Response-time and CSAT visuals return once their data sources are
- * actually instrumented (see .scratch/plan-success-meter.md).
+ * Business outcomes (conversations, bookings, leads — with vs-previous-period
+ * deltas) over chat volume and bot vs human resolution. Response-time and
+ * CSAT visuals return once their data sources are actually instrumented
+ * (see .scratch/plan-success-meter.md / .scratch/plan-insights-tiering.md P1).
  */
 
 import React, { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { useAnalyticsTimeseries, useAnalyticsChatMetrics, useAnalyticsAgents } from '../queries/useAnalyticsQueries';
+import {
+  useAnalyticsTimeseries,
+  useAnalyticsChatMetrics,
+  useAnalyticsOutcomes,
+  useAnalyticsOutcomesTimeseries,
+} from '../queries/useAnalyticsQueries';
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
+import { useHasFeature } from '../queries/useEntitlementsQueries';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
   PieChart,
   Pie,
   Cell,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -24,14 +33,13 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { TrendingUp, Users, MessageSquare, Clock, Star, Headphones } from 'lucide-react';
+import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 /* ------------------------------------------------------------------ */
@@ -54,14 +62,30 @@ interface ChatMetrics {
   avgDurationSeconds: number;
 }
 
-interface AgentRow {
-  id: string;
-  name: string;
-  status: string;
-  totalChatsHandled: number;
-  avgResponseTimeSeconds: number;
-  satisfactionScore: number;
-  currentChatCount: number;
+interface OutcomeBucket {
+  total: number;
+  byChannel?: Record<string, number>;
+  bySource?: Record<string, number>;
+}
+
+interface OutcomeAggregates {
+  conversations: OutcomeBucket;
+  bookings: OutcomeBucket;
+  leads: OutcomeBucket;
+}
+
+interface OutcomesResponse {
+  range: { from: string; to: string };
+  previousRange: { from: string; to: string };
+  current: OutcomeAggregates;
+  previous: OutcomeAggregates;
+}
+
+interface OutcomeSeriesPoint {
+  date: string;
+  conversations: number;
+  bookings: number;
+  leads: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -98,15 +122,6 @@ const ChartSkeleton: React.FC<{ height?: number }> = ({ height = 250 }) => (
   <Skeleton className="w-full rounded-xl" style={{ height }} />
 );
 
-/** Skeleton placeholder for loading tables. */
-const TableSkeleton: React.FC = () => (
-  <div className="space-y-3 p-6">
-    {[...Array(5)].map((_, i) => (
-      <Skeleton key={i} className="h-10 rounded-lg w-full" />
-    ))}
-  </div>
-);
-
 const chartTooltipStyle = {
   backgroundColor: '#1e2030',
   border: '1px solid #2a2d3e',
@@ -119,8 +134,9 @@ const Analytics: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAppAuth();
   const isAgent = user?.role === 'agent';
+  const hasBookings = useHasFeature('bookings');
   const [dateRange, setDateRange] = useState('7d');
-  const [activeTab, setActiveTab] = useState<'overview' | 'agents' | 'chats'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'chats'>('overview');
 
   const { startDate, endDate } = useMemo(() => dateRangeToISO(dateRange), [dateRange]);
 
@@ -140,11 +156,16 @@ const Analytics: React.FC = () => {
     isLoading: isLoadingMetrics,
   } = useAnalyticsChatMetrics(startDate, endDate, activeTab === 'overview' || activeTab === 'chats');
 
-  // Agent performance — used in agents tab + stats cards
+  // Business outcomes (conversations/bookings/leads + previous period)
   const {
-    data: agentsRes,
-    isLoading: isLoadingAgents,
-  } = useAnalyticsAgents(activeTab === 'agents' || activeTab === 'overview');
+    data: outcomesRes,
+    isLoading: isLoadingOutcomes,
+  } = useAnalyticsOutcomes(startDate, endDate, activeTab === 'overview');
+
+  const {
+    data: outcomesSeriesRes,
+    isLoading: isLoadingOutcomesSeries,
+  } = useAnalyticsOutcomesTimeseries(startDate, endDate, activeTab === 'overview');
 
   // Dashboard real-time metrics (sessions, agents, etc.)
   const { data: rawDashboard } = useDashboardMetrics();
@@ -157,10 +178,35 @@ const Analytics: React.FC = () => {
   const chatVolumeData: TimeseriesPoint[] = (timeseriesRes as { timeseries?: TimeseriesPoint[] })?.timeseries ?? [];
 
   const metrics = (metricsRes as { metrics?: ChatMetrics })?.metrics;
-  const agents: AgentRow[] = useMemo(
-    () => (agentsRes as { agents?: AgentRow[] })?.agents ?? [],
-    [agentsRes],
-  );
+  const outcomes = outcomesRes as OutcomesResponse | undefined;
+  const outcomesSeries: OutcomeSeriesPoint[] =
+    (outcomesSeriesRes as { timeseries?: OutcomeSeriesPoint[] })?.timeseries ?? [];
+
+  /**
+   * "+23% vs previous period" / "−12% …" delta string for a stat card.
+   * Empty while loading; "new" when the previous window had nothing.
+   */
+  const formatDelta = (current?: number, previous?: number): string => {
+    if (current == null || previous == null) return '';
+    if (previous === 0) {
+      return current > 0
+        ? `${t('analytics.outcomes.deltaNew', { defaultValue: 'new' })} ${t('analytics.outcomes.vsPrevious', { defaultValue: 'vs previous period' })}`
+        : '';
+    }
+    const pct = Math.round(((current - previous) / previous) * 100);
+    return `${pct >= 0 ? '+' : ''}${pct}% ${t('analytics.outcomes.vsPrevious', { defaultValue: 'vs previous period' })}`;
+  };
+
+  // Conversations-by-channel bar data (localised channel labels).
+  const channelData = useMemo(() => {
+    const byChannel = outcomes?.current?.conversations?.byChannel ?? {};
+    return Object.entries(byChannel)
+      .map(([channel, count]) => ({
+        channel: t(`analytics.outcomes.channels.${channel}`, { defaultValue: channel }),
+        count,
+      }))
+      .sort((a, b) => b.count - a.count);
+  }, [outcomes, t]);
 
   // Resolution pie over closed sessions: human = closed with an agent
   // assigned (from the API), bot = the remaining closed sessions.
@@ -175,27 +221,16 @@ const Analytics: React.FC = () => {
     ];
   }, [metrics, t]);
 
-  // Agent table data mapped to the shape used by the table.
-  // Response-time and CSAT columns are omitted: nothing populates
-  // Agent.avgResponseTimeSeconds / satisfactionScore yet (see
-  // .scratch/plan-success-meter.md) — showing them reads as 0s/0★ for
-  // every agent.
-  const agentPerformanceData = useMemo(
-    () =>
-      agents.map((a) => ({
-        name: a.name,
-        chats: a.totalChatsHandled,
-      })),
-    [agents],
-  );
-
-
-  // Stats cards — real-time metrics combining Dashboard + Analytics data.
-  // Avg Response Time and CSAT are hidden until their data sources are
-  // actually populated (response-time instrumentation / rating collection);
-  // they reappear automatically once real values exist.
+  // Stats cards — business outcomes for the selected range, each with a
+  // vs-previous-period delta. The bookings card follows the existing
+  // `bookings` feature flag (an Essential tenant has no bookings module, so
+  // the card would only ever read 0). Avg Response Time and CSAT stay hidden
+  // until their data sources are actually populated (response-time
+  // instrumentation / rating collection) and reappear automatically.
   const hasResponseTimeData = (dashboard?.avgResponseTimeSeconds ?? 0) > 0;
   const hasCsatData = dashboard?.csatScore != null;
+  const cur = outcomes?.current;
+  const prev = outcomes?.previous;
   const stats: Array<{
     label: string;
     value: string;
@@ -206,30 +241,33 @@ const Analytics: React.FC = () => {
     onClick?: () => void;
   }> = [
     {
-      label: t('analytics.kpis.activeChats'),
-      value: dashboard ? String((dashboard?.sessions?.active ?? 0) + (dashboard?.sessions?.bot ?? 0)) : '—',
-      change: '',
+      label: t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' }),
+      value: cur ? cur.conversations.total.toLocaleString() : '—',
+      change: formatDelta(cur?.conversations.total, prev?.conversations.total),
       icon: MessageSquare,
       color: 'text-primary-400',
       bgColor: 'bg-primary-600/10',
       onClick: () => navigate('/inbox'),
     },
+    ...(hasBookings
+      ? [{
+          label: t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' }),
+          value: cur ? cur.bookings.total.toLocaleString() : '—',
+          change: formatDelta(cur?.bookings.total, prev?.bookings.total),
+          icon: CalendarCheck,
+          color: 'text-status-online',
+          bgColor: 'bg-status-online/10',
+          onClick: () => navigate('/bookings'),
+        }]
+      : []),
     {
-      label: t('analytics.kpis.pendingHandoffs'),
-      value: dashboard ? String(dashboard?.sessions?.handoff ?? 0) : '—',
-      change: '',
-      icon: Headphones,
+      label: t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' }),
+      value: cur ? cur.leads.total.toLocaleString() : '—',
+      change: formatDelta(cur?.leads.total, prev?.leads.total),
+      icon: UserPlus,
       color: 'text-accent-400',
       bgColor: 'bg-accent-500/10',
-      onClick: () => navigate('/inbox'),
-    },
-    {
-      label: t('analytics.kpis.onlineAgents'),
-      value: dashboard ? `${dashboard?.agents?.online ?? 0}/${dashboard?.agents?.total ?? 0}` : '—',
-      change: '',
-      icon: Users,
-      color: 'text-status-online',
-      bgColor: 'bg-status-online/10',
+      onClick: () => navigate('/leads'),
     },
     ...(hasResponseTimeData
       ? [{
@@ -251,14 +289,6 @@ const Analytics: React.FC = () => {
           bgColor: 'bg-accent-500/10',
         }]
       : []),
-    {
-      label: t('analytics.kpis.totalChats'),
-      value: metrics ? metrics.total.toLocaleString() : '—',
-      change: '',
-      icon: TrendingUp,
-      color: 'text-primary-400',
-      bgColor: 'bg-primary-600/10',
-    },
   ];
 
   return (
@@ -293,7 +323,7 @@ const Analytics: React.FC = () => {
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-2 gap-4',
-          { 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }[stats.length] ?? 'lg:grid-cols-6',
+          { 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5' }[stats.length] ?? 'lg:grid-cols-3',
         )}
       >
         {stats.map((stat, index) => (
@@ -336,11 +366,65 @@ const Analytics: React.FC = () => {
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as typeof activeTab)}>
         <TabsList>
           <TabsTrigger value="overview">{t('analytics.tabs.overview')}</TabsTrigger>
-          <TabsTrigger value="agents">{t('analytics.tabs.agents')}</TabsTrigger>
           <TabsTrigger value="chats">{t('analytics.tabs.chats')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Outcomes over time */}
+            <Card variant="glass">
+              <CardHeader>
+                <h3 className="text-lg font-semibold text-text-primary">
+                  {t('analytics.outcomes.charts.overTime.title', { defaultValue: 'Outcomes over time' })}
+                </h3>
+              </CardHeader>
+              <CardContent>
+                {isLoadingOutcomesSeries ? (
+                  <ChartSkeleton height={250} />
+                ) : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <AreaChart data={outcomesSeries}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
+                      <XAxis dataKey="date" stroke="#6b7194" />
+                      <YAxis stroke="#6b7194" allowDecimals={false} />
+                      <Tooltip contentStyle={chartTooltipStyle} />
+                      <Legend />
+                      <Area type="monotone" dataKey="conversations" stroke="#a78bfa" fill="#a78bfa" fillOpacity={0.25} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
+                      {hasBookings && (
+                        <Area type="monotone" dataKey="bookings" stroke="#34d399" fill="#34d399" fillOpacity={0.25} name={t('analytics.outcomes.kpis.bookings', { defaultValue: 'Bookings' })} />
+                      )}
+                      <Area type="monotone" dataKey="leads" stroke="#fbbf24" fill="#fbbf24" fillOpacity={0.25} name={t('analytics.outcomes.kpis.leads', { defaultValue: 'Leads captured' })} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Conversations by channel */}
+            <Card variant="glass">
+              <CardHeader>
+                <h3 className="text-lg font-semibold text-text-primary">
+                  {t('analytics.outcomes.charts.byChannel.title', { defaultValue: 'Conversations by channel' })}
+                </h3>
+              </CardHeader>
+              <CardContent>
+                {isLoadingOutcomes ? (
+                  <ChartSkeleton height={250} />
+                ) : (
+                  <ResponsiveContainer width="100%" height={250}>
+                    <BarChart data={channelData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#2a2d3e" />
+                      <XAxis dataKey="channel" stroke="#6b7194" />
+                      <YAxis stroke="#6b7194" allowDecimals={false} />
+                      <Tooltip contentStyle={chartTooltipStyle} />
+                      <Bar dataKey="count" fill="#818cf8" radius={[4, 4, 0, 0]} name={t('analytics.outcomes.kpis.conversations', { defaultValue: 'Conversations' })} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
           {/* Chat Volume Chart */}
           <Card variant="glass">
             <CardHeader>
@@ -394,36 +478,6 @@ const Analytics: React.FC = () => {
                     <Legend />
                   </PieChart>
                 </ResponsiveContainer>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="agents">
-          <Card variant="glass" className="overflow-hidden">
-            <CardHeader className="border-b border-edge">
-              <h3 className="text-lg font-semibold text-text-primary">{t('analytics.agentPerformance.title')}</h3>
-            </CardHeader>
-            <CardContent className="p-0">
-              {isLoadingAgents ? (
-                <TableSkeleton />
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('analytics.agentPerformance.columns.agent')}</TableHead>
-                      <TableHead>{t('analytics.agentPerformance.columns.chatsHandled')}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {agentPerformanceData.map((agent) => (
-                      <TableRow key={agent.name}>
-                        <TableCell className="font-medium">{agent.name}</TableCell>
-                        <TableCell>{agent.chats}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
               )}
             </CardContent>
           </Card>

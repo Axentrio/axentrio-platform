@@ -1730,6 +1730,27 @@
       "title": "Analytique",
       "subtitle": "Indicateurs de performance et analyses"
     },
+    "outcomes": {
+      "kpis": {
+        "conversations": "Conversations",
+        "bookings": "Réservations",
+        "leads": "Leads capturés"
+      },
+      "vsPrevious": "vs période précédente",
+      "deltaNew": "nouveau",
+      "charts": {
+        "overTime": { "title": "Résultats dans le temps" },
+        "byChannel": { "title": "Conversations par canal" }
+      },
+      "channels": {
+        "widget": "Widget du site",
+        "whatsapp": "WhatsApp",
+        "messenger": "Messenger",
+        "instagram": "Instagram",
+        "telegram": "Telegram",
+        "direct": "Direct"
+      }
+    },
     "onboardingBanner": {
       "title": "Terminez la configuration de votre chatbot",
       "subtitle": "Suivez ces étapes pour tirer le meilleur parti de votre assistant",

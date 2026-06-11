@@ -41,6 +41,7 @@ Running log of every recommendation that changes the literal text of the subscri
 | 33 | Tier-gated widget attribution = single watermark toggle (not white-label) | approved | Q12 |
 | 34 | Split `customBranding` entitlement into typed flags | approved | Q12 |
 | 35 | Essential keeps basic widget appearance config (color/title/avatar) | clarification | Q12 |
+| 36 | AC7 re-asserted — tiered Insights ladder ships in v1 (supersedes 1-4) | approved | post-epic |
 
 ---
 
@@ -600,6 +601,21 @@ Keep `customBranding` as a deprecated compatibility alias temporarily if any cod
 **Reason:** A plumber on Essential still needs the chat widget to visually fit their website. Treating basic styling as a paid differentiator is hostile to the bottom-tier customer and counter to the epic's UX goals ("the platform understands their business"). The epic doesn't explicitly say Essential has no widget styling — it only says Essential displays Axentrio attribution. Codex called this out directly.
 
 **Status:** clarification
+
+---
+
+## Deviation 36 — AC7 re-asserted: tiered Insights ladder ships in v1 (supersedes Deviations 1-4)
+
+**Epic says (verbatim):**
+> *"AC7 – AI Insights. All subscriptions must have AI Insights access with different intelligence levels."*
+
+**History:** Deviation 1 (approved, Q4) deferred the "different intelligence levels" part — v1 was to ship one level for all paying tiers, with the ladder arriving in v2 (per ADR-0002). Deviations 2-4 followed through on copy ("Basic"/"Advanced" qualifiers dropped; Enterprise Insights bullets became Coming Soon).
+
+**Replacement:** AC7 is honored **as written, now**: every paying tier has AI Insights at a different level, differentiated along the axes ADR-0002 itself enumerated for the future ladder (insight kinds, evidence drill-down, retention) — Essential: Gap findings without evidence drill-down, 30-day history; Pro: + evidence drill-down, 90-day history; Enterprise ("AI Business Insights"): + AI digest, Correlation, Sentiment kinds, 365-day history, export. The refresh-cadence axis is deliberately not used (see ADR-0013). Detection quality is identical at every tier — no quality-bucketing of findings. Pricing copy names concrete capabilities per tier instead of restoring the "Basic"/"Advanced" qualifiers Deviations 2-3 removed; Deviation 4's Coming Soon bullets flip to real as Enterprise capabilities land.
+
+**Reason:** Stakeholder re-assertion (2026-06-11, approved by Achraf): tier differentiation is a launch requirement, not a v2 follow-up. Mechanics in [ADR-0013](./adr/0013-tiered-insights-ladder.md), which supersedes ADR-0002. Scope: `.scratch/plan-insights-tiering.md`.
+
+**Status:** approved
 
 ---
 

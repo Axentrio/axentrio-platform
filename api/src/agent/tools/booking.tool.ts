@@ -10,7 +10,7 @@ import {
 } from '../../n8n/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
-import type { AppointmentBookedEvent, LeadCreatedEvent } from '../../webhooks/webhook.types';
+import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 
 /**
  * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
@@ -151,7 +151,9 @@ export class CreateBookingTool implements ToolAdapter {
         }
       );
 
-      // Fire-and-forget: emit appointment.booked + lead.created — confirmed bookings only.
+      // Fire-and-forget: emit appointment.booked — confirmed bookings only.
+      // (lead.created is owned by the lead-capture service, fired from the booking
+      // service's captureLeadFromBooking hook — emitting it here too would double-fire.)
       // A request-mode service short-circuits to a request inside the provider, which fires
       // booking.request_created itself; emitting appointment.booked here would wrongly
       // signal a confirmation (and would re-fire on idempotent re-returns).
@@ -189,17 +191,6 @@ export class CreateBookingTool implements ToolAdapter {
             },
           };
           emitWebhookEvent(appointmentEvent);
-
-          const leadEvent: LeadCreatedEvent = {
-            ...buildEventBase('lead.created', ctx.tenantId, sessionCtx),
-            type: 'lead.created',
-            lead: {
-              name: args.attendeeName as string,
-              email: (args.attendeeEmail as string | undefined) ?? '',
-              source: 'booking',
-            },
-          };
-          emitWebhookEvent(leadEvent);
         } catch {
           // non-fatal — booking succeeded, webhook emission is best-effort
         }

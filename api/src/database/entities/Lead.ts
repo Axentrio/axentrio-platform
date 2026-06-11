@@ -34,6 +34,7 @@ import {
   ManyToOne,
   JoinColumn,
   Index,
+  Check,
 } from 'typeorm';
 import { Tenant } from './Tenant';
 import { ChatSession } from './ChatSession';
@@ -46,6 +47,15 @@ export type LeadStatus = 'new' | 'archived';
 @Index(['tenantId', 'createdAt'])
 @Index(['tenantId', 'email'])
 @Index(['sessionId'])
+// Per-identity dedup anchor — MUST match the migration so the test schema
+// (synchronize-from-entities) and prod (migration) agree. The upsert's
+// ON CONFLICT (tenant_id, dedupe_key) needs this exact partial unique index.
+@Index('ux_chatbot_leads_tenant_dedupe', ['tenantId', 'dedupeKey'], {
+  unique: true,
+  where: '"deleted_at" IS NULL',
+})
+// Every Lead must carry at least one contact identifier.
+@Check('chk_chatbot_leads_identity', '"email" IS NOT NULL OR "phone" IS NOT NULL OR "external_user_id" IS NOT NULL')
 export class Lead {
   @PrimaryGeneratedColumn('uuid')
   id!: string;

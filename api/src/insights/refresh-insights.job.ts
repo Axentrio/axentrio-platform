@@ -145,12 +145,20 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
       judged += 1;
       if (!watermarkFrozen) watermark = session.effectiveEndedAt;
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'unknown';
+      // A concurrent run (manual ops script vs the nightly pass) may have
+      // judged this session between our pre-check and insert — that's a
+      // skip, not a failure: the judgment exists, the watermark can advance.
+      if (message.includes('uq_judgments_session')) {
+        if (!watermarkFrozen) watermark = session.effectiveEndedAt;
+        continue;
+      }
       failed += 1;
       watermarkFrozen = true; // failed session retries next run
       logger.warn('[insights-refresh] judge failed for session', {
         tenantId,
         sessionId: session.id,
-        error: err instanceof Error ? err.message : 'unknown',
+        error: message,
       });
     }
   }
@@ -221,7 +229,9 @@ export function registerInsightsRefreshJob(): void {
   setInterval(async () => {
     const now = new Date();
     const day = now.toISOString().slice(0, 10);
-    if (now.getUTCHours() < 2 || lastRunDay === day || running) return;
+    // Run only DURING the 02:00 UTC hour (ADR-0006) — `>= 2` would fire
+    // immediately after any daytime deploy and race manual/ops runs.
+    if (now.getUTCHours() !== 2 || lastRunDay === day || running) return;
     running = true;
     lastRunDay = day;
     try {

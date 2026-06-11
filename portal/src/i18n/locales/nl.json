@@ -1735,7 +1735,8 @@
       "kpis": {
         "conversations": "Gesprekken",
         "bookings": "Boekingen",
-        "leads": "Vastgelegde leads"
+        "leads": "Vastgelegde leads",
+        "afterHours": "Gesprekken buiten openingstijden"
       },
       "vsPrevious": "t.o.v. vorige periode",
       "deltaNew": "nieuw",

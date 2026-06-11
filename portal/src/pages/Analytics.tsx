@@ -33,7 +33,7 @@ import {
   AreaChart,
   Area,
 } from 'recharts';
-import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus } from 'lucide-react';
+import { MessageSquare, Clock, Star, TrendingUp, CalendarCheck, UserPlus, Moon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { OnboardingBanner } from '@/components/dashboard/OnboardingBanner';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -72,6 +72,8 @@ interface OutcomeAggregates {
   conversations: OutcomeBucket;
   bookings: OutcomeBucket;
   leads: OutcomeBucket;
+  /** null when the tenant has no scheduler business hours to classify against. */
+  afterHours: { count: number; classifiable: number } | null;
 }
 
 interface OutcomesResponse {
@@ -269,6 +271,17 @@ const Analytics: React.FC = () => {
       bgColor: 'bg-accent-500/10',
       onClick: () => navigate('/leads'),
     },
+    // Only meaningful for tenants with scheduler business hours (null otherwise).
+    ...(cur?.afterHours != null
+      ? [{
+          label: t('analytics.outcomes.kpis.afterHours', { defaultValue: 'After-hours conversations' }),
+          value: cur.afterHours.count.toLocaleString(),
+          change: formatDelta(cur.afterHours.count, prev?.afterHours?.count),
+          icon: Moon,
+          color: 'text-chat-bot',
+          bgColor: 'bg-chat-bot/10',
+        }]
+      : []),
     ...(hasResponseTimeData
       ? [{
           label: t('analytics.kpis.avgResponseTime'),
@@ -323,7 +336,7 @@ const Analytics: React.FC = () => {
       <div
         className={cn(
           'grid grid-cols-1 md:grid-cols-2 gap-4',
-          { 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5' }[stats.length] ?? 'lg:grid-cols-3',
+          { 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3', 4: 'lg:grid-cols-4', 5: 'lg:grid-cols-5', 6: 'lg:grid-cols-6' }[stats.length] ?? 'lg:grid-cols-4',
         )}
       >
         {stats.map((stat, index) => (

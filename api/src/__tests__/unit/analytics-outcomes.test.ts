@@ -31,11 +31,12 @@ vi.mock('../../utils/logger', () => ({
  * for tenant-scoping assertions. Hoisted so the vi.mock factory below
  * (which vitest lifts above all declarations) can reference them.
  */
-const { sessionQueue, bookingQueue, leadQueue, whereCalls, makeRepo } = vi.hoisted(() => {
+const { sessionQueue, bookingQueue, leadQueue, whereCalls, makeRepo, mockRules } = vi.hoisted(() => {
   const sessionQueue: Array<Array<Record<string, string>>> = [];
   const bookingQueue: Array<Array<Record<string, string>>> = [];
   const leadQueue: Array<Array<Record<string, string>>> = [];
   const whereCalls: Array<Record<string, unknown>> = [];
+  const mockRules: { current: unknown[] } = { current: [] };
   function makeRepo(queue: Array<Array<Record<string, string>>>) {
     return {
       createQueryBuilder: () => {
@@ -57,7 +58,7 @@ const { sessionQueue, bookingQueue, leadQueue, whereCalls, makeRepo } = vi.hoist
       find: async () => [],
     };
   }
-  return { sessionQueue, bookingQueue, leadQueue, whereCalls, makeRepo };
+  return { sessionQueue, bookingQueue, leadQueue, whereCalls, makeRepo, mockRules };
 });
 
 vi.mock('../../database/data-source', () => ({
@@ -66,6 +67,9 @@ vi.mock('../../database/data-source', () => ({
       if (entity.name === 'ChatSession') return makeRepo(sessionQueue);
       if (entity.name === 'Booking') return makeRepo(bookingQueue);
       if (entity.name === 'Lead') return makeRepo(leadQueue);
+      if (entity.name === 'AvailabilityRule') {
+        return { find: async () => mockRules.current, createQueryBuilder: () => null };
+      }
       return makeRepo([]);
     },
     query: vi.fn(),
@@ -95,6 +99,7 @@ describe('GET /analytics/outcomes', () => {
     bookingQueue.length = 0;
     leadQueue.length = 0;
     whereCalls.length = 0;
+    mockRules.current = [];
   });
 
   it('returns current + previous aggregates with totals and breakdowns', async () => {
@@ -126,6 +131,9 @@ describe('GET /analytics/outcomes', () => {
     expect(previous.conversations.total).toBe(2);
     expect(previous.bookings).toEqual({ total: 0, byChannel: {} });
     expect(previous.leads.total).toBe(2);
+
+    // No scheduler rules → after-hours has no meaning → null (card hidden).
+    expect(current.afterHours).toBeNull();
 
     // Previous window is the same-length window ending where current starts.
     expect(previousRange.to).toBe(range.from);
@@ -167,6 +175,32 @@ describe('GET /analytics/outcomes', () => {
     mockTenantId = undefined;
     const res = await request(createApp()).get('/analytics/outcomes');
     expect(res.status).toBe(400);
+  });
+
+  it('classifies after-hours sessions when scheduler rules exist', async () => {
+    // Empty weeklyHours → every hour is after-hours; keeps the test tz-proof.
+    mockRules.current = [{ botId: 'bot-1', timezone: 'UTC', weeklyHours: {}, dateOverrides: [] }];
+    // Per window, the session repo serves the conversations query first,
+    // then the after-hours raw query: [convCur, ahCur, convPrev, ahPrev].
+    sessionQueue.push(
+      [{ key: 'widget', count: '2' }],
+      [
+        { botId: 'bot-1', createdAt: '2026-06-02T10:00:00Z' },
+        { botId: 'bot-1', createdAt: '2026-06-03T22:00:00Z' },
+      ],
+      [],
+      [],
+    );
+    bookingQueue.push([], []);
+    leadQueue.push([], []);
+
+    const res = await request(createApp())
+      .get('/analytics/outcomes')
+      .query({ from: '2026-06-01', to: '2026-06-08' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.current.afterHours).toEqual({ count: 2, classifiable: 2 });
+    expect(res.body.data.previous.afterHours).toEqual({ count: 0, classifiable: 0 });
   });
 });
 

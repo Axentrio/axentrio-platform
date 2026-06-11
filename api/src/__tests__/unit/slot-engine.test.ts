@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeSlots, SlotEngineInput } from '../../n8n/booking-providers/slot-engine';
+import { computeSlots, isWithinBusinessHours, SlotEngineInput } from '../../n8n/booking-providers/slot-engine';
 
 // Helper to build an input with sensible defaults.
 function input(overrides: Partial<SlotEngineInput> & {
@@ -148,5 +148,42 @@ describe('slot-engine · computeSlots', () => {
     );
     // First occurrence is CEST (UTC+2): 02:00→00:00Z, 02:30→00:30Z.
     expect(starts(slots)).toEqual(['2026-10-25T00:00:00.000Z', '2026-10-25T00:30:00.000Z']);
+  });
+});
+
+describe('slot-engine · isWithinBusinessHours', () => {
+  const rule = {
+    timezone: 'Europe/Brussels',
+    weeklyHours: { wed: [{ start: '09:00', end: '17:00' }] },
+    dateOverrides: [],
+  };
+
+  // 2026-06-10 is a Wednesday; Brussels is CEST (UTC+2) in June.
+  it('classifies inside a weekly window, timezone-aware', () => {
+    // 08:00 UTC = 10:00 Brussels — inside 09:00-17:00
+    expect(isWithinBusinessHours(rule, new Date('2026-06-10T08:00:00Z'))).toBe(true);
+    // 06:30 UTC = 08:30 Brussels — before opening
+    expect(isWithinBusinessHours(rule, new Date('2026-06-10T06:30:00Z'))).toBe(false);
+    // 15:00 UTC = 17:00 Brussels — end is exclusive
+    expect(isWithinBusinessHours(rule, new Date('2026-06-10T15:00:00Z'))).toBe(false);
+  });
+
+  it('treats days with no windows as fully after-hours', () => {
+    // 2026-06-11 is a Thursday — no thu entry
+    expect(isWithinBusinessHours(rule, new Date('2026-06-11T08:00:00Z'))).toBe(false);
+  });
+
+  it('honors closed date overrides', () => {
+    const closed = { ...rule, dateOverrides: [{ date: '2026-06-10', closed: true }] };
+    expect(isWithinBusinessHours(closed, new Date('2026-06-10T08:00:00Z'))).toBe(false);
+  });
+
+  it('supports the 24:00 end-of-day marker', () => {
+    const lateNight = {
+      ...rule,
+      weeklyHours: { wed: [{ start: '22:00', end: '24:00' }] },
+    };
+    // 21:00 UTC = 23:00 Brussels — inside 22:00-24:00
+    expect(isWithinBusinessHours(lateNight, new Date('2026-06-10T21:00:00Z'))).toBe(true);
   });
 });

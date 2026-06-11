@@ -160,3 +160,27 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
   slots.sort((a, b) => a.start.localeCompare(b.start));
   return slots;
 }
+
+/**
+ * Is `at` inside the rule's business hours? Reuses the same window math as
+ * slot computation (weekly hours + date overrides + "24:00" end-of-day, in
+ * the owner's timezone) so "after hours" in analytics can never drift from
+ * "bookable hours" in the scheduler. Pure; used by the outcome metrics.
+ */
+export function isWithinBusinessHours(
+  rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides'>,
+  at: Date,
+): boolean {
+  const zone = rule.timezone || 'UTC';
+  const dt = DateTime.fromJSDate(at, { zone });
+  if (!dt.isValid) return false;
+  const windows = windowsForDay({ ...rule, slotGranularityMin: 0 }, dt);
+  const minutesOfDay = dt.hour * 60 + dt.minute;
+  for (const w of windows) {
+    const start = parseHHMM(w.start);
+    const end = parseHHMM(w.end);
+    if (!start || !end) continue;
+    if (minutesOfDay >= start.h * 60 + start.m && minutesOfDay < end.h * 60 + end.m) return true;
+  }
+  return false;
+}

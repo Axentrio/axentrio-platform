@@ -1734,7 +1734,8 @@
       "kpis": {
         "conversations": "Conversations",
         "bookings": "Réservations",
-        "leads": "Leads capturés"
+        "leads": "Leads capturés",
+        "afterHours": "Conversations hors horaires"
       },
       "vsPrevious": "vs période précédente",
       "deltaNew": "nouveau",

@@ -8,6 +8,8 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Agent } from '../database/entities/Agent';
 import { Booking } from '../database/entities/Booking';
 import { Lead } from '../database/entities/Lead';
+import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { isWithinBusinessHours } from '../n8n/booking-providers/slot-engine';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
@@ -22,6 +24,7 @@ const sessionRepository = AppDataSource.getRepository(ChatSession);
 const agentRepository = AppDataSource.getRepository(Agent);
 const bookingRepository = AppDataSource.getRepository(Booking);
 const leadRepository = AppDataSource.getRepository(Lead);
+const availabilityRepository = AppDataSource.getRepository(AvailabilityRule);
 
 // All routes require agent authentication
 router.use(requireClerkAuth, autoProvision, resolveTenantContext);
@@ -265,9 +268,49 @@ function toBreakdown(rows: Array<{ key: string; count: string }>): Record<string
   return out;
 }
 
+/**
+ * Classify the window's sessions as inside/outside business hours, using the
+ * tenant's scheduler AvailabilityRules (one per bot). Sessions whose bot has
+ * a rule are classifiable; when a session's bot has none but the tenant has
+ * exactly one rule, that rule is used (the common one-bot-with-scheduler
+ * case). Returns null when the tenant has no rules at all — the metric has
+ * no meaning without business hours, and the portal hides the card.
+ */
+async function computeAfterHours(
+  tenantId: string,
+  from: Date,
+  to: Date,
+  rules: AvailabilityRule[],
+): Promise<{ count: number; classifiable: number } | null> {
+  if (rules.length === 0) return null;
+
+  const byBot = new Map(rules.map((r) => [r.botId, r]));
+  const fallback = rules.length === 1 ? rules[0] : null;
+
+  const sessions: Array<{ botId: string | null; createdAt: string | Date }> = await sessionRepository
+    .createQueryBuilder('s')
+    .select('s.bot_id', 'botId')
+    .addSelect('s.created_at', 'createdAt')
+    .where('s.tenant_id = :tenantId', { tenantId })
+    .andWhere('s.created_at >= :from', { from })
+    .andWhere('s.created_at < :to', { to })
+    .limit(10_000)
+    .getRawMany();
+
+  let count = 0;
+  let classifiable = 0;
+  for (const s of sessions) {
+    const rule = (s.botId && byBot.get(s.botId)) || fallback;
+    if (!rule) continue;
+    classifiable += 1;
+    if (!isWithinBusinessHours(rule, new Date(s.createdAt))) count += 1;
+  }
+  return { count, classifiable };
+}
+
 /** Compute the outcome aggregates for one [from, to) window. */
-async function computeOutcomes(tenantId: string, from: Date, to: Date) {
-  const [conversationRows, bookingRows, leadRows] = await Promise.all([
+async function computeOutcomes(tenantId: string, from: Date, to: Date, rules: AvailabilityRule[]) {
+  const [conversationRows, bookingRows, leadRows, afterHours] = await Promise.all([
     sessionRepository
       .createQueryBuilder('s')
       .select('s.channel', 'key')
@@ -298,12 +341,14 @@ async function computeOutcomes(tenantId: string, from: Date, to: Date) {
       .andWhere('l.created_at < :to', { to })
       .groupBy('l.source')
       .getRawMany(),
+    computeAfterHours(tenantId, from, to, rules),
   ]);
 
   return {
     conversations: { total: sumCounts(conversationRows), byChannel: toBreakdown(conversationRows) },
     bookings: { total: sumCounts(bookingRows), byChannel: toBreakdown(bookingRows) },
     leads: { total: sumCounts(leadRows), bySource: toBreakdown(leadRows) },
+    afterHours,
   };
 }
 
@@ -332,9 +377,11 @@ router.get(
       `outcomes:${tenantId}:${from.toISOString()}:${to.toISOString()}`,
       60,
       async () => {
+        // Scheduler business hours, one rule per bot — loaded once for both windows.
+        const rules = await availabilityRepository.find({ where: { tenantId } });
         const [current, previous] = await Promise.all([
-          computeOutcomes(tenantId, from, to),
-          computeOutcomes(tenantId, prevFrom, prevTo),
+          computeOutcomes(tenantId, from, to, rules),
+          computeOutcomes(tenantId, prevFrom, prevTo, rules),
         ]);
         return {
           range: { from: from.toISOString(), to: to.toISOString() },

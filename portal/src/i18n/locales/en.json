@@ -82,11 +82,11 @@
   },
   "leads": {
     "title": "Leads",
-    "intro": "Every contact your chatbot has captured. The agent fires capture_lead whenever a visitor shares their email.",
+    "intro": "Every contact your chatbot has captured — from the website widget, your connected channels (WhatsApp, Messenger, and more), and appointment bookings.",
     "loadMore": "Load more",
     "empty": {
       "title": "No leads yet",
-      "body": "When the chatbot captures a visitor's contact details — name + email at minimum — they'll show up here."
+      "body": "When a visitor shares an email or phone — or reaches out on a connected channel — they'll show up here."
     },
     "table": {
       "name": "Name",

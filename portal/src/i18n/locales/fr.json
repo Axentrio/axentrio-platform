@@ -82,11 +82,11 @@
   },
   "leads": {
     "title": "Leads",
-    "intro": "Chaque contact capturé par votre chatbot. L'agent déclenche capture_lead dès qu'un visiteur partage son e-mail.",
+    "intro": "Chaque contact capturé par votre chatbot — depuis le widget du site web, vos canaux connectés (WhatsApp, Messenger, etc.) et les prises de rendez-vous.",
     "loadMore": "Charger plus",
     "empty": {
       "title": "Aucun lead pour l'instant",
-      "body": "Lorsque le chatbot capture les coordonnées d'un visiteur — nom + e-mail au minimum — ils apparaîtront ici."
+      "body": "Dès qu'un visiteur partage un e-mail ou un téléphone — ou vous contacte sur un canal connecté — il apparaîtra ici."
     },
     "table": {
       "name": "Nom",

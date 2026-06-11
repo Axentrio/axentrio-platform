@@ -82,11 +82,11 @@
   },
   "leads": {
     "title": "Leads",
-    "intro": "Elke contactpersoon die je chatbot heeft vastgelegd. De agent roept capture_lead aan zodra een bezoeker een e-mailadres deelt.",
+    "intro": "Elke contactpersoon die je chatbot heeft vastgelegd — via de websitewidget, je gekoppelde kanalen (WhatsApp, Messenger en meer) en afspraakboekingen.",
     "loadMore": "Meer laden",
     "empty": {
       "title": "Nog geen leads",
-      "body": "Zodra de chatbot de contactgegevens van een bezoeker vastlegt — minimaal naam + e-mail — verschijnen ze hier."
+      "body": "Zodra een bezoeker een e-mailadres of telefoonnummer deelt — of contact opneemt via een gekoppeld kanaal — verschijnt deze hier."
     },
     "table": {
       "name": "Naam",

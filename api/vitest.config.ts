@@ -29,6 +29,13 @@ export default defineConfig({
     // Files run in parallel; each worker uses its own database (see setup.ts),
     // so the per-test TRUNCATE stays isolated to that worker.
     fileParallelism: true,
+    // Cap worker count. Vitest defaults to ~one fork per core; on a high-core
+    // machine that spins up many worker databases at once, whose concurrent
+    // startup overwhelms the shared test Postgres (disk/connection contention)
+    // and surfaces latent timing races — failures CI never sees on its 2-core
+    // runner. 4 keeps local runs as reliable as CI; min(4, cores) makes it a
+    // no-op in CI. Paired with the enlarged tmpfs in docker-compose.test.yml.
+    maxWorkers: 4,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

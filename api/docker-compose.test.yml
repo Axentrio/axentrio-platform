@@ -8,5 +8,12 @@ services:
       POSTGRES_DB: chatbot_test
     ports:
       - '5433:5432'
+    # RAM-backed PGDATA for speed. The size is a ceiling (not a reservation —
+    # tmpfs only consumes what's written): raised from the 2GB default because
+    # vitest runs one database per worker, and the concurrent synchronize() +
+    # shared pg_wal at startup transiently overflows 2GB → "No space left on
+    # device", whose failed afterEach TRUNCATE then cascades into duplicate-key
+    # errors. Paired with maxWorkers in vitest.config.ts (bounds worker count).
+    # Local-only; CI uses its own disk-backed postgres service (ci.yml).
     tmpfs:
-      - /var/lib/postgresql/data
+      - /var/lib/postgresql/data:size=8g

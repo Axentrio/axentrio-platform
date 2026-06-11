@@ -409,9 +409,11 @@ describe('getLeadStats', () => {
     expect(result.last7Days).toBe(6);
     expect(result.last30Days).toBe(6);
     expect(result.bySource).toEqual({
+      channel: 0, // identity-polymorphic sources, exhaustively zero-filled
       tool: 4, // 3 recent + 1 old
+      booking: 0,
       manual: 2,
-      import: 0, // exhaustively zero-filled
+      import: 0,
       webhook: 1,
     });
   });
@@ -424,7 +426,7 @@ describe('getLeadStats', () => {
       manager: a.manager,
     });
     expect(result.totalCount).toBe(0);
-    expect(result.bySource).toEqual({ tool: 0, manual: 0, import: 0, webhook: 0 });
+    expect(result.bySource).toEqual({ channel: 0, tool: 0, booking: 0, manual: 0, import: 0, webhook: 0 });
   });
 
   it('never leaks tenant B lead PII', async () => {

@@ -51,12 +51,18 @@ describe('Clerk Sync Service', () => {
       const result = await inviteToClerkOrganization('org_1', 'user@test.com');
 
       expect(result).toBe(true);
-      expect(mockOrgs.createOrganizationInvitation).toHaveBeenCalledWith({
-        organizationId: 'org_1',
-        emailAddress: 'user@test.com',
-        role: 'org:member',
-        inviterUserId: undefined,
-      });
+      // objectContaining: the invite's org/email/role/inviter are the contract.
+      // `redirectUrl` is derived from config.cors.origin, so its value differs by
+      // environment (set locally, undefined in CI) — asserting the literal arg
+      // made this test pass in CI but fail locally.
+      expect(mockOrgs.createOrganizationInvitation).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: 'org_1',
+          emailAddress: 'user@test.com',
+          role: 'org:member',
+          inviterUserId: undefined,
+        }),
+      );
     });
 
     it('should return false on failure', async () => {

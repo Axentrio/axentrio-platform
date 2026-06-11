@@ -1731,6 +1731,58 @@
       }
     }
   },
+  "insights": {
+    "surface": {
+      "outcomesTab": "Outcomes",
+      "insightsTab": "AI Insights"
+    },
+    "tabs": {
+      "open": "Open",
+      "wins": "Wins"
+    },
+    "meta": {
+      "refreshed": "Last analysed {{ago}}",
+      "pending": "First analysis runs tonight — insights appear after your chats are reviewed",
+      "incomplete": "Insights incomplete — still analysing recent chats"
+    },
+    "card": {
+      "stats": "{{visitors}} customers asked without getting an answer ({{count}} conversations) · last {{ago}}"
+    },
+    "status": {
+      "dormant": "Dormant",
+      "resolvedData": "Resolved — confirmed by chats",
+      "resolvedManual": "Resolved — marked fixed"
+    },
+    "actions": {
+      "resolve": "I fixed this",
+      "archiveHint": "Not relevant to my business",
+      "resolvedToast": "Marked as fixed",
+      "archivedToast": "Archived"
+    },
+    "evidence": {
+      "toggle": "View the conversations",
+      "locked": "See the conversations behind this finding — available on Pro",
+      "customer": "Customer",
+      "assistant": "Assistant"
+    },
+    "empty": {
+      "open": {
+        "title": "No open gaps",
+        "description": "When several customers ask something your assistant can't answer, it shows up here."
+      },
+      "wins": {
+        "title": "No wins yet",
+        "description": "Resolved gaps land here — fix a gap by adding the answer to your knowledge base."
+      }
+    },
+    "locked": {
+      "title": "AI Insights",
+      "oneLiner": "See what customers ask that your assistant can't answer yet.",
+      "bullet1": "Topics customers keep asking about, ranked by how many asked",
+      "bullet2": "Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically",
+      "bullet3": "Refreshed nightly from your real conversations"
+    }
+  },
   "analytics": {
     "header": {
       "title": "Analytics",
@@ -1746,8 +1798,12 @@
       "vsPrevious": "vs previous period",
       "deltaNew": "new",
       "charts": {
-        "overTime": { "title": "Outcomes over time" },
-        "byChannel": { "title": "Conversations by channel" }
+        "overTime": {
+          "title": "Outcomes over time"
+        },
+        "byChannel": {
+          "title": "Conversations by channel"
+        }
       },
       "channels": {
         "widget": "Website widget",

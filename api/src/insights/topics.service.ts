@@ -12,6 +12,7 @@ import { CanonicalTopic } from '../database/entities/CanonicalTopic';
 import { getProvider } from '../llm/provider-factory';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { normalizeTopic, validateTopic, TopicRejectReason } from './topic-validation';
+import type { UsageTally } from './judge.service';
 import { logger } from '../utils/logger';
 
 export type CanonicalizeResult =
@@ -39,6 +40,7 @@ export async function canonicalizeTopic(
   tenantId: string,
   rawPhrase: string,
   evidenceMessageIds: string[],
+  tally?: UsageTally,
 ): Promise<CanonicalizeResult> {
   // Layer 2, judge end.
   const judgeReject = validateTopic(rawPhrase);
@@ -73,6 +75,12 @@ export async function canonicalizeTopic(
     ],
     { model: DEFAULT_MODEL, maxTokens: 200, temperature: 0, jsonMode: true },
   );
+
+  if (tally) {
+    tally.promptTokens += response.usage.promptTokens;
+    tally.completionTokens += response.usage.completionTokens;
+    tally.calls += 1;
+  }
 
   let parsed: { decision?: string; canonical_topic?: string; evidence_message_ids?: unknown };
   try {

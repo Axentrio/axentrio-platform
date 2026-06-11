@@ -586,13 +586,13 @@ describe('getKnownGapTopics', () => {
     await seedTenantWithSentinels(TENANT_B_SENTINELS);
   });
 
-  it('returns the not-deployed state in v1 (Insights v1 not shipped)', async () => {
+  it('returns the deployed-but-empty state when no gaps exist (Insights v1 shipped)', async () => {
     const result = await getKnownGapTopics.execute({}, {
       tenantId: a.tenantId,
       userId: a.userId,
       manager: a.manager,
     });
-    expect(result).toEqual({ sourceAvailable: false, topics: [] });
+    expect(result).toEqual({ sourceAvailable: true, topics: [] });
   });
 
   it('never leaks tenant B sentinels', async () => {

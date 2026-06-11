@@ -17,6 +17,13 @@ export interface TranscriptMessage {
   content: string;
 }
 
+/** Mutable token tally the refresh job threads through all insight LLM calls. */
+export interface UsageTally {
+  promptTokens: number;
+  completionTokens: number;
+  calls: number;
+}
+
 export interface JudgeVerdict {
   hadQuestion: boolean;
   satisfied: boolean | null;
@@ -62,7 +69,12 @@ function renderTranscript(messages: TranscriptMessage[]): string {
 export async function judgeTranscript(
   messages: TranscriptMessage[],
   isHandoff: boolean,
+  tally?: UsageTally,
 ): Promise<JudgeVerdict> {
+  // Deliberately NOT passing tenantId to getProvider: the nightly judge is
+  // platform-side batch work and must not consume the tenant's dailyLlmCalls
+  // quota (which protects their live bot). Cost is tracked via the tally
+  // (ADR-0006: "monitor token spend via billing telemetry").
   const provider = getProvider(DEFAULT_PROVIDER);
   const response = await provider.chat(
     [
@@ -71,6 +83,12 @@ export async function judgeTranscript(
     ],
     { model: DEFAULT_MODEL, maxTokens: 500, temperature: 0, jsonMode: true },
   );
+
+  if (tally) {
+    tally.promptTokens += response.usage.promptTokens;
+    tally.completionTokens += response.usage.completionTokens;
+    tally.calls += 1;
+  }
 
   let parsed: Record<string, unknown>;
   try {

@@ -23,7 +23,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Judgment } from '../database/entities/Judgment';
 import { InsightsRefreshState } from '../database/entities/InsightsRefreshState';
 import { getEntitlements } from '../billing/entitlements';
-import { judgeTranscript, TranscriptMessage } from './judge.service';
+import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service';
 import { canonicalizeTopic } from './topics.service';
 import { aggregateGaps } from './gap-aggregation.service';
 import { logger } from '../utils/logger';
@@ -98,6 +98,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   let watermarkFrozen = false;
   let judged = 0;
   let failed = 0;
+  const tally: UsageTally = { promptTokens: 0, completionTokens: 0, calls: 0 };
 
   for (const session of sessions) {
     // Unique(session_id) makes re-judging a no-op risk; skip cheaply instead.
@@ -109,14 +110,14 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
 
     try {
       const transcript = await loadTranscript(session.id);
-      const verdict = await judgeTranscript(transcript, session.status === 'handoff');
+      const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally);
 
       let canonicalTopicId: string | null = null;
       let rejectedTopic: string | null = null;
       let rejectReason: string | null = null;
 
       if (verdict.hadQuestion && verdict.topicPhrase) {
-        const canon = await canonicalizeTopic(tenantId, verdict.topicPhrase, verdict.evidenceMessageIds);
+        const canon = await canonicalizeTopic(tenantId, verdict.topicPhrase, verdict.evidenceMessageIds, tally);
         if (canon.ok) {
           canonicalTopicId = canon.canonicalTopicId;
         } else {
@@ -192,6 +193,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
     judged,
     failed,
     completeness: Number(completeness.toFixed(3)),
+    llm: tally, // per-tenant token telemetry (ADR-0006 cost monitoring)
   });
 }
 

@@ -40,7 +40,7 @@ import type {
   PlanDefinition,
 } from '../../queries/useEntitlementsQueries';
 
-export type RequiredTier = Extract<InternalPlanId, 'pro' | 'enterprise'>;
+export type RequiredTier = Extract<InternalPlanId, 'essential' | 'pro' | 'enterprise'>;
 
 export interface LockedPreviewProps {
   feature: keyof PlanFeatures | string;

@@ -47,6 +47,11 @@ export const queryKeys = {
     outcomes: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'outcomes', from, to] as const,
     outcomesTimeseries: (from?: string, to?: string) => [...queryKeys.analytics.all(), 'outcomes-timeseries', from, to] as const,
   },
+  insights: {
+    all: () => ['insights'] as const,
+    list: () => [...queryKeys.insights.all(), 'list'] as const,
+    evidence: (gapId?: string) => [...queryKeys.insights.all(), 'evidence', gapId] as const,
+  },
   knowledge: {
     all: () => ['knowledge'] as const,
     documents: () => [...queryKeys.knowledge.all(), 'documents'] as const,

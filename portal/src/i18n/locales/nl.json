@@ -1726,6 +1726,58 @@
       }
     }
   },
+  "insights": {
+    "surface": {
+      "outcomesTab": "Resultaten",
+      "insightsTab": "AI-inzichten"
+    },
+    "tabs": {
+      "open": "Open",
+      "wins": "Successen"
+    },
+    "meta": {
+      "refreshed": "Laatst geanalyseerd {{ago}}",
+      "pending": "De eerste analyse draait vannacht — inzichten verschijnen nadat je gesprekken zijn beoordeeld",
+      "incomplete": "Inzichten onvolledig — recente gesprekken worden nog geanalyseerd"
+    },
+    "card": {
+      "stats": "{{visitors}} klanten vroegen iets zonder antwoord te krijgen ({{count}} gesprekken) · laatst {{ago}}"
+    },
+    "status": {
+      "dormant": "Sluimerend",
+      "resolvedData": "Opgelost — bevestigd door gesprekken",
+      "resolvedManual": "Opgelost — gemarkeerd als verholpen"
+    },
+    "actions": {
+      "resolve": "Ik heb dit opgelost",
+      "archiveHint": "Niet relevant voor mijn bedrijf",
+      "resolvedToast": "Gemarkeerd als opgelost",
+      "archivedToast": "Gearchiveerd"
+    },
+    "evidence": {
+      "toggle": "Bekijk de gesprekken",
+      "locked": "Bekijk de gesprekken achter deze bevinding — beschikbaar bij Pro",
+      "customer": "Klant",
+      "assistant": "Assistent"
+    },
+    "empty": {
+      "open": {
+        "title": "Geen open hiaten",
+        "description": "Als meerdere klanten iets vragen dat je assistent niet kan beantwoorden, verschijnt het hier."
+      },
+      "wins": {
+        "title": "Nog geen successen",
+        "description": "Opgeloste hiaten komen hier terecht — los een hiaat op door het antwoord aan je kennisbank toe te voegen."
+      }
+    },
+    "locked": {
+      "title": "AI-inzichten",
+      "oneLiner": "Zie wat klanten vragen waar je assistent nog geen antwoord op heeft.",
+      "bullet1": "Onderwerpen waar klanten naar blijven vragen, gerangschikt op aantal",
+      "bullet2": "Los een hiaat op via je kennisbank — successen worden automatisch bevestigd",
+      "bullet3": "Elke nacht ververst op basis van je echte gesprekken"
+    }
+  },
   "analytics": {
     "header": {
       "title": "Analyse",
@@ -1741,8 +1793,12 @@
       "vsPrevious": "t.o.v. vorige periode",
       "deltaNew": "nieuw",
       "charts": {
-        "overTime": { "title": "Resultaten in de tijd" },
-        "byChannel": { "title": "Gesprekken per kanaal" }
+        "overTime": {
+          "title": "Resultaten in de tijd"
+        },
+        "byChannel": {
+          "title": "Gesprekken per kanaal"
+        }
       },
       "channels": {
         "widget": "Website-widget",

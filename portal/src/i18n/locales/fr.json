@@ -1725,6 +1725,58 @@
       }
     }
   },
+  "insights": {
+    "surface": {
+      "outcomesTab": "Résultats",
+      "insightsTab": "Insights IA"
+    },
+    "tabs": {
+      "open": "Ouverts",
+      "wins": "Victoires"
+    },
+    "meta": {
+      "refreshed": "Dernière analyse {{ago}}",
+      "pending": "La première analyse a lieu cette nuit — les insights apparaissent après l'examen de vos conversations",
+      "incomplete": "Insights incomplets — analyse des conversations récentes en cours"
+    },
+    "card": {
+      "stats": "{{visitors}} clients ont demandé sans obtenir de réponse ({{count}} conversations) · dernière {{ago}}"
+    },
+    "status": {
+      "dormant": "En sommeil",
+      "resolvedData": "Résolu — confirmé par les conversations",
+      "resolvedManual": "Résolu — marqué corrigé"
+    },
+    "actions": {
+      "resolve": "J'ai corrigé",
+      "archiveHint": "Sans rapport avec mon activité",
+      "resolvedToast": "Marqué comme corrigé",
+      "archivedToast": "Archivé"
+    },
+    "evidence": {
+      "toggle": "Voir les conversations",
+      "locked": "Consultez les conversations derrière ce constat — disponible avec Pro",
+      "customer": "Client",
+      "assistant": "Assistant"
+    },
+    "empty": {
+      "open": {
+        "title": "Aucune lacune ouverte",
+        "description": "Quand plusieurs clients posent une question sans réponse, elle apparaît ici."
+      },
+      "wins": {
+        "title": "Pas encore de victoires",
+        "description": "Les lacunes résolues arrivent ici — corrigez-en une en ajoutant la réponse à votre base de connaissances."
+      }
+    },
+    "locked": {
+      "title": "Insights IA",
+      "oneLiner": "Découvrez ce que vos clients demandent sans obtenir de réponse.",
+      "bullet1": "Les sujets récurrents, classés par nombre de clients",
+      "bullet2": "Corrigez une lacune en ajoutant la réponse à votre base — les victoires sont confirmées automatiquement",
+      "bullet3": "Actualisé chaque nuit à partir de vos vraies conversations"
+    }
+  },
   "analytics": {
     "header": {
       "title": "Analytique",
@@ -1740,8 +1792,12 @@
       "vsPrevious": "vs période précédente",
       "deltaNew": "nouveau",
       "charts": {
-        "overTime": { "title": "Résultats dans le temps" },
-        "byChannel": { "title": "Conversations par canal" }
+        "overTime": {
+          "title": "Résultats dans le temps"
+        },
+        "byChannel": {
+          "title": "Conversations par canal"
+        }
       },
       "channels": {
         "widget": "Widget du site",

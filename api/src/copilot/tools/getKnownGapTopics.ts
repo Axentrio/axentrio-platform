@@ -17,12 +17,13 @@
  *    catches, emits `tool_call_end` with `outcome: 'error'`, prompt
  *    template handles gracefully.
  *
- * v1 reality: Insights v1 hasn't shipped. This tool always returns
- * "not deployed" until the Insights migrations land — at which point
- * the implementation queries the gap tables. The capability shape
- * doesn't change, only the data behind it.
+ * Insights v1 shipped 2026-06-11 (migration 1786000000000): this tool
+ * queries the real gap tables. "Not deployed" survives only as the
+ * missing-table fallback during a pre-migration deploy window.
  */
 import type { CopilotTool, CopilotToolContext } from './types';
+import { Gap } from '../../database/entities/Gap';
+import { CanonicalTopic } from '../../database/entities/CanonicalTopic';
 
 export type GapSeverity = 'red' | 'orange' | 'green';
 
@@ -40,39 +41,39 @@ export interface KnownGapTopicsResult {
 export const getKnownGapTopics: CopilotTool<Record<string, never>, KnownGapTopicsResult> = {
   name: 'getKnownGapTopics',
   description:
-    'Return topics customers asked about that the bot could not satisfy (Insights v1 Gaps). Three states: not-deployed (sourceAvailable=false), deployed-but-empty (sourceAvailable=true, topics=[]), or deployed with topics. v1 reality: Insights not yet shipped — always returns sourceAvailable=false.',
+    'Return topics customers asked about that the bot could not satisfy (Insights v1 Gaps). Three states: not-deployed (sourceAvailable=false), deployed-but-empty (sourceAvailable=true, topics=[]), or deployed with topics.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<KnownGapTopicsResult> {
-    // Detect Insights v1 deployment by probing for the canonical-topic
-    // table. If absent, source is not available.
-    //
-    // We deliberately use a raw read here against `information_schema`
-    // rather than feature-flag config — a feature flag could drift from
-    // schema reality (flag on but migrations not yet applied), and the
-    // schema is the ground truth.
-    //
-    // This is the ONE place a Copilot tool reads outside its
-    // CopilotReadOnlyManager surface — and it reads metadata, not
-    // tenant data. Once Insights v1 lands, the probe becomes a
-    // simple ctx.manager.find call.
-    const probe = await detectInsightsDeployment(ctx);
-    if (!probe.deployed) {
+    // Insights v1 shipped (migration 1786000000000-CreateInsightsTables).
+    // The probe is now the originally-planned CopilotReadOnlyManager call:
+    // a missing-table error (pre-migration deploy window) reads as
+    // "not deployed" rather than crashing the Copilot turn.
+    let gaps: Gap[];
+    try {
+      gaps = await ctx.manager.find(Gap, {
+        where: { tenantId: ctx.tenantId, status: 'open' },
+        order: { distinctVisitors: 'DESC' },
+        take: 20,
+      });
+    } catch {
       return { sourceAvailable: false, topics: [] };
     }
 
-    // Insights v1 deployed → real query goes here. For now, no
-    // canonical_topic table can be reached: returning the empty
-    // "deployed but no data" state.
-    return { sourceAvailable: true, topics: [] };
+    if (gaps.length === 0) return { sourceAvailable: true, topics: [] };
+
+    const topics = await ctx.manager.find(CanonicalTopic, {
+      where: { tenantId: ctx.tenantId },
+    });
+    const topicById = new Map(topics.map((t) => [t.id, t.topic]));
+
+    return {
+      sourceAvailable: true,
+      topics: gaps.map((g) => ({
+        canonicalTopic: topicById.get(g.canonicalTopicId) ?? 'unknown topic',
+        occurrences: g.occurrences,
+        severity: g.severity as GapSeverity,
+      })),
+    };
   },
 };
-
-async function detectInsightsDeployment(_ctx: CopilotToolContext): Promise<{ deployed: boolean }> {
-  // v1 hard-codes false because the migrations for Insights don't
-  // exist yet. When they land, this function gets a CopilotReadOnly-
-  // Manager-friendly probe (e.g. count() against the canonical-topic
-  // table behind a try/catch that interprets the missing-table error
-  // as "not deployed").
-  return { deployed: false };
-}

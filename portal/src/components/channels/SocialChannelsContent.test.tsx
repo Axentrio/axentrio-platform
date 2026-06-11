@@ -33,6 +33,7 @@ vi.mock('../../queries/useChannelQueries', () => ({
   useConnectMeta: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useDisconnectChannel: () => ({ mutate: vi.fn() }),
   useUpdateChannelBot: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateChannelAutoCapture: () => ({ mutate: vi.fn(), isPending: false }),
   useHealthCheckChannel: () => ({
     mutate: healthCheckMutate,
     isPending: false,

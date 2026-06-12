@@ -76,6 +76,10 @@ jobs:
         working-directory: portal
         run: npx tsc --noEmit
 
+      - name: Run Portal tests
+        working-directory: portal
+        run: npx vitest run
+
       - name: Build Portal
         working-directory: portal
         run: npm run build

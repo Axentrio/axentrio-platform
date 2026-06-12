@@ -42,10 +42,28 @@ vi.mock('sonner', () => ({
 
 import Bookings from './Bookings';
 
-function renderUI() {
-  // LockedPreview pulls entitlements via React Query; supply a minimal
-  // payload so tier strip and CTA render.
-  apiGet.mockResolvedValue({
+function renderUI({ services = [] }: { services?: Array<Record<string, unknown>> } = {}) {
+  // The dashboard gates its tabs on the services query (first-run owners with
+  // no services land on Setup), so the mock is URL-aware: /scheduler/services
+  // returns the given services, everything else gets the entitlements payload
+  // LockedPreview needs for its tier strip and CTA.
+  apiGet.mockImplementation(async (url: string) => {
+    if (url.includes('/scheduler/services')) return { services };
+    return entitlementsPayload;
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <Bookings />
+      </QueryClientProvider>
+    </MemoryRouter>,
+  );
+}
+
+const entitlementsPayload = {
     current: {
       planId: 'essential',
       limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
@@ -86,18 +104,7 @@ function renderUI() {
       },
     ],
     selfServePlans: ['essential', 'pro'],
-  });
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-  });
-  return render(
-    <MemoryRouter>
-      <QueryClientProvider client={queryClient}>
-        <Bookings />
-      </QueryClientProvider>
-    </MemoryRouter>,
-  );
-}
+};
 
 beforeEach(() => {
   hasFeatureMock.mockReset();
@@ -134,12 +141,15 @@ describe('Bookings — locked (Essential tenant)', () => {
 });
 
 describe('Bookings — unlocked (Pro tenant)', () => {
-  it('renders the bookings dashboard, not the LockedPreview', () => {
+  it('renders the bookings dashboard, not the LockedPreview', async () => {
     hasFeatureMock.mockReturnValue(true);
-    renderUI();
+    // A configured owner (has services) lands on the Appointments tab, where
+    // the Upcoming/Past/Requests scope tabs live; first-run owners land on
+    // Setup instead.
+    renderUI({ services: [{ id: 's1', name: 'Intro call', durationMin: 30, active: true }] });
 
     expect(screen.getByRole('heading', { name: /^bookings$/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /requests/i })).toBeInTheDocument();
+    expect(await screen.findByRole('tab', { name: /requests/i })).toBeInTheDocument();
 
     // LockedPreview-only copy should NOT be present.
     expect(screen.queryByText(/let customers schedule appointments/i)).not.toBeInTheDocument();

@@ -51,6 +51,7 @@
     "@types/react": "^18.2.38",
     "@types/react-dom": "^18.2.17",
     "@vitejs/plugin-react": "^4.2.0",
+    "@vitest/coverage-v8": "^4.1.5",
     "autoprefixer": "^10.4.16",
     "axios-mock-adapter": "^2.1.0",
     "jsdom": "^25.0.1",
@@ -67,7 +68,8 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "npx react-doctor@latest",
+    "test:coverage": "vitest run --coverage --coverage.include=\"src/**/*.{ts,tsx}\""
   },
   "browserslist": {
     "production": [

@@ -78,7 +78,9 @@ describe('Sidebar — menu structure', () => {
     expect(screen.getByRole('link', { name: /inbox/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /ai bot & content/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /social media/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /lead capture/i })).toBeInTheDocument();
+    // Renamed from "Lead Capture" with the all-channels lead work (CONTEXT.md: the
+    // sidebar surface is "Leads"; "Lead Capture" is the per-channel setting).
+    expect(screen.getByRole('link', { name: /^leads$/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^bookings/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /success meter/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /^settings/i })).toBeInTheDocument();

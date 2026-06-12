@@ -1767,7 +1767,7 @@
     },
     "evidence": {
       "toggle": "View the conversations",
-      "locked": "See the conversations behind this finding — available on Pro",
+      "locked": "Upgrade to see the conversations behind this finding",
       "customer": "Customer",
       "assistant": "Assistant"
     },

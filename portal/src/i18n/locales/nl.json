@@ -1762,7 +1762,7 @@
     },
     "evidence": {
       "toggle": "Bekijk de gesprekken",
-      "locked": "Bekijk de gesprekken achter deze bevinding — beschikbaar bij Pro",
+      "locked": "Upgrade om de gesprekken achter deze bevinding te bekijken",
       "customer": "Klant",
       "assistant": "Assistent"
     },

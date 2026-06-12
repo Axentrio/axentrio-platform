@@ -204,6 +204,16 @@ describe('LockedPreview — content', () => {
     expect(pros.some((el) => el.className.includes('rounded-full'))).toBe(true);
   });
 
+  it('derives the required tier from the plan catalog when requiredTier is omitted', async () => {
+    // 'bookings' is off on Essential and on from Pro in the fixture catalog,
+    // so the cheapest plan with the feature is Pro — no hard-coded tier
+    // needed (ADR-0013 Principle 4 reversibility).
+    await renderUI({ ...baseProps });
+    // Badge + tier-strip "Required" row both name the derived plan (the
+    // tier strip also legitimately shows the CURRENT plan, Essential).
+    expect(screen.getAllByText('Pro').length).toBeGreaterThanOrEqual(2);
+  });
+
   it("renders an Enterprise badge for requiredTier='enterprise'", async () => {
     await renderUI({ ...baseProps, requiredTier: 'enterprise' });
     const matches = screen.getAllByText('Enterprise');

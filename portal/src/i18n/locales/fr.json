@@ -1761,7 +1761,7 @@
     },
     "evidence": {
       "toggle": "Voir les conversations",
-      "locked": "Consultez les conversations derrière ce constat — disponible avec Pro",
+      "locked": "Passez à un forfait supérieur pour voir les conversations derrière ce constat",
       "customer": "Client",
       "assistant": "Assistant"
     },

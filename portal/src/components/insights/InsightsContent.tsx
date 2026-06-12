@@ -116,7 +116,7 @@ function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boole
           <p className="flex items-center gap-1.5 text-xs text-zinc-500">
             <Lock className="h-3 w-3" />
             {t('insights.evidence.locked', {
-              defaultValue: 'See the conversations behind this finding — available on Pro',
+              defaultValue: 'Upgrade to see the conversations behind this finding',
             })}
           </p>
         )}

@@ -44,7 +44,13 @@ export type RequiredTier = Extract<InternalPlanId, 'essential' | 'pro' | 'enterp
 
 export interface LockedPreviewProps {
   feature: keyof PlanFeatures | string;
-  requiredTier: RequiredTier;
+  /**
+   * Tier to advertise on the upsell. When omitted, derived from the live
+   * plan catalog (cheapest plan whose `features[feature]` is on). Prefer
+   * omitting it — a hard-coded tier silently advertises the wrong plan if
+   * the feature ever moves tiers in the catalog (ADR-0013 Principle 4).
+   */
+  requiredTier?: RequiredTier;
   title: string;
   oneLiner: string;
   bullets: string[];
@@ -57,6 +63,16 @@ function findPlan(
   id: InternalPlanId,
 ): PlanDefinition | undefined {
   return plans?.find((p) => p.id === id);
+}
+
+/** Cheapest (lowest-rank) plan that includes the feature, per the live catalog. */
+function cheapestPlanWithFeature(
+  plans: PlanDefinition[] | undefined,
+  feature: string,
+): PlanDefinition | undefined {
+  return plans
+    ?.filter((p) => p.id !== 'free' && (p.features as unknown as Record<string, boolean>)[feature])
+    .sort((a, b) => a.rank - b.rank)[0];
 }
 
 export function LockedPreview({
@@ -72,7 +88,10 @@ export function LockedPreview({
   const { data } = useEntitlements();
   const currentTierId = data?.current.planId;
   const currentPlan = findPlan(data?.plans, currentTierId ?? 'essential');
-  const requiredPlan = findPlan(data?.plans, requiredTier);
+  const requiredPlan = requiredTier
+    ? findPlan(data?.plans, requiredTier)
+    : cheapestPlanWithFeature(data?.plans, String(feature));
+  const requiredTierId = (requiredPlan?.id ?? requiredTier ?? 'pro') as RequiredTier;
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
@@ -88,7 +107,7 @@ export function LockedPreview({
             </h1>
           </div>
           <PlanBadge
-            tier={comingSoon ? 'comingSoon' : requiredTier}
+            tier={comingSoon ? 'comingSoon' : requiredTierId}
             size="md"
           />
         </div>
@@ -147,10 +166,10 @@ export function LockedPreview({
                 {t('lockedPreview.tierStrip.required')}
               </span>
               <span className="font-medium text-text-primary">
-                {requiredPlan?.displayName ?? requiredTier}
+                {requiredPlan?.displayName ?? requiredTierId}
               </span>
             </div>
-            {requiredTier === 'pro' && (
+            {requiredTierId === 'pro' && (
               <>
                 <div className="flex items-center justify-between">
                   <span className="text-text-muted">
@@ -183,7 +202,7 @@ export function LockedPreview({
           {comingSoon ? (
             <NotifyMeButton feature={String(feature)} />
           ) : (
-            <UpgradeCTA tier={requiredTier} />
+            <UpgradeCTA tier={requiredTierId} />
           )}
           <Button asChild variant="ghost" className={cn('text-text-secondary')}>
             <Link to="/settings/billing">{t('lockedPreview.comparePlans')}</Link>

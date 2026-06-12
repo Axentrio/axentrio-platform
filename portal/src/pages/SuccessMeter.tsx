@@ -40,7 +40,6 @@ export default function SuccessMeter() {
           ) : (
             <LockedPreview
               feature="gapInsights"
-              requiredTier="essential"
               title={t('insights.locked.title', { defaultValue: 'AI Insights' })}
               oneLiner={t('insights.locked.oneLiner', {
                 defaultValue: 'See what customers ask that your assistant can’t answer yet.',

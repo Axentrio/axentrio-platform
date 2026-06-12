@@ -18,6 +18,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
+      "@contracts/*": ["../api/src/contracts/*"],
       "@components/*": ["src/components/*"],
       "@pages/*": ["src/pages/*"],
       "@hooks/*": ["src/hooks/*"],

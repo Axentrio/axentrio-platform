@@ -2,6 +2,9 @@
  * Billing types — the load-bearing provider abstraction.
  * Plan: .scratch/plan-billing.md § BillingProvider interface.
  */
+import type { PlanFeatures } from '../contracts/entitlements';
+
+export type { PlanFeatures };
 
 export type NormalizedStatus = 'trialing' | 'active' | 'past_due' | 'cancelled' | 'none';
 export type InternalPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
@@ -159,39 +162,15 @@ export interface Entitlements {
     sessions: number | null;
     dailyLlmCalls: number | null;
   };
-  features: {
-    unifiedInbox: boolean;
-    bookings: boolean;
-    calendarSync: boolean;
-    leadCapture: boolean;
-    platformAssistant: boolean;
-    crm: boolean;
-    hideWidgetAttribution: boolean;
-    customWidgetAppearance: boolean;
-    handoff: boolean;
-    /** File upload to KnowledgeBase. False on `free` cancellation sink; true on all paid tiers. */
-    fileUpload: boolean;
-    /**
-     * External messaging channels (the widget is the native channel and is
-     * never gated). Pro+ per the channels plan; enforced at connect, inbound
-     * webhook processing, and outbound sends.
-     */
-    channelWhatsapp: boolean;
-    channelMessenger: boolean;
-    channelInstagram: boolean;
-    channelTelegram: boolean;
-    /**
-     * Tiered Insights ladder (ADR-0013 / Deviation 36). `gapInsights` gates
-     * the Insights surface + gap endpoints + nightly judge (all paid tiers);
-     * `gapEvidence` gates evidence drill-down (Pro+); `aiBusinessInsights`
-     * gates digest/correlation/sentiment/365d retention/export (Enterprise).
-     * Tier→flag mapping lives in plans.ts only — insights code must never
-     * branch on tier names (catalog-row reversibility).
-     */
-    gapInsights: boolean;
-    gapEvidence: boolean;
-    aiBusinessInsights: boolean;
-  };
+  /**
+   * Flat boolean feature map — the shape is the WIRE CONTRACT shared with
+   * the portal (src/contracts/entitlements.ts is the single source of
+   * truth; the portal imports it type-only). Per-key semantics:
+   * channel* are Pro+ (widget is native, never gated); the insights trio is
+   * the ADR-0013 ladder (tier→flag mapping lives in plans.ts only — insights
+   * code never branches on tier names).
+   */
+  features: PlanFeatures;
   support: 'none' | 'email' | 'priority';
 }
 

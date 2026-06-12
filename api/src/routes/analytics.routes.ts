@@ -10,6 +10,7 @@ import { Booking } from '../database/entities/Booking';
 import { Lead } from '../database/entities/Lead';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { isWithinBusinessHours } from '../n8n/booking-providers/slot-engine';
+import type { OutcomesResponse, OutcomeAggregates, OutcomesTimeseriesResponse } from '../contracts/analytics';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
@@ -309,7 +310,7 @@ async function computeAfterHours(
 }
 
 /** Compute the outcome aggregates for one [from, to) window. */
-async function computeOutcomes(tenantId: string, from: Date, to: Date, rules: AvailabilityRule[]) {
+async function computeOutcomes(tenantId: string, from: Date, to: Date, rules: AvailabilityRule[]): Promise<OutcomeAggregates> {
   const [conversationRows, bookingRows, leadRows, afterHours] = await Promise.all([
     sessionRepository
       .createQueryBuilder('s')
@@ -383,12 +384,14 @@ router.get(
           computeOutcomes(tenantId, from, to, rules),
           computeOutcomes(tenantId, prevFrom, prevTo, rules),
         ]);
-        return {
+        // Typed against the shared wire contract (src/contracts/analytics.ts).
+        const payload: OutcomesResponse = {
           range: { from: from.toISOString(), to: to.toISOString() },
           previousRange: { from: prevFrom.toISOString(), to: prevTo.toISOString() },
           current,
           previous,
         };
+        return payload;
       },
     );
 
@@ -470,7 +473,8 @@ router.get(
 
     const timeseries = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 
-    sendSuccess(res, { timeseries });
+    const seriesPayload: OutcomesTimeseriesResponse = { timeseries };
+    sendSuccess(res, seriesPayload);
   })
 );
 

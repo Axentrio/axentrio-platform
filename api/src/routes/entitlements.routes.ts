@@ -27,6 +27,7 @@ import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
 import { PLANS, selfServeCheckoutablePlans } from '../billing/plans';
 import type { InternalPlanId } from '../billing/types';
+import type { EntitlementsResponse } from '../contracts/entitlements';
 import { listActiveModules } from '../modules';
 
 const router = Router();
@@ -54,11 +55,14 @@ router.get(
 
     const selfServePlans = selfServeCheckoutablePlans().map((p) => p.id);
 
-    sendSuccess(res, {
+    // Typed against the shared wire contract — renaming a key here without
+    // updating src/contracts/entitlements.ts (and thus the portal) fails tsc.
+    const payload: EntitlementsResponse = {
       current: { ...current, activeModules },
       plans: marketedPlans,
       selfServePlans,
-    });
+    };
+    sendSuccess(res, payload);
   }),
 );
 

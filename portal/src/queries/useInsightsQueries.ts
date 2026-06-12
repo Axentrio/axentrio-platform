@@ -6,40 +6,19 @@ import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/r
 import { toast } from 'sonner';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
+// Wire types from the api's contract module (type-only, erased at build).
+import type {
+  GapStatus,
+  GapSeverity,
+  GapDto,
+  InsightsListResponse,
+  EvidenceEntryDto,
+} from '@contracts/insights';
 
-export type GapStatus = 'open' | 'dormant' | 'resolved_data' | 'resolved_manual' | 'archived';
-export type GapSeverity = 'red' | 'orange' | 'green';
-
-export interface GapRow {
-  id: string;
-  topic: string;
-  status: GapStatus;
-  severity: GapSeverity;
-  occurrences: number;
-  distinctVisitors: number;
-  firstDetectedAt: string;
-  lastSeenAt: string;
-  resolvedAt: string | null;
-  archivedAt: string | null;
-  recommendation: string | null;
-}
-
-export interface InsightsResponse {
-  gaps: GapRow[];
-  meta: {
-    lastRefreshedAt: string | null;
-    completeness: number | null;
-    retentionDays: number;
-    evidenceEnabled: boolean;
-  };
-}
-
-export interface EvidenceEntry {
-  sessionId: string;
-  sessionStartedAt: string;
-  reasoning: string | null;
-  messages: Array<{ id: string; sender: string; content: string; at: string }>;
-}
+export type { GapStatus, GapSeverity };
+export type GapRow = GapDto;
+export type InsightsResponse = InsightsListResponse;
+export type EvidenceEntry = EvidenceEntryDto;
 
 const insightsOptions = {
   list: () => queryOptions({

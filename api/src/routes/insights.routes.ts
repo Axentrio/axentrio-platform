@@ -16,6 +16,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
+import type { InsightsListResponse, GapDto, GapStatus, GapSeverity, EvidenceResponse } from '../contracts/insights';
 import { decrypt } from '../utils/encryption';
 
 const router = Router();
@@ -78,27 +79,29 @@ router.get(
       where: { tenantId },
     });
 
-    sendSuccess(res, {
-      gaps: gaps.map((g) => ({
-        id: g.id,
-        topic: g.topic,
-        status: g.status,
-        severity: g.severity,
-        occurrences: g.occurrences,
-        distinctVisitors: g.distinct_visitors,
-        firstDetectedAt: g.first_detected_at,
-        lastSeenAt: g.last_seen_at,
-        resolvedAt: g.resolved_at,
-        archivedAt: g.archived_at,
-        recommendation: g.recommendation,
+    // Typed against the shared wire contract (src/contracts/insights.ts).
+    const payload: InsightsListResponse = {
+      gaps: gaps.map((g): GapDto => ({
+        id: g.id as string,
+        topic: g.topic as string,
+        status: g.status as GapStatus,
+        severity: g.severity as GapSeverity,
+        occurrences: g.occurrences as number,
+        distinctVisitors: g.distinct_visitors as number,
+        firstDetectedAt: g.first_detected_at as string,
+        lastSeenAt: g.last_seen_at as string,
+        resolvedAt: (g.resolved_at ?? null) as string | null,
+        archivedAt: (g.archived_at ?? null) as string | null,
+        recommendation: (g.recommendation ?? null) as string | null,
       })),
       meta: {
-        lastRefreshedAt: state?.lastRefreshedAt ?? null,
+        lastRefreshedAt: (state?.lastRefreshedAt ?? null) as unknown as string | null,
         completeness: state?.judgmentsCompleteness != null ? Number(state.judgmentsCompleteness) : null,
         retentionDays: windowDays,
         evidenceEnabled: entitlements.features.gapEvidence,
       },
-    });
+    };
+    sendSuccess(res, payload);
   }),
 );
 
@@ -142,17 +145,18 @@ router.get(
       messages.map((m) => [m.id, { ...m, content: m.contentEncrypted ? decrypt(m.content) : m.content }]),
     );
 
-    sendSuccess(res, {
+    const evidencePayload: EvidenceResponse = {
       evidence: judgments.map((j) => ({
         sessionId: j.sessionId,
-        sessionStartedAt: j.sessionStartedAt,
-        reasoning: j.reasoning,
+        sessionStartedAt: j.sessionStartedAt as unknown as string,
+        reasoning: j.reasoning ?? null,
         messages: (j.evidenceMessageIds ?? [])
           .map((id) => messageById.get(id))
           .filter(Boolean)
-          .map((m) => ({ id: m!.id, sender: m!.sender, content: m!.content, at: m!.created_at })),
+          .map((m) => ({ id: m!.id, sender: m!.sender, content: m!.content, at: m!.created_at as unknown as string })),
       })),
-    });
+    };
+    sendSuccess(res, evidencePayload);
   }),
 );
 

@@ -10,65 +10,23 @@
 import { useQuery, queryOptions } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
+// Wire types come from the api's contract module (type-only — erased at
+// build, no runtime coupling). The api types its responses with the same
+// definitions, so a renamed key fails tsc on BOTH sides instead of silently
+// breaking the portal at runtime.
+import type {
+  InternalPlanId,
+  SupportTier,
+  PlanLimits,
+  PlanFeatures,
+  EntitlementsDto,
+  PlanDefinitionDto,
+  EntitlementsResponse,
+} from '@contracts/entitlements';
 
-export type InternalPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
-
-export type SupportTier = 'none' | 'email' | 'priority';
-
-export interface PlanLimits {
-  agents: number | null;
-  sessions: number | null;
-  dailyLlmCalls: number | null;
-}
-
-export interface PlanFeatures {
-  unifiedInbox: boolean;
-  bookings: boolean;
-  calendarSync: boolean;
-  leadCapture: boolean;
-  platformAssistant: boolean;
-  crm: boolean;
-  hideWidgetAttribution: boolean;
-  customWidgetAppearance: boolean;
-  handoff: boolean;
-  fileUpload: boolean;
-  channelWhatsapp: boolean;
-  channelMessenger: boolean;
-  channelInstagram: boolean;
-  channelTelegram: boolean;
-  /** Tiered Insights ladder (ADR-0013): surface / evidence drill-down / intelligence layer. */
-  gapInsights: boolean;
-  gapEvidence: boolean;
-  aiBusinessInsights: boolean;
-}
-
-export interface Entitlements {
-  planId: InternalPlanId;
-  /** False for free/suspended/cancelled tenants — everything below is off. */
-  billable: boolean;
-  limits: PlanLimits;
-  features: PlanFeatures;
-  support: SupportTier;
-  /** Ids of modules active for this tenant (feature- or enablement-gated). */
-  activeModules: string[];
-}
-
-export interface PlanDefinition {
-  id: InternalPlanId;
-  displayName: string;
-  rank: number;
-  priceEurMonthly: number | null;
-  isSelfServeCheckoutable: boolean;
-  limits: PlanLimits;
-  features: PlanFeatures;
-  support: SupportTier;
-}
-
-export interface EntitlementsResponse {
-  current: Entitlements;
-  plans: PlanDefinition[];
-  selfServePlans: InternalPlanId[];
-}
+export type { InternalPlanId, SupportTier, PlanLimits, PlanFeatures, EntitlementsResponse };
+export type Entitlements = EntitlementsDto;
+export type PlanDefinition = PlanDefinitionDto;
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 

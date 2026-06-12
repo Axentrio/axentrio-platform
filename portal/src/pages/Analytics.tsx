@@ -17,6 +17,8 @@ import {
 } from '../queries/useAnalyticsQueries';
 import { useDashboardMetrics } from '../queries/useDashboardQueries';
 import { useHasFeature } from '../queries/useEntitlementsQueries';
+// Wire types from the api's contract module (type-only, erased at build).
+import type { OutcomesResponse, OutcomeSeriesPoint } from '@contracts/analytics';
 import { useAppAuth } from '@auth/useAppAuth';
 import {
   PieChart,
@@ -60,34 +62,6 @@ interface ChatMetrics {
   /** Closed sessions a human agent resolved (assigned_agent_id set). */
   humanResolved: number;
   avgDurationSeconds: number;
-}
-
-interface OutcomeBucket {
-  total: number;
-  byChannel?: Record<string, number>;
-  bySource?: Record<string, number>;
-}
-
-interface OutcomeAggregates {
-  conversations: OutcomeBucket;
-  bookings: OutcomeBucket;
-  leads: OutcomeBucket;
-  /** null when the tenant has no scheduler business hours to classify against. */
-  afterHours: { count: number; classifiable: number } | null;
-}
-
-interface OutcomesResponse {
-  range: { from: string; to: string };
-  previousRange: { from: string; to: string };
-  current: OutcomeAggregates;
-  previous: OutcomeAggregates;
-}
-
-interface OutcomeSeriesPoint {
-  date: string;
-  conversations: number;
-  bookings: number;
-  leads: number;
 }
 
 /* ------------------------------------------------------------------ */

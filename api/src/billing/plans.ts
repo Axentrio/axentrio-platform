@@ -114,8 +114,9 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
     rank: 3,
     priceEurMonthly: 149,
     isSelfServeCheckoutable: true,
-    // Epic: Enterprise includes "2 AI chatbots".
-    limits: { agents: 2, bots: 2, sessions: null, dailyLlmCalls: null },
+    // Enterprise includes 3 AI chatbots (raised from 2 for bot-templates —
+    // tenants bind up to 3 template-backed bots; .scratch/plan-bot-templates.md T2).
+    limits: { agents: 2, bots: 3, sessions: null, dailyLlmCalls: null },
     features: {
       unifiedInbox: true,
       bookings: true,

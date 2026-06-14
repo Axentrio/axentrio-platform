@@ -508,9 +508,9 @@
           "name": "Enterprise",
           "price": "€149",
           "priceNote": "/mois · hors TVA",
-          "blurb": "Deux chatbots, historique d'insights sur 1 an, support prioritaire.",
+          "blurb": "Trois chatbots, historique d'insights sur 1 an, support prioritaire.",
           "features": {
-            "unlimited": "2 chatbots, historique d'insights sur 1 an",
+            "unlimited": "3 chatbots, historique d'insights sur 1 an",
             "integrations": "AI Business Insights : digest, corrélations, sentiment (bientôt)",
             "sla": "Support prioritaire + suivi dédié"
           }

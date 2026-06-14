@@ -513,9 +513,9 @@
           "name": "Enterprise",
           "price": "€149",
           "priceNote": "/mo · Excl. VAT",
-          "blurb": "Two chatbots, 1-year insights history, priority support.",
+          "blurb": "Three chatbots, 1-year insights history, priority support.",
           "features": {
-            "unlimited": "2 chatbots, 1-year insights history",
+            "unlimited": "3 chatbots, 1-year insights history",
             "integrations": "AI Business Insights: digest, correlations, sentiment (coming soon)",
             "sla": "Priority support + dedicated success"
           }

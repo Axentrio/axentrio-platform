@@ -330,11 +330,11 @@ describe('plan_limit_bots — POST /bots quota gate', () => {
     expect(res.body.error?.details?.limit).toBe(1);
   });
 
-  it('Enterprise (cap=2) — second create succeeds, third returns 402', async () => {
+  it('Enterprise (cap=3) — second/third create succeed, fourth returns 402', async () => {
     const tenant = await createTestTenant({ tier: 'enterprise' });
     const admin = await createTestUser(tenant.id, { role: 'admin' });
     await authedAs({ tenantId: tenant.id, userId: admin.id });
-    await seedBot(tenant.id); // anchor-equivalent — count is now 1, under cap=2.
+    await seedBot(tenant.id); // anchor-equivalent — count is now 1, under cap=3.
 
     const second = await request(app)
       .post('/api/v1/bots')
@@ -344,9 +344,14 @@ describe('plan_limit_bots — POST /bots quota gate', () => {
     const third = await request(app)
       .post('/api/v1/bots')
       .send({ name: 'Third bot' });
-    expect(third.status).toBe(402);
-    expect(third.body.error?.code).toBe('plan_limit_bots');
-    expect(third.body.error?.details?.limit).toBe(2);
+    expect(third.status).toBe(201);
+
+    const fourth = await request(app)
+      .post('/api/v1/bots')
+      .send({ name: 'Fourth bot' });
+    expect(fourth.status).toBe(402);
+    expect(fourth.body.error?.code).toBe('plan_limit_bots');
+    expect(fourth.body.error?.details?.limit).toBe(3);
   });
 
   it('Pro (cap=1) — paused bots still count toward the cap (only soft-delete frees a slot)', async () => {

@@ -56,9 +56,9 @@ describe('PLANS catalog', () => {
     expect(PLANS.essential.limits.bots).toBe(1);
     expect(PLANS.pro.limits.agents).toBe(1);
     expect(PLANS.pro.limits.bots).toBe(1);
-    // Enterprise: two of each per the epic.
+    // Enterprise: 2 agents; 3 bots (raised for bot-templates).
     expect(PLANS.enterprise.limits.agents).toBe(2);
-    expect(PLANS.enterprise.limits.bots).toBe(2);
+    expect(PLANS.enterprise.limits.bots).toBe(3);
   });
 
   it('gates features per tier', () => {
@@ -185,7 +185,7 @@ describe('entitlementsFor', () => {
     expect(ent.limits.dailyLlmCalls).toBe(50000);
     // agents + bots have no override path; use the plan defaults.
     expect(ent.limits.agents).toBe(2);
-    expect(ent.limits.bots).toBe(2);
+    expect(ent.limits.bots).toBe(3);
   });
 
   it('falls back to plan defaults for Enterprise when override is null', () => {

@@ -15,6 +15,13 @@ interface SendEmailOptions {
   from?: string;
   replyTo?: string;
   attachments?: EmailAttachment[];
+  /** Extra SMTP headers (e.g. List-Unsubscribe for one-click opt-out). */
+  headers?: Record<string, string>;
+  /**
+   * Resend idempotency key — dedupes a retried send within Resend's window so
+   * a reconciler that re-claims after a crash can't double-deliver.
+   */
+  idempotencyKey?: string;
 }
 
 interface SendEmailResult {
@@ -33,7 +40,7 @@ export class EmailService {
   }
 
   async send(options: SendEmailOptions): Promise<SendEmailResult> {
-    const { to, subject, body, from, replyTo, attachments } = options;
+    const { to, subject, body, from, replyTo, attachments, headers, idempotencyKey } = options;
 
     if (!this.resend) {
       logger.warn('[EmailService] send called but no API key configured');
@@ -45,22 +52,26 @@ export class EmailService {
 
     logger.info('[EmailService] sending email', { to: recipients, subject, from: fromAddress });
 
-    const { data, error } = await this.resend.emails.send({
-      from: fromAddress,
-      to: recipients,
-      subject,
-      html: body,
-      ...(replyTo ? { replyTo } : {}),
-      ...(attachments && attachments.length
-        ? {
-            attachments: attachments.map((a) => ({
-              filename: a.filename,
-              content: a.content,
-              ...(a.contentType ? { contentType: a.contentType } : {}),
-            })),
-          }
-        : {}),
-    });
+    const { data, error } = await this.resend.emails.send(
+      {
+        from: fromAddress,
+        to: recipients,
+        subject,
+        html: body,
+        ...(replyTo ? { replyTo } : {}),
+        ...(headers ? { headers } : {}),
+        ...(attachments && attachments.length
+          ? {
+              attachments: attachments.map((a) => ({
+                filename: a.filename,
+                content: a.content,
+                ...(a.contentType ? { contentType: a.contentType } : {}),
+              })),
+            }
+          : {}),
+      },
+      ...(idempotencyKey ? [{ idempotencyKey }] : []),
+    );
 
     if (error) {
       logger.error('[EmailService] resend error', { error });

@@ -1894,6 +1894,18 @@
       "empty": "Patronen die we in je gesprekken zien — correlaties en sentimentthema's — verschijnen hier zodra ze opduiken.",
       "dismiss": "Negeren",
       "dismissedToast": "Genegeerd"
+    },
+    "digest": {
+      "title": "Je wekelijkse samenvatting",
+      "weekOf": "Week van {{date}}",
+      "emailToggle": "Mail mij wekelijks",
+      "emailToast": "Voorkeur opgeslagen",
+      "pending": "Je eerste wekelijkse samenvatting verschijnt hier na komende maandag.",
+      "conversations": "Gesprekken",
+      "bookings": "Boekingen",
+      "leads": "Leads",
+      "gapsOpened": "Nieuwe hiaten",
+      "gapsWon": "Opgelost"
     }
   },
   "analytics": {

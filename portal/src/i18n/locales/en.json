@@ -1899,6 +1899,18 @@
       "empty": "Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.",
       "dismiss": "Dismiss",
       "dismissedToast": "Dismissed"
+    },
+    "digest": {
+      "title": "Your weekly summary",
+      "weekOf": "Week of {{date}}",
+      "emailToggle": "Email me weekly",
+      "emailToast": "Preference saved",
+      "pending": "Your first weekly summary will appear here after the coming Monday.",
+      "conversations": "Conversations",
+      "bookings": "Bookings",
+      "leads": "Leads",
+      "gapsOpened": "New gaps",
+      "gapsWon": "Resolved"
     }
   },
   "analytics": {

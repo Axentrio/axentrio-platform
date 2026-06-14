@@ -109,6 +109,18 @@ async function resolveCheckoutIdentity(
 }
 
 /**
+ * Resolve the tenant's billing-contact email for platform notifications
+ * (e.g. the weekly Insights digest, P3 / ADR-0014 D6). Reuses the exact
+ * checkout-identity resolver — primary `billing_email`, else oldest admin —
+ * so digest delivery follows the same single source of truth as invoices.
+ * Throws `billing_email_unresolvable` when neither exists.
+ */
+export async function resolveBillingEmail(tenantId: string): Promise<string> {
+  const { email } = await resolveCheckoutIdentity(tenantId);
+  return email;
+}
+
+/**
  * Start a Stripe Checkout session for `planId`. Plan: § Reverse-trial signup
  * flow → Subscribe flow (steps 1–4).
  *

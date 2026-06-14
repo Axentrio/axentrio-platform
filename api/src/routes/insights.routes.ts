@@ -17,9 +17,12 @@ import { asyncHandler, BadRequestError, ForbiddenError, NotFoundError } from '..
 import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
+import { InsightDigest } from '../database/entities/InsightDigest';
+import { Tenant } from '../database/entities/Tenant';
+import { digestEmailEnabled } from '../insights/digest.service';
 import type {
   InsightsListResponse, GapDto, GapStatus, GapSeverity, EvidenceResponse,
-  ExperimentsResponse, ExperimentDto,
+  ExperimentsResponse, ExperimentDto, DigestResponse, DigestDto, DigestMetrics,
 } from '../contracts/insights';
 import { decrypt } from '../utils/encryption';
 
@@ -264,6 +267,74 @@ router.post(
       await repo.save(exp);
     }
     sendSuccess(res, { id: exp.id, state: exp.state });
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/*  P3 — weekly digest (latest) + email preference. Enterprise-gated.  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /insights/digest
+ * The most recent weekly digest (header metrics + narrative), or null before
+ * the first Monday run. `emailEnabled` reflects the tenant's opt-out pref so
+ * the surface can render the toggle (ADR-0014 D6/D8).
+ */
+router.get(
+  '/digest',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+
+    const [digest, tenant] = await Promise.all([
+      AppDataSource.getRepository(InsightDigest).findOne({
+        where: { tenantId },
+        order: { weekStart: 'DESC' },
+      }),
+      AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId }, select: ['id', 'settings'] }),
+    ]);
+
+    const dto: DigestDto | null = digest
+      ? {
+          weekStart: digest.weekStart,
+          summaryMd: digest.summaryMd,
+          metrics: digest.metrics as unknown as DigestMetrics,
+        }
+      : null;
+
+    const payload: DigestResponse = {
+      digest: dto,
+      emailEnabled: tenant ? digestEmailEnabled(tenant) : true,
+    };
+    sendSuccess(res, payload);
+  }),
+);
+
+/**
+ * PUT /insights/digest/email  { enabled: boolean }
+ * Toggle the weekly digest email. Pref lives in tenant.settings.insights
+ * (default-ON) — a future generation reads it; an in-flight 'pending' row is
+ * left to the reconciler, which honours the row's own state.
+ */
+router.put(
+  '/digest/email',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+    const enabled = (req.body as { enabled?: unknown })?.enabled;
+    if (typeof enabled !== 'boolean') throw new BadRequestError('`enabled` must be a boolean');
+
+    const repo = AppDataSource.getRepository(Tenant);
+    const tenant = await repo.findOne({ where: { id: tenantId } });
+    if (!tenant) throw new NotFoundError('Tenant not found');
+    tenant.settings = {
+      ...tenant.settings,
+      insights: { ...tenant.settings?.insights, digestEmail: enabled },
+    };
+    await repo.save(tenant);
+    sendSuccess(res, { emailEnabled: enabled });
   }),
 );
 

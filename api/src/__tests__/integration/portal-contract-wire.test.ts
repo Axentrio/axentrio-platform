@@ -75,6 +75,7 @@ import { AppDataSource } from '../../database/data-source';
 import { CanonicalTopic } from '../../database/entities/CanonicalTopic';
 import { Gap } from '../../database/entities/Gap';
 import { InsightExperiment } from '../../database/entities/InsightExperiment';
+import { InsightDigest } from '../../database/entities/InsightDigest';
 import { createTestTenant, createTestUser } from '../helpers/factories';
 
 function setAuth(opts: { tenantId: string; userId: string }) {
@@ -266,5 +267,47 @@ describe('wire contract — /insights/experiments', () => {
       'title',
     ]);
     expect(res.body.data.experiments[0].kind).toBe('sentiment');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/insights/digest  ↔  contracts/insights.ts (P3, Enterprise)
+// ---------------------------------------------------------------------------
+
+describe('wire contract — /insights/digest', () => {
+  it('403s a Pro tenant (aiBusinessInsights-gated)', async () => {
+    await seedProTenant();
+    const res = await request(app).get('/api/v1/insights/digest');
+    expect(res.status).toBe(403);
+  });
+
+  it('pins the digest envelope shape for an Enterprise tenant', async () => {
+    const tenant = await seedEnterpriseTenant();
+    await AppDataSource.getRepository(InsightDigest).save({
+      tenantId: tenant.id,
+      weekStart: '2026-06-08',
+      summaryMd: 'A grounded weekly summary.',
+      metrics: {
+        conversations: { current: 10, previous: 5 },
+        bookings: { current: 3, previous: 1 },
+        leads: { current: 2, previous: 0 },
+        gapsOpened: 4,
+        gapsWon: 2,
+      },
+      sendState: 'pending',
+    });
+
+    const res = await request(app).get('/api/v1/insights/digest');
+    expect(res.status).toBe(200);
+    expect(keysOf(res.body.data)).toEqual(['digest', 'emailEnabled']);
+    expect(keysOf(res.body.data.digest)).toEqual(['metrics', 'summaryMd', 'weekStart']);
+    expect(keysOf(res.body.data.digest.metrics)).toEqual([
+      'bookings',
+      'conversations',
+      'gapsOpened',
+      'gapsWon',
+      'leads',
+    ]);
+    expect(res.body.data.emailEnabled).toBe(true);
   });
 });

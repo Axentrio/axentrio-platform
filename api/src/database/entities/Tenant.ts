@@ -145,6 +145,11 @@ export class Tenant {
         recipients?: string[];
       }>;
     };
+    /** Enterprise AI Insights prefs (P3 / ADR-0014, D6). */
+    insights?: {
+      /** Weekly digest email — default-ON; only an explicit `false` opts out. */
+      digestEmail?: boolean;
+    };
   };
 
   /**

@@ -2,13 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { insightsRef, experimentsRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate } = vi.hoisted(() => ({
+const { insightsRef, experimentsRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
   insightsRef: { current: null as Record<string, unknown> | null },
   experimentsRef: { current: { experiments: [] } as Record<string, unknown> },
+  digestRef: { current: { digest: null, emailEnabled: true } as Record<string, unknown> },
   hasFeatureRef: { current: {} as Record<string, boolean> },
   resolveMutate: vi.fn(),
   archiveMutate: vi.fn(),
   dismissMutate: vi.fn(),
+  setEmailMutate: vi.fn(),
 }));
 
 vi.mock('../../queries/useInsightsQueries', () => ({
@@ -18,6 +20,8 @@ vi.mock('../../queries/useInsightsQueries', () => ({
   useArchiveGap: () => ({ mutate: archiveMutate, isPending: false }),
   useExperiments: () => ({ data: experimentsRef.current, isLoading: false }),
   useDismissExperiment: () => ({ mutate: dismissMutate, isPending: false }),
+  useDigest: () => ({ data: digestRef.current, isLoading: false }),
+  useSetDigestEmail: () => ({ mutate: setEmailMutate, isPending: false }),
 }));
 
 vi.mock('../../queries/useEntitlementsQueries', () => ({
@@ -60,10 +64,27 @@ beforeEach(() => {
   hasFeatureRef.current = {};
   insightsRef.current = data([gap()]);
   experimentsRef.current = { experiments: [] };
+  digestRef.current = { digest: null, emailEnabled: true };
   resolveMutate.mockReset();
   archiveMutate.mockReset();
   dismissMutate.mockReset();
+  setEmailMutate.mockReset();
 });
+
+function digest(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    weekStart: '2026-06-08',
+    summaryMd: 'A calm week — bookings ticked up while conversations held steady.',
+    metrics: {
+      conversations: { current: 42, previous: 40 },
+      bookings: { current: 8, previous: 5 },
+      leads: { current: 3, previous: 3 },
+      gapsOpened: 2,
+      gapsWon: 1,
+    },
+    ...over,
+  };
+}
 
 function experiment(over: Partial<Record<string, unknown>> = {}) {
   return {
@@ -154,5 +175,40 @@ describe('InsightsContent — experiments (Enterprise, P3)', () => {
     render(<InsightsContent />);
     await user.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(dismissMutate).toHaveBeenCalledWith('e1');
+  });
+});
+
+describe('InsightsContent — weekly digest (Enterprise, P3)', () => {
+  it('hides the digest hero without aiBusinessInsights', () => {
+    hasFeatureRef.current = { aiBusinessInsights: false };
+    render(<InsightsContent />);
+    expect(screen.queryByText(/your weekly summary/i)).not.toBeInTheDocument();
+  });
+
+  it('shows the pending copy before the first Monday for Enterprise', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    digestRef.current = { digest: null, emailEnabled: true };
+    render(<InsightsContent />);
+    expect(screen.getByText(/your weekly summary/i)).toBeInTheDocument();
+    expect(screen.getByText(/first weekly summary will appear/i)).toBeInTheDocument();
+  });
+
+  it('renders the narrative and metric deltas when a digest exists', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    digestRef.current = { digest: digest(), emailEnabled: true };
+    render(<InsightsContent />);
+    expect(screen.getByText(/bookings ticked up/i)).toBeInTheDocument();
+    expect(screen.getByText('42')).toBeInTheDocument(); // conversations
+    expect(screen.getByText('8')).toBeInTheDocument(); // bookings
+    expect(screen.getByText(/week of 2026-06-08/i)).toBeInTheDocument();
+  });
+
+  it('toggles the weekly email preference', async () => {
+    const user = userEvent.setup();
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    digestRef.current = { digest: digest(), emailEnabled: true };
+    render(<InsightsContent />);
+    await user.click(screen.getByRole('switch'));
+    expect(setEmailMutate).toHaveBeenCalledWith(false);
   });
 });

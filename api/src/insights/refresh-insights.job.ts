@@ -28,6 +28,8 @@ import { canonicalizeTopic } from './topics.service';
 import { canonicalizeSentimentTheme } from './sentiment-themes.service';
 import { aggregateSentiment } from './sentiment-aggregation.service';
 import { aggregateCorrelations } from './correlation.service';
+import { generateDigest } from './digest.service';
+import { sendDueDigests } from './digest-send.service';
 import { aggregateGaps } from './gap-aggregation.service';
 import { logger } from '../utils/logger';
 import { decrypt } from '../utils/encryption';
@@ -215,6 +217,12 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   if (withSentiment) {
     await aggregateSentiment(tenantId, now);
     await aggregateCorrelations(tenantId, now);
+    // Weekly digest: generate once, on the Monday the prior week completes
+    // (D6). Idempotent on (tenant, weekStart) — a same-day re-run just
+    // refreshes content. Sending is a separate reconciler pass.
+    if (now.getUTCDay() === 1) {
+      await generateDigest(tenantId, now);
+    }
   }
 
   state.lastRefreshedAt = watermarkFrozen ? watermark : now;
@@ -250,6 +258,16 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
         error: err instanceof Error ? err.message : 'unknown',
       });
     }
+  }
+
+  // Drain the digest outbox once per pass — retries failed sends with backoff
+  // and delivers digests generated this run (P3 / ADR-0014 D6).
+  try {
+    await sendDueDigests(now);
+  } catch (err) {
+    logger.error('[insights-refresh] digest reconciler failed', {
+      error: err instanceof Error ? err.message : 'unknown',
+    });
   }
 }
 

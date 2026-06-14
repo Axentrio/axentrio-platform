@@ -14,6 +14,7 @@ import type {
   InsightsListResponse,
   EvidenceEntryDto,
   ExperimentsResponse,
+  DigestResponse,
 } from '@contracts/insights';
 
 export type { GapStatus, GapSeverity };
@@ -21,6 +22,7 @@ export type GapRow = GapDto;
 export type InsightsResponse = InsightsListResponse;
 export type EvidenceEntry = EvidenceEntryDto;
 export type { ExperimentDto, ExperimentKind, ExperimentsResponse } from '@contracts/insights';
+export type { DigestDto, DigestMetrics, DigestResponse } from '@contracts/insights';
 
 const insightsOptions = {
   list: () => queryOptions({
@@ -34,6 +36,10 @@ const insightsOptions = {
   experiments: () => queryOptions({
     queryKey: queryKeys.insights.experiments(),
     queryFn: () => api.get<ExperimentsResponse>('/insights/experiments'),
+  }),
+  digest: () => queryOptions({
+    queryKey: queryKeys.insights.digest(),
+    queryFn: () => api.get<DigestResponse>('/insights/digest'),
   }),
 };
 
@@ -79,6 +85,24 @@ export function useDismissExperiment(successMessage: string) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.insights.experiments() });
+      toast.success(successMessage);
+    },
+    onError: () => toast.error('Something went wrong'),
+  });
+}
+
+export function useDigest(enabled = true) {
+  return useQuery({ ...insightsOptions.digest(), enabled });
+}
+
+export function useSetDigestEmail(successMessage: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (enabled: boolean) => {
+      await api.put('/insights/digest/email', { enabled });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.insights.digest() });
       toast.success(successMessage);
     },
     onError: () => toast.error('Something went wrong'),

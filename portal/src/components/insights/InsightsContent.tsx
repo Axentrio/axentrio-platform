@@ -8,13 +8,15 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Lightbulb, Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
-  FlaskConical, X, TrendingUp, MessageCircleHeart,
+  FlaskConical, X, TrendingUp, MessageCircleHeart, Sparkles, ArrowUp, ArrowDown, Minus,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   useInsights,
@@ -23,8 +25,11 @@ import {
   useArchiveGap,
   useExperiments,
   useDismissExperiment,
+  useDigest,
+  useSetDigestEmail,
   GapRow,
   ExperimentDto,
+  DigestMetrics,
 } from '../../queries/useInsightsQueries';
 import { useHasFeature } from '../../queries/useEntitlementsQueries';
 import { timeAgo } from '@/utils/timeAgo';
@@ -223,6 +228,95 @@ function ExperimentsSection() {
   );
 }
 
+/** A single metric with a vs-prior-week delta chip. */
+function DigestMetric({ label, current, previous }: { label: string; current: number; previous: number }) {
+  const delta = previous === 0 ? null : Math.round(((current - previous) / previous) * 100);
+  const Icon = delta == null || delta === 0 ? Minus : delta > 0 ? ArrowUp : ArrowDown;
+  const tone = delta == null || delta === 0 ? 'text-zinc-500' : delta > 0 ? 'text-emerald-400' : 'text-red-400';
+  return (
+    <div className="flex flex-col">
+      <span className="text-lg font-semibold text-text-primary">{current}</span>
+      <span className="text-xs text-zinc-400">{label}</span>
+      <span className={cn('flex items-center gap-0.5 text-xs', tone)}>
+        <Icon className="h-3 w-3" />
+        {delta == null ? '—' : delta === 0 ? '0%' : `${Math.abs(delta)}%`}
+      </span>
+    </div>
+  );
+}
+
+/** Enterprise-only weekly digest hero (P3 / ADR-0014 D6/D8). */
+function DigestSection() {
+  const { t } = useTranslation();
+  const enabled = useHasFeature('aiBusinessInsights');
+  const { data, isLoading } = useDigest(enabled);
+  const setEmail = useSetDigestEmail(t('insights.digest.emailToast', { defaultValue: 'Preference saved' }));
+  if (!enabled) return null;
+  if (isLoading) return <Skeleton className="h-32 w-full rounded-xl" />;
+
+  const digest = data?.digest ?? null;
+  const emailOn = data?.emailEnabled ?? true;
+  const m: DigestMetrics | null = digest?.metrics ?? null;
+
+  return (
+    <Card variant="glass">
+      <CardContent className="p-5 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary-400" />
+            <h3 className="text-sm font-semibold text-text-primary">
+              {t('insights.digest.title', { defaultValue: 'Your weekly summary' })}
+            </h3>
+            {digest && (
+              <Badge variant="outline" className="text-xs text-zinc-400">
+                {t('insights.digest.weekOf', { defaultValue: 'Week of {{date}}', date: digest.weekStart })}
+              </Badge>
+            )}
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Switch
+              id="digest-email"
+              checked={emailOn}
+              disabled={setEmail.isPending}
+              onCheckedChange={(v) => setEmail.mutate(v)}
+            />
+            <Label htmlFor="digest-email" className="text-xs text-zinc-400">
+              {t('insights.digest.emailToggle', { defaultValue: 'Email me weekly' })}
+            </Label>
+          </div>
+        </div>
+
+        {!digest ? (
+          <p className="text-xs text-zinc-500">
+            {t('insights.digest.pending', {
+              defaultValue: 'Your first weekly summary will appear here after the coming Monday.',
+            })}
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-zinc-300 leading-relaxed">{digest.summaryMd}</p>
+            {m && (
+              <div className="grid grid-cols-3 gap-4 sm:grid-cols-5 border-t border-white/10 pt-3">
+                <DigestMetric label={t('insights.digest.conversations', { defaultValue: 'Conversations' })} {...m.conversations} />
+                <DigestMetric label={t('insights.digest.bookings', { defaultValue: 'Bookings' })} {...m.bookings} />
+                <DigestMetric label={t('insights.digest.leads', { defaultValue: 'Leads' })} {...m.leads} />
+                <div className="flex flex-col">
+                  <span className="text-lg font-semibold text-text-primary">{m.gapsOpened}</span>
+                  <span className="text-xs text-zinc-400">{t('insights.digest.gapsOpened', { defaultValue: 'New gaps' })}</span>
+                </div>
+                <div className="flex flex-col">
+                  <span className="text-lg font-semibold text-text-primary">{m.gapsWon}</span>
+                  <span className="text-xs text-zinc-400">{t('insights.digest.gapsWon', { defaultValue: 'Resolved' })}</span>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function InsightsContent() {
   const { t } = useTranslation();
   const { data, isLoading } = useInsights();
@@ -243,6 +337,9 @@ export function InsightsContent() {
 
   return (
     <div className="space-y-4">
+      {/* Enterprise weekly digest hero (P3) — renders nothing for other tiers. */}
+      <DigestSection />
+
       {/* Freshness + completeness banners (ADR-0006/0007) */}
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
         <span className="flex items-center gap-1.5">

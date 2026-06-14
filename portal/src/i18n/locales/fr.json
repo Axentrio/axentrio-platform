@@ -1893,6 +1893,18 @@
       "empty": "Les tendances repérées dans vos conversations — corrélations et thèmes de sentiment — apparaissent ici au fil du temps.",
       "dismiss": "Ignorer",
       "dismissedToast": "Ignoré"
+    },
+    "digest": {
+      "title": "Votre résumé hebdomadaire",
+      "weekOf": "Semaine du {{date}}",
+      "emailToggle": "M'envoyer un e-mail chaque semaine",
+      "emailToast": "Préférence enregistrée",
+      "pending": "Votre premier résumé hebdomadaire apparaîtra ici après le lundi à venir.",
+      "conversations": "Conversations",
+      "bookings": "Réservations",
+      "leads": "Prospects",
+      "gapsOpened": "Nouvelles lacunes",
+      "gapsWon": "Résolues"
     }
   },
   "analytics": {

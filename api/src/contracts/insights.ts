@@ -95,9 +95,11 @@ export interface DigestDto {
   metrics: DigestMetrics;
 }
 
-/** null when no digest has been generated yet (pre-first-Monday). */
+/** `digest` is null when none has been generated yet (pre-first-Monday). */
 export interface DigestResponse {
   digest: DigestDto | null;
+  /** Tenant's weekly-digest-email preference (default-ON). */
+  emailEnabled: boolean;
 }
 
 export type ExportDataset = 'outcomes-timeseries' | 'gaps' | 'leads';

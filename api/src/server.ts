@@ -46,6 +46,7 @@ import schedulerRoutes from './scheduler/scheduler.routes';
 import googleCalendarRoutes, { googleCalendarCallbackRouter } from './integrations/google/google-calendar.routes';
 import outlookCalendarRoutes, { outlookCalendarCallbackRouter } from './integrations/microsoft/outlook-calendar.routes';
 import { bookingPublicRouter } from './scheduler/booking-public.routes';
+import { digestUnsubscribeRouter } from './routes/digest-unsubscribe.routes';
 import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
@@ -279,6 +280,8 @@ app.use('/api/v1/integrations/google', googleCalendarCallbackRouter);
 app.use('/api/v1/integrations/outlook', outlookCalendarCallbackRouter);
 // Public self-service booking pages (reached from email links; signed-token auth).
 app.use('/api/v1/bookings', bookingPublicRouter);
+// Public one-click digest unsubscribe (reached from email links; signed-token auth).
+app.use('/api/v1/unsubscribe', digestUnsubscribeRouter);
 
 // Clerk middleware (global — populates auth state for all requests)
 app.use(clerkMiddleware());

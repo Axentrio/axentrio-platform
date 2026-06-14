@@ -490,6 +490,7 @@
             "sessions": "Unlimited sessions",
             "llmCalls": "Platform LLM included",
             "channels": "All channels (unified inbox)",
+            "insights": "AI Insights — what your bot can't answer",
             "uploadsHandoff": "File uploads & human handoff"
           }
         },
@@ -503,6 +504,7 @@
             "sessions": "Unlimited sessions",
             "llmCalls": "Platform LLM included",
             "channels": "All channels (unified inbox)",
+            "insights": "AI Insights with evidence + 90-day history",
             "branding": "Hide Powered by Axentrio",
             "support": "Bookings, calendar, platform assistant"
           }
@@ -511,10 +513,10 @@
           "name": "Enterprise",
           "price": "€149",
           "priceNote": "/mo · Excl. VAT",
-          "blurb": "Two chatbots, CRM, advanced lead intelligence, priority support.",
+          "blurb": "Two chatbots, 1-year insights history, priority support.",
           "features": {
-            "unlimited": "2 chatbots, near-realtime insights",
-            "integrations": "CRM + advanced lead intelligence",
+            "unlimited": "2 chatbots, 1-year insights history",
+            "integrations": "AI Business Insights: digest, correlations, sentiment (coming soon)",
             "sla": "Priority support + dedicated success"
           }
         }

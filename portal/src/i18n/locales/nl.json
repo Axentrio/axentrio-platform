@@ -485,6 +485,7 @@
             "sessions": "Onbeperkte sessies",
             "llmCalls": "Platform-LLM inbegrepen",
             "channels": "Alle kanalen (unified inbox)",
+            "insights": "AI-inzichten — wat je bot niet kan beantwoorden",
             "uploadsHandoff": "Bestandsuploads & menselijke overdracht"
           }
         },
@@ -498,6 +499,7 @@
             "sessions": "Onbeperkte sessies",
             "llmCalls": "Platform-LLM inbegrepen",
             "channels": "Alle kanalen (unified inbox)",
+            "insights": "AI-inzichten met bewijs + 90 dagen geschiedenis",
             "branding": "Verberg \"Powered by Axentrio\"",
             "support": "Boekingen, agenda, platform-assistent"
           }
@@ -506,10 +508,10 @@
           "name": "Enterprise",
           "price": "€149",
           "priceNote": "/maand · Excl. BTW",
-          "blurb": "Twee chatbots, CRM, geavanceerde lead-intelligentie, prioriteitsondersteuning.",
+          "blurb": "Twee chatbots, 1 jaar inzichtgeschiedenis, prioriteitsondersteuning.",
           "features": {
-            "unlimited": "2 chatbots, near-realtime inzichten",
-            "integrations": "CRM + geavanceerde lead-intelligentie",
+            "unlimited": "2 chatbots, 1 jaar inzichtgeschiedenis",
+            "integrations": "AI Business Insights: digest, correlaties, sentiment (binnenkort)",
             "sla": "Prioriteitsondersteuning + toegewijde success"
           }
         }

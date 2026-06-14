@@ -51,6 +51,8 @@ export const queryKeys = {
     all: () => ['insights'] as const,
     list: () => [...queryKeys.insights.all(), 'list'] as const,
     evidence: (gapId?: string) => [...queryKeys.insights.all(), 'evidence', gapId] as const,
+    experiments: () => [...queryKeys.insights.all(), 'experiments'] as const,
+    digest: () => [...queryKeys.insights.all(), 'digest'] as const,
   },
   knowledge: {
     all: () => ['knowledge'] as const,

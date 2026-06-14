@@ -1098,15 +1098,30 @@
         "availability": "Disponibilité",
         "versions": "Versions"
       },
-      "templateStatus": { "active": "Actif", "archived": "Archivé" },
-      "availability": { "all": "Tous les locataires", "granted": "Accordé uniquement" },
+      "templateStatus": {
+        "active": "Actif",
+        "archived": "Archivé"
+      },
+      "availability": {
+        "all": "Tous les locataires",
+        "granted": "Accordé uniquement"
+      },
       "versionSummary": {
         "published": "Publié v{{version}}",
         "none": "Aucune version publiée",
         "drafts": "{{count}} brouillon(s)"
       },
-      "versionStatus": { "draft": "Brouillon", "published": "Publié", "unpublished": "Dépublié" },
-      "versionColumns": { "version": "Version", "status": "Statut", "changelog": "Journal", "actions": "Actions" },
+      "versionStatus": {
+        "draft": "Brouillon",
+        "published": "Publié",
+        "unpublished": "Dépublié"
+      },
+      "versionColumns": {
+        "version": "Version",
+        "status": "Statut",
+        "changelog": "Journal",
+        "actions": "Actions"
+      },
       "empty": "Aucun modèle pour l'instant. Créez-en un pour commencer.",
       "create": {
         "title": "Créer un modèle",
@@ -1142,7 +1157,9 @@
         "reassign": "{{count}} bot(s) lié(s) seront réaffecté(s) au modèle de base vierge. Continuer ?",
         "proceed": "Continuer"
       },
-      "errors": { "load": "Échec du chargement des modèles." }
+      "errors": {
+        "load": "Échec du chargement des modèles."
+      }
     },
     "tenants": {
       "header": {
@@ -1870,6 +1887,12 @@
       "bullet1": "Les sujets récurrents, classés par nombre de clients",
       "bullet2": "Corrigez une lacune en ajoutant la réponse à votre base — les victoires sont confirmées automatiquement",
       "bullet3": "Actualisé chaque nuit à partir de vos vraies conversations"
+    },
+    "experiments": {
+      "title": "Expériences",
+      "empty": "Les tendances repérées dans vos conversations — corrélations et thèmes de sentiment — apparaissent ici au fil du temps.",
+      "dismiss": "Ignorer",
+      "dismissedToast": "Ignoré"
     }
   },
   "analytics": {

@@ -25,6 +25,8 @@ import { InsightsRefreshState } from '../database/entities/InsightsRefreshState'
 import { getEntitlements } from '../billing/entitlements';
 import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service';
 import { canonicalizeTopic } from './topics.service';
+import { canonicalizeSentimentTheme } from './sentiment-themes.service';
+import { aggregateSentiment } from './sentiment-aggregation.service';
 import { aggregateGaps } from './gap-aggregation.service';
 import { logger } from '../utils/logger';
 import { decrypt } from '../utils/encryption';
@@ -95,6 +97,11 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   const stateRepo = AppDataSource.getRepository(InsightsRefreshState);
   const judgmentRepo = AppDataSource.getRepository(Judgment);
 
+  // Resolve the Enterprise flag ONCE per tenant (P3 / ADR-0014, D5). When off,
+  // judging stays byte-identical to the pre-P3 contract — sentiment is
+  // entitled-only and additive.
+  const withSentiment = (await getEntitlements(tenantId)).features.aiBusinessInsights;
+
   let state = await stateRepo.findOne({ where: { tenantId } });
   if (!state) {
     state = stateRepo.create({ tenantId, lastRefreshedAt: null });
@@ -119,7 +126,9 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
 
     try {
       const transcript = await loadTranscript(session.id);
-      const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally);
+      const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally, {
+        withSentiment,
+      });
 
       let canonicalTopicId: string | null = null;
       let rejectedTopic: string | null = null;
@@ -136,6 +145,14 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
         }
       }
 
+      // Sentiment theme (Enterprise-only, D5). Forward-only; a reject just
+      // stores no theme on this judgment.
+      let sentimentThemeId: string | null = null;
+      if (withSentiment && verdict.sentiment && verdict.sentimentTheme) {
+        const theme = await canonicalizeSentimentTheme(tenantId, verdict.sentimentTheme, verdict.sentiment);
+        if (theme.ok) sentimentThemeId = theme.themeId;
+      }
+
       await judgmentRepo.save(
         judgmentRepo.create({
           tenantId,
@@ -150,6 +167,8 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
           rejectReason,
           evidenceMessageIds: verdict.evidenceMessageIds,
           reasoning: verdict.reasoning,
+          sentiment: verdict.sentiment,
+          sentimentThemeId,
         }),
       );
       judged += 1;
@@ -191,6 +210,10 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   const completeness = eligible > 0 ? judgedInWindow / eligible : 1;
 
   await aggregateGaps(tenantId, now);
+  // Enterprise-only experiment aggregation (P3). Gated by the flag, not tier.
+  if (withSentiment) {
+    await aggregateSentiment(tenantId, now);
+  }
 
   state.lastRefreshedAt = watermarkFrozen ? watermark : now;
   state.judgmentsCompleteness = completeness.toFixed(4);

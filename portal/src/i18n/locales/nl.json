@@ -1099,15 +1099,30 @@
         "availability": "Beschikbaarheid",
         "versions": "Versies"
       },
-      "templateStatus": { "active": "Actief", "archived": "Gearchiveerd" },
-      "availability": { "all": "Alle tenants", "granted": "Alleen toegewezen" },
+      "templateStatus": {
+        "active": "Actief",
+        "archived": "Gearchiveerd"
+      },
+      "availability": {
+        "all": "Alle tenants",
+        "granted": "Alleen toegewezen"
+      },
       "versionSummary": {
         "published": "Gepubliceerd v{{version}}",
         "none": "Geen gepubliceerde versie",
         "drafts": "{{count}} concept(en)"
       },
-      "versionStatus": { "draft": "Concept", "published": "Gepubliceerd", "unpublished": "Niet gepubliceerd" },
-      "versionColumns": { "version": "Versie", "status": "Status", "changelog": "Wijzigingslog", "actions": "Acties" },
+      "versionStatus": {
+        "draft": "Concept",
+        "published": "Gepubliceerd",
+        "unpublished": "Niet gepubliceerd"
+      },
+      "versionColumns": {
+        "version": "Versie",
+        "status": "Status",
+        "changelog": "Wijzigingslog",
+        "actions": "Acties"
+      },
       "empty": "Nog geen sjablonen. Maak er een om te beginnen.",
       "create": {
         "title": "Sjabloon maken",
@@ -1143,7 +1158,9 @@
         "reassign": "{{count}} gekoppelde bot(s) worden opnieuw toegewezen aan het lege basissjabloon. Doorgaan?",
         "proceed": "Doorgaan"
       },
-      "errors": { "load": "Kon sjablonen niet laden." }
+      "errors": {
+        "load": "Kon sjablonen niet laden."
+      }
     },
     "tenants": {
       "header": {
@@ -1871,6 +1888,12 @@
       "bullet1": "Onderwerpen waar klanten naar blijven vragen, gerangschikt op aantal",
       "bullet2": "Los een hiaat op via je kennisbank — successen worden automatisch bevestigd",
       "bullet3": "Elke nacht ververst op basis van je echte gesprekken"
+    },
+    "experiments": {
+      "title": "Experimenten",
+      "empty": "Patronen die we in je gesprekken zien — correlaties en sentimentthema's — verschijnen hier zodra ze opduiken.",
+      "dismiss": "Negeren",
+      "dismissedToast": "Genegeerd"
     }
   },
   "analytics": {

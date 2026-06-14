@@ -74,6 +74,7 @@ import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { CanonicalTopic } from '../../database/entities/CanonicalTopic';
 import { Gap } from '../../database/entities/Gap';
+import { InsightExperiment } from '../../database/entities/InsightExperiment';
 import { createTestTenant, createTestUser } from '../helpers/factories';
 
 function setAuth(opts: { tenantId: string; userId: string }) {
@@ -85,6 +86,13 @@ const keysOf = (o: Record<string, unknown>) => Object.keys(o).sort();
 
 async function seedProTenant() {
   const tenant = await createTestTenant({ tier: 'pro' });
+  const admin = await createTestUser(tenant.id, { role: 'admin' });
+  setAuth({ tenantId: tenant.id, userId: admin.id });
+  return tenant;
+}
+
+async function seedEnterpriseTenant() {
+  const tenant = await createTestTenant({ tier: 'enterprise' });
   const admin = await createTestUser(tenant.id, { role: 'admin' });
   setAuth({ tenantId: tenant.id, userId: admin.id });
   return tenant;
@@ -217,5 +225,46 @@ describe('wire contract — /analytics/outcomes', () => {
     // Empty tenant → empty (sparse) series; shape pinned by the contract type
     // + the populated-case unit tests.
     expect(Array.isArray(res.body.data.timeseries)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/insights/experiments  ↔  contracts/insights.ts (P3, Enterprise)
+// ---------------------------------------------------------------------------
+
+describe('wire contract — /insights/experiments', () => {
+  it('403s a Pro tenant (aiBusinessInsights-gated)', async () => {
+    await seedProTenant();
+    const res = await request(app).get('/api/v1/insights/experiments');
+    expect(res.status).toBe(403);
+  });
+
+  it('pins the experiment key set for an Enterprise tenant', async () => {
+    const tenant = await seedEnterpriseTenant();
+    await AppDataSource.getRepository(InsightExperiment).save({
+      tenantId: tenant.id,
+      kind: 'sentiment',
+      fingerprint: 'theme-1',
+      severity: 'orange',
+      title: 'Customers frequently mention "slow response" — 4 sessions in 30 days',
+      detail: null,
+      payload: { theme: 'slow response', sessions: 4 },
+      state: 'active',
+    });
+
+    const res = await request(app).get('/api/v1/insights/experiments');
+    expect(res.status).toBe(200);
+    expect(keysOf(res.body.data)).toEqual(['experiments']);
+    expect(keysOf(res.body.data.experiments[0])).toEqual([
+      'detail',
+      'firstSeenAt',
+      'id',
+      'kind',
+      'lastSeenAt',
+      'payload',
+      'severity',
+      'title',
+    ]);
+    expect(res.body.data.experiments[0].kind).toBe('sentiment');
   });
 });

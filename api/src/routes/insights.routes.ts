@@ -16,7 +16,11 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
-import type { InsightsListResponse, GapDto, GapStatus, GapSeverity, EvidenceResponse } from '../contracts/insights';
+import { InsightExperiment } from '../database/entities/InsightExperiment';
+import type {
+  InsightsListResponse, GapDto, GapStatus, GapSeverity, EvidenceResponse,
+  ExperimentsResponse, ExperimentDto,
+} from '../contracts/insights';
 import { decrypt } from '../utils/encryption';
 
 const router = Router();
@@ -30,7 +34,7 @@ function retentionDays(features: { gapEvidence: boolean; aiBusinessInsights: boo
 }
 
 /** Feature gate factory — 403 with a stable code so the portal can render the locked state. */
-function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence') {
+function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence' | 'aiBusinessInsights') {
   return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
     const authReq = req as ProvisionedRequest;
     const tenantId = authReq.user?.tenantId;
@@ -200,6 +204,66 @@ router.post(
     const authReq = req as ProvisionedRequest;
     const gap = await transitionGap(authReq.user?.tenantId as string, req.params.gapId, 'archived');
     sendSuccess(res, { id: gap.id, status: gap.status });
+  }),
+);
+
+/* ------------------------------------------------------------------ */
+/*  P3 — experiments (correlation + sentiment). Enterprise-gated.      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * GET /insights/experiments
+ * Active correlation + sentiment experiments for the tenant (ADR-0014 D3/D8).
+ * Observations only — no resolution state; dismissed rows are excluded.
+ */
+router.get(
+  '/experiments',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+
+    const rows = await AppDataSource.getRepository(InsightExperiment).find({
+      where: { tenantId, state: 'active' },
+      order: { severity: 'ASC', lastSeenAt: 'DESC' },
+    });
+
+    const payload: ExperimentsResponse = {
+      experiments: rows.map((e): ExperimentDto => ({
+        id: e.id,
+        kind: e.kind,
+        severity: e.severity,
+        title: e.title,
+        detail: e.detail ?? null,
+        payload: e.payload ?? {},
+        firstSeenAt: e.firstSeenAt as unknown as string,
+        lastSeenAt: e.lastSeenAt as unknown as string,
+      })),
+    };
+    sendSuccess(res, payload);
+  }),
+);
+
+/**
+ * POST /insights/experiments/:id/dismiss
+ * Tenant dismisses an experiment (active → dismissed). Dismissed experiments
+ * persist so they don't re-surface; there is no resolve (ADR-0001).
+ */
+router.post(
+  '/experiments/:id/dismiss',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+    const repo = AppDataSource.getRepository(InsightExperiment);
+    const exp = await repo.findOne({ where: { id: req.params.id, tenantId } });
+    if (!exp) throw new NotFoundError('Experiment not found');
+    if (exp.state !== 'dismissed') {
+      exp.state = 'dismissed';
+      exp.dismissedAt = new Date();
+      await repo.save(exp);
+    }
+    sendSuccess(res, { id: exp.id, state: exp.state });
   }),
 );
 

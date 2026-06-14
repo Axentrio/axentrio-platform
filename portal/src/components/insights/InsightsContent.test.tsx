@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { insightsRef, hasFeatureRef, resolveMutate, archiveMutate } = vi.hoisted(() => ({
+const { insightsRef, experimentsRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate } = vi.hoisted(() => ({
   insightsRef: { current: null as Record<string, unknown> | null },
+  experimentsRef: { current: { experiments: [] } as Record<string, unknown> },
   hasFeatureRef: { current: {} as Record<string, boolean> },
   resolveMutate: vi.fn(),
   archiveMutate: vi.fn(),
+  dismissMutate: vi.fn(),
 }));
 
 vi.mock('../../queries/useInsightsQueries', () => ({
@@ -14,6 +16,8 @@ vi.mock('../../queries/useInsightsQueries', () => ({
   useGapEvidence: () => ({ data: undefined, isLoading: false }),
   useResolveGap: () => ({ mutate: resolveMutate, isPending: false }),
   useArchiveGap: () => ({ mutate: archiveMutate, isPending: false }),
+  useExperiments: () => ({ data: experimentsRef.current, isLoading: false }),
+  useDismissExperiment: () => ({ mutate: dismissMutate, isPending: false }),
 }));
 
 vi.mock('../../queries/useEntitlementsQueries', () => ({
@@ -55,9 +59,25 @@ function data(gaps: Array<Record<string, unknown>>, meta: Partial<Record<string,
 beforeEach(() => {
   hasFeatureRef.current = {};
   insightsRef.current = data([gap()]);
+  experimentsRef.current = { experiments: [] };
   resolveMutate.mockReset();
   archiveMutate.mockReset();
+  dismissMutate.mockReset();
 });
+
+function experiment(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: 'e1',
+    kind: 'sentiment',
+    severity: 'orange',
+    title: 'Customers frequently mention "slow response" — 5 sessions in 30 days',
+    detail: null,
+    payload: {},
+    firstSeenAt: '2026-06-10T00:00:00Z',
+    lastSeenAt: '2026-06-14T00:00:00Z',
+    ...over,
+  };
+}
 
 describe('InsightsContent — gap surface', () => {
   it('renders an open gap card with topic, stats, and lifecycle actions', () => {
@@ -109,5 +129,30 @@ describe('InsightsContent — gap surface', () => {
     render(<InsightsContent />);
     expect(screen.getByText(/first analysis runs tonight/i)).toBeInTheDocument();
     expect(screen.getByText(/no open gaps/i)).toBeInTheDocument();
+  });
+});
+
+describe('InsightsContent — experiments (Enterprise, P3)', () => {
+  it('hides the Experiments section without aiBusinessInsights', () => {
+    hasFeatureRef.current = { aiBusinessInsights: false };
+    render(<InsightsContent />);
+    expect(screen.queryByText(/^experiments$/i)).not.toBeInTheDocument();
+  });
+
+  it('renders experiment cards for Enterprise tenants', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    experimentsRef.current = { experiments: [experiment()] };
+    render(<InsightsContent />);
+    expect(screen.getByText(/^experiments$/i)).toBeInTheDocument();
+    expect(screen.getByText(/Customers frequently mention "slow response"/)).toBeInTheDocument();
+  });
+
+  it('dismisses an experiment', async () => {
+    const user = userEvent.setup();
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    experimentsRef.current = { experiments: [experiment()] };
+    render(<InsightsContent />);
+    await user.click(screen.getByRole('button', { name: /dismiss/i }));
+    expect(dismissMutate).toHaveBeenCalledWith('e1');
   });
 });

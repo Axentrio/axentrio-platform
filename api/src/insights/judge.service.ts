@@ -31,6 +31,13 @@ export interface JudgeVerdict {
   topicPhrase: string | null;
   evidenceMessageIds: string[];
   reasoning: string | null;
+  /**
+   * Sentiment (P3 / ADR-0014, D5) — only populated when judged with
+   * `withSentiment` (Enterprise tenants). null/undefined otherwise.
+   */
+  sentiment: 'positive' | 'negative' | 'neutral' | null;
+  /** Short English praise/complaint theme phrase, or null. */
+  sentimentTheme: string | null;
 }
 
 const SYSTEM_PROMPT = `You judge one customer-support chat transcript for a small business.
@@ -43,6 +50,18 @@ Rules:
 - topic: a short English topic phrase (1-6 words, e.g. "pricing", "emergency availability") naming what the customer asked about — in English regardless of the customer's language. If the question is unclear, generic, or you cannot extract a specific topic, return null.
 - evidenceMessageIds: the ids of the 1-4 messages that best support your verdict (the ask, and the answer or non-answer).
 - reasoning: one or two sentences, plain language, citing what the customer asked and how the assistant responded.`;
+
+/**
+ * Enterprise-only extension (D5). Appended to the base prompt + JSON shape ONLY
+ * when `withSentiment` is set — non-Enterprise judging stays byte-identical to
+ * SYSTEM_PROMPT above, so sentiment is purely additive and entitled-only.
+ */
+const SENTIMENT_PROMPT = `${SYSTEM_PROMPT.replace(
+  '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string}',
+  '{"hadQuestion": boolean, "satisfied": boolean|null, "topic": string|null, "evidenceMessageIds": string[], "reasoning": string, "sentiment": "positive"|"negative"|"neutral", "sentimentTheme": string|null}',
+)}
+- sentiment: the customer's overall sentiment in this chat — "positive", "negative", or "neutral".
+- sentimentTheme: if the customer expressed a SPECIFIC recurring praise or complaint (e.g. "slow response", "friendly staff", "confusing pricing"), a short English theme phrase (1-5 words). If there is no specific praise/complaint, return null. Generic mood with no theme = null.`;
 
 /** Cap transcript size sent to the judge — long sessions are truncated head+tail. */
 const MAX_MESSAGES = 60;
@@ -70,6 +89,7 @@ export async function judgeTranscript(
   messages: TranscriptMessage[],
   isHandoff: boolean,
   tally?: UsageTally,
+  opts?: { withSentiment?: boolean },
 ): Promise<JudgeVerdict> {
   // Deliberately NOT passing tenantId to getProvider: the nightly judge is
   // platform-side batch work and must not consume the tenant's dailyLlmCalls
@@ -78,7 +98,7 @@ export async function judgeTranscript(
   const provider = getProvider(DEFAULT_PROVIDER);
   const response = await provider.chat(
     [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: opts?.withSentiment ? SENTIMENT_PROMPT : SYSTEM_PROMPT },
       { role: 'user', content: renderTranscript(messages) },
     ],
     { model: DEFAULT_MODEL, maxTokens: 500, temperature: 0, jsonMode: true },
@@ -111,11 +131,22 @@ export async function judgeTranscript(
   let satisfied: boolean | null = hadQuestion ? parsed.satisfied === true : null;
   if (isHandoff && hadQuestion) satisfied = false;
 
+  const sentiment =
+    opts?.withSentiment && ['positive', 'negative', 'neutral'].includes(parsed.sentiment as string)
+      ? (parsed.sentiment as 'positive' | 'negative' | 'neutral')
+      : null;
+  const sentimentTheme =
+    opts?.withSentiment && typeof parsed.sentimentTheme === 'string' && parsed.sentimentTheme.trim()
+      ? parsed.sentimentTheme
+      : null;
+
   return {
     hadQuestion,
     satisfied,
     topicPhrase: typeof parsed.topic === 'string' && parsed.topic.trim() ? parsed.topic : null,
     evidenceMessageIds: evidence,
     reasoning: typeof parsed.reasoning === 'string' ? parsed.reasoning.slice(0, 1000) : null,
+    sentiment,
+    sentimentTheme,
   };
 }

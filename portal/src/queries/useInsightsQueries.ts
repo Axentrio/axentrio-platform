@@ -13,12 +13,14 @@ import type {
   GapDto,
   InsightsListResponse,
   EvidenceEntryDto,
+  ExperimentsResponse,
 } from '@contracts/insights';
 
 export type { GapStatus, GapSeverity };
 export type GapRow = GapDto;
 export type InsightsResponse = InsightsListResponse;
 export type EvidenceEntry = EvidenceEntryDto;
+export type { ExperimentDto, ExperimentKind, ExperimentsResponse } from '@contracts/insights';
 
 const insightsOptions = {
   list: () => queryOptions({
@@ -28,6 +30,10 @@ const insightsOptions = {
   evidence: (gapId: string) => queryOptions({
     queryKey: queryKeys.insights.evidence(gapId),
     queryFn: () => api.get<{ evidence: EvidenceEntry[] }>(`/insights/${gapId}/evidence`),
+  }),
+  experiments: () => queryOptions({
+    queryKey: queryKeys.insights.experiments(),
+    queryFn: () => api.get<ExperimentsResponse>('/insights/experiments'),
   }),
 };
 
@@ -59,4 +65,22 @@ export function useResolveGap(successMessage: string) {
 
 export function useArchiveGap(successMessage: string) {
   return useGapAction('archive', successMessage);
+}
+
+export function useExperiments(enabled = true) {
+  return useQuery({ ...insightsOptions.experiments(), enabled });
+}
+
+export function useDismissExperiment(successMessage: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (experimentId: string) => {
+      await api.post(`/insights/experiments/${experimentId}/dismiss`);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.insights.experiments() });
+      toast.success(successMessage);
+    },
+    onError: () => toast.error('Something went wrong'),
+  });
 }

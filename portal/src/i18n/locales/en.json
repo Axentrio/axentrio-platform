@@ -1140,15 +1140,30 @@
         "availability": "Availability",
         "versions": "Versions"
       },
-      "templateStatus": { "active": "Active", "archived": "Archived" },
-      "availability": { "all": "All tenants", "granted": "Granted only" },
+      "templateStatus": {
+        "active": "Active",
+        "archived": "Archived"
+      },
+      "availability": {
+        "all": "All tenants",
+        "granted": "Granted only"
+      },
       "versionSummary": {
         "published": "Published v{{version}}",
         "none": "No published version",
         "drafts": "{{count}} draft(s)"
       },
-      "versionStatus": { "draft": "Draft", "published": "Published", "unpublished": "Unpublished" },
-      "versionColumns": { "version": "Version", "status": "Status", "changelog": "Changelog", "actions": "Actions" },
+      "versionStatus": {
+        "draft": "Draft",
+        "published": "Published",
+        "unpublished": "Unpublished"
+      },
+      "versionColumns": {
+        "version": "Version",
+        "status": "Status",
+        "changelog": "Changelog",
+        "actions": "Actions"
+      },
       "empty": "No templates yet. Create one to get started.",
       "create": {
         "title": "Create template",
@@ -1184,7 +1199,9 @@
         "reassign": "{{count}} bound bot(s) will be reassigned to the blank base template. Continue?",
         "proceed": "Proceed"
       },
-      "errors": { "load": "Failed to load templates." }
+      "errors": {
+        "load": "Failed to load templates."
+      }
     },
     "tenants": {
       "header": {
@@ -1876,6 +1893,12 @@
       "bullet1": "Topics customers keep asking about, ranked by how many asked",
       "bullet2": "Fix a gap by adding the answer to your knowledge base — wins are confirmed automatically",
       "bullet3": "Refreshed nightly from your real conversations"
+    },
+    "experiments": {
+      "title": "Experiments",
+      "empty": "Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.",
+      "dismiss": "Dismiss",
+      "dismissedToast": "Dismissed"
     }
   },
   "analytics": {

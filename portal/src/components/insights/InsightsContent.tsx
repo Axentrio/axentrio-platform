@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Lightbulb, Lock, ChevronDown, ChevronUp, CheckCircle2, Archive, Clock, AlertTriangle,
+  FlaskConical, X, TrendingUp, MessageCircleHeart,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
@@ -20,7 +21,10 @@ import {
   useGapEvidence,
   useResolveGap,
   useArchiveGap,
+  useExperiments,
+  useDismissExperiment,
   GapRow,
+  ExperimentDto,
 } from '../../queries/useInsightsQueries';
 import { useHasFeature } from '../../queries/useEntitlementsQueries';
 import { timeAgo } from '@/utils/timeAgo';
@@ -152,6 +156,73 @@ function GapCard({ gap, evidenceEnabled }: { gap: GapRow; evidenceEnabled: boole
   );
 }
 
+const EXPERIMENT_DOT: Record<string, string> = {
+  red: 'bg-red-400',
+  orange: 'bg-amber-400',
+  green: 'bg-emerald-400',
+};
+
+/** A correlation or sentiment experiment — an OBSERVATION, not resolvable (ADR-0001). */
+function ExperimentCard({ exp }: { exp: ExperimentDto }) {
+  const { t } = useTranslation();
+  const dismiss = useDismissExperiment(t('insights.experiments.dismissedToast', { defaultValue: 'Dismissed' }));
+  const Icon = exp.kind === 'correlation' ? TrendingUp : MessageCircleHeart;
+  return (
+    <Card variant="glass">
+      <CardContent className="p-4 space-y-2">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className={cn('h-2.5 w-2.5 rounded-full shrink-0', EXPERIMENT_DOT[exp.severity])} />
+            <Icon className="h-4 w-4 text-zinc-400 shrink-0" />
+            <p className="text-sm font-medium text-text-primary">{exp.title}</p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={dismiss.isPending}
+            onClick={() => dismiss.mutate(exp.id)}
+            title={t('insights.experiments.dismiss', { defaultValue: 'Dismiss' })}
+          >
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        {exp.detail && <p className="text-sm text-zinc-300">{exp.detail}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Enterprise-only (aiBusinessInsights). Correlation + sentiment experiments. */
+function ExperimentsSection() {
+  const { t } = useTranslation();
+  const enabled = useHasFeature('aiBusinessInsights');
+  const { data, isLoading } = useExperiments(enabled);
+  if (!enabled) return null;
+
+  const experiments = data?.experiments ?? [];
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2">
+        <FlaskConical className="h-4 w-4 text-primary-400" />
+        <h3 className="text-sm font-semibold text-text-primary">
+          {t('insights.experiments.title', { defaultValue: 'Experiments' })}
+        </h3>
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-20 w-full rounded-xl" />
+      ) : experiments.length === 0 ? (
+        <p className="text-xs text-zinc-500">
+          {t('insights.experiments.empty', {
+            defaultValue: 'Patterns we spot in your conversations — correlations and sentiment themes — appear here as they emerge.',
+          })}
+        </p>
+      ) : (
+        experiments.map((e) => <ExperimentCard key={e.id} exp={e} />)
+      )}
+    </div>
+  );
+}
+
 export function InsightsContent() {
   const { t } = useTranslation();
   const { data, isLoading } = useInsights();
@@ -236,6 +307,8 @@ export function InsightsContent() {
           )}
         </TabsContent>
       </Tabs>
+
+      <ExperimentsSection />
     </div>
   );
 }

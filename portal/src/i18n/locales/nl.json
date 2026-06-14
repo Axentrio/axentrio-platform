@@ -34,6 +34,7 @@
     "allTenants": "Alle klanten",
     "allUsers": "Alle gebruikers",
     "platformAnalytics": "Platformanalyse",
+    "botTemplates": "Bot-sjablonen",
     "faqEditor": "FAQ-editor"
   },
   "sidebar": {
@@ -1058,6 +1059,72 @@
     }
   },
   "admin": {
+    "botTemplates": {
+      "header": {
+        "title": "Bot-sjablonen",
+        "subtitle": "Stel versiebeheerde botprompts samen en wijs ze toe aan tenants."
+      },
+      "actions": {
+        "create": "Sjabloon maken",
+        "archive": "Archiveren",
+        "publish": "Publiceren",
+        "unpublish": "Publicatie ongedaan maken",
+        "rollback": "Terugdraaien",
+        "newDraft": "Nieuw concept",
+        "saveAccess": "Toegang opslaan"
+      },
+      "columns": {
+        "name": "Naam",
+        "status": "Status",
+        "availability": "Beschikbaarheid",
+        "versions": "Versies"
+      },
+      "templateStatus": { "active": "Actief", "archived": "Gearchiveerd" },
+      "availability": { "all": "Alle tenants", "granted": "Alleen toegewezen" },
+      "versionSummary": {
+        "published": "Gepubliceerd v{{version}}",
+        "none": "Geen gepubliceerde versie",
+        "drafts": "{{count}} concept(en)"
+      },
+      "versionStatus": { "draft": "Concept", "published": "Gepubliceerd", "unpublished": "Niet gepubliceerd" },
+      "versionColumns": { "version": "Versie", "status": "Status", "changelog": "Wijzigingslog", "actions": "Acties" },
+      "empty": "Nog geen sjablonen. Maak er een om te beginnen.",
+      "create": {
+        "title": "Sjabloon maken",
+        "key": "Sleutel (slug)",
+        "displayName": "Weergavenaam",
+        "category": "Categorie (optioneel)",
+        "availableToAll": "Beschikbaar voor alle tenants"
+      },
+      "detail": {
+        "back": "Terug naar sjablonen",
+        "metadata": "Details",
+        "description": "Beschrijving",
+        "availabilityHint": "Indien aan, kan elke actieve tenant dit sjabloon koppelen. Indien uit, alleen toegewezen tenants.",
+        "versions": "Versies",
+        "noVersions": "Nog geen versies. Maak een concept om te beginnen.",
+        "grants": "Tenant-toegang",
+        "grantsHint": "Eén tenant-id per regel (of komma-gescheiden). Deze tenants mogen dit sjabloon koppelen.",
+        "grantsGlobalHint": "Dit sjabloon is beschikbaar voor alle tenants, dus toewijzingen per tenant worden niet gebruikt.",
+        "grantsPlaceholder": "tenant-id-1\ntenant-id-2"
+      },
+      "editor": {
+        "newTitle": "Nieuwe conceptversie",
+        "editTitle": "Concept v{{version}} bewerken",
+        "body": "Prompt-inhoud",
+        "bodyHint": "Ondersteunt plaatsaanduidingen zoals {botName}, {businessName}, {tone}. Max 20.000 tekens.",
+        "expectedModules": "Verwachte modules (komma-gescheiden, optioneel)",
+        "changelog": "Wijzigingslog (optioneel)"
+      },
+      "confirm": {
+        "archiveTitle": "Dit sjabloon archiveren?",
+        "unpublishTitle": "Deze versie niet meer publiceren?",
+        "ungrantTitle": "Tenant-toegang verwijderen?",
+        "reassign": "{{count}} gekoppelde bot(s) worden opnieuw toegewezen aan het lege basissjabloon. Doorgaan?",
+        "proceed": "Doorgaan"
+      },
+      "errors": { "load": "Kon sjablonen niet laden." }
+    },
     "tenants": {
       "header": {
         "title": "Tenants",

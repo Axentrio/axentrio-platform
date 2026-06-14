@@ -53,6 +53,8 @@ import AdminTenants from '@pages/admin/AdminTenants';
 import AdminUsers from '@pages/admin/AdminUsers';
 import AdminAnalytics from '@pages/admin/AdminAnalytics';
 import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
+import AdminBotTemplates from '@pages/admin/AdminBotTemplates';
+import AdminBotTemplateDetail from '@pages/admin/AdminBotTemplateDetail';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
 
@@ -311,6 +313,8 @@ function AppRoutes() {
                       <Route path="/admin/users" element={<AdminUsers />} />
                       <Route path="/admin/analytics" element={<AdminAnalytics />} />
                       <Route path="/admin/faq" element={<AdminFaqEditor />} />
+                      <Route path="/admin/bot-templates" element={<AdminBotTemplates />} />
+                      <Route path="/admin/bot-templates/:id" element={<AdminBotTemplateDetail />} />
                     </Route>
 
                     {/* Redirects for old routes */}

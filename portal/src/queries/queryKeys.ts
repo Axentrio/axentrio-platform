@@ -73,6 +73,8 @@ export const queryKeys = {
     tenantOverrides: (id: string) => [...queryKeys.admin.tenantDetail(id), 'feature-overrides'] as const,
     tenantModules: (id: string) => [...queryKeys.admin.tenantDetail(id), 'modules'] as const,
     auditLogs: () => [...queryKeys.admin.all(), 'audit-logs'] as const,
+    botTemplates: () => [...queryKeys.admin.all(), 'bot-templates'] as const,
+    botTemplateDetail: (id: string) => [...queryKeys.admin.all(), 'bot-template', id] as const,
   },
   integrations: {
     all: () => ['integrations'] as const,

@@ -32,6 +32,7 @@ import {
   HelpCircle,
   ChevronDown,
   Lock,
+  FileText,
 } from 'lucide-react';
 import { useClerk, useOrganization, useOrganizationList } from '@clerk/clerk-react';
 import {
@@ -121,6 +122,7 @@ const adminMenuItems: AdminMenuItem[] = [
   { path: '/admin/tenants', labelKey: 'nav.allTenants', icon: Shield, roles: ['super_admin'] },
   { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
   { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
+  { path: '/admin/bot-templates', labelKey: 'nav.botTemplates', icon: FileText, roles: ['super_admin'] },
   { path: '/admin/faq', labelKey: 'nav.faqEditor', icon: HelpCircle, roles: ['super_admin'] },
 ];
 

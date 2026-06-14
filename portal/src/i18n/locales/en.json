@@ -34,6 +34,7 @@
     "allTenants": "All Tenants",
     "allUsers": "All Users",
     "platformAnalytics": "Platform Analytics",
+    "botTemplates": "Bot Templates",
     "faqEditor": "FAQ Editor"
   },
   "sidebar": {
@@ -1099,6 +1100,72 @@
     }
   },
   "admin": {
+    "botTemplates": {
+      "header": {
+        "title": "Bot Templates",
+        "subtitle": "Author versioned bot prompts and grant them to tenants."
+      },
+      "actions": {
+        "create": "Create Template",
+        "archive": "Archive",
+        "publish": "Publish",
+        "unpublish": "Unpublish",
+        "rollback": "Rollback",
+        "newDraft": "New draft",
+        "saveAccess": "Save access"
+      },
+      "columns": {
+        "name": "Name",
+        "status": "Status",
+        "availability": "Availability",
+        "versions": "Versions"
+      },
+      "templateStatus": { "active": "Active", "archived": "Archived" },
+      "availability": { "all": "All tenants", "granted": "Granted only" },
+      "versionSummary": {
+        "published": "Published v{{version}}",
+        "none": "No published version",
+        "drafts": "{{count}} draft(s)"
+      },
+      "versionStatus": { "draft": "Draft", "published": "Published", "unpublished": "Unpublished" },
+      "versionColumns": { "version": "Version", "status": "Status", "changelog": "Changelog", "actions": "Actions" },
+      "empty": "No templates yet. Create one to get started.",
+      "create": {
+        "title": "Create template",
+        "key": "Key (slug)",
+        "displayName": "Display name",
+        "category": "Category (optional)",
+        "availableToAll": "Available to all tenants"
+      },
+      "detail": {
+        "back": "Back to templates",
+        "metadata": "Details",
+        "description": "Description",
+        "availabilityHint": "When on, every active tenant can bind this template. When off, only granted tenants can.",
+        "versions": "Versions",
+        "noVersions": "No versions yet. Create a draft to begin.",
+        "grants": "Tenant access",
+        "grantsHint": "One tenant id per line (or comma-separated). These tenants may bind this template.",
+        "grantsGlobalHint": "This template is available to all tenants, so per-tenant grants are not used.",
+        "grantsPlaceholder": "tenant-id-1\ntenant-id-2"
+      },
+      "editor": {
+        "newTitle": "New draft version",
+        "editTitle": "Edit draft v{{version}}",
+        "body": "Prompt body",
+        "bodyHint": "Supports placeholders like {botName}, {businessName}, {tone}. Max 20,000 characters.",
+        "expectedModules": "Expected modules (comma-separated, optional)",
+        "changelog": "Changelog (optional)"
+      },
+      "confirm": {
+        "archiveTitle": "Archive this template?",
+        "unpublishTitle": "Unpublish this version?",
+        "ungrantTitle": "Remove tenant access?",
+        "reassign": "{{count}} bound bot(s) will be reassigned to the blank base template. Continue?",
+        "proceed": "Proceed"
+      },
+      "errors": { "load": "Failed to load templates." }
+    },
     "tenants": {
       "header": {
         "title": "Tenants",

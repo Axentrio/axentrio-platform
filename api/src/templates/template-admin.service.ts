@@ -22,7 +22,7 @@ import { TenantBotTemplate } from '../database/entities/TenantBotTemplate';
 import { Bot } from '../database/entities/Bot';
 import { getModule } from '../modules';
 import { ConflictError, NotFoundError, ValidationError } from '../middleware/error-handler';
-import { invalidateTemplateBundle, invalidateTenantTemplates } from './template-resolver';
+import { invalidateTemplateBundle, invalidateTenantTemplates, invalidateAllTenantTemplates } from './template-resolver';
 
 /** Template body cap (T22) — characters, matching the codebase's char-based caps. */
 export const TEMPLATE_BODY_MAX = 20_000;
@@ -169,6 +169,19 @@ async function reassignBots(
  */
 async function fanOutTemplateInvalidation(templateId: string, extraTenantIds: string[] = []): Promise<void> {
   await invalidateTemplateBundle(templateId);
+
+  // A globally-available template's change affects EVERY tenant's listing → one
+  // O(1) global bump. (availableToAllTenants still reflects "was global" during
+  // archive, since archive flips status, not the flag.)
+  const tmpl = await AppDataSource.getRepository(BotTemplate).findOne({
+    where: { id: templateId },
+    select: ['availableToAllTenants'],
+  });
+  if (tmpl?.availableToAllTenants) {
+    await invalidateAllTenantTemplates();
+  }
+
+  // Granted (non-global) templates + reassign-affected tenants: per-tenant.
   const grants = await AppDataSource.getRepository(TenantBotTemplate).find({
     where: { templateId },
     select: ['tenantId'],

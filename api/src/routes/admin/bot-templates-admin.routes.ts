@@ -20,7 +20,7 @@ import { TenantBotTemplate } from '../../database/entities/TenantBotTemplate';
 import { asyncHandler, ValidationError, NotFoundError, ConflictError } from '../../middleware/error-handler';
 import { sendSuccess } from '../../utils/response';
 import { logAudit } from '../../utils/audit';
-import { invalidateTemplateBundle, invalidateTenantTemplates } from '../../templates/template-resolver';
+import { invalidateTemplateBundle, invalidateAllTenantTemplates } from '../../templates/template-resolver';
 import {
   createDraftVersion,
   editDraftVersion,
@@ -130,7 +130,11 @@ router.post(
     }
     const tmpl = await repo.save(repo.create({ key, displayName, category, description, availableToAllTenants, status: 'active' }));
     await logAudit(req.userId!, 'bot_template.created', 'bot_template', tmpl.id, undefined, { key });
-    if (availableToAllTenants) await invalidateTemplateBundle(tmpl.id);
+    if (availableToAllTenants) {
+      // A new global template appears in every tenant's picker.
+      await invalidateTemplateBundle(tmpl.id);
+      await invalidateAllTenantTemplates();
+    }
     res.status(201);
     sendSuccess(res, { template: tmpl });
   }),
@@ -172,10 +176,11 @@ router.put(
       availableToAllTenants: saved.availableToAllTenants,
     });
     if (availabilityChanged) {
-      // Availability gates new bindings; existing bound bots keep resolving.
+      // Toggling availableToAllTenants changes the listing for ALL tenants
+      // (it appears or disappears globally) → one O(1) global bump. Availability
+      // gates new bindings only; existing bound bots keep resolving (bundle).
       await invalidateTemplateBundle(tmpl.id);
-      const grants = await AppDataSource.getRepository(TenantBotTemplate).find({ where: { templateId: tmpl.id }, select: ['tenantId'] });
-      await Promise.all(grants.map((g) => invalidateTenantTemplates(g.tenantId)));
+      await invalidateAllTenantTemplates();
     }
     sendSuccess(res, { template: saved });
   }),

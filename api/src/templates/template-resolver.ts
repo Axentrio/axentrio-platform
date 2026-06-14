@@ -22,11 +22,16 @@ import { AppDataSource } from '../database/data-source';
 import { BotTemplate } from '../database/entities/BotTemplate';
 import { BotTemplateVersion } from '../database/entities/BotTemplateVersion';
 import { getEntitlements } from '../billing/entitlements';
-import { cached, invalidate } from '../utils/cache';
+import { cached, invalidate, readCounter, bumpCounter } from '../utils/cache';
 import { logger } from '../utils/logger';
 
 const TEMPLATES_TTL_SECONDS = 60;
-const availCacheKey = (tenantId: string) => `bot-templates-avail:${tenantId}`;
+// Per-tenant availability cache is version-keyed: a change affecting the GLOBAL
+// listing (a global template created/archived/republished or its availableToAll
+// toggled) bumps this counter, orphaning every tenant's cached list at once —
+// O(1) bulk invalidation without enumerating tenants (T20 fan-out).
+const availVersionKey = 'bot-templates-avail-version';
+const availCacheKey = (tenantId: string, version: number) => `bot-templates-avail:${tenantId}:${version}`;
 const bundleCacheKey = (templateId: string) => `bot-template:${templateId}`;
 
 export interface AvailableTemplate {
@@ -107,7 +112,8 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
   }
   if (!billable) return [];
 
-  return cached(availCacheKey(tenantId), TEMPLATES_TTL_SECONDS, async () => {
+  const version = await readCounter(availVersionKey);
+  return cached(availCacheKey(tenantId, version), TEMPLATES_TTL_SECONDS, async () => {
     const rows: Array<{
       id: string;
       key: string;
@@ -223,10 +229,18 @@ export async function resolveTemplateBody(bot: {
   return (await resolveBoundTemplate(bot)).body;
 }
 
-/** Drop a tenant's available-templates cache. Call on grant add/remove for the
- *  tenant (and, fanned out, on availableToAll/archive changes) — T20. */
+/** Drop ONE tenant's available-templates cache. Call on grant add/remove for
+ *  that tenant (a grant change affects only that tenant's listing) — T20. */
 export async function invalidateTenantTemplates(tenantId: string): Promise<void> {
-  await invalidate(availCacheKey(tenantId));
+  const version = await readCounter(availVersionKey);
+  await invalidate(availCacheKey(tenantId, version));
+}
+
+/** Invalidate the available-templates listing for EVERY tenant at once (O(1)).
+ *  Call on changes to a globally-available template (create/archive/publish/
+ *  unpublish/availableToAll toggle) — these change what all tenants can bind. */
+export async function invalidateAllTenantTemplates(): Promise<void> {
+  await bumpCounter(availVersionKey);
 }
 
 /** Drop a template's published bundle. Call on version publish/unpublish and

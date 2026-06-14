@@ -51,3 +51,31 @@ export async function invalidate(...keys: string[]): Promise<void> {
     // Redis down — skip invalidation
   }
 }
+
+/**
+ * Monotonic counter for "version-keyed" caches: fold the counter into a cache
+ * key, then `bumpCounter` to orphan every key built from the old value at once
+ * (an O(1) bulk invalidation without the O(N) KEYS scan). Orphaned keys expire
+ * via their own TTL. Degrades gracefully when Redis is down (returns 0 / no-op,
+ * so the cache simply behaves as TTL-only).
+ */
+export async function readCounter(key: string): Promise<number> {
+  const redis = getRedisClient();
+  if (!redis) return 0;
+  try {
+    const v = await redis.get(key);
+    return v ? Number.parseInt(v, 10) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function bumpCounter(key: string): Promise<void> {
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.incr(key);
+  } catch {
+    // Redis down — callers fall back to TTL-only freshness
+  }
+}

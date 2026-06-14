@@ -13,6 +13,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
 import { generateResponse } from '../llm/rag.service';
 import { buildSystemPrompt } from '../llm/prompt-builder';
+import { resolveTemplateBody } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
@@ -144,10 +145,13 @@ export async function botTestChat(req: Request, res: Response) {
   const botKbIds = await getBotKnowledgeBaseIds(AppDataSource, req.params.id);
   const useKb = useKnowledgeBase && botKbIds.length > 0;
 
+  // Resolved layer-2 template body so the preview matches the live composed prompt.
+  const templateBody = await resolveTemplateBody(bot);
+
   if (useKb) {
     let result;
     try {
-      result = await generateResponse(AppDataSource, tenantId, ai, message, history, botKbIds);
+      result = await generateResponse(AppDataSource, tenantId, ai, message, history, botKbIds, templateBody);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('OPENAI_API_KEY')) {
@@ -171,7 +175,7 @@ export async function botTestChat(req: Request, res: Response) {
   } else {
     const { getProvider } = await import('../llm/provider-factory');
     const llm = getProvider(provider, tenantApiKey ?? undefined);
-    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name });
+    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name, templateBody });
     const messages = [
       { role: 'system' as const, content: systemPrompt },
       ...history.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content })),

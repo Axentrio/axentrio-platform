@@ -106,6 +106,9 @@ interface AgentCtx {
   kbContext?: string;
   moduleSections?: string[];
   customerName?: string;
+  /** Resolved bot-template body (layer 2). Empty/absent contributes nothing.
+   *  Resolved by the caller via template-resolver (`resolveTemplateBody`). */
+  templateBody?: string;
   /** Injectable for deterministic tests; defaults to now. */
   now?: Date;
 }
@@ -116,6 +119,7 @@ interface BaseCtx {
   mode: 'base';
   ai: AiSettings;
   businessName?: string;
+  templateBody?: string;
 }
 
 interface RagCtx {
@@ -123,14 +127,16 @@ interface RagCtx {
   ai: AiSettings;
   businessName?: string;
   knowledgeContext: string;
+  templateBody?: string;
 }
 
-/** n8n pass-through: substituted custom instructions only — no default block,
- *  no platform rules (the n8n workflow owns guardrails). */
+/** n8n pass-through: template + custom instructions only — no default block,
+ *  no platform rules (the n8n workflow owns guardrails, T14). */
 interface N8nCtx {
   mode: 'n8n';
   ai: AiSettings;
   businessName?: string;
+  templateBody?: string;
 }
 
 export type ComposeContext = AgentCtx | BaseCtx | RagCtx | N8nCtx;
@@ -140,14 +146,32 @@ export function composeSystemPrompt(ctx: ComposeContext): string {
     case 'agent':
       return assembleAgent(ctx);
     case 'base':
-      return assembleBase(ctx.ai, ctx.businessName);
+      return assembleBase(ctx.ai, ctx.businessName, ctx.templateBody);
     case 'rag':
       return assembleRag(ctx);
     case 'n8n':
-      return substituteVariables(ctx.ai.brandVoice?.customInstructions || '', ctx.ai, {
-        businessName: ctx.businessName,
-      });
+      // Template (layer 2) + custom (layer 4), substituted; nothing else.
+      // Empty + empty → '' preserves the n8n empty-prompt contract (T14).
+      return joinInstructionLayers(ctx.ai, { businessName: ctx.businessName }, ctx.templateBody);
   }
+}
+
+/**
+ * Compose the template (layer 2) + custom-instructions (layer 4) text, each
+ * variable-substituted, separated by a blank line. Returns '' when both are
+ * empty (the caller decides whether to fall back to a default block). Shared by
+ * the base/rag tenant-instructions block and the n8n pass-through.
+ */
+function joinInstructionLayers(
+  ai: AiSettings,
+  extras: { businessName?: string } | undefined,
+  templateBody?: string,
+): string {
+  const tmpl = templateBody?.trim() ? substituteVariables(templateBody, ai, extras) : '';
+  const custom = ai.brandVoice?.customInstructions?.trim()
+    ? substituteVariables(ai.brandVoice.customInstructions, ai, extras)
+    : '';
+  return [tmpl, custom].filter(Boolean).join('\n\n');
 }
 
 // ── Agent flow ────────────────────────────────────────────────────────────
@@ -163,8 +187,12 @@ function assembleAgent(ctx: AgentCtx): string {
   // Brand voice
   sections.push(`You are ${brandVoice?.name || tenantName}.`);
   sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);
-  // ── Tenant-instructions layer. The bot-templates work inserts the resolved
-  //    TEMPLATE body immediately before this custom-instructions line.
+  // ── Template layer (layer 2): the resolved bot-template identity, before the
+  //    tenant's own additions. Empty/absent (e.g. blank-base) contributes nothing.
+  if (ai && ctx.templateBody?.trim()) {
+    sections.push(substituteVariables(ctx.templateBody, ai, { businessName: tenantName }));
+  }
+  // ── Custom-instructions layer (layer 4): tenant's own additions.
   if (ai && brandVoice?.customInstructions) {
     sections.push(substituteVariables(brandVoice.customInstructions, ai, { businessName: tenantName }));
   }
@@ -269,19 +297,22 @@ You MUST follow these formatting rules strictly:
 
 // ── Base / preview / RAG ────────────────────────────────────────────────────
 
-// ── Tenant-instructions layer. The bot-templates work inserts the resolved
-//    TEMPLATE body here; the empty-custom default block is the path-conditional
-//    `emptyPromptDefault` fallback (ON for base/rag, OFF for n8n).
-function tenantInstructionsBlock(ai: AiSettings, extras?: { businessName?: string }): string {
-  const customInstructions = ai.brandVoice?.customInstructions?.trim() ?? '';
-  return customInstructions
-    ? substituteVariables(customInstructions, ai, extras)
-    : substituteVariables(DEFAULT_TENANT_BLOCK, ai, extras);
+// ── Tenant-instructions block: template (layer 2) + custom (layer 4), with the
+//    empty-both default block as the path-conditional `emptyPromptDefault`
+//    fallback (ON for base/rag — these are its only callers; n8n composes the
+//    layers directly without the default, T14).
+function tenantInstructionsBlock(
+  ai: AiSettings,
+  extras?: { businessName?: string },
+  templateBody?: string,
+): string {
+  const combined = joinInstructionLayers(ai, extras, templateBody);
+  return combined || substituteVariables(DEFAULT_TENANT_BLOCK, ai, extras);
 }
 
-function assembleBase(ai: AiSettings, businessName?: string): string {
+function assembleBase(ai: AiSettings, businessName?: string, templateBody?: string): string {
   const extras = businessName ? { businessName } : undefined;
-  const tenantBlock = tenantInstructionsBlock(ai, extras);
+  const tenantBlock = tenantInstructionsBlock(ai, extras, templateBody);
 
   const vars = buildVariableMap(ai, extras);
   const businessSuffix = businessName ? ` for ${businessName}` : '';
@@ -307,7 +338,7 @@ function assembleRag(ctx: RagCtx): string {
   const extras = ctx.businessName ? { businessName: ctx.businessName } : undefined;
   const vars = buildVariableMap(ai, extras);
   const businessSuffix = ctx.businessName ? ` for ${ctx.businessName}` : '';
-  const tenantBlock = tenantInstructionsBlock(ai, extras);
+  const tenantBlock = tenantInstructionsBlock(ai, extras, ctx.templateBody);
 
   return [
     `You are ${vars.botName}${businessSuffix}. Help visitors as instructed below while staying within the platform safety rules.`,

@@ -20,7 +20,8 @@ export class PromptBuilder {
     tools: ToolAdapter[],
     kbContext?: string,
     moduleSections?: string[],
-    customerName?: string
+    customerName?: string,
+    templateBody?: string
   ): string {
     return composeSystemPrompt({
       mode: 'agent',
@@ -31,6 +32,7 @@ export class PromptBuilder {
       kbContext,
       moduleSections,
       customerName,
+      templateBody,
     });
   }
 }

@@ -154,7 +154,9 @@ export async function generateResponse(
   conversationHistory: { role: 'user' | 'assistant'; content: string }[],
   // Multi-bot RAG scoping. `undefined` → tenant-wide (legacy); a list →
   // restrict to those KnowledgeBases; `[]` → no attached knowledge (I12).
-  knowledgeBaseIds?: string[]
+  knowledgeBaseIds?: string[],
+  // Resolved bot-template body (layer 2). '' / undefined contributes nothing.
+  templateBody?: string
 ): Promise<RagResult> {
   const noKnowledge = knowledgeBaseIds !== undefined && knowledgeBaseIds.length === 0;
 
@@ -214,7 +216,7 @@ export async function generateResponse(
     .map((m) => `${m.role === 'user' ? 'Customer' : 'Assistant'}: ${m.content}`)
     .join('\n');
 
-  const systemPrompt = composeSystemPrompt({ mode: 'rag', ai: aiSettings as any, knowledgeContext });
+  const systemPrompt = composeSystemPrompt({ mode: 'rag', ai: aiSettings as any, knowledgeContext, templateBody });
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },

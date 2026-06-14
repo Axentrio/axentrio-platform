@@ -17,6 +17,7 @@ import {
 import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
 import { buildSystemPrompt } from '../llm/prompt-builder';
+import { resolveTemplateBody } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
@@ -268,7 +269,7 @@ export async function testChat(req: Request, res: Response) {
 
   // Multi-bot Phase 4 (#16d): behavioural AI from anchor Bot; provider apiKey
   // from Tenant (secret stays tenant-scoped).
-  const { settings: botSettings } = await getAnchorBotConfig(tenantId);
+  const { bot, settings: botSettings } = await getAnchorBotConfig(tenantId);
   const botAi = botSettings.ai;
   if (!botAi?.enabled) {
     throw new BadRequestError('AI is not enabled. Save your AI settings first.');
@@ -288,13 +289,16 @@ export async function testChat(req: Request, res: Response) {
   const provider = DEFAULT_PROVIDER;
   const model = DEFAULT_MODEL;
 
+  // Resolved layer-2 template body so the preview matches the live composed prompt.
+  const templateBody = await resolveTemplateBody(bot);
+
   if (useKnowledgeBase) {
     let result;
     try {
       // TODO(multi-bot Phase 3 UI): when the test/preview chat targets a
       // specific bot, pass that bot's attached KB ids here. For now this
       // tenant-level preview stays tenant-wide (knowledgeBaseIds omitted).
-      result = await generateResponse(AppDataSource, tenantId, ai, message, history);
+      result = await generateResponse(AppDataSource, tenantId, ai, message, history, undefined, templateBody);
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('OPENAI_API_KEY')) {
@@ -324,7 +328,7 @@ export async function testChat(req: Request, res: Response) {
     // Secret apiKey path — still sourced from tenant (per architectural rule).
     const llm = getProvider(provider, tenantApiKey ?? undefined);
 
-    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name });
+    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name, templateBody });
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },

@@ -12,7 +12,8 @@ import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
 import { cached } from '../utils/cache';
 import { Tenant } from '../database/entities/Tenant';
-import { BotSettings } from '../database/entities/Bot';
+import { Bot, BotSettings } from '../database/entities/Bot';
+import { resolveTemplateBody } from '../templates/template-resolver';
 import { getEntitlements } from '../billing/entitlements';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
@@ -113,17 +114,19 @@ export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
 export function buildTenantAiConfig(
   tenantName: string,
   ai: BotAiSettings | undefined,
+  templateBody?: string,
 ): TenantAiConfig | undefined {
   if (!ai?.enabled) return undefined;
 
   return {
     brandName: ai.brandVoice?.name || tenantName,
     brandTone: ai.brandVoice?.tone || 'professional',
-    // n8n has its own prompt handling — pass the bot's template through
-    // with {placeholders} resolved, but without injecting a legacy fallback
-    // (empty customInstructions → empty systemPrompt). Composed via the n8n
-    // mode of the single composer (no default block, no platform rules).
-    systemPrompt: composeSystemPrompt({ mode: 'n8n', ai, businessName: tenantName }),
+    // n8n has its own prompt handling — pass the bot's template + custom
+    // instructions through with {placeholders} resolved, but without a legacy
+    // fallback (empty template + empty custom → empty systemPrompt). Composed
+    // via the n8n mode of the single composer (no default block, no platform
+    // rules, no module sections — T14).
+    systemPrompt: composeSystemPrompt({ mode: 'n8n', ai, businessName: tenantName, templateBody }),
     guardrails: {
       topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
       confidenceThreshold: ai.guardrails?.confidenceThreshold ?? 0.7,
@@ -242,8 +245,9 @@ export async function forwardMessageToN8n(
   // provider apiKey stays on Tenant.settings.ai.apiKey (fetched lazily in the
   // RAG fallback path below via getLlmRuntimeConfigForSession).
   let botSettings: BotSettings;
+  let bot: Bot;
   try {
-    ({ settings: botSettings } = await getBotConfigForSession(session));
+    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
   } catch (err) {
     if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
       // Traffic to a paused/deleted bot should have been rejected upstream
@@ -341,6 +345,10 @@ export async function forwardMessageToN8n(
   const webhookConfig = buildWebhookConfig(tenant);
   webhookConfig.url = customWebhookUrl!;
 
+  // Layer-2 template body for this bot — used by the n8n systemPrompt and the
+  // RAG fallback below (blank-base → empty → unchanged).
+  const templateBody = await resolveTemplateBody(bot);
+
   const outboundPayload: OutboundMessage = {
     event: 'message.received',
     tenantId: session.tenantId,
@@ -354,7 +362,7 @@ export async function forwardMessageToN8n(
         : savedMessage.content,
       metadata: savedMessage.metadata || undefined,
     },
-    tenantConfig: buildTenantAiConfig(tenant.name, aiSettings),
+    tenantConfig: buildTenantAiConfig(tenant.name, aiSettings, templateBody),
     knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
     integrations: await buildIntegrationsConfig(botSettings, tenant.id),
     context: {
@@ -416,7 +424,8 @@ export async function forwardMessageToN8n(
         ragSettings,
         messageContent,
         history,
-        botKbIds
+        botKbIds,
+        templateBody
       );
 
       const botParticipant = await ensureBotParticipant(session, aiSettings);

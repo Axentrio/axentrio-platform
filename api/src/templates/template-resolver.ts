@@ -211,6 +211,18 @@ export async function resolveBoundTemplate(bot: {
   return { ...UNBOUND, templateId: bot.templateId, pinnedButUnavailable: true, templateUnavailable: true };
 }
 
+/**
+ * Convenience for prompt composition: the resolved template body for a bot's
+ * binding ('' when unbound/unreachable). Drops the resolution flags — the
+ * composer only needs the text; the flags are for the tenant/admin UI.
+ */
+export async function resolveTemplateBody(bot: {
+  templateId?: string | null;
+  templateVersion?: string | null;
+}): Promise<string> {
+  return (await resolveBoundTemplate(bot)).body;
+}
+
 /** Drop a tenant's available-templates cache. Call on grant add/remove for the
  *  tenant (and, fanned out, on availableToAll/archive changes) — T20. */
 export async function invalidateTenantTemplates(tenantId: string): Promise<void> {

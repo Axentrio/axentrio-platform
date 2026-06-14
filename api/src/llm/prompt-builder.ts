@@ -19,7 +19,12 @@ type AiSettings = NonNullable<Tenant['settings']>['ai'];
 
 export function buildSystemPrompt(
   ai: NonNullable<AiSettings>,
-  extras?: { businessName?: string }
+  extras?: { businessName?: string; templateBody?: string }
 ): string {
-  return composeSystemPrompt({ mode: 'base', ai, businessName: extras?.businessName });
+  return composeSystemPrompt({
+    mode: 'base',
+    ai,
+    businessName: extras?.businessName,
+    templateBody: extras?.templateBody,
+  });
 }

@@ -15,6 +15,7 @@ import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
+import { resolveTemplateBody } from '../templates/template-resolver';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -164,7 +165,10 @@ export class AgentService {
         });
         customerName = binding?.externalUserName ?? undefined;
       }
-      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, moduleSections, customerName);
+      // Layer-2 template body, resolved from the bot's binding (blank-base →
+      // empty → unchanged). Flags are for the UI; the prompt only needs the text.
+      const templateBody = await resolveTemplateBody(bot);
+      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, moduleSections, customerName, templateBody);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

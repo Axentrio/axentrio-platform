@@ -153,6 +153,23 @@ export class Bot {
   @Column({ type: 'jsonb', default: {} })
   settings!: BotSettings;
 
+  /**
+   * Bound BotTemplate (prompt identity). Nullable for now; Phase 2 binds every
+   * existing bot to the seeded `blank-base` template. This is the SOLE binding
+   * source — the legacy client-side `settings.ai.brandVoice.templateId` is
+   * retired (T18, .scratch/plan-bot-templates.md).
+   */
+  @Column({ type: 'uuid', nullable: true, name: 'template_id' })
+  templateId?: string | null;
+
+  /**
+   * Which version of the bound template to resolve: `'latest'` (default —
+   * follows new publishes) or a stringified integer pinning a fixed version
+   * (T4/T5). Pin resolution + fallback live in template-resolver.
+   */
+  @Column({ type: 'varchar', length: 20, default: 'latest', name: 'template_version' })
+  templateVersion!: string;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

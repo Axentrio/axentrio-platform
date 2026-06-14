@@ -57,6 +57,9 @@ import { CanonicalTopic } from './entities/CanonicalTopic';
 import { Judgment } from './entities/Judgment';
 import { Gap } from './entities/Gap';
 import { InsightsRefreshState } from './entities/InsightsRefreshState';
+import { BotTemplate } from './entities/BotTemplate';
+import { BotTemplateVersion } from './entities/BotTemplateVersion';
+import { TenantBotTemplate } from './entities/TenantBotTemplate';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -121,6 +124,9 @@ export const AppDataSource = new DataSource({
     Judgment,
     Gap,
     InsightsRefreshState,
+    BotTemplate,
+    BotTemplateVersion,
+    TenantBotTemplate,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

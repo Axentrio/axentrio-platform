@@ -92,7 +92,14 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     // Editable fields (full-replace).
     enabled: data.enabled,
     supportEmail: data.supportEmail || null,
-    brandVoice: data.brandVoice,
+    // T18: never persist the legacy brandVoice.templateId — the authoritative
+    // binding lives on Bot.template_id (set via PUT /bots/:id/template). Strip it
+    // even if an old client still sends it.
+    brandVoice: {
+      name: data.brandVoice.name,
+      tone: data.brandVoice.tone,
+      customInstructions: data.brandVoice.customInstructions,
+    },
     guardrails: data.guardrails,
   };
 

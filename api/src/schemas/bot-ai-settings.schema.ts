@@ -22,8 +22,12 @@ export const putBotAiSettingsSchema = z
         name: z.string().min(1).max(100),
         tone: z.string().min(1).max(50),
         customInstructions: z.string().max(10000),
-        // Required key (full editable shape), but nullable: 'blank' → null.
-        templateId: z.string().max(100).nullable(),
+        // @deprecated Legacy client-side starter-snippet id. The authoritative
+        // template binding now lives on Bot.template_id / Bot.template_version
+        // (set via PUT /bots/:id/template). Accepted-but-ignored for backward
+        // compatibility during the portal transition (T18); the write path
+        // strips it and never persists it.
+        templateId: z.string().max(100).nullable().optional(),
       })
       .strict(),
     guardrails: z

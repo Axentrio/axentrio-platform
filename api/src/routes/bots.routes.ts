@@ -23,6 +23,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
 import { asyncHandler, NotFoundError, ForbiddenError, BadRequestError } from '../middleware/error-handler';
 import { getBotAiSettings, updateBotAiSettings, botTestChat } from '../knowledge/bot-ai-settings.controller';
+import { getBotTemplateOptions, updateBotTemplateBinding } from '../knowledge/bot-template.controller';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { createDocumentSchema } from '../schemas/knowledge.schema';
 import {
@@ -361,6 +362,14 @@ router.delete(
 router.get('/:id/ai-settings', requireRole('admin', 'supervisor'), asyncHandler(getBotAiSettings));
 router.put('/:id/ai-settings', requireRole('admin'), asyncHandler(updateBotAiSettings));
 router.post('/:id/test-chat', requireRole('admin'), asyncHandler(botTestChat));
+
+/**
+ * Per-bot template binding (bot-templates Phase 4). Read = admin/supervisor;
+ * bind = admin only — mirrors the ai-settings gating. The authoritative binding
+ * lives on Bot.template_id/template_version (legacy brandVoice.templateId retired).
+ */
+router.get('/:id/templates', requireRole('admin', 'supervisor'), asyncHandler(getBotTemplateOptions));
+router.put('/:id/template', requireRole('admin'), asyncHandler(updateBotTemplateBinding));
 
 /**
  * Per-bot knowledge (dedicated vs shared org KB). "Dedicated replaces shared":

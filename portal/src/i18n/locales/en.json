@@ -673,6 +673,26 @@
         "promptPlaceholder": "Write your bot's instructions here, or pick a template above…",
         "placeholders": "Placeholders:"
       },
+      "template": {
+        "title": "Bot template",
+        "description": "The bot's prompt identity, managed by Axentrio. Pick one and optionally pin a version.",
+        "select": "Template",
+        "selectPlaceholder": "Choose a template",
+        "version": "Version",
+        "latest": "Latest (follow updates)",
+        "preview": "Template preview (read-only)",
+        "previewEmpty": "This template adds no base instructions.",
+        "warnings": {
+          "unavailable": "The bound template is unavailable; using an empty base for now.",
+          "pinned": "The pinned version is no longer published; using the latest instead.",
+          "missingModules": "This template expects features not enabled on your plan: {{modules}}."
+        }
+      },
+      "additionalInstructions": {
+        "title": "Additional instructions",
+        "description": "Extra guidance layered on top of the selected template. Leave blank to use the template as-is.",
+        "placeholder": "e.g. Always mention our weekend promotion."
+      },
       "advanced": {
         "title": "Advanced Settings",
         "description": "Guardrails, handoff behavior, and response limits",

@@ -668,6 +668,26 @@
         "promptPlaceholder": "Schrijf hier de instructies voor je bot, of kies hierboven een sjabloon…",
         "placeholders": "Placeholders:"
       },
+      "template": {
+        "title": "Botsjabloon",
+        "description": "De prompt-identiteit van de bot, beheerd door Axentrio. Kies er een en zet eventueel een versie vast.",
+        "select": "Sjabloon",
+        "selectPlaceholder": "Kies een sjabloon",
+        "version": "Versie",
+        "latest": "Laatste (volg updates)",
+        "preview": "Sjabloonvoorbeeld (alleen-lezen)",
+        "previewEmpty": "Dit sjabloon voegt geen basisinstructies toe.",
+        "warnings": {
+          "unavailable": "Het gekoppelde sjabloon is niet beschikbaar; voorlopig wordt een lege basis gebruikt.",
+          "pinned": "De vastgezette versie is niet meer gepubliceerd; de laatste wordt gebruikt.",
+          "missingModules": "Dit sjabloon verwacht functies die niet zijn ingeschakeld in je abonnement: {{modules}}."
+        }
+      },
+      "additionalInstructions": {
+        "title": "Aanvullende instructies",
+        "description": "Extra richtlijnen bovenop het gekozen sjabloon. Laat leeg om het sjabloon ongewijzigd te gebruiken.",
+        "placeholder": "bijv. Vermeld altijd onze weekendactie."
+      },
       "advanced": {
         "title": "Geavanceerde instellingen",
         "description": "Vangrails, overdrachtsgedrag en antwoordlimieten",

@@ -154,6 +154,47 @@ export function useUpdateBotAiSettings(botId: string) {
   });
 }
 
+// --- Per-bot template binding (bot-templates Phase 4) ---
+
+export interface BotTemplateOption {
+  id: string;
+  key: string;
+  displayName: string;
+  category: string | null;
+  description: string | null;
+  availableToAllTenants: boolean;
+  latestPublishedVersion: number | null;
+}
+
+export interface BotTemplateView {
+  available: BotTemplateOption[];
+  binding: { templateId: string | null; templateVersion: string };
+  resolved: { resolvedVersion: number | null; body: string; pinnedButUnavailable: boolean; templateUnavailable: boolean };
+  publishedVersions: number[];
+  missingModules: string[];
+}
+
+/** GET /bots/:id/templates — picker options + current binding + resolved preview. */
+export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: queryKeys.bots.templates(botId),
+    queryFn: () => api.get<BotTemplateView>(`/bots/${botId}/templates`),
+    enabled: !!botId && (opts.enabled ?? true),
+  });
+}
+
+/** PUT /bots/:id/template — set the bot's template binding (id + version pin). */
+export function useBindBotTemplate(botId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { templateId: string; templateVersion: string }) =>
+      api.put<BotTemplateView>(`/bots/${botId}/template`, input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.templates(botId) });
+    },
+  });
+}
+
 /** POST /bots/:id/test-chat — preview against this bot's config + attached KBs. */
 export function useBotTestChat(botId: string) {
   return useMutation({

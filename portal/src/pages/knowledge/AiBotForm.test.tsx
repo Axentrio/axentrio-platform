@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AiBotForm from './AiBotForm';
 
-const { mockMutate } = vi.hoisted(() => ({ mockMutate: vi.fn() }));
+const { mockMutate, mockBind } = vi.hoisted(() => ({ mockMutate: vi.fn(), mockBind: vi.fn() }));
 
 vi.mock('@/auth/useAppAuth', () => ({
   useAppAuth: () => ({
@@ -17,12 +17,7 @@ vi.mock('@/queries/useBotsQueries', () => ({
   useBotAiSettings: () => ({
     data: {
       enabled: true,
-      brandVoice: {
-        name: 'TestBot',
-        tone: 'friendly',
-        customInstructions: '',
-        templateId: null,
-      },
+      brandVoice: { name: 'TestBot', tone: 'friendly', customInstructions: '' },
       guardrails: {
         topicsToAvoid: [],
         escalationKeywords: [],
@@ -36,23 +31,27 @@ vi.mock('@/queries/useBotsQueries', () => ({
     isLoading: false,
     error: null,
   }),
-  useUpdateBotAiSettings: () => ({
-    mutate: mockMutate,
-    isPending: false,
+  useUpdateBotAiSettings: () => ({ mutate: mockMutate, isPending: false }),
+  useBotTemplates: () => ({
+    data: {
+      available: [
+        { id: 'tmpl-1', key: 'plumber', displayName: 'Plumber Booking', category: null, description: null, availableToAllTenants: true, latestPublishedVersion: 1 },
+      ],
+      binding: { templateId: null, templateVersion: 'latest' },
+      resolved: { resolvedVersion: null, body: '', pinnedButUnavailable: false, templateUnavailable: false },
+      publishedVersions: [],
+      missingModules: [],
+    },
   }),
+  useBindBotTemplate: () => ({ mutate: mockBind, isPending: false }),
 }));
 
-const SYSTEM_PROMPT_PLACEHOLDER = /Write your bot's instructions here/;
+const ADDL_INSTRUCTIONS_PLACEHOLDER = /weekend promotion/;
 
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   const user = userEvent.setup();
-  // AiBotForm pulls in BotInstructionsHelpDrawer which calls useFaq() (a React
-  // Query hook). Wrap in a fresh QueryClient per test so the hook can resolve.
-  // Mocked queries here (useKnowledgeQueries) bypass the client; useFaq still
-  // needs it for its useQuery call.
-  const queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
+  // BotInstructionsHelpDrawer calls useFaq() (React Query), so wrap in a client.
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={queryClient}>
       <AiBotForm botId="test-bot" onGoToKnowledgeBase={onGoToKnowledgeBase} />
@@ -62,60 +61,23 @@ const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
 };
 
 const getInstructionsTextarea = () =>
-  screen.getByPlaceholderText(SYSTEM_PROMPT_PLACEHOLDER) as HTMLTextAreaElement;
-
-const getStarterCombobox = () => screen.getByRole('combobox', { name: /starter prompt/i });
+  screen.getByPlaceholderText(ADDL_INSTRUCTIONS_PLACEHOLDER) as HTMLTextAreaElement;
 
 describe('AiBotForm', () => {
   beforeEach(() => {
     mockMutate.mockReset();
+    mockBind.mockReset();
   });
 
-  it('cancels a template switch and preserves edits + current selection', async () => {
+  it('binds a template via the picker (separate from the auto-saved form)', async () => {
     const { user } = renderForm();
-
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
-    await user.keyboard('hand-edited instructions');
-    expect(ta.value).toBe('hand-edited instructions');
-
-    await user.click(getStarterCombobox());
-    await user.click(await screen.findByRole('option', { name: 'Customer Support Assistant' }));
-
-    // AlertDialog appears asking before we replace.
-    await user.click(await screen.findByRole('button', { name: 'Keep editing' }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    });
-    expect(getInstructionsTextarea().value).toBe('hand-edited instructions');
-    expect(getStarterCombobox()).toHaveTextContent('Blank');
+    await user.click(screen.getByRole('combobox', { name: /^template$/i }));
+    await user.click(await screen.findByRole('option', { name: 'Plumber Booking' }));
+    expect(mockBind).toHaveBeenCalledWith({ templateId: 'tmpl-1', templateVersion: 'latest' });
   });
 
-  it('confirms a template switch and replaces instructions + updates selection', async () => {
-    const { user } = renderForm();
-
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
-    await user.keyboard('throwaway');
-
-    await user.click(getStarterCombobox());
-    await user.click(await screen.findByRole('option', { name: 'Customer Support Assistant' }));
-
-    await user.click(await screen.findByRole('button', { name: 'Replace' }));
-
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    });
-    const after = getInstructionsTextarea();
-    expect(after.value).not.toBe('throwaway');
-    expect(after.value).toMatch(/customer support assistant/i);
-    expect(getStarterCombobox()).toHaveTextContent('Customer Support Assistant');
-  });
-
-  it('auto-saves on blur and Go to Knowledge Base navigates without a dialog', async () => {
+  it('auto-saves additional instructions on blur; Go to Knowledge Base navigates without a dialog', async () => {
     const { user, onGoToKnowledgeBase } = renderForm();
-
     mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => {
       options?.onSuccess?.();
     });
@@ -123,37 +85,38 @@ describe('AiBotForm', () => {
     const ta = getInstructionsTextarea();
     await user.click(ta);
     await user.keyboard('about to save');
-
-    // Tabbing out of the textarea bubbles a blur event to the wrapping form,
-    // which calls flush() → save fires immediately without waiting for the debounce.
     await user.tab();
 
-    await waitFor(() => {
-      expect(mockMutate).toHaveBeenCalled();
-    });
+    await waitFor(() => expect(mockMutate).toHaveBeenCalled());
 
-    // After save, isDirty is false — Go to KB should navigate immediately without dialog.
     await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
   });
 
+  it('does not persist a templateId in the ai-settings payload (T18)', async () => {
+    const { user } = renderForm();
+    mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
+    const ta = getInstructionsTextarea();
+    await user.click(ta);
+    await user.keyboard('hi');
+    await user.tab();
+    await waitFor(() => expect(mockMutate).toHaveBeenCalled());
+    const payload = mockMutate.mock.calls[0][0] as { brandVoice: Record<string, unknown> };
+    expect(payload.brandVoice).not.toHaveProperty('templateId');
+  });
+
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {
     const { user, onGoToKnowledgeBase } = renderForm();
 
-    // Force invalid: maxResponseLength = 0 fails validation, so auto-save is skipped.
     const maxLen = screen.getByRole('spinbutton') as HTMLInputElement;
     await user.clear(maxLen);
     await user.type(maxLen, '0');
 
     await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
-
-    // Dialog appears warning about invalid changes.
     await user.click(await screen.findByRole('button', { name: 'Stay here' }));
 
-    await waitFor(() => {
-      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument());
     expect(onGoToKnowledgeBase).not.toHaveBeenCalled();
     expect(mockMutate).not.toHaveBeenCalled();
   });

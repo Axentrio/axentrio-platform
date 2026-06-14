@@ -1,3 +1,8 @@
+// @deprecated (bot-templates Phase 4, T18). These client-side starter snippets
+// are no longer used by the tenant bot form — template authoring moved to the
+// super-admin, server-versioned Bot Templates (see api/src/templates and
+// AiBotForm's template binding section). Kept only for reference; not imported.
+//
 // Starter prompt seed templates for the AI Bot form.
 //
 // Placeholders are resolved at runtime by the backend prompt-builder:

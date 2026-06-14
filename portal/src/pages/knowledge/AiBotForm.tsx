@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RotateCcw, HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
+import { HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -27,12 +27,20 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAppAuth } from '@/auth/useAppAuth';
-import { useBotAiSettings, useUpdateBotAiSettings } from '@/queries/useBotsQueries';
+import {
+  useBotAiSettings,
+  useUpdateBotAiSettings,
+  useBotTemplates,
+  useBindBotTemplate,
+} from '@/queries/useBotsQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
-import { promptTemplates, findTemplate, AI_PLACEHOLDERS } from './aiBotTemplates';
 import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
+
+// Placeholder hint shown under the additional-instructions field. These resolve
+// at runtime via the prompt composer's variable map.
+const AI_PLACEHOLDERS = ['{botName}', '{businessName}', '{tone}', '{supportEmail}'];
 
 interface AiBotFormProps {
   /** The bot whose AI config this form edits (per-bot config editing). */
@@ -52,7 +60,6 @@ type FormSnapshot = {
   botName: string;
   supportEmail: string;
   effectiveTone: string;
-  templateId: string;
   systemPrompt: string;
   greetingMessage: string;
   fallbackMessage: string;
@@ -86,17 +93,19 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const { data: aiSettings, isLoading, error } = useBotAiSettings(botId, { enabled: isAdminOrSupervisor }) as { data: any; isLoading: boolean; error: any };
   const updateSettings = useUpdateBotAiSettings(botId);
 
+  // Template binding (Phase 4): the bound prompt identity is its own resource,
+  // separate from the auto-saved behavioural form. Each picker change saves
+  // immediately via the bind mutation; the query is the source of truth.
+  const { data: templateView } = useBotTemplates(botId, { enabled: isAdminOrSupervisor });
+  const bindTemplate = useBindBotTemplate(botId);
+
   // Form state
   const [enabled, setEnabled] = useState(false);
   const [botName, setBotName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [tone, setTone] = useState('friendly');
   const [customTone, setCustomTone] = useState('');
-  const [templateId, setTemplateId] = useState<string>('blank');
   const [systemPrompt, setSystemPrompt] = useState('');
-  // Body that was applied last time a template was selected (or hydrated from server).
-  // Compared against systemPrompt to detect unsaved edits before replacing.
-  const [lastAppliedBody, setLastAppliedBody] = useState('');
   const [greetingMessage, setGreetingMessage] = useState('');
   const [fallbackMessage, setFallbackMessage] = useState('');
   const [offHoursMessage, setOffHoursMessage] = useState('');
@@ -107,8 +116,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   // Baseline snapshot captured at hydration. Stays fixed until tenant change;
   // useAutoSave maintains its own moving "last saved" baseline on top of this.
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
-  // Pending template ID awaiting confirmation when switching templates over edited instructions.
-  const [pendingTemplateId, setPendingTemplateId] = useState<string | null>(null);
   // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
@@ -131,13 +138,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const hTone = serverTone;
     const hCustomTone = isPreset ? '' : serverTone;
     const hSystemPrompt = aiSettings.brandVoice?.customInstructions ?? '';
-    // Treat the saved instruction text as the source of truth: if the saved
-    // templateId no longer matches a known template (renamed/removed since
-    // last save), fall back to 'blank' rather than confusing the dropdown.
-    const savedTemplateId: string | null | undefined = aiSettings.brandVoice?.templateId;
-    const hTemplateId = savedTemplateId && findTemplate(savedTemplateId)
-      ? savedTemplateId
-      : 'blank';
     const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
     const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
     const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
@@ -151,9 +151,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setSupportEmail(hSupportEmail);
     setTone(hTone);
     setCustomTone(hCustomTone);
-    setTemplateId(hTemplateId);
     setSystemPrompt(hSystemPrompt);
-    setLastAppliedBody(hSystemPrompt);
     setGreetingMessage(hGreeting);
     setFallbackMessage(hFallback);
     setOffHoursMessage(hOffHours);
@@ -167,7 +165,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       botName: hBotName,
       supportEmail: hSupportEmail,
       effectiveTone: computeEffectiveTone(hTone, hCustomTone),
-      templateId: hTemplateId,
       systemPrompt: hSystemPrompt,
       greetingMessage: hGreeting,
       fallbackMessage: hFallback,
@@ -178,33 +175,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       topicsToAvoid: hTopics,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
-
-  const applyTemplate = (id: string) => {
-    const tpl = findTemplate(id);
-    const nextBody = tpl?.body ?? '';
-    setTemplateId(id);
-    setSystemPrompt(nextBody);
-    setLastAppliedBody(nextBody);
-  };
-
-  const handleTemplateChange = (id: string) => {
-    if (id === templateId) return;
-    const hasUnsavedEdits = systemPrompt.trim() !== lastAppliedBody.trim();
-    if (hasUnsavedEdits) {
-      // Defer the actual switch until the user confirms in the dialog.
-      // Leaving templateId unchanged keeps the Radix Select on its prior value.
-      setPendingTemplateId(id);
-      return;
-    }
-    applyTemplate(id);
-  };
-
-  const handleResetPrompt = () => {
-    const tpl = findTemplate(templateId);
-    if (!tpl) return;
-    setSystemPrompt(tpl.body);
-    setLastAppliedBody(tpl.body);
-  };
 
   const handleToneChipClick = (value: string) => {
     setTone(value);
@@ -222,7 +192,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     botName,
     supportEmail,
     effectiveTone,
-    templateId,
     systemPrompt,
     greetingMessage,
     fallbackMessage,
@@ -250,7 +219,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             name: botName || 'AI Assistant',
             tone: effectiveTone,
             customInstructions: systemPrompt,
-            templateId: templateId === 'blank' ? null : templateId,
           },
           guardrails: {
             greetingMessage,
@@ -265,7 +233,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, effectiveTone, systemPrompt, templateId, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
+    [updateSettings, enabled, supportEmail, botName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -289,9 +257,17 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     onGoToKnowledgeBase();
   };
 
-  const confirmTemplateSwitch = () => {
-    if (pendingTemplateId) applyTemplate(pendingTemplateId);
-    setPendingTemplateId(null);
+  // Template binding (saved immediately, separate from the auto-saved form).
+  const binding = templateView?.binding;
+  const availableTemplates = templateView?.available ?? [];
+  const publishedVersions = templateView?.publishedVersions ?? [];
+  const resolved = templateView?.resolved;
+  const missingModules = templateView?.missingModules ?? [];
+
+  // Selecting a template resets the pin to 'latest'; selecting a version pins it.
+  const handleTemplateSelect = (id: string) => bindTemplate.mutate({ templateId: id, templateVersion: 'latest' });
+  const handleVersionSelect = (version: string) => {
+    if (binding?.templateId) bindTemplate.mutate({ templateId: binding.templateId, templateVersion: version });
   };
 
   const readOnly = !isAdmin;
@@ -406,52 +382,88 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           </div>
         </section>
 
-        {/* Base System Prompt */}
+        {/* Bot Template (prompt identity, managed centrally; bound here) */}
         <section className="space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.template.title')}</h3>
+            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.template.description')}</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.instructions.title')}</h3>
-              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.instructions.description')}</p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Select value={templateId} onValueChange={handleTemplateChange} disabled={readOnly}>
-                <SelectTrigger className="h-9 w-56" aria-label={t('ai.bot.instructions.templateSelect.ariaLabel')}>
-                  <SelectValue placeholder={t('ai.bot.instructions.templateSelect.placeholder')} />
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.template.select')}</Label>
+              <Select value={binding?.templateId ?? ''} onValueChange={handleTemplateSelect} disabled={readOnly || bindTemplate.isPending}>
+                <SelectTrigger className="h-9" aria-label={t('ai.bot.template.select')}>
+                  <SelectValue placeholder={t('ai.bot.template.selectPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
-                  {promptTemplates.map((tpl) => (
-                    <SelectItem key={tpl.id} value={tpl.id}>{tpl.label}</SelectItem>
+                  {availableTemplates.map((tpl) => (
+                    <SelectItem key={tpl.id} value={tpl.id}>{tpl.displayName}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <button
-                type="button"
-                onClick={() => setIsHelpOpen(true)}
-                className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
-                title={t('ai.bot.instructions.faqsTooltip')}
-                aria-expanded={isHelpOpen}
-              >
-                <HelpCircle className="w-3.5 h-3.5" /> {t('ai.bot.instructions.faqs')}
-              </button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={handleResetPrompt}
-                disabled={readOnly}
-                className="h-8 px-2 text-xs"
-                title={t('ai.bot.instructions.resetTooltip')}
-              >
-                <RotateCcw className="w-3.5 h-3.5 mr-1" />
-                {t('ai.bot.instructions.reset')}
-              </Button>
             </div>
+            {binding?.templateId && publishedVersions.length > 0 && (
+              <div>
+                <Label className="mb-1 text-text-secondary">{t('ai.bot.template.version')}</Label>
+                <Select value={binding?.templateVersion ?? 'latest'} onValueChange={handleVersionSelect} disabled={readOnly || bindTemplate.isPending}>
+                  <SelectTrigger className="h-9" aria-label={t('ai.bot.template.version')}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
+                    {publishedVersions.map((v) => (
+                      <SelectItem key={v} value={String(v)}>{`v${v}`}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+          {resolved?.templateUnavailable && (
+            <p className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
+          )}
+          {resolved?.pinnedButUnavailable && (
+            <p className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
+          )}
+          {missingModules.length > 0 && (
+            <p className="text-[11px] text-amber-400">
+              {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}
+            </p>
+          )}
+          <div>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.template.preview')}</Label>
+            <Textarea
+              value={resolved?.body || ''}
+              placeholder={t('ai.bot.template.previewEmpty')}
+              rows={6}
+              readOnly
+              className="font-mono text-xs bg-surface-2"
+            />
+          </div>
+        </section>
+
+        {/* Additional instructions (tenant tweaks layered on top of the template) */}
+        <section className="space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.additionalInstructions.title')}</h3>
+              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.additionalInstructions.description')}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsHelpOpen(true)}
+              className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
+              title={t('ai.bot.instructions.faqsTooltip')}
+              aria-expanded={isHelpOpen}
+            >
+              <HelpCircle className="w-3.5 h-3.5" /> {t('ai.bot.instructions.faqs')}
+            </button>
           </div>
           <Textarea
             value={systemPrompt}
             onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder={t('ai.bot.instructions.promptPlaceholder')}
-            rows={14}
+            placeholder={t('ai.bot.additionalInstructions.placeholder')}
+            rows={8}
             disabled={readOnly}
             className="font-mono text-xs"
           />
@@ -567,24 +579,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         </Button>
         {isAdmin && <AutoSaveStatusIndicator status={status} onRetry={retry} />}
       </div>
-
-      <AlertDialog
-        open={pendingTemplateId !== null}
-        onOpenChange={(open) => { if (!open) setPendingTemplateId(null); }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('ai.bot.dialogs.replaceInstructions.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('ai.bot.dialogs.replaceInstructions.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('ai.bot.dialogs.replaceInstructions.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmTemplateSwitch}>{t('ai.bot.dialogs.replaceInstructions.confirm')}</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <BotInstructionsHelpDrawer
         isOpen={isHelpOpen}

@@ -667,6 +667,26 @@
         "promptPlaceholder": "Écrivez ici les instructions de votre bot, ou choisissez un modèle ci-dessus…",
         "placeholders": "Placeholders :"
       },
+      "template": {
+        "title": "Modèle de bot",
+        "description": "L'identité de prompt du bot, gérée par Axentrio. Choisissez-en un et épinglez éventuellement une version.",
+        "select": "Modèle",
+        "selectPlaceholder": "Choisir un modèle",
+        "version": "Version",
+        "latest": "Dernière (suivre les mises à jour)",
+        "preview": "Aperçu du modèle (lecture seule)",
+        "previewEmpty": "Ce modèle n'ajoute aucune instruction de base.",
+        "warnings": {
+          "unavailable": "Le modèle lié est indisponible ; une base vide est utilisée pour le moment.",
+          "pinned": "La version épinglée n'est plus publiée ; la dernière est utilisée à la place.",
+          "missingModules": "Ce modèle attend des fonctionnalités non activées sur votre offre : {{modules}}."
+        }
+      },
+      "additionalInstructions": {
+        "title": "Instructions supplémentaires",
+        "description": "Conseils supplémentaires ajoutés au modèle sélectionné. Laissez vide pour utiliser le modèle tel quel.",
+        "placeholder": "ex. Mentionnez toujours notre promotion du week-end."
+      },
       "advanced": {
         "title": "Paramètres avancés",
         "description": "Garde-fous, comportement de transfert et limites de réponse",

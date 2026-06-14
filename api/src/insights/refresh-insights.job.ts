@@ -27,6 +27,7 @@ import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service'
 import { canonicalizeTopic } from './topics.service';
 import { canonicalizeSentimentTheme } from './sentiment-themes.service';
 import { aggregateSentiment } from './sentiment-aggregation.service';
+import { aggregateCorrelations } from './correlation.service';
 import { aggregateGaps } from './gap-aggregation.service';
 import { logger } from '../utils/logger';
 import { decrypt } from '../utils/encryption';
@@ -213,6 +214,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   // Enterprise-only experiment aggregation (P3). Gated by the flag, not tier.
   if (withSentiment) {
     await aggregateSentiment(tenantId, now);
+    await aggregateCorrelations(tenantId, now);
   }
 
   state.lastRefreshedAt = watermarkFrozen ? watermark : now;

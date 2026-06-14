@@ -17,7 +17,7 @@ import { getEntitlements } from '../billing/entitlements';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { OutboundService } from '../n8n/outbound.service';
-import { substituteVariables } from '../llm/prompt-builder';
+import { composeSystemPrompt } from '../llm/compose-system-prompt';
 import { FallbackService } from '../n8n/fallback.service';
 import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
@@ -121,12 +121,9 @@ export function buildTenantAiConfig(
     brandTone: ai.brandVoice?.tone || 'professional',
     // n8n has its own prompt handling — pass the bot's template through
     // with {placeholders} resolved, but without injecting a legacy fallback
-    // (empty customInstructions → empty systemPrompt).
-    systemPrompt: substituteVariables(
-      ai.brandVoice?.customInstructions || '',
-      ai,
-      { businessName: tenantName }
-    ),
+    // (empty customInstructions → empty systemPrompt). Composed via the n8n
+    // mode of the single composer (no default block, no platform rules).
+    systemPrompt: composeSystemPrompt({ mode: 'n8n', ai, businessName: tenantName }),
     guardrails: {
       topicsToAvoid: ai.guardrails?.topicsToAvoid || [],
       confidenceThreshold: ai.guardrails?.confidenceThreshold ?? 0.7,

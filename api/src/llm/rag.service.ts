@@ -5,7 +5,7 @@ import { getProvider } from './provider-factory';
 import { ChatMessage } from './llm.types';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
-import { buildSystemPrompt } from './prompt-builder';
+import { composeSystemPrompt } from './compose-system-prompt';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from './defaults';
 
 interface TenantAiSettings {
@@ -214,19 +214,7 @@ export async function generateResponse(
     .map((m) => `${m.role === 'user' ? 'Customer' : 'Assistant'}: ${m.content}`)
     .join('\n');
 
-  const basePrompt = buildSystemPrompt(aiSettings as any);
-  const systemPrompt = `${basePrompt}
-
-RAG Rules (enforced by the system):
-- Only answer using the provided knowledge context
-- If unsure, say so honestly
-
-You MUST respond in this exact JSON format:
-{ "response": "your answer here", "confidence": 0.85 }
-where confidence is 0.0-1.0
-
-KNOWLEDGE CONTEXT:
-${knowledgeContext}`;
+  const systemPrompt = composeSystemPrompt({ mode: 'rag', ai: aiSettings as any, knowledgeContext });
 
   const messages: ChatMessage[] = [
     { role: 'system', content: systemPrompt },

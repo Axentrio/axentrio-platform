@@ -67,6 +67,17 @@ export class Judgment {
   @Column({ type: 'text', nullable: true })
   reasoning?: string | null;
 
+  /**
+   * Sentiment (P3 / ADR-0014, D5) — populated only when the tenant has
+   * `aiBusinessInsights` (Enterprise). Forward-only: sessions judged before
+   * the flag flipped stay null (cold-start accepted).
+   */
+  @Column({ type: 'varchar', length: 8, nullable: true })
+  sentiment?: 'positive' | 'negative' | 'neutral' | null;
+
+  @Column({ type: 'uuid', name: 'sentiment_theme_id', nullable: true })
+  sentimentThemeId?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 }

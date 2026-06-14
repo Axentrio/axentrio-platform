@@ -52,3 +52,52 @@ export interface EvidenceEntryDto {
 export interface EvidenceResponse {
   evidence: EvidenceEntryDto[];
 }
+
+/* ------------------------------------------------------------------ */
+/*  P3 — AI Business Insights (Enterprise). Additive; see ADR-0014.   */
+/* ------------------------------------------------------------------ */
+
+export type ExperimentKind = 'correlation' | 'sentiment';
+export type ExperimentSeverity = 'red' | 'orange' | 'green';
+
+/**
+ * An experiment (correlation or sentiment) — an OBSERVATION, never resolvable
+ * (ADR-0001). State is active|dismissed only; there is no resolved/Win.
+ */
+export interface ExperimentDto {
+  id: string;
+  kind: ExperimentKind;
+  severity: ExperimentSeverity;
+  title: string;
+  detail: string | null;
+  /** Kind-specific display data (rates, counts, suggestion text). */
+  payload: Record<string, unknown>;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface ExperimentsResponse {
+  experiments: ExperimentDto[];
+}
+
+/** The structured header of a weekly digest (rendered above the narrative). */
+export interface DigestMetrics {
+  conversations: { current: number; previous: number };
+  bookings: { current: number; previous: number };
+  leads: { current: number; previous: number };
+  gapsOpened: number;
+  gapsWon: number;
+}
+
+export interface DigestDto {
+  weekStart: string;
+  summaryMd: string;
+  metrics: DigestMetrics;
+}
+
+/** null when no digest has been generated yet (pre-first-Monday). */
+export interface DigestResponse {
+  digest: DigestDto | null;
+}
+
+export type ExportDataset = 'outcomes-timeseries' | 'gaps' | 'leads';

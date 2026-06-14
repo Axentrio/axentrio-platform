@@ -57,6 +57,9 @@ import { CanonicalTopic } from './entities/CanonicalTopic';
 import { Judgment } from './entities/Judgment';
 import { Gap } from './entities/Gap';
 import { InsightsRefreshState } from './entities/InsightsRefreshState';
+import { InsightExperiment } from './entities/InsightExperiment';
+import { InsightDigest } from './entities/InsightDigest';
+import { SentimentTheme } from './entities/SentimentTheme';
 import { BotTemplate } from './entities/BotTemplate';
 import { BotTemplateVersion } from './entities/BotTemplateVersion';
 import { TenantBotTemplate } from './entities/TenantBotTemplate';
@@ -127,6 +130,9 @@ export const AppDataSource = new DataSource({
     BotTemplate,
     BotTemplateVersion,
     TenantBotTemplate,
+    InsightExperiment,
+    InsightDigest,
+    SentimentTheme,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

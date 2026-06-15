@@ -646,7 +646,8 @@
           "invalid": "Saisissez une adresse e-mail valide."
         },
         "voiceTone": {
-          "label": "Ton"
+          "label": "Ton de la voix",
+          "helper": "La voix de votre bot — s'applique à toutes ses spécialités."
         },
         "tones": {
           "friendly": "Amical",
@@ -676,6 +677,14 @@
       "template": {
         "title": "Modèle de bot",
         "description": "L'identité de prompt du bot, gérée par Axentrio. Choisissez-en un et épinglez éventuellement une version.",
+        "descriptionMulti": "Choisissez jusqu'à 3 spécialités, gérées par Axentrio. Avec plusieurs, choisissez ci-dessous comment elles se combinent.",
+        "selectedCount": "{{count}}/3 sélectionnée(s)",
+        "modeLabel": "Comment le bot doit-il utiliser plusieurs spécialités ?",
+        "modeOr": "Indépendantes (OU)",
+        "modeAnd": "Combinées (ET)",
+        "modeOrHelp": "Le bot répond avec la spécialité qui correspond à la question du client (ex. plomberie OU électricité).",
+        "modeAndHelp": "Le bot traite les spécialités comme une offre combinée et les applique ensemble.",
+        "previewPrimary": "(spécialité principale)",
         "select": "Modèle",
         "selectPlaceholder": "Choisir un modèle",
         "version": "Version",

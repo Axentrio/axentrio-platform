@@ -193,12 +193,26 @@ export interface BotTemplateOption {
   latestPublishedVersion: number | null;
 }
 
+export type TemplateMode = 'and' | 'or';
+
+export interface BoundTemplate {
+  templateId: string;
+  version: string;
+  publishedVersions: number[];
+  resolvedVersion: number | null;
+  pinnedButUnavailable: boolean;
+  templateUnavailable: boolean;
+}
+
 export interface BotTemplateView {
   available: BotTemplateOption[];
+  mode: TemplateMode;
+  bindings: BoundTemplate[];
+  missingModules: string[];
+  // Back-compat (primary binding) — older callers.
   binding: { templateId: string | null; templateVersion: string };
   resolved: { resolvedVersion: number | null; body: string; pinnedButUnavailable: boolean; templateUnavailable: boolean };
   publishedVersions: number[];
-  missingModules: string[];
 }
 
 /** GET /bots/:id/templates — picker options + current binding + resolved preview. */
@@ -210,11 +224,11 @@ export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {})
   });
 }
 
-/** PUT /bots/:id/template — set the bot's template binding (id + version pin). */
+/** PUT /bots/:id/template — set the bot's template bindings (up to 3) + AND/OR mode. */
 export function useBindBotTemplate(botId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: { templateId: string; templateVersion: string }) =>
+    mutationFn: (input: { bindings: { templateId: string; version: string }[]; mode: TemplateMode }) =>
       api.put<BotTemplateView>(`/bots/${botId}/template`, input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.templates(botId) });

@@ -148,6 +148,7 @@
       "appearance": "Appearance",
       "widget": "Widget & Brand",
       "capabilities": "Capabilities",
+      "features": "Features",
       "integrations": "Integrations",
       "channels": "Channels",
       "billing": "Billing"
@@ -652,7 +653,8 @@
           "invalid": "Enter a valid email address."
         },
         "voiceTone": {
-          "label": "Voice Tone"
+          "label": "Voice tone",
+          "helper": "Your bot's voice — applies across all its specialities."
         },
         "tones": {
           "friendly": "Friendly",
@@ -682,6 +684,14 @@
       "template": {
         "title": "Bot template",
         "description": "The bot's prompt identity, managed by Axentrio. Pick one and optionally pin a version.",
+        "descriptionMulti": "Pick up to 3 specialities, managed by Axentrio. With more than one, choose how they combine below.",
+        "selectedCount": "{{count}}/3 selected",
+        "modeLabel": "How should the bot use multiple specialities?",
+        "modeOr": "Independent (OR)",
+        "modeAnd": "Combined (AND)",
+        "modeOrHelp": "The bot answers using whichever speciality matches the customer's question (e.g. plumbing OR electrical).",
+        "modeAndHelp": "The bot treats the specialities as one combined offering and applies them together.",
+        "previewPrimary": "(primary speciality)",
         "select": "Template",
         "selectPlaceholder": "Choose a template",
         "version": "Version",

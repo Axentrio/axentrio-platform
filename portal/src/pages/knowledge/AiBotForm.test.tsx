@@ -43,6 +43,8 @@ vi.mock('@/queries/useBotsQueries', () => ({
       available: [
         { id: 'tmpl-1', key: 'plumber', displayName: 'Plumber Booking', category: null, description: null, availableToAllTenants: true, latestPublishedVersion: 1 },
       ],
+      mode: 'or',
+      bindings: [],
       binding: { templateId: null, templateVersion: 'latest' },
       resolved: { resolvedVersion: null, body: '', pinnedButUnavailable: false, templateUnavailable: false },
       publishedVersions: [],
@@ -77,11 +79,10 @@ describe('AiBotForm', () => {
     mockBind.mockReset();
   });
 
-  it('binds a template via the picker (separate from the auto-saved form)', async () => {
+  it('binds a template via the multi-select toggle (separate from the auto-saved form)', async () => {
     const { user } = renderForm();
-    await user.click(screen.getByRole('combobox', { name: /^template$/i }));
-    await user.click(await screen.findByRole('option', { name: 'Plumber Booking' }));
-    expect(mockBind).toHaveBeenCalledWith({ templateId: 'tmpl-1', templateVersion: 'latest' });
+    await user.click(screen.getByRole('button', { name: /Plumber Booking/i }));
+    expect(mockBind).toHaveBeenCalledWith({ bindings: [{ templateId: 'tmpl-1', version: 'latest' }], mode: 'or' });
   });
 
   it('auto-saves additional instructions on blur; Go to Knowledge Base navigates without a dialog', async () => {

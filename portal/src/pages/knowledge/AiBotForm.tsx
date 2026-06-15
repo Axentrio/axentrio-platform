@@ -322,18 +322,30 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     onGoToKnowledgeBase();
   };
 
-  // Template binding (saved immediately, separate from the auto-saved form).
-  const binding = templateView?.binding;
+  // Template bindings (up to 3, AND/OR) — saved immediately, separate from the
+  // auto-saved form. The query is the source of truth.
+  const bindings = templateView?.bindings ?? [];
+  const templateMode = templateView?.mode ?? 'or';
   const availableTemplates = templateView?.available ?? [];
-  const publishedVersions = templateView?.publishedVersions ?? [];
   const resolved = templateView?.resolved;
   const missingModules = templateView?.missingModules ?? [];
+  const bindingsInput = bindings.map((b) => ({ templateId: b.templateId, version: b.version }));
 
-  // Selecting a template resets the pin to 'latest'; selecting a version pins it.
-  const handleTemplateSelect = (id: string) => bindTemplate.mutate({ templateId: id, templateVersion: 'latest' });
-  const handleVersionSelect = (version: string) => {
-    if (binding?.templateId) bindTemplate.mutate({ templateId: binding.templateId, templateVersion: version });
+  const saveBindings = (next: { templateId: string; version: string }[], nextMode: 'and' | 'or' = templateMode) => {
+    if (next.length === 0) return; // at least one template must stay bound
+    bindTemplate.mutate({ bindings: next, mode: nextMode });
   };
+  // Toggle a template in/out of the binding set (cap 3); selecting defaults to 'latest'.
+  const toggleTemplate = (id: string) => {
+    const has = bindings.some((b) => b.templateId === id);
+    if (has) {
+      saveBindings(bindingsInput.filter((b) => b.templateId !== id));
+    } else if (bindings.length < 3) {
+      saveBindings([...bindingsInput, { templateId: id, version: 'latest' }]);
+    }
+  };
+  const setVersionFor = (id: string, version: string) =>
+    saveBindings(bindingsInput.map((b) => (b.templateId === id ? { ...b, version } : b)));
 
   const readOnly = !isAdmin;
 
@@ -414,78 +426,126 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.identity.supportEmail.invalid')}</p>
               )}
             </div>
+            <div>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.voiceTone.label')}</Label>
+              <Select
+                value={isCustomTone ? '__custom__' : tone}
+                onValueChange={(v) => {
+                  if (v === '__custom__') setTone(customTone || 'custom');
+                  else { setTone(v); setCustomTone(''); }
+                }}
+                disabled={readOnly}
+              >
+                <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {TONE_PRESETS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
+                  ))}
+                  <SelectItem value="__custom__">{t('ai.bot.identity.tones.custom')}</SelectItem>
+                </SelectContent>
+              </Select>
+              {isCustomTone && (
+                <Input
+                  className="mt-1.5"
+                  value={customTone}
+                  onChange={(e) => { setCustomTone(e.target.value); setTone(e.target.value || 'custom'); }}
+                  placeholder={t('ai.bot.identity.customTone.placeholder')}
+                  disabled={readOnly}
+                />
+              )}
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
+            </div>
           </div>
         </section>
 
-        {/* Bot Template (prompt identity, managed centrally; bound here) */}
+        {/* Bot Templates (specialities, managed centrally; bind up to 3, AND/OR) */}
         <section className="space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.template.title')}</h3>
-            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.template.description')}</p>
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.template.title')}</h3>
+              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.template.descriptionMulti')}</p>
+            </div>
+            {availableTemplates.length > 0 && (
+              <span className="text-[11px] text-text-muted whitespace-nowrap">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
+            )}
           </div>
+
           {availableTemplates.length === 0 ? (
             <div className="rounded-lg border border-edge bg-surface-2 p-3 text-xs text-text-muted">
               {t('ai.bot.template.noneAvailable')}
             </div>
           ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.template.select')}</Label>
-              <Select value={binding?.templateId ?? ''} onValueChange={handleTemplateSelect} disabled={readOnly || bindTemplate.isPending}>
-                <SelectTrigger className="h-9" aria-label={t('ai.bot.template.select')}>
-                  <SelectValue placeholder={t('ai.bot.template.selectPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableTemplates.map((tpl) => (
-                    <SelectItem key={tpl.id} value={tpl.id}>
-                      <span className="flex flex-col">
-                        <span>{tpl.displayName}</span>
-                        {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {(() => {
-                const sel = availableTemplates.find((x) => x.id === binding?.templateId);
-                return sel?.description ? <p className="mt-1 text-[11px] text-text-muted">{sel.description}</p> : null;
-              })()}
+            <div className="space-y-1.5">
+              {availableTemplates.map((tpl) => {
+                const sel = bindings.find((b) => b.templateId === tpl.id);
+                const atCap = !sel && bindings.length >= 3;
+                return (
+                  <div key={tpl.id} className={`rounded-lg border p-2.5 ${sel ? 'border-primary-500/60 bg-surface-2' : 'border-edge'} ${atCap ? 'opacity-50' : ''}`}>
+                    <div className="flex items-center justify-between gap-3">
+                      <button
+                        type="button"
+                        disabled={readOnly || atCap || bindTemplate.isPending}
+                        onClick={() => toggleTemplate(tpl.id)}
+                        className="flex items-start gap-2 text-left flex-1 min-w-0"
+                        aria-pressed={!!sel}
+                      >
+                        <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${sel ? 'bg-primary-600 border-primary-600 text-white' : 'border-edge'}`}>
+                          {sel && <Sparkles className="h-2.5 w-2.5" />}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="text-sm text-text-primary">{tpl.displayName}</span>
+                          {tpl.description && <span className="block text-[11px] text-text-muted truncate">{tpl.description}</span>}
+                        </span>
+                      </button>
+                      {sel && sel.publishedVersions.length > 0 && (
+                        <Select value={sel.version} onValueChange={(v) => setVersionFor(tpl.id, v)} disabled={readOnly || bindTemplate.isPending}>
+                          <SelectTrigger className="h-8 w-40 shrink-0 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
+                            {sel.publishedVersions.map((v) => (
+                              <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                    {sel?.pinnedButUnavailable && <p className="mt-1 text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>}
+                    {sel?.templateUnavailable && <p className="mt-1 text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>}
+                  </div>
+                );
+              })}
+              <p className="text-[10px] text-text-muted">{t('ai.bot.template.versionHelper')}</p>
             </div>
-            {binding?.templateId && publishedVersions.length > 0 && (
-              <div>
-                <Label className="mb-1 text-text-secondary">{t('ai.bot.template.version')}</Label>
-                <Select value={binding?.templateVersion ?? 'latest'} onValueChange={handleVersionSelect} disabled={readOnly || bindTemplate.isPending}>
-                  <SelectTrigger className="h-9" aria-label={t('ai.bot.template.version')}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
-                    {publishedVersions.map((v) => (
-                      <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.template.versionHelper')}</p>
+          )}
+
+          {/* AND / OR — only meaningful with more than one speciality */}
+          {bindings.length > 1 && (
+            <div className="rounded-lg border border-edge p-3 space-y-2">
+              <Label className="text-text-secondary">{t('ai.bot.template.modeLabel')}</Label>
+              <div className="flex gap-2">
+                <Button type="button" size="sm" variant={templateMode === 'or' ? 'default' : 'outline'} disabled={readOnly || bindTemplate.isPending} onClick={() => saveBindings(bindingsInput, 'or')}>
+                  {t('ai.bot.template.modeOr')}
+                </Button>
+                <Button type="button" size="sm" variant={templateMode === 'and' ? 'default' : 'outline'} disabled={readOnly || bindTemplate.isPending} onClick={() => saveBindings(bindingsInput, 'and')}>
+                  {t('ai.bot.template.modeAnd')}
+                </Button>
               </div>
-            )}
-          </div>
+              <p className="text-[10px] text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
+            </div>
           )}
-          {resolved?.templateUnavailable && (
-            <p className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
-          )}
-          {resolved?.pinnedButUnavailable && (
-            <p className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
-          )}
+
           {missingModules.length > 0 && (
             <p className="text-[11px] text-amber-400">
               {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
               {t('ai.bot.template.warnings.missingModulesAction')}
             </p>
           )}
+
           <div>
             <div className="mb-1 flex items-center gap-2">
               <Label className="text-text-secondary">{t('ai.bot.template.preview')}</Label>
               <span className="text-[10px] rounded-full bg-surface-3 px-2 py-0.5 text-text-muted">{t('ai.bot.managedByAdmins')}</span>
+              {bindings.length > 1 && <span className="text-[10px] text-text-muted">{t('ai.bot.template.previewPrimary')}</span>}
             </div>
             <Textarea
               value={resolved?.body || ''}

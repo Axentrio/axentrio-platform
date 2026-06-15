@@ -647,7 +647,8 @@
           "invalid": "Geef een geldig e-mailadres op."
         },
         "voiceTone": {
-          "label": "Toon"
+          "label": "Stemtoon",
+          "helper": "De stem van je bot — geldt voor al zijn specialiteiten."
         },
         "tones": {
           "friendly": "Vriendelijk",
@@ -677,6 +678,14 @@
       "template": {
         "title": "Botsjabloon",
         "description": "De prompt-identiteit van de bot, beheerd door Axentrio. Kies er een en zet eventueel een versie vast.",
+        "descriptionMulti": "Kies tot 3 specialiteiten, beheerd door Axentrio. Bij meer dan één, kies hieronder hoe ze worden gecombineerd.",
+        "selectedCount": "{{count}}/3 geselecteerd",
+        "modeLabel": "Hoe moet de bot meerdere specialiteiten gebruiken?",
+        "modeOr": "Onafhankelijk (OF)",
+        "modeAnd": "Gecombineerd (EN)",
+        "modeOrHelp": "De bot antwoordt met de specialiteit die bij de vraag van de klant past (bijv. loodgieten OF elektra).",
+        "modeAndHelp": "De bot behandelt de specialiteiten als één gecombineerd aanbod en past ze samen toe.",
+        "previewPrimary": "(primaire specialiteit)",
         "select": "Sjabloon",
         "selectPlaceholder": "Kies een sjabloon",
         "version": "Versie",

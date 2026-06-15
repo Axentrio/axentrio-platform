@@ -142,6 +142,7 @@ function normalizeMessage(
         dedupeKey,
         timestamp,
         rawEventType: `interactive.${msg.interactive.type}`,
+        externalMessageId: msg.id,
       };
     }
   }
@@ -155,6 +156,7 @@ function normalizeMessage(
       dedupeKey,
       timestamp,
       rawEventType: 'button',
+      externalMessageId: msg.id,
     };
   }
 
@@ -178,6 +180,7 @@ function normalizeMessage(
       dedupeKey,
       timestamp,
       rawEventType: 'message.text',
+      externalMessageId: msg.id,
     };
   }
 
@@ -202,6 +205,7 @@ function normalizeMessage(
       dedupeKey,
       timestamp,
       rawEventType: `message.${msg.type}`,
+      externalMessageId: msg.id,
     };
   }
 

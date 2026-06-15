@@ -24,7 +24,7 @@ import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, Knowled
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { generateResponse } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
-import { routeOutboundMessage } from '../channels/outbound-router';
+import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import { config } from '../config/environment';
 import { AgentService, AgentResult } from '../agent/agent.service';
 import {
@@ -567,11 +567,13 @@ async function platformAgentPath(
       if (!pending || processed.has(pending.id)) break;
       processed.add(pending.id);
 
-      // Show typing indicator while AI processes
+      // Show typing indicator while AI processes — portal + widget over the
+      // WebSocket, and the end user on their external channel (best-effort).
       emitToTenantAgents(session.tenantId, 'typing:indicator', {
         sessionId: session.id, isTyping: true, participantType: 'bot',
       });
       emitToSession(session.tenantId, session.id, 'typing:start', {});
+      void sendChannelTypingIndicator(session.id).catch(() => {});
 
       const messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
       // Exclude the live turn itself; earlier burst messages remain in history

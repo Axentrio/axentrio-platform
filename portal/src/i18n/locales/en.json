@@ -1232,13 +1232,40 @@
         "configTitle": "Tone & guardrails",
         "configHint": "Owned by this template — applies to every bot bound to it. Tenants no longer set these.",
         "tone": "Voice tone",
+        "tones": {
+          "friendly": "Friendly",
+          "professional": "Professional",
+          "warm": "Warm",
+          "efficient": "Efficient",
+          "reassuring": "Reassuring",
+          "expert": "Expert",
+          "custom": "Custom…"
+        },
+        "toneCustomPlaceholder": "Describe the tone (e.g. witty, concise)",
+        "insertSuggested": "Insert suggested",
         "greetingMessage": "Greeting message",
+        "greetingSuggested": "Hi, I'm {botName}. How can I help with {businessName} today?",
         "fallbackMessage": "Fallback message",
+        "fallbackSuggested": "Sorry, I don't have enough information to answer that confidently. Please contact {businessName}, or ask me another question.",
         "offHoursMessage": "Off-hours message",
-        "topicsToAvoid": "Topics to avoid (comma-separated)",
+        "offHoursSuggested": "Thanks for reaching out. {businessName} is currently closed — leave your details and the team will follow up during business hours.",
+        "topicsToAvoid": "Topics to avoid",
+        "topicsPlaceholder": "Type a topic and press Enter",
+        "topicsAddCommon": "Add common topics",
         "topicsHint": "Subjects the bot should refuse to discuss.",
-        "confidenceThreshold": "Confidence threshold (0–1)",
-        "maxResponseLength": "Max response length (chars)"
+        "confidenceThreshold": "Confidence threshold",
+        "confidenceFlexible": "Flexible",
+        "confidenceBalanced": "Balanced",
+        "confidenceStrict": "Strict",
+        "confidenceHelper": "Higher = the bot falls back more often instead of guessing.",
+        "maxResponseLength": "Max response length (chars)",
+        "length": {
+          "300": "Short",
+          "500": "Standard",
+          "900": "Detailed",
+          "1200": "Long"
+        },
+        "saveDraft": "Save draft"
       },
       "confirm": {
         "archiveTitle": "Archive this template?",

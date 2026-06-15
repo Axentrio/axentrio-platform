@@ -1190,13 +1190,40 @@
         "configTitle": "Ton et garde-fous",
         "configHint": "Géré par ce modèle — s'applique à tous les bots qui y sont liés. Les locataires ne les définissent plus.",
         "tone": "Ton de la voix",
+        "tones": {
+          "friendly": "Amical",
+          "professional": "Professionnel",
+          "warm": "Chaleureux",
+          "efficient": "Efficace",
+          "reassuring": "Rassurant",
+          "expert": "Expert",
+          "custom": "Personnalisé…"
+        },
+        "toneCustomPlaceholder": "Décrivez le ton (ex. spirituel, concis)",
+        "insertSuggested": "Insérer un exemple",
         "greetingMessage": "Message d'accueil",
+        "greetingSuggested": "Bonjour, je suis {botName}. Comment puis-je vous aider avec {businessName} aujourd'hui ?",
         "fallbackMessage": "Message de repli",
+        "fallbackSuggested": "Désolé, je n'ai pas assez d'informations pour répondre avec certitude. Veuillez contacter {businessName} ou poser une autre question.",
         "offHoursMessage": "Message hors horaires",
-        "topicsToAvoid": "Sujets à éviter (séparés par des virgules)",
+        "offHoursSuggested": "Merci de votre message. {businessName} est actuellement fermé — laissez vos coordonnées et l'équipe vous recontactera pendant les heures d'ouverture.",
+        "topicsToAvoid": "Sujets à éviter",
+        "topicsPlaceholder": "Saisissez un sujet et appuyez sur Entrée",
+        "topicsAddCommon": "Ajouter les sujets courants",
         "topicsHint": "Sujets que le bot doit refuser d'aborder.",
-        "confidenceThreshold": "Seuil de confiance (0–1)",
-        "maxResponseLength": "Longueur max. de réponse (caractères)"
+        "confidenceThreshold": "Seuil de confiance",
+        "confidenceFlexible": "Souple",
+        "confidenceBalanced": "Équilibré",
+        "confidenceStrict": "Strict",
+        "confidenceHelper": "Plus élevé = le bot se rabat plus souvent au lieu de deviner.",
+        "maxResponseLength": "Longueur max. de réponse (caractères)",
+        "length": {
+          "300": "Court",
+          "500": "Standard",
+          "900": "Détaillé",
+          "1200": "Long"
+        },
+        "saveDraft": "Enregistrer le brouillon"
       },
       "confirm": {
         "archiveTitle": "Archiver ce modèle ?",

@@ -20,8 +20,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Slider } from '@/components/ui/slider';
+import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
+import TagInput from '@/pages/knowledge/TagInput';
 import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -36,9 +39,27 @@ import {
   forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
+// Platform defaults — seeded as REAL values in the editor (not grey placeholders)
+// so an author always sees the effective template, per the UX review.
+const DEFAULT_TONE = 'friendly';
+const DEFAULT_CONFIDENCE = '0.7';
+const DEFAULT_MAX_LENGTH = '500';
+
+// Named voice-tone presets (single-word values flow into {tone} substitution).
+const TONE_OPTIONS = ['friendly', 'professional', 'warm', 'efficient', 'reassuring', 'expert'] as const;
+// Max-response-length presets (chars) with rough word estimates shown in the UI.
+const LENGTH_PRESETS = [
+  { value: '300', words: '~45–60 words' },
+  { value: '500', words: '~75–100 words' },
+  { value: '900', words: '~130–170 words' },
+  { value: '1200', words: '~180–230 words' },
+] as const;
+// One-click safety bundle for "topics to avoid".
+const COMMON_TOPICS = ['politics', 'religion', 'adult content', 'illegal activity', 'hate or harassment', 'self-harm', 'legal advice', 'medical diagnosis', 'financial advice'];
+
 // Tone + policy guardrails are edited as flat strings in the dialog, then
-// assembled into a sparse BotTemplateConfig on save (empty fields omitted, so an
-// untouched config persists as {} and the bot falls back to platform defaults).
+// assembled into a BotTemplateConfig on save. Tone/confidence/max-length carry
+// real defaults; messages + topics stay empty (opt-in via "Insert suggested").
 type ConfigDraft = {
   tone: string;
   topicsToAvoid: string;
@@ -49,19 +70,19 @@ type ConfigDraft = {
   maxResponseLength: string;
 };
 const EMPTY_CONFIG: ConfigDraft = {
-  tone: '', topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: '', maxResponseLength: '',
+  tone: DEFAULT_TONE, topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: DEFAULT_CONFIDENCE, maxResponseLength: DEFAULT_MAX_LENGTH,
 };
 
 function configToDraft(c: BotTemplateConfig | undefined): ConfigDraft {
   const g = c?.guardrails ?? {};
   return {
-    tone: c?.tone ?? '',
+    tone: c?.tone ?? DEFAULT_TONE,
     topicsToAvoid: (g.topicsToAvoid ?? []).join(', '),
     greetingMessage: g.greetingMessage ?? '',
     fallbackMessage: g.fallbackMessage ?? '',
     offHoursMessage: g.offHoursMessage ?? '',
-    confidenceThreshold: g.confidenceThreshold === undefined ? '' : String(g.confidenceThreshold),
-    maxResponseLength: g.maxResponseLength === undefined ? '' : String(g.maxResponseLength),
+    confidenceThreshold: g.confidenceThreshold === undefined ? DEFAULT_CONFIDENCE : String(g.confidenceThreshold),
+    maxResponseLength: g.maxResponseLength === undefined ? DEFAULT_MAX_LENGTH : String(g.maxResponseLength),
   };
 }
 
@@ -471,43 +492,108 @@ const AdminBotTemplateDetail: React.FC = () => {
             </div>
 
             {/* Template-owned tone + policy guardrails (admin-controlled; tenants no longer set these). */}
-            <div className="border-t border-border/50 pt-4 space-y-4">
-              <div>
-                <h4 className="text-sm font-medium text-text-primary">{t('admin.botTemplates.editor.configTitle')}</h4>
-                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.configHint')}</p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="c-tone">{t('admin.botTemplates.editor.tone')}</Label>
-                <Input id="c-tone" value={draft.config.tone} placeholder="friendly" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, tone: e.target.value } }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="c-greeting">{t('admin.botTemplates.editor.greetingMessage')}</Label>
-                <Textarea id="c-greeting" rows={2} value={draft.config.greetingMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, greetingMessage: e.target.value } }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="c-fallback">{t('admin.botTemplates.editor.fallbackMessage')}</Label>
-                <Textarea id="c-fallback" rows={2} value={draft.config.fallbackMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, fallbackMessage: e.target.value } }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="c-offhours">{t('admin.botTemplates.editor.offHoursMessage')}</Label>
-                <Textarea id="c-offhours" rows={2} value={draft.config.offHoursMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, offHoursMessage: e.target.value } }))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="c-topics">{t('admin.botTemplates.editor.topicsToAvoid')}</Label>
-                <Input id="c-topics" value={draft.config.topicsToAvoid} placeholder="politics, religion" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, topicsToAvoid: e.target.value } }))} />
-                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.topicsHint')}</p>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="c-confidence">{t('admin.botTemplates.editor.confidenceThreshold')}</Label>
-                  <Input id="c-confidence" type="number" step="0.05" min="0" max="1" value={draft.config.confidenceThreshold} placeholder="0.7" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, confidenceThreshold: e.target.value } }))} />
+            {(() => {
+              const ro = draft.mode === 'view';
+              const cfg = draft.config;
+              const setCfg = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, config: { ...d.config, ...patch } }));
+              const isCustomTone = !TONE_OPTIONS.includes(cfg.tone as (typeof TONE_OPTIONS)[number]);
+              const topicsArr = cfg.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
+              const confidence = Number(cfg.confidenceThreshold || DEFAULT_CONFIDENCE);
+              const insertMsg = (key: 'greetingMessage' | 'fallbackMessage' | 'offHoursMessage', i18nKey: string) =>
+                setCfg({ [key]: t(i18nKey) } as Partial<ConfigDraft>);
+              return (
+                <div className="border-t border-border/50 pt-4 space-y-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-text-primary">{t('admin.botTemplates.editor.configTitle')}</h4>
+                    <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.configHint')}</p>
+                  </div>
+
+                  {/* Voice tone — named presets + Custom */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="c-tone">{t('admin.botTemplates.editor.tone')}</Label>
+                    <Select
+                      value={isCustomTone ? '__custom__' : cfg.tone}
+                      onValueChange={(v) => setCfg({ tone: v === '__custom__' ? '' : v })}
+                      disabled={ro}
+                    >
+                      <SelectTrigger id="c-tone" className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        {TONE_OPTIONS.map((o) => (
+                          <SelectItem key={o} value={o}>{t(`admin.botTemplates.editor.tones.${o}`)}</SelectItem>
+                        ))}
+                        <SelectItem value="__custom__">{t('admin.botTemplates.editor.tones.custom')}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {isCustomTone && (
+                      <Input className="mt-1.5" value={cfg.tone} placeholder={t('admin.botTemplates.editor.toneCustomPlaceholder')} readOnly={ro} onChange={(e) => setCfg({ tone: e.target.value })} />
+                    )}
+                  </div>
+
+                  {/* Customer-facing messages, each with an opt-in "Insert suggested" starter */}
+                  {([
+                    { key: 'greetingMessage', label: 'greetingMessage', suggest: 'admin.botTemplates.editor.greetingSuggested' },
+                    { key: 'fallbackMessage', label: 'fallbackMessage', suggest: 'admin.botTemplates.editor.fallbackSuggested' },
+                    { key: 'offHoursMessage', label: 'offHoursMessage', suggest: 'admin.botTemplates.editor.offHoursSuggested' },
+                  ] as const).map((f) => (
+                    <div key={f.key} className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor={`c-${f.key}`}>{t(`admin.botTemplates.editor.${f.label}`)}</Label>
+                        {!ro && !cfg[f.key].trim() && (
+                          <button type="button" className="text-xs text-primary-400 hover:text-primary-300" onClick={() => insertMsg(f.key, f.suggest)}>
+                            {t('admin.botTemplates.editor.insertSuggested')}
+                          </button>
+                        )}
+                      </div>
+                      <Textarea id={`c-${f.key}`} rows={2} value={cfg[f.key]} readOnly={ro} onChange={(e) => setCfg({ [f.key]: e.target.value } as Partial<ConfigDraft>)} />
+                    </div>
+                  ))}
+
+                  {/* Topics to avoid — chips + one-click common bundle */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <Label>{t('admin.botTemplates.editor.topicsToAvoid')}</Label>
+                      {!ro && (
+                        <button type="button" className="text-xs text-primary-400 hover:text-primary-300" onClick={() => setCfg({ topicsToAvoid: Array.from(new Set([...topicsArr, ...COMMON_TOPICS])).join(', ') })}>
+                          {t('admin.botTemplates.editor.topicsAddCommon')}
+                        </button>
+                      )}
+                    </div>
+                    <TagInput value={topicsArr} onChange={(arr) => setCfg({ topicsToAvoid: arr.join(', ') })} placeholder={t('admin.botTemplates.editor.topicsPlaceholder')} disabled={ro} />
+                    <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.topicsHint')}</p>
+                  </div>
+
+                  {/* Confidence — labeled slider */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>{t('admin.botTemplates.editor.confidenceThreshold')}</Label>
+                      <span className="text-xs font-medium text-text-secondary">{confidence.toFixed(2)}</span>
+                    </div>
+                    <Slider value={[confidence]} min={0.4} max={0.95} step={0.05} disabled={ro} onValueChange={([v]) => setCfg({ confidenceThreshold: String(v) })} />
+                    <div className="flex justify-between text-[10px] text-text-tertiary">
+                      <span>{t('admin.botTemplates.editor.confidenceFlexible')}</span>
+                      <span>{t('admin.botTemplates.editor.confidenceBalanced')}</span>
+                      <span>{t('admin.botTemplates.editor.confidenceStrict')}</span>
+                    </div>
+                    <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.confidenceHelper')}</p>
+                  </div>
+
+                  {/* Max response length — preset chips + number */}
+                  <div className="space-y-1.5">
+                    <Label htmlFor="c-maxlen">{t('admin.botTemplates.editor.maxResponseLength')}</Label>
+                    {!ro && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {LENGTH_PRESETS.map((p) => (
+                          <Button key={p.value} type="button" variant={cfg.maxResponseLength === p.value ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setCfg({ maxResponseLength: p.value })}>
+                            {t(`admin.botTemplates.editor.length.${p.value}`)} <span className="ml-1 opacity-60">{p.words}</span>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                    <Input id="c-maxlen" type="number" step="50" min="1" className="max-w-[140px]" value={cfg.maxResponseLength} readOnly={ro} onChange={(e) => setCfg({ maxResponseLength: e.target.value })} />
+                  </div>
                 </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="c-maxlen">{t('admin.botTemplates.editor.maxResponseLength')}</Label>
-                  <Input id="c-maxlen" type="number" step="50" min="1" value={draft.config.maxResponseLength} placeholder="500" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, maxResponseLength: e.target.value } }))} />
-                </div>
-              </div>
-            </div>
+              );
+            })()}
           </div>
           <DialogFooter className="shrink-0 pt-2">
             {draft.mode === 'view' ? (
@@ -515,7 +601,7 @@ const AdminBotTemplateDetail: React.FC = () => {
             ) : (
               <>
                 <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.cancel')}</Button>
-                <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('common.save')}</Button>
+                <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('admin.botTemplates.editor.saveDraft')}</Button>
               </>
             )}
           </DialogFooter>

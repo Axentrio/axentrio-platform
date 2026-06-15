@@ -1191,13 +1191,40 @@
         "configTitle": "Toon & richtlijnen",
         "configHint": "Beheerd door deze sjabloon — geldt voor elke bot die eraan gekoppeld is. Tenants stellen deze niet meer in.",
         "tone": "Stemtoon",
+        "tones": {
+          "friendly": "Vriendelijk",
+          "professional": "Professioneel",
+          "warm": "Warm",
+          "efficient": "Efficiënt",
+          "reassuring": "Geruststellend",
+          "expert": "Expert",
+          "custom": "Aangepast…"
+        },
+        "toneCustomPlaceholder": "Beschrijf de toon (bijv. gevat, bondig)",
+        "insertSuggested": "Voorbeeld invoegen",
         "greetingMessage": "Begroetingsbericht",
+        "greetingSuggested": "Hoi, ik ben {botName}. Hoe kan ik je vandaag helpen met {businessName}?",
         "fallbackMessage": "Terugvalbericht",
+        "fallbackSuggested": "Sorry, ik heb niet genoeg informatie om dat met zekerheid te beantwoorden. Neem contact op met {businessName} of stel een andere vraag.",
         "offHoursMessage": "Bericht buiten openingstijden",
-        "topicsToAvoid": "Te vermijden onderwerpen (komma-gescheiden)",
+        "offHoursSuggested": "Bedankt voor je bericht. {businessName} is momenteel gesloten — laat je gegevens achter en het team neemt tijdens openingstijden contact op.",
+        "topicsToAvoid": "Te vermijden onderwerpen",
+        "topicsPlaceholder": "Typ een onderwerp en druk op Enter",
+        "topicsAddCommon": "Veelvoorkomende onderwerpen toevoegen",
         "topicsHint": "Onderwerpen die de bot moet weigeren te bespreken.",
-        "confidenceThreshold": "Betrouwbaarheidsdrempel (0–1)",
-        "maxResponseLength": "Max. antwoordlengte (tekens)"
+        "confidenceThreshold": "Betrouwbaarheidsdrempel",
+        "confidenceFlexible": "Flexibel",
+        "confidenceBalanced": "Gebalanceerd",
+        "confidenceStrict": "Strikt",
+        "confidenceHelper": "Hoger = de bot valt vaker terug in plaats van te gokken.",
+        "maxResponseLength": "Max. antwoordlengte (tekens)",
+        "length": {
+          "300": "Kort",
+          "500": "Standaard",
+          "900": "Gedetailleerd",
+          "1200": "Lang"
+        },
+        "saveDraft": "Concept opslaan"
       },
       "confirm": {
         "archiveTitle": "Dit sjabloon archiveren?",

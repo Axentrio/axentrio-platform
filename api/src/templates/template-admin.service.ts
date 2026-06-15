@@ -391,6 +391,44 @@ export async function unpublishVersion(
   });
 }
 
+/**
+ * Permanently delete a version. Published versions are protected (unpublish
+ * first). Drafts are never bound, so they delete freely. An unpublished version
+ * may still be referenced by a fixed pin — blocked (409 + impacted count) unless
+ * force, which unpins those bots to `latest` on the same template before deleting.
+ */
+export async function deleteVersion(
+  templateId: string,
+  version: number,
+  opts: { force?: boolean },
+): Promise<{ reassignedTenants: string[] }> {
+  return AppDataSource.transaction(async (manager) => {
+    const repo = manager.getRepository(BotTemplateVersion);
+    const row = await repo.findOne({ where: { templateId, version } });
+    if (!row) throw new NotFoundError('Template version not found');
+    if (row.status === 'published') {
+      throw new ConflictError('Unpublish this version before deleting it', { status: row.status });
+    }
+
+    let reassignedTenants: string[] = [];
+    if (row.status === 'unpublished') {
+      const pinned = await countBoundBots(manager, templateId, { pinnedVersion: version });
+      if (pinned > 0 && !opts.force) {
+        throw new ConflictError('Bots pin this version — pass force to unpin them to latest and delete', {
+          impactedBots: pinned,
+        });
+      }
+      if (pinned > 0 && opts.force) {
+        reassignedTenants = await reassignBots(manager, { templateId, pinnedVersion: version }, { templateId, templateVersion: 'latest' });
+      }
+    }
+
+    await repo.remove(row);
+    await fanOutTemplateInvalidation(templateId, reassignedTenants);
+    return { reassignedTenants };
+  });
+}
+
 /** Rollback = publish a NEW version whose body is copied from an existing one (T19). */
 export async function rollbackToVersion(
   templateId: string,

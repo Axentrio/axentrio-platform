@@ -1115,6 +1115,7 @@
         "unpublish": "Publicatie ongedaan maken",
         "rollback": "Herstellen als nieuwe versie",
         "editNewVersion": "Bewerken → nieuwe versie",
+        "delete": "Verwijderen",
         "view": "Bekijken",
         "newDraft": "Nieuw concept",
         "saveAccess": "Toegang opslaan"
@@ -1162,6 +1163,7 @@
         "metadata": "Details",
         "description": "Beschrijving",
         "availabilityHint": "Indien aan, kan elke actieve tenant dit sjabloon koppelen. Indien uit, alleen toegewezen tenants.",
+        "descriptionHint": "Getoond aan tenants wanneer ze deze bot kiezen in de sjabloonkiezer.",
         "currentPrompt": "Huidige prompt",
         "promptEmpty": "Deze versie voegt geen basisinstructies toe.",
         "promptConfigDefaults": "Toon & richtlijnen: platformstandaarden",
@@ -1231,6 +1233,9 @@
         "unpublishTitle": "Deze versie niet meer publiceren?",
         "ungrantTitle": "Tenant-toegang verwijderen?",
         "reassign": "{{count}} gekoppelde bot(s) worden verplaatst naar het lege basissjabloon — ze verliezen de toon, richtlijnen, begroetings-/terugval-/buiten-openingstijdenberichten en de prompt-inhoud van dit sjabloon, en vallen terug op platformstandaarden totdat een beheerder ze opnieuw koppelt. Doorgaan?",
+        "deleteTitle": "Versie v{{version}} verwijderen?",
+        "deleteBody": "Dit verwijdert deze versie permanent. Dit kan niet ongedaan worden gemaakt.",
+        "deleteReassign": "{{count}} bot(s) zetten deze versie vast — ze worden losgekoppeld naar de nieuwste gepubliceerde versie en daarna wordt deze verwijderd. Doorgaan?",
         "proceed": "Doorgaan"
       },
       "errors": {

@@ -35,7 +35,7 @@ import {
 import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
-  useUnpublishTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants,
+  useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants,
   forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
@@ -131,10 +131,11 @@ const AdminBotTemplateDetail: React.FC = () => {
   const editVersionMut = useEditTemplateVersion(id);
   const publishMut = usePublishTemplateVersion(id);
   const unpublishMut = useUnpublishTemplateVersion(id);
+  const deleteMut = useDeleteTemplateVersion(id);
   const rollbackMut = useRollbackTemplate(id);
   const grantsMut = useUpdateTemplateGrants(id);
 
-  const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
+  const [meta, setMeta] = useState<{ displayName: string; description: string; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
   const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
@@ -150,7 +151,6 @@ const AdminBotTemplateDetail: React.FC = () => {
   const publishedVersion = versions.find((v) => v.status === 'published');
   const m = meta ?? {
     displayName: template.displayName,
-    category: template.category ?? '',
     description: template.description ?? '',
     availableToAllTenants: template.availableToAllTenants,
   };
@@ -207,6 +207,26 @@ const AdminBotTemplateDetail: React.FC = () => {
   const openView = (v: BotTemplateVersion) =>
     setDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
 
+  // Delete a draft/unpublished version: always confirm; an unpublished version that
+  // bots pin then runs the block-or-force flow (unpins them to latest).
+  const askDelete = (v: BotTemplateVersion) =>
+    setConfirm({
+      open: true,
+      title: t('admin.botTemplates.confirm.deleteTitle', { version: v.version }),
+      description: t('admin.botTemplates.confirm.deleteBody'),
+      onConfirm: () => {
+        setConfirm((c) => ({ ...c, open: false }));
+        if (v.status === 'unpublished') {
+          void withForce(
+            (force) => deleteMut.mutateAsync({ version: v.version, force }),
+            (n) => ({ title: t('admin.botTemplates.confirm.deleteTitle', { version: v.version }), description: t('admin.botTemplates.confirm.deleteReassign', { count: n }) }),
+          );
+        } else {
+          deleteMut.mutate({ version: v.version });
+        }
+      },
+    });
+
   const saveDraft = async () => {
     const config = draftToConfig(draft.config);
     if (draft.mode === 'create') {
@@ -257,12 +277,9 @@ const AdminBotTemplateDetail: React.FC = () => {
             <Input id="m-name" value={m.displayName} onChange={(e) => setMeta({ ...m, displayName: e.target.value })} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="m-cat">{t('admin.botTemplates.create.category')}</Label>
-            <Input id="m-cat" value={m.category} onChange={(e) => setMeta({ ...m, category: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
             <Label htmlFor="m-desc">{t('admin.botTemplates.detail.description')}</Label>
             <Textarea id="m-desc" rows={2} value={m.description} onChange={(e) => setMeta({ ...m, description: e.target.value })} />
+            <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.descriptionHint')}</p>
           </div>
           <div className="flex items-center justify-between">
             <div>
@@ -274,7 +291,7 @@ const AdminBotTemplateDetail: React.FC = () => {
           <div className="flex justify-end">
             <Button
               onClick={async () => {
-                await updateMut.mutateAsync({ displayName: m.displayName, category: m.category || undefined, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });
+                await updateMut.mutateAsync({ displayName: m.displayName, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });
                 setMeta(null);
               }}
               disabled={updateMut.isPending}
@@ -351,6 +368,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                       <>
                         <Button size="sm" variant="ghost" onClick={() => openEdit(v)}>{t('common.edit')}</Button>
                         <Button size="sm" onClick={() => publishMut.mutate(v.version)}>{t('admin.botTemplates.actions.publish')}</Button>
+                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</Button>
                       </>
                     )}
                     {v.status === 'published' && (
@@ -374,6 +392,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                       <>
                         <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
                         <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
+                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</Button>
                       </>
                     )}
                   </TableCell>

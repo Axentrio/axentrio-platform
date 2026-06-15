@@ -175,6 +175,56 @@ describe('version config — template-owned tone + guardrails (#24/#25)', () => 
   });
 });
 
+describe('delete version (drafts + unpublished)', () => {
+  it('deletes a draft version', async () => {
+    const id = await createTemplate();
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'd' });
+    const del = await request(app).delete(`${BASE}/${id}/versions/1`);
+    expect(del.status).toBe(200);
+    const detail = await request(app).get(`${BASE}/${id}`);
+    expect(detail.body.data.versions.length).toBe(0);
+  });
+
+  it('refuses to delete a published version (must unpublish first)', async () => {
+    const id = await createTemplate();
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'a' });
+    await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    const del = await request(app).delete(`${BASE}/${id}/versions/1`);
+    expect(del.status).toBe(409);
+  });
+
+  it('deletes an unpublished version with no pins', async () => {
+    await seedBlankBase();
+    const id = await createTemplate({ availableToAllTenants: true });
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'a' });
+    await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    await request(app).post(`${BASE}/${id}/versions/1/unpublish`).send();
+    const del = await request(app).delete(`${BASE}/${id}/versions/1`);
+    expect(del.status).toBe(200);
+  });
+
+  it('blocks deleting a pinned unpublished version, then forces (unpins to latest)', async () => {
+    await seedBlankBase();
+    const tenant = await createTestTenant({ tier: 'enterprise' });
+    const id = await createTemplate({ availableToAllTenants: true });
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'v1' });
+    await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    const bot = await makeBot(tenant.id, id, '1'); // pins fixed v1
+    // Contrive the (normally-reassigned) state: v1 unpublished but pin intact.
+    await AppDataSource.getRepository(BotTemplateVersion).update({ templateId: id, version: 1 }, { status: 'unpublished' });
+
+    const blocked = await request(app).delete(`${BASE}/${id}/versions/1`);
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error?.details?.impactedBots).toBe(1);
+
+    const forced = await request(app).delete(`${BASE}/${id}/versions/1`).send({ force: true });
+    expect(forced.status).toBe(200);
+    const reloaded = await AppDataSource.getRepository(Bot).findOneByOrFail({ id: bot.id });
+    expect(reloaded.templateVersion).toBe('latest');
+    expect(reloaded.templateId).toBe(id);
+  });
+});
+
 describe('unpublish — block-or-force (T12/T21)', () => {
   it('blocks unpublishing a version pinned by a bot, then forces with reassignment', async () => {
     await seedBlankBase();

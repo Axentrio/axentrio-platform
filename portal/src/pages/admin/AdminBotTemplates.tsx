@@ -26,19 +26,18 @@ const AdminBotTemplates: React.FC = () => {
   const createMut = useCreateBotTemplate();
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState({ key: '', displayName: '', category: '', description: '', availableToAllTenants: false });
+  const [form, setForm] = useState({ key: '', displayName: '', description: '', availableToAllTenants: false });
 
   const submit = async () => {
     if (!form.key.trim() || !form.displayName.trim()) return;
     const res = await createMut.mutateAsync({
       key: form.key.trim(),
       displayName: form.displayName.trim(),
-      category: form.category.trim() || undefined,
       description: form.description.trim() || undefined,
       availableToAllTenants: form.availableToAllTenants,
     });
     setCreateOpen(false);
-    setForm({ key: '', displayName: '', category: '', description: '', availableToAllTenants: false });
+    setForm({ key: '', displayName: '', description: '', availableToAllTenants: false });
     navigate(`/admin/bot-templates/${res.template.id}`);
   };
 
@@ -145,14 +144,6 @@ const AdminBotTemplates: React.FC = () => {
                 value={form.displayName}
                 placeholder="Plumber Booking Bot"
                 onChange={(e) => setForm((f) => ({ ...f, displayName: e.target.value }))}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="tpl-category">{t('admin.botTemplates.create.category')}</Label>
-              <Input
-                id="tpl-category"
-                value={form.category}
-                onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
               />
             </div>
             <div className="flex items-center justify-between">

@@ -1156,6 +1156,7 @@
         "unpublish": "Unpublish",
         "rollback": "Restore as new version",
         "editNewVersion": "Edit → new version",
+        "delete": "Delete",
         "view": "View",
         "newDraft": "New draft",
         "saveAccess": "Save access"
@@ -1203,6 +1204,7 @@
         "metadata": "Details",
         "description": "Description",
         "availabilityHint": "When on, every active tenant can bind this template. When off, only granted tenants can.",
+        "descriptionHint": "Shown to tenants when they pick this bot in the template picker.",
         "currentPrompt": "Current prompt",
         "promptEmpty": "This version adds no base instructions.",
         "promptConfigDefaults": "Tone & guardrails: platform defaults",
@@ -1272,6 +1274,9 @@
         "unpublishTitle": "Unpublish this version?",
         "ungrantTitle": "Remove tenant access?",
         "reassign": "{{count}} bound bot(s) will be moved to the blank base template — they'll lose this template's tone, guardrails, greeting/fallback/off-hours messages, and prompt body, and fall back to platform defaults until an admin rebinds them. Continue?",
+        "deleteTitle": "Delete version v{{version}}?",
+        "deleteBody": "This permanently removes this version. This can't be undone.",
+        "deleteReassign": "{{count}} bot(s) pin this version — they'll be unpinned to the latest published version, then it's deleted. Continue?",
         "proceed": "Proceed"
       },
       "errors": {

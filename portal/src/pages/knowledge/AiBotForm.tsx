@@ -405,10 +405,19 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 </SelectTrigger>
                 <SelectContent>
                   {availableTemplates.map((tpl) => (
-                    <SelectItem key={tpl.id} value={tpl.id}>{tpl.displayName}</SelectItem>
+                    <SelectItem key={tpl.id} value={tpl.id}>
+                      <span className="flex flex-col">
+                        <span>{tpl.displayName}</span>
+                        {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
+                      </span>
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {(() => {
+                const sel = availableTemplates.find((x) => x.id === binding?.templateId);
+                return sel?.description ? <p className="mt-1 text-[11px] text-text-muted">{sel.description}</p> : null;
+              })()}
             </div>
             {binding?.templateId && publishedVersions.length > 0 && (
               <div>

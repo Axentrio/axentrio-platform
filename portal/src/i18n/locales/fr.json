@@ -1114,6 +1114,7 @@
         "unpublish": "Dépublier",
         "rollback": "Restaurer comme nouvelle version",
         "editNewVersion": "Modifier → nouvelle version",
+        "delete": "Supprimer",
         "view": "Voir",
         "newDraft": "Nouveau brouillon",
         "saveAccess": "Enregistrer l'accès"
@@ -1161,6 +1162,7 @@
         "metadata": "Détails",
         "description": "Description",
         "availabilityHint": "Activé, chaque locataire actif peut lier ce modèle. Désactivé, seuls les locataires autorisés le peuvent.",
+        "descriptionHint": "Affiché aux locataires lorsqu'ils choisissent ce bot dans le sélecteur de modèles.",
         "currentPrompt": "Prompt actuel",
         "promptEmpty": "Cette version n'ajoute aucune instruction de base.",
         "promptConfigDefaults": "Ton et garde-fous : valeurs par défaut de la plateforme",
@@ -1230,6 +1232,9 @@
         "unpublishTitle": "Dépublier cette version ?",
         "ungrantTitle": "Retirer l'accès du locataire ?",
         "reassign": "{{count}} bot(s) lié(s) seront déplacé(s) vers le modèle de base vierge — ils perdront le ton, les garde-fous, les messages d'accueil/de repli/hors horaires et le corps du prompt de ce modèle, et reviendront aux valeurs par défaut de la plateforme jusqu'à ce qu'un admin les relie. Continuer ?",
+        "deleteTitle": "Supprimer la version v{{version}} ?",
+        "deleteBody": "Cela supprime définitivement cette version. Action irréversible.",
+        "deleteReassign": "{{count}} bot(s) épinglent cette version — ils seront désépinglés vers la dernière version publiée, puis elle sera supprimée. Continuer ?",
         "proceed": "Continuer"
       },
       "errors": {

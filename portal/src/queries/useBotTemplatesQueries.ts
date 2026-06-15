@@ -206,6 +206,19 @@ export function useUnpublishTemplateVersion(id: string) {
   });
 }
 
+export function useDeleteTemplateVersion(id: string) {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: (input: { version: number; force?: boolean }) =>
+      api.delete<{ reassignedTenants: string[] }>(`/admin/bot-templates/${id}/versions/${input.version}`, { data: { force: input.force } }),
+    onSuccess: () => {
+      invalidate(id);
+      toast.success('Version deleted');
+    },
+    onError: toastUnlessForceConflict,
+  });
+}
+
 export function useRollbackTemplate(id: string) {
   const invalidate = useInvalidate();
   return useMutation({

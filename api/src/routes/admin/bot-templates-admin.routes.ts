@@ -26,6 +26,7 @@ import {
   editDraftVersion,
   publishVersion,
   unpublishVersion,
+  deleteVersion,
   rollbackToVersion,
   archiveTemplate,
   replaceGrants,
@@ -264,6 +265,21 @@ router.post(
       reassignedTenants: reassignedTenants.length,
     });
     sendSuccess(res, { version: updated, reassignedTenants });
+  }),
+);
+
+// DELETE /admin/bot-templates/:id/versions/:version — delete a draft/unpublished
+// version (published is protected). Block-or-force when an unpublished version is pinned.
+router.delete(
+  '/bot-templates/:id/versions/:version',
+  asyncHandler(async (req: Request, res: Response) => {
+    const version = parseVersion(req.params.version);
+    const { reassignedTenants } = await deleteVersion(req.params.id, version, forceOpts(req.body));
+    await logAudit(req.userId!, 'bot_template.version_deleted', 'bot_template', req.params.id, undefined, {
+      version,
+      reassignedTenants: reassignedTenants.length,
+    });
+    sendSuccess(res, { reassignedTenants });
   }),
 );
 

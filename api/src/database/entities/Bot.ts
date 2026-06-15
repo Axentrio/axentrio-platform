@@ -68,6 +68,9 @@ export interface BotSettings {
       name: string;
       tone: string;
       customInstructions: string;
+      /** Commercial/trading name used in this bot's prompt ({businessName}).
+       *  Empty/absent → inherits the tenant's business name (tenant.name). */
+      businessName?: string;
       templateId?: string | null;
     };
     guardrails: {
@@ -169,6 +172,23 @@ export class Bot {
    */
   @Column({ type: 'varchar', length: 20, default: 'latest', name: 'template_version' })
   templateVersion!: string;
+
+  /**
+   * Up to 3 bound templates (ordered; [0] = primary). Each entry pins a template
+   * + version. `template_id`/`template_version` mirror the PRIMARY for back-compat
+   * with single-binding queries; this is the authoritative multi-binding list.
+   * Empty array = fall back to the single template_id binding (legacy bots).
+   */
+  @Column({ type: 'jsonb', default: () => "'[]'", name: 'template_bindings' })
+  templateBindings!: Array<{ templateId: string; version: string }>;
+
+  /**
+   * How multiple bound templates combine in the composed prompt:
+   * 'or' = independent specialities (AI answers using whichever the question
+   * matches); 'and' = one combined offering (all roles always active).
+   */
+  @Column({ type: 'varchar', length: 8, default: 'or', name: 'template_mode' })
+  templateMode!: 'and' | 'or';
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

@@ -208,6 +208,37 @@ describe('template test-chat (preview before publish)', () => {
   });
 });
 
+describe('multi-binding safety (unpublish blocks + reassigns a SECONDARY binding)', () => {
+  it('blocks unpublishing a version a bot pins as a secondary binding, then forces (drops it)', async () => {
+    await seedBlankBase();
+    const tenant = await createTestTenant({ tier: 'enterprise' });
+    const primary = await createTemplate({ availableToAllTenants: true });
+    const secondary = await createTemplate({ availableToAllTenants: true });
+    await request(app).post(`${BASE}/${primary}/versions`).send({ body: 'p1' });
+    await request(app).post(`${BASE}/${primary}/versions/1/publish`).send();
+    await request(app).post(`${BASE}/${secondary}/versions`).send({ body: 's1' });
+    await request(app).post(`${BASE}/${secondary}/versions/1/publish`).send();
+    // bot binds primary (latest) + secondary (pinned v1)
+    const bot = await AppDataSource.getRepository(Bot).save({
+      tenantId: tenant.id, name: 'Multi', publicKey: `bk_multi_${Date.now()}`, status: 'active', isDefault: false,
+      settings: {}, templateId: primary, templateVersion: 'latest',
+      templateBindings: [{ templateId: primary, version: 'latest' }, { templateId: secondary, version: '1' }],
+      templateMode: 'or',
+    } as Partial<Bot>);
+
+    const blocked = await request(app).post(`${BASE}/${secondary}/versions/1/unpublish`).send();
+    expect(blocked.status).toBe(409);
+    expect(blocked.body.error?.details?.impactedBots).toBe(1);
+
+    const forced = await request(app).post(`${BASE}/${secondary}/versions/1/unpublish`).send({ force: true });
+    expect(forced.status).toBe(200);
+    const reloaded = await AppDataSource.getRepository(Bot).findOneByOrFail({ id: bot.id });
+    // secondary binding dropped; primary preserved as the sole (and primary) binding
+    expect(reloaded.templateBindings.map((b) => b.templateId)).toEqual([primary]);
+    expect(reloaded.templateId).toBe(primary);
+  });
+});
+
 describe('delete version (drafts + unpublished)', () => {
   it('deletes a draft version', async () => {
     const id = await createTemplate();

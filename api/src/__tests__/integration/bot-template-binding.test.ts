@@ -115,6 +115,51 @@ describe('bot template binding', () => {
     });
   });
 
+  describe('multi-template binding (up to 3, AND/OR)', () => {
+    it('binds 2 templates with mode and returns both bindings', async () => {
+      const a = await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'Plumbing role' }] });
+      const b = await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'Electrical role' }] });
+      const res = await request(app).put(`/api/v1/bots/${botId}/template`).send({
+        bindings: [{ templateId: a.id, version: 'latest' }, { templateId: b.id, version: 'latest' }],
+        mode: 'or',
+      });
+      expect(res.status).toBe(200);
+      expect(res.body.data.mode).toBe('or');
+      expect(res.body.data.bindings.map((x: any) => x.templateId)).toEqual([a.id, b.id]);
+      // primary mirrored for back-compat
+      expect(res.body.data.binding.templateId).toBe(a.id);
+      const reloaded = await AppDataSource.getRepository(Bot).findOneByOrFail({ id: botId });
+      expect(reloaded.templateBindings.length).toBe(2);
+      expect(reloaded.templateMode).toBe('or');
+    });
+
+    it('rejects more than 3 templates (422)', async () => {
+      const mk = async () => (await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'x' }] })).id;
+      const ids = [await mk(), await mk(), await mk(), await mk()];
+      const res = await request(app).put(`/api/v1/bots/${botId}/template`).send({
+        bindings: ids.map((id) => ({ templateId: id, version: 'latest' })),
+      });
+      expect(res.status).toBe(422);
+    });
+
+    it('rejects the same template bound twice (422)', async () => {
+      const a = await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'x' }] });
+      const res = await request(app).put(`/api/v1/bots/${botId}/template`).send({
+        bindings: [{ templateId: a.id, version: 'latest' }, { templateId: a.id, version: 'latest' }],
+      });
+      expect(res.status).toBe(422);
+    });
+
+    it('rejects a binding set containing an unavailable template (403)', async () => {
+      const ok = await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'x' }] });
+      const no = await makeTemplate({ availableToAllTenants: false, versions: [{ version: 1, body: 'y' }] });
+      const res = await request(app).put(`/api/v1/bots/${botId}/template`).send({
+        bindings: [{ templateId: ok.id, version: 'latest' }, { templateId: no.id, version: 'latest' }],
+      });
+      expect(res.status).toBe(403);
+    });
+  });
+
   describe('T18 — ai-settings ignores legacy templateId', () => {
     it('accepts a templateId in the ai-settings body but never persists it', async () => {
       const res = await request(app).put(`/api/v1/bots/${botId}/ai-settings`).send({

@@ -183,50 +183,98 @@ async function resolveDefaultReplacement(
   return { templateId: blank.id, templateVersion: 'latest' };
 }
 
-/** Count bots bound to a template, optionally scoped to a tenant and/or a fixed pinned version. */
+/**
+ * A bot "uses" a template if it appears in ANY of its bindings — matched via the
+ * jsonb `template_bindings` (multi) OR the legacy primary `template_id` column
+ * (bots whose bindings haven't been backfilled). Returns the WHERE fragment + params.
+ */
+function bindingMatch(alias: string, templateId: string, pinnedVersion?: number): { sql: string; params: Record<string, unknown> } {
+  if (pinnedVersion !== undefined) {
+    const pv = String(pinnedVersion);
+    return {
+      sql: `(${alias}.template_bindings @> CAST(:bind AS jsonb) OR (${alias}.template_id = :tid AND ${alias}.template_version = :pv))`,
+      params: { bind: JSON.stringify([{ templateId, version: pv }]), tid: templateId, pv },
+    };
+  }
+  return {
+    sql: `(${alias}.template_bindings @> CAST(:bindAny AS jsonb) OR ${alias}.template_id = :tid)`,
+    params: { bindAny: JSON.stringify([{ templateId }]), tid: templateId },
+  };
+}
+
+/** Count bots bound to a template (in any binding), optionally scoped to a tenant and/or a fixed pinned version. */
 async function countBoundBots(
   manager: EntityManager,
   templateId: string,
   opts: { tenantId?: string; pinnedVersion?: number } = {},
 ): Promise<number> {
+  const m = bindingMatch('b', templateId, opts.pinnedVersion);
   const qb = manager
     .getRepository(Bot)
     .createQueryBuilder('b')
-    .where('b.templateId = :templateId', { templateId })
+    .where(m.sql, m.params)
     .andWhere('b.deletedAt IS NULL');
   if (opts.tenantId) qb.andWhere('b.tenantId = :tenantId', { tenantId: opts.tenantId });
-  if (opts.pinnedVersion !== undefined) qb.andWhere('b.templateVersion = :pv', { pv: String(opts.pinnedVersion) });
   return qb.getCount();
 }
 
-/** Reassign matching bots to a replacement binding. Returns the affected tenant ids. */
+/**
+ * Reassign bots away from a template (in any binding) to a replacement. Removes
+ * the (optionally version-specific) template from each affected bot's bindings;
+ * any bot left with no bindings adopts the replacement; the legacy primary
+ * template_id/version columns are re-synced to bindings[0]. Returns affected tenant ids.
+ */
 async function reassignBots(
   manager: EntityManager,
   where: { templateId: string; tenantId?: string; pinnedVersion?: number },
   replacement: Replacement,
 ): Promise<string[]> {
-  const qb = manager
+  const m = bindingMatch('b', where.templateId, where.pinnedVersion);
+  const sel = manager
     .getRepository(Bot)
     .createQueryBuilder('b')
-    .select('DISTINCT b.tenantId', 'tenantId')
-    .where('b.templateId = :templateId', { templateId: where.templateId })
+    .select('b.id', 'id')
+    .addSelect('b.tenantId', 'tenantId')
+    .where(m.sql, m.params)
     .andWhere('b.deletedAt IS NULL');
-  if (where.tenantId) qb.andWhere('b.tenantId = :tenantId', { tenantId: where.tenantId });
-  if (where.pinnedVersion !== undefined) qb.andWhere('b.templateVersion = :pv', { pv: String(where.pinnedVersion) });
-  const tenantRows = await qb.getRawMany<{ tenantId: string }>();
+  if (where.tenantId) sel.andWhere('b.tenantId = :tenantId', { tenantId: where.tenantId });
+  const rows = await sel.getRawMany<{ id: string; tenantId: string }>();
+  const ids = rows.map((r) => r.id);
+  if (!ids.length) return [];
 
-  const upd = manager
-    .getRepository(Bot)
-    .createQueryBuilder()
-    .update(Bot)
-    .set({ templateId: replacement.templateId, templateVersion: replacement.templateVersion })
-    .where('template_id = :templateId', { templateId: where.templateId })
-    .andWhere('deleted_at IS NULL');
-  if (where.tenantId) upd.andWhere('tenant_id = :tenantId', { tenantId: where.tenantId });
-  if (where.pinnedVersion !== undefined) upd.andWhere('template_version = :pv', { pv: String(where.pinnedVersion) });
-  await upd.execute();
+  // 1) drop the dead template (version-specific if pinned) from each bot's bindings array
+  const dropParams: unknown[] = [where.templateId];
+  let dropPredicate = "elem->>'templateId' = $1";
+  if (where.pinnedVersion !== undefined) {
+    dropParams.push(String(where.pinnedVersion));
+    dropPredicate += " AND elem->>'version' = $2";
+  }
+  const idsParam = `$${dropParams.length + 1}`;
+  dropParams.push(ids);
+  await manager.query(
+    `UPDATE chatbot_bots SET template_bindings = COALESCE(
+        (SELECT jsonb_agg(elem) FROM jsonb_array_elements(template_bindings) elem WHERE NOT (${dropPredicate})),
+        '[]'::jsonb)
+      WHERE id = ANY(${idsParam}::uuid[])`,
+    dropParams,
+  );
 
-  return tenantRows.map((r) => r.tenantId);
+  // 2) bots now with no bindings adopt the replacement
+  await manager.query(
+    `UPDATE chatbot_bots SET template_bindings = $1::jsonb
+      WHERE template_bindings = '[]'::jsonb AND id = ANY($2::uuid[])`,
+    [JSON.stringify([{ templateId: replacement.templateId, version: replacement.templateVersion }]), ids],
+  );
+
+  // 3) re-sync legacy primary columns to bindings[0]
+  await manager.query(
+    `UPDATE chatbot_bots SET template_id = (template_bindings->0->>'templateId')::uuid,
+         template_version = COALESCE(template_bindings->0->>'version', 'latest')
+      WHERE id = ANY($1::uuid[])`,
+    [ids],
+  );
+
+  return [...new Set(rows.map((r) => r.tenantId))];
 }
 
 // ── Cache fan-out (T20) ──────────────────────────────────────────────────────

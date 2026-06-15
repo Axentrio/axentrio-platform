@@ -17,7 +17,7 @@ import {
 import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
 import { buildSystemPrompt } from '../llm/prompt-builder';
-import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
@@ -291,9 +291,9 @@ export async function testChat(req: Request, res: Response) {
 
   // Resolve the bound template once → body (layer 2) + effective tone/guardrails,
   // so the preview matches the live composed prompt exactly.
-  const resolved = await resolveBoundTemplate(bot);
-  const templateBody = resolved.body;
-  const aiEff = withEffectiveConfig(ai, effectiveConfigFrom(resolved));
+  const resolvedList = await resolveBoundTemplates(bot);
+  const templateBody = composeTemplateBodies(resolvedList, bot.templateMode ?? 'or');
+  const aiEff = withEffectiveConfig(ai, effectiveConfigFromList(resolvedList));
 
   if (useKnowledgeBase) {
     let result;

@@ -304,27 +304,106 @@ export function effectiveConfigFrom(resolved: ResolvedTemplate): EffectiveBotCon
 export async function effectiveBotConfig(bot: {
   templateId?: string | null;
   templateVersion?: string | null;
+  templateBindings?: BotTemplateBinding[] | null;
 }): Promise<EffectiveBotConfig> {
-  return effectiveConfigFrom(await resolveBoundTemplate(bot));
+  return effectiveConfigFromList(await resolveBoundTemplates(bot));
+}
+
+// ── Multi-template (up to 3 bindings, AND/OR composed) ───────────────────────
+
+export interface BotTemplateBinding {
+  templateId: string;
+  version: string;
+}
+
+/** A bot's ordered bindings ([0]=primary). Falls back to the legacy single
+ *  template_id binding when templateBindings is empty (back-compat). */
+export function bindingsOf(bot: {
+  templateId?: string | null;
+  templateVersion?: string | null;
+  templateBindings?: BotTemplateBinding[] | null;
+}): BotTemplateBinding[] {
+  if (bot.templateBindings && bot.templateBindings.length) return bot.templateBindings.slice(0, 3);
+  if (bot.templateId) return [{ templateId: bot.templateId, version: bot.templateVersion ?? 'latest' }];
+  return [];
+}
+
+/** Resolve ALL of a bot's bindings to concrete bodies/configs (ordered, [0]=primary). */
+export async function resolveBoundTemplates(bot: {
+  templateId?: string | null;
+  templateVersion?: string | null;
+  templateBindings?: BotTemplateBinding[] | null;
+}): Promise<ResolvedTemplate[]> {
+  const bindings = bindingsOf(bot);
+  if (!bindings.length) return [];
+  const out: ResolvedTemplate[] = [];
+  for (const b of bindings) {
+    out.push(await resolveBoundTemplate({ templateId: b.templateId, templateVersion: b.version }));
+  }
+  return out;
 }
 
 /**
- * Return a copy of an AI-settings slice with tone + policy guardrails overridden
- * by the effective (template-sourced) config. escalationKeywords and any other
- * non-policy fields on `ai.guardrails` are preserved (operational, tenant-owned).
- * Consumers pass the result to the existing prompt/RAG/n8n builders unchanged.
+ * Stitch resolved template bodies into ONE prompt body with AND/OR framing.
+ * 1 body → returned as-is (back-compat). >1 → an explicit header tells the AI
+ * whether the specialities are combined (and) or independent/self-selected (or).
+ */
+export function composeTemplateBodies(resolved: ResolvedTemplate[], mode: 'and' | 'or'): string {
+  const bodies = resolved.map((r) => r.body).filter((b) => b && b.trim());
+  if (bodies.length === 0) return '';
+  if (bodies.length === 1) return bodies[0];
+  const header =
+    mode === 'and'
+      ? 'You provide ALL of the following specialities together as one combined service — apply them in combination:'
+      : "You cover the following INDEPENDENT specialities. Use ONLY the speciality that matches the customer's request; do not assume they want more than one unless they say so:";
+  const sections = bodies.map((b, i) => `### Speciality ${i + 1}\n${b}`).join('\n\n');
+  return `${header}\n\n${sections}`;
+}
+
+/**
+ * Effective guardrails for a (possibly multi-) binding: taken from the PRIMARY
+ * template ([0]), with topics-to-avoid UNIONED across all bound templates
+ * (additive safety). Tone is bot-owned and intentionally NOT set here — see
+ * withEffectiveConfig, which no longer overrides brandVoice.tone.
+ */
+export function effectiveConfigFromList(resolved: ResolvedTemplate[]): EffectiveBotConfig {
+  const primary = resolved[0];
+  if (!primary) {
+    return {
+      tone: PLATFORM_DEFAULT_CONFIG.tone,
+      guardrails: { ...PLATFORM_DEFAULT_CONFIG.guardrails },
+      source: 'fallback',
+      templateId: null,
+      resolvedVersion: null,
+      templateUnavailable: false,
+      pinnedButUnavailable: false,
+    };
+  }
+  const eff = effectiveConfigFrom(primary);
+  const topics = new Set<string>(eff.guardrails.topicsToAvoid);
+  for (const r of resolved.slice(1)) {
+    for (const t of r.config?.guardrails?.topicsToAvoid ?? []) topics.add(t);
+  }
+  eff.guardrails = { ...eff.guardrails, topicsToAvoid: [...topics] };
+  return eff;
+}
+
+/**
+ * Return a copy of an AI-settings slice with the policy guardrails overridden by
+ * the effective (template-sourced) config. TONE IS BOT-OWNED and is intentionally
+ * left on `ai.brandVoice.tone` untouched. escalationKeywords + other non-policy
+ * fields on `ai.guardrails` are preserved (operational, tenant-owned).
  */
 export function withEffectiveConfig<A extends { brandVoice?: Record<string, unknown>; guardrails?: Record<string, unknown> }>(
   ai: A,
   eff: EffectiveBotConfig,
 ): A {
-  // Only a bound template OWNS tone + policy guardrails. With no template
+  // Only a bound template OWNS the policy guardrails. With no template
   // (source === 'fallback'), leave the bot's own stored values untouched —
   // overlaying empty platform defaults would wipe legacy tenant config.
   if (eff.source !== 'template') return ai;
   return {
     ...ai,
-    brandVoice: { ...(ai.brandVoice ?? {}), tone: eff.tone },
     guardrails: { ...(ai.guardrails ?? {}), ...eff.guardrails },
   } as A;
 }

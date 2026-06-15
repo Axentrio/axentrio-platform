@@ -12,8 +12,36 @@ import { TenantBotTemplate } from '../../database/entities/TenantBotTemplate';
 import {
   listAvailableTemplates,
   resolveBoundTemplate,
+  composeTemplateBodies,
+  type ResolvedTemplate,
 } from '../../templates/template-resolver';
 import { createTestTenant } from '../helpers/factories';
+
+const rt = (body: string, topics: string[] = []): ResolvedTemplate => ({
+  templateId: 't', body, config: { guardrails: { topicsToAvoid: topics } }, resolvedVersion: 1,
+  pinnedButUnavailable: false, templateUnavailable: false,
+});
+
+describe('composeTemplateBodies (AND/OR stitching)', () => {
+  it('returns a single body unchanged', () => {
+    expect(composeTemplateBodies([rt('Just plumbing')], 'or')).toBe('Just plumbing');
+  });
+  it('OR mode frames specialities as independent + self-selected', () => {
+    const out = composeTemplateBodies([rt('Plumbing'), rt('Electrical')], 'or');
+    expect(out).toMatch(/INDEPENDENT/i);
+    expect(out).toContain('Plumbing');
+    expect(out).toContain('Electrical');
+    expect(out).toContain('### Speciality 1');
+    expect(out).toContain('### Speciality 2');
+  });
+  it('AND mode frames specialities as one combined offering', () => {
+    const out = composeTemplateBodies([rt('Plumbing'), rt('Electrical')], 'and');
+    expect(out).toMatch(/combined/i);
+  });
+  it('drops empty bodies (unavailable templates contribute nothing)', () => {
+    expect(composeTemplateBodies([rt('Plumbing'), rt('')], 'or')).toBe('Plumbing');
+  });
+});
 
 type VerSpec = { version: number; body: string; status?: 'draft' | 'published' | 'unpublished' };
 

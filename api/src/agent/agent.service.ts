@@ -15,7 +15,7 @@ import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -142,8 +142,9 @@ export class AgentService {
     // not the bot. Override the AI slice once so every downstream read (prompt
     // builder, fallback messages) uses the effective values; escalationKeywords
     // and other operational fields are preserved. One resolve → body + config.
-    const resolvedTemplate = await resolveBoundTemplate(bot);
-    const eff = effectiveConfigFrom(resolvedTemplate);
+    const resolvedTemplates = await resolveBoundTemplates(bot);
+    const templateBody = composeTemplateBodies(resolvedTemplates, bot.templateMode ?? 'or');
+    const eff = effectiveConfigFromList(resolvedTemplates);
     const aiSettings = botAiSettings ? withEffectiveConfig(botAiSettings, eff) : botAiSettings;
     const effBotSettings = { ...botSettings, ai: aiSettings };
     const trace: AgentTrace = {
@@ -191,7 +192,7 @@ export class AgentService {
       }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
-      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, resolvedTemplate.body);
+      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

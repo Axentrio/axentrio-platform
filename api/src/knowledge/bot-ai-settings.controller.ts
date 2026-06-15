@@ -13,7 +13,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
 import { generateResponse } from '../llm/rag.service';
 import { buildSystemPrompt } from '../llm/prompt-builder';
-import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
@@ -99,6 +99,11 @@ export async function updateBotAiSettings(req: Request, res: Response) {
       name: data.brandVoice.name,
       tone: data.brandVoice.tone,
       customInstructions: data.brandVoice.customInstructions,
+      // Persist a per-bot override only when non-empty; blank means "inherit the
+      // tenant business name", resolved at prompt-composition time.
+      ...(data.brandVoice.businessName?.trim()
+        ? { businessName: data.brandVoice.businessName.trim() }
+        : {}),
     },
     guardrails: data.guardrails,
   };
@@ -154,9 +159,9 @@ export async function botTestChat(req: Request, res: Response) {
 
   // Resolved layer-2 template body + template-owned tone/guardrails so the
   // preview matches the live composed prompt.
-  const resolved = await resolveBoundTemplate(bot);
-  const templateBody = resolved.body;
-  const aiEff = withEffectiveConfig(ai, effectiveConfigFrom(resolved));
+  const resolvedList = await resolveBoundTemplates(bot);
+  const templateBody = composeTemplateBodies(resolvedList, bot.templateMode ?? 'or');
+  const aiEff = withEffectiveConfig(ai, effectiveConfigFromList(resolvedList));
 
   if (useKb) {
     let result;

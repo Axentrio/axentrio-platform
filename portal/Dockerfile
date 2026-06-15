@@ -4,6 +4,12 @@ WORKDIR /app
 COPY portal/package*.json ./
 RUN npm install
 COPY portal/ .
+# The portal imports shared wire types via the `@contracts/*` tsconfig alias →
+# `../api/src/contracts/*`. The build context is the repo root, so copy those
+# files in at the path the alias resolves to (/api/src/contracts relative to
+# /app). Without this, `tsc` fails in the Docker build (TS2307) even though CI's
+# full-repo checkout resolves it — which silently broke every portal deploy.
+COPY api/src/contracts /api/src/contracts
 ARG VITE_API_URL
 ARG VITE_WS_URL
 ARG VITE_CLERK_PUBLISHABLE_KEY

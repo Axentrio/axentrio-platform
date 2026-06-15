@@ -20,7 +20,7 @@
  */
 import { AppDataSource } from '../database/data-source';
 import { BotTemplate } from '../database/entities/BotTemplate';
-import { BotTemplateVersion } from '../database/entities/BotTemplateVersion';
+import { BotTemplateVersion, type BotTemplateConfig } from '../database/entities/BotTemplateVersion';
 import { getEntitlements } from '../billing/entitlements';
 import { cached, invalidate, readCounter, bumpCounter } from '../utils/cache';
 import { logger } from '../utils/logger';
@@ -50,6 +50,8 @@ export interface ResolvedTemplate {
   templateId: string | null;
   /** Resolved prompt body. Empty string when unbound or unreachable. */
   body: string;
+  /** Resolved identity/policy config (tone + policy guardrails). {} when unbound/unreachable. */
+  config: BotTemplateConfig;
   /** The published version actually used, or null when none was resolvable. */
   resolvedVersion: number | null;
   /** The bot pinned a fixed version that isn't published → fell back to latest/empty. */
@@ -61,6 +63,7 @@ export interface ResolvedTemplate {
 const UNBOUND: ResolvedTemplate = {
   templateId: null,
   body: '',
+  config: {},
   resolvedVersion: null,
   pinnedButUnavailable: false,
   templateUnavailable: false,
@@ -69,6 +72,7 @@ const UNBOUND: ResolvedTemplate = {
 interface PublishedVersion {
   version: number;
   body: string;
+  config: BotTemplateConfig;
 }
 interface TemplateBundle {
   id: string;
@@ -87,13 +91,13 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
       where: { templateId, status: 'published' },
-      select: ['version', 'body'],
+      select: ['version', 'body', 'config'],
       order: { version: 'DESC' },
     });
     return {
       id: tmpl.id,
       status: tmpl.status,
-      publishedVersions: versions.map((v) => ({ version: v.version, body: v.body })),
+      publishedVersions: versions.map((v) => ({ version: v.version, body: v.body, config: v.config ?? {} })),
     };
   });
 }
@@ -185,6 +189,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       body: latest.body,
+      config: latest.config,
       resolvedVersion: latest.version,
       pinnedButUnavailable: false,
       templateUnavailable: false,
@@ -198,6 +203,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       body: exact.body,
+      config: exact.config,
       resolvedVersion: exact.version,
       pinnedButUnavailable: false,
       templateUnavailable: false,
@@ -209,6 +215,7 @@ export async function resolveBoundTemplate(bot: {
     return {
       templateId: bot.templateId,
       body: latest.body,
+      config: latest.config,
       resolvedVersion: latest.version,
       pinnedButUnavailable: true,
       templateUnavailable: false,
@@ -227,6 +234,99 @@ export async function resolveTemplateBody(bot: {
   templateVersion?: string | null;
 }): Promise<string> {
   return (await resolveBoundTemplate(bot)).body;
+}
+
+// ── Effective bot config (the single runtime source for tone + policy guardrails) ──
+//
+// Tone + policy guardrails (topics/greeting/fallback/off-hours/confidence/maxLen)
+// are owned by the bound TEMPLATE, not the bot. Every runtime consumer (composer,
+// RAG, n8n, message-forwarding, agent, widget/init) reads them via this helper —
+// never directly off Bot.settings.ai.guardrails. Operational settings
+// (escalationKeywords, businessHours) stay tenant-owned and are read from the bot.
+
+export interface EffectiveGuardrails {
+  topicsToAvoid: string[];
+  greetingMessage: string;
+  fallbackMessage: string;
+  offHoursMessage: string;
+  confidenceThreshold: number;
+  maxResponseLength: number;
+}
+export interface EffectiveBotConfig {
+  tone: string;
+  guardrails: EffectiveGuardrails;
+  /** 'template' when the bound template supplied config; 'fallback' = platform defaults. */
+  source: 'template' | 'fallback';
+  templateId: string | null;
+  resolvedVersion: number | null;
+  templateUnavailable: boolean;
+  pinnedButUnavailable: boolean;
+}
+
+/** Platform defaults used when no template config is present (mirrors the pre-slim-down form defaults). */
+export const PLATFORM_DEFAULT_CONFIG: { tone: string; guardrails: EffectiveGuardrails } = {
+  tone: 'friendly',
+  guardrails: {
+    topicsToAvoid: [],
+    greetingMessage: '',
+    fallbackMessage: '',
+    offHoursMessage: '',
+    confidenceThreshold: 0.7,
+    maxResponseLength: 500,
+  },
+};
+
+/** Derive effective tone + policy guardrails from a resolved template (pure). */
+export function effectiveConfigFrom(resolved: ResolvedTemplate): EffectiveBotConfig {
+  const c = resolved.config ?? {};
+  const g = c.guardrails ?? {};
+  const D = PLATFORM_DEFAULT_CONFIG;
+  const fromTemplate = !!resolved.templateId && !resolved.templateUnavailable && (c.tone !== undefined || c.guardrails !== undefined);
+  return {
+    tone: c.tone ?? D.tone,
+    guardrails: {
+      topicsToAvoid: g.topicsToAvoid ?? D.guardrails.topicsToAvoid,
+      greetingMessage: g.greetingMessage ?? D.guardrails.greetingMessage,
+      fallbackMessage: g.fallbackMessage ?? D.guardrails.fallbackMessage,
+      offHoursMessage: g.offHoursMessage ?? D.guardrails.offHoursMessage,
+      confidenceThreshold: g.confidenceThreshold ?? D.guardrails.confidenceThreshold,
+      maxResponseLength: g.maxResponseLength ?? D.guardrails.maxResponseLength,
+    },
+    source: fromTemplate ? 'template' : 'fallback',
+    templateId: resolved.templateId,
+    resolvedVersion: resolved.resolvedVersion,
+    templateUnavailable: resolved.templateUnavailable,
+    pinnedButUnavailable: resolved.pinnedButUnavailable,
+  };
+}
+
+/** The bot's effective tone + policy guardrails (template-sourced, else platform defaults). */
+export async function effectiveBotConfig(bot: {
+  templateId?: string | null;
+  templateVersion?: string | null;
+}): Promise<EffectiveBotConfig> {
+  return effectiveConfigFrom(await resolveBoundTemplate(bot));
+}
+
+/**
+ * Return a copy of an AI-settings slice with tone + policy guardrails overridden
+ * by the effective (template-sourced) config. escalationKeywords and any other
+ * non-policy fields on `ai.guardrails` are preserved (operational, tenant-owned).
+ * Consumers pass the result to the existing prompt/RAG/n8n builders unchanged.
+ */
+export function withEffectiveConfig<A extends { brandVoice?: Record<string, unknown>; guardrails?: Record<string, unknown> }>(
+  ai: A,
+  eff: EffectiveBotConfig,
+): A {
+  // Only a bound template OWNS tone + policy guardrails. With no template
+  // (source === 'fallback'), leave the bot's own stored values untouched —
+  // overlaying empty platform defaults would wipe legacy tenant config.
+  if (eff.source !== 'template') return ai;
+  return {
+    ...ai,
+    brandVoice: { ...(ai.brandVoice ?? {}), tone: eff.tone },
+    guardrails: { ...(ai.guardrails ?? {}), ...eff.guardrails },
+  } as A;
 }
 
 /** Drop ONE tenant's available-templates cache. Call on grant add/remove for

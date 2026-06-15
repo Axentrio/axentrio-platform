@@ -1155,7 +1155,17 @@
         "body": "Prompt-inhoud",
         "bodyHint": "Ondersteunt plaatsaanduidingen zoals {botName}, {businessName}, {tone}. Max 20.000 tekens.",
         "expectedModules": "Verwachte modules (komma-gescheiden, optioneel)",
-        "changelog": "Wijzigingslog (optioneel)"
+        "changelog": "Wijzigingslog (optioneel)",
+        "configTitle": "Toon & richtlijnen",
+        "configHint": "Beheerd door deze sjabloon — geldt voor elke bot die eraan gekoppeld is. Tenants stellen deze niet meer in.",
+        "tone": "Stemtoon",
+        "greetingMessage": "Begroetingsbericht",
+        "fallbackMessage": "Terugvalbericht",
+        "offHoursMessage": "Bericht buiten openingstijden",
+        "topicsToAvoid": "Te vermijden onderwerpen (komma-gescheiden)",
+        "topicsHint": "Onderwerpen die de bot moet weigeren te bespreken.",
+        "confidenceThreshold": "Betrouwbaarheidsdrempel (0–1)",
+        "maxResponseLength": "Max. antwoordlengte (tekens)"
       },
       "confirm": {
         "archiveTitle": "Dit sjabloon archiveren?",

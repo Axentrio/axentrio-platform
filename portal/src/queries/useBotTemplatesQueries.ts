@@ -32,6 +32,19 @@ export interface BotTemplate {
   updatedAt: string;
 }
 
+/** Template-owned tone + policy guardrails, versioned with the body (admin-controlled). */
+export interface BotTemplateConfig {
+  tone?: string;
+  guardrails?: {
+    topicsToAvoid?: string[];
+    greetingMessage?: string;
+    fallbackMessage?: string;
+    offHoursMessage?: string;
+    confidenceThreshold?: number;
+    maxResponseLength?: number;
+  };
+}
+
 export interface BotTemplateVersion {
   id: string;
   templateId: string;
@@ -39,6 +52,7 @@ export interface BotTemplateVersion {
   body: string;
   changelog: string | null;
   expectedModules: string[];
+  config: BotTemplateConfig;
   status: VersionStatus;
   publishedAt: string | null;
   publishedBy: string | null;
@@ -145,7 +159,7 @@ export function useArchiveBotTemplate(id: string) {
 export function useCreateTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[] }) =>
+    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[]; config?: BotTemplateConfig }) =>
       api.post<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions`, input),
     onSuccess: (res) => {
       invalidate(id);
@@ -158,7 +172,7 @@ export function useCreateTemplateVersion(id: string) {
 export function useEditTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; lockVersion: number }) =>
+    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; config?: BotTemplateConfig; lockVersion: number }) =>
       api.put<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions/${input.version}`, input),
     onSuccess: (res) => {
       invalidate(id);

@@ -15,7 +15,7 @@ import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveTemplateBody } from '../templates/template-resolver';
+import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -121,7 +121,14 @@ export class AgentService {
     // builder's skills/brandVoice), the AI behavioural slice, and the tenant
     // LLM key — all from a single bot+tenant lookup.
     const { bot, botSettings, botAiSettings, apiKey } = await getLlmRuntimeConfigForSession(session);
-    const aiSettings = botAiSettings;
+    // Tone + policy guardrails come from the bound template (effectiveBotConfig),
+    // not the bot. Override the AI slice once so every downstream read (prompt
+    // builder, fallback messages) uses the effective values; escalationKeywords
+    // and other operational fields are preserved. One resolve → body + config.
+    const resolvedTemplate = await resolveBoundTemplate(bot);
+    const eff = effectiveConfigFrom(resolvedTemplate);
+    const aiSettings = botAiSettings ? withEffectiveConfig(botAiSettings, eff) : botAiSettings;
+    const effBotSettings = { ...botSettings, ai: aiSettings };
     const trace: AgentTrace = {
       sessionId: session.id,
       tenantId: tenant.id,
@@ -165,10 +172,9 @@ export class AgentService {
         });
         customerName = binding?.externalUserName ?? undefined;
       }
-      // Layer-2 template body, resolved from the bot's binding (blank-base →
-      // empty → unchanged). Flags are for the UI; the prompt only needs the text.
-      const templateBody = await resolveTemplateBody(bot);
-      const systemPrompt = this.promptBuilder.build(tenant, botSettings, tools, undefined, moduleSections, customerName, templateBody);
+      // Template body (layer 2) + effective tone/guardrails both come from the
+      // one resolve above (effBotSettings carries the effective AI slice).
+      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, resolvedTemplate.body);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

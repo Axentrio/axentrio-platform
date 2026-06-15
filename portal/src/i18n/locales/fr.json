@@ -1154,7 +1154,17 @@
         "body": "Contenu du prompt",
         "bodyHint": "Prend en charge des espaces réservés comme {botName}, {businessName}, {tone}. Max 20 000 caractères.",
         "expectedModules": "Modules attendus (séparés par des virgules, facultatif)",
-        "changelog": "Journal des modifications (facultatif)"
+        "changelog": "Journal des modifications (facultatif)",
+        "configTitle": "Ton et garde-fous",
+        "configHint": "Géré par ce modèle — s'applique à tous les bots qui y sont liés. Les locataires ne les définissent plus.",
+        "tone": "Ton de la voix",
+        "greetingMessage": "Message d'accueil",
+        "fallbackMessage": "Message de repli",
+        "offHoursMessage": "Message hors horaires",
+        "topicsToAvoid": "Sujets à éviter (séparés par des virgules)",
+        "topicsHint": "Sujets que le bot doit refuser d'aborder.",
+        "confidenceThreshold": "Seuil de confiance (0–1)",
+        "maxResponseLength": "Longueur max. de réponse (caractères)"
       },
       "confirm": {
         "archiveTitle": "Archiver ce modèle ?",

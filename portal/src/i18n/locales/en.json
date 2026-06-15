@@ -1196,7 +1196,17 @@
         "body": "Prompt body",
         "bodyHint": "Supports placeholders like {botName}, {businessName}, {tone}. Max 20,000 characters.",
         "expectedModules": "Expected modules (comma-separated, optional)",
-        "changelog": "Changelog (optional)"
+        "changelog": "Changelog (optional)",
+        "configTitle": "Tone & guardrails",
+        "configHint": "Owned by this template — applies to every bot bound to it. Tenants no longer set these.",
+        "tone": "Voice tone",
+        "greetingMessage": "Greeting message",
+        "fallbackMessage": "Fallback message",
+        "offHoursMessage": "Off-hours message",
+        "topicsToAvoid": "Topics to avoid (comma-separated)",
+        "topicsHint": "Subjects the bot should refuse to discuss.",
+        "confidenceThreshold": "Confidence threshold (0–1)",
+        "maxResponseLength": "Max response length (chars)"
       },
       "confirm": {
         "archiveTitle": "Archive this template?",

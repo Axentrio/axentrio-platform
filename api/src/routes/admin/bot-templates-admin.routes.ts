@@ -213,6 +213,7 @@ router.post(
       body: text,
       changelog: reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null,
       expectedModules: body.expectedModules,
+      config: body.config,
     });
     await logAudit(req.userId!, 'bot_template.version_created', 'bot_template', req.params.id, undefined, { version: version.version });
     res.status(201);
@@ -233,6 +234,7 @@ router.put(
       body: typeof body.body === 'string' ? body.body : undefined,
       changelog: body.changelog === undefined ? undefined : (reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null),
       expectedModules: body.expectedModules,
+      config: body.config,
       lockVersion,
     });
     await logAudit(req.userId!, 'bot_template.version_edited', 'bot_template', req.params.id, undefined, { version });

@@ -13,7 +13,7 @@ import { decrypt, encrypt } from '../utils/encryption';
 import { cached } from '../utils/cache';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot, BotSettings } from '../database/entities/Bot';
-import { resolveTemplateBody } from '../templates/template-resolver';
+import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
 import { getEntitlements } from '../billing/entitlements';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
@@ -260,7 +260,12 @@ export async function forwardMessageToN8n(
     }
     throw err;
   }
-  const aiSettings = botSettings.ai;
+  // Tone + policy guardrails (offHours/fallback messages etc.) come from the
+  // bound template; override the AI slice once so all downstream reads + the n8n
+  // payload + the RAG fallback use the effective values. escalationKeywords +
+  // businessHours stay tenant-owned (preserved / read from botSettings directly).
+  const resolvedTemplate = await resolveBoundTemplate(bot);
+  const aiSettings = botSettings.ai ? withEffectiveConfig(botSettings.ai, effectiveConfigFrom(resolvedTemplate)) : botSettings.ai;
 
   // Only a genuinely custom n8n webhook is honoured. The auto-provisioned
   // default (config.n8n.defaultWebhookUrl) is intentionally NOT a fallback: that
@@ -347,7 +352,7 @@ export async function forwardMessageToN8n(
 
   // Layer-2 template body for this bot — used by the n8n systemPrompt and the
   // RAG fallback below (blank-base → empty → unchanged).
-  const templateBody = await resolveTemplateBody(bot);
+  const templateBody = resolvedTemplate.body;
 
   const outboundPayload: OutboundMessage = {
     event: 'message.received',
@@ -773,8 +778,9 @@ async function handleBotHandoff(
   // Check if handoff is enabled for this bot (multi-bot Phase 4 #16d:
   // features + ai now live on Bot.settings, not Tenant.settings).
   let botSettings: BotSettings | undefined;
+  let handoffBot: Bot | undefined;
   try {
-    ({ settings: botSettings } = await getBotConfigForSession(session));
+    ({ bot: handoffBot, settings: botSettings } = await getBotConfigForSession(session));
   } catch (err) {
     if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
       logger.warn(
@@ -786,8 +792,11 @@ async function handleBotHandoff(
     }
   }
   if (botSettings?.features?.handoffEnabled === false) {
-    // Handoff disabled — send fallback message but keep session in bot status
-    const fallbackMsg = botSettings.ai?.guardrails?.fallbackMessage ||
+    // Handoff disabled — send fallback message but keep session in bot status.
+    // fallbackMessage is template-owned, so resolve the effective config.
+    const eff = handoffBot ? effectiveConfigFrom(await resolveBoundTemplate(handoffBot)) : null;
+    const fallbackMsg = eff?.guardrails.fallbackMessage ||
+      botSettings.ai?.guardrails?.fallbackMessage ||
       "I'm sorry, I couldn't find an answer to your question.";
     await sendBotMessage(session, botParticipantId, fallbackMsg);
     logger.info(`Handoff skipped for session ${session.id} (handoff disabled)`, { reason });

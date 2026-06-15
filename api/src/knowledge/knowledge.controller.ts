@@ -17,7 +17,7 @@ import {
 import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
 import { buildSystemPrompt } from '../llm/prompt-builder';
-import { resolveTemplateBody } from '../templates/template-resolver';
+import { resolveBoundTemplate, effectiveConfigFrom, withEffectiveConfig } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
@@ -289,8 +289,11 @@ export async function testChat(req: Request, res: Response) {
   const provider = DEFAULT_PROVIDER;
   const model = DEFAULT_MODEL;
 
-  // Resolved layer-2 template body so the preview matches the live composed prompt.
-  const templateBody = await resolveTemplateBody(bot);
+  // Resolve the bound template once → body (layer 2) + effective tone/guardrails,
+  // so the preview matches the live composed prompt exactly.
+  const resolved = await resolveBoundTemplate(bot);
+  const templateBody = resolved.body;
+  const aiEff = withEffectiveConfig(ai, effectiveConfigFrom(resolved));
 
   if (useKnowledgeBase) {
     let result;
@@ -298,7 +301,7 @@ export async function testChat(req: Request, res: Response) {
       // TODO(multi-bot Phase 3 UI): when the test/preview chat targets a
       // specific bot, pass that bot's attached KB ids here. For now this
       // tenant-level preview stays tenant-wide (knowledgeBaseIds omitted).
-      result = await generateResponse(AppDataSource, tenantId, ai, message, history, undefined, templateBody);
+      result = await generateResponse(AppDataSource, tenantId, aiEff, message, history, undefined, templateBody);
     } catch (err: any) {
       const msg = err?.message || '';
       if (msg.includes('OPENAI_API_KEY')) {
@@ -316,7 +319,7 @@ export async function testChat(req: Request, res: Response) {
     sendSuccess(res, {
       response:
         result.response ||
-        ai.guardrails?.fallbackMessage ||
+        aiEff.guardrails?.fallbackMessage ||
         'I could not find an answer in the knowledge base.',
       provider,
       model,
@@ -328,7 +331,7 @@ export async function testChat(req: Request, res: Response) {
     // Secret apiKey path — still sourced from tenant (per architectural rule).
     const llm = getProvider(provider, tenantApiKey ?? undefined);
 
-    const systemPrompt = buildSystemPrompt(ai, { businessName: tenant.name, templateBody });
+    const systemPrompt = buildSystemPrompt(aiEff, { businessName: tenant.name, templateBody });
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },

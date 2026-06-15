@@ -23,6 +23,9 @@ import { widgetVersionHash } from '../widget/widget-version';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { Not } from 'typeorm';
+import { effectiveBotConfig, withEffectiveConfig } from '../templates/template-resolver';
+import { substituteVariables } from '../llm/prompt-builder';
+import { defaultBotAi } from '../config/default-bot-settings';
 
 // Simple in-memory rate limiter for unauthenticated widget endpoints
 // (Redis-based widgetRateLimiter caused crashes when Redis is unavailable)
@@ -292,15 +295,23 @@ router.post(
 
     await participantRepository.save(participant);
 
-    // Send bot greeting if session starts in bot mode
+    // Send bot greeting if session starts in bot mode. The greeting comes from
+    // the effective config (template-owned when bound, else the bot's own stored
+    // value), with placeholders like {botName}/{businessName} substituted.
     if (initialStatus === 'bot') {
-      const greetingMessage = tenant.settings?.ai?.guardrails?.greetingMessage;
+      const eff = await effectiveBotConfig(resolvedBot);
+      const botAi = resolvedBot.settings?.ai ?? defaultBotAi(resolvedBot.name);
+      const aiForGreeting = withEffectiveConfig(botAi, eff);
+      const rawGreeting = aiForGreeting.guardrails?.greetingMessage ?? '';
+      const greetingMessage = rawGreeting
+        ? substituteVariables(rawGreeting, aiForGreeting, { businessName: tenant.name })
+        : '';
       if (greetingMessage) {
         const messageRepository = AppDataSource.getRepository(Message);
         const botParticipant = participantRepository.create({
           sessionId: session.id,
           type: 'bot',
-          name: tenant.settings?.ai?.brandVoice?.name || 'AI Assistant',
+          name: resolvedBot.settings?.ai?.brandVoice?.name || 'AI Assistant',
           isAnonymous: false,
           joinedAt: new Date(),
         });

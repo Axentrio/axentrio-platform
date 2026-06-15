@@ -17,7 +17,7 @@
 import { EntityManager } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { BotTemplate } from '../database/entities/BotTemplate';
-import { BotTemplateVersion } from '../database/entities/BotTemplateVersion';
+import { BotTemplateVersion, BotTemplateConfig } from '../database/entities/BotTemplateVersion';
 import { TenantBotTemplate } from '../database/entities/TenantBotTemplate';
 import { Bot } from '../database/entities/Bot';
 import { getModule } from '../modules';
@@ -65,6 +65,70 @@ export function validateExpectedModules(value: unknown): string[] {
     if (!getModule(id)) throw new ValidationError(`expectedModules: unknown module id "${id}"`);
     out.push(id);
   }
+  return out;
+}
+
+/** Caps for the template-owned policy guardrails (mirror the per-bot form caps). */
+const GUARDRAIL_TEXT_MAX = 1000;
+const TOPICS_MAX = 50;
+
+/**
+ * Normalizes + validates the template's tone + policy guardrails config.
+ * Returns a clean BotTemplateConfig (only the keys the admin actually set), so an
+ * empty input persists `{}` and the resolver falls back to platform defaults.
+ */
+export function validateConfig(value: unknown): BotTemplateConfig {
+  if (value === undefined || value === null) return {};
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('config must be an object');
+  }
+  const v = value as Record<string, unknown>;
+  const out: BotTemplateConfig = {};
+
+  if (v.tone !== undefined) {
+    if (typeof v.tone !== 'string' || !v.tone.trim()) throw new ValidationError('config.tone must be a non-empty string');
+    if (v.tone.length > 100) throw new ValidationError('config.tone is too long');
+    out.tone = v.tone.trim();
+  }
+
+  if (v.guardrails !== undefined) {
+    if (typeof v.guardrails !== 'object' || v.guardrails === null || Array.isArray(v.guardrails)) {
+      throw new ValidationError('config.guardrails must be an object');
+    }
+    const g = v.guardrails as Record<string, unknown>;
+    const out_g: NonNullable<BotTemplateConfig['guardrails']> = {};
+
+    if (g.topicsToAvoid !== undefined) {
+      if (!Array.isArray(g.topicsToAvoid)) throw new ValidationError('config.guardrails.topicsToAvoid must be an array');
+      if (g.topicsToAvoid.length > TOPICS_MAX) throw new ValidationError(`config.guardrails.topicsToAvoid exceeds ${TOPICS_MAX} entries`);
+      out_g.topicsToAvoid = g.topicsToAvoid.map((t) => {
+        if (typeof t !== 'string' || !t.trim()) throw new ValidationError('config.guardrails.topicsToAvoid entries must be non-empty strings');
+        return t.trim();
+      });
+    }
+
+    for (const key of ['greetingMessage', 'fallbackMessage', 'offHoursMessage'] as const) {
+      if (g[key] !== undefined) {
+        if (typeof g[key] !== 'string') throw new ValidationError(`config.guardrails.${key} must be a string`);
+        if ((g[key] as string).length > GUARDRAIL_TEXT_MAX) throw new ValidationError(`config.guardrails.${key} exceeds ${GUARDRAIL_TEXT_MAX} characters`);
+        out_g[key] = g[key] as string;
+      }
+    }
+
+    if (g.confidenceThreshold !== undefined) {
+      const n = g.confidenceThreshold;
+      if (typeof n !== 'number' || Number.isNaN(n) || n < 0 || n > 1) throw new ValidationError('config.guardrails.confidenceThreshold must be a number between 0 and 1');
+      out_g.confidenceThreshold = n;
+    }
+    if (g.maxResponseLength !== undefined) {
+      const n = g.maxResponseLength;
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 1 || n > 10000) throw new ValidationError('config.guardrails.maxResponseLength must be an integer between 1 and 10000');
+      out_g.maxResponseLength = n;
+    }
+
+    if (Object.keys(out_g).length > 0) out.guardrails = out_g;
+  }
+
   return out;
 }
 
@@ -195,10 +259,11 @@ async function fanOutTemplateInvalidation(templateId: string, extraTenantIds: st
 /** Create a draft version with a row-locked, transactionally-allocated number. */
 export async function createDraftVersion(
   templateId: string,
-  input: { body: string; changelog?: string | null; expectedModules?: unknown },
+  input: { body: string; changelog?: string | null; expectedModules?: unknown; config?: unknown },
 ): Promise<BotTemplateVersion> {
   const { warnings: _w } = validateBody(input.body);
   const expectedModules = validateExpectedModules(input.expectedModules);
+  const config = validateConfig(input.config);
 
   return AppDataSource.transaction(async (manager) => {
     // Lock the template row so concurrent draft creation can't collide on version#.
@@ -225,6 +290,7 @@ export async function createDraftVersion(
       body: input.body,
       changelog: input.changelog?.trim() || null,
       expectedModules,
+      config,
       status: 'draft',
       lockVersion: 0,
     });
@@ -236,7 +302,7 @@ export async function createDraftVersion(
 export async function editDraftVersion(
   templateId: string,
   version: number,
-  input: { body?: string; changelog?: string | null; expectedModules?: unknown; lockVersion?: number },
+  input: { body?: string; changelog?: string | null; expectedModules?: unknown; config?: unknown; lockVersion?: number },
 ): Promise<BotTemplateVersion> {
   return AppDataSource.transaction(async (manager) => {
     const repo = manager.getRepository(BotTemplateVersion);
@@ -259,6 +325,7 @@ export async function editDraftVersion(
     }
     if (input.changelog !== undefined) row.changelog = input.changelog?.trim() || null;
     if (input.expectedModules !== undefined) row.expectedModules = validateExpectedModules(input.expectedModules);
+    if (input.config !== undefined) row.config = validateConfig(input.config);
     row.lockVersion += 1;
     const saved = await repo.save(row);
     return saved;
@@ -339,6 +406,7 @@ export async function rollbackToVersion(
     body: source.body,
     changelog: `Rollback to v${fromVersion}`,
     expectedModules: source.expectedModules,
+    config: source.config,
   });
   return publishVersion(templateId, draft.version, publishedBy);
 }

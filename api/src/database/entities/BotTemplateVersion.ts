@@ -18,6 +18,25 @@ import {
 
 export type BotTemplateVersionStatus = 'draft' | 'published' | 'unpublished';
 
+/**
+ * Identity/policy config the template owns (the "pre-defined bot"), versioned
+ * with the body. Tone + the policy guardrails move here from the per-bot AI
+ * settings (slim-down: tenants only pick a template + add instructions).
+ * OPERATIONAL settings (businessHours, escalationKeywords) deliberately stay
+ * tenant-owned and are NOT part of this — they're fetched per-tenant at runtime.
+ */
+export interface BotTemplateConfig {
+  tone?: string;
+  guardrails?: {
+    topicsToAvoid?: string[];
+    greetingMessage?: string;
+    fallbackMessage?: string;
+    offHoursMessage?: string;
+    confidenceThreshold?: number;
+    maxResponseLength?: number;
+  };
+}
+
 @Entity('bot_template_versions')
 @Index('ux_bot_template_versions_template_version', ['templateId', 'version'], { unique: true })
 export class BotTemplateVersion {
@@ -41,6 +60,11 @@ export class BotTemplateVersion {
   /** Advisory list of module ids this template expects (e.g. ['booking']), T13. */
   @Column({ type: 'jsonb', default: [], name: 'expected_modules' })
   expectedModules!: string[];
+
+  /** Identity/policy the template owns (tone + policy guardrails). Versioned
+   *  with the body; consumed at runtime via effectiveBotConfig(). */
+  @Column({ type: 'jsonb', default: {} })
+  config!: BotTemplateConfig;
 
   @Column({ type: 'varchar', length: 20, default: 'draft' })
   status!: BotTemplateVersionStatus;

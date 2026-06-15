@@ -123,6 +123,58 @@ describe('version lifecycle (T19)', () => {
   });
 });
 
+describe('version config — template-owned tone + guardrails (#24/#25)', () => {
+  const sampleConfig = {
+    tone: 'professional',
+    guardrails: {
+      topicsToAvoid: ['politics'],
+      greetingMessage: 'Hi from {botName}!',
+      fallbackMessage: 'Let me get a human.',
+      offHoursMessage: "We're closed.",
+      confidenceThreshold: 0.8,
+      maxResponseLength: 600,
+    },
+  };
+
+  it('persists config on create and returns it on the detail GET', async () => {
+    const id = await createTemplate();
+    const created = await request(app).post(`${BASE}/${id}/versions`).send({ body: 'v1', config: sampleConfig });
+    expect(created.status).toBe(201);
+    expect(created.body.data.version.config).toEqual(sampleConfig);
+
+    const detail = await request(app).get(`${BASE}/${id}`);
+    expect(detail.body.data.versions[0].config).toEqual(sampleConfig);
+  });
+
+  it('defaults to {} when no config is sent', async () => {
+    const id = await createTemplate();
+    const created = await request(app).post(`${BASE}/${id}/versions`).send({ body: 'v1' });
+    expect(created.body.data.version.config).toEqual({});
+  });
+
+  it('edits config on a draft and copies it through rollback', async () => {
+    const id = await createTemplate();
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'v1' });
+    const edit = await request(app).put(`${BASE}/${id}/versions/1`).send({ config: sampleConfig, lockVersion: 0 });
+    expect(edit.status).toBe(200);
+    expect(edit.body.data.version.config).toEqual(sampleConfig);
+
+    await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'v2' });
+    await request(app).post(`${BASE}/${id}/versions/2/publish`).send();
+    const rb = await request(app).post(`${BASE}/${id}/rollback`).send({ fromVersion: 1 });
+    expect(rb.body.data.version.config).toEqual(sampleConfig);
+  });
+
+  it('rejects an out-of-range confidenceThreshold', async () => {
+    const id = await createTemplate();
+    const res = await request(app)
+      .post(`${BASE}/${id}/versions`)
+      .send({ body: 'v1', config: { guardrails: { confidenceThreshold: 2 } } });
+    expect(res.status).toBe(422);
+  });
+});
+
 describe('unpublish — block-or-force (T12/T21)', () => {
   it('blocks unpublishing a version pinned by a bot, then forces with reassignment', async () => {
     await seedBlankBase();

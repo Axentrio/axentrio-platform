@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { Slider } from '@/components/ui/slider';
 import { AutoSaveStatusIndicator } from '@/components/ui/auto-save-status';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import {
@@ -35,7 +34,6 @@ import {
 } from '@/queries/useBotsQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
-import TagInput from './TagInput';
 import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
 
 // Placeholder hint shown under the additional-instructions field. These resolve
@@ -175,15 +173,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       topicsToAvoid: hTopics,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
-
-  const handleToneChipClick = (value: string) => {
-    setTone(value);
-    setCustomTone('');
-  };
-
-  const handleCustomToneToggle = () => {
-    setTone(customTone || 'custom');
-  };
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
 
@@ -336,50 +325,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               )}
             </div>
           </div>
-          <div>
-            <Label className="mb-2 text-text-secondary">{t('ai.bot.identity.voiceTone.label')}</Label>
-            <div className="flex flex-wrap gap-2">
-              {TONE_PRESETS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => !readOnly && handleToneChipClick(p.value)}
-                  disabled={readOnly}
-                  className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                    tone === p.value && !isCustomTone
-                      ? 'bg-primary-500 text-white'
-                      : 'bg-surface-2 text-text-muted hover:text-text-secondary'
-                  }`}
-                >
-                  {t(p.labelKey)}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => !readOnly && handleCustomToneToggle()}
-                disabled={readOnly}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                  isCustomTone
-                    ? 'bg-primary-500 text-white'
-                    : 'bg-surface-2 text-text-muted hover:text-text-secondary'
-                }`}
-              >
-                {t('ai.bot.identity.tones.custom')}
-              </button>
-            </div>
-            {isCustomTone && (
-              <Input
-                className="mt-2 max-w-sm"
-                value={customTone}
-                onChange={(e) => {
-                  setCustomTone(e.target.value);
-                  setTone(e.target.value || 'custom');
-                }}
-                placeholder={t('ai.bot.identity.customTone.placeholder')}
-                disabled={readOnly}
-              />
-            )}
-          </div>
         </section>
 
         {/* Bot Template (prompt identity, managed centrally; bound here) */}
@@ -470,100 +415,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           <p className="text-[10px] text-text-muted">
             {t('ai.bot.instructions.placeholders')} <code className="text-primary-400">{placeholderHint}</code>
           </p>
-        </section>
-
-        {/* Advanced Settings (flat — no accordion) */}
-        <section className="space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.advanced.title')}</h3>
-            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.advanced.description')}</p>
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.greeting.label')}</Label>
-            <Input
-              value={greetingMessage}
-              onChange={(e) => setGreetingMessage(e.target.value)}
-              placeholder={t('ai.bot.advanced.greeting.placeholder')}
-              disabled={readOnly}
-            />
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.fallback.label')}</Label>
-            <Textarea
-              value={fallbackMessage}
-              onChange={(e) => setFallbackMessage(e.target.value)}
-              placeholder={t('ai.bot.advanced.fallback.placeholder')}
-              rows={2}
-              disabled={readOnly}
-            />
-            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.fallback.helper')}</p>
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.offHours.label')}</Label>
-            <Textarea
-              value={offHoursMessage}
-              onChange={(e) => setOffHoursMessage(e.target.value)}
-              placeholder={t('ai.bot.advanced.offHours.placeholder')}
-              rows={2}
-              disabled={readOnly}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label className="mb-2 text-text-secondary">
-                {t('ai.bot.advanced.confidence.label', { value: confidenceThreshold.toFixed(2) })}
-              </Label>
-              <Slider
-                value={[confidenceThreshold]}
-                onValueChange={([v]) => setConfidenceThreshold(v)}
-                min={0}
-                max={1}
-                step={0.05}
-                disabled={readOnly}
-              />
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.confidence.helper')}</p>
-            </div>
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.maxResponseLength.label')}</Label>
-              <Input
-                type="number"
-                value={maxResponseLength}
-                onChange={(e) => setMaxResponseLength(parseInt(e.target.value) || 0)}
-                disabled={readOnly}
-                aria-invalid={!isMaxResponseLengthValid}
-              />
-              {isMaxResponseLengthValid ? (
-                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.maxResponseLength.helper')}</p>
-              ) : (
-                <p className="text-[10px] text-red-400 mt-1">{t('ai.bot.advanced.maxResponseLength.invalid')}</p>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.escalationKeywords.label')}</Label>
-            <TagInput
-              value={escalationKeywords}
-              onChange={setEscalationKeywords}
-              placeholder={t('ai.bot.advanced.escalationKeywords.placeholder')}
-              disabled={readOnly}
-            />
-            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.advanced.escalationKeywords.helper')}</p>
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.advanced.topicsToAvoid.label')}</Label>
-            <TagInput
-              value={topicsToAvoid}
-              onChange={setTopicsToAvoid}
-              placeholder={t('ai.bot.advanced.topicsToAvoid.placeholder')}
-              disabled={readOnly}
-            />
-          </div>
         </section>
       </div>
 

@@ -70,11 +70,11 @@ export const getBotReadinessStatus: CopilotTool<
     return {
       aiEnabled: ai?.enabled === true,
       hasWebhook,
+      // Tone is now template-owned (admin-controlled) and always resolves to at
+      // least the platform default, so readiness only turns on the tenant-owned
+      // chatbot name.
       brandVoiceConfigured:
-        typeof brandVoice?.name === 'string' &&
-        brandVoice.name.trim().length > 0 &&
-        typeof brandVoice?.tone === 'string' &&
-        brandVoice.tone.trim().length > 0,
+        typeof brandVoice?.name === 'string' && brandVoice.name.trim().length > 0,
       embedSnippetReady: typeof bot.publicKey === 'string' && bot.publicKey.length > 0,
     };
   },

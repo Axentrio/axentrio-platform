@@ -33,11 +33,55 @@ import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants,
-  forceConflict, type BotTemplateVersion,
+  forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
-type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string };
-const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '' };
+// Tone + policy guardrails are edited as flat strings in the dialog, then
+// assembled into a sparse BotTemplateConfig on save (empty fields omitted, so an
+// untouched config persists as {} and the bot falls back to platform defaults).
+type ConfigDraft = {
+  tone: string;
+  topicsToAvoid: string;
+  greetingMessage: string;
+  fallbackMessage: string;
+  offHoursMessage: string;
+  confidenceThreshold: string;
+  maxResponseLength: string;
+};
+const EMPTY_CONFIG: ConfigDraft = {
+  tone: '', topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: '', maxResponseLength: '',
+};
+
+function configToDraft(c: BotTemplateConfig | undefined): ConfigDraft {
+  const g = c?.guardrails ?? {};
+  return {
+    tone: c?.tone ?? '',
+    topicsToAvoid: (g.topicsToAvoid ?? []).join(', '),
+    greetingMessage: g.greetingMessage ?? '',
+    fallbackMessage: g.fallbackMessage ?? '',
+    offHoursMessage: g.offHoursMessage ?? '',
+    confidenceThreshold: g.confidenceThreshold === undefined ? '' : String(g.confidenceThreshold),
+    maxResponseLength: g.maxResponseLength === undefined ? '' : String(g.maxResponseLength),
+  };
+}
+
+function draftToConfig(d: ConfigDraft): BotTemplateConfig {
+  const config: BotTemplateConfig = {};
+  if (d.tone.trim()) config.tone = d.tone.trim();
+  const g: NonNullable<BotTemplateConfig['guardrails']> = {};
+  const topics = d.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
+  if (topics.length) g.topicsToAvoid = topics;
+  if (d.greetingMessage.trim()) g.greetingMessage = d.greetingMessage;
+  if (d.fallbackMessage.trim()) g.fallbackMessage = d.fallbackMessage;
+  if (d.offHoursMessage.trim()) g.offHoursMessage = d.offHoursMessage;
+  if (d.confidenceThreshold.trim()) g.confidenceThreshold = Number(d.confidenceThreshold);
+  if (d.maxResponseLength.trim()) g.maxResponseLength = Number(d.maxResponseLength);
+  if (Object.keys(g).length) config.guardrails = g;
+  return config;
+}
+
+type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; config: ConfigDraft };
+const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', config: EMPTY_CONFIG };
 
 const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
@@ -111,15 +155,16 @@ const AdminBotTemplateDetail: React.FC = () => {
 
   const openCreate = () => setDraft({ ...EMPTY_DRAFT, open: true, mode: 'create' });
   const openEdit = (v: BotTemplateVersion) =>
-    setDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', ') });
+    setDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
   const openView = (v: BotTemplateVersion) =>
-    setDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', ') });
+    setDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
 
   const saveDraft = async () => {
+    const config = draftToConfig(draft.config);
     if (draft.mode === 'create') {
-      await createVersionMut.mutateAsync({ body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules) });
+      await createVersionMut.mutateAsync({ body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
     } else {
-      await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules) });
+      await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
     }
     setDraft(EMPTY_DRAFT);
   };
@@ -358,6 +403,45 @@ const AdminBotTemplateDetail: React.FC = () => {
             <div className="space-y-1.5">
               <Label htmlFor="d-changelog">{t('admin.botTemplates.editor.changelog')}</Label>
               <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
+            </div>
+
+            {/* Template-owned tone + policy guardrails (admin-controlled; tenants no longer set these). */}
+            <div className="border-t border-border/50 pt-4 space-y-4">
+              <div>
+                <h4 className="text-sm font-medium text-text-primary">{t('admin.botTemplates.editor.configTitle')}</h4>
+                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.configHint')}</p>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-tone">{t('admin.botTemplates.editor.tone')}</Label>
+                <Input id="c-tone" value={draft.config.tone} placeholder="friendly" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, tone: e.target.value } }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-greeting">{t('admin.botTemplates.editor.greetingMessage')}</Label>
+                <Textarea id="c-greeting" rows={2} value={draft.config.greetingMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, greetingMessage: e.target.value } }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-fallback">{t('admin.botTemplates.editor.fallbackMessage')}</Label>
+                <Textarea id="c-fallback" rows={2} value={draft.config.fallbackMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, fallbackMessage: e.target.value } }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-offhours">{t('admin.botTemplates.editor.offHoursMessage')}</Label>
+                <Textarea id="c-offhours" rows={2} value={draft.config.offHoursMessage} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, offHoursMessage: e.target.value } }))} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="c-topics">{t('admin.botTemplates.editor.topicsToAvoid')}</Label>
+                <Input id="c-topics" value={draft.config.topicsToAvoid} placeholder="politics, religion" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, topicsToAvoid: e.target.value } }))} />
+                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.topicsHint')}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-confidence">{t('admin.botTemplates.editor.confidenceThreshold')}</Label>
+                  <Input id="c-confidence" type="number" step="0.05" min="0" max="1" value={draft.config.confidenceThreshold} placeholder="0.7" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, confidenceThreshold: e.target.value } }))} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="c-maxlen">{t('admin.botTemplates.editor.maxResponseLength')}</Label>
+                  <Input id="c-maxlen" type="number" step="50" min="1" value={draft.config.maxResponseLength} placeholder="500" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, config: { ...d.config, maxResponseLength: e.target.value } }))} />
+                </div>
+              </div>
             </div>
           </div>
           <DialogFooter>

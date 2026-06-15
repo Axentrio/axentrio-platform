@@ -109,9 +109,9 @@ describe('AiBotForm', () => {
   it('shows the leave dialog only when fields are invalid + dirty, and "Stay here" keeps the user on the form', async () => {
     const { user, onGoToKnowledgeBase } = renderForm();
 
-    const maxLen = screen.getByRole('spinbutton') as HTMLInputElement;
-    await user.clear(maxLen);
-    await user.type(maxLen, '0');
+    const email = screen.getByPlaceholderText('support@yourcompany.com') as HTMLInputElement;
+    await user.clear(email);
+    await user.type(email, 'not-an-email');
 
     await user.click(screen.getByRole('button', { name: /go to knowledge base/i }));
     await user.click(await screen.findByRole('button', { name: 'Stay here' }));

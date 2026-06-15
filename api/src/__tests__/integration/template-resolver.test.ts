@@ -95,6 +95,7 @@ describe('resolveBoundTemplate', () => {
     expect(await resolveBoundTemplate({ templateId: null, templateVersion: 'latest' })).toEqual({
       templateId: null,
       body: '',
+      config: {},
       resolvedVersion: null,
       pinnedButUnavailable: false,
       templateUnavailable: false,

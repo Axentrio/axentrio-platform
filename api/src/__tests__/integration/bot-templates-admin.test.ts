@@ -94,6 +94,17 @@ describe('version lifecycle (T19)', () => {
     expect(v2.body.data.version.version).toBe(2);
   });
 
+  it('blocks publishing a body with unknown placeholders', async () => {
+    const id = await createTemplate();
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'Hi {botName}, see {bogusVar}.' });
+    const pub = await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    expect(pub.status).toBe(422);
+    // fixing the placeholder lets it publish
+    await request(app).put(`${BASE}/${id}/versions/1`).send({ body: 'Hi {botName}.', lockVersion: 0 });
+    const ok = await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    expect(ok.status).toBe(200);
+  });
+
   it('rejects editing a published version (immutable)', async () => {
     const id = await createTemplate();
     await request(app).post(`${BASE}/${id}/versions`).send({ body: 'a' });

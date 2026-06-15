@@ -102,6 +102,14 @@ function draftToConfig(d: ConfigDraft): BotTemplateConfig {
   return config;
 }
 
+// Canonical {placeholder} set (mirrors the API's KNOWN_PLACEHOLDERS) for live linting.
+const KNOWN_PLACEHOLDERS = new Set(['botName', 'tone', 'supportEmail', 'businessName', 'fallbackMessage', 'offHoursMessage', 'greetingMessage', 'maxResponseLength', 'topicsToAvoid']);
+function unknownPlaceholders(body: string): string[] {
+  const out = new Set<string>();
+  for (const m of body.matchAll(/\{(\w+)\}/g)) if (!KNOWN_PLACEHOLDERS.has(m[1])) out.add(m[1]);
+  return [...out];
+}
+
 /** Count the guardrail fields a template actually sets (for the current-prompt summary). */
 function countGuardrails(c: BotTemplateConfig): number {
   const g = c.guardrails ?? {};
@@ -149,7 +157,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   if (isLoading) return <PageSkeleton variant="list" rows={4} />;
   if (isError || !data) return <InlineError message={t('admin.botTemplates.errors.load')} />;
 
-  const { template, versions, grantedTenantIds, usage } = data;
+  const { template, versions, grantedTenantIds, usage, moduleCatalog } = data;
   // The live prompt = latest published version (versions are DESC-ordered).
   const publishedVersion = versions.find((v) => v.status === 'published');
   const m = meta ?? {
@@ -541,10 +549,36 @@ const AdminBotTemplateDetail: React.FC = () => {
               <Label htmlFor="d-body">{t('admin.botTemplates.editor.body')}</Label>
               <Textarea id="d-body" rows={12} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
               {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.bodyHint')}</p>}
+              {draft.mode !== 'view' && unknownPlaceholders(draft.body).length > 0 && (
+                <p className="text-xs text-amber-400">
+                  {t('admin.botTemplates.editor.unknownPlaceholders', { placeholders: unknownPlaceholders(draft.body).map((p) => `{${p}}`).join(', ') })}
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="d-modules">{t('admin.botTemplates.editor.expectedModules')}</Label>
-              <Input id="d-modules" value={draft.expectedModules} placeholder="booking" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, expectedModules: e.target.value }))} />
+              <Label>{t('admin.botTemplates.editor.expectedModules')}</Label>
+              {(() => {
+                const ro = draft.mode === 'view';
+                const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
+                const toggleModule = (mid: string) => {
+                  const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
+                  setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
+                };
+                if (moduleCatalog.length === 0) return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
+                return (
+                  <div className="flex flex-wrap gap-1.5">
+                    {moduleCatalog.map((mod) => {
+                      const selected = modulesArr.includes(mod.id);
+                      return (
+                        <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
+                          {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.expectedModulesHint')}</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="d-changelog">{t('admin.botTemplates.editor.changelog')}</Label>

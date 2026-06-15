@@ -66,6 +66,7 @@ export interface BotTemplateDetail {
   versions: BotTemplateVersion[];
   grantedTenantIds: string[];
   usage: { bots: number; tenants: number };
+  moduleCatalog: { id: string; displayName: string }[];
 }
 
 /** Reads the block-or-force conflict details off a 409 response, if present. */

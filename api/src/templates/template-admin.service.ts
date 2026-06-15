@@ -39,18 +39,24 @@ const BLANK_BASE_KEY = 'blank-base';
 
 // ── Validation (T22) ─────────────────────────────────────────────────────────
 
-/** Throws on an over-cap body. Returns placeholder-lint warnings (non-blocking). */
+/** Unknown {placeholders} in a body (not in the canonical set). */
+export function findUnknownPlaceholders(body: string): string[] {
+  const unknown = new Set<string>();
+  for (const m of body.matchAll(PLACEHOLDER_RE)) {
+    if (!KNOWN_PLACEHOLDERS.has(m[1])) unknown.add(m[1]);
+  }
+  return [...unknown];
+}
+
+/** Throws on an over-cap body. Returns placeholder-lint warnings (non-blocking on save). */
 export function validateBody(body: string): { warnings: string[] } {
   if (typeof body !== 'string') throw new ValidationError('body must be a string');
   if (body.length > TEMPLATE_BODY_MAX) {
     throw new ValidationError(`body exceeds ${TEMPLATE_BODY_MAX} characters (${body.length})`);
   }
-  const unknown = new Set<string>();
-  for (const m of body.matchAll(PLACEHOLDER_RE)) {
-    if (!KNOWN_PLACEHOLDERS.has(m[1])) unknown.add(m[1]);
-  }
-  const warnings = unknown.size
-    ? [`Unknown placeholders (left as literal text): ${[...unknown].map((k) => `{${k}}`).join(', ')}`]
+  const unknown = findUnknownPlaceholders(body);
+  const warnings = unknown.length
+    ? [`Unknown placeholders (left as literal text): ${unknown.map((k) => `{${k}}`).join(', ')}`]
     : [];
   return { warnings };
 }
@@ -343,6 +349,12 @@ export async function publishVersion(
   if (!row) throw new NotFoundError('Template version not found');
   if (row.status !== 'draft') {
     throw new ConflictError(`Only a draft can be published (this version is ${row.status})`, { status: row.status });
+  }
+  // Block publishing a body with unknown {placeholders} — drafts may be WIP, but a
+  // published version must be clean (a typo'd placeholder ships as literal text).
+  const unknown = findUnknownPlaceholders(row.body);
+  if (unknown.length) {
+    throw new ValidationError(`Fix unknown placeholders before publishing: ${unknown.map((k) => `{${k}}`).join(', ')}`);
   }
   row.status = 'published';
   row.publishedAt = new Date();

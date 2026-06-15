@@ -38,6 +38,7 @@ import { buildSystemPrompt } from '../../llm/prompt-builder';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
+import { allModules } from '../../modules';
 
 const router = Router();
 
@@ -166,6 +167,7 @@ router.get(
       versions,
       grantedTenantIds: grants.map((g) => g.tenantId),
       usage: { bots: usageRow?.bots ?? 0, tenants: usageRow?.tenants ?? 0 },
+      moduleCatalog: allModules().map((m) => ({ id: m.id, displayName: m.displayName })),
     });
   }),
 );

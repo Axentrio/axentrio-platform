@@ -80,6 +80,19 @@ function draftToConfig(d: ConfigDraft): BotTemplateConfig {
   return config;
 }
 
+/** Count the guardrail fields a template actually sets (for the current-prompt summary). */
+function countGuardrails(c: BotTemplateConfig): number {
+  const g = c.guardrails ?? {};
+  let n = 0;
+  if (g.greetingMessage) n++;
+  if (g.fallbackMessage) n++;
+  if (g.offHoursMessage) n++;
+  if (g.topicsToAvoid?.length) n++;
+  if (g.confidenceThreshold !== undefined) n++;
+  if (g.maxResponseLength !== undefined) n++;
+  return n;
+}
+
 type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; config: ConfigDraft };
 const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', config: EMPTY_CONFIG };
 
@@ -112,6 +125,8 @@ const AdminBotTemplateDetail: React.FC = () => {
   if (isError || !data) return <InlineError message={t('admin.botTemplates.errors.load')} />;
 
   const { template, versions, grantedTenantIds } = data;
+  // The live prompt = latest published version (versions are DESC-ordered).
+  const publishedVersion = versions.find((v) => v.status === 'published');
   const m = meta ?? {
     displayName: template.displayName,
     category: template.category ?? '',
@@ -246,6 +261,41 @@ const AdminBotTemplateDetail: React.FC = () => {
               {t('common.save')}
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Current prompt — the live (latest published) prompt, surfaced so you can
+          see what the bot does without opening a version, with a clear edit path. */}
+      <Card variant="glass">
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CardTitle>{t('admin.botTemplates.detail.currentPrompt')}</CardTitle>
+            {publishedVersion && <Badge variant="default">{`v${publishedVersion.version}`}</Badge>}
+          </div>
+          <Button size="sm" onClick={() => openCreate()}>{t('admin.botTemplates.actions.editNewVersion')}</Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {publishedVersion ? (
+            <>
+              <Textarea
+                readOnly
+                rows={8}
+                value={publishedVersion.body || ''}
+                placeholder={t('admin.botTemplates.detail.promptEmpty')}
+                className="font-mono text-xs bg-surface-2"
+              />
+              <p className="text-xs text-text-tertiary">
+                {countGuardrails(publishedVersion.config) === 0 && !publishedVersion.config.tone
+                  ? t('admin.botTemplates.detail.promptConfigDefaults')
+                  : t('admin.botTemplates.detail.promptConfigSummary', {
+                      tone: publishedVersion.config.tone || t('admin.botTemplates.detail.promptToneDefault'),
+                      count: countGuardrails(publishedVersion.config),
+                    })}
+              </p>
+            </>
+          ) : (
+            <p className="text-sm text-text-tertiary">{t('admin.botTemplates.detail.noPublishedPrompt')}</p>
+          )}
         </CardContent>
       </Card>
 

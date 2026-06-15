@@ -43,6 +43,11 @@ export class ConversationBinding {
   @Column({ type: 'timestamp', nullable: true })
   lastInboundAt!: Date | null;
 
+  // Platform id of the most recent inbound message (e.g. WhatsApp wamid). Used
+  // to anchor a typing indicator on channels that require an inbound message_id.
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  lastInboundMessageId!: string | null;
+
   @CreateDateColumn()
   createdAt!: Date;
 

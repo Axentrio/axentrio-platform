@@ -147,6 +147,15 @@ export async function processInboundEvent(
 
     const savedMessage = await messageRepo.save(messageRepo.create(messageData)) as Message;
 
+    // Remember the latest inbound platform message id so a typing indicator can
+    // be anchored to it later (WhatsApp keys typing to a specific message_id).
+    if (event.externalMessageId) {
+      await getRepository(ConversationBinding).update(
+        { id: binding.id },
+        { lastInboundMessageId: event.externalMessageId, lastInboundAt: event.timestamp },
+      );
+    }
+
     // ── 5b. Ingest inbound media (fire-and-forget) ───────────────────────
     // Download/scan an inbound image into a `ready` upload_session so it
     // auto-attaches to a later booking. NEVER awaited — must not delay the

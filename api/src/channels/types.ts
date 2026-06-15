@@ -31,6 +31,12 @@ export interface NormalizedEvent {
   dedupeKey: string;
   timestamp: Date;
   rawEventType: string;
+  /**
+   * The platform's own id for this inbound message (e.g. WhatsApp wamid,
+   * Messenger mid). Needed by channels that key a typing indicator to a
+   * specific inbound message rather than a thread.
+   */
+  externalMessageId?: string;
 }
 
 // --- Outbound (us → platform) ---
@@ -96,13 +102,27 @@ export interface EventNormalizer {
   normalize(rawPayload: unknown, connection: ChannelConnection): NormalizedEvent[];
 }
 
+/** Optional context for a typing indicator send. */
+export interface TypingContext {
+  /**
+   * Latest inbound platform message id for the thread. WhatsApp keys its typing
+   * indicator to a specific inbound message_id; channels that don't need it
+   * (Messenger, Telegram) ignore this.
+   */
+  lastInboundMessageId?: string;
+}
+
 export interface OutboundTransport {
   send(
     message: OutboundChannelMessage,
     externalThreadId: string,
     connection: ChannelConnection,
   ): Promise<DeliveryResult>;
-  sendTypingIndicator(externalThreadId: string, connection: ChannelConnection): Promise<void>;
+  sendTypingIndicator(
+    externalThreadId: string,
+    connection: ChannelConnection,
+    context?: TypingContext,
+  ): Promise<void>;
   getCapabilities(): ChannelCapabilities;
 }
 

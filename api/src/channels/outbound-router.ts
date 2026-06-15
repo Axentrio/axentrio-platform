@@ -152,10 +152,6 @@ export async function routeTypingIndicator(
   tenantId: string,
   isTyping: boolean,
 ): Promise<void> {
-  const sessionRepository = AppDataSource.getRepository(ChatSession);
-  const bindingRepository = AppDataSource.getRepository(ConversationBinding);
-  const connectionRepository = AppDataSource.getRepository(ChannelConnection);
-
   // Always send to WebSocket for portal
   emitToSession(tenantId, sessionId, 'typing:indicator', {
     isTyping,
@@ -164,28 +160,40 @@ export async function routeTypingIndicator(
   });
 
   if (!isTyping) return;
+  await sendChannelTypingIndicator(sessionId);
+}
 
-  const session = await sessionRepository.findOne({ where: { id: sessionId } });
+/**
+ * Push a typing indicator to the end user on their external channel (Messenger
+ * typing_on, WhatsApp typing_indicator). Best-effort, and a no-op for widget
+ * sessions, inactive/unentitled connections, and channels that don't support
+ * typing. Widget + portal typing is handled over the WebSocket by the caller, so
+ * this only covers the platform-side bubble.
+ */
+export async function sendChannelTypingIndicator(sessionId: string): Promise<void> {
+  const session = await AppDataSource.getRepository(ChatSession).findOne({ where: { id: sessionId } });
   if (!session || session.channel === 'widget' || !session.channelConnectionId) return;
 
   const adapter = getChannelAdapter(session.channel);
   if (!adapter) return;
 
-  const binding = await bindingRepository.findOne({
+  const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
     where: { sessionId, channelConnectionId: session.channelConnectionId },
   });
-  const connection = await connectionRepository.findOne({
+  const connection = await AppDataSource.getRepository(ChannelConnection).findOne({
     where: { id: session.channelConnectionId },
   });
+  if (!binding || !connection?.isActive()) return;
 
-  if (binding && connection?.isActive()) {
-    // Same gate as message delivery (channels plan D10) — typing indicators
-    // are external API calls too.
-    if (!(await isChannelEntitled(connection.tenantId, connection.channel))) return;
-    try {
-      await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection);
-    } catch {
-      // Typing indicators are best-effort
-    }
+  // Same gate as message delivery (channels plan D10) — typing indicators are
+  // external API calls too.
+  if (!(await isChannelEntitled(connection.tenantId, connection.channel))) return;
+
+  try {
+    await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection, {
+      lastInboundMessageId: binding.lastInboundMessageId ?? undefined,
+    });
+  } catch {
+    // Typing indicators are best-effort
   }
 }

@@ -13,7 +13,7 @@ import { HandoffRequest } from '../database/entities/HandoffRequest';
 import { Participant } from '../database/entities/Participant';
 import { emitToTenantAgents } from '../websocket/socket.handler';
 import { EventEmitter } from '../utils/event-emitter';
-import { routeOutboundMessage } from '../channels/outbound-router';
+import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import {
   ResponsePayload,
   WebhookResponse,
@@ -261,6 +261,12 @@ export class WebhookService {
         isTyping,
         timestamp: new Date().toISOString(),
       });
+
+      // Also surface the typing bubble to the end user on their external
+      // channel (best-effort; no-op for widget / unsupported channels).
+      if (isTyping) {
+        void sendChannelTypingIndicator(sessionId).catch(() => {});
+      }
 
       return {
         success: true,

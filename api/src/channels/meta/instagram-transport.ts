@@ -49,7 +49,8 @@ export class InstagramOutboundTransport extends GraphOutboundTransport {
   }
 
   async sendTypingIndicator(_externalThreadId: string, _connection: ChannelConnection): Promise<void> {
-    // Instagram does not support typing indicators
+    // The Instagram-Login messaging API (graph.instagram.com) only supports the
+    // react/unreact sender actions — no typing indicator. No-op by design.
   }
 
   protected buildSendBody(

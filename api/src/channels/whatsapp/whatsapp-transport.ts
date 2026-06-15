@@ -1,5 +1,6 @@
+import axios from 'axios';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
-import { OutboundChannelMessage, ChannelCapabilities } from '../types';
+import { OutboundChannelMessage, ChannelCapabilities, TypingContext } from '../types';
 import { getWhatsAppAccessToken } from '../credential-utils';
 import { FB_GRAPH_API as GRAPH_API } from '../meta/graph-api';
 import { GraphOutboundTransport, GraphSendRequest } from '../meta/graph-outbound-transport';
@@ -30,9 +31,9 @@ export class WhatsAppOutboundTransport extends GraphOutboundTransport {
       supportsVideo: true,
       supportsAudio: true,
       supportsFiles: true,
-      // Typing indicators are keyed to a specific inbound message_id, not a
-      // thread, so they don't fit the OutboundTransport interface.
-      supportsTypingIndicator: false,
+      // Typing indicators are keyed to a specific inbound message_id (see
+      // sendTypingIndicator); the latest one is threaded through via TypingContext.
+      supportsTypingIndicator: true,
       supportsReadReceipts: true,
       supportsMessageEdit: false,
       supportsMessageDelete: false,
@@ -62,9 +63,35 @@ export class WhatsAppOutboundTransport extends GraphOutboundTransport {
     return data?.messages?.[0]?.id;
   }
 
-  async sendTypingIndicator(_externalThreadId: string, _connection: ChannelConnection): Promise<void> {
-    // WhatsApp typing indicators require a specific inbound message_id, which
-    // the thread-scoped interface can't provide. No-op.
+  async sendTypingIndicator(
+    _externalThreadId: string,
+    connection: ChannelConnection,
+    context?: TypingContext,
+  ): Promise<void> {
+    // WhatsApp ties the typing indicator to a specific inbound message_id (the
+    // call doubles as a read receipt). Without the latest inbound id we can't
+    // show typing — no-op. The indicator auto-clears after 25s or when we reply.
+    const messageId = context?.lastInboundMessageId;
+    if (!messageId) return;
+
+    const accessToken = getWhatsAppAccessToken(connection.credentials);
+    const phoneNumberId = connection.platformAccountId;
+    if (!accessToken || !phoneNumberId) return;
+
+    try {
+      await axios.post(
+        `${GRAPH_API}/${phoneNumberId}/messages`,
+        {
+          messaging_product: 'whatsapp',
+          status: 'read',
+          message_id: messageId,
+          typing_indicator: { type: 'text' },
+        },
+        { headers: { Authorization: `Bearer ${accessToken}` }, timeout: 5000 },
+      );
+    } catch {
+      // Typing indicators are best-effort
+    }
   }
 
   protected buildSendBody(

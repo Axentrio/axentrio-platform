@@ -87,6 +87,7 @@ const mockRouteOutboundMessage = vi.fn().mockResolvedValue({ success: true });
 vi.mock('../../channels/outbound-router', () => ({
   routeOutboundMessage: (...args: unknown[]) => mockRouteOutboundMessage(...args),
   routeTypingIndicator: vi.fn().mockResolvedValue(undefined),
+  sendChannelTypingIndicator: vi.fn().mockResolvedValue(undefined),
 }));
 
 const mockSendToWebhook = vi.fn();

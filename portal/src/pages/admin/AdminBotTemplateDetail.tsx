@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +20,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
+import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
@@ -40,6 +43,9 @@ const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
   const { id = '' } = useParams();
   const { data, isLoading, isError } = useAdminBotTemplateDetail(id);
+  // Tenant list for the access picker — only fetched when this template is not
+  // globally available (i.e. per-tenant grants are actually used).
+  const { data: tenantList } = useAdminTenantsAll({ enabled: data?.template ? !data.template.availableToAllTenants : false });
 
   const updateMut = useUpdateBotTemplate(id);
   const archiveMut = useArchiveBotTemplate(id);
@@ -52,7 +58,8 @@ const AdminBotTemplateDetail: React.FC = () => {
 
   const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
-  const [grantsText, setGrantsText] = useState<string | null>(null);
+  const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
+  const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
   const [confirm, setConfirm] = useState<{ open: boolean; title: string; description: string; onConfirm: () => void }>({
     open: false, title: '', description: '', onConfirm: () => {},
   });
@@ -67,7 +74,14 @@ const AdminBotTemplateDetail: React.FC = () => {
     description: template.description ?? '',
     availableToAllTenants: template.availableToAllTenants,
   };
-  const grants = grantsText ?? grantedTenantIds.join('\n');
+  const selectedTenantIds = selectedTenants ?? grantedTenantIds;
+  const tenants: Array<{ id: string; name: string }> = (tenantList ?? []) as Array<{ id: string; name: string }>;
+  const tenantName = (tid: string) => tenants.find((x) => x.id === tid)?.name ?? tid;
+  const toggleTenant = (tid: string) =>
+    setSelectedTenants((prev) => {
+      const base = prev ?? grantedTenantIds;
+      return base.includes(tid) ? base.filter((x) => x !== tid) : [...base, tid];
+    });
 
   const parseModules = (s: string) => s.split(',').map((x) => x.trim()).filter(Boolean);
 
@@ -246,27 +260,70 @@ const AdminBotTemplateDetail: React.FC = () => {
           <p className="text-xs text-text-tertiary">
             {template.availableToAllTenants ? t('admin.botTemplates.detail.grantsGlobalHint') : t('admin.botTemplates.detail.grantsHint')}
           </p>
-          <Textarea
-            rows={4} value={grants}
-            placeholder={t('admin.botTemplates.detail.grantsPlaceholder')}
-            onChange={(e) => setGrantsText(e.target.value)}
-            disabled={template.availableToAllTenants}
-          />
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              disabled={template.availableToAllTenants || grantsMut.isPending}
-              onClick={() => {
-                const tenantIds = grants.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-                withForce(
-                  (force) => grantsMut.mutateAsync({ tenantIds, force }).then(() => setGrantsText(null)),
-                  (n) => ({ title: t('admin.botTemplates.confirm.ungrantTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
-                );
-              }}
-            >
-              {t('admin.botTemplates.actions.saveAccess')}
-            </Button>
-          </div>
+
+          {!template.availableToAllTenants && (
+            <>
+              {/* Searchable tenant multi-select */}
+              <Popover open={tenantPickerOpen} onOpenChange={setTenantPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" role="combobox" className="w-full justify-between">
+                    {selectedTenantIds.length
+                      ? t('admin.botTemplates.detail.tenantsSelected', { count: selectedTenantIds.length })
+                      : t('admin.botTemplates.detail.tenantsSelectPlaceholder')}
+                    <ChevronsUpDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder={t('admin.botTemplates.detail.tenantsSearch')} />
+                    <CommandList>
+                      <CommandEmpty>{t('admin.botTemplates.detail.tenantsNone')}</CommandEmpty>
+                      <CommandGroup>
+                        {tenants.map((tenant) => {
+                          const checked = selectedTenantIds.includes(tenant.id);
+                          return (
+                            <CommandItem key={tenant.id} value={`${tenant.name} ${tenant.id}`} onSelect={() => toggleTenant(tenant.id)}>
+                              <Check className={`mr-2 h-4 w-4 ${checked ? 'opacity-100' : 'opacity-0'}`} />
+                              <span className="truncate">{tenant.name}</span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+
+              {/* Selected chips */}
+              {selectedTenantIds.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {selectedTenantIds.map((tid) => (
+                    <Badge key={tid} variant="secondary" className="gap-1">
+                      {tenantName(tid)}
+                      <button type="button" onClick={() => toggleTenant(tid)} aria-label="remove">
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button
+                  variant="outline"
+                  disabled={grantsMut.isPending}
+                  onClick={() =>
+                    withForce(
+                      (force) => grantsMut.mutateAsync({ tenantIds: selectedTenantIds, force }).then(() => setSelectedTenants(null)),
+                      (n) => ({ title: t('admin.botTemplates.confirm.ungrantTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
+                    )
+                  }
+                >
+                  {t('admin.botTemplates.actions.saveAccess')}
+                </Button>
+              </div>
+            </>
+          )}
         </CardContent>
       </Card>
 

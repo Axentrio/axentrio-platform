@@ -1140,7 +1140,11 @@
         "grants": "Accès des locataires",
         "grantsHint": "Un id de locataire par ligne (ou séparés par des virgules). Ces locataires peuvent lier ce modèle.",
         "grantsGlobalHint": "Ce modèle est disponible pour tous les locataires ; les autorisations par locataire ne sont pas utilisées.",
-        "grantsPlaceholder": "tenant-id-1\ntenant-id-2"
+        "grantsPlaceholder": "tenant-id-1\ntenant-id-2",
+        "tenantsSelectPlaceholder": "Sélectionner des locataires…",
+        "tenantsSelected": "{{count}} locataire(s) sélectionné(s)",
+        "tenantsSearch": "Rechercher des locataires…",
+        "tenantsNone": "Aucun locataire trouvé."
       },
       "editor": {
         "newTitle": "Nouvelle version brouillon",

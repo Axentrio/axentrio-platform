@@ -1182,7 +1182,11 @@
         "grants": "Tenant access",
         "grantsHint": "One tenant id per line (or comma-separated). These tenants may bind this template.",
         "grantsGlobalHint": "This template is available to all tenants, so per-tenant grants are not used.",
-        "grantsPlaceholder": "tenant-id-1\ntenant-id-2"
+        "grantsPlaceholder": "tenant-id-1\ntenant-id-2",
+        "tenantsSelectPlaceholder": "Select tenants…",
+        "tenantsSelected": "{{count}} tenant(s) selected",
+        "tenantsSearch": "Search tenants…",
+        "tenantsNone": "No tenants found."
       },
       "editor": {
         "newTitle": "New draft version",

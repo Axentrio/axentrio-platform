@@ -23,9 +23,12 @@ export interface SchedulerEventType {
   locationType: string;
 }
 
+export type AvailabilityMode = 'always_open' | 'business_hours';
+
 export interface SchedulerAvailability {
   id?: string;
   timezone: string;
+  availabilityMode?: AvailabilityMode;
   weeklyHours: WeeklyHours;
   dateOverrides: unknown[];
   slotGranularityMin: number;

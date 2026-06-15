@@ -27,7 +27,10 @@ export interface BusyInterval {
 }
 
 export interface SlotEngineInput {
-  rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides' | 'slotGranularityMin'>;
+  rule: Pick<
+    AvailabilityRule,
+    'timezone' | 'weeklyHours' | 'dateOverrides' | 'slotGranularityMin' | 'availabilityMode'
+  >;
   eventType: Pick<
     ServiceType,
     'durationMin' | 'bufferBeforeMin' | 'bufferAfterMin' | 'minNoticeMin' | 'maxHorizonDays'
@@ -72,13 +75,21 @@ function parseHHMM(s: string): { h: number; m: number } | null {
   return { h, m };
 }
 
+/** A full calendar day (00:00–24:00) — the implicit window in `always_open` mode. */
+const ALL_DAY: TimeWindow[] = [{ start: '00:00', end: '24:00' }];
+
 function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
   const dateStr = day.toFormat('yyyy-MM-dd');
   const override = (rule.dateOverrides || []).find((o) => o.date === dateStr);
   if (override) {
+    // A date override wins in every mode: a holiday closure still closes an
+    // always-open business, and custom one-off hours still apply.
     if (override.closed) return [];
     return override.windows || [];
   }
+  // Always-open: bookable around the clock; the calendar's busy intervals (passed
+  // in `busy`) are the only limit. Weekly hours are ignored in this mode.
+  if (rule.availabilityMode === 'always_open') return ALL_DAY;
   const key = WEEKDAY_KEYS[day.weekday - 1];
   return rule.weeklyHours?.[key] || [];
 }
@@ -168,12 +179,14 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
  * "bookable hours" in the scheduler. Pure; used by the outcome metrics.
  */
 export function isWithinBusinessHours(
-  rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides'>,
+  rule: Pick<AvailabilityRule, 'timezone' | 'weeklyHours' | 'dateOverrides' | 'availabilityMode'>,
   at: Date,
 ): boolean {
   const zone = rule.timezone || 'UTC';
   const dt = DateTime.fromJSDate(at, { zone });
   if (!dt.isValid) return false;
+  // always_open → the full-day window covers every instant (minus override closures),
+  // so a 24/7 business never has "after hours" in analytics.
   const windows = windowsForDay({ ...rule, slotGranularityMin: 0 }, dt);
   const minutesOfDay = dt.hour * 60 + dt.minute;
   for (const w of windows) {

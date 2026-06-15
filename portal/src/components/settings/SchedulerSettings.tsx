@@ -20,6 +20,7 @@ import {
   useUpdateSchedulerConfig,
   useBookingAvailability,
   type WeeklyHours,
+  type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
 import {
   useGoogleCalendarStatus,
@@ -141,6 +142,7 @@ export const SchedulerSettings: React.FC = () => {
   }, [queryClient]);
 
   const [timezone, setTimezone] = useState('Europe/Brussels');
+  const [availabilityMode, setAvailabilityMode] = useState<AvailabilityMode>('business_hours');
   const [slotGranularityMin, setSlotGranularityMin] = useState(30);
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
@@ -151,6 +153,7 @@ export const SchedulerSettings: React.FC = () => {
     if (!data || hydrated) return;
     if (data.availability) {
       setTimezone(data.availability.timezone);
+      setAvailabilityMode(data.availability.availabilityMode ?? 'business_hours');
       setSlotGranularityMin(data.availability.slotGranularityMin);
       setDays(rowsFromWeeklyHours(data.availability.weeklyHours));
       setOverrides(overridesFromConfig(data.availability.dateOverrides));
@@ -165,15 +168,18 @@ export const SchedulerSettings: React.FC = () => {
   // the service editor). Blocks an invalid availability save.
   const errors = useMemo<string[]>(() => {
     const e: string[] = [];
-    for (const { key, label } of DAYS) {
-      const r = days[key];
-      if (r.enabled && r.start >= r.end) e.push(`${label}: end time must be after start time.`);
+    // Weekly-hours validity only matters when those hours gate bookings.
+    if (availabilityMode === 'business_hours') {
+      for (const { key, label } of DAYS) {
+        const r = days[key];
+        if (r.enabled && r.start >= r.end) e.push(`${label}: end time must be after start time.`);
+      }
     }
     for (const o of overrides) {
       if (o.date && !o.closed && o.start >= o.end) e.push(`Override ${o.date}: end time must be after start time.`);
     }
     return e;
-  }, [days, overrides]);
+  }, [days, overrides, availabilityMode]);
 
   const handleSave = () => {
     const weeklyHours: WeeklyHours = {};
@@ -188,7 +194,7 @@ export const SchedulerSettings: React.FC = () => {
     );
     update.mutate({
       provider: 'internal',
-      availability: { timezone, weeklyHours, dateOverrides, slotGranularityMin },
+      availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
     });
   };
 
@@ -297,7 +303,43 @@ export const SchedulerSettings: React.FC = () => {
 
                 {/* Availability (shared across all services) */}
                 <div className="space-y-3 border-t border-edge pt-4">
-                  <h3 className="text-sm font-medium text-text-primary">Weekly availability</h3>
+                  <h3 className="text-sm font-medium text-text-primary">Availability</h3>
+                  <p className="text-xs text-text-muted">
+                    These hours tell the assistant when you're open and which times it can auto-confirm. They never stop
+                    it from helping customers or capturing an out-of-hours request for you to confirm.
+                  </p>
+                  {/* Always-open vs business-hours mode */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {([
+                      { mode: 'business_hours' as const, title: 'Set business hours', desc: 'The assistant offers slots only within the weekly hours below.' },
+                      { mode: 'always_open' as const, title: 'Always open (24/7)', desc: "Bookable around the clock — only your calendar's busy times limit slots." },
+                    ]).map(({ mode, title, desc }) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => setAvailabilityMode(mode)}
+                        className={cn(
+                          'rounded-lg border p-3 text-left transition-colors',
+                          availabilityMode === mode
+                            ? 'border-primary-400 bg-primary-400/10'
+                            : 'border-edge hover:border-text-muted',
+                        )}
+                      >
+                        <div className="flex items-center gap-2 text-sm font-medium text-text-primary">
+                          <span
+                            className={cn(
+                              'flex h-4 w-4 items-center justify-center rounded-full border',
+                              availabilityMode === mode ? 'border-primary-400' : 'border-text-muted',
+                            )}
+                          >
+                            {availabilityMode === mode && <span className="h-2 w-2 rounded-full bg-primary-400" />}
+                          </span>
+                          {title}
+                        </div>
+                        <p className="mt-1 pl-6 text-xs text-text-muted">{desc}</p>
+                      </button>
+                    ))}
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <Label className="text-text-secondary mb-1 block">Timezone</Label>
@@ -316,30 +358,38 @@ export const SchedulerSettings: React.FC = () => {
                     </div>
                     <NumberField label="Slot interval (min)" value={slotGranularityMin} onChange={setSlotGranularityMin} min={5} />
                   </div>
-                  <div className="space-y-2">
-                    {DAYS.map(({ key, label }) => (
-                      <div key={key} className="flex items-center gap-3">
-                        <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer">
-                          <Checkbox
-                            checked={days[key].enabled}
-                            onCheckedChange={(c) => setDay(key, { enabled: c === true })}
+                  {availabilityMode === 'business_hours' ? (
+                    <div className="space-y-2">
+                      <Label className="text-text-secondary block">Weekly hours</Label>
+                      {DAYS.map(({ key, label }) => (
+                        <div key={key} className="flex items-center gap-3">
+                          <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer">
+                            <Checkbox
+                              checked={days[key].enabled}
+                              onCheckedChange={(c) => setDay(key, { enabled: c === true })}
+                            />
+                            <span className="text-sm text-text-primary">{label}</span>
+                          </label>
+                          <TimeSelect
+                            value={days[key].start}
+                            disabled={!days[key].enabled}
+                            onChange={(v) => setDay(key, { start: v })}
                           />
-                          <span className="text-sm text-text-primary">{label}</span>
-                        </label>
-                        <TimeSelect
-                          value={days[key].start}
-                          disabled={!days[key].enabled}
-                          onChange={(v) => setDay(key, { start: v })}
-                        />
-                        <span className="text-text-muted">–</span>
-                        <TimeSelect
-                          value={days[key].end}
-                          disabled={!days[key].enabled}
-                          onChange={(v) => setDay(key, { end: v })}
-                        />
-                      </div>
-                    ))}
-                  </div>
+                          <span className="text-text-muted">–</span>
+                          <TimeSelect
+                            value={days[key].end}
+                            disabled={!days[key].enabled}
+                            onChange={(v) => setDay(key, { end: v })}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2 text-xs text-text-muted">
+                      Open 24/7 — the assistant can offer any time, limited only by your connected calendar's busy
+                      periods and each service's notice/buffer settings. Use date overrides below to close specific days.
+                    </p>
+                  )}
                 </div>
 
                 {/* Date overrides — holidays / closures / one-off hours */}

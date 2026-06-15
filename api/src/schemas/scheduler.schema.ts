@@ -125,6 +125,8 @@ export const serviceUpdateSchema = serviceInputSchema.partial().superRefine(dura
 
 export const availabilityInputSchema = z.object({
   timezone: z.string().min(1).max(64),
+  // 'always_open' → bookable 24/7 (weekly hours ignored); 'business_hours' → gated by weeklyHours.
+  availabilityMode: z.enum(['always_open', 'business_hours']).default('business_hours'),
   weeklyHours: weeklyHours.default({}),
   dateOverrides: z.array(dateOverride).default([]),
   slotGranularityMin: z.number().int().min(5).max(240).default(30),

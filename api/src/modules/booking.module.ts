@@ -12,6 +12,11 @@
 import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import {
+  AvailabilityRule,
+  type Weekday,
+  type TimeWindow,
+} from '../database/entities/AvailabilityRule';
+import {
   CheckAvailabilityTool,
   CreateBookingTool,
   RequestAppointmentTool,
@@ -64,6 +69,40 @@ function intakeLines(s: ServiceType): string {
     });
   if (!lines.length) return '';
   return `\n  Intake questions:\n${lines.join('\n')}`;
+}
+
+const WEEKDAY_ORDER: { key: Weekday; label: string }[] = [
+  { key: 'mon', label: 'Mon' },
+  { key: 'tue', label: 'Tue' },
+  { key: 'wed', label: 'Wed' },
+  { key: 'thu', label: 'Thu' },
+  { key: 'fri', label: 'Fri' },
+  { key: 'sat', label: 'Sat' },
+  { key: 'sun', label: 'Sun' },
+];
+
+const fmtWindows = (wins: TimeWindow[]): string =>
+  wins.map((w) => `${w.start}–${w.end}`).join(', ');
+
+/**
+ * The OPENING HOURS prompt block, so the bot answers "when are you open?" from
+ * the configured hours instead of guessing or relying on the knowledge base.
+ * Returns null when there's nothing reliable to state (business-hours mode with
+ * no days enabled) — the bot then falls back to kb_search for hours. These hours
+ * tell the bot WHEN the business is open; they never block it from helping or
+ * capturing an out-of-hours request (see the fallback rule in SERVICES).
+ */
+export function buildHoursSection(rule: AvailabilityRule | null): string | null {
+  if (!rule) return null;
+  if (rule.availabilityMode === 'always_open') {
+    return `\n## OPENING HOURS\nThis business takes bookings 24/7 — there are no fixed opening hours. If a customer asks when you are open, tell them you're available around the clock.`;
+  }
+  const lines = WEEKDAY_ORDER.flatMap(({ key, label }) => {
+    const wins = rule.weeklyHours?.[key];
+    return wins && wins.length ? [`- ${label}: ${fmtWindows(wins)}`] : [];
+  });
+  if (!lines.length) return null;
+  return `\n## OPENING HOURS\nThe business is open at these times (${rule.timezone}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`;
 }
 
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
@@ -133,6 +172,7 @@ Then follow these rules IN ORDER:
 7. For a service shown with a duration RANGE (e.g. "30-90 min"), establish the length FIRST — ask the customer how long they need ("choose length"), or estimate it from the conversation ("AI-estimated") — then pass that as durationMin to check_availability AND the booking tool (same value). If a tool returns DURATION_OUT_OF_RANGE, pick a length within the shown range. If create_booking returns SLOT_UNAVAILABLE for a range service, the chosen length didn't fit that start — offer a different start or a shorter length within range; don't retry the same start+length.`
       : ''
   }
+- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment (tell them it's a request the business will confirm) — this is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${
     hasOnRequestPrice
       ? ' For a service priced "on request", do not quote a number — capture the job via request_appointment so the owner can quote.'
@@ -159,10 +199,16 @@ export const bookingModule: ModuleDefinition = {
     new CancelBookingTool(),
   ],
   async buildPromptSection(ctx: ModulePromptContext): Promise<string | null> {
-    const services = await AppDataSource.getRepository(ServiceType).find({
-      where: { botId: ctx.botId, isActive: true },
-      order: { sortOrder: 'ASC' },
-    });
-    return buildServicesSection(services);
+    const [services, rule] = await Promise.all([
+      AppDataSource.getRepository(ServiceType).find({
+        where: { botId: ctx.botId, isActive: true },
+        order: { sortOrder: 'ASC' },
+      }),
+      AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),
+    ]);
+    const servicesSection = buildServicesSection(services);
+    if (!servicesSection) return null;
+    const hoursSection = buildHoursSection(rule);
+    return hoursSection ? `${servicesSection}${hoursSection}` : servicesSection;
   },
 };

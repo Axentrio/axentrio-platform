@@ -28,6 +28,17 @@ export interface TimeWindow {
 
 export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 
+/**
+ * How the slot engine treats `weeklyHours`:
+ *  - `business_hours` (default): slots are restricted to the configured weekly
+ *    windows — a barber doesn't get 3am bookings.
+ *  - `always_open`: the owner is bookable around the clock (every day 00:00–24:00),
+ *    so the only limits are the connected calendar's busy times + min-notice/horizon.
+ *    Suits emergency trades (a plumber) and fixes the "empty hours = never open" footgun.
+ * Date-override closures still apply in both modes (a holiday is still closed).
+ */
+export type AvailabilityMode = 'always_open' | 'business_hours';
+
 /** Recurring weekly hours: each weekday maps to zero or more open windows. */
 export type WeeklyHours = Partial<Record<Weekday, TimeWindow[]>>;
 
@@ -57,6 +68,10 @@ export class AvailabilityRule {
   /** IANA timezone, e.g. "Europe/Brussels". */
   @Column({ type: 'varchar', length: 64, default: 'UTC' })
   timezone!: string;
+
+  /** Whether `weeklyHours` gates bookable slots, or the owner is open 24/7. */
+  @Column({ type: 'varchar', length: 16, name: 'availability_mode', default: 'business_hours' })
+  availabilityMode!: AvailabilityMode;
 
   @Column({ type: 'jsonb', name: 'weekly_hours', default: {} })
   weeklyHours!: WeeklyHours;

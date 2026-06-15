@@ -70,7 +70,10 @@ async function claimOne(now: Date): Promise<ClaimedDigest | null> {
          LIMIT 1
          FOR UPDATE SKIP LOCKED
       )
-      RETURNING id, tenant_id, week_start, summary_md, metrics, send_attempts`,
+      -- week_start::text — node-postgres parses a bare date column into a JS
+      -- Date (local midnight), which stringifies to an ugly locale string in
+      -- the subject/body and risks a toISOString off-by-one. Keep YYYY-MM-DD.
+      RETURNING id, tenant_id, week_start::text AS week_start, summary_md, metrics, send_attempts`,
     [now, claimedUntil],
   ).then((r: [ClaimedDigest[], number] | ClaimedDigest[]) =>
     // node-postgres UPDATE…RETURNING returns rows directly; guard both shapes.

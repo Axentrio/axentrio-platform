@@ -69,6 +69,14 @@ describe('insights · digest send reconciler (P3 D6)', () => {
     expect((sent.headers as Record<string, string>)['List-Unsubscribe']).toMatch(/^<.*\/unsubscribe\/digest\?token=.+>$/);
   });
 
+  it('uses the plain YYYY-MM-DD week in the subject (claim returns week_start::text)', async () => {
+    // Live-caught: a bare `date` column comes back from pg as a JS Date and
+    // stringifies to "Mon Jun 08 2026 …" — claimOne casts to text to keep it clean.
+    h.claimQueue = [claim(1), null];
+    await sendDueDigests(NOW);
+    expect(h.sendCalls[0].subject).toBe('Your weekly business summary — week of 2026-06-08');
+  });
+
   it('backs off a failed send while attempts remain', async () => {
     h.sendResult = { success: false, error: 'provider 500' };
     h.claimQueue = [claim(2), null];

@@ -1905,6 +1905,15 @@
       "leads": "Prospects",
       "gapsOpened": "Nouvelles lacunes",
       "gapsWon": "Résolues"
+    },
+    "export": {
+      "label": "Exporter en CSV",
+      "error": "Échec de l'export",
+      "dataset": {
+        "outcomes-timeseries": "Résultats (quotidiens)",
+        "gaps": "Lacunes",
+        "leads": "Prospects"
+      }
     }
   },
   "analytics": {

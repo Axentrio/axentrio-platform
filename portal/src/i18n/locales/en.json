@@ -1911,6 +1911,15 @@
       "leads": "Leads",
       "gapsOpened": "New gaps",
       "gapsWon": "Resolved"
+    },
+    "export": {
+      "label": "Export CSV",
+      "error": "Export failed",
+      "dataset": {
+        "outcomes-timeseries": "Outcomes (daily)",
+        "gaps": "Gaps",
+        "leads": "Leads"
+      }
     }
   },
   "analytics": {

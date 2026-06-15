@@ -1906,6 +1906,15 @@
       "leads": "Leads",
       "gapsOpened": "Nieuwe hiaten",
       "gapsWon": "Opgelost"
+    },
+    "export": {
+      "label": "CSV exporteren",
+      "error": "Export mislukt",
+      "dataset": {
+        "outcomes-timeseries": "Resultaten (dagelijks)",
+        "gaps": "Hiaten",
+        "leads": "Leads"
+      }
     }
   },
   "analytics": {

@@ -311,3 +311,38 @@ describe('wire contract — /insights/digest', () => {
     expect(res.body.data.emailEnabled).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/analytics/export  ↔  exporter registry (P3, Enterprise, D7)
+// ---------------------------------------------------------------------------
+
+describe('analytics export — /analytics/export', () => {
+  it('403s a Pro tenant (aiBusinessInsights-gated)', async () => {
+    await seedProTenant();
+    const res = await request(app).get('/api/v1/analytics/export?dataset=leads');
+    expect(res.status).toBe(403);
+  });
+
+  it('streams a text/csv attachment for an Enterprise tenant', async () => {
+    await seedEnterpriseTenant();
+    const res = await request(app).get('/api/v1/analytics/export?dataset=leads');
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename="leads_.*\.csv"/);
+    // Header row is always present even with no leads in range.
+    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status');
+  });
+
+  it('400s an unknown dataset', async () => {
+    await seedEnterpriseTenant();
+    const res = await request(app).get('/api/v1/analytics/export?dataset=bogus');
+    expect(res.status).toBe(400);
+  });
+
+  it('405s the retired POST with an Allow: GET header', async () => {
+    await seedEnterpriseTenant();
+    const res = await request(app).post('/api/v1/analytics/export');
+    expect(res.status).toBe(405);
+    expect(res.headers['allow']).toBe('GET');
+  });
+});

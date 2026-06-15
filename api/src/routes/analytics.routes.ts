@@ -14,11 +14,13 @@ import type { OutcomesResponse, OutcomeAggregates, OutcomesTimeseriesResponse } 
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { cached } from '../utils/cache';
-import { asyncHandler, ApiError, BadRequestError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, ForbiddenError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
 import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
-import { analyticsQuerySchema } from '../schemas';
+import { analyticsQuerySchema, analyticsExportQuerySchema } from '../schemas';
+import { getEntitlements } from '../billing/entitlements';
+import { getExporter, toCsv, EXPORT_DATASETS } from '../analytics/exporters';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -479,13 +481,53 @@ router.get(
 );
 
 /**
- * POST /analytics/export
- * Export analytics data (stub)
+ * GET /analytics/export?dataset=<outcomes-timeseries|gaps|leads>&from=&to=&format=csv
+ * Enterprise-gated (aiBusinessInsights, P3 / ADR-0014 D7). Synchronous CSV
+ * download (data is small at SMB scale). Range reuses /analytics/outcomes.
+ */
+router.get(
+  '/export',
+  validate(analyticsExportQuerySchema, 'query'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId;
+    if (!tenantId) throw new BadRequestError('Tenant context required');
+
+    const entitlements = await getEntitlements(tenantId);
+    if (!entitlements.features.aiBusinessInsights) {
+      throw new ForbiddenError('Feature aiBusinessInsights not included in your plan');
+    }
+
+    const dataset = String(req.query.dataset ?? '');
+    const exporter = getExporter(dataset);
+    if (!exporter) {
+      throw new BadRequestError(`Unknown dataset — expected one of: ${EXPORT_DATASETS.join(', ')}`);
+    }
+    const format = String(req.query.format ?? 'csv');
+    if (format !== 'csv') throw new BadRequestError("Only format=csv is supported");
+
+    const { from, to } = resolveOutcomeWindow(
+      req.query.from as string | undefined,
+      req.query.to as string | undefined,
+    );
+    const rows = await exporter.rows(tenantId, { from, to });
+    const csv = toCsv(exporter.headers, rows);
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to })}"`);
+    res.status(200).send(csv);
+  })
+);
+
+/**
+ * POST /analytics/export → 405. The endpoint moved to GET (D7); POST is
+ * intentionally gone, not unimplemented.
  */
 router.post(
   '/export',
-  asyncHandler(async (_req: Request, _res: Response) => {
-    throw new ApiError('Analytics export not yet implemented', 501, ERROR_CODES.NOT_IMPLEMENTED);
+  asyncHandler(async (_req: Request, res: Response) => {
+    res.setHeader('Allow', 'GET');
+    throw new ApiError('Use GET /analytics/export', 405, ERROR_CODES.METHOD_NOT_ALLOWED);
   })
 );
 

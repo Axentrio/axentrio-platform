@@ -9,6 +9,7 @@ import { useTranslation } from 'react-i18next';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Analytics from './Analytics';
 import { InsightsContent } from '@/components/insights/InsightsContent';
+import { ExportMenu } from '@/components/insights/ExportMenu';
 import { LockedPreview } from '@/components/billing/LockedPreview';
 import { useHasFeature } from '@/queries/useEntitlementsQueries';
 
@@ -19,7 +20,7 @@ export default function SuccessMeter() {
   return (
     <div className="h-full overflow-y-auto">
       <Tabs defaultValue="outcomes" className="h-full">
-        <div className="px-6 pt-4">
+        <div className="px-6 pt-4 flex items-center justify-between gap-3">
           <TabsList>
             <TabsTrigger value="outcomes">
               {t('insights.surface.outcomesTab', { defaultValue: 'Outcomes' })}
@@ -28,6 +29,8 @@ export default function SuccessMeter() {
               {t('insights.surface.insightsTab', { defaultValue: 'AI Insights' })}
             </TabsTrigger>
           </TabsList>
+          {/* Enterprise CSV export (P3 D7) — renders nothing for other tiers. */}
+          <ExportMenu />
         </div>
 
         <TabsContent value="outcomes">

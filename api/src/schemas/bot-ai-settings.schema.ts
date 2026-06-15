@@ -22,6 +22,9 @@ export const putBotAiSettingsSchema = z
         name: z.string().min(1).max(100),
         tone: z.string().min(1).max(50),
         customInstructions: z.string().max(10000),
+        // Optional per-bot commercial name. Empty/absent → inherits the tenant
+        // business name at prompt-composition time (not persisted as a copy).
+        businessName: z.string().max(100).optional(),
         // @deprecated Legacy client-side starter-snippet id. The authoritative
         // template binding now lives on Bot.template_id / Bot.template_version
         // (set via PUT /bots/:id/template). Accepted-but-ignored for backward

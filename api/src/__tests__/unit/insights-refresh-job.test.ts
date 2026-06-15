@@ -57,6 +57,13 @@ vi.mock('../../insights/gap-aggregation.service', () => ({
   aggregateGaps: aggregateMock,
 }));
 
+// Digest generation + outbox are Enterprise-only and have their own tests; this
+// suite covers refresh orchestration only. Stub them so the once-runner's
+// unconditional sendDueDigests() drain doesn't touch unmocked repos.
+const sendDueDigestsMock = vi.hoisted(() => vi.fn(async () => ({ sent: 0, failed: 0 })));
+vi.mock('../../insights/digest-send.service', () => ({ sendDueDigests: sendDueDigestsMock }));
+vi.mock('../../insights/digest.service', () => ({ generateDigest: vi.fn(async () => {}) }));
+
 vi.mock('../../billing/entitlements', () => ({
   getEntitlements: async (tenantId: string) => ({
     features: { gapInsights: st.entitled[tenantId] ?? false },

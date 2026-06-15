@@ -86,17 +86,18 @@ beforeEach(() => {
 
 // ─── analytics.routes.ts ────────────────────────────────────────────────────
 
-describe('analytics.routes.ts — POST /export (L219 migration)', () => {
-  it('emits envelope 501 / NOT_IMPLEMENTED instead of bare {error}', async () => {
+describe('analytics.routes.ts — POST /export → 405 (P3 / ADR-0014 D7)', () => {
+  it('emits the envelope 405 / METHOD_NOT_ALLOWED with Allow: GET', async () => {
     const router = (await import('../../routes/analytics.routes')).default;
     const app = makeApp((a) => a.use('/analytics', router));
 
     const res = await request(app).post('/analytics/export');
 
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(405);
+    expect(res.headers['allow']).toBe('GET');
     expect(res.body).toMatchObject({
       success: false,
-      error: { code: 'NOT_IMPLEMENTED', message: 'Analytics export not yet implemented' },
+      error: { code: 'METHOD_NOT_ALLOWED', message: 'Use GET /analytics/export' },
       meta: { path: '/analytics/export', requestId: expect.any(String) },
     });
   });

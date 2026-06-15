@@ -178,7 +178,12 @@ router.get(
       where: { id: req.params.id, tenantId, deletedAt: IsNull() },
     });
     if (!bot) throw new NotFoundError('Bot not found');
-    sendSuccess(res, { ...toListItem(bot), embedSnippet: embedSnippet(bot.publicKey) });
+    sendSuccess(res, {
+      ...toListItem(bot),
+      embedSnippet: embedSnippet(bot.publicKey),
+      // Operational, tenant-owned business hours (editable on the bot page).
+      businessHours: bot.settings?.businessHours ?? null,
+    });
   })
 );
 
@@ -208,7 +213,11 @@ router.patch(
     const authReq = req as ProvisionedRequest;
     requireMutateRole(authReq.userRole);
     const tenantId = authReq.tenantId!;
-    const { name, status } = req.body as { name?: string; status?: 'active' | 'paused' };
+    const { name, status, businessHours } = req.body as {
+      name?: string;
+      status?: 'active' | 'paused';
+      businessHours?: NonNullable<Bot['settings']>['businessHours'];
+    };
 
     // Activation (paused → active) must re-check the quota: a tenant could have
     // 2 paused bots on Enterprise (cap=2), downgrade to Pro (cap=1), and then
@@ -247,6 +256,10 @@ router.patch(
 
       if (name !== undefined) bot.name = name;
       if (status !== undefined) bot.status = status;
+      // Operational, tenant-owned business hours live on the bot's settings blob.
+      if (businessHours !== undefined) {
+        bot.settings = { ...(bot.settings ?? {}), businessHours };
+      }
       return repo.save(bot);
     });
 

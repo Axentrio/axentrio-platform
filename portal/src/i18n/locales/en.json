@@ -679,7 +679,9 @@
         "select": "Template",
         "selectPlaceholder": "Choose a template",
         "version": "Version",
-        "latest": "Latest (follow updates)",
+        "latest": "Auto-update to latest version",
+        "pinTo": "Pin to v{{version}}",
+        "versionHelper": "Auto-update applies admin improvements automatically; pinning keeps the bot's behavior fixed to one version.",
         "preview": "Template preview (read-only)",
         "previewEmpty": "This template adds no base instructions.",
         "warnings": {
@@ -688,10 +690,28 @@
           "missingModules": "This template expects features not enabled on your plan: {{modules}}."
         }
       },
+      "managedByAdmins": "Managed by platform admins",
       "additionalInstructions": {
         "title": "Additional instructions",
         "description": "Extra guidance layered on top of the selected template. Leave blank to use the template as-is.",
-        "placeholder": "e.g. Always mention our weekend promotion."
+        "placeholder": "e.g. Always mention our weekend promotion.",
+        "scopeNote": "Add business-specific notes only. This can't override the template's tone, safety rules, or escalation policy — those are set by platform admins."
+      },
+      "operational": {
+        "title": "Operational settings",
+        "description": "Your business's day-to-day controls — these stay with you, not the template.",
+        "escalationKeywords": {
+          "label": "Escalation keywords",
+          "placeholder": "e.g. refund, complaint, manager",
+          "helper": "When a visitor's message contains one of these, the bot hands off to a human."
+        },
+        "businessHours": {
+          "label": "Business hours",
+          "helper": "Outside these hours, visitors get the off-hours message instead of a bot reply.",
+          "timezone": "Timezone (IANA, e.g. America/New_York)",
+          "closed": "Closed",
+          "save": "Save business hours"
+        }
       },
       "advanced": {
         "title": "Advanced Settings",
@@ -1130,7 +1150,7 @@
         "archive": "Archive",
         "publish": "Publish",
         "unpublish": "Unpublish",
-        "rollback": "Rollback",
+        "rollback": "Restore as new version",
         "view": "View",
         "newDraft": "New draft",
         "saveAccess": "Save access"
@@ -1212,7 +1232,7 @@
         "archiveTitle": "Archive this template?",
         "unpublishTitle": "Unpublish this version?",
         "ungrantTitle": "Remove tenant access?",
-        "reassign": "{{count}} bound bot(s) will be reassigned to the blank base template. Continue?",
+        "reassign": "{{count}} bound bot(s) will be moved to the blank base template — they'll lose this template's tone, guardrails, greeting/fallback/off-hours messages, and prompt body, and fall back to platform defaults until an admin rebinds them. Continue?",
         "proceed": "Proceed"
       },
       "errors": {

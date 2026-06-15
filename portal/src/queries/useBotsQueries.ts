@@ -43,6 +43,19 @@ export interface BotEmbedResponse {
   publicKey?: string;
 }
 
+export type WeekDay = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+export interface BusinessHours {
+  enabled: boolean;
+  timezone: string;
+  schedule: Array<{ day: WeekDay; open: string; close: string; closed: boolean }>;
+}
+
+export interface BotDetail extends BotListItem {
+  embedSnippet: string;
+  businessHours: BusinessHours | null;
+}
+
 /**
  * Extracts the structured backend error code from an Axios error response.
  * Backend bodies follow `{ error: { code, message, ... } }`.
@@ -68,6 +81,12 @@ export const botsOptions = {
       queryFn: () => api.get<BotEmbedResponse>(`/bots/${botId}/embed`),
       enabled: !!botId,
     }),
+  detail: (botId: string) =>
+    queryOptions({
+      queryKey: queryKeys.bots.detail(botId),
+      queryFn: () => api.get<BotDetail>(`/bots/${botId}`),
+      enabled: !!botId,
+    }),
 };
 
 // --- Queries ---
@@ -80,6 +99,13 @@ export function useBotEmbed(botId: string | null | undefined) {
   return useQuery({
     ...botsOptions.embed(botId ?? ''),
     enabled: !!botId,
+  });
+}
+
+export function useBotDetail(botId: string | null | undefined, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    ...botsOptions.detail(botId ?? ''),
+    enabled: !!botId && (opts.enabled ?? true),
   });
 }
 
@@ -98,10 +124,11 @@ export function useCreateBot() {
 export function useUpdateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: { id: string; name?: string; status?: BotStatus }) =>
+    mutationFn: ({ id, ...patch }: { id: string; name?: string; status?: BotStatus; businessHours?: BusinessHours }) =>
       api.patch<BotListItem>(`/bots/${id}`, patch),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });
+      queryClient.invalidateQueries({ queryKey: queryKeys.bots.detail(vars.id) });
     },
   });
 }

@@ -31,20 +31,43 @@ import {
   useUpdateBotAiSettings,
   useBotTemplates,
   useBindBotTemplate,
+  useBotDetail,
+  useUpdateBot,
+  type BusinessHours,
+  type WeekDay,
 } from '@/queries/useBotsQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
+import TagInput from './TagInput';
 import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
 
 // Placeholder hint shown under the additional-instructions field. These resolve
 // at runtime via the prompt composer's variable map.
-const AI_PLACEHOLDERS = ['{botName}', '{businessName}', '{tone}', '{supportEmail}'];
+// Tone is admin-owned (template), so it's intentionally not advertised here as a
+// tenant-editable placeholder.
+const AI_PLACEHOLDERS = ['{botName}', '{businessName}', '{supportEmail}'];
 
 interface AiBotFormProps {
   /** The bot whose AI config this form edits (per-bot config editing). */
   botId: string;
   onGoToKnowledgeBase: () => void;
 }
+
+// Operational, tenant-owned business hours. Full lowercase weekday names — must
+// match the API/runtime off-hours check (Intl `weekday: 'long'`).
+const WEEK_DAYS: WeekDay[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+type DaySchedule = BusinessHours['schedule'][number];
+
+/** A full 7-day schedule, merging stored rows over a sensible default (9–5, weekends closed). */
+function buildSchedule(stored: BusinessHours['schedule'] | undefined): DaySchedule[] {
+  const byDay = new Map((stored ?? []).map((s) => [s.day, s]));
+  return WEEK_DAYS.map(
+    (day) => byDay.get(day) ?? { day, open: '09:00', close: '17:00', closed: day === 'saturday' || day === 'sunday' },
+  );
+}
+
+const businessHoursKey = (enabled: boolean, tz: string, schedule: DaySchedule[]): string =>
+  JSON.stringify({ enabled, tz, schedule });
 
 const TONE_PRESETS = [
   { value: 'friendly', labelKey: 'ai.bot.identity.tones.friendly' },
@@ -97,6 +120,11 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const { data: templateView } = useBotTemplates(botId, { enabled: isAdminOrSupervisor });
   const bindTemplate = useBindBotTemplate(botId);
 
+  // Business hours (operational, tenant-owned). Its own resource (bot settings),
+  // saved explicitly with its own button — separate from the auto-saved AI form.
+  const { data: botDetail } = useBotDetail(botId, { enabled: isAdminOrSupervisor });
+  const updateBot = useUpdateBot();
+
   // Form state
   const [enabled, setEnabled] = useState(false);
   const [botName, setBotName] = useState('');
@@ -111,6 +139,12 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [maxResponseLength, setMaxResponseLength] = useState(500);
   const [escalationKeywords, setEscalationKeywords] = useState<string[]>([]);
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
+  // Business hours editor state (hydrated from the bot detail, saved separately).
+  const [bhEnabled, setBhEnabled] = useState(false);
+  const [bhTimezone, setBhTimezone] = useState('UTC');
+  const [bhSchedule, setBhSchedule] = useState<DaySchedule[]>(() => buildSchedule(undefined));
+  const [bhBaseline, setBhBaseline] = useState<string | null>(null);
+  const bhHydratedKeyRef = useRef<string | null>(null);
   // Baseline snapshot captured at hydration. Stays fixed until tenant change;
   // useAutoSave maintains its own moving "last saved" baseline on top of this.
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
@@ -173,6 +207,30 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       topicsToAvoid: hTopics,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
+
+  // Hydrate business hours once per (tenant, bot), mirroring the AI-form guard so
+  // refetches don't clobber in-progress edits.
+  useEffect(() => {
+    if (!botDetail || !tenantId) return;
+    if (bhHydratedKeyRef.current === hydrationKey) return;
+    bhHydratedKeyRef.current = hydrationKey;
+    const bh = botDetail.businessHours;
+    const sched = buildSchedule(bh?.schedule);
+    setBhEnabled(bh?.enabled ?? false);
+    setBhTimezone(bh?.timezone || 'UTC');
+    setBhSchedule(sched);
+    setBhBaseline(businessHoursKey(bh?.enabled ?? false, bh?.timezone || 'UTC', sched));
+  }, [botDetail, tenantId, hydrationKey]);
+
+  const bhDirty = bhBaseline !== null && businessHoursKey(bhEnabled, bhTimezone, bhSchedule) !== bhBaseline;
+
+  const setDay = (day: WeekDay, patch: Partial<DaySchedule>) =>
+    setBhSchedule((prev) => prev.map((d) => (d.day === day ? { ...d, ...patch } : d)));
+
+  const saveBusinessHours = async () => {
+    await updateBot.mutateAsync({ id: botId, businessHours: { enabled: bhEnabled, timezone: bhTimezone, schedule: bhSchedule } });
+    setBhBaseline(businessHoursKey(bhEnabled, bhTimezone, bhSchedule));
+  };
 
   const effectiveTone = isCustomTone ? (customTone.trim() || 'custom') : tone;
 
@@ -357,10 +415,11 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                   <SelectContent>
                     <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
                     {publishedVersions.map((v) => (
-                      <SelectItem key={v} value={String(v)}>{`v${v}`}</SelectItem>
+                      <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.template.versionHelper')}</p>
               </div>
             )}
           </div>
@@ -376,7 +435,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             </p>
           )}
           <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.template.preview')}</Label>
+            <div className="mb-1 flex items-center gap-2">
+              <Label className="text-text-secondary">{t('ai.bot.template.preview')}</Label>
+              <span className="text-[10px] rounded-full bg-surface-3 px-2 py-0.5 text-text-muted">{t('ai.bot.managedByAdmins')}</span>
+            </div>
             <Textarea
               value={resolved?.body || ''}
               placeholder={t('ai.bot.template.previewEmpty')}
@@ -412,9 +474,84 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             disabled={readOnly}
             className="font-mono text-xs"
           />
+          <p className="text-[10px] text-text-muted">{t('ai.bot.additionalInstructions.scopeNote')}</p>
           <p className="text-[10px] text-text-muted">
             {t('ai.bot.instructions.placeholders')} <code className="text-primary-400">{placeholderHint}</code>
           </p>
+        </section>
+
+        {/* Operational settings (tenant-owned: escalation + business hours) */}
+        <section className="space-y-4">
+          <div>
+            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.operational.title')}</h3>
+            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.operational.description')}</p>
+          </div>
+
+          <div>
+            <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.escalationKeywords.label')}</Label>
+            <TagInput
+              value={escalationKeywords}
+              onChange={setEscalationKeywords}
+              placeholder={t('ai.bot.operational.escalationKeywords.placeholder')}
+              disabled={readOnly}
+            />
+            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
+          </div>
+
+          {/* Business hours — its own resource, saved with an explicit button. */}
+          <div className="rounded-xl border border-edge p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
+                <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
+              </div>
+              <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
+            </div>
+
+            {bhEnabled && (
+              <>
+                <div className="max-w-xs">
+                  <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.businessHours.timezone')}</Label>
+                  <Input
+                    value={bhTimezone}
+                    onChange={(e) => setBhTimezone(e.target.value)}
+                    placeholder="America/New_York"
+                    disabled={readOnly}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  {bhSchedule.map((d) => (
+                    <div key={d.day} className="flex items-center gap-2 text-sm">
+                      <span className="w-24 capitalize text-text-secondary">{d.day}</span>
+                      <Switch
+                        checked={!d.closed}
+                        onCheckedChange={(open) => setDay(d.day, { closed: !open })}
+                        disabled={readOnly}
+                        aria-label={`${d.day} open`}
+                      />
+                      {d.closed ? (
+                        <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
+                      ) : (
+                        <div className="flex items-center gap-1.5">
+                          <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
+                          <span className="text-text-muted">–</span>
+                          <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {!readOnly && (
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || updateBot.isPending}>
+                  {t('ai.bot.operational.businessHours.save')}
+                </Button>
+              </div>
+            )}
+          </div>
         </section>
       </div>
 

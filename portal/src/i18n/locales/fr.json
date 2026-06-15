@@ -673,7 +673,9 @@
         "select": "Modèle",
         "selectPlaceholder": "Choisir un modèle",
         "version": "Version",
-        "latest": "Dernière (suivre les mises à jour)",
+        "latest": "Mise à jour automatique vers la dernière version",
+        "pinTo": "Épingler à v{{version}}",
+        "versionHelper": "La mise à jour automatique applique les améliorations des admins automatiquement ; l'épinglage fige le comportement du bot sur une version.",
         "preview": "Aperçu du modèle (lecture seule)",
         "previewEmpty": "Ce modèle n'ajoute aucune instruction de base.",
         "warnings": {
@@ -682,10 +684,28 @@
           "missingModules": "Ce modèle attend des fonctionnalités non activées sur votre offre : {{modules}}."
         }
       },
+      "managedByAdmins": "Géré par les admins de la plateforme",
       "additionalInstructions": {
         "title": "Instructions supplémentaires",
         "description": "Conseils supplémentaires ajoutés au modèle sélectionné. Laissez vide pour utiliser le modèle tel quel.",
-        "placeholder": "ex. Mentionnez toujours notre promotion du week-end."
+        "placeholder": "ex. Mentionnez toujours notre promotion du week-end.",
+        "scopeNote": "Ajoutez uniquement des notes spécifiques à votre activité. Cela ne peut pas remplacer le ton, les règles de sécurité ni la politique d'escalade du modèle — ceux-ci sont définis par les admins de la plateforme."
+      },
+      "operational": {
+        "title": "Paramètres opérationnels",
+        "description": "Les commandes quotidiennes de votre entreprise — elles vous appartiennent, pas au modèle.",
+        "escalationKeywords": {
+          "label": "Mots-clés d'escalade",
+          "placeholder": "ex. remboursement, réclamation, responsable",
+          "helper": "Quand le message d'un visiteur contient l'un de ces mots, le bot transfère à un humain."
+        },
+        "businessHours": {
+          "label": "Horaires d'ouverture",
+          "helper": "En dehors de ces horaires, les visiteurs reçoivent le message hors horaires au lieu d'une réponse du bot.",
+          "timezone": "Fuseau horaire (IANA, ex. America/New_York)",
+          "closed": "Fermé",
+          "save": "Enregistrer les horaires"
+        }
       },
       "advanced": {
         "title": "Paramètres avancés",
@@ -1088,7 +1108,7 @@
         "archive": "Archiver",
         "publish": "Publier",
         "unpublish": "Dépublier",
-        "rollback": "Restaurer",
+        "rollback": "Restaurer comme nouvelle version",
         "view": "Voir",
         "newDraft": "Nouveau brouillon",
         "saveAccess": "Enregistrer l'accès"
@@ -1170,7 +1190,7 @@
         "archiveTitle": "Archiver ce modèle ?",
         "unpublishTitle": "Dépublier cette version ?",
         "ungrantTitle": "Retirer l'accès du locataire ?",
-        "reassign": "{{count}} bot(s) lié(s) seront réaffecté(s) au modèle de base vierge. Continuer ?",
+        "reassign": "{{count}} bot(s) lié(s) seront déplacé(s) vers le modèle de base vierge — ils perdront le ton, les garde-fous, les messages d'accueil/de repli/hors horaires et le corps du prompt de ce modèle, et reviendront aux valeurs par défaut de la plateforme jusqu'à ce qu'un admin les relie. Continuer ?",
         "proceed": "Continuer"
       },
       "errors": {

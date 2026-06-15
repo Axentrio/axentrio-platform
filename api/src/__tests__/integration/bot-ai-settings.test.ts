@@ -275,4 +275,38 @@ describe('Per-bot AI settings', () => {
       expect(res.status).toBe(403);
     });
   });
+
+  describe('PATCH /bots/:id — business hours (operational, tenant-owned)', () => {
+    const validBH = {
+      enabled: true,
+      timezone: 'America/New_York',
+      schedule: [
+        { day: 'monday', open: '09:00', close: '17:00', closed: false },
+        { day: 'saturday', open: '00:00', close: '00:00', closed: true },
+      ],
+    };
+
+    it('persists businessHours and returns it on the bot GET', async () => {
+      const patch = await request(app).patch(`/api/v1/bots/${botId}`).send({ businessHours: validBH });
+      expect(patch.status).toBe(200);
+
+      const get = await request(app).get(`/api/v1/bots/${botId}`);
+      expect(get.status).toBe(200);
+      expect(get.body.data.businessHours).toEqual(validBH);
+    });
+
+    it('rejects an invalid day name (must match Intl weekday output)', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({ businessHours: { ...validBH, schedule: [{ day: 'mon', open: '09:00', close: '17:00', closed: false }] } });
+      expect(res.status).toBe(422);
+    });
+
+    it('rejects a malformed time', async () => {
+      const res = await request(app)
+        .patch(`/api/v1/bots/${botId}`)
+        .send({ businessHours: { ...validBH, schedule: [{ day: 'monday', open: '9am', close: '17:00', closed: false }] } });
+      expect(res.status).toBe(422);
+    });
+  });
 });

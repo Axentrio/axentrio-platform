@@ -674,7 +674,9 @@
         "select": "Sjabloon",
         "selectPlaceholder": "Kies een sjabloon",
         "version": "Versie",
-        "latest": "Laatste (volg updates)",
+        "latest": "Automatisch bijwerken naar nieuwste versie",
+        "pinTo": "Vastzetten op v{{version}}",
+        "versionHelper": "Automatisch bijwerken past adminverbeteringen automatisch toe; vastzetten houdt het gedrag van de bot op één versie.",
         "preview": "Sjabloonvoorbeeld (alleen-lezen)",
         "previewEmpty": "Dit sjabloon voegt geen basisinstructies toe.",
         "warnings": {
@@ -683,10 +685,28 @@
           "missingModules": "Dit sjabloon verwacht functies die niet zijn ingeschakeld in je abonnement: {{modules}}."
         }
       },
+      "managedByAdmins": "Beheerd door platformbeheerders",
       "additionalInstructions": {
         "title": "Aanvullende instructies",
         "description": "Extra richtlijnen bovenop het gekozen sjabloon. Laat leeg om het sjabloon ongewijzigd te gebruiken.",
-        "placeholder": "bijv. Vermeld altijd onze weekendactie."
+        "placeholder": "bijv. Vermeld altijd onze weekendactie.",
+        "scopeNote": "Voeg alleen bedrijfsspecifieke notities toe. Dit kan de toon, veiligheidsregels of escalatiebeleid van het sjabloon niet overschrijven — die worden ingesteld door platformbeheerders."
+      },
+      "operational": {
+        "title": "Operationele instellingen",
+        "description": "De dagelijkse instellingen van je bedrijf — deze blijven bij jou, niet bij het sjabloon.",
+        "escalationKeywords": {
+          "label": "Escalatiewoorden",
+          "placeholder": "bijv. terugbetaling, klacht, manager",
+          "helper": "Wanneer het bericht van een bezoeker een van deze woorden bevat, draagt de bot over aan een mens."
+        },
+        "businessHours": {
+          "label": "Openingstijden",
+          "helper": "Buiten deze tijden krijgen bezoekers het buiten-openingstijdenbericht in plaats van een botantwoord.",
+          "timezone": "Tijdzone (IANA, bijv. America/New_York)",
+          "closed": "Gesloten",
+          "save": "Openingstijden opslaan"
+        }
       },
       "advanced": {
         "title": "Geavanceerde instellingen",
@@ -1089,7 +1109,7 @@
         "archive": "Archiveren",
         "publish": "Publiceren",
         "unpublish": "Publicatie ongedaan maken",
-        "rollback": "Terugdraaien",
+        "rollback": "Herstellen als nieuwe versie",
         "view": "Bekijken",
         "newDraft": "Nieuw concept",
         "saveAccess": "Toegang opslaan"
@@ -1171,7 +1191,7 @@
         "archiveTitle": "Dit sjabloon archiveren?",
         "unpublishTitle": "Deze versie niet meer publiceren?",
         "ungrantTitle": "Tenant-toegang verwijderen?",
-        "reassign": "{{count}} gekoppelde bot(s) worden opnieuw toegewezen aan het lege basissjabloon. Doorgaan?",
+        "reassign": "{{count}} gekoppelde bot(s) worden verplaatst naar het lege basissjabloon — ze verliezen de toon, richtlijnen, begroetings-/terugval-/buiten-openingstijdenberichten en de prompt-inhoud van dit sjabloon, en vallen terug op platformstandaarden totdat een beheerder ze opnieuw koppelt. Doorgaan?",
         "proceed": "Doorgaan"
       },
       "errors": {

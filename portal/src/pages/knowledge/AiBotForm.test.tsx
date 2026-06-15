@@ -44,6 +44,8 @@ vi.mock('@/queries/useBotsQueries', () => ({
     },
   }),
   useBindBotTemplate: () => ({ mutate: mockBind, isPending: false }),
+  useBotDetail: () => ({ data: { businessHours: null } }),
+  useUpdateBot: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const ADDL_INSTRUCTIONS_PLACEHOLDER = /weekend promotion/;

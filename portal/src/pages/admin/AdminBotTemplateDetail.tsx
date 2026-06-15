@@ -380,8 +380,8 @@ const AdminBotTemplateDetail: React.FC = () => {
 
       {/* Version editor dialog */}
       <Dialog open={draft.open} onOpenChange={(o) => setDraft((d) => ({ ...d, open: o }))}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle>
               {draft.mode === 'create'
                 ? t('admin.botTemplates.editor.newTitle')
@@ -390,7 +390,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                   : t('admin.botTemplates.editor.editTitle', { version: draft.version })}
             </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+          <div className="space-y-4 overflow-y-auto flex-1 -mx-1 px-1">
             <div className="space-y-1.5">
               <Label htmlFor="d-body">{t('admin.botTemplates.editor.body')}</Label>
               <Textarea id="d-body" rows={12} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
@@ -444,7 +444,7 @@ const AdminBotTemplateDetail: React.FC = () => {
               </div>
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0 pt-2">
             {draft.mode === 'view' ? (
               <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
             ) : (

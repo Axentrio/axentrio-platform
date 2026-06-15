@@ -1141,7 +1141,11 @@
         "grants": "Tenant-toegang",
         "grantsHint": "Eén tenant-id per regel (of komma-gescheiden). Deze tenants mogen dit sjabloon koppelen.",
         "grantsGlobalHint": "Dit sjabloon is beschikbaar voor alle tenants, dus toewijzingen per tenant worden niet gebruikt.",
-        "grantsPlaceholder": "tenant-id-1\ntenant-id-2"
+        "grantsPlaceholder": "tenant-id-1\ntenant-id-2",
+        "tenantsSelectPlaceholder": "Selecteer tenants…",
+        "tenantsSelected": "{{count}} tenant(s) geselecteerd",
+        "tenantsSearch": "Zoek tenants…",
+        "tenantsNone": "Geen tenants gevonden."
       },
       "editor": {
         "newTitle": "Nieuwe conceptversie",

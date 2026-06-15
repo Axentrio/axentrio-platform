@@ -153,7 +153,19 @@ const AdminBotTemplateDetail: React.FC = () => {
     }
   };
 
-  const openCreate = () => setDraft({ ...EMPTY_DRAFT, open: true, mode: 'create' });
+  // Prefill a new draft from the most recent version (body + modules + config) so
+  // it's an edit-from-here, not a blank slate. Changelog stays empty (new entry).
+  const openCreate = () => {
+    const latest = versions[0];
+    setDraft({
+      ...EMPTY_DRAFT,
+      open: true,
+      mode: 'create',
+      body: latest?.body ?? '',
+      expectedModules: latest ? latest.expectedModules.join(', ') : '',
+      config: latest ? configToDraft(latest.config) : EMPTY_CONFIG,
+    });
+  };
   const openEdit = (v: BotTemplateVersion) =>
     setDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
   const openView = (v: BotTemplateVersion) =>
@@ -389,6 +401,9 @@ const AdminBotTemplateDetail: React.FC = () => {
                   ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
                   : t('admin.botTemplates.editor.editTitle', { version: draft.version })}
             </DialogTitle>
+            {draft.mode === 'create' && versions[0] && (
+              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</p>
+            )}
           </DialogHeader>
           <div className="space-y-4 overflow-y-auto flex-1 -mx-1 px-1">
             <div className="space-y-1.5">

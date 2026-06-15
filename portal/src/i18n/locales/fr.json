@@ -702,6 +702,10 @@
         "businessHours": {
           "label": "Horaires d'ouverture",
           "helper": "En dehors de ces horaires, les visiteurs reçoivent le message hors horaires au lieu d'une réponse du bot.",
+          "alwaysOnHint": "Laissez désactivé pour une disponibilité 24/7.",
+          "presetsLabel": "Réglage rapide :",
+          "presetWeekdays": "Sem. 9–17",
+          "presetEveryday": "Tous les jours 9–17",
           "timezone": "Fuseau horaire (IANA, ex. America/New_York)",
           "closed": "Fermé",
           "save": "Enregistrer les horaires"
@@ -1169,6 +1173,7 @@
       },
       "editor": {
         "newTitle": "Nouvelle version brouillon",
+        "prefilledFrom": "Pré-rempli depuis la v{{version}} — modifiez et publiez comme nouvelle version.",
         "editTitle": "Modifier le brouillon v{{version}}",
         "viewTitle": "Version v{{version}} (lecture seule)",
         "body": "Contenu du prompt",

@@ -708,6 +708,10 @@
         "businessHours": {
           "label": "Business hours",
           "helper": "Outside these hours, visitors get the off-hours message instead of a bot reply.",
+          "alwaysOnHint": "Leave off for 24/7 availability.",
+          "presetsLabel": "Quick set:",
+          "presetWeekdays": "Weekdays 9–5",
+          "presetEveryday": "Every day 9–5",
           "timezone": "Timezone (IANA, e.g. America/New_York)",
           "closed": "Closed",
           "save": "Save business hours"
@@ -1211,6 +1215,7 @@
       },
       "editor": {
         "newTitle": "New draft version",
+        "prefilledFrom": "Prefilled from v{{version}} — edit and publish as a new version.",
         "editTitle": "Edit draft v{{version}}",
         "viewTitle": "Version v{{version}} (read-only)",
         "body": "Prompt body",

@@ -703,6 +703,10 @@
         "businessHours": {
           "label": "Openingstijden",
           "helper": "Buiten deze tijden krijgen bezoekers het buiten-openingstijdenbericht in plaats van een botantwoord.",
+          "alwaysOnHint": "Laat uit voor 24/7 beschikbaarheid.",
+          "presetsLabel": "Snel instellen:",
+          "presetWeekdays": "Werkdagen 9–17",
+          "presetEveryday": "Elke dag 9–17",
           "timezone": "Tijdzone (IANA, bijv. America/New_York)",
           "closed": "Gesloten",
           "save": "Openingstijden opslaan"
@@ -1170,6 +1174,7 @@
       },
       "editor": {
         "newTitle": "Nieuwe conceptversie",
+        "prefilledFrom": "Vooraf ingevuld vanaf v{{version}} — bewerk en publiceer als nieuwe versie.",
         "editTitle": "Concept v{{version}} bewerken",
         "viewTitle": "Versie v{{version}} (alleen-lezen)",
         "body": "Prompt-inhoud",

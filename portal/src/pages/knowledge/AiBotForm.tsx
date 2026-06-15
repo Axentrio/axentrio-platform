@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { AutoSaveStatusIndicator } from '@/components/ui/auto-save-status';
 import { useAutoSave } from '@/hooks/useAutoSave';
 import {
@@ -68,6 +69,10 @@ function buildSchedule(stored: BusinessHours['schedule'] | undefined): DaySchedu
 
 const businessHoursKey = (enabled: boolean, tz: string, schedule: DaySchedule[]): string =>
   JSON.stringify({ enabled, tz, schedule });
+
+// Quick-set presets so the common cases don't require touching the 7-row grid.
+const PRESET_WEEKDAYS: DaySchedule[] = WEEK_DAYS.map((day) => ({ day, open: '09:00', close: '17:00', closed: day === 'saturday' || day === 'sunday' }));
+const PRESET_EVERYDAY: DaySchedule[] = WEEK_DAYS.map((day) => ({ day, open: '09:00', close: '17:00', closed: false }));
 
 const TONE_PRESETS = [
   { value: 'friendly', labelKey: 'ai.bot.identity.tones.friendly' },
@@ -480,79 +485,97 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           </p>
         </section>
 
-        {/* Operational settings (tenant-owned: escalation + business hours) */}
-        <section className="space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.operational.title')}</h3>
-            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.operational.description')}</p>
-          </div>
-
-          <div>
-            <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.escalationKeywords.label')}</Label>
-            <TagInput
-              value={escalationKeywords}
-              onChange={setEscalationKeywords}
-              placeholder={t('ai.bot.operational.escalationKeywords.placeholder')}
-              disabled={readOnly}
-            />
-            <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
-          </div>
-
-          {/* Business hours — its own resource, saved with an explicit button. */}
-          <div className="rounded-xl border border-edge p-4 space-y-3">
-            <div className="flex items-center justify-between">
+        {/* Operational settings (tenant-owned: escalation + business hours).
+            Collapsed by default to keep the page lean — most tenants won't touch it. */}
+        <Accordion type="single" collapsible className="w-full">
+          <AccordionItem value="operational" className="rounded-xl border border-edge px-4 border-b">
+            <AccordionTrigger className="hover:no-underline">
+              <div className="text-left">
+                <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.operational.title')}</h3>
+                <p className="text-xs text-text-muted mt-0.5 font-normal">{t('ai.bot.operational.description')}</p>
+              </div>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4">
               <div>
-                <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
-                <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
+                <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.escalationKeywords.label')}</Label>
+                <TagInput
+                  value={escalationKeywords}
+                  onChange={setEscalationKeywords}
+                  placeholder={t('ai.bot.operational.escalationKeywords.placeholder')}
+                  disabled={readOnly}
+                />
+                <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.operational.escalationKeywords.helper')}</p>
               </div>
-              <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
-            </div>
 
-            {bhEnabled && (
-              <>
-                <div className="max-w-xs">
-                  <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.businessHours.timezone')}</Label>
-                  <Input
-                    value={bhTimezone}
-                    onChange={(e) => setBhTimezone(e.target.value)}
-                    placeholder="America/New_York"
-                    disabled={readOnly}
-                  />
+              {/* Business hours — its own resource, saved with an explicit button. */}
+              <div className="rounded-xl border border-edge p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <Label className="text-text-secondary">{t('ai.bot.operational.businessHours.label')}</Label>
+                    <p className="text-[10px] text-text-muted mt-0.5">{t('ai.bot.operational.businessHours.helper')}</p>
+                    <p className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.alwaysOnHint')}</p>
+                  </div>
+                  <Switch checked={bhEnabled} onCheckedChange={setBhEnabled} disabled={readOnly} />
                 </div>
-                <div className="space-y-1.5">
-                  {bhSchedule.map((d) => (
-                    <div key={d.day} className="flex items-center gap-2 text-sm">
-                      <span className="w-24 capitalize text-text-secondary">{d.day}</span>
-                      <Switch
-                        checked={!d.closed}
-                        onCheckedChange={(open) => setDay(d.day, { closed: !open })}
+
+                {bhEnabled && (
+                  <>
+                    {!readOnly && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] text-text-muted">{t('ai.bot.operational.businessHours.presetsLabel')}</span>
+                        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_WEEKDAYS)}>
+                          {t('ai.bot.operational.businessHours.presetWeekdays')}
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setBhSchedule(PRESET_EVERYDAY)}>
+                          {t('ai.bot.operational.businessHours.presetEveryday')}
+                        </Button>
+                      </div>
+                    )}
+                    <div className="max-w-xs">
+                      <Label className="mb-1 text-text-secondary">{t('ai.bot.operational.businessHours.timezone')}</Label>
+                      <Input
+                        value={bhTimezone}
+                        onChange={(e) => setBhTimezone(e.target.value)}
+                        placeholder="America/New_York"
                         disabled={readOnly}
-                        aria-label={`${d.day} open`}
                       />
-                      {d.closed ? (
-                        <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
-                      ) : (
-                        <div className="flex items-center gap-1.5">
-                          <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
-                          <span className="text-text-muted">–</span>
-                          <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
-                        </div>
-                      )}
                     </div>
-                  ))}
-                </div>
-              </>
-            )}
+                    <div className="space-y-1.5">
+                      {bhSchedule.map((d) => (
+                        <div key={d.day} className="flex items-center gap-2 text-sm">
+                          <span className="w-24 capitalize text-text-secondary">{d.day}</span>
+                          <Switch
+                            checked={!d.closed}
+                            onCheckedChange={(open) => setDay(d.day, { closed: !open })}
+                            disabled={readOnly}
+                            aria-label={`${d.day} open`}
+                          />
+                          {d.closed ? (
+                            <span className="text-xs text-text-muted">{t('ai.bot.operational.businessHours.closed')}</span>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <Input type="time" className="h-8 w-28" value={d.open} onChange={(e) => setDay(d.day, { open: e.target.value })} disabled={readOnly} />
+                              <span className="text-text-muted">–</span>
+                              <Input type="time" className="h-8 w-28" value={d.close} onChange={(e) => setDay(d.day, { close: e.target.value })} disabled={readOnly} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
 
-            {!readOnly && (
-              <div className="flex justify-end">
-                <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || updateBot.isPending}>
-                  {t('ai.bot.operational.businessHours.save')}
-                </Button>
+                {!readOnly && (
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" onClick={saveBusinessHours} disabled={!bhDirty || updateBot.isPending}>
+                      {t('ai.bot.operational.businessHours.save')}
+                    </Button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </section>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
 
       {/* Go to KB + auto-save status */}

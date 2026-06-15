@@ -17,7 +17,7 @@ import { AppDataSource } from '../../database/data-source';
 import { BotTemplate } from '../../database/entities/BotTemplate';
 import { BotTemplateVersion } from '../../database/entities/BotTemplateVersion';
 import { TenantBotTemplate } from '../../database/entities/TenantBotTemplate';
-import { asyncHandler, ValidationError, NotFoundError, ConflictError } from '../../middleware/error-handler';
+import { asyncHandler, ValidationError, NotFoundError, ConflictError, ApiError } from '../../middleware/error-handler';
 import { sendSuccess } from '../../utils/response';
 import { logAudit } from '../../utils/audit';
 import { invalidateTemplateBundle, invalidateAllTenantTemplates } from '../../templates/template-resolver';
@@ -31,8 +31,13 @@ import {
   archiveTemplate,
   replaceGrants,
   validateBody,
+  validateConfig,
   type Replacement,
 } from '../../templates/template-admin.service';
+import { buildSystemPrompt } from '../../llm/prompt-builder';
+import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
+import { ERROR_CODES } from '../../middleware/error-codes';
+import { logger } from '../../utils/logger';
 
 const router = Router();
 
@@ -151,7 +156,17 @@ router.get(
       order: { version: 'DESC' },
     });
     const grants = await AppDataSource.getRepository(TenantBotTemplate).find({ where: { templateId: tmpl.id } });
-    sendSuccess(res, { template: tmpl, versions, grantedTenantIds: grants.map((g) => g.tenantId) });
+    // Live usage — how many (non-deleted) bots, across how many tenants, bind this template.
+    const [usageRow] = await AppDataSource.query(
+      'SELECT COUNT(*)::int AS bots, COUNT(DISTINCT tenant_id)::int AS tenants FROM chatbot_bots WHERE template_id = $1 AND deleted_at IS NULL',
+      [tmpl.id],
+    );
+    sendSuccess(res, {
+      template: tmpl,
+      versions,
+      grantedTenantIds: grants.map((g) => g.tenantId),
+      usage: { bots: usageRow?.bots ?? 0, tenants: usageRow?.tenants ?? 0 },
+    });
   }),
 );
 
@@ -197,6 +212,60 @@ router.post(
       reassignedTenants: reassignedTenants.length,
     });
     sendSuccess(res, { template, reassignedTenants });
+  }),
+);
+
+// POST /admin/bot-templates/test-chat — preview a prompt+config WITHOUT saving a
+// version, so authors can try a draft before publishing. Prompt-only (no KB), run
+// on the platform LLM with sample {botName}/{businessName} substitutions.
+router.post(
+  '/bot-templates/test-chat',
+  asyncHandler(async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const message = reqStr(b.message, 'message', { max: 4000 })!;
+    const body = typeof b.body === 'string' ? b.body : '';
+    validateBody(body);
+    const config = validateConfig(b.config);
+    const history = Array.isArray(b.history)
+      ? (b.history as unknown[])
+          .filter((m): m is { role: string; content: string } =>
+            !!m && typeof (m as { content?: unknown }).content === 'string')
+          .slice(-10)
+          .map((m) => ({ role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: m.content }))
+      : [];
+
+    // Build a tenant-style ai slice from the template config; sample identity so
+    // {botName}/{businessName} resolve to readable preview values.
+    const ai = {
+      enabled: true,
+      brandVoice: { name: 'Assistant', tone: config.tone || 'friendly', customInstructions: '' },
+      guardrails: {
+        topicsToAvoid: config.guardrails?.topicsToAvoid ?? [],
+        greetingMessage: config.guardrails?.greetingMessage ?? '',
+        fallbackMessage: config.guardrails?.fallbackMessage ?? '',
+        offHoursMessage: config.guardrails?.offHoursMessage ?? '',
+        confidenceThreshold: config.guardrails?.confidenceThreshold ?? 0.7,
+        maxResponseLength: config.guardrails?.maxResponseLength ?? 500,
+        escalationKeywords: [],
+      },
+    } as Parameters<typeof buildSystemPrompt>[0];
+
+    const systemPrompt = buildSystemPrompt(ai, { businessName: 'Your Business', templateBody: body });
+    const { getProvider } = await import('../../llm/provider-factory');
+    const llm = getProvider(DEFAULT_PROVIDER);
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...history,
+      { role: 'user' as const, content: message },
+    ];
+    let response;
+    try {
+      response = await llm.chat(messages, { model: DEFAULT_MODEL, maxTokens: 1000, temperature: 0.3, jsonMode: false });
+    } catch (err) {
+      logger.error('Template test chat failed', err);
+      throw new ApiError('LLM call failed. Check the platform API key.', 500, ERROR_CODES.UPSTREAM_FAILED);
+    }
+    sendSuccess(res, { response: response.content, provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL });
   }),
 );
 

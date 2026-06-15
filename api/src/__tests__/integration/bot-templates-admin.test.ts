@@ -19,6 +19,10 @@ vi.mock('../../websocket/socket.handler', () => ({
   emitToAgent: vi.fn(),
 }));
 vi.mock('../../utils/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../../llm/provider-factory', async (importActual) => ({
+  ...(await importActual<typeof import('../../llm/provider-factory')>()),
+  getProvider: () => ({ chat: vi.fn().mockResolvedValue({ content: 'TEST REPLY' }) }),
+}));
 
 import request from 'supertest';
 import { app } from '../../server';
@@ -171,6 +175,24 @@ describe('version config — template-owned tone + guardrails (#24/#25)', () => 
     const res = await request(app)
       .post(`${BASE}/${id}/versions`)
       .send({ body: 'v1', config: { guardrails: { confidenceThreshold: 2 } } });
+    expect(res.status).toBe(422);
+  });
+});
+
+describe('template test-chat (preview before publish)', () => {
+  it('returns a reply for an unsaved prompt + config', async () => {
+    const res = await request(app).post(`${BASE}/test-chat`).send({
+      body: 'You are {botName} for {businessName}.',
+      config: { tone: 'professional', guardrails: { fallbackMessage: 'Sorry.' } },
+      message: 'hi',
+      history: [],
+    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.response).toBe('TEST REPLY');
+  });
+
+  it('422 without a message', async () => {
+    const res = await request(app).post(`${BASE}/test-chat`).send({ body: 'x' });
     expect(res.status).toBe(422);
   });
 });

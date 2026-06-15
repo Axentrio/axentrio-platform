@@ -677,12 +677,14 @@
         "latest": "Automatisch bijwerken naar nieuwste versie",
         "pinTo": "Vastzetten op v{{version}}",
         "versionHelper": "Automatisch bijwerken past adminverbeteringen automatisch toe; vastzetten houdt het gedrag van de bot op één versie.",
+        "noneAvailable": "Er zijn nog geen botsjablonen voor je beschikbaar. Je platformbeheerder wijst deze toe — neem contact op om er een in te stellen.",
         "preview": "Sjabloonvoorbeeld (alleen-lezen)",
         "previewEmpty": "Dit sjabloon voegt geen basisinstructies toe.",
         "warnings": {
           "unavailable": "Het gekoppelde sjabloon is niet beschikbaar; voorlopig wordt een lege basis gebruikt.",
           "pinned": "De vastgezette versie is niet meer gepubliceerd; de laatste wordt gebruikt.",
-          "missingModules": "Dit sjabloon verwacht functies die niet zijn ingeschakeld in je abonnement: {{modules}}."
+          "missingModules": "Dit sjabloon verwacht functies die niet zijn ingeschakeld in je abonnement: {{modules}}.",
+          "missingModulesAction": "Neem contact op met je beheerder om ze in te schakelen."
         }
       },
       "managedByAdmins": "Beheerd door platformbeheerders",
@@ -1164,6 +1166,7 @@
         "description": "Beschrijving",
         "availabilityHint": "Indien aan, kan elke actieve tenant dit sjabloon koppelen. Indien uit, alleen toegewezen tenants.",
         "descriptionHint": "Getoond aan tenants wanneer ze deze bot kiezen in de sjabloonkiezer.",
+        "usage": "{{bots}} bot(s) · {{tenants}} tenant(s)",
         "currentPrompt": "Huidige prompt",
         "promptEmpty": "Deze versie voegt geen basisinstructies toe.",
         "promptConfigDefaults": "Toon & richtlijnen: platformstandaarden",
@@ -1226,7 +1229,13 @@
           "900": "Gedetailleerd",
           "1200": "Lang"
         },
-        "saveDraft": "Concept opslaan"
+        "saveDraft": "Concept opslaan",
+        "testTitle": "Test deze prompt",
+        "testPlaceholder": "Typ een bezoekersbericht…",
+        "testSend": "Versturen",
+        "testThinking": "Bezig…",
+        "testError": "Test mislukt — controleer de platform-API-sleutel.",
+        "testHint": "Voert het huidige (niet-opgeslagen) concept uit op het platformmodel met voorbeeld-{botName}/{businessName}. Kennisbank niet inbegrepen."
       },
       "confirm": {
         "archiveTitle": "Dit sjabloon archiveren?",
@@ -1236,6 +1245,8 @@
         "deleteTitle": "Versie v{{version}} verwijderen?",
         "deleteBody": "Dit verwijdert deze versie permanent. Dit kan niet ongedaan worden gemaakt.",
         "deleteReassign": "{{count}} bot(s) zetten deze versie vast — ze worden losgekoppeld naar de nieuwste gepubliceerde versie en daarna wordt deze verwijderd. Doorgaan?",
+        "discardTitle": "Niet-opgeslagen wijzigingen weggooien?",
+        "discardBody": "Je hebt niet-opgeslagen wijzigingen aan deze versie. Sluiten zonder opslaan?",
         "proceed": "Doorgaan"
       },
       "errors": {

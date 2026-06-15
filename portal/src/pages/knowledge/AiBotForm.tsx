@@ -396,6 +396,11 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.template.title')}</h3>
             <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.template.description')}</p>
           </div>
+          {availableTemplates.length === 0 ? (
+            <div className="rounded-lg border border-edge bg-surface-2 p-3 text-xs text-text-muted">
+              {t('ai.bot.template.noneAvailable')}
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.template.select')}</Label>
@@ -437,6 +442,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               </div>
             )}
           </div>
+          )}
           {resolved?.templateUnavailable && (
             <p className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
           )}
@@ -445,7 +451,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           )}
           {missingModules.length > 0 && (
             <p className="text-[11px] text-amber-400">
-              {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}
+              {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
+              {t('ai.bot.template.warnings.missingModulesAction')}
             </p>
           )}
           <div>

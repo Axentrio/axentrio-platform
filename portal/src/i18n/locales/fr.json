@@ -676,12 +676,14 @@
         "latest": "Mise à jour automatique vers la dernière version",
         "pinTo": "Épingler à v{{version}}",
         "versionHelper": "La mise à jour automatique applique les améliorations des admins automatiquement ; l'épinglage fige le comportement du bot sur une version.",
+        "noneAvailable": "Aucun modèle de bot ne vous est encore disponible. Votre admin de plateforme les attribue — contactez-le pour en configurer un.",
         "preview": "Aperçu du modèle (lecture seule)",
         "previewEmpty": "Ce modèle n'ajoute aucune instruction de base.",
         "warnings": {
           "unavailable": "Le modèle lié est indisponible ; une base vide est utilisée pour le moment.",
           "pinned": "La version épinglée n'est plus publiée ; la dernière est utilisée à la place.",
-          "missingModules": "Ce modèle attend des fonctionnalités non activées sur votre offre : {{modules}}."
+          "missingModules": "Ce modèle attend des fonctionnalités non activées sur votre offre : {{modules}}.",
+          "missingModulesAction": "Contactez votre admin pour les activer."
         }
       },
       "managedByAdmins": "Géré par les admins de la plateforme",
@@ -1163,6 +1165,7 @@
         "description": "Description",
         "availabilityHint": "Activé, chaque locataire actif peut lier ce modèle. Désactivé, seuls les locataires autorisés le peuvent.",
         "descriptionHint": "Affiché aux locataires lorsqu'ils choisissent ce bot dans le sélecteur de modèles.",
+        "usage": "{{bots}} bot(s) · {{tenants}} locataire(s)",
         "currentPrompt": "Prompt actuel",
         "promptEmpty": "Cette version n'ajoute aucune instruction de base.",
         "promptConfigDefaults": "Ton et garde-fous : valeurs par défaut de la plateforme",
@@ -1225,7 +1228,13 @@
           "900": "Détaillé",
           "1200": "Long"
         },
-        "saveDraft": "Enregistrer le brouillon"
+        "saveDraft": "Enregistrer le brouillon",
+        "testTitle": "Tester ce prompt",
+        "testPlaceholder": "Saisissez un message visiteur…",
+        "testSend": "Envoyer",
+        "testThinking": "Réflexion…",
+        "testError": "Échec du test — vérifiez la clé API de la plateforme.",
+        "testHint": "Exécute le brouillon actuel (non enregistré) sur le modèle de la plateforme avec des {botName}/{businessName} d'exemple. Base de connaissances non incluse."
       },
       "confirm": {
         "archiveTitle": "Archiver ce modèle ?",
@@ -1235,6 +1244,8 @@
         "deleteTitle": "Supprimer la version v{{version}} ?",
         "deleteBody": "Cela supprime définitivement cette version. Action irréversible.",
         "deleteReassign": "{{count}} bot(s) épinglent cette version — ils seront désépinglés vers la dernière version publiée, puis elle sera supprimée. Continuer ?",
+        "discardTitle": "Abandonner les modifications non enregistrées ?",
+        "discardBody": "Vous avez des modifications non enregistrées sur cette version. Fermer sans enregistrer ?",
         "proceed": "Continuer"
       },
       "errors": {

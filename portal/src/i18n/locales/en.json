@@ -682,12 +682,14 @@
         "latest": "Auto-update to latest version",
         "pinTo": "Pin to v{{version}}",
         "versionHelper": "Auto-update applies admin improvements automatically; pinning keeps the bot's behavior fixed to one version.",
+        "noneAvailable": "No bot templates are available to you yet. Your platform admin assigns these — contact them to get one set up.",
         "preview": "Template preview (read-only)",
         "previewEmpty": "This template adds no base instructions.",
         "warnings": {
           "unavailable": "The bound template is unavailable; using an empty base for now.",
           "pinned": "The pinned version is no longer published; using the latest instead.",
-          "missingModules": "This template expects features not enabled on your plan: {{modules}}."
+          "missingModules": "This template expects features not enabled on your plan: {{modules}}.",
+          "missingModulesAction": "Contact your admin to enable them."
         }
       },
       "managedByAdmins": "Managed by platform admins",
@@ -1205,6 +1207,7 @@
         "description": "Description",
         "availabilityHint": "When on, every active tenant can bind this template. When off, only granted tenants can.",
         "descriptionHint": "Shown to tenants when they pick this bot in the template picker.",
+        "usage": "{{bots}} bot(s) · {{tenants}} tenant(s)",
         "currentPrompt": "Current prompt",
         "promptEmpty": "This version adds no base instructions.",
         "promptConfigDefaults": "Tone & guardrails: platform defaults",
@@ -1267,7 +1270,13 @@
           "900": "Detailed",
           "1200": "Long"
         },
-        "saveDraft": "Save draft"
+        "saveDraft": "Save draft",
+        "testTitle": "Test this prompt",
+        "testPlaceholder": "Type a visitor message…",
+        "testSend": "Send",
+        "testThinking": "Thinking…",
+        "testError": "Test failed — check the platform API key.",
+        "testHint": "Runs the current draft (unsaved) on the platform model with sample {botName}/{businessName}. Knowledge base not included."
       },
       "confirm": {
         "archiveTitle": "Archive this template?",
@@ -1277,6 +1286,8 @@
         "deleteTitle": "Delete version v{{version}}?",
         "deleteBody": "This permanently removes this version. This can't be undone.",
         "deleteReassign": "{{count}} bot(s) pin this version — they'll be unpinned to the latest published version, then it's deleted. Continue?",
+        "discardTitle": "Discard unsaved changes?",
+        "discardBody": "You have unsaved edits to this version. Close without saving?",
         "proceed": "Proceed"
       },
       "errors": {

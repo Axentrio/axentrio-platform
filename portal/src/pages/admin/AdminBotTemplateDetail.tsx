@@ -7,7 +7,7 @@
  * the API answers 409 with an impacted count → confirm → retry with force,
  * which reassigns affected bots to blank-base (T21).
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
 import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye } from 'lucide-react';
@@ -25,6 +25,7 @@ import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
 import TagInput from '@/pages/knowledge/TagInput';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -35,7 +36,7 @@ import {
 import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
-  useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants,
+  useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
   forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
@@ -137,6 +138,8 @@ const AdminBotTemplateDetail: React.FC = () => {
 
   const [meta, setMeta] = useState<{ displayName: string; description: string; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
+  const [testInput, setTestInput] = useState('');
+  const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
   const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
   const [confirm, setConfirm] = useState<{ open: boolean; title: string; description: string; onConfirm: () => void }>({
@@ -146,7 +149,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   if (isLoading) return <PageSkeleton variant="list" rows={4} />;
   if (isError || !data) return <InlineError message={t('admin.botTemplates.errors.load')} />;
 
-  const { template, versions, grantedTenantIds } = data;
+  const { template, versions, grantedTenantIds, usage } = data;
   // The live prompt = latest published version (versions are DESC-ordered).
   const publishedVersion = versions.find((v) => v.status === 'published');
   const m = meta ?? {
@@ -189,11 +192,48 @@ const AdminBotTemplateDetail: React.FC = () => {
     }
   };
 
+  // Serialized snapshot of the editable fields, captured when a draft opens, to
+  // detect unsaved changes before discarding.
+  const draftBaselineRef = useRef<string>('');
+  const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, config: d.config });
+  const openDraft = (d: VersionDraft) => { draftBaselineRef.current = draftKey(d); setTestLog([]); setTestInput(''); setDraft(d); };
+
+  // Test-this-prompt panel — runs the current draft body+config against the LLM
+  // without saving, so authors can try before publishing.
+  const testChat = useTemplateTestChat();
+  const runTest = async () => {
+    const msg = testInput.trim();
+    if (!msg) return;
+    const history = testLog;
+    setTestLog((l) => [...l, { role: 'user', content: msg }]);
+    setTestInput('');
+    try {
+      const res = await testChat.mutateAsync({ body: draft.body, config: draftToConfig(draft.config), message: msg, history });
+      setTestLog((l) => [...l, { role: 'assistant', content: res.response }]);
+    } catch {
+      setTestLog((l) => [...l, { role: 'assistant', content: t('admin.botTemplates.editor.testError') }]);
+    }
+  };
+
+  // Discard with a guard: confirm if there are unsaved edits (create/edit only).
+  const requestCloseDraft = () => {
+    if (draft.mode !== 'view' && draftKey(draft) !== draftBaselineRef.current) {
+      setConfirm({
+        open: true,
+        title: t('admin.botTemplates.confirm.discardTitle'),
+        description: t('admin.botTemplates.confirm.discardBody'),
+        onConfirm: () => { setConfirm((c) => ({ ...c, open: false })); setDraft(EMPTY_DRAFT); },
+      });
+    } else {
+      setDraft(EMPTY_DRAFT);
+    }
+  };
+
   // Prefill a new draft from the most recent version (body + modules + config) so
   // it's an edit-from-here, not a blank slate. Changelog stays empty (new entry).
   const openCreate = () => {
     const latest = versions[0];
-    setDraft({
+    openDraft({
       ...EMPTY_DRAFT,
       open: true,
       mode: 'create',
@@ -203,9 +243,9 @@ const AdminBotTemplateDetail: React.FC = () => {
     });
   };
   const openEdit = (v: BotTemplateVersion) =>
-    setDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
   const openView = (v: BotTemplateVersion) =>
-    setDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
 
   // Delete a draft/unpublished version: always confirm; an unpublished version that
   // bots pin then runs the block-or-force flow (unpins them to latest).
@@ -251,6 +291,7 @@ const AdminBotTemplateDetail: React.FC = () => {
               {t(`admin.botTemplates.templateStatus.${template.status}`)}
             </Badge>
             <span className="text-xs font-mono text-text-tertiary">{template.key}</span>
+            <Badge variant="secondary">{t('admin.botTemplates.detail.usage', { bots: usage.bots, tenants: usage.tenants })}</Badge>
           </div>
           {template.status === 'active' && (
             <Button
@@ -481,7 +522,7 @@ const AdminBotTemplateDetail: React.FC = () => {
       </Card>
 
       {/* Version editor dialog */}
-      <Dialog open={draft.open} onOpenChange={(o) => setDraft((d) => ({ ...d, open: o }))}>
+      <Dialog open={draft.open} onOpenChange={(o) => { if (!o) requestCloseDraft(); else setDraft((d) => ({ ...d, open: o })); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
           <DialogHeader className="shrink-0">
             <DialogTitle>
@@ -613,13 +654,46 @@ const AdminBotTemplateDetail: React.FC = () => {
                 </div>
               );
             })()}
+
+            {/* Test this prompt — try the current draft (body + config) before publishing. */}
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="test" className="rounded-xl border border-edge px-4 border-b">
+                <AccordionTrigger className="hover:no-underline text-sm font-medium">{t('admin.botTemplates.editor.testTitle')}</AccordionTrigger>
+                <AccordionContent className="space-y-3">
+                  {testLog.length > 0 && (
+                    <div className="max-h-48 overflow-y-auto space-y-2 rounded-lg bg-surface-2 p-2">
+                      {testLog.map((mtest, i) => (
+                        <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
+                          <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
+                            {mtest.content}
+                          </span>
+                        </div>
+                      ))}
+                      {testChat.isPending && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.testThinking')}</p>}
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={testInput}
+                      placeholder={t('admin.botTemplates.editor.testPlaceholder')}
+                      onChange={(e) => setTestInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void runTest(); } }}
+                    />
+                    <Button type="button" onClick={() => void runTest()} disabled={testChat.isPending || !testInput.trim()}>
+                      {t('admin.botTemplates.editor.testSend')}
+                    </Button>
+                  </div>
+                  <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.testHint')}</p>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
           </div>
           <DialogFooter className="shrink-0 pt-2">
             {draft.mode === 'view' ? (
               <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
             ) : (
               <>
-                <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.cancel')}</Button>
+                <Button variant="outline" onClick={requestCloseDraft}>{t('common.cancel')}</Button>
                 <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('admin.botTemplates.editor.saveDraft')}</Button>
               </>
             )}

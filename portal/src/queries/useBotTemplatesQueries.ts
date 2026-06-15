@@ -65,6 +65,7 @@ export interface BotTemplateDetail {
   template: BotTemplate;
   versions: BotTemplateVersion[];
   grantedTenantIds: string[];
+  usage: { bots: number; tenants: number };
 }
 
 /** Reads the block-or-force conflict details off a 409 response, if present. */
@@ -203,6 +204,13 @@ export function useUnpublishTemplateVersion(id: string) {
       toast.success('Version unpublished');
     },
     onError: toastUnlessForceConflict,
+  });
+}
+
+export function useTemplateTestChat() {
+  return useMutation({
+    mutationFn: (input: { body: string; config: BotTemplateConfig; message: string; history: { role: 'user' | 'assistant'; content: string }[] }) =>
+      api.post<{ response: string }>(`/admin/bot-templates/test-chat`, input),
   });
 }
 

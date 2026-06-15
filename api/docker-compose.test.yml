@@ -8,12 +8,31 @@ services:
       POSTGRES_DB: chatbot_test
     ports:
       - '5433:5432'
-    # RAM-backed PGDATA for speed. The size is a ceiling (not a reservation —
-    # tmpfs only consumes what's written): raised from the 2GB default because
-    # vitest runs one database per worker, and the concurrent synchronize() +
-    # shared pg_wal at startup transiently overflows 2GB → "No space left on
-    # device", whose failed afterEach TRUNCATE then cascades into duplicate-key
-    # errors. Paired with maxWorkers in vitest.config.ts (bounds worker count).
-    # Local-only; CI uses its own disk-backed postgres service (ci.yml).
+    # Reclaim-aggressive tuning so a long full run can't exhaust the RAM-backed
+    # PGDATA. The per-test TRUNCATE-of-all-tables allocates a fresh relfilenode
+    # per table; the dropped files are only physically unlinked at CHECKPOINT, so
+    # over 1500+ tests they pile up faster than the default 5-min checkpoint
+    # reclaims them → "No space left on device", whose failed TRUNCATE then
+    # cascades into duplicate-key errors. Frequent checkpoints + a small WAL
+    # ceiling keep tmpfs usage bounded well under the Docker VM's RAM (the tmpfs
+    # `size` is only a ceiling — the real limit is VM memory, ~3.8GiB here).
+    # fsync/full-page writes off purely for speed (ephemeral DB). Paired with
+    # maxWorkers in vitest.config.ts. Local-only; CI uses a disk-backed postgres.
+    command:
+      - postgres
+      - -c
+      - fsync=off
+      - -c
+      - full_page_writes=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - max_wal_size=512MB
+      - -c
+      - min_wal_size=80MB
+      - -c
+      - checkpoint_timeout=30s
+      - -c
+      - checkpoint_completion_target=0.7
     tmpfs:
       - /var/lib/postgresql/data:size=8g

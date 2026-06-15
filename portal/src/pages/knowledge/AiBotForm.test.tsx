@@ -13,6 +13,12 @@ vi.mock('@/auth/useAppAuth', () => ({
   }),
 }));
 
+// AiBotForm reads the org/business name from Clerk for the per-bot business-name
+// placeholder. Stub it so the form renders outside a <ClerkProvider>.
+vi.mock('@clerk/clerk-react', () => ({
+  useOrganization: () => ({ organization: { name: 'Test Org' } }),
+}));
+
 vi.mock('@/queries/useBotsQueries', () => ({
   useBotAiSettings: () => ({
     data: {

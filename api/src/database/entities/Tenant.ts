@@ -107,6 +107,10 @@ export class Tenant {
         name: string;
         tone: string;
         customInstructions: string;
+        /** Commercial/trading name used as the {businessName} placeholder value
+         *  and the per-bot business-name default. Distinct from tenant.name only
+         *  if set here; today the org name (tenant.name) is the source. */
+        businessName?: string;
         templateId?: string | null;
       };
       guardrails: {

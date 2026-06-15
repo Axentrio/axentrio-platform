@@ -18,7 +18,7 @@ import { requireAdmin, asyncHandler, ValidationError, NotFoundError, BadRequestE
 import { ERROR_CODES } from '../middleware/error-codes';
 import { sendSuccess, sendCreated } from '../utils/response';
 import { requireClerkAuth, autoProvision, invalidateProvisionCache } from '../middleware/clerk.middleware';
-import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization, getAllOrgMemberships } from '../services/clerk-sync.service';
+import { inviteToClerkOrganization, revokeAndResendClerkInvitation, revokeClerkInvitation, removeFromClerkOrganization, addMemberToClerkOrganization, getAllOrgMemberships, updateClerkOrganization } from '../services/clerk-sync.service';
 import { logger } from '../utils/logger';
 import { logAudit } from '../utils/audit';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
@@ -138,8 +138,19 @@ router.patch(
       throw new NotFoundError('Tenant not found');
     }
 
-    // Update fields
-    if (name) tenant.name = name;
+    // Update fields. The tenant name IS the business name shown to customers and
+    // used by the AI ({businessName}); a rename must also propagate to the Clerk
+    // organization so the two never drift. Sync FIRST, then persist locally — if
+    // Clerk rejects it, fail the request rather than leave the two out of sync.
+    if (name && name !== tenant.name) {
+      if (tenant.clerkOrgId) {
+        const synced = await updateClerkOrganization(tenant.clerkOrgId, { name });
+        if (!synced) {
+          throw new ApiError('Could not rename the organization right now. Please try again.', 502, ERROR_CODES.UPSTREAM_FAILED);
+        }
+      }
+      tenant.name = name;
+    }
     if (webhookUrl !== undefined) {
       // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
       // string clears the webhook (preserved).

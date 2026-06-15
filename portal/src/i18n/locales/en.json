@@ -228,10 +228,10 @@
         "removeFailed": "Failed to remove logo"
       },
       "displayName": {
-        "title": "Display Name",
-        "description": "The name shown in the chat widget header",
-        "label": "Name",
-        "placeholder": "Your company name"
+        "title": "Business Name",
+        "description": "Your organization / business name — shown in the chat widget and used by your AI assistants. Renaming also updates your account organization.",
+        "label": "Business name",
+        "placeholder": "Your business name"
       },
       "status": {
         "title": "Status",
@@ -638,6 +638,12 @@
           "label": "Chatbot Name",
           "placeholder": "e.g. Ava",
           "helper": "Chatbot display name for users to see on the website."
+        },
+        "businessName": {
+          "label": "Business Name",
+          "placeholder": "Your business name",
+          "helper": "Trading name this bot uses in its replies ({businessName}).",
+          "helperInherit": "Leave blank to use your organization name ({{name}}). Set a value to override it for this bot — useful for a separate commercial or social brand."
         },
         "supportEmail": {
           "label": "Support Email",

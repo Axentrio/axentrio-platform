@@ -228,9 +228,9 @@
         "removeFailed": "Logo verwijderen is mislukt"
       },
       "displayName": {
-        "title": "Weergavenaam",
-        "description": "De naam die wordt weergegeven in de header van de chatwidget",
-        "label": "Naam",
+        "title": "Bedrijfsnaam",
+        "description": "Je organisatie- / bedrijfsnaam — getoond in de chatwidget en gebruikt door je AI-assistenten. Hernoemen werkt ook de organisatie van je account bij.",
+        "label": "Bedrijfsnaam",
         "placeholder": "Je bedrijfsnaam"
       },
       "status": {
@@ -633,6 +633,12 @@
           "label": "Chatbotnaam",
           "placeholder": "bijv. Ava",
           "helper": "Weergavenaam van de chatbot, zichtbaar voor bezoekers op de website."
+        },
+        "businessName": {
+          "label": "Bedrijfsnaam",
+          "placeholder": "Je bedrijfsnaam",
+          "helper": "Handelsnaam die deze bot in zijn antwoorden gebruikt ({businessName}).",
+          "helperInherit": "Laat leeg om je organisatienaam te gebruiken ({{name}}). Vul een waarde in om die voor deze bot te overschrijven — handig voor een aparte commerciële of social-merknaam."
         },
         "supportEmail": {
           "label": "Support-e-mail",

@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useAppAuth } from '@/auth/useAppAuth';
+import { useOrganization } from '@clerk/clerk-react';
 import {
   useBotAiSettings,
   useUpdateBotAiSettings,
@@ -84,6 +85,7 @@ const TONE_PRESETS = [
 type FormSnapshot = {
   enabled: boolean;
   botName: string;
+  businessName: string;
   supportEmail: string;
   effectiveTone: string;
   systemPrompt: string;
@@ -106,6 +108,10 @@ const computeEffectiveTone = (tone: string, customTone: string): string => {
 const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => {
   const { t } = useTranslation();
   const { isRole, tenantId } = useAppAuth();
+  // The org/business name — the inherited default for a bot's business name when
+  // no per-bot override is set (shown as the field's placeholder).
+  const { organization } = useOrganization();
+  const orgBusinessName = organization?.name ?? '';
   const isAdmin = isRole('admin');
   const isAdminOrSupervisor = isRole(['admin', 'supervisor']);
 
@@ -133,6 +139,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   // Form state
   const [enabled, setEnabled] = useState(false);
   const [botName, setBotName] = useState('');
+  const [businessName, setBusinessName] = useState('');
   const [supportEmail, setSupportEmail] = useState('');
   const [tone, setTone] = useState('friendly');
   const [customTone, setCustomTone] = useState('');
@@ -169,6 +176,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
 
     const hEnabled = aiSettings.enabled ?? false;
     const hBotName = aiSettings.brandVoice?.name ?? '';
+    const hBusinessName = aiSettings.brandVoice?.businessName ?? '';
     const hSupportEmail = aiSettings.supportEmail ?? '';
     const serverTone: string = aiSettings.brandVoice?.tone ?? 'friendly';
     const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
@@ -185,6 +193,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
 
     setEnabled(hEnabled);
     setBotName(hBotName);
+    setBusinessName(hBusinessName);
     setSupportEmail(hSupportEmail);
     setTone(hTone);
     setCustomTone(hCustomTone);
@@ -200,6 +209,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setInitialSnapshot(snapshotKey({
       enabled: hEnabled,
       botName: hBotName,
+      businessName: hBusinessName,
       supportEmail: hSupportEmail,
       effectiveTone: computeEffectiveTone(hTone, hCustomTone),
       systemPrompt: hSystemPrompt,
@@ -242,6 +252,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const currentSnapshotKey = snapshotKey({
     enabled,
     botName,
+    businessName,
     supportEmail,
     effectiveTone,
     systemPrompt,
@@ -271,6 +282,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             name: botName || 'AI Assistant',
             tone: effectiveTone,
             customInstructions: systemPrompt,
+            // Trimmed; blank means "inherit the business name" (backend omits it).
+            businessName: businessName.trim(),
           },
           guardrails: {
             greetingMessage,
@@ -285,7 +298,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
+    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -370,6 +383,20 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 disabled={readOnly}
               />
               <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.botName.helper')}</p>
+            </div>
+            <div>
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
+              <Input
+                value={businessName}
+                onChange={(e) => setBusinessName(e.target.value)}
+                placeholder={orgBusinessName || t('ai.bot.identity.businessName.placeholder')}
+                disabled={readOnly}
+              />
+              <p className="text-[10px] text-text-muted mt-1">
+                {orgBusinessName
+                  ? t('ai.bot.identity.businessName.helperInherit', { name: orgBusinessName })
+                  : t('ai.bot.identity.businessName.helper')}
+              </p>
             </div>
             <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.supportEmail.label')}</Label>

@@ -59,7 +59,9 @@ function buildVariableMap(
     botName: ai.brandVoice?.name || 'AI Assistant',
     tone: ai.brandVoice?.tone || 'friendly',
     supportEmail: ai.supportEmail || '',
-    businessName: extras?.businessName || '',
+    // Per-bot override wins; otherwise the tenant business name passed by the
+    // caller (tenant.name / org name) is the inherited default.
+    businessName: ai.brandVoice?.businessName || extras?.businessName || '',
     fallbackMessage: g?.fallbackMessage || '',
     offHoursMessage: g?.offHoursMessage || '',
     greetingMessage: g?.greetingMessage || '',

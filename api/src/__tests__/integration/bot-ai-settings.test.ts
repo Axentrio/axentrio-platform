@@ -169,6 +169,25 @@ describe('Per-bot AI settings', () => {
       expect((bot.settings.ai as Record<string, unknown>).apiKey).toBeUndefined();
     });
 
+    it('persists a per-bot brandVoice.businessName when provided', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bots/${botId}/ai-settings`)
+        .send(fullAiBody({ brandVoice: { name: 'Acme Bot', tone: 'professional', customInstructions: '', businessName: '  GlowSpa  ' } }));
+      expect(res.status).toBe(200);
+      const bot = await AppDataSource.getRepository(Bot).findOneOrFail({ where: { id: botId } });
+      // Trimmed on save.
+      expect(bot.settings.ai?.brandVoice.businessName).toBe('GlowSpa');
+    });
+
+    it('omits brandVoice.businessName when blank (inherits the tenant business name)', async () => {
+      const res = await request(app)
+        .put(`/api/v1/bots/${botId}/ai-settings`)
+        .send(fullAiBody({ brandVoice: { name: 'Acme Bot', tone: 'professional', customInstructions: '', businessName: '   ' } }));
+      expect(res.status).toBe(200);
+      const bot = await AppDataSource.getRepository(Bot).findOneOrFail({ where: { id: botId } });
+      expect(bot.settings.ai?.brandVoice.businessName).toBeUndefined();
+    });
+
     it('normalizes empty supportEmail to null', async () => {
       const res = await request(app)
         .put(`/api/v1/bots/${botId}/ai-settings`)

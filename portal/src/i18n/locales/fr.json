@@ -228,9 +228,9 @@
         "removeFailed": "Échec de la suppression du logo"
       },
       "displayName": {
-        "title": "Nom d'affichage",
-        "description": "Le nom affiché dans l'en-tête du widget de chat",
-        "label": "Nom",
+        "title": "Nom de l'entreprise",
+        "description": "Le nom de votre organisation / entreprise — affiché dans le widget de chat et utilisé par vos assistants IA. Le renommer met aussi à jour l'organisation de votre compte.",
+        "label": "Nom de l'entreprise",
         "placeholder": "Le nom de votre entreprise"
       },
       "status": {
@@ -632,6 +632,12 @@
           "label": "Nom du chatbot",
           "placeholder": "ex. Ava",
           "helper": "Nom d'affichage du chatbot, visible pour les visiteurs sur le site."
+        },
+        "businessName": {
+          "label": "Nom de l'entreprise",
+          "placeholder": "Le nom de votre entreprise",
+          "helper": "Nom commercial utilisé par ce bot dans ses réponses ({businessName}).",
+          "helperInherit": "Laissez vide pour utiliser le nom de votre organisation ({{name}}). Indiquez une valeur pour le remplacer pour ce bot — utile pour une marque commerciale ou sociale distincte."
         },
         "supportEmail": {
           "label": "E-mail de support",

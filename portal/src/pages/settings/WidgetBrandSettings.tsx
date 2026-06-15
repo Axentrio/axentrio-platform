@@ -101,6 +101,9 @@ const WidgetBrandSettings: React.FC = () => {
       if (displayName !== tenant?.name) payload.name = displayName;
       if (Object.keys(payload).length > 0) {
         await updateMutation.mutateAsync(payload);
+        // The API renamed the Clerk org server-side; refresh the local Clerk
+        // session so the org switcher / other surfaces show the new name now.
+        if (payload.name) await organization?.reload?.();
       }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2000);

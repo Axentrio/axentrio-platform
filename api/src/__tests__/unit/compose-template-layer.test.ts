@@ -40,6 +40,33 @@ describe('agent mode — template layer', () => {
   });
 });
 
+describe('{businessName} resolution — per-bot override vs tenant default', () => {
+  // Bot with an explicit commercial name set on brandVoice.businessName.
+  const aiWithBusiness = {
+    ...ai,
+    brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'CUSTOM_MARKER for {businessName}.', businessName: 'GlowSpa' },
+  } as unknown as AiSettings;
+
+  it('uses the per-bot businessName when set, ignoring the tenant name', () => {
+    const out = composeSystemPrompt({
+      mode: 'agent', ai: aiWithBusiness, tenantName: 'Acme Holdings', tools: [],
+      templateBody: 'TEMPLATE_MARKER serving {businessName}.',
+    });
+    expect(out).toContain('TEMPLATE_MARKER serving GlowSpa.');
+    expect(out).toContain('CUSTOM_MARKER for GlowSpa.');
+    expect(out).not.toContain('Acme Holdings');
+  });
+
+  it('falls back to the tenant name when no per-bot businessName is set', () => {
+    const out = composeSystemPrompt({
+      mode: 'agent', ai, tenantName: 'Acme Holdings', tools: [],
+      templateBody: 'TEMPLATE_MARKER serving {businessName}.',
+    });
+    expect(out).toContain('TEMPLATE_MARKER serving Acme Holdings.');
+    expect(out).toContain('CUSTOM_MARKER for Acme Holdings.');
+  });
+});
+
 describe('base mode — template layer', () => {
   it('combines template then custom under TENANT INSTRUCTIONS', () => {
     const out = composeSystemPrompt({ mode: 'base', ai, businessName: 'Acme', templateBody: 'TEMPLATE_MARKER.' });

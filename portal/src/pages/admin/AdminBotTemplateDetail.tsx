@@ -143,6 +143,8 @@ const AdminBotTemplateDetail: React.FC = () => {
   const deleteMut = useDeleteTemplateVersion(id);
   const rollbackMut = useRollbackTemplate(id);
   const grantsMut = useUpdateTemplateGrants(id);
+  const testChat = useTemplateTestChat();
+  const draftBaselineRef = useRef<string>('');
 
   const [meta, setMeta] = useState<{ displayName: string; description: string; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
@@ -201,14 +203,13 @@ const AdminBotTemplateDetail: React.FC = () => {
   };
 
   // Serialized snapshot of the editable fields, captured when a draft opens, to
-  // detect unsaved changes before discarding.
-  const draftBaselineRef = useRef<string>('');
+  // detect unsaved changes before discarding. (draftBaselineRef hook is declared
+  // above the early returns to keep hook order stable.)
   const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, config: d.config });
   const openDraft = (d: VersionDraft) => { draftBaselineRef.current = draftKey(d); setTestLog([]); setTestInput(''); setDraft(d); };
 
   // Test-this-prompt panel — runs the current draft body+config against the LLM
   // without saving, so authors can try before publishing.
-  const testChat = useTemplateTestChat();
   const runTest = async () => {
     const msg = testInput.trim();
     if (!msg) return;

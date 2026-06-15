@@ -1131,6 +1131,7 @@
         "publish": "Publish",
         "unpublish": "Unpublish",
         "rollback": "Rollback",
+        "view": "View",
         "newDraft": "New draft",
         "saveAccess": "Save access"
       },
@@ -1191,6 +1192,7 @@
       "editor": {
         "newTitle": "New draft version",
         "editTitle": "Edit draft v{{version}}",
+        "viewTitle": "Version v{{version}} (read-only)",
         "body": "Prompt body",
         "bodyHint": "Supports placeholders like {botName}, {businessName}, {tone}. Max 20,000 characters.",
         "expectedModules": "Expected modules (comma-separated, optional)",

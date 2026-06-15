@@ -1090,6 +1090,7 @@
         "publish": "Publiceren",
         "unpublish": "Publicatie ongedaan maken",
         "rollback": "Terugdraaien",
+        "view": "Bekijken",
         "newDraft": "Nieuw concept",
         "saveAccess": "Toegang opslaan"
       },
@@ -1150,6 +1151,7 @@
       "editor": {
         "newTitle": "Nieuwe conceptversie",
         "editTitle": "Concept v{{version}} bewerken",
+        "viewTitle": "Versie v{{version}} (alleen-lezen)",
         "body": "Prompt-inhoud",
         "bodyHint": "Ondersteunt plaatsaanduidingen zoals {botName}, {businessName}, {tone}. Max 20.000 tekens.",
         "expectedModules": "Verwachte modules (komma-gescheiden, optioneel)",

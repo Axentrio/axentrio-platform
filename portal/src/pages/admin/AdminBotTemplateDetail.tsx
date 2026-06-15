@@ -10,7 +10,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -36,7 +36,7 @@ import {
   forceConflict, type BotTemplateVersion,
 } from '../../queries/useBotTemplatesQueries';
 
-type VersionDraft = { open: boolean; mode: 'create' | 'edit'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string };
+type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string };
 const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '' };
 
 const AdminBotTemplateDetail: React.FC = () => {
@@ -112,6 +112,8 @@ const AdminBotTemplateDetail: React.FC = () => {
   const openCreate = () => setDraft({ ...EMPTY_DRAFT, open: true, mode: 'create' });
   const openEdit = (v: BotTemplateVersion) =>
     setDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', ') });
+  const openView = (v: BotTemplateVersion) =>
+    setDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', ') });
 
   const saveDraft = async () => {
     if (draft.mode === 'create') {
@@ -225,6 +227,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                     )}
                     {v.status === 'published' && (
                       <>
+                        <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
                         <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
                         <Button
                           size="sm" variant="ghost"
@@ -240,7 +243,10 @@ const AdminBotTemplateDetail: React.FC = () => {
                       </>
                     )}
                     {v.status === 'unpublished' && (
-                      <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
+                      <>
+                        <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
+                        <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
+                      </>
                     )}
                   </TableCell>
                 </TableRow>
@@ -332,27 +338,37 @@ const AdminBotTemplateDetail: React.FC = () => {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>
-              {draft.mode === 'create' ? t('admin.botTemplates.editor.newTitle') : t('admin.botTemplates.editor.editTitle', { version: draft.version })}
+              {draft.mode === 'create'
+                ? t('admin.botTemplates.editor.newTitle')
+                : draft.mode === 'view'
+                  ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
+                  : t('admin.botTemplates.editor.editTitle', { version: draft.version })}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="d-body">{t('admin.botTemplates.editor.body')}</Label>
-              <Textarea id="d-body" rows={12} className="font-mono text-sm" value={draft.body} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
-              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.bodyHint')}</p>
+              <Textarea id="d-body" rows={12} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
+              {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.bodyHint')}</p>}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="d-modules">{t('admin.botTemplates.editor.expectedModules')}</Label>
-              <Input id="d-modules" value={draft.expectedModules} placeholder="booking" onChange={(e) => setDraft((d) => ({ ...d, expectedModules: e.target.value }))} />
+              <Input id="d-modules" value={draft.expectedModules} placeholder="booking" readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, expectedModules: e.target.value }))} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="d-changelog">{t('admin.botTemplates.editor.changelog')}</Label>
-              <Input id="d-changelog" value={draft.changelog} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
+              <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.cancel')}</Button>
-            <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('common.save')}</Button>
+            {draft.mode === 'view' ? (
+              <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.cancel')}</Button>
+                <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('common.save')}</Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1089,6 +1089,7 @@
         "publish": "Publier",
         "unpublish": "Dépublier",
         "rollback": "Restaurer",
+        "view": "Voir",
         "newDraft": "Nouveau brouillon",
         "saveAccess": "Enregistrer l'accès"
       },
@@ -1149,6 +1150,7 @@
       "editor": {
         "newTitle": "Nouvelle version brouillon",
         "editTitle": "Modifier le brouillon v{{version}}",
+        "viewTitle": "Version v{{version}} (lecture seule)",
         "body": "Contenu du prompt",
         "bodyHint": "Prend en charge des espaces réservés comme {botName}, {businessName}, {tone}. Max 20 000 caractères.",
         "expectedModules": "Modules attendus (séparés par des virgules, facultatif)",

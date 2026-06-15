@@ -1,19 +1,31 @@
 import OpenAI from 'openai';
-import { LLMProvider, ChatMessage, LLMOptions, LLMResponse, ToolCall } from './llm.types';
+import { LLMProvider, ChatMessage, ContentPart, contentToText, LLMOptions, LLMResponse, ToolCall } from './llm.types';
+
+type UserContentPart = OpenAI.Chat.ChatCompletionContentPart;
 
 type OpenAIMessage =
-  | { role: 'system' | 'user'; content: string }
+  | { role: 'system'; content: string }
+  | { role: 'user'; content: string | UserContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: OpenAI.Chat.ChatCompletionMessageToolCall[] }
   | { role: 'tool'; content: string; tool_call_id: string };
 
+/** Map multimodal user content to OpenAI content parts (images as data URLs). */
+function userContentToParts(content: ContentPart[]): UserContentPart[] {
+  return content.map((part): UserContentPart =>
+    part.type === 'text'
+      ? { type: 'text', text: part.text }
+      : { type: 'image_url', image_url: { url: `data:${part.mimeType};base64,${part.data}` } },
+  );
+}
+
 function mapMessage(m: ChatMessage): OpenAIMessage {
   if (m.role === 'tool') {
-    return { role: 'tool', content: m.content, tool_call_id: m.toolCallId! };
+    return { role: 'tool', content: contentToText(m.content), tool_call_id: m.toolCallId! };
   }
   if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
     return {
       role: 'assistant',
-      content: m.content || null,
+      content: contentToText(m.content) || null,
       tool_calls: m.toolCalls.map((tc) => ({
         id: tc.id,
         type: 'function' as const,
@@ -21,7 +33,10 @@ function mapMessage(m: ChatMessage): OpenAIMessage {
       })),
     };
   }
-  return { role: m.role as 'system' | 'user' | 'assistant', content: m.content };
+  if (m.role === 'user') {
+    return { role: 'user', content: typeof m.content === 'string' ? m.content : userContentToParts(m.content) };
+  }
+  return { role: m.role as 'system' | 'assistant', content: contentToText(m.content) };
 }
 
 export class OpenAIProvider implements LLMProvider {

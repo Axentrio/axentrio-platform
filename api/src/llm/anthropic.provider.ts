@@ -1,10 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk';
-import { LLMProvider, ChatMessage, LLMOptions, LLMResponse, ToolCall } from './llm.types';
+import { LLMProvider, ChatMessage, ContentPart, contentToText, LLMOptions, LLMResponse, ToolCall } from './llm.types';
 
 type AnthropicMessage = {
   role: 'user' | 'assistant';
   content: string | Anthropic.ContentBlockParam[];
 };
+
+/** Map multimodal user content to Anthropic content blocks. */
+function userContentToBlocks(content: ContentPart[]): Anthropic.ContentBlockParam[] {
+  return content.map((part): Anthropic.ContentBlockParam =>
+    part.type === 'text'
+      ? { type: 'text', text: part.text }
+      : {
+          type: 'image',
+          source: { type: 'base64', media_type: part.mimeType as Anthropic.Base64ImageSource['media_type'], data: part.data },
+        },
+  );
+}
 
 function mapMessagesToAnthropic(messages: ChatMessage[]): AnthropicMessage[] {
   const result: AnthropicMessage[] = [];
@@ -28,7 +40,7 @@ function mapMessagesToAnthropic(messages: ChatMessage[]): AnthropicMessage[] {
         }));
         result.push({ role: 'assistant', content: blocks });
       } else {
-        result.push({ role: 'assistant', content: msg.content });
+        result.push({ role: 'assistant', content: contentToText(msg.content) });
       }
       i++;
       continue;
@@ -42,7 +54,7 @@ function mapMessagesToAnthropic(messages: ChatMessage[]): AnthropicMessage[] {
         toolResultBlocks.push({
           type: 'tool_result' as const,
           tool_use_id: toolMsg.toolCallId ?? '',
-          content: toolMsg.content,
+          content: contentToText(toolMsg.content),
         });
         i++;
       }
@@ -50,8 +62,12 @@ function mapMessagesToAnthropic(messages: ChatMessage[]): AnthropicMessage[] {
       continue;
     }
 
-    // Regular user message
-    result.push({ role: 'user', content: msg.content });
+    // Regular user message — string stays a string; multimodal parts (text +
+    // images) become Anthropic content blocks.
+    result.push({
+      role: 'user',
+      content: typeof msg.content === 'string' ? msg.content : userContentToBlocks(msg.content),
+    });
     i++;
   }
 
@@ -83,7 +99,7 @@ export class AnthropicProvider implements LLMProvider {
       model: options.model,
       max_tokens: options.maxTokens,
       temperature: options.temperature,
-      system: systemMessage?.content || '',
+      system: systemMessage ? contentToText(systemMessage.content) : '',
       messages: anthropicMessages,
     };
 

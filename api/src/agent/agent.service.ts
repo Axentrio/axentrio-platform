@@ -7,7 +7,7 @@ import { TraceLogger, AgentTrace } from './trace-logger';
 import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
-import { ChatMessage, ToolDefinition } from '../llm/llm.types';
+import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { Tenant } from '../database/entities/Tenant';
@@ -31,6 +31,22 @@ export type AgentResult =
   | { type: 'error'; error: string; fallbackMessage: string };
 
 const MAX_ITERATIONS = 10;
+
+/** An image attached to the live user turn, already fetched + base64-encoded. */
+export interface AgentImageInput {
+  mimeType: string;
+  data: string;
+}
+
+/** Build the live user turn — multimodal when images are attached, plain string
+ *  otherwise (so the common text path is unchanged). */
+function buildUserContent(message: string, images?: AgentImageInput[]): string | ContentPart[] {
+  if (!images || images.length === 0) return message;
+  const parts: ContentPart[] = [];
+  if (message) parts.push({ type: 'text', text: message });
+  for (const img of images) parts.push({ type: 'image', mimeType: img.mimeType, data: img.data });
+  return parts;
+}
 
 const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'];
 
@@ -110,6 +126,7 @@ export class AgentService {
     session: ChatSession,
     tenant: Tenant,
     conversationHistory: ChatMessage[],
+    images?: AgentImageInput[],
   ): Promise<AgentResult> {
     const runId = crypto.randomUUID();
     // Multi-bot Phase 4 (#16d): resolve the bot config for this session.
@@ -183,7 +200,7 @@ export class AgentService {
       const messages: ChatMessage[] = [
         { role: 'system', content: systemPrompt },
         ...conversationHistory,
-        { role: 'user', content: message },
+        { role: 'user', content: buildUserContent(message, images) },
       ];
 
       const toolsCalled: string[] = [];

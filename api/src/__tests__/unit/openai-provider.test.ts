@@ -124,6 +124,32 @@ describe('OpenAIProvider', () => {
     });
   });
 
+  it('maps a multimodal user message (text + image) to OpenAI content parts with a data URL', async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [{ message: { role: 'assistant', content: 'I see it.' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 40, completion_tokens: 6 },
+    });
+
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image', mimeType: 'image/jpeg', data: 'BASE64DATA' },
+        ],
+      },
+    ];
+
+    await provider.chat(messages, baseOptions);
+
+    const callArgs = mockCreate.mock.calls[0][0];
+    const userMsg = callArgs.messages.find((m: { role: string }) => m.role === 'user');
+    expect(userMsg.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,BASE64DATA' } },
+    ]);
+  });
+
   it('maps tool role messages to OpenAI format with tool_call_id', async () => {
     mockCreate.mockResolvedValueOnce({
       choices: [

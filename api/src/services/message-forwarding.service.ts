@@ -26,7 +26,7 @@ import { generateResponse } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import { config } from '../config/environment';
-import { AgentService, AgentResult } from '../agent/agent.service';
+import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import {
   getBotConfigForSession,
   getLlmRuntimeConfigForSession,
@@ -512,20 +512,56 @@ async function releaseSessionLock(sessionId: string): Promise<void> {
   }
 }
 
-// The most recent user text message that has no bot reply after it — i.e. the
-// live turn to answer. Returns null when the latest message is already a bot
-// reply (everything answered). Earlier burst messages are still picked up: they
-// ride along as conversation history for whichever message is the live turn.
+// The most recent user message that has no bot reply after it — i.e. the live
+// turn to answer. Returns null when the latest message is already a bot reply
+// (everything answered). Earlier burst messages are still picked up: they ride
+// along as conversation history for whichever message is the live turn.
+// `image` messages count too — a photo (with or without a caption) is a turn the
+// bot must answer; the agent path attaches the image as vision input.
 async function getLatestUnansweredUserMessage(sessionId: string): Promise<Message | null> {
   const latest = await messageRepository
     .createQueryBuilder('message')
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type = :type', { type: 'text' })
+    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] })
     .orderBy('message.createdAt', 'DESC')
     .getOne();
   return latest && latest.participant?.type === 'user' ? latest : null;
+}
+
+// ── Inbound image → vision input ───────────────────────────────────────────
+
+// Image formats both LLM providers (Anthropic + OpenAI) accept.
+const SUPPORTED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
+// Anthropic caps a single base64 image near 5 MB; stay under that.
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+// Fetch a stored inbound image and return it as base64 for the vision model.
+// Best-effort: returns null on any failure (network, unsupported type, too big)
+// so the turn degrades to text-only rather than erroring the whole reply.
+async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) {
+      logger.warn(`Inbound image fetch failed (${res.status}) — answering without vision`);
+      return null;
+    }
+    const headerType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
+      logger.warn(`Inbound image rejected (size ${buf.byteLength}B) — answering without vision`);
+      return null;
+    }
+    const mimeType = SUPPORTED_IMAGE_MIME.has(headerType) ? headerType : 'image/jpeg';
+    if (!SUPPORTED_IMAGE_MIME.has(headerType)) {
+      logger.info(`Inbound image content-type '${headerType}' not recognised — defaulting to image/jpeg`);
+    }
+    return { mimeType, data: buf.toString('base64') };
+  } catch (error) {
+    logger.warn('Inbound image fetch threw — answering without vision', { error });
+    return null;
+  }
 }
 
 // ── Platform Agent Path ──────────────────────────────────────────────────
@@ -575,7 +611,19 @@ async function platformAgentPath(
       emitToSession(session.tenantId, session.id, 'typing:start', {});
       void sendChannelTypingIndicator(session.id).catch(() => {});
 
-      const messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
+      let messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
+      // Picture turn: fetch the image and hand it to the agent as vision input.
+      // If the fetch fails we still answer — with a note so the bot acknowledges
+      // the photo instead of replying to an empty message.
+      let images: AgentImageInput[] | undefined;
+      if (pending.type === 'image' && pending.metadata?.fileUrl) {
+        const img = await fetchInboundImageForAgent(pending.metadata.fileUrl);
+        if (img) {
+          images = [img];
+        } else if (!messageContent) {
+          messageContent = '[The customer sent an image, but it could not be loaded.]';
+        }
+      }
       // Exclude the live turn itself; earlier burst messages remain in history
       // so the agent sees the whole burst.
       const history = await getConversationHistory(session.id, pending.id);
@@ -585,6 +633,7 @@ async function platformAgentPath(
         session,
         tenant,
         history,
+        images,
       );
 
       let handedOff = false;
@@ -700,7 +749,7 @@ async function getConversationHistory(
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type = :type', { type: 'text' });
+    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] });
 
   if (excludeMessageId) {
     qb.andWhere('message.id != :excludeMessageId', { excludeMessageId });
@@ -711,11 +760,20 @@ async function getConversationHistory(
     .take(10)
     .getMany();
 
-  // Reverse to chronological order
-  return messages.reverse().map((msg) => ({
-    role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
-    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
-  }));
+  // Reverse to chronological order. Past images are summarised as a text
+  // placeholder (plus any caption) rather than re-sent as vision input — their
+  // channel CDN URLs are short-lived, and only the live turn's image needs to be
+  // re-fetched and shown to the model.
+  return messages.reverse().map((msg) => {
+    const text = msg.contentEncrypted ? decrypt(msg.content) : msg.content;
+    const content = msg.type === 'image'
+      ? (text ? `[Image] ${text}` : '[Image]')
+      : text;
+    return {
+      role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
+      content,
+    };
+  });
 }
 
 /**

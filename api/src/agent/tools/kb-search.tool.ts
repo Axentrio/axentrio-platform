@@ -1,5 +1,6 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { searchKnowledge } from '../../llm/rag.service';
+import { contentToText } from '../../llm/llm.types';
 import { getBotKnowledgeBaseIds } from '../../knowledge/bot-knowledge-bases';
 
 export class KbSearchTool implements ToolAdapter {
@@ -33,7 +34,7 @@ export class KbSearchTool implements ToolAdapter {
         ctx.dataSource,
         ctx.tenantId,
         query,
-        ctx.conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+        ctx.conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: contentToText(m.content) })),
         undefined,
         botKbIds
       );

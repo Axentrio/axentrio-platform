@@ -104,6 +104,34 @@ describe('AnthropicProvider', () => {
     ]);
   });
 
+  it('maps a multimodal user message (text + image) to Anthropic content blocks', async () => {
+    mockMessagesCreate.mockResolvedValue({
+      content: [{ type: 'text', text: 'I can see the photo.' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 40, output_tokens: 8 },
+    });
+
+    const provider = new AnthropicProvider('test-api-key');
+    const messages: ChatMessage[] = [
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image', mimeType: 'image/png', data: 'BASE64DATA' },
+        ],
+      },
+    ];
+
+    await provider.chat(messages, baseOptions);
+
+    const callArg = mockMessagesCreate.mock.calls[0][0];
+    const userMsg = callArg.messages.find((m: any) => m.role === 'user');
+    expect(userMsg.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'BASE64DATA' } },
+    ]);
+  });
+
   it('maps tool result messages to Anthropic user message with tool_result blocks', async () => {
     mockMessagesCreate.mockResolvedValue({
       content: [{ type: 'text', text: 'Based on the search results, pricing starts at $29/mo.' }],

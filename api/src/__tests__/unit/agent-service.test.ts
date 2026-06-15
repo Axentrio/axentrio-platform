@@ -91,6 +91,68 @@ describe('AgentService', () => {
     expect(mockTraceSave).toHaveBeenCalled();
   });
 
+  it('attaches an image to the live user turn as a multimodal message', async () => {
+    (mockProvider.chat as any).mockResolvedValue({
+      content: 'That looks like a cat.',
+      usage: { promptTokens: 50, completionTokens: 20 },
+      finishReason: 'stop',
+    });
+
+    await agent.run(
+      'What is in this picture?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+      [{ mimeType: 'image/jpeg', data: 'BASE64DATA' }],
+    );
+
+    const sentMessages = (mockProvider.chat as any).mock.calls[0][0];
+    const userMsg = sentMessages.find((m: any) => m.role === 'user');
+    expect(userMsg.content).toEqual([
+      { type: 'text', text: 'What is in this picture?' },
+      { type: 'image', mimeType: 'image/jpeg', data: 'BASE64DATA' },
+    ]);
+  });
+
+  it('sends an image-only turn (no caption) as a single image part', async () => {
+    (mockProvider.chat as any).mockResolvedValue({
+      content: 'Nice photo!',
+      usage: { promptTokens: 50, completionTokens: 20 },
+      finishReason: 'stop',
+    });
+
+    await agent.run(
+      '',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+      [{ mimeType: 'image/png', data: 'PNGDATA' }],
+    );
+
+    const sentMessages = (mockProvider.chat as any).mock.calls[0][0];
+    const userMsg = sentMessages.find((m: any) => Array.isArray(m.content));
+    expect(userMsg.content).toEqual([{ type: 'image', mimeType: 'image/png', data: 'PNGDATA' }]);
+  });
+
+  it('keeps the live turn a plain string when no images are attached', async () => {
+    (mockProvider.chat as any).mockResolvedValue({
+      content: 'Hi!',
+      usage: { promptTokens: 10, completionTokens: 5 },
+      finishReason: 'stop',
+    });
+
+    await agent.run(
+      'hello',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    const sentMessages = (mockProvider.chat as any).mock.calls[0][0];
+    const userMsg = sentMessages[sentMessages.length - 1];
+    expect(userMsg).toEqual({ role: 'user', content: 'hello' });
+  });
+
   it('executes tool calls and loops back to LLM', async () => {
     // First call: LLM wants to use kb_search
     (mockProvider.chat as any)

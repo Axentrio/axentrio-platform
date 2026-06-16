@@ -140,8 +140,14 @@ export async function processInboundEvent(
       contentEncrypted: true,
       status: 'sent',
       sentAt: event.timestamp,
-      metadata: event.message?.mediaUrl
-        ? { fileUrl: event.message.mediaUrl, customData: event.message.mediaMetadata as Record<string, unknown> | undefined }
+      // Persist media info whenever the event carries a URL (Messenger/IG) OR
+      // just metadata (WhatsApp/Telegram deliver a media id, not a URL — keep it
+      // in customData so the agent can resolve+download it later for vision).
+      metadata: (event.message?.mediaUrl || event.message?.mediaMetadata)
+        ? {
+            ...(event.message?.mediaUrl ? { fileUrl: event.message.mediaUrl } : {}),
+            customData: event.message?.mediaMetadata as Record<string, unknown> | undefined,
+          }
         : undefined,
     };
 

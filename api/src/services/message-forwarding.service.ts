@@ -29,6 +29,10 @@ import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/ou
 import { config } from '../config/environment';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
+import { ConversationBinding } from '../database/entities/ConversationBinding';
+import { ChannelConnection } from '../database/entities/ChannelConnection';
+import { getWhatsAppAccessToken } from '../channels/credential-utils';
+import { FB_GRAPH_API } from '../channels/meta/graph-api';
 import {
   getBotConfigForSession,
   getLlmRuntimeConfigForSession,
@@ -551,22 +555,25 @@ const IMAGE_FORMAT_TO_MIME: Record<string, string> = {
   jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
 };
 
-// Fetch a stored inbound image and return it as base64 for the vision model.
+// Download an image URL → base64 content part for the vision model.
 //
-// Uses the SAME download mechanism as inbound-media ingestion
+// Uses the SAME mechanism as inbound-media ingestion
 // (`UploadService.ingestRemoteFile`): the SSRF-guarded axios path with MANUAL
-// redirect following. A bare `fetch()` does NOT reliably retrieve Meta
-// attachment URLs from the prod datacenter — they 302-redirect (lookaside →
-// scontent CDN) and the CDN rejects the default client — which is why the bot
-// kept replying "I can't see the image". Format is sniffed with sharp (the
-// authoritative source), not the content-type header.
+// redirect following. A bare `fetch()` does NOT reliably retrieve Meta CDN URLs
+// from the prod datacenter — they 302-redirect (lookaside → scontent) and the
+// CDN rejects the default client. Following redirects manually also lets us
+// re-apply `authHeader` on every hop (axios drops Authorization across hosts) —
+// required for WhatsApp media, whose download URLs are token-gated. Format is
+// sniffed with sharp (authoritative), not the content-type header.
 //
 // Best-effort: returns null on any failure so the turn degrades to text-only
 // rather than erroring the whole reply.
-async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput | null> {
+async function downloadImageAsContentPart(
+  url: string,
+  label: string,
+  authHeader?: Record<string, string>,
+): Promise<AgentImageInput | null> {
   try {
-    // safeOutboundRequest hardcodes maxRedirects:0; follow Location manually
-    // (≤3 hops), re-validating each hop for SSRF — mirrors ingestRemoteFile.
     let current = url;
     let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
     for (let hop = 0; hop < 4; hop++) {
@@ -574,6 +581,7 @@ async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput |
         url: current,
         method: 'GET',
         responseType: 'arraybuffer',
+        headers: authHeader,
         timeout: 15_000,
         maxContentLength: MAX_IMAGE_BYTES,
         maxBodyLength: MAX_IMAGE_BYTES,
@@ -588,12 +596,12 @@ async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput |
       break;
     }
     if (!response || response.status < 200 || response.status >= 300) {
-      logger.warn(`Inbound image fetch failed (status ${response?.status ?? 'redirect-no-location'}) — answering without vision`);
+      logger.warn(`${label} image fetch failed (status ${response?.status ?? 'redirect-no-location'}) — answering without vision`);
       return null;
     }
     const buf = Buffer.from(response.data as ArrayBuffer);
     if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
-      logger.warn(`Inbound image rejected (size ${buf.byteLength}B) — answering without vision`);
+      logger.warn(`${label} image rejected (size ${buf.byteLength}B) — answering without vision`);
       return null;
     }
     // Authoritative format sniff via sharp (lazy import keeps the native dep off
@@ -607,14 +615,89 @@ async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput |
     }
     const mimeType = format ? IMAGE_FORMAT_TO_MIME[format] : undefined;
     if (!mimeType) {
-      logger.warn(`Inbound image format '${format ?? 'unknown'}' unsupported — answering without vision`);
+      logger.warn(`${label} image format '${format ?? 'unknown'}' unsupported — answering without vision`);
       return null;
     }
     return { mimeType, data: buf.toString('base64') };
   } catch (error) {
-    logger.warn('Inbound image fetch threw — answering without vision', { error });
+    logger.warn(`${label} image fetch threw — answering without vision`, { error });
     return null;
   }
+}
+
+// Messenger/Instagram: the stored fileUrl is a directly-fetchable CDN URL.
+function fetchInboundImageForAgent(url: string): Promise<AgentImageInput | null> {
+  return downloadImageAsContentPart(url, 'Inbound');
+}
+
+// WhatsApp: the webhook delivers a media *id*, not a URL. Resolve it via the
+// Graph API (`GET /<media-id>`) to a temporary, token-gated download URL, then
+// download the bytes — BOTH requests need the connection's WhatsApp access
+// token as a Bearer header. The token is resolved from the session's bound
+// ChannelConnection.
+async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): Promise<AgentImageInput | null> {
+  try {
+    const binding = await AppDataSource.getRepository(ConversationBinding).findOne({
+      where: { sessionId },
+      select: { channelConnectionId: true },
+    });
+    if (!binding) {
+      logger.warn('WhatsApp image: no conversation binding for session — answering without vision');
+      return null;
+    }
+    const connection = await AppDataSource.getRepository(ChannelConnection).findOne({
+      where: { id: binding.channelConnectionId },
+    });
+    const accessToken = connection ? getWhatsAppAccessToken(connection.credentials) : null;
+    if (!accessToken) {
+      logger.warn('WhatsApp image: no access token on connection — answering without vision');
+      return null;
+    }
+    const authHeader = { Authorization: `Bearer ${accessToken}` };
+
+    // Step 1: media id → temporary download URL (JSON: { url, mime_type, ... }).
+    let mediaUrl: string | undefined;
+    try {
+      const meta = await safeOutboundRequest({
+        url: `${FB_GRAPH_API}/${encodeURIComponent(mediaId)}`,
+        method: 'GET',
+        headers: authHeader,
+        timeout: 15_000,
+      });
+      mediaUrl = (meta.data as { url?: string } | undefined)?.url;
+    } catch (error) {
+      logger.warn('WhatsApp image: media-id resolve failed — answering without vision', { error });
+      return null;
+    }
+    if (!mediaUrl) {
+      logger.warn('WhatsApp image: media-id resolve returned no url — answering without vision');
+      return null;
+    }
+
+    // Step 2: download the bytes (token required, may redirect).
+    return downloadImageAsContentPart(mediaUrl, 'WhatsApp', authHeader);
+  } catch (error) {
+    logger.warn('WhatsApp image fetch threw — answering without vision', { error });
+    return null;
+  }
+}
+
+// Resolve an inbound image message into a vision content part, picking the right
+// download path per channel: Messenger/IG expose a fetchable fileUrl; WhatsApp
+// exposes a token-gated media id in customData. Returns null for non-images and
+// on any failure (caller falls back to a text placeholder).
+async function resolveInboundImage(pending: Message, session: ChatSession): Promise<AgentImageInput | null> {
+  if (pending.type !== 'image') return null;
+  if (pending.metadata?.fileUrl) {
+    return fetchInboundImageForAgent(pending.metadata.fileUrl);
+  }
+  if (session.channel === 'whatsapp') {
+    const mediaId = (pending.metadata?.customData as Record<string, unknown> | undefined)?.mediaId;
+    if (typeof mediaId === 'string' && mediaId) {
+      return fetchWhatsAppImageForAgent(session.id, mediaId);
+    }
+  }
+  return null;
 }
 
 // ── Platform Agent Path ──────────────────────────────────────────────────
@@ -669,8 +752,8 @@ async function platformAgentPath(
       // If the fetch fails we still answer — with a note so the bot acknowledges
       // the photo instead of replying to an empty message.
       let images: AgentImageInput[] | undefined;
-      if (pending.type === 'image' && pending.metadata?.fileUrl) {
-        const img = await fetchInboundImageForAgent(pending.metadata.fileUrl);
+      if (pending.type === 'image') {
+        const img = await resolveInboundImage(pending, session);
         if (img) {
           images = [img];
         } else if (!messageContent) {
@@ -1012,8 +1095,8 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
 
   let messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
   let images: AgentImageInput[] | undefined;
-  if (pending.type === 'image' && pending.metadata?.fileUrl) {
-    const img = await fetchInboundImageForAgent(pending.metadata.fileUrl);
+  if (pending.type === 'image') {
+    const img = await resolveInboundImage(pending, session);
     if (img) images = [img];
     else if (!messageContent) messageContent = '[The customer sent an image, but it could not be loaded.]';
   }

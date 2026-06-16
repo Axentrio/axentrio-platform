@@ -48,6 +48,14 @@ const STATE_TTL_MS = 120_000;
 const LOCK_TTL_MS = 60_000;
 const HEARTBEAT_MS = 15_000;
 const REARM_MS = 500;
+// Failure-mode re-arms (lock-miss / stale / error / deps-not-ready) back off
+// exponentially and give up after a cap, so a persistent failure (e.g. an
+// upstream 429) can never become a tight ~500ms agent/LLM retry loop. The
+// durable watermark means a given-up turn is still recovered by the next inbound
+// message's job. The legitimate "not due yet" debounce re-arm is NOT a failure
+// and resets the attempt counter.
+const MAX_REARM_BACKOFF_MS = 30_000;
+const MAX_REARM_ATTEMPTS = 12; // ~3.5 min of cumulative backoff before giving up
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
 
@@ -169,12 +177,12 @@ export async function scheduleTurn(session: ChatSession, message: Message): Prom
   }
 }
 
-/** Re-arm a delayed coalesce job (used for early-job / lock-miss / error paths). */
-async function rearm(sessionId: string, tenantId: string, delay: number): Promise<void> {
+/** Re-arm a delayed coalesce job (used for timing / lock-miss / error paths). */
+async function rearm(sessionId: string, tenantId: string, delay: number, attempt = 0): Promise<void> {
   const queue = getQueue(TURN_COALESCE_QUEUE);
   if (!queue) return;
   await queue.add(
-    { sessionId, tenantId },
+    { sessionId, tenantId, attempt },
     {
       jobId: `${sessionId}:rearm:${randomUUID()}`,
       delay: Math.max(0, delay),
@@ -184,17 +192,44 @@ async function rearm(sessionId: string, tenantId: string, delay: number): Promis
   );
 }
 
+/** Exponential backoff (+ small jitter) for a failure-mode re-arm. */
+function backoffDelay(attempt: number): number {
+  const base = Math.min(REARM_MS * 2 ** attempt, MAX_REARM_BACKOFF_MS);
+  return base + Math.floor(Math.random() * REARM_MS);
+}
+
+/**
+ * Re-arm a failure path with backoff, or give up once the attempt cap is hit.
+ * Giving up is safe: the durable watermark leaves the turn recoverable by the
+ * next inbound message's job (or, for 'stale', the newer message already has one).
+ */
+async function rearmWithBackoff(
+  sessionId: string,
+  tenantId: string,
+  attempt: number,
+  reason: string,
+): Promise<void> {
+  if (attempt + 1 > MAX_REARM_ATTEMPTS) {
+    logger.error(
+      `[coalescer] giving up session ${sessionId} after ${attempt} re-arms (${reason}) — durable watermark leaves it recoverable on next activity`,
+    );
+    return;
+  }
+  await rearm(sessionId, tenantId, backoffDelay(attempt), attempt + 1);
+}
+
 // ── Processor (due side) ───────────────────────────────────────────────────
 
 export async function coalesceProcessor(job: Job): Promise<void> {
   const { sessionId, tenantId } = job.data as { sessionId: string; tenantId: string };
+  const attempt = (job.data as { attempt?: number }).attempt ?? 0;
   const redis = getRedisClient();
   if (!redis) return; // scheduled via Redis; if it's gone there's nothing to do.
 
   // Deps-ready guard — a job from a previous process can fire before the agent /
   // forwarding services are wired during boot.
   if (!isForwardingReady()) {
-    await rearm(sessionId, tenantId, REARM_MS);
+    await rearmWithBackoff(sessionId, tenantId, attempt, 'deps-not-ready');
     return;
   }
 
@@ -202,7 +237,7 @@ export async function coalesceProcessor(job: Job): Promise<void> {
   const token = randomUUID();
   const acquired = await redis.set(lockKey(sessionId), token, 'PX', LOCK_TTL_MS, 'NX');
   if (acquired !== 'OK') {
-    await rearm(sessionId, tenantId, REARM_MS);
+    await rearmWithBackoff(sessionId, tenantId, attempt, 'lock-miss');
     return;
   }
 
@@ -223,7 +258,8 @@ export async function coalesceProcessor(job: Job): Promise<void> {
     // stored dueAt; if turn:state was lost (TTL/restart) recompute from the DB.
     const dueAt = await resolveDueAt(redis, session, pending);
     if (Date.now() < dueAt) {
-      await rearm(sessionId, tenantId, dueAt - Date.now());
+      // Legitimate debounce wait, not a failure — reset the backoff counter.
+      await rearm(sessionId, tenantId, dueAt - Date.now(), 0);
       return;
     }
 
@@ -236,7 +272,7 @@ export async function coalesceProcessor(job: Job): Promise<void> {
         .catch(() => {});
     } else if (status === 'stale') {
       // A newer message arrived (or watermark race) — let it form the next turn.
-      await rearm(sessionId, tenantId, REARM_MS);
+      await rearmWithBackoff(sessionId, tenantId, attempt, 'stale');
     }
     // 'noop' (paused bot / AI off / no tenant): nothing to clear or re-arm.
   } catch (err) {
@@ -244,7 +280,7 @@ export async function coalesceProcessor(job: Job): Promise<void> {
       sessionId,
       error: err instanceof Error ? err.message : String(err),
     });
-    await rearm(sessionId, tenantId, REARM_MS);
+    await rearmWithBackoff(sessionId, tenantId, attempt, 'processor-error');
   } finally {
     clearInterval(heartbeat);
     await redis.eval(RELEASE_LUA, 1, lockKey(sessionId), token).catch(() => {});

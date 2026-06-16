@@ -45,6 +45,7 @@ vi.mock('../../channels/outbound-router', () => ({
 import {
   runTurn,
   getNewestUnansweredUserMessage,
+  getUnansweredBounds,
   initializeForwarding,
   initializeAgentService,
 } from '../../services/message-forwarding.service';
@@ -144,6 +145,42 @@ describe('runTurn — burst coalescing', () => {
     const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
     expect(after.lastCoalescedAnswerMessageId).toBe(m3.id);
     expect(await getNewestUnansweredUserMessage(after)).toBeNull();
+  });
+});
+
+describe('runTurn — watermark compared DB-side (re-arm storm regression)', () => {
+  // The watermark advance (finalizeReply) reads created_at DB-side with full µs
+  // precision, but the read side used to compare against session.lastCoalescedAnswerAt
+  // — a JS Date (ms precision). In prod (created_at is timestamptz/µs) that truncates
+  // sub-ms µs, so the just-answered watermark message re-qualified as "unanswered"
+  // and the coalescer re-ran the agent on it every ~500ms forever (the 429/TPM storm).
+  // The reads must key off the watermark *message id* and read its created_at DB-side,
+  // independent of the stored JS Date. Asserting that here: the stored date is stale,
+  // but the message-id watermark is the newest message → nothing is unanswered.
+  it('treats the newest message as answered from the id watermark, ignoring a stale lastCoalescedAnswerAt', async () => {
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+
+    const base = 1_700_000_000_000;
+    const m1 = await createTestMessage(session.id, tenant.id, user.id, { content: 'Hi' });
+    const m2 = await createTestMessage(session.id, tenant.id, user.id, { content: 'there' });
+    await setCreatedAt(m1.id, base);
+    await setCreatedAt(m2.id, base + 1000);
+
+    // m2 IS the answered high-water mark, but the stored timestamp is stale/imprecise
+    // (an hour behind — standing in for the sub-ms truncation a JS Date causes).
+    await sessionRepo.query(
+      `UPDATE chat_sessions SET last_coalesced_answer_message_id = $1, last_coalesced_answer_at = $2 WHERE id = $3`,
+      [m2.id, new Date(base + 1000 - 3_600_000), session.id],
+    );
+
+    const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(after.lastCoalescedAnswerMessageId).toBe(m2.id);
+    // DB-side compare reads m2's real created_at via its id → m2 is not > itself → null.
+    // (Old JS-Date compare used the stale stored date → re-selected m2 → infinite re-arm.)
+    expect(await getNewestUnansweredUserMessage(after)).toBeNull();
+    expect(await getUnansweredBounds(after)).toBeNull();
   });
 });
 

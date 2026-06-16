@@ -870,11 +870,17 @@ export async function getNewestUnansweredUserMessage(session: ChatSession): Prom
     .andWhere('m.isDeleted = false')
     .andWhere("m.type IN ('text','image')")
     .andWhere("p.type = 'user'");
-  if (session.lastCoalescedAnswerAt) {
-    qb.andWhere('(m.createdAt, m.id) > (:wAt, :wId)', {
-      wAt: session.lastCoalescedAnswerAt,
-      wId: session.lastCoalescedAnswerMessageId,
-    });
+  if (session.lastCoalescedAnswerMessageId) {
+    // Compare the watermark DB-side: read its created_at from the row with full
+    // microsecond precision. Passing session.lastCoalescedAnswerAt (a JS Date,
+    // millisecond precision) truncates sub-ms µs, so the already-answered
+    // watermark message re-qualifies as "unanswered" and the coalescer re-runs
+    // the agent on it forever (re-arm storm → LLM/TPM saturation). Mirrors the
+    // DB-side advance in finalizeReply.
+    qb.andWhere(
+      '(m.created_at, m.id) > ((SELECT created_at FROM messages WHERE id = :wId), :wId)',
+      { wId: session.lastCoalescedAnswerMessageId },
+    );
   }
   return qb.orderBy('m.createdAt', 'DESC').addOrderBy('m.id', 'DESC').limit(1).getOne();
 }
@@ -897,11 +903,13 @@ export async function getUnansweredBounds(
     .andWhere('m.isDeleted = false')
     .andWhere("m.type IN ('text','image')")
     .andWhere("p.type = 'user'");
-  if (session.lastCoalescedAnswerAt) {
-    qb.andWhere('(m.created_at, m.id) > (:wAt, :wId)', {
-      wAt: session.lastCoalescedAnswerAt,
-      wId: session.lastCoalescedAnswerMessageId,
-    });
+  if (session.lastCoalescedAnswerMessageId) {
+    // DB-side watermark comparison (full µs precision) — see the note in
+    // getNewestUnansweredUserMessage.
+    qb.andWhere(
+      '(m.created_at, m.id) > ((SELECT created_at FROM messages WHERE id = :wId), :wId)',
+      { wId: session.lastCoalescedAnswerMessageId },
+    );
   }
   const raw = await qb.getRawOne<{ cnt: string; firstat: string; lastat: string }>();
   if (!raw || Number(raw.cnt) === 0) return null;

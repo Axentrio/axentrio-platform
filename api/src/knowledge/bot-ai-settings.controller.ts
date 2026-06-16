@@ -13,6 +13,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { logger } from '../utils/logger';
 import { generateResponse } from '../llm/rag.service';
 import { buildSystemPrompt } from '../llm/prompt-builder';
+import { rethrowIfUpstreamRateLimit } from '../llm/upstream-error';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
@@ -168,6 +169,7 @@ export async function botTestChat(req: Request, res: Response) {
     try {
       result = await generateResponse(AppDataSource, tenantId, aiEff, message, history, botKbIds, templateBody);
     } catch (err: unknown) {
+      rethrowIfUpstreamRateLimit(err);
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('OPENAI_API_KEY')) {
         throw new BadRequestError(
@@ -201,6 +203,7 @@ export async function botTestChat(req: Request, res: Response) {
     try {
       response = await llm.chat(messages, { model, maxTokens: 1000, temperature: 0.3, jsonMode: false });
     } catch (err) {
+      rethrowIfUpstreamRateLimit(err);
       logger.error('Bot test chat LLM call failed', err);
       throw new ApiError('LLM call failed. Check your API key and model.', 500, ERROR_CODES.UPSTREAM_FAILED);
     }

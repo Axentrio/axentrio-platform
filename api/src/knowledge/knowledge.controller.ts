@@ -17,6 +17,7 @@ import {
 import { updateAiSettingsSchema, testChatSchema } from '../schemas/ai-settings.schema';
 import { Tenant } from '../database/entities/Tenant';
 import { buildSystemPrompt } from '../llm/prompt-builder';
+import { rethrowIfUpstreamRateLimit } from '../llm/upstream-error';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { sendSuccess, sendCreated, sendNoContent } from '../utils/response';
@@ -303,6 +304,7 @@ export async function testChat(req: Request, res: Response) {
       // tenant-level preview stays tenant-wide (knowledgeBaseIds omitted).
       result = await generateResponse(AppDataSource, tenantId, aiEff, message, history, undefined, templateBody);
     } catch (err: any) {
+      rethrowIfUpstreamRateLimit(err);
       const msg = err?.message || '';
       if (msg.includes('OPENAI_API_KEY')) {
         throw new BadRequestError(
@@ -348,6 +350,7 @@ export async function testChat(req: Request, res: Response) {
         jsonMode: false,
       });
     } catch (err) {
+      rethrowIfUpstreamRateLimit(err);
       logger.error('Test chat LLM call failed', err);
       throw new ApiError(
         'LLM call failed. Check your API key and model.',

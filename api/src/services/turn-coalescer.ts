@@ -28,6 +28,9 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt } from '../utils/encryption';
+import { cached } from '../utils/cache';
+import { config } from '../config/environment';
+import { Tenant } from '../database/entities/Tenant';
 import { computeDueAt, isContactFragment } from './turn-timing';
 import {
   forwardMessageToN8n,
@@ -35,6 +38,7 @@ import {
   isForwardingReady,
   getNewestUnansweredUserMessage,
   getUnansweredBounds,
+  isCustomWebhookUrl,
 } from './message-forwarding.service';
 
 export const TURN_COALESCE_QUEUE = 'turn-coalesce';
@@ -58,6 +62,24 @@ const MAX_REARM_BACKOFF_MS = 30_000;
 const MAX_REARM_ATTEMPTS = 12; // ~3.5 min of cumulative backoff before giving up
 
 const sessionRepository = AppDataSource.getRepository(ChatSession);
+const tenantRepository = AppDataSource.getRepository(Tenant);
+
+/**
+ * Whether a tenant routes to a CUSTOM n8n webhook (cached 60s). Such tenants are
+ * NOT coalesced: the coalescer's run path (runTurn) is platform-agent only, so
+ * coalescing them would bypass their own n8n workflow (answer via the platform
+ * agent, or drop the message if their AI is off). They take the legacy inline
+ * forward instead, which handles the custom-webhook path. See issue #37.
+ */
+export async function usesCustomWebhook(tenantId: string): Promise<boolean> {
+  return cached(`coalescer:custom-webhook:${tenantId}`, 60, async () => {
+    const t = await tenantRepository.findOne({
+      where: { id: tenantId },
+      select: { id: true, webhookUrl: true } as never,
+    });
+    return isCustomWebhookUrl(t?.webhookUrl, config.n8n.defaultWebhookUrl);
+  });
+}
 
 const stateKey = (sessionId: string): string => `turn:state:${sessionId}`;
 const lockKey = (sessionId: string): string => `agent:lock:${sessionId}`;
@@ -133,6 +155,14 @@ export async function scheduleTurn(session: ChatSession, message: Message): Prom
   }
   // Only text/image user turns are coalesced; anything else uses the legacy path.
   if (message.type !== 'text' && message.type !== 'image') {
+    await forwardMessageToN8n(session, message);
+    return;
+  }
+
+  // Custom-webhook tenants are NOT coalesced — runTurn is platform-agent only, so
+  // coalescing them would bypass their n8n workflow (issue #37). Route them to the
+  // legacy inline forward, which handles the custom-webhook path + RAG fallback.
+  if (await usesCustomWebhook(session.tenantId)) {
     await forwardMessageToN8n(session, message);
     return;
   }

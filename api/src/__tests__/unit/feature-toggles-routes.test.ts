@@ -18,6 +18,7 @@ const { state } = vi.hoisted(() => ({
     lastWriteSql: null as string | null,
     lastWriteParams: null as unknown[] | null,
     invalidated: [] as string[],
+    modulesInvalidated: [] as string[],
     audits: [] as Array<{ action: string; metadata: unknown }>,
   },
 }));
@@ -57,6 +58,12 @@ vi.mock('../../billing/entitlements', () => ({
   }),
   invalidateEntitlements: async (id: string) => {
     state.invalidated.push(id);
+  },
+}));
+
+vi.mock('../../modules', () => ({
+  invalidateModules: async (id: string) => {
+    state.modulesInvalidated.push(id);
   },
 }));
 
@@ -104,6 +111,7 @@ beforeEach(() => {
   state.lastWriteSql = null;
   state.lastWriteParams = null;
   state.invalidated = [];
+  state.modulesInvalidated = [];
   state.audits = [];
 });
 
@@ -119,6 +127,10 @@ describe('PUT /tenants/me/feature-toggles', () => {
     expect(state.lastWriteSql).toContain("'{featureToggles}'");
     expect(state.lastWriteParams).toEqual(['tenant-1', JSON.stringify({ bookings: false })]);
     expect(state.invalidated).toEqual(['tenant-1']);
+    // Feature-gated modules (e.g. booking) must re-resolve immediately, so the
+    // module cache is invalidated too — otherwise a toggled-off feature keeps
+    // its agent tools for up to the resolver's 60s TTL.
+    expect(state.modulesInvalidated).toEqual(['tenant-1']);
     expect(state.audits).toEqual([
       { action: 'tenant.feature_toggles_updated', metadata: { featureToggles: { bookings: false } } },
     ]);

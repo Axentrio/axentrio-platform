@@ -28,6 +28,7 @@ import { asyncHandler, ValidationError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { AppDataSource } from '../database/data-source';
 import { getEntitlements, invalidateEntitlements } from '../billing/entitlements';
+import { invalidateModules } from '../modules';
 import { isToggleableFeature } from '../billing/feature-toggles';
 import { logAudit } from '../utils/audit';
 import type { TenantFeatureToggles } from '../contracts/entitlements';
@@ -75,7 +76,13 @@ router.put(
       [tenantId, JSON.stringify(next)],
     );
 
+    // Invalidate BOTH caches: entitlements AND the module resolver. Feature-
+    // gated modules (e.g. the booking module) derive their activeness from
+    // entitlements.features, and the resolver caches the active-module list on
+    // its own 60s TTL — without this, a just-toggled-off feature keeps its
+    // agent tools (e.g. the bot still tries to book) until that TTL lapses.
     await invalidateEntitlements(tenantId);
+    await invalidateModules(tenantId);
     await logAudit(req.userId!, 'tenant.feature_toggles_updated', 'tenant', tenantId, tenantId, {
       featureToggles: next,
     });

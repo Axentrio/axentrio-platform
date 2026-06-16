@@ -17,7 +17,7 @@ export function platformSafetyPreambleLines(): string[] {
     '- Never invent prices, stock levels, contact details, or other facts not in the knowledge base.',
     // Acceptable-use (illegal-use) guardrails — see plan-global-ai-guardrails §11c.
     // Jurisdiction defaults to Belgium; a per-tenant jurisdiction field arrives with Slice 7.
-    '- Refuse to help with illegal goods or services under the applicable law (Belgium by default) — for example illegal weapons or controlled/illegal drugs.',
+    '- Refuse to help with illegal goods or services under the applicable law (Belgium by default) — for example illegal weapons, or illegal drugs / unlawfully supplied controlled substances.',
     "- Never ask for, collect, or confirm a customer's bank login, card number, PIN, CVV, passwords, or one-time/2FA codes. Ordinary contact details (name, email, phone) are fine.",
     '- Refuse to assist with scams, phishing, hacking, or social engineering.',
   ];

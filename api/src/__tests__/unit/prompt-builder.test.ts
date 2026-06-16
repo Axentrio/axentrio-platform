@@ -99,7 +99,7 @@ describe('PromptBuilder', () => {
     expect(prompt).toContain('Never invent prices, stock levels, contact details');
   });
 
-  it('keeps the existing agent prompt section order with platform rules between guardrails and escalation', () => {
+  it('emits the non-negotiable platform rules AFTER tenant/tool content, before formatting (§11f)', () => {
     const tenantWithSkills = {
       ...baseTenant,
       settings: {
@@ -127,10 +127,15 @@ describe('PromptBuilder', () => {
     expect(idxBrand).toBeGreaterThanOrEqual(0);
     expect(idxCustom).toBeGreaterThan(idxBrand);
     expect(idxGuardrails).toBeGreaterThan(idxCustom);
-    expect(idxPlatform).toBeGreaterThan(idxGuardrails);
-    expect(idxEscalation).toBeGreaterThan(idxPlatform);
+    // §11f: tool sections (escalation, skills) come BEFORE the non-negotiable
+    // platform rules now — the safety block is emitted after all tenant/tool/KB
+    // content so none of it can override safety by recency.
+    expect(idxEscalation).toBeGreaterThan(idxGuardrails);
     expect(idxSkills).toBeGreaterThan(idxEscalation);
-    expect(idxFormatting).toBeGreaterThan(idxSkills);
+    expect(idxPlatform).toBeGreaterThan(idxSkills);
+    // ...with only the platform-authored FORMATTING RULES after it (keeps the
+    // language-matching rule last for recency; can't be used to override safety).
+    expect(idxFormatting).toBeGreaterThan(idxPlatform);
   });
 
   it('keeps tool/skill section wording stable after the safety-rules insertion', () => {

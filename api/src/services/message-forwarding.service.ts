@@ -10,6 +10,7 @@ import { notificationService } from './notification.service';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { decrypt, encrypt } from '../utils/encryption';
+import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot, BotSettings } from '../database/entities/Bot';
@@ -63,6 +64,16 @@ export function initializeForwarding(
 export function initializeAgentService(agent: AgentService): void {
   agentService = agent;
   logger.info('Platform agent service initialized for message forwarding');
+}
+
+/**
+ * True once both the n8n outbound service and the platform agent service are
+ * wired. The turn-coalescer processor checks this before running, so a delayed
+ * job that fires during the post-restart boot window re-arms instead of running
+ * against half-initialised deps. See plan-message-coalescer.md (deps-ready guard).
+ */
+export function isForwardingReady(): boolean {
+  return outboundService !== null && agentService !== null;
 }
 
 export function getFallbackService(): FallbackService | null {
@@ -703,6 +714,327 @@ async function platformAgentPath(
   } finally {
     await releaseSessionLock(session.id);
   }
+}
+
+// ── Turn Coalescer: single-run path + durable watermark ────────────────────
+// Used by the turn-coalescer (api/src/services/turn-coalescer.ts). Unlike
+// platformAgentPath (the legacy fail-open fallback, which keeps its own lock +
+// fixed-sleep drain), this path runs the agent EXACTLY ONCE for a snapped
+// high-water-mark message, then finalises against the durable tuple watermark on
+// chat_sessions. The coalescer owns timing, the run-lock, and re-running.
+// See .scratch/plan-message-coalescer.md.
+
+/** Status returned by runTurn so the coalescer can decide clear-vs-re-arm. */
+export type RunTurnStatus = 'answered' | 'stale' | 'noop';
+
+/** Benign loser of a watermark race (rolls back the txn → no double reply). */
+class WatermarkConflictError extends Error {}
+
+/**
+ * Newest UNANSWERED user text/image message for a session — the live turn.
+ * "Unanswered" is the durable tuple compare `(created_at, id) >
+ * (lastCoalescedAnswerAt, lastCoalescedAnswerMessageId)`; when the watermark is
+ * null the whole conversation qualifies (the clause is simply omitted, which is
+ * null-safe by construction). Returns null when everything is answered.
+ */
+export async function getNewestUnansweredUserMessage(session: ChatSession): Promise<Message | null> {
+  const qb = messageRepository
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .where('m.sessionId = :sid', { sid: session.id })
+    .andWhere('m.isDeleted = false')
+    .andWhere("m.type IN ('text','image')")
+    .andWhere("p.type = 'user'");
+  if (session.lastCoalescedAnswerAt) {
+    qb.andWhere('(m.createdAt, m.id) > (:wAt, :wId)', {
+      wAt: session.lastCoalescedAnswerAt,
+      wId: session.lastCoalescedAnswerMessageId,
+    });
+  }
+  return qb.orderBy('m.createdAt', 'DESC').addOrderBy('m.id', 'DESC').limit(1).getOne();
+}
+
+/**
+ * Count + first/last createdAt of the unanswered user messages — lets the
+ * coalescer recompute `dueAt` from the DB when Redis turn:state was lost
+ * (TTL/restart). Returns null when nothing is unanswered.
+ */
+export async function getUnansweredBounds(
+  session: ChatSession,
+): Promise<{ count: number; firstAt: Date; lastAt: Date } | null> {
+  const qb = messageRepository
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .select('COUNT(*)', 'cnt')
+    .addSelect('MIN(m.created_at)', 'firstat')
+    .addSelect('MAX(m.created_at)', 'lastat')
+    .where('m.sessionId = :sid', { sid: session.id })
+    .andWhere('m.isDeleted = false')
+    .andWhere("m.type IN ('text','image')")
+    .andWhere("p.type = 'user'");
+  if (session.lastCoalescedAnswerAt) {
+    qb.andWhere('(m.created_at, m.id) > (:wAt, :wId)', {
+      wAt: session.lastCoalescedAnswerAt,
+      wId: session.lastCoalescedAnswerMessageId,
+    });
+  }
+  const raw = await qb.getRawOne<{ cnt: string; firstat: string; lastat: string }>();
+  if (!raw || Number(raw.cnt) === 0) return null;
+  return { count: Number(raw.cnt), firstAt: new Date(raw.firstat), lastAt: new Date(raw.lastat) };
+}
+
+/**
+ * Conversation history bounded to `<= hwm` (and excluding the hwm message
+ * itself, which is the live turn). The created_at is read DB-side from the hwm id
+ * for microsecond fidelity. Messages that arrived AFTER the hwm are intentionally
+ * left for their own future turn.
+ */
+async function getCoalescedHistory(
+  sessionId: string,
+  hwmId: string,
+): Promise<{ role: 'user' | 'assistant'; content: string }[]> {
+  const messages = await messageRepository
+    .createQueryBuilder('message')
+    .leftJoinAndSelect('message.participant', 'participant')
+    .where('message.sessionId = :sid', { sid: sessionId })
+    .andWhere('message.isDeleted = false')
+    .andWhere("message.type IN ('text','image')")
+    .andWhere('message.id != :hwmId', { hwmId })
+    .andWhere(
+      '(message.created_at, message.id) <= ((SELECT created_at FROM messages WHERE id = :hwmId), :hwmId)',
+      { hwmId },
+    )
+    .orderBy('message.createdAt', 'DESC')
+    .addOrderBy('message.id', 'DESC')
+    .take(10)
+    .getMany();
+
+  return messages.reverse().map((msg) => {
+    const text = msg.contentEncrypted ? decrypt(msg.content) : msg.content;
+    const content = msg.type === 'image' ? (text ? `[Image] ${text}` : '[Image]') : text;
+    return {
+      role: msg.participant?.type === 'bot' ? ('assistant' as const) : ('user' as const),
+      content,
+    };
+  });
+}
+
+/**
+ * Persist the bot reply AND advance the durable watermark in ONE transaction.
+ * - When `staleGuard`, first check for a user message newer than the hwm; if one
+ *   exists the computed reply is stale → return 'stale' WITHOUT writing.
+ * - The watermark advance is null-safe and DB-side (created_at read from the hwm
+ *   row, never a JS ms param). It must affect exactly one row; otherwise another
+ *   run already advanced past hwm → roll back (no double reply).
+ * Outbound delivery happens AFTER commit (caller), so a crash before commit
+ * re-runs the turn rather than marking it answered without a persisted reply.
+ */
+async function finalizeReply(
+  session: ChatSession,
+  botParticipantId: string,
+  content: string,
+  quickReplies: Array<{ title: string; value: string }> | undefined,
+  hwmId: string,
+  staleGuard: boolean,
+): Promise<{ status: 'answered'; savedId: string } | { status: 'stale' }> {
+  try {
+    return await AppDataSource.transaction(async (manager) => {
+      if (staleGuard) {
+        const r = await manager.query(
+          `SELECT EXISTS(
+             SELECT 1 FROM messages m
+             JOIN participants p ON p.id = m.participant_id
+             WHERE m.session_id = $1 AND m.is_deleted = false
+               AND m.type IN ('text','image') AND p.type = 'user'
+               AND (m.created_at, m.id) > ((SELECT created_at FROM messages WHERE id = $2), $2)
+           ) AS has_newer`,
+          [session.id, hwmId],
+        );
+        if (r?.[0]?.has_newer) return { status: 'stale' as const };
+      }
+
+      const metadata = quickReplies?.length ? { quickReplies } : undefined;
+      const repo = manager.getRepository(Message);
+      const saved = await repo.save(
+        repo.create({
+          sessionId: session.id,
+          tenantId: session.tenantId,
+          participantId: botParticipantId,
+          type: 'text' as Message['type'],
+          content: encrypt(content),
+          contentEncrypted: true,
+          status: 'sent' as Message['status'],
+          sentAt: new Date(),
+          ...(metadata ? { metadata } : {}),
+        }),
+      );
+
+      const upd = await manager.query(
+        `UPDATE chat_sessions s
+            SET last_coalesced_answer_at = m.created_at,
+                last_coalesced_answer_message_id = m.id
+           FROM messages m
+          WHERE s.id = $1 AND m.id = $2
+            AND (s.last_coalesced_answer_at IS NULL
+                 OR (s.last_coalesced_answer_at, s.last_coalesced_answer_message_id)
+                    < (m.created_at, m.id))
+          RETURNING s.id`,
+        [session.id, hwmId],
+      );
+      if (returningRows<{ id: string }>(upd).length !== 1) {
+        // Another run already advanced past hwm — roll back this reply.
+        throw new WatermarkConflictError();
+      }
+
+      await manager.query(
+        `UPDATE chat_sessions
+            SET message_count = message_count + 1, last_activity_at = now()
+          WHERE id = $1`,
+        [session.id],
+      );
+
+      return { status: 'answered' as const, savedId: saved.id };
+    });
+  } catch (err) {
+    if (err instanceof WatermarkConflictError) {
+      logger.info(`[coalescer] watermark race for session ${session.id} — treating as stale`);
+      return { status: 'stale' as const };
+    }
+    throw err;
+  }
+}
+
+/** Outbound delivery for a persisted bot message (post-commit). */
+async function routeBotMessageOutbound(
+  session: ChatSession,
+  savedId: string,
+  content: string,
+  quickReplies?: Array<{ title: string; value: string }>,
+): Promise<void> {
+  const metadata = quickReplies?.length ? { quickReplies } : undefined;
+  await routeOutboundMessage(
+    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}) },
+    { sessionId: session.id, tenantId: session.tenantId, messageId: savedId },
+    {
+      event: 'message:receive',
+      data: {
+        id: savedId,
+        type: 'text',
+        content,
+        senderType: 'bot',
+        timestamp: new Date().toISOString(),
+        ...(metadata ? { metadata } : {}),
+      },
+    },
+  );
+}
+
+/**
+ * Run the platform agent EXACTLY ONCE for the snapped `pending` (= hwm) message,
+ * with history bounded to `<= hwm`, then finalise. The coalescer (not this fn)
+ * owns the run-lock, timing, and re-running. Returns 'answered' | 'stale' |
+ * 'noop' so the coalescer can clear state or re-arm.
+ */
+export async function runTurn(session: ChatSession, pending: Message): Promise<RunTurnStatus> {
+  const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
+  if (!tenant) return 'noop';
+
+  let botSettings: BotSettings;
+  let bot: Bot;
+  try {
+    ({ bot, settings: botSettings } = await getBotConfigForSession(session));
+  } catch (err) {
+    if (err instanceof BotPausedConfigError || err instanceof BotNotFoundConfigError) {
+      logger.warn(`[coalescer] session ${session.id} points at a paused/deleted bot — skipping`, {
+        error: (err as Error).message,
+      });
+      return 'noop';
+    }
+    throw err;
+  }
+
+  const resolvedTemplates = await resolveBoundTemplates(bot);
+  const aiSettings = botSettings.ai
+    ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates))
+    : botSettings.ai;
+  if (!aiSettings?.enabled || !agentService) return 'noop';
+
+  const botParticipant = await ensureBotParticipant(session, aiSettings);
+
+  // Typing indicators — portal + widget over WS, and the end user's channel.
+  emitToTenantAgents(session.tenantId, 'typing:indicator', {
+    sessionId: session.id, isTyping: true, participantType: 'bot',
+  });
+  emitToSession(session.tenantId, session.id, 'typing:start', {});
+  void sendChannelTypingIndicator(session.id).catch(() => {});
+
+  let messageContent = pending.contentEncrypted ? decrypt(pending.content) : pending.content;
+  let images: AgentImageInput[] | undefined;
+  if (pending.type === 'image' && pending.metadata?.fileUrl) {
+    const img = await fetchInboundImageForAgent(pending.metadata.fileUrl);
+    if (img) images = [img];
+    else if (!messageContent) messageContent = '[The customer sent an image, but it could not be loaded.]';
+  }
+
+  const history = await getCoalescedHistory(session.id, pending.id);
+
+  let result: AgentResult;
+  try {
+    result = await agentService.run(messageContent, session, tenant, history, images);
+  } finally {
+    emitToSession(session.tenantId, session.id, 'typing:stop', {});
+  }
+
+  // Map the agent result to (content, handoff, stale-guard). Only the normal
+  // answer paths are stale-guarded; error/handoff paths always finalise so the
+  // turn isn't retried forever (the human picks up the newer messages).
+  let content: string;
+  let handoffReason: HandoffRequest['reason'] | null = null;
+  let staleGuard = false;
+  switch (result.type) {
+    case 'response':
+      content = result.content;
+      staleGuard = true;
+      break;
+    case 'awaiting_confirmation':
+      content = result.message;
+      staleGuard = true;
+      break;
+    case 'error':
+      logger.error(`[coalescer] agent error for session ${session.id}`, { error: result.error });
+      content = result.fallbackMessage;
+      handoffReason = 'bot_error';
+      break;
+    case 'budget_exceeded':
+      logger.warn(`[coalescer] agent budget exceeded for tenant ${tenant.id}`);
+      content = result.fallbackMessage;
+      handoffReason = 'bot_error';
+      break;
+    case 'max_iterations':
+      logger.warn(`[coalescer] agent max iterations for session ${session.id}`);
+      content = result.fallbackMessage;
+      handoffReason = 'bot_error';
+      break;
+  }
+  const quickReplies = result.type === 'response' ? result.quickReplies : undefined;
+
+  const fin = await finalizeReply(session, botParticipant.id, content, quickReplies, pending.id, staleGuard);
+  if (fin.status === 'stale') return 'stale';
+
+  await routeBotMessageOutbound(session, fin.savedId, content, quickReplies);
+
+  if (handoffReason) await handleBotHandoff(session, botParticipant.id, handoffReason);
+
+  if (session.status === 'waiting') {
+    await sessionRepository
+      .createQueryBuilder()
+      .update(ChatSession)
+      .set({ status: 'bot' })
+      .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
+      .execute();
+  }
+
+  return 'answered';
 }
 
 // ── RAG Helper Functions ──────────────────────────────────────────────────

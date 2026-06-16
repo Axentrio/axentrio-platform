@@ -20,7 +20,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { validateTenant, TenantRequest } from '../middleware/tenant.middleware';
 import { rateLimit } from '../middleware/rate-limit.middleware';
 import { emitToSession } from '../websocket/socket.handler';
-import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { scheduleTurn } from '../services/turn-coalescer';
 import { encrypt, decrypt, DecryptionError } from '../utils/encryption';
 import { parsePaginationParams, applyPagination } from '../utils/pagination';
 import { asyncHandler, BadRequestError, NotFoundError, ForbiddenError } from '../middleware/error-handler';
@@ -207,8 +207,8 @@ router.post(
 
     emitToSession(tenantId!, sessionId, 'message:receive', messageData);
 
-    forwardMessageToN8n(session, savedMessage).catch((err) => {
-      logger.error('Error in n8n message forwarding:', err);
+    scheduleTurn(session, savedMessage).catch((err) => {
+      logger.error('Error scheduling turn:', err);
     });
 
     logger.debug(`Message sent via HTTP for session ${sessionId}`);

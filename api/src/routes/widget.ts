@@ -14,7 +14,7 @@ import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../servic
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
-import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { scheduleTurn } from '../services/turn-coalescer';
 import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
@@ -481,8 +481,8 @@ router.post(
       timestamp: message.createdAt.toISOString(),
     });
 
-    forwardMessageToN8n(session, message).catch((err) => {
-      logger.error('Error in n8n message forwarding (widget):', err);
+    scheduleTurn(session, message).catch((err) => {
+      logger.error('Error scheduling turn (widget):', err);
     });
 
     sendCreated(res, {

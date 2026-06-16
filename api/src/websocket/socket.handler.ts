@@ -30,7 +30,7 @@ import { AppDataSource } from '../database/data-source';
 import { ChatSession } from '../database/entities/ChatSession';
 import { Message } from '../database/entities/Message';
 import { Participant } from '../database/entities/Participant';
-import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { scheduleTurn } from '../services/turn-coalescer';
 import {
   resolveBotKeyStrict,
   BotPausedError,
@@ -565,10 +565,11 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
         senderType,
       });
 
-      // Forward visitor messages to n8n if applicable (fire-and-forget, outside lock scope)
+      // Schedule a (coalesced) agent turn for visitor messages — fire-and-forget,
+      // outside lock scope. Falls back to inline forwarding when disabled/no Redis.
       if (senderType === 'user') {
-        forwardMessageToN8n(session, savedMessage).catch((err) => {
-          logger.error('Error in n8n message forwarding:', err);
+        scheduleTurn(session, savedMessage).catch((err) => {
+          logger.error('Error scheduling turn:', err);
         });
       }
 

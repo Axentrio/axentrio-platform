@@ -17,7 +17,7 @@ import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { NormalizedEvent } from './types';
 import { isChannelEntitled } from './channel-entitlement';
 import { encrypt } from '../utils/encryption';
-import { forwardMessageToN8n } from '../services/message-forwarding.service';
+import { scheduleTurn } from '../services/turn-coalescer';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 import { enforceCountLimit, requireFeature } from '../billing/enforce';
@@ -192,11 +192,14 @@ export async function processInboundEvent(
       },
     });
 
-    // ── 7. Forward to RAG / n8n ──────────────────────────────────────────
+    // ── 7. Schedule a (coalesced) agent turn ─────────────────────────────
+    // scheduleTurn is fast (Redis write + delayed-job add); the await keeps the
+    // channel-inbound processor's backpressure. Falls back to inline forwarding
+    // when the coalescer is disabled or Redis is down.
     try {
-      await forwardMessageToN8n(session, savedMessage);
+      await scheduleTurn(session, savedMessage);
     } catch (err) {
-      logger.error(`[inbound-pipeline] Error forwarding to n8n for session ${session.id}`, err);
+      logger.error(`[inbound-pipeline] Error scheduling turn for session ${session.id}`, err);
     }
 
     // ── 8. Mark event as processed ───────────────────────────────────────

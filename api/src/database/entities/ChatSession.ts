@@ -106,6 +106,20 @@ export class ChatSession {
   @Column({ type: 'int', nullable: true, name: 'first_response_time_seconds' })
   firstResponseTimeSeconds?: number;
 
+  /**
+   * Turn-coalescer "answered" high-water mark: the (created_at, id) of the newest
+   * USER message a completed coalesced run consumed. A user message is unanswered
+   * iff (its created_at, id) > (lastCoalescedAnswerAt, lastCoalescedAnswerMessageId).
+   * Durable so correctness survives Redis flush/restart. Carried in code as the
+   * message id; created_at is read/compared DB-side (µs fidelity). Null ⇒
+   * everything unanswered (self-heals on first run). See plan-message-coalescer.md.
+   */
+  @Column({ type: 'timestamptz', nullable: true, name: 'last_coalesced_answer_at' })
+  lastCoalescedAnswerAt?: Date;
+
+  @Column({ type: 'uuid', nullable: true, name: 'last_coalesced_answer_message_id' })
+  lastCoalescedAnswerMessageId?: string;
+
   @Column({ type: 'decimal', precision: 3, scale: 2, nullable: true, name: 'satisfaction_rating' })
   satisfactionRating?: number;
 

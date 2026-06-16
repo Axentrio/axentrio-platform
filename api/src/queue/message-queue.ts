@@ -15,6 +15,7 @@ let notificationQueue: Queue | null = null;
 let fileQueue: Queue | null = null;
 let knowledgeQueue: Queue | null = null;
 let bookingReminderQueue: Queue | null = null;
+let turnCoalesceQueue: Queue | null = null;
 let deadLetterQueue: Queue | null = null;
 
 // Fallback flag: when true, jobs are processed synchronously (no Redis)
@@ -83,6 +84,9 @@ export const initializeQueues = async (): Promise<void> => {
 
     bookingReminderQueue = new Bull('booking-reminders', createQueueOptions('booking-reminders'));
 
+    // Turn coalescer queue (message-burst debounce)
+    turnCoalesceQueue = new Bull('turn-coalesce', createQueueOptions('turn-coalesce'));
+
     // Dead letter queue for failed jobs
     deadLetterQueue = new Bull('dead-letter', createQueueOptions('dead-letter'));
 
@@ -145,6 +149,7 @@ export const initializeQueues = async (): Promise<void> => {
     fileQueue = null;
     knowledgeQueue = null;
     bookingReminderQueue = null;
+    turnCoalesceQueue = null;
     deadLetterQueue = null;
   }
 };
@@ -340,6 +345,9 @@ export const registerProcessor = (
     case 'booking-reminders':
       queue = bookingReminderQueue;
       break;
+    case 'turn-coalesce':
+      queue = turnCoalesceQueue;
+      break;
   }
 
   if (queue) {
@@ -384,6 +392,8 @@ export const getQueue = (queueName: string): Queue | null => {
       return knowledgeQueue;
     case 'booking-reminders':
       return bookingReminderQueue;
+    case 'turn-coalesce':
+      return turnCoalesceQueue;
     case 'dead-letter':
       return deadLetterQueue;
     default:
@@ -490,7 +500,7 @@ export const resumeQueue = async (queueName: string): Promise<void> => {
  * Close all queues
  */
 export const closeQueues = async (): Promise<void> => {
-  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, bookingReminderQueue, deadLetterQueue];
+  const queues = [messageQueue, webhookQueue, notificationQueue, fileQueue, knowledgeQueue, bookingReminderQueue, turnCoalesceQueue, deadLetterQueue];
 
   await Promise.all(
     queues.map(async (queue) => {

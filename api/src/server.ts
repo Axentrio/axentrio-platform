@@ -51,6 +51,7 @@ import aiSettingsRoutes from './knowledge/ai-settings.routes';
 import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
 import integrationsRoutes from './knowledge/integrations.routes';
+import featureTogglesRoutes from './routes/feature-toggles.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import botsRoutes from './routes/bots.routes';
 import demandSignalsRoutes from './routes/demand-signals.routes';
@@ -322,6 +323,7 @@ apiRouter.use('/faq', faqRoutes);
 apiRouter.use('/tenants/me', aiSettingsRoutes);
 apiRouter.use('/tenants/me', widgetAppearanceRoutes);
 apiRouter.use('/tenants/me', integrationsRoutes);
+apiRouter.use('/tenants/me', featureTogglesRoutes);
 apiRouter.use('/tenants', skillsRoutes);
 apiRouter.use('/tenants', automationsRoutes);
 
@@ -396,6 +398,13 @@ async function startServer(): Promise<void> {
       const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./n8n/booking-providers/reminders');
       registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());
       logger.info('Booking reminder processor registered');
+
+      // Message turn coalescer (burst debounce). The processor has a deps-ready
+      // guard, so registering it before forwarding/agent init (below) is safe —
+      // an early job re-arms until those are wired.
+      const { TURN_COALESCE_QUEUE, coalesceProcessor } = await import('./services/turn-coalescer');
+      registerProcessor(TURN_COALESCE_QUEUE, coalesceProcessor);
+      logger.info('Turn coalescer processor registered');
     } catch (err) {
       logger.warn('Knowledge ingestion processor registration failed', { error: err });
     }

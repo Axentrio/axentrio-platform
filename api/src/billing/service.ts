@@ -34,7 +34,7 @@ import {
 import { User } from '../database/entities/User';
 import { getBillingProvider } from './provider-registry';
 import { getStripeClient } from './providers/stripe';
-import { invalidateEntitlements } from './entitlements';
+import { invalidateEntitlementsAndModules } from '../modules';
 import { BillingProviderError, CheckoutablePlanId } from './types';
 
 const STRIPE = 'stripe' as const;
@@ -773,8 +773,9 @@ export async function setTierManual(
   });
 
   // Invalidate AFTER commit — invalidating inside the transaction would let a
-  // concurrent reader repopulate the cache with the pre-commit tier.
-  await invalidateEntitlements(tenantId);
+  // concurrent reader repopulate the cache with the pre-commit tier. A tier
+  // change moves features, so feature-gated modules must re-resolve too.
+  await invalidateEntitlementsAndModules(tenantId);
   return result;
 }
 

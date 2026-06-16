@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { AppDataSource, runInTransaction } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { setEnterpriseManual, setTierManual } from '../../billing/service';
-import { invalidateEntitlements } from '../../billing/entitlements';
+import { invalidateEntitlementsAndModules } from '../../modules';
 import { User } from '../../database/entities/User';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { PendingInvite } from '../../database/entities/PendingInvite';
@@ -442,8 +442,9 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
   if (settings) tenant.settings = { ...tenant.settings, ...settings };
 
   await repo.save(tenant);
-  // Entitlements resolve from status — any status write must drop the cache.
-  if (status) await invalidateEntitlements(tenant.id);
+  // Entitlements resolve from status — any status write must drop the cache,
+  // and (since status flips billable → all features) the module cache too.
+  if (status) await invalidateEntitlementsAndModules(tenant.id);
   await logAudit(req.userId!, 'tenant.updated', 'tenant', tenant.id, tenant.id, { fields: Object.keys(req.body) });
 
   // Sync name change to Clerk
@@ -600,7 +601,7 @@ router.post('/tenants/:id/suspend', asyncHandler(async (req: Request, res: Respo
 
   tenant.status = 'suspended';
   await repo.save(tenant);
-  await invalidateEntitlements(tenant.id);
+  await invalidateEntitlementsAndModules(tenant.id);
   await logAudit(req.userId!, 'tenant.suspended', 'tenant', tenant.id, tenant.id);
 
   if (tenant.clerkOrgId) {
@@ -621,7 +622,7 @@ router.post('/tenants/:id/activate', asyncHandler(async (req: Request, res: Resp
 
   tenant.status = 'active';
   await repo.save(tenant);
-  await invalidateEntitlements(tenant.id);
+  await invalidateEntitlementsAndModules(tenant.id);
   await logAudit(req.userId!, 'tenant.activated', 'tenant', tenant.id, tenant.id);
 
   if (tenant.clerkOrgId) {

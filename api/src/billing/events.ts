@@ -36,7 +36,7 @@ import { Tenant, TenantTier } from '../database/entities/Tenant';
 import { TenantBillingAccount } from '../database/entities/TenantBillingAccount';
 import { planIdForStripePriceId } from './plans';
 import { getStripeClient } from './providers/stripe';
-import { invalidateEntitlements } from './entitlements';
+import { invalidateEntitlementsAndModules } from '../modules';
 import { InternalPlanId, NormalizedEvent } from './types';
 
 interface ResolvedRow {
@@ -119,7 +119,7 @@ async function promotePrimaryAndCascadeTier(
     [targetRow.id, targetRow.tenantId],
   );
   await manager.update(Tenant, { id: targetRow.tenantId }, { tier: newTier });
-  await invalidateEntitlements(targetRow.tenantId);
+  await invalidateEntitlementsAndModules(targetRow.tenantId);
 }
 
 /**
@@ -279,7 +279,7 @@ export async function handleNormalizedEvent(
       // stay row-local — Tenant.tier reflects the surviving primary.
       if (row.isPrimary) {
         await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
-        await invalidateEntitlements(tenantId);
+        await invalidateEntitlementsAndModules(tenantId);
       }
 
       // Audit log entry — `tenant.cancelled`. actor_id is the Tenant.id
@@ -522,7 +522,7 @@ export async function handleNormalizedEvent(
       const isEntitlementGranting = s.status === 'trialing' || s.status === 'active';
       if (row.isPrimary && isEntitlementGranting) {
         await manager.update(Tenant, { id: tenantId }, { tier: newPlanForStatus });
-        await invalidateEntitlements(tenantId);
+        await invalidateEntitlementsAndModules(tenantId);
         return { outcome: 'tier_cascaded' };
       }
 

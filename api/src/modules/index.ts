@@ -16,5 +16,6 @@ export {
   isModuleActive,
   requireModule,
   invalidateModules,
+  invalidateEntitlementsAndModules,
   type ActiveModule,
 } from './module-resolver';

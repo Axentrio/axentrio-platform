@@ -18,7 +18,7 @@
  */
 import { AppDataSource } from '../database/data-source';
 import { TenantModule } from '../database/entities/TenantModule';
-import { getEntitlements } from '../billing/entitlements';
+import { getEntitlements, invalidateEntitlements } from '../billing/entitlements';
 import { PlanLimitError } from '../billing/enforce';
 import type { FeatureKey } from '../billing/types';
 import { cached, invalidate } from '../utils/cache';
@@ -53,6 +53,20 @@ async function getTenantModuleRows(tenantId: string): Promise<TenantModuleRow[]>
 /** MUST be called after any write to tenant_modules for the tenant. */
 export async function invalidateModules(tenantId: string): Promise<void> {
   await invalidate(modulesCacheKey(tenantId));
+}
+
+/**
+ * Drop BOTH the entitlements cache and the (derived) module cache for a tenant.
+ * Feature-gated modules (e.g. the booking module) resolve from
+ * `entitlements.features`, so ANY write that changes a tenant's entitlements —
+ * tier, status, feature overrides, or the tenant's own feature toggles — must
+ * invalidate the module cache too, or a feature-gated module lingers (with its
+ * agent tools) until the resolver's 60s TTL lapses. Use this everywhere an
+ * entitlement-affecting write happens, instead of `invalidateEntitlements` alone.
+ */
+export async function invalidateEntitlementsAndModules(tenantId: string): Promise<void> {
+  await invalidateEntitlements(tenantId);
+  await invalidateModules(tenantId);
 }
 
 function resolveOne(

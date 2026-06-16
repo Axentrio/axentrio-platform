@@ -14,8 +14,7 @@ import type { FeatureOverride } from '../../database/entities/Tenant';
 import { TenantModule } from '../../database/entities/TenantModule';
 import { PLANS } from '../../billing/plans';
 import { FEATURE_TAXONOMY, FEATURE_GROUPS } from '../../billing/feature-taxonomy';
-import { invalidateEntitlements } from '../../billing/entitlements';
-import { allModules, getModule, invalidateModules, listActiveModules } from '../../modules';
+import { allModules, getModule, invalidateModules, invalidateEntitlementsAndModules, listActiveModules } from '../../modules';
 import { asyncHandler, ValidationError, NotFoundError } from '../../middleware/error-handler';
 import { sendSuccess } from '../../utils/response';
 import { logAudit } from '../../utils/audit';
@@ -95,7 +94,8 @@ router.put(
 
     tenant.featureOverrides = next;
     await AppDataSource.getRepository(Tenant).save(tenant);
-    await invalidateEntitlements(tenant.id);
+    // Overrides change resolved features → feature-gated modules must re-resolve.
+    await invalidateEntitlementsAndModules(tenant.id);
     await logAudit(req.userId!, 'tenant.feature_overrides_updated', 'tenant', tenant.id, tenant.id, {
       overrides: Object.fromEntries(Object.entries(next).map(([k, v]) => [k, v.value])),
     });

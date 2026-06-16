@@ -62,7 +62,9 @@ vi.mock('../../billing/entitlements', () => ({
 }));
 
 vi.mock('../../modules', () => ({
-  invalidateModules: async (id: string) => {
+  // The route uses the combined helper, which drops both caches.
+  invalidateEntitlementsAndModules: async (id: string) => {
+    state.invalidated.push(id);
     state.modulesInvalidated.push(id);
   },
 }));

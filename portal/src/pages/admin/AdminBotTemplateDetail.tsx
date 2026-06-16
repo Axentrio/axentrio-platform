@@ -10,7 +10,8 @@
 import React, { useState, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical } from 'lucide-react';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -403,38 +404,48 @@ const AdminBotTemplateDetail: React.FC = () => {
                     </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-text-secondary max-w-xs truncate">{v.changelog ?? '—'}</TableCell>
-                  <TableCell className="text-right space-x-2">
-                    {v.status === 'draft' && (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => openEdit(v)}>{t('common.edit')}</Button>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {/* Primary action stays visible; the rest live in the ⋯ menu. */}
+                      {v.status === 'draft' ? (
                         <Button size="sm" onClick={() => publishMut.mutate(v.version)}>{t('admin.botTemplates.actions.publish')}</Button>
-                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</Button>
-                      </>
-                    )}
-                    {v.status === 'published' && (
-                      <>
+                      ) : (
                         <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
-                        <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
-                        <Button
-                          size="sm" variant="ghost"
-                          onClick={() =>
-                            withForce(
-                              (force) => unpublishMut.mutateAsync({ version: v.version, force }),
-                              (n) => ({ title: t('admin.botTemplates.confirm.unpublishTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
-                            )
-                          }
-                        >
-                          {t('admin.botTemplates.actions.unpublish')}
-                        </Button>
-                      </>
-                    )}
-                    {v.status === 'unpublished' && (
-                      <>
-                        <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
-                        <Button size="sm" variant="ghost" onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</Button>
-                        <Button size="sm" variant="ghost" className="text-red-400 hover:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</Button>
-                      </>
-                    )}
+                      )}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" aria-label={t('admin.botTemplates.versionColumns.actions')}>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {v.status === 'draft' && (
+                            <DropdownMenuItem onClick={() => openEdit(v)}>{t('common.edit')}</DropdownMenuItem>
+                          )}
+                          {v.status === 'published' && (
+                            <DropdownMenuItem
+                              onClick={() =>
+                                withForce(
+                                  (force) => unpublishMut.mutateAsync({ version: v.version, force }),
+                                  (n) => ({ title: t('admin.botTemplates.confirm.unpublishTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
+                                )
+                              }
+                            >
+                              {t('admin.botTemplates.actions.unpublish')}
+                            </DropdownMenuItem>
+                          )}
+                          {v.status !== 'draft' && (
+                            <DropdownMenuItem onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</DropdownMenuItem>
+                          )}
+                          {v.status !== 'published' && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem className="text-red-400 focus:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

@@ -21,7 +21,6 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Slider } from '@/components/ui/slider';
-import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
 import TagInput from '@/pages/knowledge/TagInput';
@@ -42,12 +41,9 @@ import {
 
 // Platform defaults — seeded as REAL values in the editor (not grey placeholders)
 // so an author always sees the effective template, per the UX review.
-const DEFAULT_TONE = 'friendly';
 const DEFAULT_CONFIDENCE = '0.7';
 const DEFAULT_MAX_LENGTH = '500';
 
-// Named voice-tone presets (single-word values flow into {tone} substitution).
-const TONE_OPTIONS = ['friendly', 'professional', 'warm', 'efficient', 'reassuring', 'expert'] as const;
 // Max-response-length presets (chars) with rough word estimates shown in the UI.
 const LENGTH_PRESETS = [
   { value: '300', words: '~45–60 words' },
@@ -58,11 +54,10 @@ const LENGTH_PRESETS = [
 // One-click safety bundle for "topics to avoid".
 const COMMON_TOPICS = ['politics', 'religion', 'adult content', 'illegal activity', 'hate or harassment', 'self-harm', 'legal advice', 'medical diagnosis', 'financial advice'];
 
-// Tone + policy guardrails are edited as flat strings in the dialog, then
-// assembled into a BotTemplateConfig on save. Tone/confidence/max-length carry
-// real defaults; messages + topics stay empty (opt-in via "Insert suggested").
+// Policy guardrails are edited as flat strings in the dialog, then assembled into
+// a BotTemplateConfig on save. Confidence/max-length carry real defaults; messages
+// + topics stay empty (opt-in via "Insert suggested"). Tone is bot-owned, not here.
 type ConfigDraft = {
-  tone: string;
   topicsToAvoid: string;
   greetingMessage: string;
   fallbackMessage: string;
@@ -71,13 +66,12 @@ type ConfigDraft = {
   maxResponseLength: string;
 };
 const EMPTY_CONFIG: ConfigDraft = {
-  tone: DEFAULT_TONE, topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: DEFAULT_CONFIDENCE, maxResponseLength: DEFAULT_MAX_LENGTH,
+  topicsToAvoid: '', greetingMessage: '', fallbackMessage: '', offHoursMessage: '', confidenceThreshold: DEFAULT_CONFIDENCE, maxResponseLength: DEFAULT_MAX_LENGTH,
 };
 
 function configToDraft(c: BotTemplateConfig | undefined): ConfigDraft {
   const g = c?.guardrails ?? {};
   return {
-    tone: c?.tone ?? DEFAULT_TONE,
     topicsToAvoid: (g.topicsToAvoid ?? []).join(', '),
     greetingMessage: g.greetingMessage ?? '',
     fallbackMessage: g.fallbackMessage ?? '',
@@ -89,7 +83,6 @@ function configToDraft(c: BotTemplateConfig | undefined): ConfigDraft {
 
 function draftToConfig(d: ConfigDraft): BotTemplateConfig {
   const config: BotTemplateConfig = {};
-  if (d.tone.trim()) config.tone = d.tone.trim();
   const g: NonNullable<BotTemplateConfig['guardrails']> = {};
   const topics = d.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
   if (topics.length) g.topicsToAvoid = topics;
@@ -373,12 +366,9 @@ const AdminBotTemplateDetail: React.FC = () => {
                 className="font-mono text-xs bg-surface-2"
               />
               <p className="text-xs text-text-tertiary">
-                {countGuardrails(publishedVersion.config) === 0 && !publishedVersion.config.tone
+                {countGuardrails(publishedVersion.config) === 0
                   ? t('admin.botTemplates.detail.promptConfigDefaults')
-                  : t('admin.botTemplates.detail.promptConfigSummary', {
-                      tone: publishedVersion.config.tone || t('admin.botTemplates.detail.promptToneDefault'),
-                      count: countGuardrails(publishedVersion.config),
-                    })}
+                  : t('admin.botTemplates.detail.promptConfigSummary', { count: countGuardrails(publishedVersion.config) })}
               </p>
             </>
           ) : (
@@ -586,12 +576,11 @@ const AdminBotTemplateDetail: React.FC = () => {
               <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
             </div>
 
-            {/* Template-owned tone + policy guardrails (admin-controlled; tenants no longer set these). */}
+            {/* Template-owned policy guardrails (admin-controlled). Tone is bot-owned. */}
             {(() => {
               const ro = draft.mode === 'view';
               const cfg = draft.config;
               const setCfg = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, config: { ...d.config, ...patch } }));
-              const isCustomTone = !TONE_OPTIONS.includes(cfg.tone as (typeof TONE_OPTIONS)[number]);
               const topicsArr = cfg.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
               const confidence = Number(cfg.confidenceThreshold || DEFAULT_CONFIDENCE);
               const insertMsg = (key: 'greetingMessage' | 'fallbackMessage' | 'offHoursMessage', i18nKey: string) =>
@@ -601,27 +590,6 @@ const AdminBotTemplateDetail: React.FC = () => {
                   <div>
                     <h4 className="text-sm font-medium text-text-primary">{t('admin.botTemplates.editor.configTitle')}</h4>
                     <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.configHint')}</p>
-                  </div>
-
-                  {/* Voice tone — named presets + Custom */}
-                  <div className="space-y-1.5">
-                    <Label htmlFor="c-tone">{t('admin.botTemplates.editor.tone')}</Label>
-                    <Select
-                      value={isCustomTone ? '__custom__' : cfg.tone}
-                      onValueChange={(v) => setCfg({ tone: v === '__custom__' ? '' : v })}
-                      disabled={ro}
-                    >
-                      <SelectTrigger id="c-tone" className="h-9"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {TONE_OPTIONS.map((o) => (
-                          <SelectItem key={o} value={o}>{t(`admin.botTemplates.editor.tones.${o}`)}</SelectItem>
-                        ))}
-                        <SelectItem value="__custom__">{t('admin.botTemplates.editor.tones.custom')}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {isCustomTone && (
-                      <Input className="mt-1.5" value={cfg.tone} placeholder={t('admin.botTemplates.editor.toneCustomPlaceholder')} readOnly={ro} onChange={(e) => setCfg({ tone: e.target.value })} />
-                    )}
                   </div>
 
                   {/* Customer-facing messages, each with an opt-in "Insert suggested" starter */}

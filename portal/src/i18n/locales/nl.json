@@ -1185,7 +1185,7 @@
         "currentPrompt": "Huidige prompt",
         "promptEmpty": "Deze versie voegt geen basisinstructies toe.",
         "promptConfigDefaults": "Toon & richtlijnen: platformstandaarden",
-        "promptConfigSummary": "Toon: {{tone}} · {{count}} richtlijn(en) ingesteld",
+        "promptConfigSummary": "{{count}} richtlijn(en) ingesteld",
         "promptToneDefault": "standaard",
         "noPublishedPrompt": "Nog geen gepubliceerde versie. Maak een concept en publiceer het om de live prompt in te stellen.",
         "versions": "Versies",
@@ -1211,7 +1211,7 @@
         "noModules": "Geen modules beschikbaar.",
         "unknownPlaceholders": "Onbekende placeholders: {{placeholders}} — corrigeer of verwijder ze vóór publicatie (ze verschijnen anders als letterlijke tekst).",
         "changelog": "Wijzigingslog (optioneel)",
-        "configTitle": "Toon & richtlijnen",
+        "configTitle": "Richtlijnen",
         "configHint": "Beheerd door deze sjabloon — geldt voor elke bot die eraan gekoppeld is. Tenants stellen deze niet meer in.",
         "tone": "Stemtoon",
         "tones": {

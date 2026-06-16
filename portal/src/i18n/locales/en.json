@@ -1227,7 +1227,7 @@
         "currentPrompt": "Current prompt",
         "promptEmpty": "This version adds no base instructions.",
         "promptConfigDefaults": "Tone & guardrails: platform defaults",
-        "promptConfigSummary": "Tone: {{tone}} · {{count}} guardrail(s) set",
+        "promptConfigSummary": "{{count}} guardrail(s) set",
         "promptToneDefault": "default",
         "noPublishedPrompt": "No published version yet. Create a draft and publish it to set the live prompt.",
         "versions": "Versions",
@@ -1253,7 +1253,7 @@
         "noModules": "No modules available.",
         "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",
-        "configTitle": "Tone & guardrails",
+        "configTitle": "Guardrails",
         "configHint": "Owned by this template — applies to every bot bound to it. Tenants no longer set these.",
         "tone": "Voice tone",
         "tones": {

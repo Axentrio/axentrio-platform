@@ -1184,7 +1184,7 @@
         "currentPrompt": "Prompt actuel",
         "promptEmpty": "Cette version n'ajoute aucune instruction de base.",
         "promptConfigDefaults": "Ton et garde-fous : valeurs par défaut de la plateforme",
-        "promptConfigSummary": "Ton : {{tone}} · {{count}} garde-fou(s) défini(s)",
+        "promptConfigSummary": "{{count}} garde-fou(s) défini(s)",
         "promptToneDefault": "par défaut",
         "noPublishedPrompt": "Aucune version publiée. Créez un brouillon et publiez-le pour définir le prompt en ligne.",
         "versions": "Versions",
@@ -1210,7 +1210,7 @@
         "noModules": "Aucun module disponible.",
         "unknownPlaceholders": "Variables inconnues : {{placeholders}} — corrigez-les ou supprimez-les avant de publier (elles apparaîtraient en texte brut).",
         "changelog": "Journal des modifications (facultatif)",
-        "configTitle": "Ton et garde-fous",
+        "configTitle": "Garde-fous",
         "configHint": "Géré par ce modèle — s'applique à tous les bots qui y sont liés. Les locataires ne les définissent plus.",
         "tone": "Ton de la voix",
         "tones": {

@@ -79,9 +79,10 @@ describe('AiBotForm', () => {
     mockBind.mockReset();
   });
 
-  it('binds a template via the multi-select toggle (separate from the auto-saved form)', async () => {
+  it('adds a template via the Select (separate from the auto-saved form)', async () => {
     const { user } = renderForm();
-    await user.click(screen.getByRole('button', { name: /Plumber Booking/i }));
+    await user.click(screen.getByRole('combobox', { name: /add a speciality/i }));
+    await user.click(await screen.findByRole('option', { name: /Plumber Booking/i }));
     expect(mockBind).toHaveBeenCalledWith({ bindings: [{ templateId: 'tmpl-1', version: 'latest' }], mode: 'or' });
   });
 

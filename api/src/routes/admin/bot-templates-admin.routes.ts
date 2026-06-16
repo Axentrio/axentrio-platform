@@ -157,10 +157,14 @@ router.get(
       order: { version: 'DESC' },
     });
     const grants = await AppDataSource.getRepository(TenantBotTemplate).find({ where: { templateId: tmpl.id } });
-    // Live usage — how many (non-deleted) bots, across how many tenants, bind this template.
+    // Live usage — bots (across tenants) that bind this template in ANY binding
+    // (primary column OR a secondary entry in template_bindings).
     const [usageRow] = await AppDataSource.query(
-      'SELECT COUNT(*)::int AS bots, COUNT(DISTINCT tenant_id)::int AS tenants FROM chatbot_bots WHERE template_id = $1 AND deleted_at IS NULL',
-      [tmpl.id],
+      `SELECT COUNT(*)::int AS bots, COUNT(DISTINCT tenant_id)::int AS tenants
+         FROM chatbot_bots
+        WHERE deleted_at IS NULL
+          AND (template_id = $1 OR template_bindings @> $2::jsonb)`,
+      [tmpl.id, JSON.stringify([{ templateId: tmpl.id }])],
     );
     sendSuccess(res, {
       template: tmpl,

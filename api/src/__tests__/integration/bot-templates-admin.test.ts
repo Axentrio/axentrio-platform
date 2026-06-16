@@ -237,6 +237,21 @@ describe('multi-binding safety (unpublish blocks + reassigns a SECONDARY binding
     expect(reloaded.templateBindings.map((b) => b.templateId)).toEqual([primary]);
     expect(reloaded.templateId).toBe(primary);
   });
+
+  it('usage count includes bots that bind a template as a SECONDARY binding', async () => {
+    const tenant = await createTestTenant({ tier: 'enterprise' });
+    const primary = await createTemplate({ availableToAllTenants: true });
+    const secondary = await createTemplate({ availableToAllTenants: true });
+    await AppDataSource.getRepository(Bot).save({
+      tenantId: tenant.id, name: 'UsageMulti', publicKey: `bk_usage_${Date.now()}`, status: 'active', isDefault: false,
+      settings: {}, templateId: primary, templateVersion: 'latest',
+      templateBindings: [{ templateId: primary, version: 'latest' }, { templateId: secondary, version: 'latest' }],
+      templateMode: 'or',
+    } as Partial<Bot>);
+    const detail = await request(app).get(`${BASE}/${secondary}`);
+    expect(detail.body.data.usage.bots).toBe(1);
+    expect(detail.body.data.usage.tenants).toBe(1);
+  });
 });
 
 describe('delete version (drafts + unpublished)', () => {

@@ -21,3 +21,8 @@ workerUrl.pathname = `/${baseDbName}_${workerId}`;
 
 process.env.DATABASE_URL = workerUrl.toString();
 process.env.TEST_DATABASE_URL = workerUrl.toString();
+
+// Integration tests fire many requests per file through the global IP rate
+// limiter (default 100/window) — raise it far past any single file so tests
+// aren't throttled with spurious 429s. Must be set before config is imported.
+process.env.RATE_LIMIT_MAX_REQUESTS = process.env.RATE_LIMIT_MAX_REQUESTS ?? '1000000';

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HelpCircle, Sparkles, ArrowRight } from 'lucide-react';
+import { HelpCircle, Sparkles, ArrowRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -327,7 +327,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const bindings = templateView?.bindings ?? [];
   const templateMode = templateView?.mode ?? 'or';
   const availableTemplates = templateView?.available ?? [];
-  const resolved = templateView?.resolved;
   const missingModules = templateView?.missingModules ?? [];
   const bindingsInput = bindings.map((b) => ({ templateId: b.templateId, version: b.version }));
 
@@ -475,47 +474,67 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               {t('ai.bot.template.noneAvailable')}
             </div>
           ) : (
-            <div className="space-y-1.5">
-              {availableTemplates.map((tpl) => {
-                const sel = bindings.find((b) => b.templateId === tpl.id);
-                const atCap = !sel && bindings.length >= 3;
+            <>
+              {/* Add a speciality — Select listing only the not-yet-selected templates (cap 3). */}
+              {(() => {
+                const unselected = availableTemplates.filter((x) => !bindings.some((b) => b.templateId === x.id));
+                const atCap = bindings.length >= 3;
                 return (
-                  <div key={tpl.id} className={`rounded-lg border p-2.5 ${sel ? 'border-primary-500/60 bg-surface-2' : 'border-edge'} ${atCap ? 'opacity-50' : ''}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <button
-                        type="button"
-                        disabled={readOnly || atCap || bindTemplate.isPending}
-                        onClick={() => toggleTemplate(tpl.id)}
-                        className="flex items-start gap-2 text-left flex-1 min-w-0"
-                        aria-pressed={!!sel}
-                      >
-                        <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${sel ? 'bg-primary-600 border-primary-600 text-white' : 'border-edge'}`}>
-                          {sel && <Sparkles className="h-2.5 w-2.5" />}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="text-sm text-text-primary">{tpl.displayName}</span>
-                          {tpl.description && <span className="block text-[11px] text-text-muted truncate">{tpl.description}</span>}
-                        </span>
-                      </button>
-                      {sel && sel.publishedVersions.length > 0 && (
-                        <Select value={sel.version} onValueChange={(v) => setVersionFor(tpl.id, v)} disabled={readOnly || bindTemplate.isPending}>
-                          <SelectTrigger className="h-8 w-40 shrink-0 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
-                            {sel.publishedVersions.map((v) => (
-                              <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      )}
-                    </div>
-                    {sel?.pinnedButUnavailable && <p className="mt-1 text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>}
-                    {sel?.templateUnavailable && <p className="mt-1 text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>}
-                  </div>
+                  <Select value="" onValueChange={(id) => toggleTemplate(id)} disabled={readOnly || bindTemplate.isPending || atCap || unselected.length === 0}>
+                    <SelectTrigger className="h-9" aria-label={t('ai.bot.template.addPlaceholder')}>
+                      <SelectValue placeholder={atCap ? t('ai.bot.template.maxReached') : t('ai.bot.template.addPlaceholder')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {unselected.map((tpl) => (
+                        <SelectItem key={tpl.id} value={tpl.id}>
+                          <span className="flex flex-col">
+                            <span>{tpl.displayName}</span>
+                            {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 );
-              })}
-              <p className="text-[10px] text-text-muted">{t('ai.bot.template.versionHelper')}</p>
-            </div>
+              })()}
+
+              {/* Selected specialities as chips (name + version pill + remove). */}
+              {bindings.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {bindings.map((b) => {
+                    const tpl = availableTemplates.find((x) => x.id === b.templateId);
+                    return (
+                      <div key={b.templateId} className="flex items-center gap-1.5 rounded-full border border-edge bg-surface-2 py-1 pl-3 pr-1.5 text-sm">
+                        <span className="text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</span>
+                        {b.publishedVersions.length > 0 && (
+                          <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || bindTemplate.isPending}>
+                            <SelectTrigger className="h-6 rounded-full border-0 bg-surface-3 px-2 text-[10px] gap-1"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
+                              {b.publishedVersions.map((v) => (
+                                <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        {!readOnly && (
+                          <button type="button" onClick={() => toggleTemplate(b.templateId)} aria-label={t('ai.bot.template.removeAria')} className="rounded-full p-0.5 text-text-muted hover:text-text-primary">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {bindings.filter((b) => b.pinnedButUnavailable).map((b) => (
+                <p key={'p' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.pinned')}</p>
+              ))}
+              {bindings.filter((b) => b.templateUnavailable).map((b) => (
+                <p key={'u' + b.templateId} className="text-[11px] text-amber-400">{t('ai.bot.template.warnings.unavailable')}</p>
+              ))}
+            </>
           )}
 
           {/* AND / OR — only meaningful with more than one speciality */}
@@ -540,21 +559,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               {t('ai.bot.template.warnings.missingModulesAction')}
             </p>
           )}
-
-          <div>
-            <div className="mb-1 flex items-center gap-2">
-              <Label className="text-text-secondary">{t('ai.bot.template.preview')}</Label>
-              <span className="text-[10px] rounded-full bg-surface-3 px-2 py-0.5 text-text-muted">{t('ai.bot.managedByAdmins')}</span>
-              {bindings.length > 1 && <span className="text-[10px] text-text-muted">{t('ai.bot.template.previewPrimary')}</span>}
-            </div>
-            <Textarea
-              value={resolved?.body || ''}
-              placeholder={t('ai.bot.template.previewEmpty')}
-              rows={6}
-              readOnly
-              className="font-mono text-xs bg-surface-2"
-            />
-          </div>
         </section>
 
         {/* Additional instructions (tenant tweaks layered on top of the template) */}

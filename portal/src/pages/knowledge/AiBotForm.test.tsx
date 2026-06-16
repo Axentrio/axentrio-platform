@@ -56,11 +56,9 @@ vi.mock('@/queries/useBotsQueries', () => ({
   useUpdateBot: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
-const ADDL_INSTRUCTIONS_PLACEHOLDER = /weekend promotion/;
-
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   const user = userEvent.setup();
-  // BotInstructionsHelpDrawer calls useFaq() (React Query), so wrap in a client.
+  // Some children use React Query hooks, so wrap in a client.
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const result = render(
     <QueryClientProvider client={queryClient}>
@@ -70,8 +68,11 @@ const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   return { user, onGoToKnowledgeBase, ...result };
 };
 
-const getInstructionsTextarea = () =>
-  screen.getByPlaceholderText(ADDL_INSTRUCTIONS_PLACEHOLDER) as HTMLTextAreaElement;
+// Business Name is an auto-saved AI-settings field (the form's auto-save path),
+// used here to exercise blur-save behaviour now that the free-text instructions
+// field has been removed from the form.
+const getBusinessNameInput = () =>
+  screen.getByPlaceholderText('Test Org') as HTMLInputElement;
 
 describe('AiBotForm', () => {
   beforeEach(() => {
@@ -86,15 +87,15 @@ describe('AiBotForm', () => {
     expect(mockBind).toHaveBeenCalledWith({ bindings: [{ templateId: 'tmpl-1', version: 'latest' }], mode: 'or' });
   });
 
-  it('auto-saves additional instructions on blur; Go to Knowledge Base navigates without a dialog', async () => {
+  it('auto-saves an edited field on blur; Go to Knowledge Base navigates without a dialog', async () => {
     const { user, onGoToKnowledgeBase } = renderForm();
     mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => {
       options?.onSuccess?.();
     });
 
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
-    await user.keyboard('about to save');
+    const input = getBusinessNameInput();
+    await user.click(input);
+    await user.keyboard('Acme Plumbing');
     await user.tab();
 
     await waitFor(() => expect(mockMutate).toHaveBeenCalled());
@@ -107,8 +108,8 @@ describe('AiBotForm', () => {
   it('does not persist a templateId in the ai-settings payload (T18)', async () => {
     const { user } = renderForm();
     mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
-    const ta = getInstructionsTextarea();
-    await user.click(ta);
+    const input = getBusinessNameInput();
+    await user.click(input);
     await user.keyboard('hi');
     await user.tab();
     await waitFor(() => expect(mockMutate).toHaveBeenCalled());

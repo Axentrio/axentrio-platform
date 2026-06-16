@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { HelpCircle, Sparkles, ArrowRight, X } from 'lucide-react';
+import { Sparkles, ArrowRight, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { AutoSaveStatusIndicator } from '@/components/ui/auto-save-status';
@@ -41,13 +40,6 @@ import {
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import TagInput from './TagInput';
-import BotInstructionsHelpDrawer from '@/pages/help/BotInstructionsHelpDrawer';
-
-// Placeholder hint shown under the additional-instructions field. These resolve
-// at runtime via the prompt composer's variable map.
-// Tone is admin-owned (template), so it's intentionally not advertised here as a
-// tenant-editable placeholder.
-const AI_PLACEHOLDERS = ['{botName}', '{businessName}', '{supportEmail}'];
 
 interface AiBotFormProps {
   /** The bot whose AI config this form edits (per-bot config editing). */
@@ -162,7 +154,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [initialSnapshot, setInitialSnapshot] = useState<string | null>(null);
   // Open state for the unsaved-changes navigation dialog (Go to Knowledge Base).
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
-  const [isHelpOpen, setIsHelpOpen] = useState(false);
 
   const isCustomTone = !TONE_PRESETS.some((p) => p.value === tone);
 
@@ -348,7 +339,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
 
   const readOnly = !isAdmin;
 
-  const placeholderHint = useMemo(() => AI_PLACEHOLDERS.join('  '), []);
 
   if (!isAdminOrSupervisor) {
     return (
@@ -385,16 +375,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.identity.description')}</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.botName.label')}</Label>
-              <Input
-                value={botName}
-                onChange={(e) => setBotName(e.target.value)}
-                placeholder={t('ai.bot.identity.botName.placeholder')}
-                disabled={readOnly}
-              />
-              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.botName.helper')}</p>
-            </div>
             <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
               <Input
@@ -561,36 +541,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           )}
         </section>
 
-        {/* Additional instructions (tenant tweaks layered on top of the template) */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <div>
-              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.additionalInstructions.title')}</h3>
-              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.additionalInstructions.description')}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsHelpOpen(true)}
-              className="text-xs text-primary-400 hover:text-primary-300 flex items-center gap-1"
-              title={t('ai.bot.instructions.faqsTooltip')}
-              aria-expanded={isHelpOpen}
-            >
-              <HelpCircle className="w-3.5 h-3.5" /> {t('ai.bot.instructions.faqs')}
-            </button>
-          </div>
-          <Textarea
-            value={systemPrompt}
-            onChange={(e) => setSystemPrompt(e.target.value)}
-            placeholder={t('ai.bot.additionalInstructions.placeholder')}
-            rows={8}
-            disabled={readOnly}
-            className="font-mono text-xs"
-          />
-          <p className="text-[10px] text-text-muted">{t('ai.bot.additionalInstructions.scopeNote')}</p>
-          <p className="text-[10px] text-text-muted">
-            {t('ai.bot.instructions.placeholders')} <code className="text-primary-400">{placeholderHint}</code>
-          </p>
-        </section>
 
         {/* Operational settings (tenant-owned: escalation + business hours).
             Collapsed by default to keep the page lean — most tenants won't touch it. */}
@@ -697,11 +647,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         </Button>
         {isAdmin && <AutoSaveStatusIndicator status={status} onRetry={retry} />}
       </div>
-
-      <BotInstructionsHelpDrawer
-        isOpen={isHelpOpen}
-        onClose={() => setIsHelpOpen(false)}
-      />
 
       <AlertDialog open={showLeaveDialog} onOpenChange={setShowLeaveDialog}>
         <AlertDialogContent>

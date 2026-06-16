@@ -688,20 +688,16 @@ async function fetchWhatsAppImageForAgent(sessionId: string, mediaId: string): P
 // on any failure (caller falls back to a text placeholder).
 async function resolveInboundImage(pending: Message, session: ChatSession): Promise<AgentImageInput | null> {
   if (pending.type !== 'image') return null;
-  let result: AgentImageInput | null = null;
   if (pending.metadata?.fileUrl) {
-    result = await fetchInboundImageForAgent(pending.metadata.fileUrl);
-  } else if (session.channel === 'whatsapp') {
+    return fetchInboundImageForAgent(pending.metadata.fileUrl);
+  }
+  if (session.channel === 'whatsapp') {
     const mediaId = (pending.metadata?.customData as Record<string, unknown> | undefined)?.mediaId;
-    // TEMP diagnostic (#wa-vision): confirm the branch + mediaId at agent-time.
-    logger.warn(`[wa-vision] whatsapp image turn sid=${session.id} mediaId=${typeof mediaId === 'string' ? mediaId : 'MISSING'} metaKeys=${Object.keys(pending.metadata ?? {}).join('|')}`);
     if (typeof mediaId === 'string' && mediaId) {
-      result = await fetchWhatsAppImageForAgent(session.id, mediaId);
+      return fetchWhatsAppImageForAgent(session.id, mediaId);
     }
   }
-  // TEMP diagnostic (#wa-vision): what did resolution yield?
-  logger.warn(`[wa-vision] resolveInboundImage channel=${session.channel} type=${pending.type} fileUrl=${pending.metadata?.fileUrl ? 'y' : 'n'} -> ${result ? 'IMAGE/' + result.mimeType : 'NULL'}`);
-  return result;
+  return null;
 }
 
 // ── Platform Agent Path ──────────────────────────────────────────────────

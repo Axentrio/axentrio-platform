@@ -28,6 +28,7 @@ import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import { config } from '../config/environment';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
+import { safeOutboundRequest } from '../security/ssrf-guard';
 import {
   getBotConfigForSession,
   getLlmRuntimeConfigForSession,
@@ -543,30 +544,71 @@ async function getLatestUnansweredUserMessage(sessionId: string): Promise<Messag
 
 // ── Inbound image → vision input ───────────────────────────────────────────
 
-// Image formats both LLM providers (Anthropic + OpenAI) accept.
-const SUPPORTED_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 // Anthropic caps a single base64 image near 5 MB; stay under that.
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+// sharp's detected format → the MIME both LLM providers (Anthropic + OpenAI) accept.
+const IMAGE_FORMAT_TO_MIME: Record<string, string> = {
+  jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+};
 
 // Fetch a stored inbound image and return it as base64 for the vision model.
-// Best-effort: returns null on any failure (network, unsupported type, too big)
-// so the turn degrades to text-only rather than erroring the whole reply.
+//
+// Uses the SAME download mechanism as inbound-media ingestion
+// (`UploadService.ingestRemoteFile`): the SSRF-guarded axios path with MANUAL
+// redirect following. A bare `fetch()` does NOT reliably retrieve Meta
+// attachment URLs from the prod datacenter — they 302-redirect (lookaside →
+// scontent CDN) and the CDN rejects the default client — which is why the bot
+// kept replying "I can't see the image". Format is sniffed with sharp (the
+// authoritative source), not the content-type header.
+//
+// Best-effort: returns null on any failure so the turn degrades to text-only
+// rather than erroring the whole reply.
 async function fetchInboundImageForAgent(url: string): Promise<AgentImageInput | null> {
   try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      logger.warn(`Inbound image fetch failed (${res.status}) — answering without vision`);
+    // safeOutboundRequest hardcodes maxRedirects:0; follow Location manually
+    // (≤3 hops), re-validating each hop for SSRF — mirrors ingestRemoteFile.
+    let current = url;
+    let response: Awaited<ReturnType<typeof safeOutboundRequest>> | undefined;
+    for (let hop = 0; hop < 4; hop++) {
+      response = await safeOutboundRequest({
+        url: current,
+        method: 'GET',
+        responseType: 'arraybuffer',
+        timeout: 15_000,
+        maxContentLength: MAX_IMAGE_BYTES,
+        maxBodyLength: MAX_IMAGE_BYTES,
+      });
+      if (response.status >= 300 && response.status < 400) {
+        const location = (response.headers as Record<string, string> | undefined)?.location;
+        if (!location) break;
+        current = new URL(location, current).toString();
+        response = undefined;
+        continue;
+      }
+      break;
+    }
+    if (!response || response.status < 200 || response.status >= 300) {
+      logger.warn(`Inbound image fetch failed (status ${response?.status ?? 'redirect-no-location'}) — answering without vision`);
       return null;
     }
-    const headerType = (res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-    const buf = Buffer.from(await res.arrayBuffer());
+    const buf = Buffer.from(response.data as ArrayBuffer);
     if (buf.byteLength === 0 || buf.byteLength > MAX_IMAGE_BYTES) {
       logger.warn(`Inbound image rejected (size ${buf.byteLength}B) — answering without vision`);
       return null;
     }
-    const mimeType = SUPPORTED_IMAGE_MIME.has(headerType) ? headerType : 'image/jpeg';
-    if (!SUPPORTED_IMAGE_MIME.has(headerType)) {
-      logger.info(`Inbound image content-type '${headerType}' not recognised — defaulting to image/jpeg`);
+    // Authoritative format sniff via sharp (lazy import keeps the native dep off
+    // this hot module's load path).
+    const sharp = (await import('sharp')).default;
+    let format: string | undefined;
+    try {
+      format = (await sharp(buf).metadata()).format;
+    } catch {
+      format = undefined;
+    }
+    const mimeType = format ? IMAGE_FORMAT_TO_MIME[format] : undefined;
+    if (!mimeType) {
+      logger.warn(`Inbound image format '${format ?? 'unknown'}' unsupported — answering without vision`);
+      return null;
     }
     return { mimeType, data: buf.toString('base64') };
   } catch (error) {

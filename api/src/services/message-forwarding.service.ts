@@ -942,7 +942,7 @@ async function getCoalescedHistory(
     .take(10)
     .getMany();
 
-  return messages.reverse().map((msg) => {
+  const turns = messages.reverse().map((msg) => {
     const text = msg.contentEncrypted ? decrypt(msg.content) : msg.content;
     const content = msg.type === 'image' ? (text ? `[Image] ${text}` : '[Image]') : text;
     return {
@@ -950,6 +950,15 @@ async function getCoalescedHistory(
       content,
     };
   });
+
+  // Drop leading assistant turn(s) — chiefly the session greeting, which is a
+  // static configured message (often in the business's default language). Feeding
+  // it as the first turn anchors the model into replying in that language even to
+  // a customer writing another, on the first turn. History should start with the
+  // customer's turn; later turns are unaffected (they begin with a user message).
+  let start = 0;
+  while (start < turns.length && turns[start].role === 'assistant') start++;
+  return turns.slice(start);
 }
 
 /**

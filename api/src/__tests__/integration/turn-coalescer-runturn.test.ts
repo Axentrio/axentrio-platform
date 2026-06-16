@@ -184,6 +184,41 @@ describe('runTurn — watermark compared DB-side (re-arm storm regression)', () 
   });
 });
 
+describe('runTurn — greeting excluded from agent history', () => {
+  it('drops the leading bot greeting so it cannot anchor the reply language', async () => {
+    const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'Sure, I can help.' });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const botp = await createTestParticipant(session.id, { type: 'bot', name: 'Bot' });
+
+    const base = 1_700_000_000_000;
+    // Static configured greeting (Dutch) sent at init, BEFORE the customer's turn.
+    const greeting = await createTestMessage(session.id, tenant.id, botp.id, {
+      content: 'Welkom, waar kan ik je mee van dienst zijn?',
+    });
+    const userMsg = await createTestMessage(session.id, tenant.id, user.id, {
+      content: 'do you have availability this weekend?',
+    });
+    await setCreatedAt(greeting.id, base);
+    await setCreatedAt(userMsg.id, base + 1000);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const pending = await getNewestUnansweredUserMessage(fresh);
+    expect(pending?.id).toBe(userMsg.id);
+
+    await runTurn(fresh, pending!);
+
+    const history = runMock.mock.calls[0][3] as { role: string; content: string }[];
+    // The Dutch greeting must NOT be fed to the model (it would anchor the reply
+    // language on turn 1). Turn 1 → history is empty (only the greeting preceded).
+    expect(history.some((h) => h.content.includes('Welkom'))).toBe(false);
+    expect(history).toEqual([]);
+  });
+});
+
 describe('runTurn — stale-output suppression', () => {
   it('discards the reply when a newer message lands DURING the run, and keeps that message', async () => {
     const tenant = await makeTenantWithAi();

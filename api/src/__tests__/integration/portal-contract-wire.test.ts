@@ -112,8 +112,12 @@ describe('wire contract — /entitlements', () => {
     const data = res.body.data;
     expect(keysOf(data)).toEqual(['current', 'plans', 'selfServePlans']);
     expect(keysOf(data.current)).toEqual(
-      ['activeModules', 'billable', 'features', 'limits', 'planId', 'support'],
+      ['activeModules', 'billable', 'entitledFeatures', 'featureToggles', 'features', 'limits', 'planId', 'support'],
     );
+    // entitledFeatures mirrors the features shape (it's the ceiling pre-toggle);
+    // featureToggles is the tenant's raw on/off prefs ({} when none set).
+    expect(keysOf(data.current.entitledFeatures)).toEqual(keysOf(data.current.features));
+    expect(Array.isArray(data.current.featureToggles)).toBe(false);
     expect(keysOf(data.current.features)).toEqual([
       'aiBusinessInsights',
       'bookings',

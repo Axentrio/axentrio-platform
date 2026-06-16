@@ -263,17 +263,22 @@ export async function coalesceProcessor(job: Job): Promise<void> {
   if (!redis) return; // scheduled via Redis; if it's gone there's nothing to do.
 
   // Deps-ready guard — a job from a previous process can fire before the agent /
-  // forwarding services are wired during boot.
+  // forwarding services are wired during boot. This is a boot LIVENESS wait, not a
+  // failure: retry at a flat interval and reset the counter so a slow boot never
+  // hits the give-up cap and drops the message. (No LLM is called on this path.)
   if (!isForwardingReady()) {
-    await rearmWithBackoff(sessionId, tenantId, attempt, 'deps-not-ready');
+    await rearm(sessionId, tenantId, REARM_MS, 0);
     return;
   }
 
   // Acquire the run-lock (owner token). Lock-miss ⇒ a run is in flight ⇒ re-arm.
+  // This is a LIVENESS wait (another worker is making progress), not a failure, and
+  // it never calls the LLM — so retry flat and reset the counter rather than backing
+  // off toward the give-up cap, which could otherwise drop a turn behind a slow run.
   const token = randomUUID();
   const acquired = await redis.set(lockKey(sessionId), token, 'PX', LOCK_TTL_MS, 'NX');
   if (acquired !== 'OK') {
-    await rearmWithBackoff(sessionId, tenantId, attempt, 'lock-miss');
+    await rearm(sessionId, tenantId, REARM_MS, 0);
     return;
   }
 

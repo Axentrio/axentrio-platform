@@ -182,6 +182,33 @@ describe('runTurn — watermark compared DB-side (re-arm storm regression)', () 
     expect(await getNewestUnansweredUserMessage(after)).toBeNull();
     expect(await getUnansweredBounds(after)).toBeNull();
   });
+
+  it('falls back to the stored date when the watermark message was hard-deleted (no stall)', async () => {
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+
+    const base = 1_700_000_000_000;
+    const m1 = await createTestMessage(session.id, tenant.id, user.id, { content: 'old' });
+    const m2 = await createTestMessage(session.id, tenant.id, user.id, { content: 'new' });
+    await setCreatedAt(m1.id, base);
+    await setCreatedAt(m2.id, base + 1000);
+
+    // Watermark id points at a message that no longer exists (hard-deleted), but the
+    // session still has the stored date between m1 and m2. The DB-side subquery
+    // returns NULL → without COALESCE every message looks answered (silent stall).
+    await sessionRepo.query(
+      `UPDATE chat_sessions SET last_coalesced_answer_message_id = $1, last_coalesced_answer_at = $2 WHERE id = $3`,
+      ['00000000-0000-0000-0000-000000000000', new Date(base + 500), session.id],
+    );
+
+    const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    // COALESCE falls back to the stored date (base+500): m1 (base) is answered, m2
+    // (base+1000) is still unanswered → returned, not a stall.
+    const pending = await getNewestUnansweredUserMessage(after);
+    expect(pending?.id).toBe(m2.id);
+    expect((await getUnansweredBounds(after))?.count).toBe(1);
+  });
 });
 
 describe('runTurn — greeting excluded from agent history', () => {
@@ -216,6 +243,41 @@ describe('runTurn — greeting excluded from agent history', () => {
     // language on turn 1). Turn 1 → history is empty (only the greeting preceded).
     expect(history.some((h) => h.content.includes('Welkom'))).toBe(false);
     expect(history).toEqual([]);
+  });
+
+  it('keeps a leading assistant turn when older history exists (window starts mid-conversation)', async () => {
+    const runMock = vi.fn().mockResolvedValue({ type: 'response', content: 'ok' });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const botp = await createTestParticipant(session.id, { type: 'bot', name: 'Bot' });
+
+    const base = 1_700_000_000_000;
+    // 11 non-hwm messages → the 10-message window excludes the oldest and starts on
+    // a real bot turn (b1) that must NOT be trimmed (it isn't the greeting).
+    const uOld = await createTestMessage(session.id, tenant.id, user.id, { content: 'oldest user' });
+    await setCreatedAt(uOld.id, base);
+    let t = base + 1;
+    for (let i = 1; i <= 5; i++) {
+      const b = await createTestMessage(session.id, tenant.id, botp.id, { content: `bot ${i}` });
+      await setCreatedAt(b.id, t++);
+      const u = await createTestMessage(session.id, tenant.id, user.id, { content: `user ${i}` });
+      await setCreatedAt(u.id, t++);
+    }
+    const hwm = await createTestMessage(session.id, tenant.id, user.id, { content: 'live question' });
+    await setCreatedAt(hwm.id, t++);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const pending = await getNewestUnansweredUserMessage(fresh);
+    expect(pending?.id).toBe(hwm.id);
+    await runTurn(fresh, pending!);
+
+    const history = runMock.mock.calls[0][3] as { role: string; content: string }[];
+    expect(history).toHaveLength(10); // window cap
+    expect(history[0]).toEqual({ role: 'assistant', content: 'bot 1' }); // leading bot turn kept
+    expect(history.some((h) => h.content === 'oldest user')).toBe(false); // oldest beyond the window
   });
 });
 

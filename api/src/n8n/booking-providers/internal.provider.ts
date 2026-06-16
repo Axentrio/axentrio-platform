@@ -119,15 +119,18 @@ export function normalizeDateRange(
  * "2026-06-19T14:00:00" — what the model emits for the customer's "2 PM") is read
  * as business-local wall-clock. Without this, a zoneless/UTC time round-trips
  * through `new Date()` on a UTC server as UTC, landing the booking at the wrong
- * local hour in any non-UTC zone. Falls back to `new Date()` for a non-ISO but
- * Date-parseable string; returns null when unparseable. Same rule as
- * {@link normalizeDateRange}.
+ * local hour in any non-UTC zone. A loose space-separated form ("2026-06-19
+ * 14:00") is also anchored to the business timezone via fromSQL — NEVER the
+ * server's, which `new Date()` would do (re-introducing the wrong-hour bug).
+ * Returns null when unparseable. Same rule as {@link normalizeDateRange}.
  */
 export function parseBookingStart(input: string, timezone: string): Date | null {
-  const dt = DateTime.fromISO(input, { zone: timezone });
-  if (dt.isValid) return dt.toJSDate();
-  const fallback = new Date(input);
-  return Number.isNaN(fallback.getTime()) ? null : fallback;
+  const iso = DateTime.fromISO(input, { zone: timezone });
+  if (iso.isValid) return iso.toJSDate();
+  // Loose "YYYY-MM-DD HH:mm[:ss]" (space, not 'T') — still business-local.
+  const sql = DateTime.fromSQL(input, { zone: timezone });
+  if (sql.isValid) return sql.toJSDate();
+  return null;
 }
 
 /** P5a — which contact fields a service requires. Single mapping for the column-name
@@ -491,6 +494,23 @@ export class InternalProvider implements BookingProvider {
     }
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
     const end = new Date(start.getTime() + effectiveDuration * 60_000);
+
+    // Idempotency on the PARSED instant (codex): the model may pass the same time
+    // as a `Z` slot one turn and a zoneless local string the next → different
+    // idempotency keys. Catch it on (session, service, startUtc) so a re-confirm
+    // returns the existing booking instead of failing SLOT_UNAVAILABLE on the now-
+    // taken slot. Mirrors requestAppointment's dedup.
+    const recentDup = await bookingRepo.findOne({
+      where: {
+        tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
+        eventTypeId: service.id, startUtc: start,
+        createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)),
+      },
+      order: { createdAt: 'DESC' },
+    });
+    if (recentDup && !['failed', 'cancelled', 'declined'].includes(recentDup.status)) {
+      return this.toResult(recentDup, true);
+    }
 
     // P3: normalize intake answers against THIS resolved service (the row's real service).
     const intakeJson = normalizeIntakeAnswers(service, intakeAnswers);

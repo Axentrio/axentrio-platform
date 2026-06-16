@@ -25,7 +25,16 @@ describe('parseBookingStart', () => {
     expect(d?.toISOString()).toBe('2026-06-19T13:00:00.000Z');
   });
 
+  it('reads a loose space-separated time as business-local (not server-local)', () => {
+    // "2026-06-19 14:00" (space, not 'T') — a common model output. fromISO rejects
+    // it, so it must go through fromSQL anchored to Brussels (14:00 → 12:00 UTC),
+    // NOT new Date() which would read it as server-local (UTC) → wrong hour.
+    const d = parseBookingStart('2026-06-19 14:00:00', 'Europe/Brussels');
+    expect(d?.toISOString()).toBe('2026-06-19T12:00:00.000Z');
+  });
+
   it('returns null for an unparseable string', () => {
     expect(parseBookingStart('not a time', 'Europe/Brussels')).toBeNull();
+    expect(parseBookingStart('June 19 2026 2pm', 'Europe/Brussels')).toBeNull();
   });
 });

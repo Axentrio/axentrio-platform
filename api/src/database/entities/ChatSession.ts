@@ -64,6 +64,17 @@ export class ChatSession {
   @Column('uuid', { nullable: true })
   channelConnectionId!: string | null;
 
+  // ── Guardrails state (Global AI Workflow Guardrails). Distinct from `status`
+  // (routing): these track the safety-layer decision so spam/scam/bot-loop logic
+  // never couples to handoff logic. Default-on / default-normal ⇒ no backfill of
+  // existing sessions. See .scratch/plan-global-ai-guardrails.md §3a.
+  @Column({ type: 'boolean', default: true, name: 'ai_auto_reply_enabled' })
+  aiAutoReplyEnabled!: boolean;
+
+  /** normal | spam | scam | phishing | solicitation | bot_loop | suspicious_link */
+  @Column({ type: 'varchar', length: 32, default: 'normal', name: 'guardrail_status' })
+  guardrailStatus!: string;
+
   @Column({ type: 'varchar', length: 500, nullable: true })
   subject?: string;
 

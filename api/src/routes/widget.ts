@@ -12,6 +12,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
 import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
+import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { scheduleTurn } from '../services/turn-coalescer';
@@ -413,8 +414,14 @@ router.post(
       throw new ValidationError('Session not initialized');
     }
 
-    if (!content) {
+    if (typeof content !== 'string' || !content) {
       throw new ValidationError('Message content is required');
+    }
+
+    // Hard length cap == the guardrails scan window, so no ingress path forwards
+    // an unscanned tail to the AI (closes the prefix-evasion). See chat.schema.
+    if (content.length > MAX_MESSAGE_CONTENT_CHARS) {
+      throw new ValidationError('Message too long');
     }
 
     const sessionRepository = AppDataSource.getRepository(ChatSession);

@@ -28,6 +28,7 @@ import { validate } from '../middleware/validate';
 import { sendSuccess } from '../utils/response';
 import { requestHandoffSchema } from '../schemas';
 import { requireFeature } from '../billing/enforce';
+import { redisLoopStore } from '../guardrails/loop-store';
 
 const router = Router();
 const sessionRepository = AppDataSource.getRepository(ChatSession);
@@ -500,6 +501,51 @@ router.get(
         waitTimeSeconds: r.getWaitTime(),
       })),
     }, { pagination: result.meta });
+  })
+);
+
+/**
+ * POST /handoff/resume-ai
+ * Re-enable AI replies on a conversation the guardrails layer paused
+ * (spam/scam/bot-loop). Owner action only — per R18, AI resumes solely on
+ * explicit business-owner reactivation. Tenant-scoped lookup (no IDOR).
+ */
+router.post(
+  '/resume-ai',
+  requireClerkAuth, autoProvision, resolveTenantContext,
+  validateTenant,
+  asyncHandler(async (req: TenantRequest, res: Response) => {
+    const tenantId = req.tenant?.id;
+    const agent = req.user;
+    const { sessionId } = req.body;
+
+    if (!sessionId) {
+      throw new BadRequestError('Session ID is required');
+    }
+    // Owner action only (R18): re-enabling AI after a safety pause is an admin
+    // decision, not something any agent seat should do.
+    if (agent?.role !== 'admin' && agent?.role !== 'super_admin') {
+      throw new ForbiddenError('Only an admin can re-enable AI on a flagged conversation');
+    }
+
+    const session = await sessionRepository.findOne({ where: { id: sessionId, tenantId } });
+    if (!session) {
+      throw new NotFoundError('Session not found');
+    }
+
+    session.aiAutoReplyEnabled = true;
+    session.guardrailStatus = 'normal';
+    await sessionRepository.save(session);
+
+    // Clear the ephemeral bot-loop counters so a resumed conversation starts fresh.
+    await redisLoopStore.clear(sessionId).catch(() => {});
+
+    logger.info(`Guardrails: AI re-enabled for session ${sessionId}`, { agentId: agent?.id });
+
+    sendSuccess(res, {
+      message: 'AI replies re-enabled',
+      session: { id: session.id, aiAutoReplyEnabled: true, guardrailStatus: 'normal' },
+    });
   })
 );
 

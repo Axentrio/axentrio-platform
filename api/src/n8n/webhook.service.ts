@@ -76,11 +76,31 @@ export class WebhookService {
         };
       }
 
+      // Reject bot messages on a guardrail-paused conversation (spam/scam/bot-loop) —
+      // covers the in-flight race where a concurrent block disabled the session
+      // after the message was forwarded to n8n. Resume via /handoff/resume-ai.
+      if (session.aiAutoReplyEnabled === false) {
+        logger.warn(`Bot message rejected — session ${sessionId} is guardrail-paused`);
+        return {
+          success: false,
+          error: 'Session is guardrail-paused — bot messages not accepted',
+        };
+      }
+
       // Apply delay if specified
       const actualDelay = Math.min(delay, this.config.maxDelay || 30000);
       if (actualDelay > 0) {
         logger.debug(`Delaying message by ${actualDelay}ms for session ${sessionId}`);
         await this.sleep(actualDelay);
+        // A guardrail block could have landed DURING the delay — re-read the
+        // current flag (not the stale session) right before persisting/sending.
+        const live = await this.sessionRepo.findOne({
+          where: { id: sessionId }, select: { id: true, aiAutoReplyEnabled: true } as never,
+        });
+        if (live && live.aiAutoReplyEnabled === false) {
+          logger.warn(`Bot message rejected post-delay — session ${sessionId} is guardrail-paused`);
+          return { success: false, error: 'Session is guardrail-paused — bot messages not accepted' };
+        }
       }
 
       // Process different message types

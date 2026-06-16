@@ -163,6 +163,16 @@ export class Tenant {
      * See .scratch/plan-tenant-feature-toggles.md.
      */
     featureToggles?: TenantFeatureToggles;
+    /**
+     * Global AI Workflow Guardrails — platform-ops controls (super-admin only,
+     * NOT a customer entitlement, NOT in TENANT_TOGGLEABLE_FEATURES).
+     * `enforce` flips the guardrails gate from shadow (classify + log only) to
+     * enforcing (block + disable auto-reply). Default absent = shadow.
+     * See .scratch/plan-global-ai-guardrails.md §6.
+     */
+    guardrails?: {
+      enforce?: boolean;
+    };
   };
 
   /**

@@ -9,6 +9,7 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { Server as HttpServer } from 'http';
 import { logger } from '../utils/logger';
 import { getPubClient, getSubClient, isRedisAvailable } from '../config/redis';
+import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { isOriginAllowed, isWildcardCors } from '../security/cors';
 import { validateSocketTenant, TenantSocket } from '../middleware/tenant.middleware';
 import { checkEventRateLimit } from './socket-rate-limit';
@@ -488,8 +489,15 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
   const user = socket.data.user;
   const tenantId = socket.data.tenantId;
 
-  if (!sessionId || !content) {
+  if (!sessionId || typeof content !== 'string' || !content) {
     socket.emit('error', { message: 'Invalid message data' });
+    return;
+  }
+
+  // Hard length cap == the guardrails scan window (closes the prefix-evasion;
+  // every AI-scheduling ingress enforces the same bound). See chat.schema.
+  if (content.length > MAX_MESSAGE_CONTENT_CHARS) {
+    socket.emit('error', { message: 'Message too long' });
     return;
   }
 

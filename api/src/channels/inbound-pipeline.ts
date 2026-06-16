@@ -17,6 +17,8 @@ import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { NormalizedEvent } from './types';
 import { isChannelEntitled } from './channel-entitlement';
 import { encrypt } from '../utils/encryption';
+import { MAX_MESSAGE_CONTENT_CHARS, classifyMessage } from '../guardrails/classify';
+import { isGuardrailsEnforcing } from '../guardrails/inbound-guardrails.service';
 import { scheduleTurn } from '../services/turn-coalescer';
 import { emitToSession, emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
@@ -106,24 +108,37 @@ export async function processInboundEvent(
     // the service logs its own failures and must never block message processing
     // or the (already-sent) webhook ACK.
     if (created && (connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads !== false) {
-      void upsertLead({
-        dataSource: AppDataSource,
-        tenantId: connection.tenantId,
-        sessionId: session.id,
-        botId: session.botId ?? null,
-        source: 'channel',
-        channel: connection.channel,
-        externalUserId: binding.externalUserId,
-        name: binding.externalUserName,
-      }).catch(() => {});
+      // Guardrails: a clearly spam/scam/solicitation first message must not become
+      // a lead (AC17/19). Classify (pure, cheap); only when flagged do we check the
+      // tenant's enforce flag — shadow mode stays behaviour-neutral. See §1A.
+      const firstContent = event.type === 'postback'
+        ? event.postback?.payload || ''
+        : event.message?.content || '';
+      const flagged = classifyMessage(firstContent, connection.channel).category !== 'clean';
+      const suppress = flagged && (await isGuardrailsEnforcing(connection.tenantId));
+      if (!suppress) {
+        void upsertLead({
+          dataSource: AppDataSource,
+          tenantId: connection.tenantId,
+          sessionId: session.id,
+          botId: session.botId ?? null,
+          source: 'channel',
+          channel: connection.channel,
+          externalUserId: binding.externalUserId,
+          name: binding.externalUserName,
+        }).catch(() => {});
+      }
     }
 
     // ── 5. Save the message (encrypted) to DB ────────────────────────────
     const messageRepo = getRepository(Message);
 
-    const content = event.type === 'postback'
+    // Cap to the guardrails scan window (truncate — a channel webhook message is
+    // already accepted upstream, so we keep it rather than reject). Keeps the
+    // "stored message never exceeds the scan window" invariant on this path too.
+    const content = (event.type === 'postback'
       ? event.postback?.payload || ''
-      : event.message?.content || '';
+      : event.message?.content || '').slice(0, MAX_MESSAGE_CONTENT_CHARS);
 
     const messageType = event.type === 'postback'
       ? 'text'

@@ -18,6 +18,21 @@ vi.mock('../../channels/channel-entitlement', async (importOriginal) => {
   };
 });
 
+// setupMetaConnections resolves entitlements once to attach the disabled_by_tenant
+// vs not_entitled reason to its 402. Derive both from the same per-channel map
+// (no toggles in these tests → ceiling == effective).
+vi.mock('../../billing/entitlements', () => {
+  const featuresFromMap = () => ({
+    channelMessenger: entitled.map.messenger ?? false,
+    channelInstagram: entitled.map.instagram ?? false,
+    channelWhatsapp: entitled.map.whatsapp ?? false,
+    channelTelegram: entitled.map.telegram ?? false,
+  });
+  return {
+    getEntitlements: vi.fn(async () => ({ features: featuresFromMap(), entitledFeatures: featuresFromMap() })),
+  };
+});
+
 // ── Repo stubs (per entity name) ─────────────────────────────────────────────
 const repoStubs = vi.hoisted(() => ({ map: new Map<string, Record<string, ReturnType<typeof vi.fn>>>() }));
 function stubRepo(name: string, methods: Record<string, ReturnType<typeof vi.fn>>) {

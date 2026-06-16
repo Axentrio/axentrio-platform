@@ -104,15 +104,15 @@ end
 return 0
 `;
 
-// Clear turn:state only if its last-pending tuple is <= hwm (identity compare on
-// the durable message tuple, not a wall-clock compare).
+// Clear turn:state only if the last-recorded pending message IS the hwm we just
+// answered — i.e. nothing newer arrived. Pure message-id identity: no timestamp
+// comparison at all (a stored-ms-vs-JS-ms equality check was fragile, and the
+// durable watermark — not this state — is what guarantees correctness). If a
+// newer message arrived (lastPendingId != hwm), leave the state: that message
+// already scheduled its own job and will clear on its own turn. A non-clear at
+// worst lets turn:state linger until its TTL; it can never cause a re-run.
 const CLEAR_IF_CONSUMED_LUA = `
-local lastAt = redis.call('HGET', KEYS[1], 'lastPendingAt')
-local lastId = redis.call('HGET', KEYS[1], 'lastPendingId')
-if not lastAt then return 0 end
-local curAt = tonumber(lastAt)
-local hwmAt = tonumber(ARGV[1])
-if curAt < hwmAt or (curAt == hwmAt and lastId <= ARGV[2]) then
+if redis.call('HGET', KEYS[1], 'lastPendingId') == ARGV[1] then
   return redis.call('DEL', KEYS[1])
 end
 return 0
@@ -266,9 +266,10 @@ export async function coalesceProcessor(job: Job): Promise<void> {
     const status = await runTurn(session, pending);
 
     if (status === 'answered') {
-      // Clear state only if no message newer than hwm is recorded.
+      // Clear state only if the hwm we answered is still the last recorded
+      // pending message (no newer one arrived) — pure id identity, no timestamps.
       await redis
-        .eval(CLEAR_IF_CONSUMED_LUA, 1, stateKey(sessionId), String(pending.createdAt.getTime()), pending.id)
+        .eval(CLEAR_IF_CONSUMED_LUA, 1, stateKey(sessionId), pending.id)
         .catch(() => {});
     } else if (status === 'stale') {
       // A newer message arrived (or watermark race) — let it form the next turn.

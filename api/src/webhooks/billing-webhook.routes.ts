@@ -208,6 +208,9 @@ billingWebhookRoutes.post('/:provider', async (req: Request, res: Response) => {
         outcome: handlerOutcome.outcome,
         meta: handlerOutcome.meta,
         finalizeAsProcessedWithError,
+        // Surfaced to the wrapper so entitlement/module caches are invalidated
+        // AFTER the outer commit, not inside this still-open tx.
+        invalidateTenantIds: handlerOutcome.invalidateTenantIds,
       };
     },
   });

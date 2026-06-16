@@ -48,7 +48,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
   return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
-      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides', 'settings'],
+      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides', 'featureToggles'],
     });
 
     if (!tenant) {
@@ -64,7 +64,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
       {
         status: tenant.status,
         featureOverrides: tenant.featureOverrides ?? {},
-        featureToggles: tenant.settings?.featureToggles ?? {},
+        featureToggles: tenant.featureToggles ?? {},
         tenantId,
       },
     );

@@ -79,10 +79,27 @@ const PLAN_LIMIT_NO_TOAST: ReadonlySet<string> = new Set([
 function handlePlanLimit(error: AxiosError): void {
   if (error.response?.status !== 402) return;
   const body = error.response.data as
-    | { error?: { code?: string; message?: string; details?: { limit?: number } } }
+    | { error?: { code?: string; message?: string; details?: { limit?: number; reason?: string } } }
     | undefined;
   const code = body?.error?.code ?? '';
   if (PLAN_LIMIT_NO_TOAST.has(code)) return;
+
+  // `disabled_by_tenant` means the tenant switched this feature OFF themselves
+  // (it IS in their plan) — point them to Settings → Features, NOT an upgrade.
+  if (body?.error?.details?.reason === 'disabled_by_tenant') {
+    import('sonner').then(({ toast }) => {
+      toast.warning('This feature is switched off for your workspace.', {
+        action: {
+          label: 'Manage features',
+          onClick: () => {
+            window.location.href = '/settings/features';
+          },
+        },
+      });
+    });
+    return;
+  }
+
   const message =
     PLAN_LIMIT_COPY[code] ??
     body?.error?.message ??

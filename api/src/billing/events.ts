@@ -119,7 +119,9 @@ async function promotePrimaryAndCascadeTier(
     [targetRow.id, targetRow.tenantId],
   );
   await manager.update(Tenant, { id: targetRow.tenantId }, { tier: newTier });
-  await invalidateEntitlementsAndModules(targetRow.tenantId);
+  // NB: entitlement/module cache invalidation is deferred to AFTER the outer
+  // commit (the caller surfaces this tenant via invalidateTenantIds) — never
+  // here inside the open tx, where a concurrent miss would re-cache the old tier.
 }
 
 /**
@@ -132,7 +134,7 @@ export async function handleNormalizedEvent(
   manager: EntityManager,
   event: NormalizedEvent,
   matched: ResolvedRow | null,
-): Promise<{ outcome: string; meta?: Record<string, unknown> }> {
+): Promise<{ outcome: string; meta?: Record<string, unknown>; invalidateTenantIds?: string[] }> {
   // Refunds, unresolved rows, and audit-only paths short-circuit.
   if (event.type === 'refund.recorded') {
     return { outcome: 'audit_only_refund' };
@@ -279,7 +281,7 @@ export async function handleNormalizedEvent(
       // stay row-local — Tenant.tier reflects the surviving primary.
       if (row.isPrimary) {
         await manager.update(Tenant, { id: tenantId }, { tier: 'free' });
-        await invalidateEntitlementsAndModules(tenantId);
+        // Invalidation deferred to after the outer commit (see return below).
       }
 
       // Audit log entry — `tenant.cancelled`. actor_id is the Tenant.id
@@ -309,7 +311,12 @@ export async function handleNormalizedEvent(
         ],
       );
 
-      return { outcome: 'tenant_cancelled', meta: auditMeta };
+      return {
+        outcome: 'tenant_cancelled',
+        meta: auditMeta,
+        // Only a primary cancellation cascaded Tenant.tier → 'free'.
+        invalidateTenantIds: row.isPrimary ? [tenantId] : undefined,
+      };
     }
 
     case 'subscription.created':
@@ -516,14 +523,14 @@ export async function handleNormalizedEvent(
       const isPromotion = (s.status === 'trialing' || s.status === 'active') && !row.isPrimary;
       if (isPromotion) {
         await promotePrimaryAndCascadeTier(manager, row, newPlanForStatus);
-        return { outcome: 'promoted_primary' };
+        return { outcome: 'promoted_primary', invalidateTenantIds: [row.tenantId] };
       }
 
       const isEntitlementGranting = s.status === 'trialing' || s.status === 'active';
       if (row.isPrimary && isEntitlementGranting) {
         await manager.update(Tenant, { id: tenantId }, { tier: newPlanForStatus });
-        await invalidateEntitlementsAndModules(tenantId);
-        return { outcome: 'tier_cascaded' };
+        // Invalidation deferred to after the outer commit (see return).
+        return { outcome: 'tier_cascaded', invalidateTenantIds: [tenantId] };
       }
 
       if (row.isPrimary && isPastDue) {
@@ -818,6 +825,10 @@ export interface StripeWebhookCallbackResult {
    *  still find the failure in event-log queries. */
   finalizeAsProcessedWithError?: string;
   meta?: Record<string, unknown>;
+  /** Tenants whose entitlements were mutated — invalidated AFTER the outer
+   *  commit (never inside the open tx, where a concurrent miss would re-cache
+   *  the pre-commit tier). See `runStripeWebhookIdempotent`. */
+  invalidateTenantIds?: string[];
 }
 
 export async function runStripeWebhookIdempotent(opts: {
@@ -929,6 +940,15 @@ export async function runStripeWebhookIdempotent(opts: {
     );
 
     await queryRunner.commitTransaction();
+
+    // Cache invalidation happens ONLY here — after the success commit — so a
+    // concurrent reader can never re-cache the pre-commit tier for the 60s TTL.
+    // (The failure path at the catch above rolled back the mutations, so there
+    // is nothing to invalidate there.)
+    for (const id of callbackResult.invalidateTenantIds ?? []) {
+      await invalidateEntitlementsAndModules(id);
+    }
+
     return {
       status: 'processed',
       outcome: callbackResult.outcome,

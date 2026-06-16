@@ -94,7 +94,11 @@ export function useUpdateFeatureToggles() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (toggles: TenantFeatureToggles) =>
-      api.put<EntitlementsDto>('/tenants/me/feature-toggles', toggles),
+      // The route returns only the effective/ceiling/prefs slice, not the full DTO.
+      api.put<Pick<EntitlementsDto, 'featureToggles' | 'entitledFeatures' | 'features'>>(
+        '/tenants/me/feature-toggles',
+        toggles,
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.entitlements.all() });
     },

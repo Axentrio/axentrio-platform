@@ -5,6 +5,7 @@ import { encryptCredential } from '../credential-utils';
 import { logger } from '../../utils/logger';
 import { FB_GRAPH_API as GRAPH_API } from './graph-api';
 import { isChannelEntitled } from '../channel-entitlement';
+import { getEntitlements } from '../../billing/entitlements';
 import { PlanLimitError } from '../../billing/enforce';
 
 interface PageToConnect {
@@ -42,7 +43,14 @@ export async function setupMetaConnections(
   if (!messengerEntitled && !instagramEntitled) {
     // Callers gate on "any Meta channel entitled" before invoking, but the
     // entitlement may change mid-OAuth — never return a "successful" no-op.
-    throw new PlanLimitError('plan_limit_channel_meta', null, { channel: 'messenger|instagram' });
+    // Carry the same reason as the gate so the portal can distinguish
+    // "turned off in Settings" from "upgrade needed" (hardening Fix C).
+    const e = await getEntitlements(tenantId);
+    const reason =
+      e.entitledFeatures.channelMessenger || e.entitledFeatures.channelInstagram
+        ? 'disabled_by_tenant'
+        : 'not_entitled';
+    throw new PlanLimitError('plan_limit_channel_meta', null, { channel: 'messenger|instagram', reason });
   }
 
   for (const page of pages) {

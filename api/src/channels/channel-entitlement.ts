@@ -75,8 +75,13 @@ export async function requireChannelEntitled(tenantId: string, channel: ChannelT
  * gate it on having EITHER. The per-type filtering happens at connect time.
  */
 export async function requireAnyMetaChannelEntitled(tenantId: string): Promise<void> {
-  const f = (await getEntitlements(tenantId)).features;
-  if (!f.channelMessenger && !f.channelInstagram) {
-    throw new PlanLimitError('plan_limit_channel_meta', null, { channel: 'messenger|instagram' });
+  const e = await getEntitlements(tenantId);
+  if (!e.features.channelMessenger && !e.features.channelInstagram) {
+    // Entitled-but-off (tenant toggle) vs not in plan — Plan § 9b.11 / hardening Fix C.
+    const reason =
+      e.entitledFeatures.channelMessenger || e.entitledFeatures.channelInstagram
+        ? 'disabled_by_tenant'
+        : 'not_entitled';
+    throw new PlanLimitError('plan_limit_channel_meta', null, { channel: 'messenger|instagram', reason });
   }
 }

@@ -68,7 +68,7 @@ export async function lockTenantEntitlements(
     {
       status: tenant.status,
       featureOverrides: tenant.featureOverrides ?? {},
-      featureToggles: tenant.settings?.featureToggles ?? {},
+      featureToggles: tenant.featureToggles ?? {},
       tenantId,
     },
   );

@@ -207,6 +207,22 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
       expect(e.entitledFeatures.crm).toBe(true);
     });
 
+    it('gapInsights toggled off cascades its insights children off too', () => {
+      // enterprise includes the full insights ladder (gapInsights + the two children).
+      const e = entitlementsFor('enterprise', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { gapInsights: false },
+      });
+      expect(e.features.gapInsights).toBe(false);
+      expect(e.features.gapEvidence).toBe(false); // requires gapInsights
+      expect(e.features.aiBusinessInsights).toBe(false); // requires gapInsights
+      // ceiling untouched
+      expect(e.entitledFeatures.gapInsights).toBe(true);
+      expect(e.entitledFeatures.gapEvidence).toBe(true);
+      expect(e.entitledFeatures.aiBusinessInsights).toBe(true);
+    });
+
     it('admin override ⊕ tenant preference compose (override on, tenant off)', () => {
       // essential is comped bookings by an admin override, then the tenant
       // turns it back off for themselves.

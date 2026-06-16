@@ -351,6 +351,16 @@ router.post('/tenants', validate(createTenantSchema), asyncHandler(async (req: R
   // Enterprise after creation via POST /admin/tenants/:id/set-enterprise.
   const { name, settings, adminEmail } = req.body;
 
+  // featureToggles is NOT a settings sub-key — it has its own column with a
+  // validated, entitlement-clamped write path. Reject it here so the single
+  // write path (PUT /tenants/me/feature-toggles) is enforced and no misleading
+  // stale settings.featureToggles is persisted.
+  if (settings?.featureToggles !== undefined) {
+    throw new BadRequestError(
+      'featureToggles cannot be set via tenant settings. Use PUT /tenants/me/feature-toggles.',
+    );
+  }
+
   // Step 1: Create Clerk org first
   const clerkOrg = await createClerkOrganization(name);
   if (!clerkOrg) {
@@ -435,6 +445,13 @@ router.patch('/tenants/:id', asyncHandler(async (req: Request, res: Response) =>
   if (tier !== undefined) {
     throw new BadRequestError(
       'Tier cannot be changed via this endpoint. Use POST /admin/tenants/:id/set-enterprise for Enterprise; Pro/Premium changes happen through the tenant\'s Stripe checkout flow.',
+    );
+  }
+  // featureToggles has its own column + validated, entitlement-clamped write
+  // path — reject it here so the settings-merge can't bypass that path.
+  if (settings?.featureToggles !== undefined) {
+    throw new BadRequestError(
+      'featureToggles cannot be changed via this endpoint. Use PUT /tenants/me/feature-toggles.',
     );
   }
   if (name) tenant.name = name;

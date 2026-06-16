@@ -156,14 +156,6 @@ export class Tenant {
       digestEmail?: boolean;
     };
     /**
-     * Tenant self-service feature on/off prefs, merged over the entitlement
-     * ceiling by the resolver. Default-ON: absent key = on (when entitled);
-     * only an explicit `false` disables. Written through
-     * PUT /tenants/me/feature-toggles (tenant admin), never the generic PATCH.
-     * See .scratch/plan-tenant-feature-toggles.md.
-     */
-    featureToggles?: TenantFeatureToggles;
-    /**
      * Global AI Workflow Guardrails — platform-ops controls (super-admin only,
      * NOT a customer entitlement, NOT in TENANT_TOGGLEABLE_FEATURES).
      * `enforce` flips the guardrails gate from shadow (classify + log only) to
@@ -183,6 +175,18 @@ export class Tenant {
    */
   @Column({ type: 'jsonb', default: {}, name: 'feature_overrides' })
   featureOverrides!: Record<string, FeatureOverride>;
+
+  /**
+   * Tenant self-service feature on/off prefs (ToggleableFeatureKey → boolean),
+   * merged over the entitlement ceiling by the resolver. Default-ON: absent key =
+   * on (when entitled); only an explicit `false` disables. Its OWN column (not a
+   * `settings` sub-key) so other settings writers can't clobber it and the
+   * super-admin settings-merge can't bypass the validated write path. Written
+   * only through PUT /tenants/me/feature-toggles. See
+   * .scratch/plan-feature-toggles-hardening.md.
+   */
+  @Column({ type: 'jsonb', default: {}, name: 'feature_toggles' })
+  featureToggles!: TenantFeatureToggles;
 
   @Column({ type: 'int', default: 100, name: 'max_sessions' })
   maxSessions!: number;

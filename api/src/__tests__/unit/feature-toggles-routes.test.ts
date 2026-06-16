@@ -124,9 +124,9 @@ describe('PUT /tenants/me/feature-toggles', () => {
       .send({ bookings: false });
 
     expect(res.status).toBe(200);
-    // atomic jsonb_set write touching only settings.featureToggles
-    expect(state.lastWriteSql).toContain("jsonb_set");
-    expect(state.lastWriteSql).toContain("'{featureToggles}'");
+    // atomic write to the dedicated feature_toggles column (isolated from settings)
+    expect(state.lastWriteSql).toContain("feature_toggles = $2");
+    expect(state.lastWriteSql).not.toContain("settings");
     expect(state.lastWriteParams).toEqual(['tenant-1', JSON.stringify({ bookings: false })]);
     expect(state.invalidated).toEqual(['tenant-1']);
     // Feature-gated modules (e.g. booking) must re-resolve immediately, so the

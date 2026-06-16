@@ -13,8 +13,8 @@
  *       entitlement CEILING (entitledFeatures), never effective features —
  *       so a previously-disabled-but-entitled feature can always be re-enabled.
  *       Turning a feature OFF is always allowed.
- *     - atomic jsonb_set on settings.featureToggles ONLY (never clobbers other
- *       settings sub-keys such as ai.apiKey under a concurrent writer).
+ *     - atomic write to the dedicated `feature_toggles` column (isolated from the
+ *       shared `settings` blob — no other settings writer can clobber it).
  *     - invalidates the entitlement cache + writes an audit event.
  *
  * No GET here — GET /entitlements already returns `featureToggles` +
@@ -65,14 +65,11 @@ router.put(
       next[key] = value;
     }
 
-    // Atomic write — replace ONLY settings.featureToggles. COALESCE handles a
-    // NULL/absent settings column; every other settings sub-key is preserved
-    // even if another request writes settings concurrently.
+    // Atomic write to the dedicated feature_toggles column — isolated from the
+    // shared `settings` blob, so no other settings writer can clobber it and the
+    // super-admin settings-merge can't reach it. Full-map replace (PUT semantics).
     await AppDataSource.query(
-      `UPDATE tenants
-          SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{featureToggles}', $2::jsonb, true),
-              updated_at = now()
-        WHERE id = $1`,
+      `UPDATE tenants SET feature_toggles = $2::jsonb, updated_at = now() WHERE id = $1`,
       [tenantId, JSON.stringify(next)],
     );
 

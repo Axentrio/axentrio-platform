@@ -8,7 +8,7 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-  MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2, Lock,
+  MessageSquare, Trash2, AlertCircle, RefreshCw, Loader2, Lock, PowerOff,
 } from 'lucide-react';
 import { SiTelegram, SiMessenger, SiInstagram, SiWhatsapp, SiFacebook } from 'react-icons/si';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
@@ -47,7 +47,7 @@ import {
   useUpdateChannelAutoCapture,
 } from '../../queries/useChannelQueries';
 import { useBots } from '@/queries/useBotsQueries';
-import { useIsEntitled } from '../../queries/useEntitlementsQueries';
+import { useIsEntitled, useHasFeature } from '../../queries/useEntitlementsQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -126,7 +126,23 @@ export function SocialChannelsContent() {
     messenger: useIsEntitled('channelMessenger'),
     instagram: useIsEntitled('channelInstagram'),
   };
+  // EFFECTIVE flag (entitled AND switched on). A channel that's entitled but
+  // toggled off is a distinct state from not-in-plan: it points to Settings →
+  // Features (not upgrade). `channelOff` = entitled but switched off.
+  const channelEnabled: Record<string, boolean> = {
+    telegram: useHasFeature('channelTelegram'),
+    whatsapp: useHasFeature('channelWhatsapp'),
+    messenger: useHasFeature('channelMessenger'),
+    instagram: useHasFeature('channelInstagram'),
+  };
+  const channelOff = (ch: string): boolean => channelEntitled[ch] && !channelEnabled[ch];
+  const channelAvailable = (ch: string): boolean => channelEntitled[ch] && channelEnabled[ch];
   const anyMetaEntitled = channelEntitled.messenger || channelEntitled.instagram;
+  const anyMetaAvailable = channelAvailable('messenger') || channelAvailable('instagram');
+  const anyMetaOff = anyMetaEntitled && !anyMetaAvailable;
+  // Hint copy shared by the connect buttons.
+  const offHint = t('ai.social.offHint', { defaultValue: 'Turned off — enable in Settings → Features' });
+  const lockedHint = t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' });
 
   // WhatsApp connect state
   const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
@@ -263,10 +279,12 @@ export function SocialChannelsContent() {
               size="sm"
               variant="outline"
               onClick={handleConnectFacebook}
-              disabled={metaOAuthUrl.isPending || !anyMetaEntitled}
-              title={!anyMetaEntitled ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
+              disabled={metaOAuthUrl.isPending || !anyMetaAvailable}
+              title={!anyMetaEntitled ? lockedHint : anyMetaOff ? offHint : undefined}
             >
-              {!anyMetaEntitled && <Lock className="h-3 w-3 mr-1" />}
+              {!anyMetaEntitled
+                ? <Lock className="h-3 w-3 mr-1" />
+                : anyMetaOff && <PowerOff className="h-3 w-3 mr-1" />}
               {metaOAuthUrl.isPending
                 ? <Loader2 className="h-4 w-4 mr-1 animate-spin" />
                 : <SiFacebook className="h-4 w-4 mr-1" />}
@@ -278,10 +296,12 @@ export function SocialChannelsContent() {
               size="sm"
               variant="outline"
               onClick={() => setShowWhatsAppModal(true)}
-              disabled={!channelEntitled.whatsapp}
-              title={!channelEntitled.whatsapp ? t('ai.social.lockedHint', { defaultValue: 'Available on Pro and Enterprise plans' }) : undefined}
+              disabled={!channelAvailable('whatsapp')}
+              title={!channelEntitled.whatsapp ? lockedHint : channelOff('whatsapp') ? offHint : undefined}
             >
-              {!channelEntitled.whatsapp && <Lock className="h-3 w-3 mr-1" />}
+              {!channelEntitled.whatsapp
+                ? <Lock className="h-3 w-3 mr-1" />
+                : channelOff('whatsapp') && <PowerOff className="h-3 w-3 mr-1" />}
               <SiWhatsapp className="h-4 w-4 mr-1" /> {t('ai.social.whatsapp.title', { defaultValue: 'WhatsApp' })}
             </Button>
           </div>

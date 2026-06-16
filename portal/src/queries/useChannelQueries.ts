@@ -69,6 +69,9 @@ export function useConnectWhatsApp() {
       toast.success('WhatsApp number connected');
     },
     onError: (error: Any) => {
+      // 402 plan-limit (incl. disabled_by_tenant) is owned by the global
+      // interceptor's toast — don't double-notify here.
+      if (error?.response?.status === 402) return;
       toast.error(extractApiErrorMessage(error) ?? 'Failed to connect WhatsApp');
     },
   });
@@ -105,6 +108,9 @@ export function useConnectMeta() {
       toast.success('Facebook pages connected');
     },
     onError: (error: Any) => {
+      // 402 plan-limit (incl. disabled_by_tenant) is owned by the global
+      // interceptor's toast — don't double-notify here.
+      if (error?.response?.status === 402) return;
       toast.error(extractApiErrorMessage(error) ?? 'Failed to connect');
     },
   });

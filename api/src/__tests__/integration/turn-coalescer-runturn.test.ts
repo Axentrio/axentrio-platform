@@ -25,7 +25,7 @@ import {
   createTestParticipant,
   createTestMessage,
 } from '../helpers/factories';
-import { Bot, BotSettings } from '../../database/entities/Bot';
+import { BotSettings } from '../../database/entities/Bot';
 
 // ── Mocks (same external boundaries as message-forwarding.test.ts) ───────────
 vi.mock('../../websocket/socket.handler', () => ({

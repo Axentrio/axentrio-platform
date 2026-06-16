@@ -2344,5 +2344,55 @@
       "uploadFile": "Upload PDF/DOCX",
       "uploading": "Uploading…"
     }
+  },
+  "features": {
+    "header": {
+      "title": "Features",
+      "subtitle": "Turn features on or off for your workspace. Features your plan doesn’t include show an upgrade option."
+    },
+    "groups": {
+      "channels": "Social channels",
+      "leads": "Leads",
+      "bookings": "Bookings",
+      "insights": "Success Meter"
+    },
+    "keys": {
+      "channelWhatsapp": {
+        "label": "WhatsApp",
+        "description": "Reply to WhatsApp messages with your AI bot."
+      },
+      "channelMessenger": {
+        "label": "Facebook Messenger",
+        "description": "Reply to Messenger conversations."
+      },
+      "channelInstagram": {
+        "label": "Instagram DMs",
+        "description": "Reply to Instagram direct messages."
+      },
+      "channelTelegram": {
+        "label": "Telegram",
+        "description": "Reply to Telegram messages."
+      },
+      "leadCapture": {
+        "label": "Leads",
+        "description": "Capture and store leads from conversations."
+      },
+      "bookings": {
+        "label": "Bookings",
+        "description": "Let your bot schedule appointments."
+      },
+      "gapInsights": {
+        "label": "Success Meter",
+        "description": "AI insights into conversation gaps and outcomes."
+      }
+    },
+    "allChannels": "All channels",
+    "upgrade": "Upgrade",
+    "adminOnly": "Only workspace admins can change these settings.",
+    "disabled": {
+      "title": "{{feature}} is turned off",
+      "body": "Your plan includes this feature, but it has been switched off for your workspace.",
+      "cta": "Manage features"
+    }
   }
 }

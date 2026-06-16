@@ -150,7 +150,8 @@
       "capabilities": "Functionaliteiten",
       "integrations": "Integraties",
       "channels": "Kanalen",
-      "billing": "Facturatie"
+      "billing": "Facturatie",
+      "features": "Functies"
     },
     "profile": {
       "title": "Profielgegevens",
@@ -2337,6 +2338,56 @@
       "or": "of",
       "uploadFile": "PDF/DOCX uploaden",
       "uploading": "Uploaden…"
+    }
+  },
+  "features": {
+    "header": {
+      "title": "Functies",
+      "subtitle": "Schakel functies in of uit voor je werkruimte. Functies die niet in je abonnement zitten, tonen een upgrade-optie."
+    },
+    "groups": {
+      "channels": "Sociale kanalen",
+      "leads": "Leads",
+      "bookings": "Boekingen",
+      "insights": "Succesmeter"
+    },
+    "keys": {
+      "channelWhatsapp": {
+        "label": "WhatsApp",
+        "description": "Reageer op WhatsApp-berichten met je AI-bot."
+      },
+      "channelMessenger": {
+        "label": "Facebook Messenger",
+        "description": "Reageer op Messenger-gesprekken."
+      },
+      "channelInstagram": {
+        "label": "Instagram-DM's",
+        "description": "Reageer op directe berichten op Instagram."
+      },
+      "channelTelegram": {
+        "label": "Telegram",
+        "description": "Reageer op Telegram-berichten."
+      },
+      "leadCapture": {
+        "label": "Leads",
+        "description": "Leg leads uit gesprekken vast en bewaar ze."
+      },
+      "bookings": {
+        "label": "Boekingen",
+        "description": "Laat je bot afspraken inplannen."
+      },
+      "gapInsights": {
+        "label": "Succesmeter",
+        "description": "AI-inzichten in gesprekslacunes en resultaten."
+      }
+    },
+    "allChannels": "Alle kanalen",
+    "upgrade": "Upgraden",
+    "adminOnly": "Alleen beheerders van de werkruimte kunnen deze instellingen wijzigen.",
+    "disabled": {
+      "title": "{{feature}} is uitgeschakeld",
+      "body": "Je abonnement bevat deze functie, maar deze is uitgeschakeld voor je werkruimte.",
+      "cta": "Functies beheren"
     }
   }
 }

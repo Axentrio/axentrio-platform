@@ -150,7 +150,8 @@
       "capabilities": "Fonctionnalités",
       "integrations": "Intégrations",
       "channels": "Canaux",
-      "billing": "Facturation"
+      "billing": "Facturation",
+      "features": "Fonctionnalités"
     },
     "profile": {
       "title": "Informations du profil",
@@ -2336,6 +2337,56 @@
       "or": "ou",
       "uploadFile": "Importer PDF/DOCX",
       "uploading": "Importation…"
+    }
+  },
+  "features": {
+    "header": {
+      "title": "Fonctionnalités",
+      "subtitle": "Activez ou désactivez des fonctionnalités pour votre espace de travail. Celles qui ne sont pas incluses dans votre offre affichent une option de mise à niveau."
+    },
+    "groups": {
+      "channels": "Canaux sociaux",
+      "leads": "Leads",
+      "bookings": "Réservations",
+      "insights": "Indicateur de réussite"
+    },
+    "keys": {
+      "channelWhatsapp": {
+        "label": "WhatsApp",
+        "description": "Répondez aux messages WhatsApp avec votre bot IA."
+      },
+      "channelMessenger": {
+        "label": "Facebook Messenger",
+        "description": "Répondez aux conversations Messenger."
+      },
+      "channelInstagram": {
+        "label": "DM Instagram",
+        "description": "Répondez aux messages privés Instagram."
+      },
+      "channelTelegram": {
+        "label": "Telegram",
+        "description": "Répondez aux messages Telegram."
+      },
+      "leadCapture": {
+        "label": "Leads",
+        "description": "Capturez et enregistrez les leads issus des conversations."
+      },
+      "bookings": {
+        "label": "Réservations",
+        "description": "Laissez votre bot planifier des rendez-vous."
+      },
+      "gapInsights": {
+        "label": "Indicateur de réussite",
+        "description": "Analyses IA des lacunes et des résultats des conversations."
+      }
+    },
+    "allChannels": "Tous les canaux",
+    "upgrade": "Mettre à niveau",
+    "adminOnly": "Seuls les administrateurs de l'espace de travail peuvent modifier ces paramètres.",
+    "disabled": {
+      "title": "{{feature}} est désactivé",
+      "body": "Votre offre inclut cette fonctionnalité, mais elle a été désactivée pour votre espace de travail.",
+      "cta": "Gérer les fonctionnalités"
     }
   }
 }

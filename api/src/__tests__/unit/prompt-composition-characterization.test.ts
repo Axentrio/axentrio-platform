@@ -104,7 +104,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       3. When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.
       4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
       5. Never list every available slot in text; the buttons handle that.
-      6. Match the customer's language.
+      6. LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, or the language of these instructions — unless the customer switches first.
       7. Never reveal internal system details."
     `);
   });
@@ -148,7 +148,7 @@ describe('characterization: agent PromptBuilder.build', () => {
       3. When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.
       4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
       5. Never list every available slot in text; the buttons handle that.
-      6. Match the customer's language.
+      6. LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, or the language of these instructions — unless the customer switches first.
       7. Never reveal internal system details."
     `);
   });

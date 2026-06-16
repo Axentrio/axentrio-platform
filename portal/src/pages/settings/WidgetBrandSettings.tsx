@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { useTenantSettings, useUpdateTenant } from '@/queries/useTenantQueries';
+import { useAppAuth } from '@/auth/useAppAuth';
 import type { Tenant } from '@app-types/index';
 
 /** Shape of the unwrapped GET /tenants/me response (envelope stripped by interceptor) */
@@ -70,6 +71,11 @@ function mapApiToTenant(data: TenantApiData): Tenant {
 const WidgetBrandSettings: React.FC = () => {
   const { t } = useTranslation();
   const { organization } = useOrganization();
+  // Renaming the org maps to PATCH /tenants/me (requireAdmin) — gate the field
+  // client-side so non-admins don't tab in and hit a 403 on save. isRole('admin')
+  // also returns true for super_admin, matching the API guard.
+  const { isRole } = useAppAuth();
+  const canEditName = isRole('admin');
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
@@ -260,7 +266,11 @@ const WidgetBrandSettings: React.FC = () => {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder={t('settings.widget.displayName.placeholder')}
+              disabled={!canEditName}
             />
+            {!canEditName && (
+              <p className="text-xs text-text-muted">{t('settings.widget.displayName.adminOnly')}</p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -297,7 +307,7 @@ const WidgetBrandSettings: React.FC = () => {
 
       {/* Save Button */}
       <div className="flex justify-end">
-        <Button onClick={handleSave} disabled={isSaving || !isDirty}>
+        <Button onClick={handleSave} disabled={isSaving || !isDirty || !canEditName}>
           {isSaving ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />

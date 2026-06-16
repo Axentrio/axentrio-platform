@@ -232,7 +232,8 @@
         "title": "Business Name",
         "description": "Your organization / business name — shown in the chat widget and used by your AI assistants. Renaming also updates your account organization.",
         "label": "Business name",
-        "placeholder": "Your business name"
+        "placeholder": "Your business name",
+        "adminOnly": "Only admins can change the business name."
       },
       "status": {
         "title": "Status",
@@ -686,6 +687,10 @@
         "description": "The bot's prompt identity, managed by Axentrio. Pick one and optionally pin a version.",
         "descriptionMulti": "Pick up to 3 specialities, managed by Axentrio. With more than one, choose how they combine below.",
         "selectedCount": "{{count}}/3 selected",
+        "addPlaceholder": "Add a speciality…",
+        "maxReached": "Maximum 3 specialities",
+        "unknownTemplate": "Template",
+        "removeAria": "Remove speciality",
         "modeLabel": "How should the bot use multiple specialities?",
         "modeOr": "Independent (OR)",
         "modeAnd": "Combined (AND)",

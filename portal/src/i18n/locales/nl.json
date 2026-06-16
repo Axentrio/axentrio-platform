@@ -231,7 +231,8 @@
         "title": "Bedrijfsnaam",
         "description": "Je organisatie- / bedrijfsnaam — getoond in de chatwidget en gebruikt door je AI-assistenten. Hernoemen werkt ook de organisatie van je account bij.",
         "label": "Bedrijfsnaam",
-        "placeholder": "Je bedrijfsnaam"
+        "placeholder": "Je bedrijfsnaam",
+        "adminOnly": "Alleen beheerders kunnen de bedrijfsnaam wijzigen."
       },
       "status": {
         "title": "Status",
@@ -680,6 +681,10 @@
         "description": "De prompt-identiteit van de bot, beheerd door Axentrio. Kies er een en zet eventueel een versie vast.",
         "descriptionMulti": "Kies tot 3 specialiteiten, beheerd door Axentrio. Bij meer dan één, kies hieronder hoe ze worden gecombineerd.",
         "selectedCount": "{{count}}/3 geselecteerd",
+        "addPlaceholder": "Specialiteit toevoegen…",
+        "maxReached": "Maximaal 3 specialiteiten",
+        "unknownTemplate": "Sjabloon",
+        "removeAria": "Specialiteit verwijderen",
         "modeLabel": "Hoe moet de bot meerdere specialiteiten gebruiken?",
         "modeOr": "Onafhankelijk (OF)",
         "modeAnd": "Gecombineerd (EN)",

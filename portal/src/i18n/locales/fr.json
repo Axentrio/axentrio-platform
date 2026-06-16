@@ -231,7 +231,8 @@
         "title": "Nom de l'entreprise",
         "description": "Le nom de votre organisation / entreprise — affiché dans le widget de chat et utilisé par vos assistants IA. Le renommer met aussi à jour l'organisation de votre compte.",
         "label": "Nom de l'entreprise",
-        "placeholder": "Le nom de votre entreprise"
+        "placeholder": "Le nom de votre entreprise",
+        "adminOnly": "Seuls les administrateurs peuvent modifier le nom de l'entreprise."
       },
       "status": {
         "title": "Statut",
@@ -679,6 +680,10 @@
         "description": "L'identité de prompt du bot, gérée par Axentrio. Choisissez-en un et épinglez éventuellement une version.",
         "descriptionMulti": "Choisissez jusqu'à 3 spécialités, gérées par Axentrio. Avec plusieurs, choisissez ci-dessous comment elles se combinent.",
         "selectedCount": "{{count}}/3 sélectionnée(s)",
+        "addPlaceholder": "Ajouter une spécialité…",
+        "maxReached": "Maximum 3 spécialités",
+        "unknownTemplate": "Modèle",
+        "removeAria": "Retirer la spécialité",
         "modeLabel": "Comment le bot doit-il utiliser plusieurs spécialités ?",
         "modeOr": "Indépendantes (OU)",
         "modeAnd": "Combinées (ET)",

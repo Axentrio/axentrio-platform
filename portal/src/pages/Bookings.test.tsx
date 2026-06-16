@@ -23,6 +23,9 @@ vi.mock('../queries/useEntitlementsQueries', async () => {
   return {
     ...actual,
     useHasFeature: (key: string) => hasFeatureMock(key),
+    // Page splits on entitlement (upsell) vs effective (disabled notice). No
+    // tenant toggles in these tests → ceiling == effective, same mock.
+    useIsEntitled: (key: string) => hasFeatureMock(key),
   };
 });
 

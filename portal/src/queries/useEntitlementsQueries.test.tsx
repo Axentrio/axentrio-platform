@@ -40,6 +40,26 @@ function makeWrapper() {
   };
 }
 
+const ESSENTIAL_FEATURES = {
+  unifiedInbox: true,
+  bookings: false,
+  calendarSync: false,
+  leadCapture: true,
+  platformAssistant: false,
+  crm: false,
+  hideWidgetAttribution: false,
+  customWidgetAppearance: false,
+  handoff: true,
+  fileUpload: true,
+  channelWhatsapp: false,
+  channelMessenger: false,
+  channelInstagram: false,
+  channelTelegram: false,
+  gapInsights: true,
+  gapEvidence: false,
+  aiBusinessInsights: false,
+} as const;
+
 function essentialResponse(overrides?: Partial<EntitlementsResponse>): EntitlementsResponse {
   return {
     current: {
@@ -47,25 +67,9 @@ function essentialResponse(overrides?: Partial<EntitlementsResponse>): Entitleme
       billable: true,
       activeModules: [],
       limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
-      features: {
-        unifiedInbox: true,
-        bookings: false,
-        calendarSync: false,
-        leadCapture: true,
-        platformAssistant: false,
-        crm: false,
-        hideWidgetAttribution: false,
-        customWidgetAppearance: false,
-        handoff: true,
-        fileUpload: true,
-        channelWhatsapp: false,
-        channelMessenger: false,
-        channelInstagram: false,
-        channelTelegram: false,
-        gapInsights: true,
-        gapEvidence: false,
-        aiBusinessInsights: false,
-      },
+      features: { ...ESSENTIAL_FEATURES },
+      entitledFeatures: { ...ESSENTIAL_FEATURES },
+      featureToggles: {},
       support: 'email',
     },
     plans: [],

@@ -58,8 +58,15 @@ export async function isChannelEntitled(tenantId: string, channel: ChannelType):
 export async function requireChannelEntitled(tenantId: string, channel: ChannelType): Promise<void> {
   const key = channelFeatureKey(channel);
   if (key === 'ungated') return;
-  if (key === null || !(await getEntitlements(tenantId)).features[key]) {
-    throw new PlanLimitError(`plan_limit_channel_${channel}`, null, { channel });
+  if (key === null) {
+    throw new PlanLimitError(`plan_limit_channel_${channel}`, null, { channel, reason: 'not_entitled' });
+  }
+  const e = await getEntitlements(tenantId);
+  if (!e.features[key]) {
+    // Entitled-but-off (tenant toggle) vs not in plan — Plan § 9b.11. The portal
+    // must not show upgrade copy for `disabled_by_tenant`.
+    const reason = e.entitledFeatures[key] ? 'disabled_by_tenant' : 'not_entitled';
+    throw new PlanLimitError(`plan_limit_channel_${channel}`, null, { channel, reason });
   }
 }
 

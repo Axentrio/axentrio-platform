@@ -339,6 +339,7 @@ describe('getEntitlements', () => {
     expect(result.features.crm).toBe(false); // Pro doesn't include CRM
     expect(Object.keys(result.features).sort()).toEqual(
       [
+        'aiBusinessInsights',
         'bookings',
         'calendarSync',
         'channelInstagram',
@@ -348,6 +349,8 @@ describe('getEntitlements', () => {
         'crm',
         'customWidgetAppearance',
         'fileUpload',
+        'gapEvidence',
+        'gapInsights',
         'handoff',
         'hideWidgetAttribution',
         'leadCapture',
@@ -355,6 +358,10 @@ describe('getEntitlements', () => {
         'unifiedInbox',
       ].sort(),
     );
+    // Two-layer contract: ceiling mirrors features here (no tenant toggles),
+    // and nothing is tenant-disabled.
+    expect(result.entitledFeatures).toEqual(result.features);
+    expect(result.disabledByTenant).toEqual([]);
   });
 
   it('returns Essential features when the tenant is on Essential', async () => {

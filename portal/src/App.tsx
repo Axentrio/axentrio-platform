@@ -47,6 +47,7 @@ import IntegrationSettings from '@pages/settings/IntegrationSettings';
 import WidgetBrandSettings from '@pages/settings/WidgetBrandSettings';
 import ChannelsSettings from '@pages/settings/ChannelsSettings';
 import CapabilitiesSettings from '@pages/settings/CapabilitiesSettings';
+import FeaturesSettings from '@pages/settings/FeaturesSettings';
 import BillingSettings from '@pages/settings/BillingSettings';
 import WidgetTest from '@pages/WidgetTest';
 import AdminTenants from '@pages/admin/AdminTenants';
@@ -296,6 +297,7 @@ function AppRoutes() {
                         <Route path="integrations" element={<IntegrationSettings />} />
                         <Route path="channels" element={<ChannelsSettings />} />
                         <Route path="capabilities" element={<CapabilitiesSettings />} />
+                        <Route path="features" element={<FeaturesSettings />} />
                         <Route path="billing" element={<BillingSettings />} />
                         <Route path="automations" element={<Navigate to="/settings/capabilities" replace />} />
                       </Route>

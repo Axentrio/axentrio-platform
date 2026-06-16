@@ -24,6 +24,9 @@ const { hasFeatureMock, userRef } = vi.hoisted(() => ({
 
 vi.mock('../queries/useEntitlementsQueries', () => ({
   useHasFeature: (key: string) => hasFeatureMock(key),
+  // Sidebar lock now keys off entitlement (ceiling). With no tenant toggles in
+  // these tests, ceiling == effective, so reuse the same mock.
+  useIsEntitled: (key: string) => hasFeatureMock(key),
 }));
 
 vi.mock('../queries/useHandoffQueries', () => ({

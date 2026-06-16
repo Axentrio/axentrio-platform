@@ -13,7 +13,7 @@ import { CanonicalTopic } from '../database/entities/CanonicalTopic';
 import { InsightsRefreshState } from '../database/entities/InsightsRefreshState';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
-import { asyncHandler, BadRequestError, ForbiddenError, NotFoundError } from '../middleware/error-handler';
+import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { getEntitlements } from '../billing/entitlements';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
@@ -44,7 +44,10 @@ function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence' | 'aiBusines
     if (!tenantId) throw new BadRequestError('Tenant context required');
     const entitlements = await getEntitlements(tenantId);
     if (!entitlements.features[flag]) {
-      throw new ForbiddenError(`Feature ${flag} not included in your plan`);
+      // disabled_by_tenant (entitled but toggled off) vs not_entitled — the
+      // portal must not show upgrade copy for the former. Plan § 9b.11.
+      const reason = entitlements.entitledFeatures[flag] ? 'disabled_by_tenant' : 'not_entitled';
+      throw new ApiError(`Feature ${flag} not available`, 403, 'FORBIDDEN', { feature: flag, reason });
     }
     next();
   });

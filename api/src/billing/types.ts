@@ -2,7 +2,7 @@
  * Billing types — the load-bearing provider abstraction.
  * Plan: .scratch/plan-billing.md § BillingProvider interface.
  */
-import type { PlanFeatures } from '../contracts/entitlements';
+import type { PlanFeatures, TenantFeatureToggles } from '../contracts/entitlements';
 
 export type { PlanFeatures };
 
@@ -171,6 +171,15 @@ export interface Entitlements {
    * code never branches on tier names).
    */
   features: PlanFeatures;
+  /**
+   * The entitlement CEILING — tier ⊕ admin overrides, BEFORE the tenant's own
+   * on/off preference is applied. `features` above is the EFFECTIVE map
+   * (ceiling ∧ preference). Upsell/"locked" UI reads `entitledFeatures`; gates
+   * read `features`. See .scratch/plan-tenant-feature-toggles.md § 1.
+   */
+  entitledFeatures: PlanFeatures;
+  /** The tenant's raw stored on/off preferences (drives the Features settings UI). */
+  featureToggles: TenantFeatureToggles;
   support: 'none' | 'email' | 'priority';
 }
 

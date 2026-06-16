@@ -12,6 +12,8 @@ import { cached, invalidate } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { PLANS } from './plans';
 import { enforceFeatureDependencies } from './feature-taxonomy';
+import { TENANT_TOGGLEABLE_FEATURES } from './feature-toggles';
+import type { TenantFeatureToggles } from '../contracts/entitlements';
 import type { Entitlements, FeatureKey, InternalPlanId } from './types';
 
 /**
@@ -46,7 +48,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
   return cached(entitlementsCacheKey(tenantId), ENTITLEMENTS_TTL_SECONDS, async () => {
     const tenant = await AppDataSource.getRepository(Tenant).findOne({
       where: { id: tenantId },
-      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides'],
+      select: ['id', 'tier', 'status', 'maxSessions', 'dailyLlmCallLimit', 'featureOverrides', 'settings'],
     });
 
     if (!tenant) {
@@ -62,6 +64,7 @@ export async function getEntitlements(tenantId: string): Promise<Entitlements> {
       {
         status: tenant.status,
         featureOverrides: tenant.featureOverrides ?? {},
+        featureToggles: tenant.settings?.featureToggles ?? {},
         tenantId,
       },
     );
@@ -101,6 +104,12 @@ export function entitlementsFor(
   featureCtx?: {
     status?: TenantStatus;
     featureOverrides?: Record<string, FeatureOverride>;
+    /**
+     * Tenant's own on/off preferences. Can only turn a feature OFF (never on
+     * above the entitlement ceiling). Absent/true key = on. Only keys in
+     * TENANT_TOGGLEABLE_FEATURES are honoured; anything else is ignored.
+     */
+    featureToggles?: TenantFeatureToggles;
     /** Only used to make warnings attributable. */
     tenantId?: string;
   },
@@ -151,11 +160,56 @@ export function entitlementsFor(
   // e.g. calendarSync without bookings has nothing to sync.
   enforceFeatureDependencies(features);
 
+  // ── Entitlement CEILING is now finalized. Snapshot it before the tenant's
+  // own preference is layered on; this is what upsell/"locked" UI reads so a
+  // tenant-disabled feature shows an off switch, not an upgrade prompt.
+  const entitledFeatures = { ...features };
+
+  // Tenant preference layer: can only turn a toggleable feature OFF (never on
+  // above the ceiling). Ignored entirely for non-billable tenants (everything
+  // is already false). Malformed/non-toggleable entries are dropped.
+  const featureToggles = sanitizeFeatureToggles(featureCtx?.featureToggles, featureCtx?.tenantId);
+  if (billable) {
+    for (const key of TENANT_TOGGLEABLE_FEATURES) {
+      if (featureToggles[key] === false) features[key] = false;
+    }
+    // Cascade a toggled-off parent to its children (e.g. bookings off ⇒
+    // calendarSync off; gapInsights off ⇒ gapEvidence/aiBusinessInsights off).
+    enforceFeatureDependencies(features);
+  }
+
   return {
     planId: plan.id,
     billable,
     limits,
     features,
+    entitledFeatures,
+    featureToggles,
     support: plan.support,
   };
+}
+
+/**
+ * Keep only well-formed, toggleable entries from a raw `featureToggles` blob.
+ * Like the override reader, manual JSONB drift must never throw or leak —
+ * unknown keys and non-boolean values are dropped with a warning.
+ */
+function sanitizeFeatureToggles(
+  raw: TenantFeatureToggles | undefined,
+  tenantId: string | undefined,
+): TenantFeatureToggles {
+  if (!raw) return {};
+  const clean: TenantFeatureToggles = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (!TENANT_TOGGLEABLE_FEATURES.includes(key as never)) {
+      logger.warn('entitlementsFor: ignoring non-toggleable feature toggle key', { tenantId, key });
+      continue;
+    }
+    if (typeof value !== 'boolean') {
+      logger.warn('entitlementsFor: ignoring malformed feature toggle', { tenantId, key });
+      continue;
+    }
+    clean[key as keyof TenantFeatureToggles] = value;
+  }
+  return clean;
 }

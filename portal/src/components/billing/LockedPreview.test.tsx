@@ -35,6 +35,26 @@ vi.mock('sonner', () => ({
 import { LockedPreview } from './LockedPreview';
 import type { EntitlementsResponse } from '../../queries/useEntitlementsQueries';
 
+const PREVIEW_FEATURES = {
+  unifiedInbox: true,
+  bookings: false,
+  calendarSync: false,
+  leadCapture: true,
+  platformAssistant: false,
+  crm: false,
+  hideWidgetAttribution: false,
+  customWidgetAppearance: false,
+  handoff: true,
+  fileUpload: true,
+  channelWhatsapp: false,
+  channelMessenger: false,
+  channelInstagram: false,
+  channelTelegram: false,
+  gapInsights: true,
+  gapEvidence: false,
+  aiBusinessInsights: false,
+} as const;
+
 function entitlements(): EntitlementsResponse {
   return {
     current: {
@@ -42,25 +62,9 @@ function entitlements(): EntitlementsResponse {
       billable: true,
       activeModules: [],
       limits: { agents: 3, sessions: 5, dailyLlmCalls: 1000 },
-      features: {
-        unifiedInbox: true,
-        bookings: false,
-        calendarSync: false,
-        leadCapture: true,
-        platformAssistant: false,
-        crm: false,
-        hideWidgetAttribution: false,
-        customWidgetAppearance: false,
-        handoff: true,
-        fileUpload: true,
-        channelWhatsapp: false,
-        channelMessenger: false,
-        channelInstagram: false,
-        channelTelegram: false,
-        gapInsights: true,
-        gapEvidence: false,
-        aiBusinessInsights: false,
-      },
+      features: { ...PREVIEW_FEATURES },
+      entitledFeatures: { ...PREVIEW_FEATURES },
+      featureToggles: {},
       support: 'email',
     },
     plans: [

@@ -62,10 +62,13 @@ export async function lockTenantEntitlements(
     },
     // Count gates only read .limits (feature overrides can't touch limits),
     // but resolve with full feature context so the returned .features is
-    // never a stale tier-only view for any caller that inspects it.
+    // never a stale tier-only view for any caller that inspects it. Pass the
+    // tenant preference too, so this path's effective .features matches the
+    // cached getEntitlements() read (plan §9b.3).
     {
       status: tenant.status,
       featureOverrides: tenant.featureOverrides ?? {},
+      featureToggles: tenant.settings?.featureToggles ?? {},
       tenantId,
     },
   );
@@ -121,6 +124,10 @@ export async function requireFeature(
     throw err; // unknown-tier or other real errors surface as 500
   }
   if (!entitlements.features[feature]) {
-    throw new PlanLimitError(errorCode, null, { feature });
+    // Distinguish "your plan doesn't include this" (upsell) from "you turned it
+    // off" (point to Settings → Features). The portal must not show upgrade copy
+    // for `disabled_by_tenant`. Plan § 9b.11.
+    const reason = entitlements.entitledFeatures[feature] ? 'disabled_by_tenant' : 'not_entitled';
+    throw new PlanLimitError(errorCode, null, { feature, reason });
   }
 }

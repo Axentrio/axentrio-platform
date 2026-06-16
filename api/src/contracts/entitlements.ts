@@ -14,6 +14,26 @@
 export type InternalPlanId = 'free' | 'essential' | 'pro' | 'enterprise';
 export type SupportTier = 'none' | 'email' | 'priority';
 
+/**
+ * The subset of feature keys a TENANT admin may switch on/off for themselves
+ * (within their entitlement ceiling). Distinct from the full FeatureKey set —
+ * plan-traits and dependent children (crm, calendarSync, gap*) are NOT directly
+ * toggleable; children follow their parent via the taxonomy `requires` pass.
+ * The runtime allowlist (api/src/billing/feature-toggles.ts) is checked against
+ * this type with `satisfies`, so the two can never drift.
+ */
+export type ToggleableFeatureKey =
+  | 'channelWhatsapp'
+  | 'channelMessenger'
+  | 'channelInstagram'
+  | 'channelTelegram'
+  | 'leadCapture'
+  | 'bookings'
+  | 'gapInsights';
+
+/** Tenant's own on/off preferences. Absent key = on (when entitled). */
+export type TenantFeatureToggles = Partial<Record<ToggleableFeatureKey, boolean>>;
+
 /** Flat boolean feature map — every gate on both sides reads `features.x`. */
 export interface PlanFeatures {
   unifiedInbox: boolean;
@@ -47,7 +67,19 @@ export interface EntitlementsDto {
   planId: InternalPlanId;
   billable?: boolean;
   limits: PlanLimits;
+  /**
+   * EFFECTIVE feature map = entitlement ceiling ∧ tenant preference. Every
+   * gate on both sides reads this ("is it live right now").
+   */
   features: PlanFeatures;
+  /**
+   * The entitlement CEILING (tier ⊕ admin overrides), BEFORE the tenant's own
+   * on/off preference is applied. Upsell/"locked" UI keys off this so a
+   * tenant-disabled feature shows an off switch, not an upgrade prompt.
+   */
+  entitledFeatures: PlanFeatures;
+  /** The tenant's raw stored on/off preferences (for the Features settings UI). */
+  featureToggles: TenantFeatureToggles;
   support: SupportTier;
   /** Module ids active for the tenant (feature- or enablement-gated). */
   activeModules: string[];

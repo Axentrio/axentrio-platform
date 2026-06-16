@@ -25,7 +25,9 @@ vi.mock('../../middleware/super-admin.middleware', () => ({
 }));
 
 vi.mock('../../billing/entitlements', () => ({
-  getEntitlements: async () => ({ features: state.features }),
+  // ceiling == effective in these tests (no tenant toggles), so the gate's
+  // disabled_by_tenant-vs-not_entitled check resolves to not_entitled → 403.
+  getEntitlements: async () => ({ features: state.features, entitledFeatures: state.features }),
 }));
 
 vi.mock('../../utils/logger', () => ({

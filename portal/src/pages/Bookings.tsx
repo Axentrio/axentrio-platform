@@ -19,8 +19,9 @@ import {
 } from 'lucide-react';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
-import { useHasFeature } from '../queries/useEntitlementsQueries';
+import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
+import { FeatureDisabledNotice } from '../components/billing/FeatureDisabledNotice';
 import {
   useSchedulerConfig,
   useAdminBookings,
@@ -87,11 +88,13 @@ async function downloadFile(fileSessionId: string): Promise<void> {
 
 export default function Bookings() {
   const { t } = useTranslation();
-  const hasBookings = useHasFeature('bookings');
+  const isEntitled = useIsEntitled('bookings');
+  const hasBookings = useHasFeature('bookings'); // effective (entitled ∧ tenant toggle)
   const { data: config } = useSchedulerConfig(hasBookings);
   const { data: servicesData, isLoading: servicesLoading } = useServices(hasBookings);
 
-  if (!hasBookings) {
+  // Not entitled → upsell. Entitled but toggled off → opt-out notice (never upsell).
+  if (!isEntitled) {
     return (
       <LockedPreview
         feature="bookings"
@@ -105,6 +108,9 @@ export default function Bookings() {
         ]}
       />
     );
+  }
+  if (!hasBookings) {
+    return <FeatureDisabledNotice featureLabel={t('features.keys.bookings.label', { defaultValue: 'Bookings' })} />;
   }
 
   // First-run owners (no services configured yet) land on Setup so they're guided

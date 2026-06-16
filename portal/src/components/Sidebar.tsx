@@ -55,7 +55,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useHandoffsQuery } from '../queries/useHandoffQueries';
 import {
-  useHasFeature,
+  useIsEntitled,
   type PlanFeatures,
 } from '../queries/useEntitlementsQueries';
 import { PlanBadge } from '@/components/billing/PlanBadge';
@@ -152,8 +152,10 @@ const SidebarMenuEntry: React.FC<SidebarMenuEntryProps> = ({ item, badgeCount })
   // with a stable key. `unifiedInbox` is a safe no-op (true on every paid
   // tier) when `requiredFeature` is undefined.
   const featureKey = item.requiredFeature ?? 'unifiedInbox';
-  const hasFeature = useHasFeature(featureKey);
-  const isLocked = !!item.requiredFeature && !hasFeature;
+  // Lock = NOT entitled (upsell). A feature the tenant merely toggled off is
+  // still entitled, so it stays unlocked — its page shows the opt-out notice.
+  const isEntitled = useIsEntitled(featureKey);
+  const isLocked = !!item.requiredFeature && !isEntitled;
   const requiredTier = item.requiredTier ?? 'pro';
 
   const label = t(item.labelKey);

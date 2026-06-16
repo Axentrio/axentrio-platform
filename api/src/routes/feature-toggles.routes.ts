@@ -1,0 +1,94 @@
+/**
+ * Tenant feature-toggle route — lets a tenant's OWN admin switch
+ * entitlement-clamped features on/off for themselves. Mounted at /tenants/me.
+ *
+ * Plan: .scratch/plan-tenant-feature-toggles.md § 4 / § 9b.
+ *
+ * PUT /tenants/me/feature-toggles
+ *   Body: { [ToggleableFeatureKey]: boolean }  — the FULL desired toggle map
+ *   (PUT semantics: replaces the stored map; absent key = default-on).
+ *     - admin only (super-admin also allowed by requireRole)
+ *     - a key outside TENANT_TOGGLEABLE_FEATURES → 400
+ *     - enabling a feature the plan doesn't grant → 400, validated against the
+ *       entitlement CEILING (entitledFeatures), never effective features —
+ *       so a previously-disabled-but-entitled feature can always be re-enabled.
+ *       Turning a feature OFF is always allowed.
+ *     - atomic jsonb_set on settings.featureToggles ONLY (never clobbers other
+ *       settings sub-keys such as ai.apiKey under a concurrent writer).
+ *     - invalidates the entitlement cache + writes an audit event.
+ *
+ * No GET here — GET /entitlements already returns `featureToggles` +
+ * `entitledFeatures` for the settings UI.
+ */
+import { Router, Request, Response } from 'express';
+import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
+import { resolveTenantContext } from '../middleware/super-admin.middleware';
+import { requireRole } from '../middleware/auth.middleware';
+import { asyncHandler, ValidationError } from '../middleware/error-handler';
+import { sendSuccess } from '../utils/response';
+import { AppDataSource } from '../database/data-source';
+import { getEntitlements, invalidateEntitlements } from '../billing/entitlements';
+import { isToggleableFeature } from '../billing/feature-toggles';
+import { logAudit } from '../utils/audit';
+import type { TenantFeatureToggles } from '../contracts/entitlements';
+
+const router = Router();
+
+router.use(requireClerkAuth, autoProvision, resolveTenantContext);
+
+router.put(
+  '/feature-toggles',
+  requireRole('admin'),
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = req.tenantId!;
+    const body = req.body as Record<string, unknown>;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new ValidationError('Body must be an object mapping feature keys to booleans');
+    }
+
+    // Resolve the entitlement ceiling once — the clamp checks against this, not
+    // effective features, so a disabled-but-entitled feature can be re-enabled.
+    const { entitledFeatures } = await getEntitlements(tenantId);
+
+    const next: TenantFeatureToggles = {};
+    for (const [key, value] of Object.entries(body)) {
+      if (!isToggleableFeature(key)) {
+        throw new ValidationError(`Feature "${key}" is not tenant-toggleable`);
+      }
+      if (typeof value !== 'boolean') {
+        throw new ValidationError(`Toggle for "${key}" must be a boolean`);
+      }
+      if (value && !entitledFeatures[key]) {
+        throw new ValidationError(`Feature "${key}" is not included in your plan`);
+      }
+      next[key] = value;
+    }
+
+    // Atomic write — replace ONLY settings.featureToggles. COALESCE handles a
+    // NULL/absent settings column; every other settings sub-key is preserved
+    // even if another request writes settings concurrently.
+    await AppDataSource.query(
+      `UPDATE tenants
+          SET settings = jsonb_set(COALESCE(settings, '{}'::jsonb), '{featureToggles}', $2::jsonb, true),
+              updated_at = now()
+        WHERE id = $1`,
+      [tenantId, JSON.stringify(next)],
+    );
+
+    await invalidateEntitlements(tenantId);
+    await logAudit(req.userId!, 'tenant.feature_toggles_updated', 'tenant', tenantId, tenantId, {
+      featureToggles: next,
+    });
+
+    // Return a coherent post-write snapshot (effective + ceiling + stored prefs)
+    // so the client refreshes without a second round-trip.
+    const updated = await getEntitlements(tenantId);
+    sendSuccess(res, {
+      featureToggles: updated.featureToggles,
+      entitledFeatures: updated.entitledFeatures,
+      features: updated.features,
+    });
+  }),
+);
+
+export default router;

@@ -162,6 +162,99 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
     });
   });
 
+  describe('tenant feature toggles — preference layer (plan-tenant-feature-toggles)', () => {
+    it('entitled feature toggled off → effective off, but ceiling stays on', () => {
+      const e = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { bookings: false },
+      });
+      expect(e.features.bookings).toBe(false); // effective
+      expect(e.entitledFeatures.bookings).toBe(true); // ceiling — drives upsell vs off-switch
+      expect(e.featureToggles).toEqual({ bookings: false }); // echoed back for the UI
+    });
+
+    it('toggling a NON-entitled feature on can never exceed the ceiling', () => {
+      // essential doesn't include bookings; a stray `true` preference must not enable it.
+      const e = entitlementsFor('essential', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { bookings: true },
+      });
+      expect(e.features.bookings).toBe(false);
+      expect(e.entitledFeatures.bookings).toBe(false);
+    });
+
+    it('toggling a parent off cascades to its dependent child', () => {
+      const e = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { bookings: false },
+      });
+      expect(e.features.bookings).toBe(false);
+      expect(e.features.calendarSync).toBe(false); // cascaded
+      expect(e.entitledFeatures.calendarSync).toBe(true); // ceiling untouched
+    });
+
+    it('leadCapture toggled off cascades crm off too', () => {
+      const e = entitlementsFor('enterprise', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { leadCapture: false },
+      });
+      expect(e.features.leadCapture).toBe(false);
+      expect(e.features.crm).toBe(false);
+      expect(e.entitledFeatures.crm).toBe(true);
+    });
+
+    it('admin override ⊕ tenant preference compose (override on, tenant off)', () => {
+      // essential is comped bookings by an admin override, then the tenant
+      // turns it back off for themselves.
+      const e = entitlementsFor('essential', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: { bookings: override(true) },
+        featureToggles: { bookings: false },
+      });
+      expect(e.entitledFeatures.bookings).toBe(true); // override raised the ceiling
+      expect(e.features.bookings).toBe(false); // tenant opted out under it
+    });
+
+    it('free/suspended tenants ignore toggles entirely (D2 absolute deny wins)', () => {
+      const free = entitlementsFor('free', NO_LIMITS, {
+        status: 'active',
+        featureToggles: { bookings: false, leadCapture: false },
+      });
+      expect(Object.values(free.features).every((v) => v === false)).toBe(true);
+      expect(Object.values(free.entitledFeatures).every((v) => v === false)).toBe(true);
+
+      const suspended = entitlementsFor('pro', NO_LIMITS, {
+        status: 'suspended',
+        featureToggles: { bookings: false },
+      });
+      expect(Object.values(suspended.features).every((v) => v === false)).toBe(true);
+    });
+
+    it('ignores non-toggleable keys and non-boolean values without throwing', () => {
+      const e = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureToggles: {
+          calendarSync: false, // entitled on pro, but NOT in the toggleable allowlist
+          notAFeature: false, // unknown
+          bookings: 'nope', // malformed
+        } as never,
+      });
+      expect(e.features.calendarSync).toBe(true); // untouched — not tenant-toggleable
+      expect(e.features.bookings).toBe(true); // malformed value dropped
+      expect(e.featureToggles).toEqual({}); // all rejected
+    });
+
+    it('no toggles → effective equals ceiling', () => {
+      const e = entitlementsFor('pro', NO_LIMITS, { status: 'active', featureOverrides: {} });
+      expect(e.features).toEqual(e.entitledFeatures);
+      expect(e.featureToggles).toEqual({});
+    });
+  });
+
   describe('catalog isolation — plan.features is never mutated', () => {
     it('an override never leaks into the shared PLANS catalog or later resolves', () => {
       const before = { ...PLANS.pro.features };

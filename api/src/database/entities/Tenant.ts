@@ -15,6 +15,7 @@ import {
 import { ChatSession } from './ChatSession';
 import { User } from './User';
 import { Agent } from './Agent';
+import type { TenantFeatureToggles } from '../../contracts/entitlements';
 
 export type TenantTier = 'free' | 'essential' | 'pro' | 'enterprise';
 export type TenantStatus = 'active' | 'suspended' | 'cancelled';
@@ -154,6 +155,14 @@ export class Tenant {
       /** Weekly digest email — default-ON; only an explicit `false` opts out. */
       digestEmail?: boolean;
     };
+    /**
+     * Tenant self-service feature on/off prefs, merged over the entitlement
+     * ceiling by the resolver. Default-ON: absent key = on (when entitled);
+     * only an explicit `false` disables. Written through
+     * PUT /tenants/me/feature-toggles (tenant admin), never the generic PATCH.
+     * See .scratch/plan-tenant-feature-toggles.md.
+     */
+    featureToggles?: TenantFeatureToggles;
   };
 
   /**

@@ -11,11 +11,13 @@ import Analytics from './Analytics';
 import { InsightsContent } from '@/components/insights/InsightsContent';
 import { ExportMenu } from '@/components/insights/ExportMenu';
 import { LockedPreview } from '@/components/billing/LockedPreview';
-import { useHasFeature } from '@/queries/useEntitlementsQueries';
+import { FeatureDisabledNotice } from '@/components/billing/FeatureDisabledNotice';
+import { useHasFeature, useIsEntitled } from '@/queries/useEntitlementsQueries';
 
 export default function SuccessMeter() {
   const { t } = useTranslation();
-  const hasInsights = useHasFeature('gapInsights');
+  const isEntitledInsights = useIsEntitled('gapInsights');
+  const hasInsights = useHasFeature('gapInsights'); // effective (entitled ∧ tenant toggle)
 
   return (
     <div className="h-full overflow-y-auto">
@@ -40,6 +42,11 @@ export default function SuccessMeter() {
         <TabsContent value="insights" className="p-6">
           {hasInsights ? (
             <InsightsContent />
+          ) : isEntitledInsights ? (
+            // Entitled but toggled off — opt-out notice, never an upsell.
+            <FeatureDisabledNotice
+              featureLabel={t('features.keys.gapInsights.label', { defaultValue: 'Success Meter' })}
+            />
           ) : (
             <LockedPreview
               feature="gapInsights"

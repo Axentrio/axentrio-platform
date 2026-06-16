@@ -10,9 +10,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail, Phone, MessageSquare, Inbox, ChevronRight } from 'lucide-react';
-import { useHasFeature } from '../queries/useEntitlementsQueries';
+import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
 import { useLeadsInfinite } from '../queries/useLeadsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
+import { FeatureDisabledNotice } from '../components/billing/FeatureDisabledNotice';
 import { Button } from '@/components/ui/button';
 
 function formatRelative(iso: string): string {
@@ -30,7 +31,8 @@ function formatRelative(iso: string): string {
 
 export default function Leads() {
   const { t } = useTranslation();
-  const hasLeadCapture = useHasFeature('leadCapture');
+  const isEntitled = useIsEntitled('leadCapture');
+  const hasLeadCapture = useHasFeature('leadCapture'); // effective (entitled ∧ tenant toggle)
   const {
     data,
     isLoading,
@@ -40,7 +42,8 @@ export default function Leads() {
   } = useLeadsInfinite();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
 
-  if (!hasLeadCapture) {
+  // Not entitled → upsell. Entitled but toggled off → opt-out notice (never upsell).
+  if (!isEntitled) {
     return (
       <LockedPreview
         feature="leadCapture"
@@ -54,6 +57,9 @@ export default function Leads() {
         ]}
       />
     );
+  }
+  if (!hasLeadCapture) {
+    return <FeatureDisabledNotice featureLabel={t('features.keys.leadCapture.label', { defaultValue: 'Leads' })} />;
   }
 
   const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];

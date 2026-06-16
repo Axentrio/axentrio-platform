@@ -47,7 +47,7 @@ import {
   useUpdateChannelAutoCapture,
 } from '../../queries/useChannelQueries';
 import { useBots } from '@/queries/useBotsQueries';
-import { useHasFeature } from '../../queries/useEntitlementsQueries';
+import { useIsEntitled } from '../../queries/useEntitlementsQueries';
 import { queryKeys } from '../../queries/queryKeys';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
@@ -114,13 +114,17 @@ export function SocialChannelsContent() {
     queryClient.invalidateQueries({ queryKey: queryKeys.entitlements.all() });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // Plan-locked state keys off the entitlement CEILING (useIsEntitled), not the
+  // effective flag — a channel the tenant merely toggled off is still in-plan and
+  // must not show the "upgrade" lock. Its on/off lives in Settings → Features; the
+  // backend keeps a toggled-off channel inert regardless.
   const channelEntitled: Record<string, boolean> = {
     // telegram connect is removed from the UI, but the entitlement is kept so any
     // pre-existing telegram connection row still computes its plan-locked state.
-    telegram: useHasFeature('channelTelegram'),
-    whatsapp: useHasFeature('channelWhatsapp'),
-    messenger: useHasFeature('channelMessenger'),
-    instagram: useHasFeature('channelInstagram'),
+    telegram: useIsEntitled('channelTelegram'),
+    whatsapp: useIsEntitled('channelWhatsapp'),
+    messenger: useIsEntitled('channelMessenger'),
+    instagram: useIsEntitled('channelInstagram'),
   };
   const anyMetaEntitled = channelEntitled.messenger || channelEntitled.instagram;
 

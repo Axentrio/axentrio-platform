@@ -52,6 +52,9 @@ const { entitledRef } = vi.hoisted(() => ({
 }));
 vi.mock('../../queries/useEntitlementsQueries', () => ({
   useHasFeature: (key: string) => entitledRef.current[key] ?? true,
+  // Channel locks now key off the ceiling (useIsEntitled). No tenant toggles in
+  // these tests → ceiling == effective, same mock.
+  useIsEntitled: (key: string) => entitledRef.current[key] ?? true,
 }));
 
 // The component invalidates the entitlements query on mount; no provider in

@@ -76,7 +76,8 @@ export class CreateBookingTool implements ToolAdapter {
     properties: {
       startTime: {
         type: 'string',
-        description: 'Start time of the booking in ISO 8601 format.',
+        description:
+          'Start time of the booking. Prefer the exact slot start returned by check_availability, verbatim. If you must construct it from the customer\'s words, give a ZONELESS ISO 8601 local time in the business\'s timezone — e.g. "2026-06-19T14:00:00" — never append \'Z\' or an offset.',
       },
       attendeeName: {
         type: 'string',
@@ -212,7 +213,8 @@ export class RequestAppointmentTool implements ToolAdapter {
     properties: {
       preferredTime: {
         type: 'string',
-        description: "The customer's preferred appointment time in ISO 8601 format.",
+        description:
+          "The customer's preferred appointment time as a ZONELESS ISO 8601 local time in the business's timezone — e.g. \"2026-06-19T14:00:00\" for 2 PM. Never append 'Z' or a timezone offset; the time is read as the business's local wall-clock.",
       },
       attendeeName: {
         type: 'string',

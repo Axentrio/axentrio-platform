@@ -112,6 +112,24 @@ export function normalizeDateRange(
   return { rangeStart: start.toUTC().toISO()!, rangeEnd: end.toUTC().toISO()! };
 }
 
+/**
+ * Parse an appointment time string into a UTC instant, anchored to the business
+ * timezone. A string carrying an explicit offset/Z (e.g. a slot returned by
+ * check_availability) keeps its instant; a ZONELESS string (e.g.
+ * "2026-06-19T14:00:00" — what the model emits for the customer's "2 PM") is read
+ * as business-local wall-clock. Without this, a zoneless/UTC time round-trips
+ * through `new Date()` on a UTC server as UTC, landing the booking at the wrong
+ * local hour in any non-UTC zone. Falls back to `new Date()` for a non-ISO but
+ * Date-parseable string; returns null when unparseable. Same rule as
+ * {@link normalizeDateRange}.
+ */
+export function parseBookingStart(input: string, timezone: string): Date | null {
+  const dt = DateTime.fromISO(input, { zone: timezone });
+  if (dt.isValid) return dt.toJSDate();
+  const fallback = new Date(input);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
 /** P5a — which contact fields a service requires. Single mapping for the column-name
  *  wart: customerLocationRequired maps to PHONE (a callback number), not address. */
 function requiredContactFields(service: ServiceType): { address: boolean; phone: boolean } {
@@ -467,8 +485,8 @@ export class InternalProvider implements BookingProvider {
 
     // 2. Compute times. P5c: effective length depends on durationMode (range/ai use
     //    the agent-supplied minutes; fixed ignores it). Throws DURATION_OUT_OF_RANGE.
-    const start = new Date(startTime);
-    if (Number.isNaN(start.getTime())) {
+    const start = parseBookingStart(startTime, rule.timezone);
+    if (!start) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
     const effectiveDuration = resolveDuration(service, extras?.durationMin);
@@ -800,11 +818,12 @@ export class InternalProvider implements BookingProvider {
     }
 
     // Resolve the service (sole-active default / SERVICE_REQUIRED / SERVICE_NOT_FOUND).
+    const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
     const calendarKey = await this.calendarKey(ctx);
 
-    const start = new Date(preferredTime);
-    if (Number.isNaN(start.getTime())) {
+    const start = parseBookingStart(preferredTime, rule.timezone);
+    if (!start) {
       throw new BookingError('Invalid preferred time', 'INVALID_START_TIME', 400);
     }
     // P5c: requests validate the duration BOUNDS (DURATION_OUT_OF_RANGE) but not slot-fit;

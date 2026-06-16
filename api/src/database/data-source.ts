@@ -63,6 +63,7 @@ import { SentimentTheme } from './entities/SentimentTheme';
 import { BotTemplate } from './entities/BotTemplate';
 import { BotTemplateVersion } from './entities/BotTemplateVersion';
 import { TenantBotTemplate } from './entities/TenantBotTemplate';
+import { SpamScamLog } from './entities/SpamScamLog';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -133,6 +134,7 @@ export const AppDataSource = new DataSource({
     InsightExperiment,
     InsightDigest,
     SentimentTheme,
+    SpamScamLog,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

@@ -60,6 +60,8 @@ async function loadEligibleSessions(
     .addSelect('COALESCE(s.ended_at, s.last_activity_at, s.started_at)', 'effectiveEndedAt')
     .where('s.tenant_id = :tenantId', { tenantId })
     .andWhere("s.status IN ('closed', 'handoff')")
+    // Guardrails: exclude spam/scam/bot-loop conversations from insights (AC20).
+    .andWhere("s.guardrail_status = 'normal'")
     .andWhere('COALESCE(s.ended_at, s.last_activity_at, s.started_at) > :since', { since })
     .orderBy('COALESCE(s.ended_at, s.last_activity_at, s.started_at)', 'ASC')
     .limit(cap)
@@ -200,6 +202,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   const [{ eligible }] = await AppDataSource.query(
     `SELECT COUNT(*)::int AS eligible FROM chat_sessions s
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
+       AND s.guardrail_status = 'normal'
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );
@@ -207,6 +210,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
     `SELECT COUNT(*)::int AS "judgedInWindow" FROM chat_sessions s
      JOIN chatbot_judgments j ON j.session_id = s.id
      WHERE s.tenant_id = $1 AND s.status IN ('closed','handoff')
+       AND s.guardrail_status = 'normal'
        AND COALESCE(s.ended_at, s.last_activity_at, s.started_at) >= $2`,
     [tenantId, windowStart],
   );

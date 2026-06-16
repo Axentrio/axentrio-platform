@@ -167,6 +167,12 @@ export async function scheduleTurn(session: ChatSession, message: Message): Prom
     return;
   }
 
+  // Guardrails are NOT gated here. The gate runs at the point a message is
+  // actually consumed (after config/target resolution): runTurn gates the whole
+  // coalesced window (idempotent per message), and the legacy fallback gates at
+  // forwardMessageToN8n's entry. Gating at ingress would gate AI-off/no-target
+  // sessions and miss non-hwm history messages.
+
   try {
     const createdAtMs = message.createdAt.getTime();
     const captureMode = looksLikeContactFragment(message);

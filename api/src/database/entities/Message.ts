@@ -92,6 +92,23 @@ export class Message {
   @Column({ type: 'boolean', default: false, name: 'is_deleted' })
   isDeleted!: boolean;
 
+  /**
+   * Set true when the guardrails layer flags this inbound message (spam/scam/
+   * bot-loop) or it arrived while the session was guardrail-disabled. Flagged
+   * messages are excluded from AI history so a phishing/injection message can't
+   * leak after reactivation. See .scratch/plan-global-ai-guardrails.md §3b/§1B.
+   */
+  @Column({ type: 'boolean', default: false, name: 'guardrail_flagged' })
+  guardrailFlagged!: boolean;
+
+  /**
+   * Set true the first time the guardrails gate evaluates this message — the
+   * idempotency anchor that makes the gate exactly-once across the coalescer
+   * window, the legacy entry, drain, and 'stale' re-runs. `flagged` ⊆ `checked`.
+   */
+  @Column({ type: 'boolean', default: false, name: 'guardrail_checked' })
+  guardrailChecked!: boolean;
+
   @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deletedAt?: Date;
 

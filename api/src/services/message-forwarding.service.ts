@@ -39,6 +39,7 @@ import {
   BotPausedConfigError,
   BotNotFoundConfigError,
 } from './bot-config.service';
+import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -219,6 +220,7 @@ async function getConversationHistoryForPayload(
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
     .andWhere('message.type = :type', { type: 'text' })
+    .andWhere('message.guardrailFlagged = false')
     .orderBy('message.createdAt', 'DESC')
     .take(10)
     .getMany();
@@ -238,7 +240,7 @@ async function getConversationHistoryForPayload(
  */
 export async function forwardMessageToN8n(
   session: ChatSession,
-  savedMessage: Message
+  savedMessage: Message,
 ): Promise<boolean> {
   // Only forward visitor messages when session is in bot or waiting status
   if (session.status !== 'bot' && session.status !== 'waiting') {
@@ -304,6 +306,27 @@ export async function forwardMessageToN8n(
     return false;
   }
 
+  // ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────
+  // Single per-message gate for the legacy path, placed BEFORE the local
+  // autoresponders (business-hours / escalation) so spam never receives an
+  // off-hours or fallback reply. Covers BOTH the platform-agent and custom-webhook
+  // branches below. Every inbound message reaches this entry exactly once
+  // (scheduleTurn → forwardMessageToN8n per message), so the drain loop does NOT
+  // re-gate (that would double-count). The coalescer path (runTurn) runs the same
+  // gate under its own lock. The gate is idempotent per message (guardrail_checked
+  // claim), so a message that's also seen by the coalescer window isn't
+  // double-counted. Shadow mode logs only.
+  if (savedMessage.type === 'text' || savedMessage.type === 'image') {
+    const gateContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
+    const gate = await runInboundGate({
+      session, tenantId: session.tenantId, message: savedMessage, content: gateContent, channel: session.channel,
+    });
+    if (!gate.proceed) {
+      logger.info(`[guardrails] message blocked for session ${session.id} (${gate.category})`);
+      return true; // handled — no reply, no forward
+    }
+  }
+
   // ── Pre-forwarding checks (cheap, local) ──────────────────────────────
   if (session.status === 'bot' && savedMessage.type === 'text' && aiSettings?.enabled) {
     // Business hours check
@@ -363,6 +386,7 @@ export async function forwardMessageToN8n(
   }
 
   // ── Custom webhook path (tenant-configured n8n workflow) ───────────────
+  // (Already gated once at the entry above — covers this branch + the RAG fallback.)
   const webhookConfig = buildWebhookConfig(tenant);
   webhookConfig.url = customWebhookUrl!;
 
@@ -541,6 +565,7 @@ async function getLatestUnansweredUserMessage(sessionId: string): Promise<Messag
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
     .andWhere('message.type IN (:...types)', { types: ['text', 'image'] })
+    .andWhere('message.guardrailFlagged = false')
     .orderBy('message.createdAt', 'DESC')
     .getOne();
   return latest && latest.participant?.type === 'user' ? latest : null;
@@ -738,6 +763,15 @@ async function platformAgentPath(
       const pending = await getLatestUnansweredUserMessage(session.id);
       if (!pending || processed.has(pending.id)) break;
       processed.add(pending.id);
+      // No guardrails gate here: every message was already gated at its own
+      // forwardMessageToN8n entry (above), so the drain only coalesces
+      // already-gated messages. Re-gating would double-count loop counters.
+      // But re-check the guardrail pause each turn — a concurrent spam message
+      // could have disabled the session mid-drain.
+      const live = await sessionRepository.findOne({
+        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
+      });
+      if (live && live.aiAutoReplyEnabled === false) break;
 
       // Show typing indicator while AI processes — portal + widget over the
       // WebSocket, and the end user on their external channel (best-effort).
@@ -771,6 +805,16 @@ async function platformAgentPath(
         history,
         images,
       );
+
+      // In-flight pause: a concurrent guardrail block may have disabled the
+      // session while the agent was thinking — don't send the reply.
+      const liveAfter = await sessionRepository.findOne({
+        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
+      });
+      if (liveAfter && liveAfter.aiAutoReplyEnabled === false) {
+        emitToSession(session.tenantId, session.id, 'typing:stop', {});
+        break;
+      }
 
       let handedOff = false;
       switch (result.type) {
@@ -869,7 +913,8 @@ export async function getNewestUnansweredUserMessage(session: ChatSession): Prom
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
     .andWhere("m.type IN ('text','image')")
-    .andWhere("p.type = 'user'");
+    .andWhere("p.type = 'user'")
+    .andWhere('m.guardrailFlagged = false');
   if (session.lastCoalescedAnswerMessageId) {
     // Compare the watermark DB-side: read its created_at from the row with full
     // microsecond precision. Passing session.lastCoalescedAnswerAt (a JS Date,
@@ -902,7 +947,8 @@ export async function getUnansweredBounds(
     .where('m.sessionId = :sid', { sid: session.id })
     .andWhere('m.isDeleted = false')
     .andWhere("m.type IN ('text','image')")
-    .andWhere("p.type = 'user'");
+    .andWhere("p.type = 'user'")
+    .andWhere('m.guardrailFlagged = false');
   if (session.lastCoalescedAnswerMessageId) {
     // DB-side watermark comparison (full µs precision) — see the note in
     // getNewestUnansweredUserMessage.
@@ -932,6 +978,7 @@ async function getCoalescedHistory(
     .where('message.sessionId = :sid', { sid: sessionId })
     .andWhere('message.isDeleted = false')
     .andWhere("message.type IN ('text','image')")
+    .andWhere('message.guardrailFlagged = false')
     .andWhere('message.id != :hwmId', { hwmId })
     .andWhere(
       '(message.created_at, message.id) <= ((SELECT created_at FROM messages WHERE id = :hwmId), :hwmId)',
@@ -962,6 +1009,41 @@ async function getCoalescedHistory(
 }
 
 /**
+ * Unanswered USER messages in the coalesced window — `(watermark, hwm]`,
+ * chronological — for the guardrails gate to vet every message that will be
+ * answered or enter history (not just the hwm). Excludes already-flagged
+ * messages; already-checked-clean ones are included but the gate no-ops them
+ * (idempotent claim).
+ *
+ * Limit is 11 = the hwm + the 10 non-hwm rows getCoalescedHistory can include
+ * (which uses `take(10)` AFTER excluding the hwm). That guarantees every user
+ * message the agent could see — answered turn OR history — is gated, with no
+ * off-by-one (codex review).
+ */
+async function getUnansweredUserWindow(session: ChatSession, hwmId: string): Promise<Message[]> {
+  const qb = messageRepository
+    .createQueryBuilder('m')
+    .leftJoinAndSelect('m.participant', 'p')
+    .where('m.sessionId = :sid', { sid: session.id })
+    .andWhere('m.isDeleted = false')
+    .andWhere("m.type IN ('text','image')")
+    .andWhere("p.type = 'user'")
+    .andWhere('m.guardrailFlagged = false')
+    .andWhere(
+      '(m.created_at, m.id) <= ((SELECT created_at FROM messages WHERE id = :hwmId), :hwmId)',
+      { hwmId },
+    );
+  if (session.lastCoalescedAnswerMessageId) {
+    qb.andWhere(
+      '(m.created_at, m.id) > ((SELECT created_at FROM messages WHERE id = :wId), :wId)',
+      { wId: session.lastCoalescedAnswerMessageId },
+    );
+  }
+  const rows = await qb.orderBy('m.createdAt', 'DESC').addOrderBy('m.id', 'DESC').take(11).getMany();
+  return rows.reverse();
+}
+
+/**
  * Persist the bot reply AND advance the durable watermark in ONE transaction.
  * - When `staleGuard`, first check for a user message newer than the hwm; if one
  *   exists the computed reply is stale → return 'stale' WITHOUT writing.
@@ -988,6 +1070,7 @@ async function finalizeReply(
              JOIN participants p ON p.id = m.participant_id
              WHERE m.session_id = $1 AND m.is_deleted = false
                AND m.type IN ('text','image') AND p.type = 'user'
+               AND m.guardrail_flagged = false
                AND (m.created_at, m.id) > ((SELECT created_at FROM messages WHERE id = $2), $2)
            ) AS has_newer`,
           [session.id, hwmId],
@@ -1017,6 +1100,7 @@ async function finalizeReply(
                 last_coalesced_answer_message_id = m.id
            FROM messages m
           WHERE s.id = $1 AND m.id = $2
+            AND s.ai_auto_reply_enabled = true
             AND (s.last_coalesced_answer_at IS NULL
                  OR (s.last_coalesced_answer_at, s.last_coalesced_answer_message_id)
                     < (m.created_at, m.id))
@@ -1024,7 +1108,9 @@ async function finalizeReply(
         [session.id, hwmId],
       );
       if (returningRows<{ id: string }>(upd).length !== 1) {
-        // Another run already advanced past hwm — roll back this reply.
+        // Another run advanced past hwm, OR a guardrail block disabled the session
+        // mid-run (ai_auto_reply_enabled = false) — roll back this reply (no
+        // persist, no delivery). Treated as 'stale' upstream.
         throw new WatermarkConflictError();
       }
 
@@ -1078,6 +1164,16 @@ async function routeBotMessageOutbound(
  * 'noop' so the coalescer can clear state or re-arm.
  */
 export async function runTurn(session: ChatSession, pending: Message): Promise<RunTurnStatus> {
+  // Status gate — mirror forwardMessageToN8n: never run the agent on a session a
+  // human owns ('active'/'handoff') or that's closed. Without this the coalescer
+  // path would bypass human takeover (R11/AC9).
+  if (session.status !== 'bot' && session.status !== 'waiting') return 'noop';
+
+  // Guardrail pause: a sibling message may have tripped the gate and disabled the
+  // session after this one was scheduled. `session` is loaded fresh by the
+  // coalescer right before this call, so the in-memory flag is current.
+  if (session.aiAutoReplyEnabled === false) return 'noop';
+
   const tenant = await tenantRepository.findOne({ where: { id: session.tenantId } });
   if (!tenant) return 'noop';
 
@@ -1100,6 +1196,28 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates))
     : botSettings.ai;
   if (!aiSettings?.enabled || !agentService) return 'noop';
+
+  // ── Global guardrails gate (spam/scam/bot-loop) ───────────────────────────
+  // Gate EVERY unanswered user message in this coalesced window — not just the
+  // hwm — or an earlier burst message (e.g. phishing) would enter history
+  // ungated. The gate is idempotent per message (guardrail_checked claim), so a
+  // 'stale' re-run never double-counts. Placed AFTER config resolution, so
+  // AI-off / no-target sessions (returned above) are never gated. If the hwm is
+  // blocked, or an earlier message disabled the session, drop the turn.
+  const windowMsgs = await getUnansweredUserWindow(session, pending.id);
+  for (const m of windowMsgs) {
+    const c = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
+    const g = await runInboundGate({
+      session, tenantId: session.tenantId, message: m, content: c, channel: session.channel,
+    });
+    if (m.id === pending.id && !g.proceed) {
+      // hwm blocked — drop the turn. (An earlier window message that disabled the
+      // session also surfaces here: the hwm gate's enforce fast-exit re-reads the
+      // DB and blocks, since the hwm is always the last/newest in the window.)
+      logger.info(`[guardrails] turn blocked for session ${session.id} (${g.category})`);
+      return 'noop';
+    }
+  }
 
   const botParticipant = await ensureBotParticipant(session, aiSettings);
 
@@ -1223,7 +1341,8 @@ async function getConversationHistory(
     .leftJoinAndSelect('message.participant', 'participant')
     .where('message.sessionId = :sessionId', { sessionId })
     .andWhere('message.isDeleted = false')
-    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] });
+    .andWhere('message.type IN (:...types)', { types: ['text', 'image'] })
+    .andWhere('message.guardrailFlagged = false');
 
   if (excludeMessageId) {
     qb.andWhere('message.id != :excludeMessageId', { excludeMessageId });

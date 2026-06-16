@@ -227,11 +227,38 @@ export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {})
 /** PUT /bots/:id/template — set the bot's template bindings (up to 3) + AND/OR mode. */
 export function useBindBotTemplate(botId: string) {
   const queryClient = useQueryClient();
+  const key = queryKeys.bots.templates(botId);
   return useMutation({
     mutationFn: (input: { bindings: { templateId: string; version: string }[]; mode: TemplateMode }) =>
       api.put<BotTemplateView>(`/bots/${botId}/template`, input),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.bots.templates(botId) });
+    // Reflect the new chips + AND/OR mode immediately so the UI feels instant,
+    // then reconcile with the server's authoritative view — no extra refetch.
+    onMutate: async (input) => {
+      await queryClient.cancelQueries({ queryKey: key });
+      const prev = queryClient.getQueryData<BotTemplateView>(key);
+      if (prev) {
+        const bindings: BoundTemplate[] = input.bindings.map((b) => {
+          const existing = prev.bindings.find((x) => x.templateId === b.templateId);
+          return existing
+            ? { ...existing, version: b.version }
+            : {
+                templateId: b.templateId,
+                version: b.version,
+                publishedVersions: [],
+                resolvedVersion: null,
+                pinnedButUnavailable: false,
+                templateUnavailable: false,
+              };
+        });
+        queryClient.setQueryData<BotTemplateView>(key, { ...prev, bindings, mode: input.mode });
+      }
+      return { prev };
+    },
+    onError: (_err, _input, ctx) => {
+      if (ctx?.prev) queryClient.setQueryData(key, ctx.prev);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(key, data);
     },
   });
 }

@@ -186,6 +186,14 @@ function assembleAgent(ctx: AgentCtx): string {
 
   const sections: string[] = [];
 
+  // Language directive FIRST (primacy): the opening greeting is in the business's
+  // default language, which otherwise anchors the model into replying in that
+  // language even to a customer writing in another. State the rule up top AND in
+  // the formatting rules (recency) so it holds reliably.
+  sections.push(
+    "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.",
+  );
+
   // Brand voice
   sections.push(`You are ${brandVoice?.name || tenantName}.`);
   sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);

@@ -57,7 +57,8 @@ describe('characterization: agent PromptBuilder.build', () => {
       'Jordan',
     );
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
-      "You are Ava.
+      "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
+      You are Ava.
       Tone: friendly
       Greet warmly. You serve Acme Plumbing.
 
@@ -122,7 +123,8 @@ describe('characterization: agent PromptBuilder.build', () => {
     } as unknown as Tenant;
     const prompt = builder.build(bare, bare.settings as any, []);
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
-      "You are Bot.
+      "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
+      You are Bot.
       Tone: professional
 
       ## CONVERSATION STYLE

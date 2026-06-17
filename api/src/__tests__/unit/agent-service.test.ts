@@ -185,6 +185,88 @@ describe('AgentService', () => {
     expect(mockMeteringRecord).toHaveBeenCalledTimes(2); // two LLM calls
   });
 
+  it('R31: sanitizes an unexpected tool exception before it reaches the model', async () => {
+    const RAW = 'connection to 10.0.0.5:5432 failed: password authentication failed for user "secret"';
+    const throwingTool: ToolAdapter = {
+      name: 'kb_search',
+      description: 'Search KB',
+      parameters: { type: 'object', properties: { query: { type: 'string' } } },
+      hasSideEffects: false,
+      execute: vi.fn().mockRejectedValue(new Error(RAW)),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([throwingTool]);
+
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 50, completionTokens: 10 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'kb_search', arguments: { query: 'pricing' } }],
+      })
+      .mockResolvedValueOnce({
+        content: "Sorry, I'm having trouble — let me connect you with someone.",
+        usage: { promptTokens: 100, completionTokens: 20 },
+        finishReason: 'stop',
+      });
+
+    await agent.run(
+      'pricing?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    // The tool result fed back to the model on the 2nd call must be sanitized:
+    // no raw exception text (host/credentials), just a generic unavailable note.
+    const secondCallMessages = (mockProvider.chat as any).mock.calls[1][0];
+    const toolMsg = secondCallMessages.find((m: any) => m.role === 'tool' && m.toolCallId === 'tc_1');
+    expect(toolMsg).toBeTruthy();
+    expect(toolMsg.content).not.toContain('password');
+    expect(toolMsg.content).not.toContain('10.0.0.5');
+    expect(toolMsg.content).toContain('temporarily unavailable');
+  });
+
+  it('R31: sanitizes an UNMARKED returned tool error before it reaches the model', async () => {
+    const RAW = 'duplicate key value violates unique constraint "leads_pkey" at 10.0.0.5';
+    const leakyTool: ToolAdapter = {
+      name: 'kb_search', description: 'Search KB',
+      parameters: { type: 'object', properties: { query: { type: 'string' } } },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: false, error: RAW }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([leakyTool]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({ content: '', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'tool_calls', toolCalls: [{ id: 'tc_1', name: 'kb_search', arguments: {} }] })
+      .mockResolvedValueOnce({ content: 'ok', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'stop' });
+
+    await agent.run('x', { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any, []);
+
+    const toolMsg = (mockProvider.chat as any).mock.calls[1][0].find((m: any) => m.role === 'tool');
+    expect(toolMsg.content).not.toContain('duplicate key');
+    expect(toolMsg.content).not.toContain('10.0.0.5');
+    expect(toolMsg.content).toContain("couldn't complete");
+  });
+
+  it('R31: preserves a tool-authored domain error marked errorSafeForModel', async () => {
+    const domainTool: ToolAdapter = {
+      name: 'check_availability', description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({ success: false, error: 'NO_AVAILABILITY: no slots that day', errorSafeForModel: true }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([domainTool]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({ content: '', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'tool_calls', toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }] })
+      .mockResolvedValueOnce({ content: 'ok', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'stop' });
+
+    await agent.run('x', { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any, []);
+
+    const toolMsg = (mockProvider.chat as any).mock.calls[1][0].find((m: any) => m.role === 'tool');
+    expect(toolMsg.content).toContain('NO_AVAILABILITY');
+  });
+
   it('attaches slot chips (quickReplies) when check_availability offers slots', async () => {
     const checkAvailability: ToolAdapter = {
       name: 'check_availability',

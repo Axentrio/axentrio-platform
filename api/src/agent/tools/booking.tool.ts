@@ -17,9 +17,12 @@ import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
  * …"), so the agent can branch on the codes the SERVICES prompt rules reference
  * (ADDRESS_REQUIRED / PHONE_REQUIRED / SERVICE_REQUIRED / SLOT_UNAVAILABLE / etc.).
  */
-function toolError(err: unknown, fallback: string): string {
-  if (err instanceof BookingError) return `${err.code}: ${err.message}`;
-  return err instanceof Error ? err.message : fallback;
+// R31: a BookingError is an authored DOMAIN error (its code + message are safe to
+// show the model and help it respond well). Anything else is an unexpected infra
+// exception — return it unmarked so the agent sanitizes it before the model sees it.
+function toolError(err: unknown, fallback: string): { error: string; errorSafeForModel: boolean } {
+  if (err instanceof BookingError) return { error: `${err.code}: ${err.message}`, errorSafeForModel: true };
+  return { error: err instanceof Error ? err.message : fallback, errorSafeForModel: false };
 }
 
 export class CheckAvailabilityTool implements ToolAdapter {
@@ -63,7 +66,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: toolError(err, 'Failed to check availability') };
+      return { success: false, ...toolError(err, 'Failed to check availability') };
     }
   }
 }
@@ -199,7 +202,7 @@ export class CreateBookingTool implements ToolAdapter {
 
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: toolError(err, 'Failed to create booking') };
+      return { success: false, ...toolError(err, 'Failed to create booking') };
     }
   }
 }
@@ -293,7 +296,7 @@ export class RequestAppointmentTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: toolError(err, 'Failed to capture request') };
+      return { success: false, ...toolError(err, 'Failed to capture request') };
     }
   }
 }
@@ -318,7 +321,7 @@ export class ListBookingsTool implements ToolAdapter {
       const result = await listBookings('agent', ctx.sessionId, args.attendeeEmail as string);
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: err instanceof Error ? err.message : 'Failed to list bookings' };
+      return { success: false, ...toolError(err, 'Failed to list bookings') };
     }
   }
 }
@@ -352,7 +355,7 @@ export class RescheduleBookingTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: toolError(err, 'Failed to reschedule booking') };
+      return { success: false, ...toolError(err, 'Failed to reschedule booking') };
     }
   }
 }
@@ -386,7 +389,7 @@ export class CancelBookingTool implements ToolAdapter {
       );
       return { success: true, data: result };
     } catch (err) {
-      return { success: false, error: toolError(err, 'Failed to cancel booking') };
+      return { success: false, ...toolError(err, 'Failed to cancel booking') };
     }
   }
 }

@@ -340,7 +340,23 @@ export class AgentService {
               pendingAvailability = null;
               bookingRecorded = true;
             }
-            let resultJson = JSON.stringify(result.data ?? { error: result.error });
+            // R31: a tool that fails may return a raw infra error (err.message)
+            // as result.error; never forward an UNMARKED error to the model — it
+            // could be echoed to the customer. Only errors a tool explicitly
+            // marks errorSafeForModel (authored domain errors) pass through; the
+            // rest become a generic message. The full result stays in the trace.
+            let modelPayload: unknown;
+            if (result.success) {
+              modelPayload = result.data ?? {};
+            } else if (result.errorSafeForModel) {
+              modelPayload = { error: result.error };
+            } else {
+              logger.warn('Agent tool error sanitized for model', {
+                sessionId: session.id, tool: tool.name, error: result.error,
+              });
+              modelPayload = { error: `The ${tool.name} tool couldn't complete that request right now.` };
+            }
+            let resultJson = JSON.stringify(modelPayload);
             if (resultJson.length > 4000) {
               resultJson = resultJson.substring(0, 4000) + '...[truncated]';
             }
@@ -356,12 +372,20 @@ export class AgentService {
               latencyMs: Date.now() - toolStartMs,
             });
           } catch (error) {
-            const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
-            messages.push({ role: 'tool', content: JSON.stringify({ error: errorMsg }), toolCallId: toolCall.id });
+            // R31: an UNEXPECTED tool exception (SQL error, stack, connection
+            // string, internal id) must never reach the model context — the model
+            // can echo it to the customer. Log the real error server-side + keep
+            // it in the trace, but hand the model a sanitized, generic message.
+            // (A tool that RETURNS an error is sanitized at the boundary above
+            // unless it set errorSafeForModel; this catch covers tools that THROW.)
+            const rawMsg = error instanceof Error ? error.message : 'Tool execution failed';
+            logger.error('Agent tool threw', { sessionId: session.id, tool: tool.name, error });
+            const safeMsg = `The ${tool.name} tool is temporarily unavailable. Do not retry it this turn.`;
+            messages.push({ role: 'tool', content: JSON.stringify({ error: safeMsg }), toolCallId: toolCall.id });
             traceEntry.toolCalls.push({
               name: tool.name,
               args: toolCall.arguments,
-              result: { success: false, error: errorMsg },
+              result: { success: false, error: rawMsg },
               latencyMs: Date.now() - toolStartMs,
             });
           }

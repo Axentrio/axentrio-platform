@@ -14,6 +14,12 @@ export interface ToolResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  /** R31: set true ONLY for a tool-authored DOMAIN error that is safe to show the
+   *  model (e.g. "no availability that day", "service not found"). An UNMARKED
+   *  error is treated as a potentially-raw infrastructure exception and is
+   *  sanitized to a generic message before it reaches the model — the raw text is
+   *  kept in logs/trace only. Secure-by-default: omit ⇒ sanitized. */
+  errorSafeForModel?: boolean;
 }
 
 export interface ToolAdapter {

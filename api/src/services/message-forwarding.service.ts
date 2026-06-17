@@ -41,6 +41,7 @@ import {
   BotNotFoundConfigError,
 } from './bot-config.service';
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
+import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -436,9 +437,20 @@ export async function forwardMessageToN8n(
       );
 
       const botParticipant = await ensureBotParticipant(session, aiSettings);
-      await sendBotMessage(session, botParticipant.id, ragResult.response);
 
-      if (ragResult.shouldHandoff && ragResult.handoffReason) {
+      // Output guardrails (AC14): validate the RAG-generated reply. A blocked
+      // reply (enforce mode) is replaced with the fallback + a human handoff.
+      const fallbackMessage =
+        aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
+      const guard = await applyOutputGuardrails({
+        tenantId: session.tenantId, session, channel: session.channel,
+        content: ragResult.response, fallbackMessage, generationPath: 'rag',
+      });
+      await sendBotMessage(session, botParticipant.id, guard.content);
+
+      if (guard.blocked) {
+        await handleBotHandoff(session, botParticipant.id, 'bot_error');
+      } else if (ragResult.shouldHandoff && ragResult.handoffReason) {
         await handleBotHandoff(session, botParticipant.id, ragResult.handoffReason as HandoffRequest['reason']);
       }
 
@@ -791,6 +803,8 @@ async function platformAgentPath(
 
   try {
     const botParticipant = await ensureBotParticipant(session, aiSettings);
+    const fallbackMessage =
+      aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
 
     // Debounce: wait a quiet-window so a burst of messages typed in quick
     // succession settles before we run, and is answered as ONE coherent turn
@@ -864,9 +878,22 @@ async function platformAgentPath(
 
       let handedOff = false;
       switch (result.type) {
-        case 'response':
-          await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
+        case 'response': {
+          // Output guardrails (AC14): a blocked AI reply is treated like an agent
+          // error — send the fallback (no quick replies) + hand off to a human.
+          const guard = await applyOutputGuardrails({
+            tenantId: tenant.id, session, channel: session.channel,
+            content: result.content, fallbackMessage, generationPath: 'legacy',
+          });
+          if (guard.blocked) {
+            await sendBotMessage(session, botParticipant.id, guard.content);
+            await handleBotHandoff(session, botParticipant.id, 'bot_error');
+            handedOff = true;
+          } else {
+            await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
+          }
           break;
+        }
 
         case 'error':
           logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
@@ -889,10 +916,22 @@ async function platformAgentPath(
           handedOff = true;
           break;
 
-        case 'awaiting_confirmation':
+        case 'awaiting_confirmation': {
           // Confirmation gate — just send the preview message, don't handoff
-          await sendBotMessage(session, botParticipant.id, result.message);
+          // (unless output guardrails block it in enforce mode).
+          const guard = await applyOutputGuardrails({
+            tenantId: tenant.id, session, channel: session.channel,
+            content: result.message, fallbackMessage, generationPath: 'legacy',
+          });
+          if (guard.blocked) {
+            await sendBotMessage(session, botParticipant.id, guard.content);
+            await handleBotHandoff(session, botParticipant.id, 'bot_error');
+            handedOff = true;
+          } else {
+            await sendBotMessage(session, botParticipant.id, result.message);
+          }
           break;
+        }
       }
 
       // Stop typing indicator
@@ -1478,7 +1517,27 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       handoffReason = 'bot_error';
       break;
   }
-  const quickReplies = result.type === 'response' ? result.quickReplies : undefined;
+  let quickReplies = result.type === 'response' ? result.quickReplies : undefined;
+
+  // ── Output guardrails (AC14) ──────────────────────────────────────────────
+  // Validate only AI-GENERATED content (response / booking confirmation); the
+  // error/budget/max_iterations branches already carry the platform-authored
+  // fallback. In enforce mode a blocked reply is treated exactly like an agent
+  // error: send the fallback (no quick replies) and hand off to a human.
+  if (result.type === 'response' || result.type === 'awaiting_confirmation') {
+    const fallbackMessage =
+      aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
+    const guard = await applyOutputGuardrails({
+      tenantId: session.tenantId, session, channel: session.channel,
+      content, fallbackMessage, generationPath: 'coalescer',
+    });
+    if (guard.blocked) {
+      content = guard.content;
+      quickReplies = undefined;
+      handoffReason = 'bot_error';
+      staleGuard = false;
+    }
+  }
 
   const fin = await finalizeReply(session, botParticipant.id, content, quickReplies, pending.id, staleGuard);
   if (fin.status === 'stale') return 'stale';

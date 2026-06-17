@@ -14,6 +14,7 @@ import { Participant } from '../database/entities/Participant';
 import { emitToTenantAgents } from '../websocket/socket.handler';
 import { EventEmitter } from '../utils/event-emitter';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
+import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import {
   ResponsePayload,
   WebhookResponse,
@@ -21,6 +22,9 @@ import {
   HandoffPayload,
   FileRequestPayload,
 } from './types';
+
+/** Replacement text sent when an n8n-generated reply is blocked in enforce mode. */
+const OUTPUT_BLOCK_FALLBACK = "We're connecting you to an agent. Please hold on.";
 
 export interface WebhookServiceConfig {
   eventEmitter: EventEmitter;
@@ -103,6 +107,30 @@ export class WebhookService {
         }
       }
 
+      // Output guardrails (AC14): validate n8n-generated text BEFORE it is
+      // persisted/sent. The custom-webhook prompt path omits the platform safety
+      // preamble, so this is the primary output safety net for those tenants. In
+      // enforce mode a blocked reply is REPLACED by a clean plain-text fallback
+      // (no spread — drop any original quick replies / buttons / attachments /
+      // metadata so unsafe actions can't ride along) and the session is handed to
+      // a human after delivery; in shadow mode it is only logged.
+      let outputBlocked = false;
+      if (
+        (payload.type === 'text' || payload.type === 'quick_reply') &&
+        typeof payload.content === 'string'
+      ) {
+        const guard = await applyOutputGuardrails({
+          tenantId: session.tenantId, session, channel: session.channel,
+          content: payload.content,
+          fallbackMessage: OUTPUT_BLOCK_FALLBACK,
+          generationPath: 'n8n',
+        });
+        if (guard.blocked) {
+          payload = { type: 'text', content: guard.content };
+          outputBlocked = true;
+        }
+      }
+
       // Process different message types
       let messageId: string;
 
@@ -173,6 +201,12 @@ export class WebhookService {
         logger.info(`Message sent to session ${sessionId}`, { messageId, type: payload.type });
       }
 
+      // Enforced output block: hand the session to a human so the custom webhook
+      // can't keep producing blocked replies (matches coalescer/legacy/RAG).
+      if (outputBlocked) {
+        await this.triggerHandoff(sessionId, { reason: 'bot_error' });
+      }
+
       return {
         success: true,
         messageId,
@@ -205,6 +239,20 @@ export class WebhookService {
       }
 
       const messageId = payload.metadata.messageId as string;
+
+      // Output guardrails (AC14): an n8n edit replaces customer-visible text, so
+      // validate it too. In enforce mode a blocked edit applies the fallback text
+      // instead (keep metadata.messageId so the right row is edited); shadow logs.
+      if (typeof payload.content === 'string') {
+        const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+        if (session) {
+          const guard = await applyOutputGuardrails({
+            tenantId: session.tenantId, session, channel: session.channel,
+            content: payload.content, fallbackMessage: OUTPUT_BLOCK_FALLBACK, generationPath: 'n8n',
+          });
+          if (guard.blocked) payload = { ...payload, content: guard.content };
+        }
+      }
 
       await this.messageRepo.update(messageId, {
         content: payload.content as string,

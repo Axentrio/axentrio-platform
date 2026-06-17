@@ -1728,6 +1728,12 @@
     "takeover": {
       "button": "Prendre en charge"
     },
+    "guardrail": {
+      "paused": "IA en pause · {{reason}}",
+      "pausedShort": "IA en pause",
+      "pausedTooltip": "Une règle de sécurité a mis en pause les réponses de l'IA sur cette conversation. Vérifiez-la, puis reprenez l'IA si elle est légitime.",
+      "resumeButton": "Reprendre l'IA"
+    },
     "actions": {
       "transfer": "Transférer",
       "returnToBot": "Rendre au bot",
@@ -1755,6 +1761,8 @@
       "loadFailed": "Échec du chargement de la conversation",
       "takeoverSuccess": "Conversation reprise avec succès",
       "takeoverFailed": "Échec de la reprise de la conversation",
+      "resumeAiSuccess": "Réponses de l'IA réactivées",
+      "resumeAiFailed": "Impossible de réactiver l'IA (administrateurs uniquement)",
       "handoffAccepted": "Transfert accepté",
       "handoffAcceptFailed": "Échec de l'acceptation du transfert",
       "handoffDeclineFailed": "Échec du refus du transfert",

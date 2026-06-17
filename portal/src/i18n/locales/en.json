@@ -1734,6 +1734,12 @@
     "takeover": {
       "button": "Take Over"
     },
+    "guardrail": {
+      "paused": "AI paused · {{reason}}",
+      "pausedShort": "AI paused",
+      "pausedTooltip": "A guardrail paused AI replies on this conversation. Review it, then resume AI if it's legitimate.",
+      "resumeButton": "Resume AI"
+    },
     "actions": {
       "transfer": "Transfer",
       "returnToBot": "Return to Bot",
@@ -1761,6 +1767,8 @@
       "loadFailed": "Failed to load chat",
       "takeoverSuccess": "Chat taken over successfully",
       "takeoverFailed": "Failed to take over chat",
+      "resumeAiSuccess": "AI replies re-enabled",
+      "resumeAiFailed": "Couldn't re-enable AI (admins only)",
       "handoffAccepted": "Handoff accepted",
       "handoffAcceptFailed": "Failed to accept handoff",
       "handoffDeclineFailed": "Failed to decline handoff",

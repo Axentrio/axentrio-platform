@@ -1729,6 +1729,12 @@
     "takeover": {
       "button": "Overnemen"
     },
+    "guardrail": {
+      "paused": "AI gepauzeerd · {{reason}}",
+      "pausedShort": "AI gepauzeerd",
+      "pausedTooltip": "Een beveiligingsregel heeft AI-antwoorden in dit gesprek gepauzeerd. Bekijk het en hervat de AI als het legitiem is.",
+      "resumeButton": "AI hervatten"
+    },
     "actions": {
       "transfer": "Overdragen",
       "returnToBot": "Terug naar bot",
@@ -1756,6 +1762,8 @@
       "loadFailed": "Gesprek laden mislukt",
       "takeoverSuccess": "Gesprek succesvol overgenomen",
       "takeoverFailed": "Gesprek overnemen mislukt",
+      "resumeAiSuccess": "AI-antwoorden weer ingeschakeld",
+      "resumeAiFailed": "Kan AI niet weer inschakelen (alleen beheerders)",
       "handoffAccepted": "Overdracht geaccepteerd",
       "handoffAcceptFailed": "Overdracht accepteren mislukt",
       "handoffDeclineFailed": "Overdracht weigeren mislukt",

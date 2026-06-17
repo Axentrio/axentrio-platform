@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, MessageSquare, Clock, User } from 'lucide-react';
+import { Search, MessageSquare, Clock, User, ShieldAlert } from 'lucide-react';
 import { useChatsQuery } from '../queries/useChatQueries';
 import { ChatStatusBadge } from './StatusBadge';
 import { TenantSelector } from './TenantSelector';
@@ -216,6 +216,15 @@ export const ChatStream: React.FC<ChatStreamProps> = ({
                       {chat.userName || t('inbox.chat.anonymous')}
                     </span>
                     <ChatStatusBadge status={chat.status} size="sm" showLabel={true} />
+                    {chat.aiAutoReplyEnabled === false && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-600"
+                        title={t('inbox.guardrail.pausedTooltip')}
+                      >
+                        <ShieldAlert className="w-3 h-3" />
+                        {t('inbox.guardrail.pausedShort')}
+                      </span>
+                    )}
                   </div>
 
                   {/* Last message */}

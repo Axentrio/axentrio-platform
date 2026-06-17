@@ -22,6 +22,8 @@ import {
   ArrowLeft,
   Bot,
   CheckCircle,
+  ShieldAlert,
+  ShieldCheck,
 } from 'lucide-react';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -43,7 +45,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { api } from '@services/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys } from '../queries/queryKeys';
 import { useNotificationSound } from '@websocket/notificationSound';
 import {
   useHandoffsQuery,
@@ -156,6 +159,8 @@ const Inbox: React.FC = () => {
   const [isClosing, setIsClosing] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
 
+  const queryClient = useQueryClient();
+
   // Handoff queue data
   const { handoffs, pendingCount } = useHandoffsQuery('pending');
   const acceptHandoffMutation = useAcceptHandoff();
@@ -191,13 +196,31 @@ const Inbox: React.FC = () => {
   const handleTakeover = async (chatId: string) => {
     try {
       await api.post(`/chats/${chatId}/takeover`);
-      // Refresh chat data after takeover
-      const data = await api.get<{ data: Chat }>(`/chats/${chatId}`);
-      setSelectedChat(data.data);
+      // Refresh chat data after takeover. api.get already unwraps the
+      // { success, data } envelope, so it returns the Chat directly.
+      const chat = await api.get<Chat>(`/chats/${chatId}`);
+      setSelectedChat(chat);
       toast.success(t('inbox.toasts.takeoverSuccess'));
     } catch (error) {
       console.error('Failed to takeover chat:', error);
       toast.error(t('inbox.toasts.takeoverFailed'));
+    }
+  };
+
+  // Re-enable AI on a conversation a guardrail paused (admin-only on the server).
+  const handleResumeAI = async () => {
+    if (!selectedChat) return;
+    try {
+      await api.post('/handoff/resume-ai', { sessionId: selectedChat.id });
+      // api.get unwraps the { success, data } envelope → returns the Chat directly.
+      const chat = await api.get<Chat>(`/chats/${selectedChat.id}`);
+      setSelectedChat(chat);
+      // Refresh the conversation list so the paused badge clears on the row too.
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats.all() });
+      toast.success(t('inbox.toasts.resumeAiSuccess'));
+    } catch (error) {
+      console.error('Failed to resume AI:', error);
+      toast.error(t('inbox.toasts.resumeAiFailed'));
     }
   };
 
@@ -289,6 +312,8 @@ const Inbox: React.FC = () => {
 
   const isHandoff = selectedChat?.status === 'handsoff';
   const isHuman = selectedChat?.status === 'human';
+  // A guardrail paused AI auto-reply (status stays 'bot'); surface it + allow resume.
+  const isGuardrailPaused = selectedChat?.aiAutoReplyEnabled === false;
 
   return (
     <div className="h-full flex flex-col">
@@ -473,6 +498,15 @@ const Inbox: React.FC = () => {
                     </h2>
                     <div className="flex items-center gap-2 text-sm text-text-secondary">
                       <ChatStatusBadge status={selectedChat.status} size="sm" />
+                      {isGuardrailPaused && (
+                        <span
+                          className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600"
+                          title={t('inbox.guardrail.pausedTooltip')}
+                        >
+                          <ShieldAlert className="w-3 h-3" />
+                          {t('inbox.guardrail.paused', { reason: selectedChat.guardrailStatus || 'flagged' })}
+                        </span>
+                      )}
                       {selectedChat.tenantName && (
                         <>
                           <span>-</span>
@@ -490,6 +524,16 @@ const Inbox: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {isGuardrailPaused && (
+                    <Button
+                      onClick={handleResumeAI}
+                      size="sm"
+                      className="gap-2 rounded-xl"
+                    >
+                      <ShieldCheck className="w-4 h-4" />
+                      {t('inbox.guardrail.resumeButton')}
+                    </Button>
+                  )}
                   {isHandoff && (
                     <Button
                       onClick={() => handleTakeover(selectedChat.id)}

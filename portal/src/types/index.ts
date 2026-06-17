@@ -121,6 +121,10 @@ export interface Chat {
   userName?: string;
   userEmail?: string;
   status: ChatStatus;
+  // Guardrail state: false = AI auto-reply paused by a guardrail (status stays
+  // 'bot'); guardrailStatus is the reason category (spam/scam/phishing/bot_loop).
+  aiAutoReplyEnabled?: boolean;
+  guardrailStatus?: string;
   assignedAgentId?: string;
   assignedAgentName?: string;
   messages: Message[];

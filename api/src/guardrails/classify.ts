@@ -204,3 +204,36 @@ export function classifyMessage(text: string, channel: string): ClassifyResult {
   }
   return { category: 'clean', score: 0, reasons: [], links: linkInfo.links };
 }
+
+// ---------------------------------------------------------------------------
+// Output-side link primitive, reusing this module's URL extraction + shortener
+// set (guardrails output validation, AC14). Credential solicitation is handled
+// separately in output-validation.ts with an OUTPUT-specific noun list (the
+// inbound CREDENTIAL_SIGNALS deliberately differ — e.g. bare "credentials").
+// ---------------------------------------------------------------------------
+
+/**
+ * Output-side link check: reasons a reply contains a link that HIDES or SPOOFS
+ * its destination — shortener, IP-literal host, or punycode. These are never
+ * legitimate in a bot reply. Deliberately OMITS the inbound credential-path
+ * heuristic: a business may legitimately link its own /login or /account page,
+ * so a path alone must not replace an otherwise-good reply (the credential
+ * *text* is caught separately in output-validation.ts).
+ */
+export function detectUnsafeLinkHosts(text: string): string[] {
+  const reasons: string[] = [];
+  for (const m of (text ?? '').slice(0, MAX_CLASSIFY_CHARS).matchAll(URL_RE)) {
+    let host = '';
+    try {
+      const raw = m[1];
+      const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(raw);
+      host = new URL(hasScheme ? raw : `https://${raw}`).hostname.replace(/^www\./, '').toLowerCase();
+    } catch {
+      continue; // an unparseable URL-ish token alone is too weak to block a reply
+    }
+    if (SHORTENER_HOSTS.has(host)) reasons.push(`shortened link (${host})`);
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) reasons.push('ip-literal link host');
+    if (host.includes('xn--')) reasons.push('punycode link host');
+  }
+  return reasons;
+}

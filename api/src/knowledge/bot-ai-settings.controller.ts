@@ -107,6 +107,12 @@ export async function updateBotAiSettings(req: Request, res: Response) {
         : {}),
     },
     guardrails: data.guardrails,
+    // Free-text supplementary context (§11b). Full-replace, so: preserve the
+    // existing value when the client omits the field (don't silently clear it),
+    // persist a non-empty value, and clear only on an explicit blank (codex).
+    ...(data.extraInfo === undefined
+      ? (existing.extraInfo ? { extraInfo: existing.extraInfo } : {})
+      : (data.extraInfo.trim() ? { extraInfo: data.extraInfo.trim() } : {})),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

@@ -104,6 +104,9 @@ export class Tenant {
       model?: string | null;
       apiKey?: string | null;
       supportEmail?: string | null;
+      /** Free-text supplementary context — rendered as a fenced, LOWEST-authority
+       *  block in the prompt; can never override platform rules. Guardrails §11b. */
+      extraInfo?: string;
       brandVoice: {
         name: string;
         tone: string;

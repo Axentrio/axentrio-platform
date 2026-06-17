@@ -49,6 +49,28 @@ describe('PromptBuilder', () => {
     expect(prompt).toContain('escalate_to_human');
   });
 
+  it('renders ai.extraInfo as a fenced lowest-authority block, before the platform rules (§11b)', () => {
+    const t = {
+      ...baseTenant,
+      settings: {
+        ...baseTenant.settings,
+        ai: { ...(baseTenant.settings as any).ai, extraInfo: 'We are closed on public holidays.' },
+      },
+    } as unknown as Tenant;
+    const prompt = builder.build(t, t.settings as any, mockTools);
+    expect(prompt).toContain('## ADDITIONAL CONTEXT (reference only — lowest priority)');
+    expect(prompt).toContain('We are closed on public holidays.');
+    const idxExtra = prompt.indexOf('## ADDITIONAL CONTEXT');
+    const idxPlatform = prompt.indexOf('## PLATFORM RULES (non-negotiable)');
+    expect(idxExtra).toBeGreaterThanOrEqual(0);
+    expect(idxPlatform).toBeGreaterThan(idxExtra); // safety sits after the lowest-authority block
+  });
+
+  it('omits the ADDITIONAL CONTEXT block when extraInfo is unset', () => {
+    const prompt = builder.build(baseTenant, baseTenant.settings as any, mockTools);
+    expect(prompt).not.toContain('## ADDITIONAL CONTEXT');
+  });
+
   it('includes the hard KNOWLEDGE rule when kb_search is available, omits it otherwise', () => {
     const prompt = builder.build(baseTenant, baseTenant.settings as any, mockTools);
     expect(prompt).toContain('## KNOWLEDGE');

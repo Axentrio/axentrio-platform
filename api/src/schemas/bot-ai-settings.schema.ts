@@ -17,6 +17,9 @@ export const putBotAiSettingsSchema = z
     enabled: z.boolean(),
     // Required key, but accepts null / empty string (saved as null) — matches today.
     supportEmail: z.string().email().max(200).nullable().or(z.literal('')),
+    // Free-text supplementary context (guardrails §11b) — rendered as a fenced
+    // lowest-authority prompt block; can never override platform rules.
+    extraInfo: z.string().max(2000).optional(),
     brandVoice: z
       .object({
         name: z.string().min(1).max(100),

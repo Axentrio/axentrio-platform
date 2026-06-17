@@ -64,6 +64,9 @@ export interface BotSettings {
     provider?: 'openai' | 'anthropic' | null;
     model?: string | null;
     supportEmail?: string | null;
+    /** Free-text supplementary context — rendered as a fenced, LOWEST-authority
+     *  block in the prompt; can never override platform rules. Guardrails §11b. */
+    extraInfo?: string;
     brandVoice: {
       name: string;
       tone: string;

@@ -57,7 +57,9 @@ describe('CaptureLeadTool', () => {
     const tool = new CaptureLeadTool();
     const res = await tool.execute({ email: 'alice@example.com' }, makeCtx());
     expect(res.success).toBe(true);
-    expect((res.data as { leadId?: string }).leadId).toBe('lead-1');
+    // R31: the internal leadId is NOT exposed to the model; just a confirmation.
+    expect((res.data as { leadId?: string; message?: string }).leadId).toBeUndefined();
+    expect((res.data as { message?: string }).message).toBe('Lead captured');
     expect(upsertLead).toHaveBeenCalledWith(
       expect.objectContaining({ tenantId: 'tenant-123', sessionId: 'session-abc', source: 'tool', channel: 'widget', email: 'alice@example.com', name: null }),
     );

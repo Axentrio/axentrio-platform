@@ -15,15 +15,15 @@ export class EscalationTool implements ToolAdapter {
   };
   hasSideEffects = true;
 
-  async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
+  async execute(args: Record<string, unknown>, _ctx: ToolContext): Promise<ToolResult> {
     try {
+      // R31: do NOT return internal ids (sessionId/tenantId) to the model — it
+      // could echo them to the customer. The model only needs the outcome.
       return {
         success: true,
         data: {
           escalated: true,
           reason: args.reason as string,
-          sessionId: ctx.sessionId,
-          tenantId: ctx.tenantId,
         },
       };
     } catch (err) {

@@ -49,8 +49,9 @@ export class CaptureLeadTool implements ToolAdapter {
         phone,
       });
 
+      // R31: don't surface the internal leadId to the model (it could echo it).
       return res
-        ? { success: true, data: { message: 'Lead captured', leadId: res.leadId } }
+        ? { success: true, data: { message: 'Lead captured' } }
         : { success: true, data: { message: 'Noted.' } }; // gated off / no identifier — never an error to the model
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : 'Failed to capture lead' };

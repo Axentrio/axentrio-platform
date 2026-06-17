@@ -26,6 +26,38 @@ import {
 /** Replacement text sent when an n8n-generated reply is blocked in enforce mode. */
 const OUTPUT_BLOCK_FALLBACK = "We're connecting you to an agent. Please hold on.";
 
+/** Non-customer-visible keys to skip when collecting text to validate. */
+const NON_VISIBLE_PAYLOAD_KEYS = new Set([
+  'metadata', 'style', 'id', 'type', 'action', 'icon', 'webviewHeightRatio',
+  'size', 'disabled', 'visible', 'columns', 'layout', 'persist',
+  'dismissOnSelect', 'borderRadius', 'backgroundColor', 'textColor', 'borderColor',
+  'maxSize', 'maxFiles',
+]);
+
+/**
+ * Collect EVERY customer-visible string from an outbound payload — content,
+ * quick-reply labels/values, button titles/values/urls, carousel card
+ * titles/subtitles/buttons, image/attachment urls, template text — so the output
+ * guardrails scan the whole reply, not just `content` (codex). Skips internal /
+ * style / id fields to avoid scanning non-visible noise.
+ */
+function collectVisibleText(payload: ResponsePayload): string {
+  const out: string[] = [];
+  const walk = (node: unknown): void => {
+    if (typeof node === 'string') {
+      if (node.trim()) out.push(node);
+    } else if (Array.isArray(node)) {
+      node.forEach(walk);
+    } else if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        if (!NON_VISIBLE_PAYLOAD_KEYS.has(k)) walk(v);
+      }
+    }
+  };
+  walk(payload);
+  return out.join('\n');
+}
+
 export interface WebhookServiceConfig {
   eventEmitter: EventEmitter;
   defaultDelay?: number;
@@ -107,21 +139,20 @@ export class WebhookService {
         }
       }
 
-      // Output guardrails (AC14): validate n8n-generated text BEFORE it is
-      // persisted/sent. The custom-webhook prompt path omits the platform safety
-      // preamble, so this is the primary output safety net for those tenants. In
-      // enforce mode a blocked reply is REPLACED by a clean plain-text fallback
-      // (no spread — drop any original quick replies / buttons / attachments /
-      // metadata so unsafe actions can't ride along) and the session is handed to
-      // a human after delivery; in shadow mode it is only logged.
+      // Output guardrails (AC14): validate ALL customer-visible n8n text BEFORE it
+      // is persisted/sent — content, quick-reply labels, button titles/urls,
+      // carousel cards, template text, attachment urls (codex). The custom-webhook
+      // path omits the platform safety preamble, so this is its primary output net.
+      // In enforce mode a blocked reply is REPLACED by a clean plain-text fallback
+      // (the whole structured payload is dropped so no unsafe text/links/actions
+      // ride along) and the session is handed to a human after delivery; in shadow
+      // mode it is only logged.
       let outputBlocked = false;
-      if (
-        (payload.type === 'text' || payload.type === 'quick_reply') &&
-        typeof payload.content === 'string'
-      ) {
+      const visibleText = collectVisibleText(payload);
+      if (visibleText.trim()) {
         const guard = await applyOutputGuardrails({
           tenantId: session.tenantId, session, channel: session.channel,
-          content: payload.content,
+          content: visibleText,
           fallbackMessage: OUTPUT_BLOCK_FALLBACK,
           generationPath: 'n8n',
         });
@@ -240,18 +271,28 @@ export class WebhookService {
 
       const messageId = payload.metadata.messageId as string;
 
+      // Mirror sendMessageToSession's gates (codex): once a session is handed off,
+      // closed, or guardrail-paused, n8n must not keep mutating visible messages.
+      const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+      if (!session) {
+        return { success: false, error: `Session not found: ${sessionId}` };
+      }
+      if (session.status === 'handoff' || session.status === 'closed') {
+        return { success: false, error: `Session is in ${session.status} status — bot edits not accepted` };
+      }
+      if (session.aiAutoReplyEnabled === false) {
+        return { success: false, error: 'Session is guardrail-paused — bot edits not accepted' };
+      }
+
       // Output guardrails (AC14): an n8n edit replaces customer-visible text, so
       // validate it too. In enforce mode a blocked edit applies the fallback text
       // instead (keep metadata.messageId so the right row is edited); shadow logs.
       if (typeof payload.content === 'string') {
-        const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
-        if (session) {
-          const guard = await applyOutputGuardrails({
-            tenantId: session.tenantId, session, channel: session.channel,
-            content: payload.content, fallbackMessage: OUTPUT_BLOCK_FALLBACK, generationPath: 'n8n',
-          });
-          if (guard.blocked) payload = { ...payload, content: guard.content };
-        }
+        const guard = await applyOutputGuardrails({
+          tenantId: session.tenantId, session, channel: session.channel,
+          content: payload.content, fallbackMessage: OUTPUT_BLOCK_FALLBACK, generationPath: 'n8n',
+        });
+        if (guard.blocked) payload = { ...payload, content: guard.content };
       }
 
       await this.messageRepo.update(messageId, {
@@ -467,6 +508,34 @@ export class WebhookService {
           success: false,
           error: 'Payload is required for file.request action',
         };
+      }
+
+      // Mirror the message-send gates (codex): never show customer-visible UI
+      // (a file-upload prompt) after the session is handed off, closed, or
+      // guardrail-paused.
+      const session = await this.sessionRepo.findOne({ where: { id: sessionId } });
+      if (!session) {
+        return { success: false, error: `Session not found: ${sessionId}` };
+      }
+      if (session.status === 'handoff' || session.status === 'closed') {
+        return { success: false, error: `Session is in ${session.status} status — file requests not accepted` };
+      }
+      if (session.aiAutoReplyEnabled === false) {
+        return { success: false, error: 'Session is guardrail-paused — file requests not accepted' };
+      }
+
+      // Output guardrails (AC14): the prompt is customer-visible n8n text. A blocked
+      // prompt (enforce) means the n8n flow produced unsafe text — DON'T show the
+      // upload UI; hand off to a human instead. Shadow mode only logs and proceeds.
+      if (typeof payload.prompt === 'string' && payload.prompt.trim()) {
+        const guard = await applyOutputGuardrails({
+          tenantId: session.tenantId, session, channel: session.channel,
+          content: payload.prompt, fallbackMessage: OUTPUT_BLOCK_FALLBACK, generationPath: 'n8n',
+        });
+        if (guard.blocked) {
+          await this.triggerHandoff(sessionId, { reason: 'bot_error' });
+          return { success: true };
+        }
       }
 
       this.config.eventEmitter.emit('file:requested', {

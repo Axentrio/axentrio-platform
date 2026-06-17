@@ -298,7 +298,7 @@ describe('EscalationTool', () => {
     expect(tool.name).toBe('escalate_to_human');
   });
 
-  it('execute returns escalated=true with reason and session context', async () => {
+  it('execute returns escalated=true with reason, but NOT internal ids (R31)', async () => {
     const tool = new EscalationTool();
     const ctx = makeCtx({ sessionId: 'sess-6', tenantId: 'tenant-456' });
 
@@ -307,7 +307,8 @@ describe('EscalationTool', () => {
     expect(result.success).toBe(true);
     expect((result.data as any).escalated).toBe(true);
     expect((result.data as any).reason).toBe('Cannot resolve customer issue');
-    expect((result.data as any).sessionId).toBe('sess-6');
-    expect((result.data as any).tenantId).toBe('tenant-456');
+    // R31: internal ids must NOT be exposed to the model (it could echo them).
+    expect((result.data as any).sessionId).toBeUndefined();
+    expect((result.data as any).tenantId).toBeUndefined();
   });
 });

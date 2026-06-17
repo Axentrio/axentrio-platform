@@ -12,7 +12,7 @@
 // detectable from output text alone): invented price, fake confirmation, fake
 // feature-unlock, inferred-tier — those need backend/state cross-checks.
 
-import { detectUnsafeLinkHosts, MAX_CLASSIFY_CHARS } from './classify';
+import { detectUnsafeLinkHosts } from './classify';
 
 export type OutputViolationFamily =
   | 'leaked_internals'
@@ -107,7 +107,11 @@ const OUTPUT_CREDENTIAL: Array<{ re: RegExp; reason: string }> = [
  * is always ok (nothing to send anyway).
  */
 export function validateOutput(text: string): OutputValidationResult {
-  const t = (text ?? '').slice(0, MAX_CLASSIFY_CHARS);
+  // Scan the ENTIRE reply — unlike inbound (which is hard-capped at ingress so its
+  // scan window always covers the whole message), an outbound reply has no such
+  // cap, so truncating here would let a leak in the tail slip past unscanned
+  // (codex). All checks are linear (bounded negated classes), so full-scan is O(n).
+  const t = text ?? '';
   const violations: OutputViolation[] = [];
   if (!t.trim()) return { ok: true, violations };
 

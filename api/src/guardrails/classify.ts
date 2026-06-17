@@ -222,7 +222,8 @@ export function classifyMessage(text: string, channel: string): ClassifyResult {
  */
 export function detectUnsafeLinkHosts(text: string): string[] {
   const reasons: string[] = [];
-  for (const m of (text ?? '').slice(0, MAX_CLASSIFY_CHARS).matchAll(URL_RE)) {
+  // Full scan (output has no ingress cap; linear) — see validateOutput.
+  for (const m of (text ?? '').matchAll(URL_RE)) {
     let host = '';
     try {
       const raw = m[1];

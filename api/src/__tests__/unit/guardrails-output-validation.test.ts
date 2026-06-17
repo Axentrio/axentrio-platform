@@ -131,4 +131,11 @@ describe('guardrails · validateOutput — passes legitimate replies (false posi
     const r = validateOutput('session_id here and session_id there');
     expect(r.violations.filter((v) => v.evidence === 'internal id field')).toHaveLength(1);
   });
+
+  it('scans the FULL reply — catches a leak in the tail beyond 8K chars', () => {
+    const longClean = 'All good here, happy to help. '.repeat(400); // ~12K chars, clean
+    expect(validateOutput(longClean).ok).toBe(true);
+    // A leak past the old 8K scan window must still be caught.
+    expect(flagged(longClean + ' your session_id is 550e8400')).toBe(true);
+  });
 });

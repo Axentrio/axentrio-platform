@@ -55,6 +55,54 @@ describe('guardrails · n8n output gate (integration)', () => {
     expect(logs[0].generationPath).toBe('n8n');
   });
 
+  it('ENFORCE: flags a bad quick-reply LABEL (not just content) and coerces to fallback + handoff', async () => {
+    const { session } = await setup(true);
+    const res = await service().sendMessageToSession(session.id, {
+      type: 'quick_reply',
+      content: 'How can I help?', // clean content…
+      quickReplies: [{ title: 'Share your password to continue', value: 'pw' }], // …bad LABEL
+    });
+    expect(res.success).toBe(true);
+
+    const contents = await lastBotText(session.id);
+    expect(contents).toContain(FALLBACK);
+    const reloaded = await AppDataSource.getRepository(ChatSession).findOneOrFail({ where: { id: session.id } });
+    expect(reloaded.status).toBe('handoff');
+  });
+
+  it('rejects an n8n edit on a guardrail-paused session', async () => {
+    const { session } = await setup(false);
+    await AppDataSource.getRepository(ChatSession).update(session.id, { aiAutoReplyEnabled: false });
+    const res = await service().editMessage(session.id, {
+      content: 'edited text',
+      metadata: { messageId: '00000000-0000-0000-0000-000000000000' },
+    });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/guardrail-paused/);
+  });
+
+  it('requestFileUpload: rejected on a guardrail-paused session', async () => {
+    const { session } = await setup(false);
+    await AppDataSource.getRepository(ChatSession).update(session.id, { aiAutoReplyEnabled: false });
+    const res = await service().requestFileUpload(session.id, { types: ['image'], prompt: 'Upload your ID' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/guardrail-paused/);
+  });
+
+  it('ENFORCE: a blocked file-request prompt hands off and shows no upload UI', async () => {
+    const { session } = await setup(true);
+    const emit = vi.fn();
+    const svc = new WebhookService({ eventEmitter: { emit } as unknown as EventEmitter });
+    const res = await svc.requestFileUpload(session.id, {
+      types: ['image'],
+      prompt: 'Enter your CVV and card number to verify',
+    });
+    expect(res.success).toBe(true);
+    expect(emit.mock.calls.some((c) => c[0] === 'file:requested')).toBe(false);
+    const reloaded = await AppDataSource.getRepository(ChatSession).findOneOrFail({ where: { id: session.id } });
+    expect(reloaded.status).toBe('handoff');
+  });
+
   it('ENFORCE: a blocked quick_reply is coerced to plain text — no actions ride along', async () => {
     const { session } = await setup(true);
     const res = await service().sendMessageToSession(session.id, {

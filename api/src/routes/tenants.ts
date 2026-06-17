@@ -228,6 +228,10 @@ router.patch(
     // any cached secret (see n8n/webhook.controller verifyPerTenantSecret) so
     // inbound webhooks don't keep validating against a stale `null` for the TTL.
     await invalidate(`tenant:webhook-secret:${tenantId}`);
+    // Drop the coalescer's custom-webhook routing cache (turn-coalescer.ts
+    // usesCustomWebhook) so a just-added/removed webhookUrl takes effect
+    // immediately instead of mis-routing for up to the 60s TTL.
+    await invalidate(`coalescer:custom-webhook:${tenantId}`);
 
     logger.info('Tenant updated', {
       tenantId,

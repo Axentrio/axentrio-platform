@@ -316,3 +316,122 @@ describe('runTurn — stale-output suppression', () => {
     expect(stillPending?.content).toBe('0475464421');
   });
 });
+
+describe('runTurn — human takeover', () => {
+  it('does not run the agent when a human already owns the session (status active)', async () => {
+    const runMock = vi.fn();
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'active' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const msg = await createTestMessage(session.id, tenant.id, user.id, { content: 'hello?' });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const status = await runTurn(fresh, msg);
+
+    expect(status).toBe('noop');
+    expect(runMock).not.toHaveBeenCalled();
+    expect(await countBotMessages(session.id)).toBe(0);
+  });
+
+  it('does not commit/send a reply when a human takes over DURING the run', async () => {
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const msg = await createTestMessage(session.id, tenant.id, user.id, { content: 'are you a bot?' });
+
+    // An agent takes the chat while the LLM is "thinking".
+    const runMock = vi.fn().mockImplementation(async () => {
+      await sessionRepo.query(`UPDATE chat_sessions SET status = 'active' WHERE id = $1`, [session.id]);
+      return { type: 'response', content: 'I am a bot!' };
+    });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const status = await runTurn(fresh, msg);
+
+    expect(status).toBe('stale'); // finalize predicate (status IN bot,waiting) rolled it back
+    expect(await countBotMessages(session.id)).toBe(0);
+    expect(mockRouteOutboundMessage).not.toHaveBeenCalled();
+    const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(after.lastCoalescedAnswerAt == null).toBe(true); // not marked answered
+  });
+});
+
+describe('runTurn — local autoresponders (parity with the legacy path)', () => {
+  async function makeTenantWith(aiOverrides: Record<string, unknown>, botExtra: Record<string, unknown> = {}) {
+    const tenant = await createTestTenant({ settings: { ai: { apiKey: 'sk-test' } } as any });
+    await createTestAnchorBot(tenant, {
+      settings: {
+        ai: { ...AI, ...aiOverrides, guardrails: { ...AI.guardrails, ...(aiOverrides.guardrails as object || {}) } },
+        ...botExtra,
+      } as BotSettings,
+    });
+    return tenant;
+  }
+
+  it('hands off on an escalation keyword instead of running the agent', async () => {
+    const runMock = vi.fn();
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWith({ guardrails: { escalationKeywords: ['human please'] } });
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const msg = await createTestMessage(session.id, tenant.id, user.id, { content: 'a HUMAN PLEASE now' });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const status = await runTurn(fresh, msg);
+
+    expect(status).toBe('answered');
+    expect(runMock).not.toHaveBeenCalled(); // escalation short-circuits the agent
+    expect(await countBotMessages(session.id)).toBe(1); // the fallback message
+    const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(after.lastCoalescedAnswerMessageId).toBe(msg.id); // marked answered
+  });
+
+  it('hands off when an EARLIER burst message has the escalation keyword (window scan)', async () => {
+    const runMock = vi.fn();
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWith({ guardrails: { escalationKeywords: ['human please'] } });
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+
+    const base = 1_700_000_000_000;
+    const m1 = await createTestMessage(session.id, tenant.id, user.id, { content: 'a human please!' });
+    const m2 = await createTestMessage(session.id, tenant.id, user.id, { content: 'are you there?' });
+    await setCreatedAt(m1.id, base);
+    await setCreatedAt(m2.id, base + 1000);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const pending = await getNewestUnansweredUserMessage(fresh);
+    expect(pending?.id).toBe(m2.id); // hwm is the non-escalation message
+
+    const status = await runTurn(fresh, pending!);
+
+    expect(status).toBe('answered');
+    expect(runMock).not.toHaveBeenCalled(); // escalation in m1 still short-circuits
+    expect(await countBotMessages(session.id)).toBe(1);
+  });
+
+  it('sends the off-hours message instead of running the agent when outside business hours', async () => {
+    const runMock = vi.fn();
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const closedEveryDay = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'].map(
+      (day) => ({ day, closed: true, open: '09:00', close: '17:00' }),
+    );
+    const tenant = await makeTenantWith({}, { businessHours: { enabled: true, timezone: 'UTC', schedule: closedEveryDay } });
+    const session = await createTestSession(tenant.id, { status: 'bot' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const msg = await createTestMessage(session.id, tenant.id, user.id, { content: 'hello' });
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    const status = await runTurn(fresh, msg);
+
+    expect(status).toBe('answered');
+    expect(runMock).not.toHaveBeenCalled();
+    expect(await countBotMessages(session.id)).toBe(1); // off-hours message
+  });
+});

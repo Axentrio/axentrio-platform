@@ -4,6 +4,7 @@
  * Used by both WebSocket handler and HTTP chat routes
  */
 
+import { randomUUID } from 'crypto';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { notificationService } from './notification.service';
@@ -327,55 +328,16 @@ export async function forwardMessageToN8n(
     }
   }
 
-  // ── Pre-forwarding checks (cheap, local) ──────────────────────────────
-  if (session.status === 'bot' && savedMessage.type === 'text' && aiSettings?.enabled) {
-    // Business hours check
-    const bh = botSettings.businessHours;
-    if (bh?.enabled && bh.schedule?.length) {
-      const now = new Date();
-      const tz = bh.timezone || 'UTC';
-      const dayFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' });
-      const dayName = dayFormatter.format(now).toLowerCase();
-      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
-      const parts = timeFormatter.formatToParts(now);
-      const hour = parts.find(p => p.type === 'hour')!.value;
-      const minute = parts.find(p => p.type === 'minute')!.value;
-      const timeStr = `${hour}:${minute}`;
-      const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
-
-      const isOutsideHours = !daySchedule || daySchedule.closed ||
-        timeStr < daySchedule.open || timeStr >= daySchedule.close;
-
-      if (isOutsideHours) {
-        const botParticipant = await ensureBotParticipant(session, aiSettings);
-        await sendBotMessage(
-          session,
-          botParticipant.id,
-          aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon."
-        );
-        return true;
-      }
-    }
-
-    // Escalation keyword check — decrypt first if needed
-    const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
-    const plainContent = savedMessage.contentEncrypted
-      ? decrypt(savedMessage.content)
-      : savedMessage.content;
-    const lowerContent = plainContent.toLowerCase();
-    const matchedKeyword = escalationKeywords.find((kw: string) =>
-      lowerContent.includes(kw.toLowerCase())
-    );
-
-    if (matchedKeyword) {
-      logger.info(`Escalation keyword "${matchedKeyword}" detected in session ${session.id}`);
+  // ── Pre-forwarding checks (cheap, local) — shared with the coalesced path ──
+  if (aiSettings) {
+    const plainContent = savedMessage.contentEncrypted ? decrypt(savedMessage.content) : (savedMessage.content || '');
+    const auto = localAutoresponse(session, savedMessage.type, plainContent, botSettings, aiSettings);
+    if (auto) {
       const botParticipant = await ensureBotParticipant(session, aiSettings);
-      await sendBotMessage(
-        session,
-        botParticipant.id,
-        aiSettings.guardrails?.fallbackMessage || "I'm connecting you to a human agent."
-      );
-      await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+      await sendBotMessage(session, botParticipant.id, auto.message);
+      if (auto.kind === 'escalation') {
+        await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+      }
       return true;
     }
   }
@@ -518,38 +480,122 @@ const BURST_DEBOUNCE_MS = Number(
 // Safety cap on the drain loop — bounds work even if a user keeps bursting.
 const MAX_DRAIN_TURNS = 6;
 
-async function acquireSessionLock(sessionId: string, ttlMs: number = 60000): Promise<boolean> {
+// Owner-token lock — `agent:lock:{sessionId}` is SHARED with the coalescer
+// (turn-coalescer.ts), so refresh/release MUST be owner-token-scoped: an
+// unconditional PEXPIRE/DEL here could extend or delete a lock the coalescer
+// owns (and vice-versa) → concurrent runs / double reply. acquire returns the
+// token to pass back to refresh/release; NO_REDIS_LOCK is the fail-open sentinel.
+const NO_REDIS_LOCK = 'no-redis';
+const LOCK_REFRESH_LUA = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end return 0`;
+const LOCK_RELEASE_LUA = `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`;
+
+async function acquireSessionLock(sessionId: string, ttlMs: number = 60000): Promise<string | null> {
   try {
     const { getRedisClient } = await import('../config/redis');
     const redis = getRedisClient();
-    if (!redis) return true; // no Redis = no lock (fail open)
-    const result = await redis.set(`agent:lock:${sessionId}`, '1', 'PX', ttlMs, 'NX');
-    return result === 'OK';
+    if (!redis) return NO_REDIS_LOCK; // no Redis = no lock (fail open)
+    const token = randomUUID();
+    const result = await redis.set(`agent:lock:${sessionId}`, token, 'PX', ttlMs, 'NX');
+    return result === 'OK' ? token : null;
   } catch {
-    return true; // fail open
+    return NO_REDIS_LOCK; // fail open
   }
 }
 
 // Extend the lock while a multi-turn drain is in progress, so a slow burst
-// doesn't let the TTL lapse and admit a concurrent run.
-async function refreshSessionLock(sessionId: string, ttlMs: number = 60000): Promise<void> {
+// doesn't let the TTL lapse and admit a concurrent run. Owner-token-scoped.
+async function refreshSessionLock(sessionId: string, token: string, ttlMs: number = 60000): Promise<void> {
+  if (token === NO_REDIS_LOCK) return;
   try {
     const { getRedisClient } = await import('../config/redis');
     const redis = getRedisClient();
-    if (redis) await redis.pexpire(`agent:lock:${sessionId}`, ttlMs);
+    if (redis) await redis.eval(LOCK_REFRESH_LUA, 1, `agent:lock:${sessionId}`, token, String(ttlMs));
   } catch {
     // ignore
   }
 }
 
-async function releaseSessionLock(sessionId: string): Promise<void> {
+async function releaseSessionLock(sessionId: string, token: string): Promise<void> {
+  if (token === NO_REDIS_LOCK) return;
   try {
     const { getRedisClient } = await import('../config/redis');
     const redis = getRedisClient();
-    if (redis) await redis.del(`agent:lock:${sessionId}`);
+    if (redis) await redis.eval(LOCK_RELEASE_LUA, 1, `agent:lock:${sessionId}`, token);
   } catch {
     // ignore
   }
+}
+
+// Advance the durable coalesced-answer watermark to `messageId` (DB-side, µs
+// precision, monotonic). The legacy platformAgentPath calls this after answering
+// a message so that — when the coalescer is enabled and a message reached the
+// legacy path via the fail-open fallback — a coalescer job for the same session
+// won't re-answer it (the watermark is the coalescer's "answered" source of
+// truth). No-op-safe when the coalescer is off (nothing reads the watermark).
+export async function advanceCoalescedWatermark(sessionId: string, messageId: string): Promise<void> {
+  try {
+    await sessionRepository.query(
+      `UPDATE chat_sessions s
+          SET last_coalesced_answer_at = m.created_at,
+              last_coalesced_answer_message_id = m.id
+         FROM messages m
+        WHERE s.id = $1 AND m.id = $2
+          AND (s.last_coalesced_answer_at IS NULL
+               OR (s.last_coalesced_answer_at, s.last_coalesced_answer_message_id)
+                  < (m.created_at, m.id))`,
+      [sessionId, messageId],
+    );
+  } catch (err) {
+    logger.warn('[coalescer] legacy watermark advance failed', {
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+// Local autoresponder decision (off-hours / escalation-keyword), shared by the
+// legacy forwardMessageToN8n path and the coalesced runTurn path so the two can't
+// diverge (the coalescer previously skipped both gates). Returns null when the
+// agent should run normally. Mirrors the legacy gate: text turns on bot-owned
+// sessions with AI enabled only.
+function localAutoresponse(
+  session: ChatSession,
+  messageType: Message['type'],
+  plainContent: string,
+  botSettings: BotSettings,
+  aiSettings: BotAiSettings,
+): { kind: 'off_hours' | 'escalation'; message: string } | null {
+  if (session.status !== 'bot' || messageType !== 'text' || !aiSettings?.enabled) return null;
+
+  const bh = botSettings.businessHours;
+  if (bh?.enabled && bh.schedule?.length) {
+    const now = new Date();
+    const tz = bh.timezone || 'UTC';
+    const dayName = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long' }).format(now).toLowerCase();
+    const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+    const timeStr = `${parts.find((p) => p.type === 'hour')!.value}:${parts.find((p) => p.type === 'minute')!.value}`;
+    const daySchedule = bh.schedule.find((s: any) => s.day.toLowerCase() === dayName);
+    const isOutsideHours = !daySchedule || daySchedule.closed || timeStr < daySchedule.open || timeStr >= daySchedule.close;
+    if (isOutsideHours) {
+      return {
+        kind: 'off_hours',
+        message: aiSettings.guardrails?.offHoursMessage || "We're currently outside business hours. We'll get back to you soon.",
+      };
+    }
+  }
+
+  const escalationKeywords = aiSettings.guardrails?.escalationKeywords || [];
+  const lowerContent = plainContent.toLowerCase();
+  const matched = escalationKeywords.find((kw: string) => lowerContent.includes(kw.toLowerCase()));
+  if (matched) {
+    logger.info(`Escalation keyword "${matched}" detected in session ${session.id}`);
+    return {
+      kind: 'escalation',
+      message: aiSettings.guardrails?.fallbackMessage || "I'm connecting you to a human agent.",
+    };
+  }
+
+  return null;
 }
 
 // The most recent user message that has no bot reply after it — i.e. the live
@@ -737,8 +783,8 @@ async function platformAgentPath(
   // wins the lock drives the turn; rapid-fire siblings fail to acquire, return
   // here (already persisted by the /message handler), and get picked up by the
   // drain loop below as part of the same coalesced turn.
-  const locked = await acquireSessionLock(session.id);
-  if (!locked) {
+  const lockToken = await acquireSessionLock(session.id);
+  if (!lockToken) {
     logger.info(`Agent already processing session ${session.id}; message queued for the in-flight run`);
     return true;
   }
@@ -759,7 +805,7 @@ async function platformAgentPath(
     const processed = new Set<string>();
 
     for (let turn = 0; turn < MAX_DRAIN_TURNS; turn++) {
-      await refreshSessionLock(session.id);
+      await refreshSessionLock(session.id, lockToken);
       const pending = await getLatestUnansweredUserMessage(session.id);
       if (!pending || processed.has(pending.id)) break;
       processed.add(pending.id);
@@ -852,6 +898,11 @@ async function platformAgentPath(
       // Stop typing indicator
       emitToSession(session.tenantId, session.id, 'typing:stop', {});
 
+      // Keep the durable coalesced watermark current: if the coalescer is enabled
+      // and this message reached the legacy path via the fail-open fallback, this
+      // stops a coalescer job from re-answering the same message.
+      await advanceCoalescedWatermark(session.id, pending.id);
+
       // Once handed to a human, stop draining — the bot no longer owns the session.
       if (handedOff) break;
 
@@ -881,7 +932,7 @@ async function platformAgentPath(
     await handleBotHandoff(session, bp.id, 'bot_error');
     return true;
   } finally {
-    await releaseSessionLock(session.id);
+    await releaseSessionLock(session.id, lockToken);
   }
 }
 
@@ -930,6 +981,74 @@ export async function getNewestUnansweredUserMessage(session: ChatSession): Prom
     );
   }
   return qb.orderBy('m.createdAt', 'DESC').addOrderBy('m.id', 'DESC').limit(1).getOne();
+}
+
+/**
+ * OLDEST unanswered user message (same watermark predicate, ascending). Used by
+ * the custom-webhook recovery drain to forward a backlog oldest→newest one at a
+ * time, advancing the watermark after each — so an arbitrarily large backlog is
+ * forwarded exactly once with no message hidden behind the watermark.
+ */
+export async function getOldestUnansweredUserMessage(
+  session: ChatSession,
+  upToHwmId?: string,
+): Promise<Message | null> {
+  const qb = messageRepository
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .where('m.sessionId = :sid', { sid: session.id })
+    .andWhere('m.isDeleted = false')
+    .andWhere("m.type IN ('text','image')")
+    .andWhere("p.type = 'user'")
+    .andWhere('m.guardrailFlagged = false');
+  if (session.lastCoalescedAnswerMessageId) {
+    qb.andWhere(
+      '(m.created_at, m.id) > (COALESCE((SELECT created_at FROM messages WHERE id = :wId), :wAt), :wId)',
+      { wId: session.lastCoalescedAnswerMessageId, wAt: session.lastCoalescedAnswerAt },
+    );
+  }
+  // Upper bound: don't drain past the snapped hwm. Messages that arrive DURING a
+  // (slow) drain are forwarded by their own ingress path — without this bound the
+  // drain loop would re-forward them (double send).
+  if (upToHwmId) {
+    qb.andWhere(
+      '(m.created_at, m.id) <= ((SELECT created_at FROM messages WHERE id = :upTo), :upTo)',
+      { upTo: upToHwmId },
+    );
+  }
+  return qb.orderBy('m.createdAt', 'ASC').addOrderBy('m.id', 'ASC').limit(1).getOne();
+}
+
+/**
+ * All unanswered USER TEXT messages up to (and including) the hwm, oldest-first,
+ * capped at `limit`. Used by the coalesced escalation scan to cover the WHOLE
+ * burst (legacy checks each message individually), beyond the small guardrails
+ * window. Returns plaintext is the caller's job (content stays encrypted here).
+ */
+export async function getUnansweredUserTextUpTo(
+  session: ChatSession,
+  hwmId: string,
+  limit: number,
+): Promise<Message[]> {
+  const qb = messageRepository
+    .createQueryBuilder('m')
+    .innerJoin('m.participant', 'p')
+    .where('m.sessionId = :sid', { sid: session.id })
+    .andWhere('m.isDeleted = false')
+    .andWhere("m.type = 'text'")
+    .andWhere("p.type = 'user'")
+    .andWhere('m.guardrailFlagged = false')
+    .andWhere(
+      '(m.created_at, m.id) <= ((SELECT created_at FROM messages WHERE id = :hwmId), :hwmId)',
+      { hwmId },
+    );
+  if (session.lastCoalescedAnswerMessageId) {
+    qb.andWhere(
+      '(m.created_at, m.id) > (COALESCE((SELECT created_at FROM messages WHERE id = :wId), :wAt), :wId)',
+      { wId: session.lastCoalescedAnswerMessageId, wAt: session.lastCoalescedAnswerAt },
+    );
+  }
+  return qb.orderBy('m.createdAt', 'ASC').addOrderBy('m.id', 'ASC').limit(limit).getMany();
 }
 
 /**
@@ -1106,6 +1225,21 @@ async function finalizeReply(
         }),
       );
 
+      // Atomic finalize predicate — every condition that must still hold at COMMIT
+      // time (not just at the earlier checks), so the bot reply rolls back if:
+      //  - ai_auto_reply was disabled mid-run (guardrail block), OR
+      //  - a human took over mid-run (status left 'bot'/'waiting' → 'active'/'handoff'/
+      //    'closed'); without this a coalesced reply could land after takeover, OR
+      //  - another run already advanced past hwm, OR
+      //  - (staleGuard) a NEWER user message arrived between the stale-check and
+      //    here — closes the READ COMMITTED race so no stale reply commits/sends.
+      const noNewerClause = staleGuard
+        ? `AND NOT EXISTS (
+             SELECT 1 FROM messages n JOIN participants p ON p.id = n.participant_id
+             WHERE n.session_id = s.id AND n.is_deleted = false
+               AND n.type IN ('text','image') AND p.type = 'user' AND n.guardrail_flagged = false
+               AND (n.created_at, n.id) > (m.created_at, m.id))`
+        : '';
       const upd = await manager.query(
         `UPDATE chat_sessions s
             SET last_coalesced_answer_at = m.created_at,
@@ -1113,16 +1247,18 @@ async function finalizeReply(
            FROM messages m
           WHERE s.id = $1 AND m.id = $2
             AND s.ai_auto_reply_enabled = true
+            AND s.status IN ('bot','waiting')
             AND (s.last_coalesced_answer_at IS NULL
                  OR (s.last_coalesced_answer_at, s.last_coalesced_answer_message_id)
                     < (m.created_at, m.id))
+            ${noNewerClause}
           RETURNING s.id`,
         [session.id, hwmId],
       );
       if (returningRows<{ id: string }>(upd).length !== 1) {
-        // Another run advanced past hwm, OR a guardrail block disabled the session
-        // mid-run (ai_auto_reply_enabled = false) — roll back this reply (no
-        // persist, no delivery). Treated as 'stale' upstream.
+        // One of the finalize conditions failed at commit time (human takeover,
+        // AI disabled, watermark race, or a newer message) — roll back this reply
+        // (no persist, no delivery). Treated as 'stale' upstream.
         throw new WatermarkConflictError();
       }
 
@@ -1144,7 +1280,15 @@ async function finalizeReply(
   }
 }
 
-/** Outbound delivery for a persisted bot message (post-commit). */
+/**
+ * Outbound delivery for a persisted bot message (post-commit).
+ *
+ * The reply is already committed + watermark-advanced, so a delivery failure here
+ * does NOT roll back (re-running would re-LLM and persist a duplicate). We surface
+ * it loudly instead — a true at-least-once guarantee needs a transactional outbox
+ * (tracked separately). routeOutboundMessage SWALLOWS errors and returns
+ * { success: false }, so check the result rather than relying on a throw.
+ */
 async function routeBotMessageOutbound(
   session: ChatSession,
   savedId: string,
@@ -1152,7 +1296,7 @@ async function routeBotMessageOutbound(
   quickReplies?: Array<{ title: string; value: string }>,
 ): Promise<void> {
   const metadata = quickReplies?.length ? { quickReplies } : undefined;
-  await routeOutboundMessage(
+  const result = await routeOutboundMessage(
     { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: savedId },
     {
@@ -1167,6 +1311,12 @@ async function routeBotMessageOutbound(
       },
     },
   );
+  if (result && result.success === false) {
+    logger.error('[coalescer] bot reply persisted but channel delivery FAILED', {
+      sessionId: session.id, tenantId: session.tenantId, messageId: savedId,
+      channel: session.channel, error: result.error,
+    });
+  }
 }
 
 /**
@@ -1232,6 +1382,46 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   }
 
   const botParticipant = await ensureBotParticipant(session, aiSettings);
+
+  // Local autoresponders (off-hours / escalation-keyword) — same gate as the
+  // legacy path (shared helper), so coalesced platform-agent tenants don't lose
+  // them. Finalise via the watermark so the turn is marked answered (won't re-run)
+  // and route outbound; escalation also hands off.
+  const pendingPlain = pending.contentEncrypted ? decrypt(pending.content) : (pending.content || '');
+  let auto = localAutoresponse(session, pending.type, pendingPlain, botSettings, aiSettings);
+  // The hwm itself didn't trip off-hours/escalation — but an EARLIER message in
+  // this coalesced burst might contain an escalation keyword (the legacy path sees
+  // each message individually; we must scan the whole window for parity). Off-hours
+  // is time-based so it's already covered by the hwm check above.
+  if (!auto) {
+    const kwCount = aiSettings.guardrails?.escalationKeywords?.length ?? 0;
+    // windowMsgs is the small guardrails window (newest 11). If it's at the cap
+    // AND escalation keywords are configured, scan the FULL unanswered text
+    // backlog up to the hwm so a keyword in an older burst message isn't missed
+    // (legacy checks each message individually). Common case (no keywords / small
+    // burst) reuses the already-loaded window — no extra query.
+    const scan = kwCount > 0 && windowMsgs.length >= 11
+      ? await getUnansweredUserTextUpTo(session, pending.id, 200)
+      : windowMsgs;
+    for (const m of scan) {
+      if (m.id === pending.id || m.type !== 'text') continue;
+      const mc = m.contentEncrypted ? decrypt(m.content) : (m.content || '');
+      const esc = localAutoresponse(session, 'text', mc, botSettings, aiSettings);
+      if (esc?.kind === 'escalation') { auto = esc; break; }
+    }
+  }
+  if (auto) {
+    // off-hours is stale-guarded (a newer message arriving mid-finalize should be
+    // handled as its own turn, not double-replied with the canned off-hours msg).
+    // escalation is NOT stale-guarded: hand off immediately; the human sees newer
+    // messages and the takeover gate stops further bot replies.
+    const staleGuard = auto.kind === 'off_hours';
+    const fin = await finalizeReply(session, botParticipant.id, auto.message, undefined, pending.id, staleGuard);
+    if (fin.status === 'stale') return 'stale';
+    await routeBotMessageOutbound(session, fin.savedId, auto.message);
+    if (auto.kind === 'escalation') await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
+    return 'answered';
+  }
 
   // Typing indicators — portal + widget over WS, and the end user's channel.
   emitToTenantAgents(session.tenantId, 'typing:indicator', {
@@ -1468,9 +1658,12 @@ async function handleBotHandoff(
     return;
   }
 
-  // Update session status
-  session.requestHandoff();
-  await sessionRepository.save(session);
+  // Update session status — targeted column UPDATE, NOT a full-entity save().
+  // save(session) would write back every column from the in-memory entity,
+  // including a stale last_coalesced_answer_message_id loaded before finalizeReply
+  // advanced it — clobbering the watermark and re-opening the answered turn.
+  session.requestHandoff(); // keep the in-memory copy consistent for the caller
+  await sessionRepository.update(session.id, { status: 'handoff' });
 
   // Create handoff request
   const handoff = handoffRepository.create({

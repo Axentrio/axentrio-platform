@@ -37,7 +37,9 @@ import {
   runTurn,
   isForwardingReady,
   getNewestUnansweredUserMessage,
+  getOldestUnansweredUserMessage,
   getUnansweredBounds,
+  advanceCoalescedWatermark,
   isCustomWebhookUrl,
 } from './message-forwarding.service';
 
@@ -71,14 +73,20 @@ const tenantRepository = AppDataSource.getRepository(Tenant);
  * agent, or drop the message if their AI is off). They take the legacy inline
  * forward instead, which handles the custom-webhook path. See issue #37.
  */
-export async function usesCustomWebhook(tenantId: string): Promise<boolean> {
-  return cached(`coalescer:custom-webhook:${tenantId}`, 60, async () => {
+export async function usesCustomWebhook(tenantId: string, opts?: { fresh?: boolean }): Promise<boolean> {
+  const compute = async () => {
     const t = await tenantRepository.findOne({
       where: { id: tenantId },
       select: { id: true, webhookUrl: true } as never,
     });
     return isCustomWebhookUrl(t?.webhookUrl, config.n8n.defaultWebhookUrl);
-  });
+  };
+  // The processor's under-lock re-check reads FRESH (uncached): a tenant update
+  // saves then invalidates, so a cached read can still be stale in that window,
+  // and an authoritative routing decision must not mis-route. Ingress uses the
+  // 60s cache (hot path).
+  if (opts?.fresh) return compute();
+  return cached(`coalescer:custom-webhook:${tenantId}`, 60, compute);
 }
 
 const stateKey = (sessionId: string): string => `turn:state:${sessionId}`;
@@ -294,6 +302,45 @@ export async function coalesceProcessor(job: Job): Promise<void> {
 
     const pending = await getNewestUnansweredUserMessage(session);
     if (!pending) return; // everything answered.
+
+    // Re-check custom-webhook UNDER the lock (FRESH/uncached — an authoritative
+    // routing decision must not read a stale cache): a webhook added during the
+    // debounce window means this tenant must NOT be coalesced (runTurn is
+    // platform-agent only). Forward EVERY unanswered message in the window to the
+    // legacy custom-webhook path, in chronological order (not just the newest hwm,
+    // or sibling jobs would each forward the same message and older ones would be
+    // dropped), then advance the watermark past the window so sibling jobs that
+    // lock-miss and re-arm find nothing to do. (Ingress also checks this; this
+    // closes the already-scheduled-job window — issue #37.)
+    if (await usesCustomWebhook(session.tenantId, { fresh: true })) {
+      // Forward the unanswered backlog oldest→newest, advancing the watermark
+      // after EACH message (not just to the newest hwm). This forwards every
+      // message exactly once regardless of backlog size, and as the watermark
+      // advances, sibling jobs that lock-miss + re-arm find nothing to do. The
+      // guard bounds a pathological backlog.
+      // Drain bound = the last message actually COALESCED (turn:state.lastPendingId),
+      // NOT newest-unanswered. A message that arrived via custom-webhook ingress
+      // AFTER the webhook was added was already forwarded there and never wrote
+      // turn:state, so bounding to newest-unanswered would re-forward it (double
+      // send). Fall back to the snapped hwm only if turn:state was lost.
+      const hwmId = (await redis.hget(stateKey(sessionId), 'lastPendingId')) || pending.id;
+      for (let i = 0; i < 200; i++) {
+        const next = await getOldestUnansweredUserMessage(session, hwmId);
+        if (!next) break;
+        await forwardMessageToN8n(session, next);
+        await advanceCoalescedWatermark(session.id, next.id);
+        // Reflect the advance in-memory so the next query excludes this message.
+        session.lastCoalescedAnswerAt = next.createdAt;
+        session.lastCoalescedAnswerMessageId = next.id;
+      }
+      // Do NOT delete turn:state here — leave it to expire by TTL. Its
+      // lastPendingId is the drain bound; a sibling/re-armed old job must keep
+      // seeing it so it excludes post-webhook custom-ingress messages (which were
+      // already forwarded by ingress). Deleting it would make that job fall back
+      // to newest-unanswered and double-forward. The watermark already advanced
+      // past the drained messages, so a sibling job finds nothing to drain.
+      return;
+    }
 
     // Re-derive dueAt UNDER the lock — closes the read-then-run gap. Prefer the
     // stored dueAt; if turn:state was lost (TTL/restart) recompute from the DB.

@@ -43,6 +43,9 @@ export interface InboundGateResult {
 /** Tenant-scoped enforce flag (cached 60s). Default shadow (false). A toggle
  *  takes effect within the TTL. Used by every ingress path. */
 export async function isGuardrailsEnforcing(tenantId: string): Promise<boolean> {
+  // Global break-glass: GUARDRAILS_KILL_SWITCH=true instantly disables ALL
+  // enforcement (every tenant falls back to shadow), regardless of per-tenant flag.
+  if (process.env.GUARDRAILS_KILL_SWITCH === 'true') return false;
   try {
     return await cached(`guardrails:enforce:${tenantId}`, 60, async () => {
       const t = await AppDataSource.getRepository(Tenant).findOne({

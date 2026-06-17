@@ -34,6 +34,7 @@
     "allTenants": "Alle klanten",
     "allUsers": "Alle gebruikers",
     "platformAnalytics": "Platformanalyse",
+    "guardrails": "Beveiliging",
     "botTemplates": "Bot-sjablonen",
     "faqEditor": "FAQ-editor"
   },
@@ -1126,6 +1127,27 @@
     }
   },
   "admin": {
+    "guardrails": {
+      "title": "Beveiliging",
+      "subtitle": "Bekijk gemarkeerde gesprekken en schakel handhaving per tenant in. Schaduwmodus logt alleen; handhaving blokkeert/vervangt een antwoord en draagt over aan een mens.",
+      "byTenant": "Activiteit per tenant (laatste {{days}} dagen)",
+      "flaggedFeed": "Recent gemarkeerde gesprekken",
+      "empty": "Nog geen gemarkeerde activiteit.",
+      "enforced": "Gehandhaafd",
+      "shadow": "Schaduw",
+      "view": "Bekijken",
+      "col": {
+        "tenant": "Tenant",
+        "flagged": "Gemarkeerd",
+        "enforcedCount": "Gehandhaafd",
+        "enforce": "Handhaven",
+        "time": "Tijd",
+        "source": "Bron",
+        "category": "Categorie",
+        "reasons": "Redenen",
+        "mode": "Modus"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Bot-sjablonen",

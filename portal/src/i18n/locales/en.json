@@ -34,6 +34,7 @@
     "allTenants": "All Tenants",
     "allUsers": "All Users",
     "platformAnalytics": "Platform Analytics",
+    "guardrails": "Guardrails",
     "botTemplates": "Bot Templates",
     "faqEditor": "FAQ Editor"
   },
@@ -1167,6 +1168,27 @@
     }
   },
   "admin": {
+    "guardrails": {
+      "title": "Guardrails",
+      "subtitle": "Review flagged conversations and enable enforcement per tenant. Shadow mode logs only; enforcement blocks/replaces a reply and hands off to a human.",
+      "byTenant": "Per-tenant activity (last {{days}} days)",
+      "flaggedFeed": "Recent flagged conversations",
+      "empty": "No flagged activity yet.",
+      "enforced": "Enforced",
+      "shadow": "Shadow",
+      "view": "View",
+      "col": {
+        "tenant": "Tenant",
+        "flagged": "Flagged",
+        "enforcedCount": "Enforced",
+        "enforce": "Enforce",
+        "time": "Time",
+        "source": "Source",
+        "category": "Category",
+        "reasons": "Reasons",
+        "mode": "Mode"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Bot Templates",

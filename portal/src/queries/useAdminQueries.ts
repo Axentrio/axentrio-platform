@@ -443,3 +443,36 @@ export function useSetTenantModule(id: string) {
       toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to update module'),
   });
 }
+
+// ── Guardrails cockpit (super-admin) ──────────────────────────────────────────
+
+export function useGuardrailFlagged(filters: { source?: string; tenantId?: string; enforced?: string } = {}) {
+  return useQuery({
+    queryKey: queryKeys.admin.guardrailFlagged(filters),
+    queryFn: async () => {
+      const res = await api.get<Any>('/admin/guardrails/flagged', { params: { limit: 100, ...filters } });
+      return (res?.events ?? []) as Any[];
+    },
+  });
+}
+
+export function useGuardrailSummary(days = 7) {
+  return useQuery({
+    queryKey: queryKeys.admin.guardrailSummary(days),
+    queryFn: async () => (await api.get<Any>('/admin/guardrails/summary', { params: { days } })) as Any,
+  });
+}
+
+export function useSetTenantGuardrailEnforce() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { tenantId: string; enforce: boolean }) =>
+      api.put(`/admin/tenants/${input.tenantId}/guardrails`, { enforce: input.enforce }),
+    onSuccess: (_, vars) => {
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.all(), 'guardrails'] });
+      toast.success(`Enforce ${vars.enforce ? 'enabled' : 'disabled'}`);
+    },
+    onError: (err: Any) =>
+      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to update enforce'),
+  });
+}

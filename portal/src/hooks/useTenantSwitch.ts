@@ -27,22 +27,27 @@ export function useTenantSwitch() {
   const { closeTenantPalette } = useUiStore();
   const { reconnect } = useSocket();
 
-  const flushAndRedirect = useCallback(() => {
-    // Remove all tenant-scoped caches (not admin caches)
-    for (const key of TENANT_SCOPED_KEYS) {
-      queryClient.removeQueries({ queryKey: [key] });
-    }
-    // Reconnect socket so server picks up new tenant context
-    reconnect();
-    // Redirect to dashboard to avoid 404s on tenant-scoped routes
-    navigate('/inbox', { replace: true });
-  }, [queryClient, navigate, reconnect]);
+  const flushAndRedirect = useCallback(
+    (path = '/inbox') => {
+      // Remove all tenant-scoped caches (not admin caches)
+      for (const key of TENANT_SCOPED_KEYS) {
+        queryClient.removeQueries({ queryKey: [key] });
+      }
+      // Reconnect socket so server picks up new tenant context
+      reconnect();
+      // Redirect (default dashboard) to avoid 404s on tenant-scoped routes
+      navigate(path, { replace: true });
+    },
+    [queryClient, navigate, reconnect]
+  );
 
+  // `redirectTo` lets callers (e.g. the guardrails cockpit deep-link) land on a
+  // specific tenant-scoped route after switching, instead of the default inbox.
   const switchTenant = useCallback(
-    (tenant: { tenantId: string; tenantName: string }) => {
+    (tenant: { tenantId: string; tenantName: string }, redirectTo?: string) => {
       setActiveTenant(tenant);
       closeTenantPalette();
-      flushAndRedirect();
+      flushAndRedirect(redirectTo);
       toast.success(`Now viewing ${tenant.tenantName}`);
     },
     [setActiveTenant, closeTenantPalette, flushAndRedirect]

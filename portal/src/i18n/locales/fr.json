@@ -34,6 +34,7 @@
     "allTenants": "Tous les clients",
     "allUsers": "Tous les utilisateurs",
     "platformAnalytics": "Analyses de la plateforme",
+    "guardrails": "Garde-fous",
     "botTemplates": "Modèles de bot",
     "faqEditor": "Éditeur de FAQ"
   },
@@ -1125,6 +1126,27 @@
     }
   },
   "admin": {
+    "guardrails": {
+      "title": "Garde-fous",
+      "subtitle": "Examinez les conversations signalées et activez l'application par locataire. Le mode observation se contente de journaliser ; l'application bloque/remplace une réponse et transfère à un humain.",
+      "byTenant": "Activité par locataire ({{days}} derniers jours)",
+      "flaggedFeed": "Conversations récemment signalées",
+      "empty": "Aucune activité signalée pour l'instant.",
+      "enforced": "Appliqué",
+      "shadow": "Observation",
+      "view": "Voir",
+      "col": {
+        "tenant": "Locataire",
+        "flagged": "Signalés",
+        "enforcedCount": "Appliqués",
+        "enforce": "Appliquer",
+        "time": "Heure",
+        "source": "Source",
+        "category": "Catégorie",
+        "reasons": "Raisons",
+        "mode": "Mode"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Modèles de bot",

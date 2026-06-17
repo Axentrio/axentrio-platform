@@ -13,6 +13,9 @@ export const sendMessageSchema = z.object({
 
 export const chatListQuerySchema = z.object({
   status: z.enum(['active', 'closed', 'waiting', 'handoff', 'bot']).optional(),
+  // Filter to guardrail-paused conversations (AI auto-reply disabled by a guardrail).
+  // Only 'true' is meaningful (it filters); absent = no filter.
+  aiPaused: z.literal('true').optional(),
   page: z.coerce.number().int().positive().optional(),
   limit: z.coerce.number().int().positive().max(100).optional(),
 });

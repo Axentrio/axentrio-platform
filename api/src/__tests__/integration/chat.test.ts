@@ -82,6 +82,43 @@ describe('Chat Lifecycle', () => {
     });
   });
 
+  describe('GET /api/v1/chats/sessions — guardrail visibility (Slice A)', () => {
+    it('exposes guardrail state and filters to guardrail-paused sessions', async () => {
+      const normal = await createTestSession(tenantId, { status: 'bot' });
+      const paused = await createTestSession(tenantId, { status: 'bot' });
+      await AppDataSource.getRepository(ChatSession).update(paused.id, {
+        aiAutoReplyEnabled: false,
+        guardrailStatus: 'spam',
+      });
+
+      const all = await request(app).get('/api/v1/chats/sessions?limit=100');
+      expect(all.status).toBe(200);
+      const pausedRow = all.body.data.find((s: { id: string }) => s.id === paused.id);
+      expect(pausedRow.aiAutoReplyEnabled).toBe(false);
+      expect(pausedRow.guardrailStatus).toBe('spam');
+      const normalRow = all.body.data.find((s: { id: string }) => s.id === normal.id);
+      expect(normalRow.aiAutoReplyEnabled).toBe(true);
+
+      const filtered = await request(app).get('/api/v1/chats/sessions?aiPaused=true&limit=100');
+      expect(filtered.status).toBe(200);
+      const ids = filtered.body.data.map((s: { id: string }) => s.id);
+      expect(ids).toContain(paused.id);
+      expect(ids).not.toContain(normal.id);
+    });
+
+    it('GET /chats/:id exposes guardrail state', async () => {
+      const s = await createTestSession(tenantId, { status: 'bot' });
+      await AppDataSource.getRepository(ChatSession).update(s.id, {
+        aiAutoReplyEnabled: false,
+        guardrailStatus: 'scam',
+      });
+      const res = await request(app).get(`/api/v1/chats/${s.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.data.aiAutoReplyEnabled).toBe(false);
+      expect(res.body.data.guardrailStatus).toBe('scam');
+    });
+  });
+
   describe('POST /api/v1/auth/widget', () => {
     it('should return a token for valid apiKey', async () => {
       const tenant = await createTestTenant();

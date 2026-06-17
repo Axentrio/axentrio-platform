@@ -371,6 +371,13 @@ router.get(
       qb.andWhere('session.status = :status', { status });
     }
 
+    // Surface guardrail-paused conversations: AI was disabled by a guardrail
+    // (auto-pause keeps status='bot', so these are otherwise indistinguishable
+    // from a healthy bot conversation in the inbox).
+    if (req.query.aiPaused === 'true') {
+      qb.andWhere('session.aiAutoReplyEnabled = false');
+    }
+
     if (!params.sortBy) {
       qb.orderBy('session.lastActivityAt', 'DESC');
     }
@@ -409,6 +416,8 @@ router.get(
         id: s.id,
         sessionId: s.id,
         status: s.status,
+        aiAutoReplyEnabled: s.aiAutoReplyEnabled,
+        guardrailStatus: s.guardrailStatus,
         userName: `Visitor ${s.visitorId?.substring(0, 8) || 'Anonymous'}`,
         assignedAgent: s.assignedAgent ? { id: s.assignedAgent.id } : null,
         assignedAgentName: s.assignedAgent?.userId ?? null,
@@ -461,6 +470,11 @@ router.get(
       sessionId: session.id,
       tenantId: session.tenantId,
       status: session.status,
+      // Guardrail state so the inbox can show "AI paused by guardrail" + a
+      // resume action — a guardrail pause keeps status='bot' but sets
+      // aiAutoReplyEnabled=false, which is otherwise invisible to operators.
+      aiAutoReplyEnabled: session.aiAutoReplyEnabled,
+      guardrailStatus: session.guardrailStatus,
       visitorId: session.visitorId,
       assignedAgentId: session.assignedAgentId,
       assignedAgentName: session.assignedAgent?.userId ?? null,

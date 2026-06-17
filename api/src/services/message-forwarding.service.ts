@@ -42,6 +42,7 @@ import {
 } from './bot-config.service';
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
+import { localizeMessage } from '../llm/localize';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -335,7 +336,10 @@ export async function forwardMessageToN8n(
     const auto = localAutoresponse(session, savedMessage.type, plainContent, botSettings, aiSettings);
     if (auto) {
       const botParticipant = await ensureBotParticipant(session, aiSettings);
-      await sendBotMessage(session, botParticipant.id, auto.message);
+      // Localize the canned off-hours/escalation message to the customer's
+      // language (fail-open to the original).
+      const autoMsg = await localizeMessage(auto.message, plainContent, session);
+      await sendBotMessage(session, botParticipant.id, autoMsg);
       if (auto.kind === 'escalation') {
         await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
       }
@@ -1467,9 +1471,13 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     // escalation is NOT stale-guarded: hand off immediately; the human sees newer
     // messages and the takeover gate stops further bot replies.
     const staleGuard = auto.kind === 'off_hours';
-    const fin = await finalizeReply(session, botParticipant.id, auto.message, undefined, pending.id, staleGuard);
+    // Localize the tenant's canned off-hours/escalation message to the customer's
+    // language (fail-open to the original) so an English customer doesn't get the
+    // Dutch-configured fallback.
+    const autoMsg = await localizeMessage(auto.message, pendingPlain, session);
+    const fin = await finalizeReply(session, botParticipant.id, autoMsg, undefined, pending.id, staleGuard);
     if (fin.status === 'stale') return 'stale';
-    await routeBotMessageOutbound(session, fin.savedId, auto.message);
+    await routeBotMessageOutbound(session, fin.savedId, autoMsg);
     if (auto.kind === 'escalation') await handleBotHandoff(session, botParticipant.id, 'bot_escalation_keyword');
     return 'answered';
   }

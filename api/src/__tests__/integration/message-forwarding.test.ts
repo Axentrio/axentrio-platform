@@ -83,6 +83,12 @@ vi.mock('../../llm/rag.service', () => ({
   generateResponse: (...args: unknown[]) => mockGenerateResponse(...args),
 }));
 
+// Canned off-hours/escalation messages now pass through localizeMessage; stub it
+// as a passthrough so these tests assert the configured text without a real LLM call.
+vi.mock('../../llm/localize', () => ({
+  localizeMessage: (message: string) => Promise.resolve(message),
+}));
+
 const mockRouteOutboundMessage = vi.fn().mockResolvedValue({ success: true });
 vi.mock('../../channels/outbound-router', () => ({
   routeOutboundMessage: (...args: unknown[]) => mockRouteOutboundMessage(...args),

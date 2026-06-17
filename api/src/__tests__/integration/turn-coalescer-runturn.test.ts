@@ -34,6 +34,12 @@ vi.mock('../../websocket/socket.handler', () => ({
   emitToAgent: vi.fn(),
 }));
 
+// Canned off-hours/escalation messages pass through localizeMessage; stub it as a
+// passthrough so coalescer auto-path tests don't make a real LLM translate call.
+vi.mock('../../llm/localize', () => ({
+  localizeMessage: (message: string) => Promise.resolve(message),
+}));
+
 const mockRouteOutboundMessage = vi.fn().mockResolvedValue({ success: true });
 vi.mock('../../channels/outbound-router', () => ({
   routeOutboundMessage: (...args: unknown[]) => mockRouteOutboundMessage(...args),

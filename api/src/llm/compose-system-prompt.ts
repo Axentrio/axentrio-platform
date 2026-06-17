@@ -12,12 +12,14 @@
 // prompt vs. guardrail-free n8n pass-through), so this is a dispatcher over
 // shared primitives, not a single uniform template.
 //
-// Output is locked by prompt-composition-characterization.test.ts. The agent,
-// base and n8n modes are byte-for-byte identical to the pre-consolidation
-// builders; the rag mode intentionally applies the T9 KB trust-separation
-// (retrieved KB fenced as untrusted, platform rules + output format last).
-// Any further change to the emitted text is a behavior change — review it
-// against those snapshots.
+// Output is locked by prompt-composition-characterization.test.ts — any change to
+// the emitted text is a behavior change; review it against those snapshots. The
+// base and n8n modes still match the pre-consolidation builders. The rag mode
+// applies the T9 KB trust-separation (retrieved KB fenced as untrusted, platform
+// rules + output format last); the agent mode now does the same (guardrails §11f):
+// it emits the non-negotiable platform rules AFTER all tenant/external content and
+// fences retrieved KB, so it is intentionally no longer byte-identical to the
+// legacy agent builder.
 
 import type { Tenant } from '../database/entities/Tenant';
 import type { ToolAdapter } from '../agent/tool-adapter';

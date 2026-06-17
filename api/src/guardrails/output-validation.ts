@@ -44,8 +44,8 @@ const INTERNAL_MARKERS: Array<{ re: RegExp; reason: string }> = [
   { re: /##\s*GUARDRAILS\b/i, reason: 'guardrails header' },
   { re: /##\s*FORMATTING RULES \(CRITICAL/i, reason: 'formatting-rules header' },
   { re: /\bLANGUAGE \(read first\):/i, reason: 'language-directive header' },
-  // Internal tool names.
-  { re: /\b(?:kb_search|capture_lead|escalate_to_human)\b/, reason: 'internal tool name' },
+  // Internal tool names (all built-in agent tools — a reply must never name them).
+  { re: /\b(?:kb_search|capture_lead|escalate_to_human|check_availability|create_booking|request_appointment|list_bookings|reschedule_booking|cancel_booking)\b/, reason: 'internal tool name' },
   // Internal id field names (snake_case ids that only exist server-side).
   { re: /\b(?:tenant_id|session_id|bot_id|conversation_id)\b/, reason: 'internal id field' },
   // Secret / API-key shapes (high-precision — these strings are always secrets).

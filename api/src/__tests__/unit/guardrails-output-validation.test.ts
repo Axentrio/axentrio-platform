@@ -39,6 +39,12 @@ describe('guardrails · validateOutput — flags bad replies (true positives)', 
     expect(families('Your session_id is 550e8400 and tenant_id abc-def')).toContain('leaked_internals');
   });
 
+  it('flags leaked booking tool names', () => {
+    expect(families('Let me run create_booking for that slot')).toContain('leaked_internals');
+    expect(families('I will check_availability then reschedule_booking')).toContain('leaked_internals');
+    expect(families('calling cancel_booking now')).toContain('leaked_internals');
+  });
+
   it('flags leaked webhook / n8n infrastructure', () => {
     expect(families('Your bot webhookUrl is set up')).toContain('leaked_internals');
     expect(families('Connection: https://my-instance.n8n.cloud/webhook/abc')).toContain('leaked_internals');

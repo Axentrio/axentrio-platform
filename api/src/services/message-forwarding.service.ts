@@ -436,6 +436,18 @@ export async function forwardMessageToN8n(
         templateBody
       );
 
+      // In-flight guardrail pause: a concurrent inbound block may have disabled
+      // the session during the (slow) RAG generation — re-read before sending so
+      // we don't deliver a reply on a now-paused session (mirrors
+      // platformAgentPath's liveAfter check).
+      const liveRag = await sessionRepository.findOne({
+        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
+      });
+      if (liveRag && liveRag.aiAutoReplyEnabled === false) {
+        logger.info(`[Fallback] RAG reply suppressed — session ${session.id} guardrail-paused mid-generation`);
+        return true;
+      }
+
       const botParticipant = await ensureBotParticipant(session, aiSettings);
 
       // Output guardrails (AC14): validate the RAG-generated reply. A blocked

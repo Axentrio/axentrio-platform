@@ -64,6 +64,7 @@ import { BotTemplate } from './entities/BotTemplate';
 import { BotTemplateVersion } from './entities/BotTemplateVersion';
 import { TenantBotTemplate } from './entities/TenantBotTemplate';
 import { SpamScamLog } from './entities/SpamScamLog';
+import { GuardrailOutputLog } from './entities/GuardrailOutputLog';
 
 // Create the DataSource instance
 export const AppDataSource = new DataSource({
@@ -135,6 +136,7 @@ export const AppDataSource = new DataSource({
     InsightDigest,
     SentimentTheme,
     SpamScamLog,
+    GuardrailOutputLog,
   ],
 
   // Migration configuration (disabled in test — tests use synchronize from entities)

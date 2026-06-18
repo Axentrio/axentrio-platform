@@ -1,7 +1,8 @@
 /**
  * Privacy Policy (public).
- * Required by Meta App Review and linked from the App Dashboard
- * (Settings → Basic → Privacy Policy URL → https://app.axentrio.com/privacy).
+ * Required by Meta App Review and Google OAuth verification; linked from the
+ * Meta App Dashboard (Settings → Basic → Privacy Policy URL) and the Google
+ * OAuth consent screen → https://app.axentrio.com/privacy.
  */
 
 import React from 'react';
@@ -10,7 +11,7 @@ import LegalLayout, { LegalSection } from './LegalLayout';
 
 const PrivacyPolicy: React.FC = () => {
   return (
-    <LegalLayout title="Privacy Policy" lastUpdated="June 9, 2026">
+    <LegalLayout title="Privacy Policy" lastUpdated="June 19, 2026">
       <p>
         This Privacy Policy explains how Axentrio (&ldquo;Axentrio&rdquo;,
         &ldquo;we&rdquo;, &ldquo;us&rdquo;) collects, uses, and protects information
@@ -82,6 +83,41 @@ const PrivacyPolicy: React.FC = () => {
           with the Meta Platform Terms and Developer Policies, request only the
           permissions required to operate, and retain platform data no longer than
           necessary to provide the Service.
+        </p>
+      </LegalSection>
+
+      <LegalSection heading="Google user data">
+        <p>
+          When a Customer connects a Google account, Axentrio requests access to
+          Google Calendar using the narrowest permissions required to operate
+          appointment booking: the ability to view and edit calendar events, and to
+          read the list of calendars the Customer is subscribed to. We use this access
+          only to create, reschedule, and cancel the appointments the
+          Customer&rsquo;s AI assistant schedules, and to let the Customer choose which
+          calendar those bookings are written to. We do not request access to read or
+          change calendar data beyond what is necessary to manage those bookings.
+        </p>
+        <p>
+          We store the credentials needed to maintain this connection in encrypted
+          form and use Google user data solely to provide the booking features the
+          Customer has enabled. We do not sell Google user data, we do not use it for
+          advertising, and we do not use it to train generalized
+          artificial-intelligence or machine-learning models. A Customer can
+          disconnect their Google account at any time, which revokes
+          Axentrio&rsquo;s access.
+        </p>
+        <p>
+          Axentrio&rsquo;s use and transfer of information received from Google APIs
+          to any other application will adhere to the{' '}
+          <a
+            href="https://developers.google.com/terms/api-services-user-data-policy"
+            className="text-primary-600 underline"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Google API Services User Data Policy
+          </a>
+          , including the Limited Use requirements.
         </p>
       </LegalSection>
 

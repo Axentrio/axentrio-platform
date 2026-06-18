@@ -370,7 +370,7 @@ function BookingRow({
             ))}
           </div>
         )}
-        {booking.meetingUrl && (
+        {booking.meetingUrl && /^https?:\/\//i.test(booking.meetingUrl) && (
           <a
             href={booking.meetingUrl}
             target="_blank"

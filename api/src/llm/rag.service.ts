@@ -81,7 +81,7 @@ async function rewriteQuery(
 
     const rewritten = response.choices[0]?.message?.content?.trim();
     if (rewritten && rewritten !== message) {
-      logger.info(`[RAG] Query rewritten: "${message}" → "${rewritten}"`);
+      logger.debug(`[RAG] Query rewritten: "${message}" → "${rewritten}"`);
       return rewritten;
     }
     return message;
@@ -112,7 +112,7 @@ export async function searchKnowledge(
   }
 
   const searchQuery = await rewriteQuery(query, conversationHistory);
-  logger.info(`[RAG Search] Query: "${searchQuery}" | tenant: ${tenantId}`);
+  logger.debug(`[RAG Search] Query: "${searchQuery}" | tenant: ${tenantId}`);
 
   const queryEmbedding = await embed(searchQuery);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
@@ -162,7 +162,7 @@ export async function generateResponse(
 
   // Rewrite contextual follow-ups into standalone queries
   const searchQuery = await rewriteQuery(customerMessage, conversationHistory);
-  logger.info(`[RAG] Query: "${searchQuery}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
+  logger.debug(`[RAG] Query: "${searchQuery}" | tenant: ${tenantId} | minSimilarity: ${config.rag.minSimilarity}`);
   const queryEmbedding = await embed(searchQuery);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
   logger.info(`[RAG] Embedding generated, dimensions: ${queryEmbedding.length}`);

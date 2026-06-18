@@ -5,6 +5,7 @@ import { AppDataSource } from '../database/data-source';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { createS3Client } from '../config/s3.config';
 import { config } from '../config/environment';
+import { getValidationService } from '../file-handling/validation.service';
 import { encrypt } from '../utils/encryption';
 import { logger } from '../utils/logger';
 import { generateResponse } from '../llm/rag.service';
@@ -157,14 +158,43 @@ export async function uploadFile(req: Request, res: Response) {
     throw new ApiError('File storage is not configured', 503, ERROR_CODES.FILE_SERVICE_UNAVAILABLE);
   }
 
-  const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${file.originalname}`;
+  // Magic-number validation (#20): the route fileFilter only trusts the client
+  // mimetype (forgeable). Verify the actual bytes are a real PDF/Word doc before
+  // storing — blocks type-confusion uploads (e.g. a script renamed .pdf). The
+  // default allowlist is broad, so additionally gate the DETECTED type to the two
+  // KB-supported document types. (Zip-bomb amplification on a genuine docx is a
+  // separate, deferred guard — bounded by the 25MB upload cap.)
+  const validation = await getValidationService().validateFileBuffer(
+    file.buffer,
+    file.originalname,
+    file.mimetype,
+    tenantId,
+  );
+  if (!validation.valid) {
+    throw new BadRequestError(validation.errors.join('; ') || 'File failed validation');
+  }
+  const KB_ALLOWED_TYPES = [
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ];
+  if (!validation.detectedMimeType || !KB_ALLOWED_TYPES.includes(validation.detectedMimeType)) {
+    throw new BadRequestError('Uploaded file is not a valid PDF or Word document');
+  }
+
+  // Sanitize the filename before it becomes part of the S3 object key (path
+  // traversal / control chars) — mirrors s3.config.ts + upload.service.ts.
+  const safeName = (file.originalname || 'file')
+    .replace(/[^a-zA-Z0-9.-]/g, '_')
+    .replace(/_{2,}/g, '_')
+    .slice(0, 100);
+  const key = `knowledge/${tenantId}/${crypto.randomUUID()}/${safeName}`;
 
   const s3 = createS3Client();
   await s3.send(new PutObjectCommand({
     Bucket: config.s3.bucket,
     Key: key,
     Body: file.buffer,
-    ContentType: file.mimetype,
+    ContentType: validation.detectedMimeType,
   }));
 
   const token = getService().registerUploadToken(tenantId, key);

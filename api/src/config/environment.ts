@@ -207,8 +207,21 @@ const env = parseEnv();
 // Validate secrets in production
 if (env.NODE_ENV === 'production') {
   if (env.JWT_SECRET.length < 32) throw new Error('JWT_SECRET must be 32+ chars in production');
+  // The JWT defaults are 32+ chars, so the length guard alone lets them through —
+  // value-reject them too (a leaked default secret = forgeable sessions).
+  if (env.JWT_SECRET === 'development-jwt-secret-change-in-prod-32chars') {
+    throw new Error('JWT_SECRET must not be the development default in production');
+  }
   if (env.JWT_REFRESH_SECRET.length < 32) throw new Error('JWT_REFRESH_SECRET must be 32+ chars in production');
+  if (env.JWT_REFRESH_SECRET === 'development-refresh-secret-change-prod-32chars') {
+    throw new Error('JWT_REFRESH_SECRET must not be the development default in production');
+  }
   if (env.ENCRYPTION_KEY.length < 32) throw new Error('ENCRYPTION_KEY must be 32+ chars in production');
+  // Value-reject the known dev default too — the length guard is a fragile proxy
+  // (a 32+ char weak/shared key would pass it). Mirrors the CLERK/WIDGET checks below.
+  if (env.ENCRYPTION_KEY === 'development-encryption-key-32ch') {
+    throw new Error('ENCRYPTION_KEY must not be the development default in production');
+  }
   if (env.CLERK_SECRET_KEY === 'clerk-dev-key-set-in-production') {
     throw new Error('CLERK_SECRET_KEY must be set in production');
   }

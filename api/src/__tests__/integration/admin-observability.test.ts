@@ -84,6 +84,9 @@ describe('admin observability (Rollout Health snapshot)', () => {
     expect(totals.guardrailOutput).toEqual({ enforced: 1, shadow: 0 });
     expect(totals.handoffs).toBe(1);
     expect(totals.openHandoffs).toBe(1);
+    expect(totals.handoffRate).toBe(1); // 1 handoff / 1 session
+    expect(totals.enforcedBlocks).toBe(1); // output enforced (inbound was shadow)
+    expect(totals.impliedInboundFp).toEqual({ enforcedResumed: 0, ofEnforcedInbound: 0 });
     expect(totals.channelsDown).toBe(0);
     expect(totals.enforceOnTenants).toBe(0);
     expect(channelsDown).toEqual([]);
@@ -116,6 +119,24 @@ describe('admin observability (Rollout Health snapshot)', () => {
     expect(res.body.data.totals.deliveryFailures).toBe(1);
     expect(res.body.data.channelsDown).toHaveLength(2);
     expect(res.body.data.channelsDown.map((c: { channel: string }) => c.channel).sort()).toEqual(['messenger', 'telegram']);
+  });
+
+  it('counts an enforced inbound block whose session was resumed as implied-FP', async () => {
+    const session = await createTestSession(tenantId); // defaults: guardrail_status='normal', ai_auto_reply_enabled=true
+    const spam = AppDataSource.getRepository(SpamScamLog);
+    await spam.save(
+      spam.create({
+        tenantId,
+        conversationId: session.id,
+        sourceChannel: 'widget',
+        detectedCategory: 'spam',
+        reasons: ['x'],
+        enforced: true, // enforced, and the session is now resumed → implied FP
+      }),
+    );
+    const res = await request(app).get(`${BASE}?days=7`);
+    expect(res.body.data.totals.impliedInboundFp.enforcedResumed).toBe(1);
+    expect(res.body.data.totals.impliedInboundFp.ofEnforcedInbound).toBe(1);
   });
 
   it('counts a tenant with guardrails.enforce=true in enforceOnTenants', async () => {

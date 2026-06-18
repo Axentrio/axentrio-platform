@@ -1199,6 +1199,7 @@
       "split": "{{enforced}} enforced · {{shadow}} shadow",
       "openHandoffs": "{{count}} open",
       "enforcingTenants": "{{count}} tenant(s) currently enforcing guardrails",
+      "impliedFpSub": "of {{count}} enforced",
       "stat": {
         "sessions": "Sessions",
         "messages": "Messages",
@@ -1206,7 +1207,10 @@
         "inboundFlags": "Inbound flags",
         "outputFlags": "Output flags",
         "deliveryFailures": "Delivery failures",
-        "channelsDown": "Channels down"
+        "channelsDown": "Channels down",
+        "handoffRate": "Handoffs/session",
+        "enforcedBlocks": "Enforced blocks",
+        "impliedFp": "Implied FP (resumed)"
       }
     },
     "botTemplates": {

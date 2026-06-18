@@ -567,6 +567,9 @@ async function startServer(): Promise<void> {
                WHERE status IN ('bot', 'waiting')
                AND last_activity_at < $1
                AND last_activity_at IS NOT NULL
+               -- Keep guardrail-paused sessions open: they need human review (and the
+               -- SLA sweep re-alerts on them); auto-closing would silently drop a flag.
+               AND NOT (ai_auto_reply_enabled = false AND guardrail_status <> 'normal')
                LIMIT $2
                FOR UPDATE SKIP LOCKED
              )
@@ -655,6 +658,19 @@ async function startServer(): Promise<void> {
         );
       setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
       setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
+    }
+
+    // Handoff / guardrail-pause SLA sweep — re-alerts staff about conversations
+    // unacknowledged past the SLA so enforce-driven pauses/handoffs aren't silently
+    // abandoned. Ships DARK: opt-in via SLA_SWEEP_ENABLED (enable once B1 desktop
+    // delivery is confirmed). Bucketed + capped so it can't spam.
+    if (process.env.SLA_SWEEP_ENABLED === 'true') {
+      const { sweepOverdueHandoffsAndPauses } = await import('./notifications/sla-sweep');
+      setInterval(() => {
+        sweepOverdueHandoffsAndPauses().catch((error) =>
+          logger.error('SLA sweep failed', { error })
+        );
+      }, 5 * 60 * 1000); // every 5 minutes
     }
 
     // Nightly Insights refresh — judges closed/handoff sessions and

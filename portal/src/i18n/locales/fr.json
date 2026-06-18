@@ -1157,6 +1157,7 @@
       "split": "{{enforced}} appliqués · {{shadow}} observés",
       "openHandoffs": "{{count}} en attente",
       "enforcingTenants": "{{count}} locataire(s) appliquent actuellement les garde-fous",
+      "impliedFpSub": "sur {{count}} appliqués",
       "stat": {
         "sessions": "Sessions",
         "messages": "Messages",
@@ -1164,7 +1165,10 @@
         "inboundFlags": "Signalements entrants",
         "outputFlags": "Signalements sortants",
         "deliveryFailures": "Échecs de livraison",
-        "channelsDown": "Canaux en panne"
+        "channelsDown": "Canaux en panne",
+        "handoffRate": "Transferts/session",
+        "enforcedBlocks": "Blocages appliqués",
+        "impliedFp": "FP implicite (repris)"
       }
     },
     "botTemplates": {

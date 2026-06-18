@@ -28,9 +28,12 @@ interface ObsTotals {
   guardrailOutput: { enforced: number; shadow: number };
   handoffs: number;
   openHandoffs: number;
+  handoffRate: number;
   deliveryFailures: number;
   channelsDown: number;
   enforceOnTenants: number;
+  enforcedBlocks: number;
+  impliedInboundFp: { enforcedResumed: number; ofEnforcedInbound: number };
 }
 
 function Stat({ label, value, sub, alert }: { label: string; value: number; sub?: string; alert?: boolean }) {
@@ -102,7 +105,7 @@ export default function AdminGuardrails() {
               const split = (g: { enforced: number; shadow: number }) =>
                 t('admin.observability.split', { enforced: g.enforced, shadow: g.shadow });
               return (
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
                   <Stat label={t('admin.observability.stat.sessions')} value={x.sessions} />
                   <Stat label={t('admin.observability.stat.messages')} value={x.messages} />
                   <Stat
@@ -122,6 +125,16 @@ export default function AdminGuardrails() {
                   />
                   <Stat label={t('admin.observability.stat.deliveryFailures')} value={x.deliveryFailures} alert />
                   <Stat label={t('admin.observability.stat.channelsDown')} value={x.channelsDown} alert />
+                  <Stat
+                    label={t('admin.observability.stat.handoffRate')}
+                    value={Math.round((x.handoffRate ?? 0) * 100) / 100}
+                  />
+                  <Stat label={t('admin.observability.stat.enforcedBlocks')} value={x.enforcedBlocks ?? 0} />
+                  <Stat
+                    label={t('admin.observability.stat.impliedFp')}
+                    value={x.impliedInboundFp?.enforcedResumed ?? 0}
+                    sub={t('admin.observability.impliedFpSub', { count: x.impliedInboundFp?.ofEnforcedInbound ?? 0 })}
+                  />
                 </div>
               );
             })()

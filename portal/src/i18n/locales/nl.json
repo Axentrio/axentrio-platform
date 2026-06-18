@@ -1158,6 +1158,7 @@
       "split": "{{enforced}} afgedwongen · {{shadow}} schaduw",
       "openHandoffs": "{{count}} open",
       "enforcingTenants": "{{count}} tenant(s) dwingen momenteel beveiliging af",
+      "impliedFpSub": "van {{count}} afgedwongen",
       "stat": {
         "sessions": "Sessies",
         "messages": "Berichten",
@@ -1165,7 +1166,10 @@
         "inboundFlags": "Inkomende meldingen",
         "outputFlags": "Uitgaande meldingen",
         "deliveryFailures": "Leveringsfouten",
-        "channelsDown": "Kanalen offline"
+        "channelsDown": "Kanalen offline",
+        "handoffRate": "Overdrachten/sessie",
+        "enforcedBlocks": "Afgedwongen blokkades",
+        "impliedFp": "Impliciete FP (hervat)"
       }
     },
     "botTemplates": {

@@ -11,7 +11,6 @@ import { Notification } from '../database/entities/Notification';
 import { MobileDevice } from '../database/entities/MobileDevice';
 import { User } from '../database/entities/User';
 import { addNotificationJob } from '../queue/message-queue';
-import { emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 
 export interface CreateNotificationInput {
@@ -135,7 +134,10 @@ export const notificationService = {
     // handoff / guardrail pause / channel-down could go unnoticed. Emit ONE
     // tenant-level event to all agents (not per-recipient, which would N-duplicate
     // the toast/sound). Best-effort: a socket hiccup must never fail the write.
+    // Lazy import to avoid a load-time notification.service↔socket.handler edge
+    // (the static import reordered the module graph and broke unrelated test mocks).
     try {
+      const { emitToTenantAgents } = await import('../websocket/socket.handler');
       emitToTenantAgents(input.tenantId, 'notification', {
         type: input.type,
         title: input.title,

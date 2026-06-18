@@ -107,6 +107,7 @@ router.get(
       channelsDownCount,
       channelsDownDetail,
       enforceRows,
+      enforcedResumedRows,
       sessionsByTenant,
       messagesByTenant,
       spamByTenant,
@@ -139,6 +140,24 @@ router.get(
         'enforceOnTenants',
         AppDataSource.query(
           `SELECT count(*)::int AS n FROM tenants WHERE settings->'guardrails'->>'enforce' = 'true'`,
+        ) as Promise<Array<{ n: number }>>,
+        [{ n: 0 }],
+      ),
+      // Implied-FP proxy (INBOUND only, POST-ENFORCE): enforced inbound blocks in
+      // the window whose session was later resumed (resume-AI sets guardrail_status
+      // back to 'normal' + ai_auto_reply_enabled=true). Empty while 0 tenants
+      // enforce — it's a canary metric, NOT a pre-flip gate. Output guardrails never
+      // pause, so they can't be proxied this way. (SpamScamLog.conversationId is the
+      // chat_sessions id — verified.)
+      safe(
+        'enforcedResumed',
+        AppDataSource.query(
+          `SELECT count(*)::int AS n
+             FROM guardrail_spam_logs l
+             JOIN chat_sessions s ON s.id = l.conversation_id
+            WHERE l.enforced = true AND l.created_at >= $1
+              AND s.guardrail_status = 'normal' AND s.ai_auto_reply_enabled = true`,
+          [since],
         ) as Promise<Array<{ n: number }>>,
         [{ n: 0 }],
       ),
@@ -195,9 +214,21 @@ router.get(
         guardrailOutput: { enforced: outEnforced, shadow: outShadow },
         handoffs,
         openHandoffs,
+        // Handoff-REQUESTS per session (request-row based — excludes the session-only
+        // /handoffs/request path that writes no HandoffRequest; labeled "Handoffs/session"
+        // in the UI). A ratio, can exceed 1.
+        handoffRate: sessions > 0 ? handoffs / sessions : 0,
         deliveryFailures,
         channelsDown: channelsDownCount,
         enforceOnTenants: enforceRows[0]?.n ?? 0,
+        // True-positive load the operator is carrying.
+        enforcedBlocks: spamEnforced + outEnforced,
+        // Implied-FP proxy — INBOUND only, POST-ENFORCE (empty while 0 tenants
+        // enforce). Not a pre-flip gate; the pre-flip FP gate is a manual shadow review.
+        impliedInboundFp: {
+          enforcedResumed: enforcedResumedRows[0]?.n ?? 0,
+          ofEnforcedInbound: spamEnforced,
+        },
       },
       channelsDown: channelsDownDetail,
       byTenant: top,

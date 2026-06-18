@@ -11,6 +11,8 @@ import {
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
+import type { CreateBookingResult } from '../../n8n/booking-providers/types';
+import { logger } from '../../utils/logger';
 
 /**
  * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
@@ -161,9 +163,27 @@ export class CreateBookingTool implements ToolAdapter {
       // A request-mode service short-circuits to a request inside the provider, which fires
       // booking.request_created itself; emitting appointment.booked here would wrongly
       // signal a confirmation (and would re-fire on idempotent re-returns).
-      const isRequest = (result as { requested?: boolean })?.requested === true;
-      if (!isRequest) void (async () => {
+      // Emit appointment.booked only for a NEW confirmed booking. Skip request-mode
+      // (the provider fires booking.request_created itself) AND idempotent re-returns
+      // (the original create already emitted — re-firing would double the webhook +
+      // downstream automations).
+      const r = result as CreateBookingResult;
+      const isRequest = r.requested === true;
+      if (!isRequest && !r.idempotent) void (async () => {
         try {
+          // #5: the id + canonical UTC time live at result.booking.{id,startTime} —
+          // NOT result.bookingId (never existed → the webhook always fell back to the
+          // synthetic idempotency key) and NOT args.startTime (raw, often zoneless).
+          // A confirmed booking missing them is a provider-contract violation: log +
+          // skip rather than emit a bogus id.
+          if (!r.booking?.id || !r.booking?.startTime) {
+            logger.warn('[booking] appointment.booked skipped — confirmed result missing booking id/startTime', {
+              sessionId: ctx.sessionId,
+              tenantId: ctx.tenantId,
+            });
+            return;
+          }
+
           let session: ChatSession | null = null;
           try {
             session = await ctx.dataSource
@@ -182,13 +202,12 @@ export class CreateBookingTool implements ToolAdapter {
             tags: session?.tags,
           };
 
-          const bookingData = result as unknown as Record<string, unknown>;
           const appointmentEvent: AppointmentBookedEvent = {
             ...buildEventBase('appointment.booked', ctx.tenantId, sessionCtx),
             type: 'appointment.booked',
             appointment: {
-              bookingId: (bookingData?.bookingId as string) ?? idempotencyKey,
-              startTime: args.startTime as string,
+              bookingId: r.booking.id,
+              startTime: r.booking.startTime,
               attendeeName: args.attendeeName as string,
               attendeeEmail: (args.attendeeEmail as string | undefined) ?? '',
               notes: args.notes as string | undefined,

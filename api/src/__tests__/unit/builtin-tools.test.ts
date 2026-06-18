@@ -53,6 +53,7 @@ import {
   CancelBookingTool,
 } from '../../agent/tools/booking.tool';
 import { EscalationTool } from '../../agent/tools/escalation.tool';
+import { emitWebhookEvent } from '../../webhooks/webhook.emitter';
 import type { ToolAdapter, ToolContext } from '../../agent/tool-adapter';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -209,6 +210,65 @@ describe('CreateBookingTool', () => {
       undefined,
       undefined,
       { customerAddress: undefined, customerPhone: undefined, durationMin: undefined }    );
+  });
+
+  it('#5: emits appointment.booked with the real booking id + canonical UTC startTime (not the idempotency key / arg time)', async () => {
+    const tool = new CreateBookingTool();
+    const ctx = makeCtx({ sessionId: 'sess-5' });
+    mockCreateBooking.mockResolvedValue({
+      success: true,
+      booking: {
+        id: 'bk-real-uuid',
+        startTime: '2026-04-03T12:00:00.000Z',
+        endTime: '2026-04-03T12:30:00.000Z',
+        attendee: { name: 'Cara' },
+      },
+    });
+    // arg time is the raw/zoneless model string; the webhook must carry the
+    // provider's canonical UTC time + the real booking id.
+    await tool.execute(
+      { startTime: '2026-04-03T12:00', attendeeName: 'Cara', attendeeEmail: 'c@test.com' },
+      ctx,
+    );
+    await new Promise((r) => setTimeout(r, 0)); // flush the fire-and-forget emit
+    expect(vi.mocked(emitWebhookEvent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'appointment.booked',
+        appointment: expect.objectContaining({
+          bookingId: 'bk-real-uuid',
+          startTime: '2026-04-03T12:00:00.000Z',
+        }),
+      }),
+    );
+  });
+
+  it('#5: does NOT re-emit appointment.booked on an idempotent retry', async () => {
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({
+      success: true,
+      idempotent: true,
+      booking: { id: 'bk-x', startTime: '2026-04-04T10:00:00.000Z', endTime: '2026-04-04T10:30:00.000Z', attendee: {} },
+    });
+    await tool.execute(
+      { startTime: '2026-04-04T10:00:00Z', attendeeName: 'Dee', attendeeEmail: 'd@test.com' },
+      makeCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(emitWebhookEvent)).not.toHaveBeenCalled();
+  });
+
+  it('#5: skips the webhook when a confirmed result is missing the booking id (contract violation)', async () => {
+    const tool = new CreateBookingTool();
+    mockCreateBooking.mockResolvedValue({
+      success: true,
+      booking: { id: undefined, startTime: undefined, endTime: undefined, attendee: {} },
+    });
+    await tool.execute(
+      { startTime: '2026-04-05T10:00:00Z', attendeeName: 'Eve', attendeeEmail: 'e@test.com' },
+      makeCtx(),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(emitWebhookEvent)).not.toHaveBeenCalled();
   });
 
   it('execute returns success=false with error on failure', async () => {

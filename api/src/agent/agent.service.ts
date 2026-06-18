@@ -226,6 +226,13 @@ export class AgentService {
       // Egress guard state: was a booking/request actually recorded this run, and
       // have we already nudged the model once for claiming one that wasn't?
       let bookingRecorded = false;
+      // #7: per-run guard — a side-effecting tool must not execute twice with
+      // identical args within one agent run (a model re-emitting the same call).
+      // Cross-run re-invocation (the coalescer re-arming a turn) is already
+      // neutralised by the booking provider's idempotency window + DB constraints
+      // for create/request; reschedule/cancel re-runs are self-idempotent (same
+      // target = no new effect).
+      const sideEffectsInvoked = new Set<string>();
       let correctionAttempted = false;
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
@@ -310,8 +317,19 @@ export class AgentService {
             }
           }
 
-          // TODO: Task 12 will add confirmation gate for hasSideEffects tools
-          // For now, execute directly (Phase 1 ships without confirmation UX)
+          // #7: dedupe side-effecting tools within this run — an identical (tool,
+          // args) call a second time, AFTER it already succeeded, does NOT re-execute;
+          // the model is told it was already performed. Marked only on success (below)
+          // so a failed first attempt can still be retried. (Cross-run dedupe is the
+          // provider's idempotency job.)
+          const sideEffectSig = tool.hasSideEffects
+            ? `${tool.name}:${JSON.stringify(toolCall.arguments)}`
+            : null;
+          if (sideEffectSig && sideEffectsInvoked.has(sideEffectSig)) {
+            messages.push({ role: 'tool', content: JSON.stringify({ note: 'already_performed', tool: tool.name }), toolCallId: toolCall.id });
+            traceEntry.toolCalls.push({ name: tool.name, args: toolCall.arguments, result: { success: true }, latencyMs: 0 });
+            continue;
+          }
 
           // Execute tool
           const ctx: ToolContext = {
@@ -326,6 +344,9 @@ export class AgentService {
           try {
             const result = await tool.execute(toolCall.arguments, ctx);
             toolsCalled.push(tool.name);
+            // #7: only now (post-success) is the side-effect "performed" — a failed
+            // attempt stays retryable.
+            if (sideEffectSig && result.success) sideEffectsInvoked.add(sideEffectSig);
             // Track offered slots for the chip UI; a booking mutation clears them.
             if (tool.name === 'check_availability' && result.success && result.data) {
               const d = result.data as {

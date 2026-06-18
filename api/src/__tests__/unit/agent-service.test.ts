@@ -185,6 +185,38 @@ describe('AgentService', () => {
     expect(mockMeteringRecord).toHaveBeenCalledTimes(2); // two LLM calls
   });
 
+  it('#7: dedupes a side-effecting tool called twice with identical args in one run', async () => {
+    const sideEffectExec = vi.fn().mockResolvedValue({ success: true, data: { ok: true } });
+    const sideTool: ToolAdapter = {
+      name: 'create_booking',
+      description: 'book',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: sideEffectExec,
+    };
+    mockGetToolsForTenant.mockResolvedValue([sideTool]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'tool_calls',
+        toolCalls: [
+          { id: 'tc_1', name: 'create_booking', arguments: { startTime: '2026-04-01T10:00:00Z' } },
+          { id: 'tc_2', name: 'create_booking', arguments: { startTime: '2026-04-01T10:00:00Z' } }, // identical → must dedupe
+        ],
+      })
+      .mockResolvedValueOnce({ content: 'Booked!', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'stop' });
+
+    await agent.run(
+      'book it',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    expect(sideEffectExec).toHaveBeenCalledTimes(1); // second identical side-effect call skipped
+  });
+
   it('R31: sanitizes an unexpected tool exception before it reaches the model', async () => {
     const RAW = 'connection to 10.0.0.5:5432 failed: password authentication failed for user "secret"';
     const throwingTool: ToolAdapter = {

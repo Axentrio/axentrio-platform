@@ -587,6 +587,7 @@ async function handleMessageSend(socket: TenantSocket, data: MessageSendData): P
           { type: 'text', content },
           { sessionId, tenantId: session.tenantId, messageId: savedMessage.id },
           undefined, // Skip WebSocket — already emitted above
+          { humanAgent: true }, // human-agent reply → may need Meta's HUMAN_AGENT tag if outside the window
         ).catch((err) => {
           logger.error('Error routing agent reply to external channel:', err);
         });

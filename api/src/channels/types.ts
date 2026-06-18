@@ -44,6 +44,13 @@ export interface NormalizedEvent {
 export interface OutboundChannelMessage {
   type: 'text' | 'image' | 'video' | 'audio' | 'file' | 'quick_reply' | 'carousel' | 'template' | 'typing';
   content?: string;
+  /**
+   * True when this is a HUMAN-AGENT reply that must use Meta's HUMAN_AGENT message
+   * tag (set by routeOutboundMessage only when the outbound is a human reply AND the
+   * standard messaging window has closed). Transports that support it (Messenger/IG)
+   * switch messaging_type to MESSAGE_TAG; others ignore it.
+   */
+  humanAgent?: boolean;
   quickReplies?: Array<{ title: string; payload: string }>;
   buttons?: Array<{ type: 'url' | 'postback'; title: string; value: string }>;
   mediaUrl?: string;

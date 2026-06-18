@@ -36,6 +36,7 @@ export async function routeOutboundMessage(
     event: string;
     data: Record<string, unknown>;
   },
+  options?: { humanAgent?: boolean },
 ): Promise<DeliveryResult> {
   const sessionRepository = AppDataSource.getRepository(ChatSession);
   const bindingRepository = AppDataSource.getRepository(ConversationBinding);
@@ -109,11 +110,22 @@ export async function routeOutboundMessage(
   const capabilities = adapter.outboundTransport.getCapabilities();
   const channelMessages = formatResponseForChannel(response, capabilities);
 
+  // A human-agent reply needs Meta's HUMAN_AGENT tag ONLY once the standard
+  // messaging window has closed (using RESPONSE inside the window is the norm and
+  // avoids tag-abuse review flags). Fail-safe to RESPONSE when lastInboundAt is
+  // unknown. Bot replies (humanAgent !== true) are never tagged.
+  const windowMs = (capabilities.messagingWindowHours ?? 24) * 60 * 60 * 1000;
+  const outsideWindow =
+    !!binding.lastInboundAt && Date.now() - binding.lastInboundAt.getTime() > windowMs;
+  const useHumanAgentTag = options?.humanAgent === true && outsideWindow;
+
   for (const msg of channelMessages) {
     if (msg.type === 'typing') {
       await adapter.outboundTransport.sendTypingIndicator(binding.externalThreadId, connection);
       continue;
     }
+
+    if (useHumanAgentTag) msg.humanAgent = true;
 
     const result = await adapter.outboundTransport.send(
       msg,

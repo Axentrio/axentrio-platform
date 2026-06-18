@@ -76,12 +76,13 @@ export class MessengerOutboundTransport extends GraphOutboundTransport {
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       recipient: { id: recipientId },
-      // TODO: Support HUMAN_AGENT tag for live agent sessions.
-      // When session status is 'active' (agent assigned), should use:
-      //   messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT'
-      // This enables a 7-day messaging window for human agent replies.
-      // Requires threading session status through to the transport's send method.
-      messaging_type: 'RESPONSE',
+      // A human-agent reply outside the 24h standard window uses Meta's HUMAN_AGENT
+      // tag (7-day human-agent window); routeOutboundMessage sets message.humanAgent
+      // only in that case. Everything else stays RESPONSE.
+      // NOTE: HUMAN_AGENT needs the human_agent permission via App Review — a tagged
+      // send still 400s until that's granted (a Meta-config dependency, not code).
+      messaging_type: message.humanAgent ? 'MESSAGE_TAG' : 'RESPONSE',
+      ...(message.humanAgent ? { tag: 'HUMAN_AGENT' } : {}),
     };
 
     switch (message.type) {

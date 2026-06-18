@@ -59,12 +59,13 @@ export class InstagramOutboundTransport extends GraphOutboundTransport {
   ): Record<string, unknown> {
     const body: Record<string, unknown> = {
       recipient: { id: recipientId },
-      // TODO: Support HUMAN_AGENT tag for live agent sessions.
-      // When session status is 'active' (agent assigned), should use:
-      //   messaging_type: 'MESSAGE_TAG', tag: 'HUMAN_AGENT'
-      // This enables a 7-day messaging window for human agent replies.
-      // Requires threading session status through to the transport's send method.
-      messaging_type: 'RESPONSE',
+      // A human-agent reply outside the standard window uses Meta's HUMAN_AGENT tag;
+      // routeOutboundMessage sets message.humanAgent only in that case. Else RESPONSE.
+      // NOTE: needs the human_agent permission via App Review — a tagged send still
+      // 400s until granted; IG human-agent-window support may also differ from
+      // Messenger, so verify IG behaviour before relying on it.
+      messaging_type: message.humanAgent ? 'MESSAGE_TAG' : 'RESPONSE',
+      ...(message.humanAgent ? { tag: 'HUMAN_AGENT' } : {}),
     };
 
     switch (message.type) {

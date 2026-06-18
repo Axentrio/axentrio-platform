@@ -10,6 +10,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
+import { triggerHealthCheckDebounced } from './health-check.service';
 import { ResponsePayload } from '../n8n/types/message.types';
 import { getChannelAdapter } from './channel-registry';
 import { isChannelEntitled } from './channel-entitlement';
@@ -137,6 +138,14 @@ export async function routeOutboundMessage(
         channel: connection.channel,
         error: result.error,
       });
+      // A delivery failure can mean the channel itself broke (token expired, page
+      // disconnected, WhatsApp permission/window). If the connection still looks
+      // active, probe it (debounced, fire-and-forget) so it flips to 'error' +
+      // notifies the operator instead of silently staying green — without blocking
+      // the reply path or storming the provider on a burst of failures.
+      if (connection.status === 'active') {
+        void triggerHealthCheckDebounced(connection.id);
+      }
       return result;
     }
   }

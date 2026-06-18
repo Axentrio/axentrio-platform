@@ -9,6 +9,8 @@ import { getRepository } from '../database/data-source';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { getTelegramBotToken, getMetaPageAccessToken, getWhatsAppAccessToken } from './credential-utils';
 import { logger } from '../utils/logger';
+import { notificationService } from '../services/notification.service';
+import { getRedisClient } from '../config/redis';
 import { FB_GRAPH_API as META_GRAPH_API } from './meta/graph-api';
 
 const TELEGRAM_API = 'https://api.telegram.org';
@@ -32,6 +34,7 @@ export async function runHealthCheck(connectionId: string): Promise<ChannelConne
     throw new Error(`ChannelConnection ${connectionId} not found`);
   }
 
+  const prevStatus = conn.status;
   const outcome = await probeChannel(conn);
 
   conn.lastHealthCheckAt = outcome.checkedAt;
@@ -40,7 +43,69 @@ export async function runHealthCheck(connectionId: string): Promise<ChannelConne
     conn.status = outcome.ok ? 'active' : 'error';
   }
 
-  return (await repo.save(conn)) as ChannelConnection;
+  const saved = (await repo.save(conn)) as ChannelConnection;
+
+  // Notify the tenant ONLY on the active→error transition, so "the bot stopped
+  // working" isn't silent — and (deliberately no permanent dedupe) a channel that
+  // recovers and later breaks again re-notifies. Within one outage the transition
+  // fires once (subsequent probes see status already 'error'), and the outbound
+  // trigger is debounced, so this won't spam.
+  if (prevStatus === 'active' && saved.status === 'error') {
+    void notifyChannelDown(saved);
+  }
+
+  return saved;
+}
+
+async function notifyChannelDown(conn: ChannelConnection): Promise<void> {
+  try {
+    await notificationService.createForTenant({
+      tenantId: conn.tenantId,
+      type: 'channel.error',
+      title: 'A channel needs attention',
+      message: `Your ${conn.channel} connection stopped working${conn.lastError ? `: ${conn.lastError}` : ''}. Reconnect it in Settings → Channels.`,
+      data: { connectionId: conn.id, channel: conn.channel, lastError: conn.lastError },
+    });
+  } catch (err) {
+    logger.warn('[health-check] channel-down notification failed', {
+      connectionId: conn.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Fire-and-forget health probe debounced to ≤1 per connection per 60s
+ * (cross-instance via Redis SET NX EX; fail-open to probing if Redis is down).
+ * Used by the outbound path so a burst of failed sends can't fan out into a
+ * storm of provider probes (or concurrent active→error double-notifications).
+ */
+export async function triggerHealthCheckDebounced(connectionId: string): Promise<void> {
+  // The debounce is a best-effort optimisation — a Redis error must FAIL OPEN to
+  // probing (an extra probe is far better than leaving a broken channel green).
+  let skip = false;
+  try {
+    const redis = getRedisClient();
+    if (redis) {
+      const acquired = await redis.set(`channel:probe:${connectionId}`, '1', 'EX', 60, 'NX');
+      skip = acquired !== 'OK'; // a probe ran for this connection recently
+    }
+  } catch (err) {
+    logger.warn('[health-check] probe debounce check failed — probing anyway', {
+      connectionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  if (skip) return;
+
+  try {
+    await runHealthCheck(connectionId);
+  } catch (err) {
+    logger.warn('[health-check] debounced probe failed', {
+      connectionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 async function probeChannel(conn: ChannelConnection): Promise<HealthCheckOutcome> {

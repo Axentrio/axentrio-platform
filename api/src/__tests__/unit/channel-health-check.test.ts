@@ -32,8 +32,16 @@ vi.mock('../../channels/credential-utils', () => ({
   getMetaPageAccessToken: vi.fn((creds: Record<string, unknown>) => (creds.pageAccessToken as string) ?? null),
 }));
 
+const mockCreateForTenant = vi.fn();
+vi.mock('../../services/notification.service', () => ({
+  notificationService: { createForTenant: (...a: unknown[]) => mockCreateForTenant(...a) },
+}));
+
+const mockGetRedisClient = vi.fn();
+vi.mock('../../config/redis', () => ({ getRedisClient: () => mockGetRedisClient() }));
+
 import axios from 'axios';
-import { runHealthCheck } from '../../channels/health-check.service';
+import { runHealthCheck, triggerHealthCheckDebounced } from '../../channels/health-check.service';
 
 const axiosGet = vi.mocked(axios.get);
 
@@ -59,7 +67,72 @@ beforeEach(() => {
   mockFindOne.mockReset();
   mockSave.mockReset();
   axiosGet.mockReset();
+  mockCreateForTenant.mockReset();
+  mockGetRedisClient.mockReset();
+  mockGetRedisClient.mockReturnValue(null);
   mockSave.mockImplementation((entity) => Promise.resolve(entity));
+});
+
+describe('triggerHealthCheckDebounced', () => {
+  it('probes when Redis is unavailable (debounce best-effort)', async () => {
+    mockGetRedisClient.mockReturnValue(null);
+    mockFindOne.mockResolvedValue({ ...baseConn });
+    axiosGet.mockResolvedValue({ data: { ok: true } });
+    await triggerHealthCheckDebounced('conn-1');
+    expect(mockFindOne).toHaveBeenCalled(); // runHealthCheck ran
+  });
+
+  it('skips the probe when the debounce lock is already held', async () => {
+    mockGetRedisClient.mockReturnValue({ set: vi.fn().mockResolvedValue(null) }); // NX not acquired
+    await triggerHealthCheckDebounced('conn-1');
+    expect(mockFindOne).not.toHaveBeenCalled();
+  });
+
+  it('probes when it acquires the lock', async () => {
+    mockGetRedisClient.mockReturnValue({ set: vi.fn().mockResolvedValue('OK') });
+    mockFindOne.mockResolvedValue({ ...baseConn });
+    axiosGet.mockResolvedValue({ data: { ok: true } });
+    await triggerHealthCheckDebounced('conn-1');
+    expect(mockFindOne).toHaveBeenCalled();
+  });
+
+  it('FAIL-OPEN: probes when redis.set throws', async () => {
+    mockGetRedisClient.mockReturnValue({ set: vi.fn().mockRejectedValue(new Error('redis down')) });
+    mockFindOne.mockResolvedValue({ ...baseConn });
+    axiosGet.mockResolvedValue({ data: { ok: true } });
+    await triggerHealthCheckDebounced('conn-1');
+    expect(mockFindOne).toHaveBeenCalled();
+  });
+});
+
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+describe('runHealthCheck (channel-down notification)', () => {
+  it('notifies the tenant when an active channel flips to error', async () => {
+    mockFindOne.mockResolvedValue({ ...baseConn, status: 'active' });
+    axiosGet.mockRejectedValue(new Error('401 Unauthorized'));
+    await runHealthCheck('conn-1');
+    await tick(); // fire-and-forget notify
+    expect(mockCreateForTenant).toHaveBeenCalledWith(
+      expect.objectContaining({ tenantId: 'tenant-1', type: 'channel.error' }),
+    );
+  });
+
+  it('does NOT notify when the channel was already in error', async () => {
+    mockFindOne.mockResolvedValue({ ...baseConn, status: 'error' });
+    axiosGet.mockRejectedValue(new Error('401'));
+    await runHealthCheck('conn-1');
+    await tick();
+    expect(mockCreateForTenant).not.toHaveBeenCalled();
+  });
+
+  it('does NOT notify when the channel stays healthy', async () => {
+    mockFindOne.mockResolvedValue({ ...baseConn, status: 'active' });
+    axiosGet.mockResolvedValue({ data: { ok: true } });
+    await runHealthCheck('conn-1');
+    await tick();
+    expect(mockCreateForTenant).not.toHaveBeenCalled();
+  });
 });
 
 describe('runHealthCheck (Telegram)', () => {

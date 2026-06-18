@@ -8,11 +8,13 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { QueryClientProvider } from '@tanstack/react-query';
 import { createQueryClient } from './queries/queryConfig';
 import { Toaster } from '@/components/ui/sonner';
+import { toast } from 'sonner';
 import { ClerkProvider, SignedIn, SignedOut, SignIn } from '@clerk/clerk-react';
 
 // Context Providers
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext';
 import { SocketProvider, useSocket } from '@websocket/SocketContext';
+import { useNotificationSound } from '@websocket/notificationSound';
 
 // Auth
 import { OrganizationRequired } from '@auth/OrganizationRequired';
@@ -74,6 +76,25 @@ const CLERK_PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
 // Create Query Client
 const queryClient = createQueryClient();
+
+// Global desktop delivery for backend notifications (handoff, guardrail pause,
+// channel-down, SLA, leads, booking). The push worker only covers mobile; this
+// is the desktop path. Mounted once inside the socket provider so every tenant
+// agent gets a toast + sound when a notification fires.
+const NotificationListener: React.FC = () => {
+  const { registerHandlers, unregisterHandlers } = useSocket();
+  const { playNotification } = useNotificationSound();
+  React.useEffect(() => {
+    const id = registerHandlers({
+      onNotification: (n) => {
+        toast(n.title || 'Notification', { description: n.message });
+        playNotification();
+      },
+    });
+    return () => unregisterHandlers(id);
+  }, [registerHandlers, unregisterHandlers, playNotification]);
+  return null;
+};
 
 // Connection status banner — shown when socket is disconnected
 const ConnectionBanner: React.FC = () => {
@@ -163,6 +184,7 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         </div>
         <TenantImpersonationBanner />
         <ConnectionBanner />
+        <NotificationListener />
         <main className="flex-1 overflow-hidden">
           {children}
         </main>

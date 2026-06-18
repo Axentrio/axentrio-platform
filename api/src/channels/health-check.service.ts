@@ -11,6 +11,7 @@ import { getTelegramBotToken, getMetaPageAccessToken, getWhatsAppAccessToken } f
 import { logger } from '../utils/logger';
 import { notificationService } from '../services/notification.service';
 import { getRedisClient } from '../config/redis';
+import { isChannelEntitled } from './channel-entitlement';
 import { FB_GRAPH_API as META_GRAPH_API } from './meta/graph-api';
 
 const TELEGRAM_API = 'https://api.telegram.org';
@@ -51,10 +52,44 @@ export async function runHealthCheck(connectionId: string): Promise<ChannelConne
   // fires once (subsequent probes see status already 'error'), and the outbound
   // trigger is debounced, so this won't spam.
   if (prevStatus === 'active' && saved.status === 'error') {
-    void notifyChannelDown(saved);
+    void notifyChannelDownOnce(saved);
+  } else if (prevStatus === 'error' && saved.status === 'active') {
+    // Recovered → drop the down-claim so the NEXT outage re-notifies immediately
+    // (preserves the "re-outages re-notify" intent despite the 5-min claim window).
+    void clearDownClaim(saved.id);
   }
 
   return saved;
+}
+
+/**
+ * Notify at most once per ~5 minutes per outage, even if concurrent probes (cron +
+ * reactive + manual, or a Redis-down debounce bypass) race the active→error
+ * transition — the in-memory prevStatus check is not race-proof on its own, so a
+ * short Redis NX claim is the backstop. The claim is cleared on recovery (see
+ * runHealthCheck) so a fresh outage re-notifies. Fail-open: a missed claim is
+ * better than a silent dead channel.
+ */
+async function notifyChannelDownOnce(conn: ChannelConnection): Promise<void> {
+  try {
+    const redis = getRedisClient();
+    if (redis) {
+      const claimed = await redis.set(`channel:down:${conn.id}`, '1', 'EX', 300, 'NX');
+      if (claimed !== 'OK') return; // already notified within the claim window
+    }
+  } catch {
+    // Redis down → fall through and notify (fail-open).
+  }
+  await notifyChannelDown(conn);
+}
+
+async function clearDownClaim(connectionId: string): Promise<void> {
+  try {
+    const redis = getRedisClient();
+    if (redis) await redis.del(`channel:down:${connectionId}`);
+  } catch {
+    // best-effort
+  }
 }
 
 async function notifyChannelDown(conn: ChannelConnection): Promise<void> {
@@ -106,6 +141,55 @@ export async function triggerHealthCheckDebounced(connectionId: string): Promise
       error: err instanceof Error ? err.message : String(err),
     });
   }
+}
+
+// Re-probe ACTIVE channels not health-checked within this window.
+const SWEEP_STALE_MS = 6 * 60 * 60 * 1000;
+// Over-fetch candidates so a block of unentitled stale rows at the front can't
+// starve eligible ones (entitlement isn't a SQL-filterable column).
+const SWEEP_CANDIDATES = 200;
+// Cap actual probes per tick so a backlog drains gradually instead of a provider herd.
+const SWEEP_PROBE_CAP = 50;
+// Only channels with a real probe (probeChannel throws for widget/unknown).
+const PROBEABLE_CHANNELS = ['telegram', 'messenger', 'instagram', 'whatsapp'];
+
+/**
+ * Proactive sweep: re-probe ACTIVE, probeable channels whose lastHealthCheckAt is
+ * stale, so a silently-broken channel (expired token, revoked permission, page
+ * disconnect) flips active→error + notifies even with NO outbound traffic to fire
+ * the reactive probe. Reuses triggerHealthCheckDebounced → inherits the Redis NX
+ * dedupe (cross-instance + anti-herd) and the single active→error+notify path, so
+ * it composes with the reactive trigger without double-probing/notifying. Skips
+ * unentitled channels (channels plan D3: unentitled = inert). Driven by a
+ * setInterval in server.ts behind CHANNEL_HEALTH_SWEEP_ENABLED.
+ */
+export async function sweepStaleChannels(): Promise<{ scanned: number; probed: number }> {
+  const repo = getRepository(ChannelConnection);
+  const cutoff = new Date(Date.now() - SWEEP_STALE_MS);
+  const stale = (await repo
+    .createQueryBuilder('c')
+    .where('c.status = :active', { active: 'active' })
+    .andWhere('c.channel IN (:...channels)', { channels: PROBEABLE_CHANNELS })
+    .andWhere('(c.lastHealthCheckAt IS NULL OR c.lastHealthCheckAt < :cutoff)', { cutoff })
+    .orderBy('c.lastHealthCheckAt', 'ASC', 'NULLS FIRST')
+    .limit(SWEEP_CANDIDATES)
+    .getMany()) as ChannelConnection[];
+
+  let probed = 0;
+  for (const conn of stale) {
+    if (probed >= SWEEP_PROBE_CAP) break;
+    try {
+      if (!(await isChannelEntitled(conn.tenantId, conn.channel))) continue; // unentitled = inert
+      await triggerHealthCheckDebounced(conn.id);
+      probed++;
+    } catch (err) {
+      logger.warn('[health-check] sweep probe failed', {
+        connectionId: conn.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  return { scanned: stale.length, probed };
 }
 
 async function probeChannel(conn: ChannelConnection): Promise<HealthCheckOutcome> {

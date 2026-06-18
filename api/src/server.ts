@@ -642,6 +642,21 @@ async function startServer(): Promise<void> {
       );
     }, 5 * 60 * 1000); // Every 5 minutes
 
+    // Proactive channel-health sweep — re-probes idle ACTIVE channels so a
+    // silently-broken one (expired token, revoked permission, page disconnect)
+    // flips to error + notifies even with no outbound traffic to trigger the
+    // reactive probe. Ships DARK: opt-in via CHANNEL_HEALTH_SWEEP_ENABLED. Reuses
+    // the debounced probe path (Redis NX dedupe), first run delayed past boot.
+    if (process.env.CHANNEL_HEALTH_SWEEP_ENABLED === 'true') {
+      const { sweepStaleChannels } = await import('./channels/health-check.service');
+      const runChannelSweep = () =>
+        sweepStaleChannels().catch((error) =>
+          logger.error('Channel health sweep failed', { error })
+        );
+      setTimeout(runChannelSweep, 2 * 60 * 1000); // first run 2 min after boot
+      setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
+    }
+
     // Nightly Insights refresh — judges closed/handoff sessions and
     // aggregates Gap state at 02:00 UTC (ADR-0006; tenants included by the
     // gapInsights Feature per ADR-0013).

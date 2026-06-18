@@ -4,12 +4,26 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const mockFindOne = vi.fn();
 const mockSave = vi.fn();
+const mockGetMany = vi.fn();
+const mockQb = {
+  where: vi.fn(() => mockQb),
+  andWhere: vi.fn(() => mockQb),
+  orderBy: vi.fn(() => mockQb),
+  limit: vi.fn(() => mockQb),
+  getMany: mockGetMany,
+};
 
 vi.mock('../../database/data-source', () => ({
   getRepository: vi.fn(() => ({
     findOne: mockFindOne,
     save: mockSave,
+    createQueryBuilder: () => mockQb,
   })),
+}));
+
+const mockIsEntitled = vi.fn();
+vi.mock('../../channels/channel-entitlement', () => ({
+  isChannelEntitled: (...a: unknown[]) => mockIsEntitled(...a),
 }));
 
 vi.mock('axios', () => ({
@@ -41,7 +55,7 @@ const mockGetRedisClient = vi.fn();
 vi.mock('../../config/redis', () => ({ getRedisClient: () => mockGetRedisClient() }));
 
 import axios from 'axios';
-import { runHealthCheck, triggerHealthCheckDebounced } from '../../channels/health-check.service';
+import { runHealthCheck, triggerHealthCheckDebounced, sweepStaleChannels } from '../../channels/health-check.service';
 
 const axiosGet = vi.mocked(axios.get);
 
@@ -71,6 +85,58 @@ beforeEach(() => {
   mockGetRedisClient.mockReset();
   mockGetRedisClient.mockReturnValue(null);
   mockSave.mockImplementation((entity) => Promise.resolve(entity));
+  mockGetMany.mockReset();
+  mockIsEntitled.mockReset();
+  mockIsEntitled.mockResolvedValue(true);
+});
+
+describe('sweepStaleChannels', () => {
+  it('probes entitled stale active channels and skips unentitled ones', async () => {
+    mockGetMany.mockResolvedValue([
+      { ...baseConn, id: 'c1', channel: 'telegram' },
+      { ...baseConn, id: 'c2', channel: 'messenger' },
+      { ...baseConn, id: 'c3', channel: 'whatsapp' },
+    ]);
+    mockIsEntitled.mockImplementation((_t: string, ch: string) => Promise.resolve(ch !== 'whatsapp'));
+    mockGetRedisClient.mockReturnValue(null); // debounce fail-open → probe runs
+    mockFindOne.mockImplementation(({ where: { id } }: { where: { id: string } }) =>
+      Promise.resolve({ ...baseConn, id }),
+    );
+    axiosGet.mockResolvedValue({ data: { ok: true, result: { id: 1 } } });
+
+    const res = await sweepStaleChannels();
+
+    expect(res.scanned).toBe(3);
+    expect(res.probed).toBe(2); // whatsapp skipped — unentitled
+    expect(mockIsEntitled).toHaveBeenCalledTimes(3);
+  });
+
+  it('probes nothing when no channels are stale', async () => {
+    mockGetMany.mockResolvedValue([]);
+    const res = await sweepStaleChannels();
+    expect(res).toEqual({ scanned: 0, probed: 0 });
+    expect(mockIsEntitled).not.toHaveBeenCalled();
+  });
+});
+
+describe('runHealthCheck (active→error notify dedupe)', () => {
+  it('does NOT notify when the down-claim is already held', async () => {
+    mockFindOne.mockResolvedValue({ ...baseConn, status: 'active' });
+    axiosGet.mockRejectedValue(new Error('401'));
+    mockGetRedisClient.mockReturnValue({ set: vi.fn().mockResolvedValue(null) }); // claim lost
+    await runHealthCheck('conn-1');
+    await tick();
+    expect(mockCreateForTenant).not.toHaveBeenCalled();
+  });
+
+  it('notifies when it wins the down-claim', async () => {
+    mockFindOne.mockResolvedValue({ ...baseConn, status: 'active' });
+    axiosGet.mockRejectedValue(new Error('401'));
+    mockGetRedisClient.mockReturnValue({ set: vi.fn().mockResolvedValue('OK') });
+    await runHealthCheck('conn-1');
+    await tick();
+    expect(mockCreateForTenant).toHaveBeenCalled();
+  });
 });
 
 describe('triggerHealthCheckDebounced', () => {

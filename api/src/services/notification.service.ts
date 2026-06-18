@@ -11,6 +11,7 @@ import { Notification } from '../database/entities/Notification';
 import { MobileDevice } from '../database/entities/MobileDevice';
 import { User } from '../database/entities/User';
 import { addNotificationJob } from '../queue/message-queue';
+import { emitToTenantAgents } from '../websocket/socket.handler';
 import { logger } from '../utils/logger';
 
 export interface CreateNotificationInput {
@@ -77,11 +78,16 @@ async function enqueueDelivery(notificationId: string): Promise<void> {
 }
 
 export const notificationService = {
-  /** Create one notification per recipient (idempotent) and queue push delivery. */
+  /**
+   * Create one notification per recipient (idempotent) and queue push delivery.
+   * Returns the number of rows actually created (skips deduped/raced recipients),
+   * so callers can avoid re-emitting a real-time event for a fully-deduped retry.
+   */
   async createForUsers(
     input: CreateNotificationInput & { recipientUserIds: string[] },
-  ): Promise<void> {
+  ): Promise<number> {
     const repo = AppDataSource.getRepository(Notification);
+    let created = 0;
     for (const recipientUserId of input.recipientUserIds) {
       const dedupeKey = input.dedupeBase ? `${input.dedupeBase}:${recipientUserId}` : undefined;
       if (dedupeKey) {
@@ -101,6 +107,7 @@ export const notificationService = {
           }),
         );
         await enqueueDelivery(n.id);
+        created += 1;
       } catch (err) {
         // Unique dedupe_key violation under a race → already created; ignore.
         logger.debug('Notification create skipped', {
@@ -108,6 +115,7 @@ export const notificationService = {
         });
       }
     }
+    return created;
   },
 
   /** Fan out to all active operators of a tenant. */
@@ -117,7 +125,29 @@ export const notificationService = {
       select: ['id'],
     });
     if (users.length === 0) return;
-    await this.createForUsers({ ...input, recipientUserIds: users.map((u) => u.id) });
+    const created = await this.createForUsers({ ...input, recipientUserIds: users.map((u) => u.id) });
+    // Nothing new was written (a fully-deduped retry of the same dedupeBase) →
+    // don't re-toast/re-sound desktops for an event they were already alerted to.
+    if (created === 0) return;
+
+    // Real-time desktop delivery. The push worker only covers mobile (which most
+    // staff don't have), and nothing else surfaced notifications on desktop — so a
+    // handoff / guardrail pause / channel-down could go unnoticed. Emit ONE
+    // tenant-level event to all agents (not per-recipient, which would N-duplicate
+    // the toast/sound). Best-effort: a socket hiccup must never fail the write.
+    try {
+      emitToTenantAgents(input.tenantId, 'notification', {
+        type: input.type,
+        title: input.title,
+        message: input.message,
+        data: input.data ?? null,
+      });
+    } catch (err) {
+      logger.warn('Failed to emit notification WS event', {
+        tenantId: input.tenantId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   },
 
   async list(params: {

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle, Circle, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/useAppAuth';
 import { useOnboardingStatus } from '@/queries/useOnboardingQueries';
+import { useTenantSettings } from '@/queries/useTenantQueries';
 
 const DISMISSED_KEY = 'onboarding_banner_dismissed';
 
@@ -11,10 +12,21 @@ interface ChecklistItem {
   key: string;
   labelKey: string;
   link: string;
+  /**
+   * Opens the real (out-of-portal) widget in a new tab with the tenant apiKey,
+   * rather than navigating within the portal shell. Falls back to the in-portal
+   * bot hub if the apiKey hasn't loaded yet.
+   */
+  external?: boolean;
+  ctaKey?: string;
 }
 
 const CHECKLIST_ITEMS: ChecklistItem[] = [
   { key: 'aiEnabled', labelKey: 'analytics.onboardingBanner.steps.aiEnabled.label', link: '/ai?tab=settings' },
+  // The bot answers out of the box — surface the instant "try it live" path early
+  // (the real widget, in a new tab) so the first useful answer doesn't wait on
+  // KB/automations or the Meta-gated social-channel setup.
+  { key: 'firstConversation', labelKey: 'analytics.onboardingBanner.steps.firstConversation.label', link: '/widget-test', external: true, ctaKey: 'analytics.onboardingBanner.tryIt' },
   { key: 'brandVoiceConfigured', labelKey: 'analytics.onboardingBanner.steps.brandVoiceConfigured.label', link: '/ai?tab=settings' },
   { key: 'knowledgeBaseHasDocs', labelKey: 'analytics.onboardingBanner.steps.knowledgeBaseHasDocs.label', link: '/ai?tab=knowledge' },
   { key: 'automationsConfigured', labelKey: 'analytics.onboardingBanner.steps.automationsConfigured.label', link: '/settings/automations' },
@@ -24,6 +36,8 @@ export const OnboardingBanner: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAppAuth();
   const { data: status, isLoading } = useOnboardingStatus();
+  const { data: tenant } = useTenantSettings();
+  const apiKey = (tenant as { apiKey?: string } | undefined)?.apiKey;
   const [dismissed, setDismissed] = useState(
     () => localStorage.getItem(DISMISSED_KEY) === 'true'
   );
@@ -90,14 +104,33 @@ export const OnboardingBanner: React.FC = () => {
                   {t(item.labelKey)}
                 </span>
               </div>
-              {!complete && (
-                <Link
-                  to={item.link}
-                  className="text-xs font-medium text-primary-400 hover:text-primary-300 shrink-0"
-                >
-                  {t('analytics.onboardingBanner.setUp')}
-                </Link>
-              )}
+              {!complete && (() => {
+                const cls = 'text-xs font-medium text-primary-400 hover:text-primary-300 shrink-0';
+                const cta = t(item.ctaKey ?? 'analytics.onboardingBanner.setUp');
+                // Real out-of-portal widget, opened in a new tab with the tenant
+                // apiKey so /widget/init resolves — this is what actually flips
+                // the "first conversation" signal.
+                if (item.external && apiKey) {
+                  return (
+                    <a
+                      href={`${item.link}?apiKey=${encodeURIComponent(apiKey)}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={cls}
+                    >
+                      {cta}
+                    </a>
+                  );
+                }
+                // External step but the apiKey hasn't loaded — send them to the
+                // bot hub (embed snippet + live preview live there) instead of a
+                // key-less, blank widget page.
+                return (
+                  <Link to={item.external ? '/ai?tab=bots' : item.link} className={cls}>
+                    {cta}
+                  </Link>
+                );
+              })()}
             </div>
           );
         })}

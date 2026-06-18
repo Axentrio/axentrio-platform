@@ -2099,6 +2099,7 @@
       "progress": "{{completed}} van {{total}} voltooid",
       "dismiss": "Sluiten",
       "setUp": "Instellen",
+      "tryIt": "Probeer",
       "steps": {
         "aiEnabled": {
           "label": "AI-assistent activeren"
@@ -2114,6 +2115,9 @@
         },
         "automationsConfigured": {
           "label": "Automatiseringen instellen"
+        },
+        "firstConversation": {
+          "label": "Zie je bot antwoorden (probeer het live)"
         }
       }
     },

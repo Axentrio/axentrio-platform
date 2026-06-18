@@ -2098,6 +2098,7 @@
       "progress": "{{completed}} sur {{total}} terminés",
       "dismiss": "Fermer",
       "setUp": "Configurer",
+      "tryIt": "Essayer",
       "steps": {
         "aiEnabled": {
           "label": "Activer l'assistant IA"
@@ -2113,6 +2114,9 @@
         },
         "automationsConfigured": {
           "label": "Configurer les automatisations"
+        },
+        "firstConversation": {
+          "label": "Voyez votre bot répondre (essai en direct)"
         }
       }
     },

@@ -11,6 +11,7 @@ interface OnboardingSteps {
   knowledgeBaseHasDocs: boolean;
   calcomConnected: boolean;
   automationsConfigured: boolean;
+  firstConversation: boolean;
   [key: string]: boolean;
 }
 

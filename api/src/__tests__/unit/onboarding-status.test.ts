@@ -35,8 +35,31 @@ describe('computeOnboardingStatus', () => {
         ai: { enabled: true, brandVoice: { name: 'Bot' } },
         automations: { emailNotifications: { newLeadAlert: { enabled: true } } },
       },
-    } as any, 3);
+    } as any, 3, true);
     expect(result.complete).toBe(true);
+    expect(result.completedCount).toBe(5);
+  });
+
+  it('defaults firstConversation to false', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true } },
+    } as any, 0);
+    expect(result.steps.firstConversation).toBe(false);
+  });
+
+  it('detects a first conversation', () => {
+    const result = computeOnboardingStatus({ settings: {} } as any, 0, true);
+    expect(result.steps.firstConversation).toBe(true);
+  });
+
+  it('is not complete until a first conversation happens', () => {
+    const result = computeOnboardingStatus({
+      settings: {
+        ai: { enabled: true, brandVoice: { name: 'Bot' } },
+        automations: { emailNotifications: { newLeadAlert: { enabled: true } } },
+      },
+    } as any, 3, false);
+    expect(result.complete).toBe(false);
     expect(result.completedCount).toBe(4);
   });
 
@@ -47,9 +70,9 @@ describe('computeOnboardingStatus', () => {
     expect(result.steps.brandVoiceConfigured).toBe(false);
   });
 
-  it('returns totalCount of 4', () => {
+  it('returns totalCount of 5', () => {
     const result = computeOnboardingStatus({ settings: {} } as any, 0);
-    expect(result.totalCount).toBe(4);
+    expect(result.totalCount).toBe(5);
   });
 
   it('detects automations configured via bookingConfirmation', () => {

@@ -1077,7 +1077,7 @@ router.delete(
   })
 );
 
-export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
+export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConversation = false) {
   const settings = tenant.settings || {};
   const ai = settings.ai || {};
   const automations = settings.automations || {};
@@ -1092,6 +1092,12 @@ export function computeOnboardingStatus(tenant: any, kbDocCount: number) {
       automations.emailNotifications?.newLeadAlert?.enabled ||
       automations.emailNotifications?.conversationSummary?.enabled
     ),
+    // The point of onboarding is a *working* bot, not just a configured one — so
+    // track whether the bot has actually answered at least once (a persisted bot
+    // reply exists; see the route handler for the exact signal). This is the
+    // "time to first useful answer" metric; the banner uses it to steer new
+    // tenants to try their bot rather than stalling at setup steps.
+    firstConversation: hadConversation,
   };
 
   const totalCount = Object.keys(steps).length;
@@ -1132,7 +1138,39 @@ router.get(
       if (!(err instanceof AnchorBotMissingError)) throw err;
     }
 
-    const status = computeOnboardingStatus({ settings: botSettings }, kbResult[0]?.count || 0);
+    // "First conversation" = the bot has actually ANSWERED a prompt at least once:
+    // a persisted bot text message that FOLLOWS a user message in the same session.
+    // We can't use a bare bot-message-exists check because /widget/init persists a
+    // bot *greeting* before the visitor types anything (widget.ts), and we can't use
+    // `chat_sessions.message_count > 0` because that flips on the visitor's inbound
+    // message alone (unanswered prompt / LLM failure / AI-disabled). The ephemeral
+    // in-portal test chat does NOT persist, so only real conversations (embedded
+    // widget / connected channel / standalone /widget-test) count. Fail-safe to
+    // false so a query error never blocks the rest of onboarding status.
+    const convResult = await AppDataSource.query(
+      `SELECT EXISTS(
+         SELECT 1
+         FROM messages bm
+         JOIN participants bp ON bp.id = bm.participant_id
+         WHERE bm.tenant_id = $1
+           AND bp.type = 'bot' AND bm.type = 'text' AND bm.is_deleted = false
+           AND EXISTS (
+             SELECT 1
+             FROM messages um
+             JOIN participants up ON up.id = um.participant_id
+             WHERE um.session_id = bm.session_id
+               AND up.type = 'user' AND um.is_deleted = false
+               AND (um.created_at, um.id) < (bm.created_at, bm.id)
+           )
+       ) AS has`,
+      [tenantId]
+    ).catch(() => [{ has: false }]);
+
+    const status = computeOnboardingStatus(
+      { settings: botSettings },
+      kbResult[0]?.count || 0,
+      !!convResult[0]?.has,
+    );
     sendSuccess(res, status);
   })
 );

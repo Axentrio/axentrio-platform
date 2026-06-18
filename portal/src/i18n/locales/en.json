@@ -2104,6 +2104,7 @@
       "progress": "{{completed}} of {{total}} done",
       "dismiss": "Dismiss",
       "setUp": "Set up",
+      "tryIt": "Try it",
       "steps": {
         "aiEnabled": {
           "label": "Enable the AI assistant"
@@ -2119,6 +2120,9 @@
         },
         "automationsConfigured": {
           "label": "Configure automations"
+        },
+        "firstConversation": {
+          "label": "See your bot answer (try it live)"
         }
       }
     },

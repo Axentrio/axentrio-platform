@@ -79,6 +79,7 @@ export const queryKeys = {
     botTemplateDetail: (id: string) => [...queryKeys.admin.all(), 'bot-template', id] as const,
     guardrailFlagged: (filters?: Record<string, unknown>) => [...queryKeys.admin.all(), 'guardrails', 'flagged', filters] as const,
     guardrailSummary: (days: number) => [...queryKeys.admin.all(), 'guardrails', 'summary', days] as const,
+    observability: (days: number) => [...queryKeys.admin.all(), 'observability', days] as const,
   },
   integrations: {
     all: () => ['integrations'] as const,

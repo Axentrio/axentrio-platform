@@ -1152,6 +1152,21 @@
         "mode": "Mode"
       }
     },
+    "observability": {
+      "title": "État du déploiement — {{days}} derniers jours",
+      "split": "{{enforced}} appliqués · {{shadow}} observés",
+      "openHandoffs": "{{count}} en attente",
+      "enforcingTenants": "{{count}} locataire(s) appliquent actuellement les garde-fous",
+      "stat": {
+        "sessions": "Sessions",
+        "messages": "Messages",
+        "handoffs": "Transferts",
+        "inboundFlags": "Signalements entrants",
+        "outputFlags": "Signalements sortants",
+        "deliveryFailures": "Échecs de livraison",
+        "channelsDown": "Canaux en panne"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Modèles de bot",

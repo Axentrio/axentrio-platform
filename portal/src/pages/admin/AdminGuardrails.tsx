@@ -6,7 +6,7 @@
  * Backed by /admin/guardrails/{summary,flagged} + PUT /admin/tenants/:id/guardrails.
  */
 import { useTranslation } from 'react-i18next';
-import { Loader2, ShieldAlert, ExternalLink } from 'lucide-react';
+import { Loader2, ShieldAlert, ExternalLink, Activity } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
@@ -17,8 +17,31 @@ import {
   useGuardrailFlagged,
   useSetTenantGuardrailEnforce,
   useAdminTenantsAll,
+  useObservabilityOverview,
 } from '../../queries/useAdminQueries';
 import { useTenantSwitch } from '../../hooks/useTenantSwitch';
+
+interface ObsTotals {
+  sessions: number;
+  messages: number;
+  guardrailInbound: { enforced: number; shadow: number };
+  guardrailOutput: { enforced: number; shadow: number };
+  handoffs: number;
+  openHandoffs: number;
+  deliveryFailures: number;
+  channelsDown: number;
+  enforceOnTenants: number;
+}
+
+function Stat({ label, value, sub, alert }: { label: string; value: number; sub?: string; alert?: boolean }) {
+  return (
+    <div className="rounded-lg border border-edge bg-surface-1/40 px-3 py-2">
+      <p className="text-xs text-text-muted">{label}</p>
+      <p className={`text-xl font-semibold ${alert && value > 0 ? 'text-red-500' : 'text-text-primary'}`}>{value}</p>
+      {sub && <p className="text-[11px] text-text-muted">{sub}</p>}
+    </div>
+  );
+}
 
 interface TenantRow {
   tenant_id: string;
@@ -42,6 +65,7 @@ export default function AdminGuardrails() {
   const { t } = useTranslation();
   const { data: summary, isLoading: summaryLoading } = useGuardrailSummary(7);
   const { data: events = [], isLoading: feedLoading } = useGuardrailFlagged();
+  const { data: obs, isLoading: obsLoading } = useObservabilityOverview(7);
   const setEnforce = useSetTenantGuardrailEnforce();
   const { switchTenant } = useTenantSwitch();
   const { data: tenants = [] } = useAdminTenantsAll({ enabled: true });
@@ -60,6 +84,55 @@ export default function AdminGuardrails() {
         </h1>
         <p className="text-sm text-text-secondary mt-1">{t('admin.guardrails.subtitle')}</p>
       </header>
+
+      {/* Rollout Health — operational snapshot over existing data (last N days) */}
+      <Card>
+        <CardHeader className="font-medium flex items-center gap-2">
+          <Activity className="w-4 h-4 text-primary-500" />
+          {t('admin.observability.title', { days: obs?.windowDays ?? 7 })}
+        </CardHeader>
+        <CardContent>
+          {obsLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin text-text-muted" />
+          ) : !obs?.totals ? (
+            <p className="text-sm text-text-muted">{t('admin.guardrails.empty')}</p>
+          ) : (
+            (() => {
+              const x = obs.totals as ObsTotals;
+              const split = (g: { enforced: number; shadow: number }) =>
+                t('admin.observability.split', { enforced: g.enforced, shadow: g.shadow });
+              return (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                  <Stat label={t('admin.observability.stat.sessions')} value={x.sessions} />
+                  <Stat label={t('admin.observability.stat.messages')} value={x.messages} />
+                  <Stat
+                    label={t('admin.observability.stat.handoffs')}
+                    value={x.handoffs}
+                    sub={t('admin.observability.openHandoffs', { count: x.openHandoffs })}
+                  />
+                  <Stat
+                    label={t('admin.observability.stat.inboundFlags')}
+                    value={x.guardrailInbound.enforced + x.guardrailInbound.shadow}
+                    sub={split(x.guardrailInbound)}
+                  />
+                  <Stat
+                    label={t('admin.observability.stat.outputFlags')}
+                    value={x.guardrailOutput.enforced + x.guardrailOutput.shadow}
+                    sub={split(x.guardrailOutput)}
+                  />
+                  <Stat label={t('admin.observability.stat.deliveryFailures')} value={x.deliveryFailures} alert />
+                  <Stat label={t('admin.observability.stat.channelsDown')} value={x.channelsDown} alert />
+                </div>
+              );
+            })()
+          )}
+          {obs?.totals && (
+            <p className="mt-3 text-xs text-text-muted">
+              {t('admin.observability.enforcingTenants', { count: (obs.totals as ObsTotals).enforceOnTenants })}
+            </p>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Per-tenant activity + enforce toggle */}
       <Card>

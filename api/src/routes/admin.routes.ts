@@ -15,6 +15,7 @@ import userAdminRoutes from './admin/user-admin.routes';
 import reportingAdminRoutes from './admin/reporting-admin.routes';
 import botTemplatesAdminRoutes from './admin/bot-templates-admin.routes';
 import guardrailsAdminRoutes from './admin/guardrails-admin.routes';
+import observabilityAdminRoutes from './admin/observability-admin.routes';
 
 const router = Router();
 
@@ -26,6 +27,7 @@ router.use(requireClerkAuth, autoProvision, requireSuperAdmin);
 // collide with `/tenants/:id`, but explicit ordering keeps intent obvious).
 router.use(entitlementsAdminRoutes);
 router.use(guardrailsAdminRoutes);
+router.use(observabilityAdminRoutes);
 router.use(botTemplatesAdminRoutes);
 router.use(tenantAdminRoutes);
 router.use(userAdminRoutes);

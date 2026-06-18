@@ -1153,6 +1153,21 @@
         "mode": "Modus"
       }
     },
+    "observability": {
+      "title": "Uitrolstatus — laatste {{days}} dagen",
+      "split": "{{enforced}} afgedwongen · {{shadow}} schaduw",
+      "openHandoffs": "{{count}} open",
+      "enforcingTenants": "{{count}} tenant(s) dwingen momenteel beveiliging af",
+      "stat": {
+        "sessions": "Sessies",
+        "messages": "Berichten",
+        "handoffs": "Overdrachten",
+        "inboundFlags": "Inkomende meldingen",
+        "outputFlags": "Uitgaande meldingen",
+        "deliveryFailures": "Leveringsfouten",
+        "channelsDown": "Kanalen offline"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Bot-sjablonen",

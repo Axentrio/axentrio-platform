@@ -463,6 +463,13 @@ export function useGuardrailSummary(days = 7) {
   });
 }
 
+export function useObservabilityOverview(days = 7) {
+  return useQuery({
+    queryKey: queryKeys.admin.observability(days),
+    queryFn: async () => (await api.get<Any>('/admin/observability/overview', { params: { days } })) as Any,
+  });
+}
+
 export function useSetTenantGuardrailEnforce() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -470,6 +477,8 @@ export function useSetTenantGuardrailEnforce() {
       api.put(`/admin/tenants/${input.tenantId}/guardrails`, { enforce: input.enforce }),
     onSuccess: (_, vars) => {
       queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.all(), 'guardrails'] });
+      // The Rollout Health band's enforceOnTenants is keyed under 'observability'.
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.all(), 'observability'] });
       toast.success(`Enforce ${vars.enforce ? 'enabled' : 'disabled'}`);
     },
     onError: (err: Any) =>

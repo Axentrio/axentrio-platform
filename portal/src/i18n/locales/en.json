@@ -1194,6 +1194,21 @@
         "mode": "Mode"
       }
     },
+    "observability": {
+      "title": "Rollout Health — last {{days}} days",
+      "split": "{{enforced}} enforced · {{shadow}} shadow",
+      "openHandoffs": "{{count}} open",
+      "enforcingTenants": "{{count}} tenant(s) currently enforcing guardrails",
+      "stat": {
+        "sessions": "Sessions",
+        "messages": "Messages",
+        "handoffs": "Handoffs",
+        "inboundFlags": "Inbound flags",
+        "outputFlags": "Output flags",
+        "deliveryFailures": "Delivery failures",
+        "channelsDown": "Channels down"
+      }
+    },
     "botTemplates": {
       "header": {
         "title": "Bot Templates",

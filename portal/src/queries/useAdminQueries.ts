@@ -470,6 +470,31 @@ export function useObservabilityOverview(days = 7) {
   });
 }
 
+// #9 incident-response: look up a single conversation's enforcement state + journals.
+export function useGuardrailConversation(id: string | undefined) {
+  return useQuery({
+    queryKey: queryKeys.admin.guardrailConversation(id ?? ''),
+    queryFn: async () => (await api.get<Any>(`/admin/guardrails/conversations/${id}`)) as Any,
+    enabled: !!id,
+  });
+}
+
+// #9 reversible action: super-admin cross-tenant resume-AI (audited).
+export function useResumeAiAdmin() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post(`/admin/guardrails/conversations/${id}/resume-ai`, {}),
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.guardrailConversation(id) });
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.all(), 'guardrails'] });
+      queryClient.invalidateQueries({ queryKey: [...queryKeys.admin.all(), 'observability'] });
+      toast.success('AI re-enabled for this conversation');
+    },
+    onError: (err: Any) =>
+      toast.error(err?.response?.data?.error?.message ?? err?.message ?? 'Failed to re-enable AI'),
+  });
+}
+
 export function useSetTenantGuardrailEnforce() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -1171,6 +1171,24 @@
         "impliedFp": "FP implicite (repris)"
       }
     },
+    "incident": {
+      "lookup": "Rechercher",
+      "lookupPlaceholder": "ID de conversation…",
+      "inspect": "Inspecter",
+      "back": "Retour",
+      "backToCockpit": "Retour au tableau de bord Garde-fous",
+      "notFound": "Conversation introuvable.",
+      "none": "Aucun",
+      "openInbox": "Ouvrir dans la boîte de réception",
+      "resumeAi": "Réactiver l'IA",
+      "enforcementState": "État d'application",
+      "statusLabel": "Statut",
+      "aiOn": "IA active",
+      "aiPaused": "IA en pause",
+      "inboundJournal": "Journal des garde-fous entrants",
+      "outputJournal": "Journal des garde-fous sortants",
+      "handoffs": "Transferts"
+    },
     "botTemplates": {
       "header": {
         "title": "Modèles de bot",

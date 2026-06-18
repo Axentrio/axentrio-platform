@@ -20,7 +20,8 @@ import { Tenant } from '../../database/entities/Tenant';
 import { SpamScamLog } from '../../database/entities/SpamScamLog';
 import { GuardrailOutputLog } from '../../database/entities/GuardrailOutputLog';
 import { isGuardrailsEnforcing } from '../../guardrails/inbound-guardrails.service';
-import { createTestTenant, createTestUser } from '../helpers/factories';
+import { createTestTenant, createTestUser, createTestSession, createTestHandoffRequest } from '../helpers/factories';
+import { ChatSession } from '../../database/entities/ChatSession';
 
 const tenantRepo = () => AppDataSource.getRepository(Tenant);
 
@@ -57,6 +58,43 @@ describe('admin guardrails (super-admin cockpit)', () => {
 
     const out = await request(app).get('/api/v1/admin/guardrails/flagged?source=output');
     expect(out.body.data.events.every((e: { source: string }) => e.source === 'output')).toBe(true);
+  });
+
+  it('#9: GET /guardrails/conversations/:id returns enforcement state + both journals + handoffs', async () => {
+    const session = await createTestSession(tenantId, { aiAutoReplyEnabled: false, guardrailStatus: 'phishing' });
+    const spam = AppDataSource.getRepository(SpamScamLog);
+    await spam.save(spam.create({
+      tenantId, conversationId: session.id, sourceChannel: 'widget',
+      detectedCategory: 'phishing', reasons: ['x'], enforced: true,
+    }));
+    const out = AppDataSource.getRepository(GuardrailOutputLog);
+    await out.save(out.create({
+      tenantId, conversationId: session.id, sourceChannel: 'widget',
+      generationPath: 'coalescer', families: ['plan_leakage'], reasons: ['y'], enforced: true,
+    }));
+    await createTestHandoffRequest(session.id, tenantId, { status: 'requested' });
+
+    const res = await request(app).get(`/api/v1/admin/guardrails/conversations/${session.id}`);
+    expect(res.status).toBe(200);
+    const d = res.body.data;
+    expect(d.session).toMatchObject({ id: session.id, tenantId, aiAutoReplyEnabled: false, guardrailStatus: 'phishing' });
+    expect(d.inboundLogs).toHaveLength(1);
+    expect(d.outputLogs).toHaveLength(1);
+    expect(d.handoffs).toHaveLength(1);
+  });
+
+  it('#9: GET /guardrails/conversations/:id 404s an unknown id', async () => {
+    const res = await request(app).get(`/api/v1/admin/guardrails/conversations/${crypto.randomUUID()}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('#9: POST /guardrails/conversations/:id/resume-ai re-enables AI (cross-tenant)', async () => {
+    const session = await createTestSession(tenantId, { aiAutoReplyEnabled: false, guardrailStatus: 'scam' });
+    const res = await request(app).post(`/api/v1/admin/guardrails/conversations/${session.id}/resume-ai`);
+    expect(res.status).toBe(200);
+    const reloaded = await AppDataSource.getRepository(ChatSession).findOneOrFail({ where: { id: session.id } });
+    expect(reloaded.aiAutoReplyEnabled).toBe(true);
+    expect(reloaded.guardrailStatus).toBe('normal');
   });
 
   it('PUT /tenants/:id/guardrails flips the enforce flag (and rejects non-boolean)', async () => {

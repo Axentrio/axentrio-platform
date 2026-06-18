@@ -168,14 +168,24 @@ export async function processInboundEvent(
 
     const savedMessage = await messageRepo.save(messageRepo.create(messageData)) as Message;
 
-    // Remember the latest inbound platform message id so a typing indicator can
-    // be anchored to it later (WhatsApp keys typing to a specific message_id).
-    if (event.externalMessageId) {
-      await getRepository(ConversationBinding).update(
-        { id: binding.id },
-        { lastInboundMessageId: event.externalMessageId, lastInboundAt: event.timestamp },
-      );
-    }
+    // Always advance lastInboundAt on every inbound — it's the 24h messaging-window
+    // anchor the HUMAN_AGENT tag decision relies on (Meta events carry no
+    // externalMessageId, so gating this on it left Messenger/IG lastInboundAt null
+    // and human-agent replies stuck on RESPONSE). MONOTONIC (GREATEST) so an
+    // out-of-order/retried event can't move the anchor backward and wrongly tag an
+    // inside-window reply. lastInboundMessageId is set only when the platform gives
+    // us a message id (WhatsApp anchors typing to it).
+    const inboundTs = event.timestamp ?? new Date();
+    await getRepository(ConversationBinding)
+      .createQueryBuilder()
+      .update()
+      .set({
+        lastInboundAt: () => 'GREATEST(COALESCE("lastInboundAt", :inboundTs), :inboundTs)',
+        ...(event.externalMessageId ? { lastInboundMessageId: event.externalMessageId } : {}),
+      })
+      .where('id = :id', { id: binding.id })
+      .setParameter('inboundTs', inboundTs)
+      .execute();
 
     // ── 5b. Ingest inbound media (fire-and-forget) ───────────────────────
     // Download/scan an inbound image into a `ready` upload_session so it

@@ -265,6 +265,13 @@ router.post('/users/:id/promote', asyncHandler(async (req: Request, res: Respons
   await repo.save(user);
   await logAudit(req.userId!, 'user.promoted', 'user', user.id, user.tenantId, { previousRole });
 
+  // Invalidate the autoProvision role cache so the grant takes effect immediately
+  // (the cache holds userRole for 5 min — see clerk.middleware).
+  if (user.clerkUserId) {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
+    if (tenant?.clerkOrgId) invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+  }
+
   logger.info('User promoted to super_admin', { promotedBy: req.userId, userId: user.id });
   sendSuccess(res, user);
 }));
@@ -292,6 +299,14 @@ router.post('/users/:id/demote', asyncHandler(async (req: Request, res: Response
   }
   await repo.save(user);
   await logAudit(req.userId!, 'user.demoted', 'user', user.id, user.tenantId, { newRole: user.role });
+
+  // Invalidate the autoProvision role cache so the REVOKE takes effect immediately —
+  // otherwise a demoted super-admin keeps cross-tenant access (incl. the incident
+  // endpoints) for up to the 5-min cache TTL.
+  if (user.clerkUserId) {
+    const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: user.tenantId } });
+    if (tenant?.clerkOrgId) invalidateProvisionCache(tenant.clerkOrgId, user.clerkUserId);
+  }
 
   logger.info('User demoted from super_admin', { demotedBy: req.userId, userId: user.id, newRole: user.role });
   sendSuccess(res, user);

@@ -1213,6 +1213,24 @@
         "impliedFp": "Implied FP (resumed)"
       }
     },
+    "incident": {
+      "lookup": "Look up",
+      "lookupPlaceholder": "Conversation ID…",
+      "inspect": "Inspect",
+      "back": "Back",
+      "backToCockpit": "Back to Guardrails cockpit",
+      "notFound": "Conversation not found.",
+      "none": "None",
+      "openInbox": "Open in inbox",
+      "resumeAi": "Resume AI",
+      "enforcementState": "Enforcement state",
+      "statusLabel": "Status",
+      "aiOn": "AI active",
+      "aiPaused": "AI paused",
+      "inboundJournal": "Inbound guardrail journal",
+      "outputJournal": "Output guardrail journal",
+      "handoffs": "Handoffs"
+    },
     "botTemplates": {
       "header": {
         "title": "Bot Templates",

@@ -1172,6 +1172,24 @@
         "impliedFp": "Impliciete FP (hervat)"
       }
     },
+    "incident": {
+      "lookup": "Opzoeken",
+      "lookupPlaceholder": "Gespreks-ID…",
+      "inspect": "Inspecteren",
+      "back": "Terug",
+      "backToCockpit": "Terug naar Beveiliging-cockpit",
+      "notFound": "Gesprek niet gevonden.",
+      "none": "Geen",
+      "openInbox": "Openen in inbox",
+      "resumeAi": "AI hervatten",
+      "enforcementState": "Handhavingsstatus",
+      "statusLabel": "Status",
+      "aiOn": "AI actief",
+      "aiPaused": "AI gepauzeerd",
+      "inboundJournal": "Inkomend beveiligingsjournaal",
+      "outputJournal": "Uitgaand beveiligingsjournaal",
+      "handoffs": "Overdrachten"
+    },
     "botTemplates": {
       "header": {
         "title": "Bot-sjablonen",

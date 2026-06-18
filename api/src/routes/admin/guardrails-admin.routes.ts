@@ -15,11 +15,14 @@ import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { SpamScamLog } from '../../database/entities/SpamScamLog';
 import { GuardrailOutputLog } from '../../database/entities/GuardrailOutputLog';
+import { ChatSession } from '../../database/entities/ChatSession';
+import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { asyncHandler, NotFoundError, ValidationError } from '../../middleware/error-handler';
 import { sendSuccess } from '../../utils/response';
 import { logger } from '../../utils/logger';
 import { invalidate } from '../../utils/cache';
 import { logAudit } from '../../utils/audit';
+import { redisLoopStore } from '../../guardrails/loop-store';
 
 const router = Router();
 
@@ -84,6 +87,71 @@ router.get(
       .slice(0, limit);
 
     sendSuccess(res, { events });
+  }),
+);
+
+// GET /admin/guardrails/conversations/:id — incident-response lookup (#9): a single
+// conversation's enforcement state + BOTH guardrail journals + handoff state. Keyed
+// by chat_sessions id (= the conversationId both journals carry). Cross-tenant —
+// super-admin scope (the router enforces requireSuperAdmin), so NO tenant filter.
+router.get(
+  '/guardrails/conversations/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id;
+    const session = await AppDataSource.getRepository(ChatSession).findOne({ where: { id } });
+    if (!session) throw new NotFoundError('Conversation not found');
+
+    const [inboundLogs, outputLogs, handoffs] = await Promise.all([
+      AppDataSource.getRepository(SpamScamLog).find({ where: { conversationId: id }, order: { createdAt: 'DESC' }, take: 50 }),
+      AppDataSource.getRepository(GuardrailOutputLog).find({ where: { conversationId: id }, order: { createdAt: 'DESC' }, take: 50 }),
+      AppDataSource.getRepository(HandoffRequest).find({ where: { sessionId: id }, order: { createdAt: 'DESC' }, take: 50 }),
+    ]);
+
+    sendSuccess(res, {
+      session: {
+        id: session.id,
+        tenantId: session.tenantId,
+        status: session.status,
+        aiAutoReplyEnabled: session.aiAutoReplyEnabled,
+        guardrailStatus: session.guardrailStatus,
+        assignedAgentId: session.assignedAgentId ?? null,
+        channel: session.channel,
+        lastActivityAt: session.lastActivityAt,
+        createdAt: session.createdAt,
+      },
+      inboundLogs,
+      outputLogs,
+      handoffs,
+    });
+  }),
+);
+
+// POST /admin/guardrails/conversations/:id/resume-ai — the reversible incident action
+// (#9): re-enable AI on a (possibly guardrail-paused) conversation. CROSS-TENANT by
+// design (super-admin acting outside any one tenant context) — safe ONLY because this
+// router is behind requireSuperAdmin; never expose on the tenant router. Audited
+// (unlike the tenant-scoped /handoff/resume-ai) so the action is reversible-with-trail.
+router.post(
+  '/guardrails/conversations/:id/resume-ai',
+  asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id;
+    const repo = AppDataSource.getRepository(ChatSession);
+    const session = await repo.findOne({ where: { id } });
+    if (!session) throw new NotFoundError('Conversation not found');
+
+    session.aiAutoReplyEnabled = true;
+    session.guardrailStatus = 'normal';
+    await repo.save(session);
+    await redisLoopStore.clear(id).catch(() => {});
+
+    await logAudit(req.userId!, 'guardrails.resume_ai', 'chat_session', id, session.tenantId, {
+      via: 'incident-cockpit',
+    });
+
+    sendSuccess(res, {
+      message: 'AI replies re-enabled',
+      session: { id: session.id, aiAutoReplyEnabled: true, guardrailStatus: 'normal' },
+    });
   }),
 );
 

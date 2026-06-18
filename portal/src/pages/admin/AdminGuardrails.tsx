@@ -5,12 +5,15 @@
  *   each deep-linking to the inbox conversation.
  * Backed by /admin/guardrails/{summary,flagged} + PUT /admin/tenants/:id/guardrails.
  */
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, ShieldAlert, ExternalLink, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Loader2, ShieldAlert, ExternalLink, Activity, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
   useGuardrailSummary,
@@ -71,6 +74,8 @@ export default function AdminGuardrails() {
   const { data: obs, isLoading: obsLoading } = useObservabilityOverview(7);
   const setEnforce = useSetTenantGuardrailEnforce();
   const { switchTenant } = useTenantSwitch();
+  const navigate = useNavigate();
+  const [lookupId, setLookupId] = useState('');
   const { data: tenants = [] } = useAdminTenantsAll({ enabled: true });
 
   const byTenant: TenantRow[] = summary?.byTenant ?? [];
@@ -87,6 +92,26 @@ export default function AdminGuardrails() {
         </h1>
         <p className="text-sm text-text-secondary mt-1">{t('admin.guardrails.subtitle')}</p>
       </header>
+
+      {/* #9 incident lookup: jump to ANY conversation's enforcement state + journals */}
+      <form
+        className="flex items-center gap-2 max-w-md"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const id = lookupId.trim();
+          if (id) navigate(`/admin/guardrails/${id}`);
+        }}
+      >
+        <Input
+          value={lookupId}
+          onChange={(e) => setLookupId(e.target.value)}
+          placeholder={t('admin.incident.lookupPlaceholder')}
+          className="text-sm"
+        />
+        <Button type="submit" variant="outline" size="sm" className="gap-1 shrink-0" disabled={!lookupId.trim()}>
+          <Search className="w-3.5 h-3.5" /> {t('admin.incident.lookup')}
+        </Button>
+      </form>
 
       {/* Rollout Health — operational snapshot over existing data (last N days) */}
       <Card>
@@ -231,7 +256,16 @@ export default function AdminGuardrails() {
                         {e.enforced ? t('admin.guardrails.enforced') : t('admin.guardrails.shadow')}
                       </Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="flex items-center gap-1">
+                      {/* #9: incident-response detail (enforcement state + journals + resume) */}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="gap-1 text-xs text-primary-500"
+                        onClick={() => navigate(`/admin/guardrails/${e.conversationId}`)}
+                      >
+                        {t('admin.incident.inspect')}
+                      </Button>
                       {/* Cross-tenant deep-link: switch the super-admin's tenant
                           context to this event's tenant first, else /chats/:id 404s. */}
                       <Button

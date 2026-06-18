@@ -163,6 +163,14 @@ describe('InternalProvider.createBooking', () => {
     expect(res.booking.id).toBe('bk-1');
     expect(res.booking.startTime).toBe('2026-06-10T07:00:00.000Z');
     expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z');
+    // #6: the result carries the business-local pre-formatted time + tz so the AI
+    // quotes it instead of mis-converting the UTC instant. 07:00 UTC = 09:00 in
+    // Europe/Brussels (the tz is rendered as CEST or GMT+2 depending on ICU data).
+    expect(res.timezone).toBe('Europe/Brussels');
+    expect(res.booking.displayTime).toBeDefined();
+    expect(res.booking.displayTime).toContain('9:00');
+    expect(res.booking.displayTime).toContain('June');
+    expect(res.booking.displayTime).not.toContain('7:00'); // never the UTC drift
     expect(logSave).toHaveBeenCalledOnce();
     // advisory lock + insert both ran inside the transaction
     expect(managerQuery).toHaveBeenCalledTimes(2);
@@ -211,6 +219,11 @@ describe('InternalProvider.createBooking', () => {
     });
     expect(res.idempotent).toBe(true);
     expect(res.booking.id).toBe('bk-existing');
+    // #6: even an idempotent re-confirm carries the business-local displayTime, so a
+    // re-confirmation can't drift to the UTC time.
+    expect(res.timezone).toBe('Europe/Brussels');
+    expect(res.booking.displayTime).toContain('9:00');
+    expect(res.booking.displayTime).not.toContain('7:00');
     expect(transaction).not.toHaveBeenCalled();
   });
 

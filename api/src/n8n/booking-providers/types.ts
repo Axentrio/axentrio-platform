@@ -66,20 +66,31 @@ export interface CreateBookingResult {
   /** True when the service is request-only: a request/lead was captured, NOT a
    *  confirmed appointment (no calendar event). The AI must phrase accordingly. */
   requested?: boolean;
+  /** Business timezone the booking time is in (IANA, e.g. Europe/Brussels). */
+  timezone?: string;
+  /** Service name, so the confirmation can name it without the model guessing. */
+  serviceName?: string;
   booking: {
     id: string | undefined;
     startTime: string | undefined;
     endTime: string | undefined;
+    /** #6: pre-formatted local time the AI must quote VERBATIM in the confirmation
+     *  (it must NOT re-derive a local time from the UTC startTime — that drifts). */
+    displayTime?: string;
     attendee: { name?: string; email?: string };
   };
 }
 
 export interface RescheduleResult {
   success: boolean;
+  timezone?: string;
+  serviceName?: string;
   booking: {
     id: string;
     startTime: string;
     endTime: string;
+    /** #6: pre-formatted local time the AI must quote VERBATIM (never re-derive). */
+    displayTime?: string;
   };
 }
 

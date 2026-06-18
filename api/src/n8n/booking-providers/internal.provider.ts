@@ -133,6 +133,15 @@ export function parseBookingStart(input: string, timezone: string): Date | null 
   return null;
 }
 
+/**
+ * #6: server-format the booking time in the BUSINESS timezone, so the AI can quote
+ * it verbatim instead of re-deriving a local time from the UTC instant (which drifts).
+ * e.g. "Monday, 23 June 2026 at 12:00 PM (CEST)".
+ */
+export function formatBookingDisplayTime(startUtc: Date, timezone: string): string {
+  return DateTime.fromJSDate(startUtc).setZone(timezone).toFormat("cccc, d LLLL yyyy 'at' h:mm a (ZZZZ)");
+}
+
 /** P5a — which contact fields a service requires. Single mapping for the column-name
  *  wart: customerLocationRequired maps to PHONE (a callback number), not address. */
 function requiredContactFields(service: ServiceType): { address: boolean; phone: boolean } {
@@ -444,15 +453,18 @@ export class InternalProvider implements BookingProvider {
     return external ? [...internal, ...external] : internal;
   }
 
-  private toResult(booking: Booking, idempotent: boolean): CreateBookingResult {
+  private toResult(booking: Booking, idempotent: boolean, timezone?: string, serviceName?: string): CreateBookingResult {
     return {
       success: true,
       idempotent: idempotent || undefined,
       requested: booking.status === 'request_created' || undefined,
+      timezone,
+      serviceName,
       booking: {
         id: booking.id,
         startTime: booking.startUtc.toISOString(),
         endTime: booking.endUtc.toISOString(),
+        displayTime: timezone ? formatBookingDisplayTime(booking.startUtc, timezone) : undefined,
         attendee: {
           name: booking.attendeeName ?? undefined,
           email: booking.attendeeEmail ?? undefined,
@@ -483,7 +495,7 @@ export class InternalProvider implements BookingProvider {
       where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
     });
     if (existing && existing.status !== 'failed') {
-      return this.toResult(existing, true);
+      return this.toResult(existing, true, rule.timezone, service.name);
     }
 
     // 2. Compute times. P5c: effective length depends on durationMode (range/ai use
@@ -509,7 +521,7 @@ export class InternalProvider implements BookingProvider {
       order: { createdAt: 'DESC' },
     });
     if (recentDup && !['failed', 'cancelled', 'declined'].includes(recentDup.status)) {
-      return this.toResult(recentDup, true);
+      return this.toResult(recentDup, true, rule.timezone, service.name);
     }
 
     // P3: normalize intake answers against THIS resolved service (the row's real service).
@@ -605,7 +617,7 @@ export class InternalProvider implements BookingProvider {
         const dup = await bookingRepo.findOne({
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
-        if (dup && dup.status !== 'failed') return this.toResult(dup, true);
+        if (dup && dup.status !== 'failed') return this.toResult(dup, true, rule.timezone, service.name);
         throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
@@ -676,10 +688,13 @@ export class InternalProvider implements BookingProvider {
 
     return {
       success: true,
+      timezone: rule.timezone,
+      serviceName: service.name,
       booking: {
         id: bookingId,
         startTime: start.toISOString(),
         endTime: end.toISOString(),
+        displayTime: formatBookingDisplayTime(start, rule.timezone),
         attendee,
       },
     };
@@ -1327,7 +1342,7 @@ export class InternalProvider implements BookingProvider {
 
     await this.scheduleAndPersistReminders(bookingId, start, 0);
 
-    return this.toResult(confirmed, false);
+    return this.toResult(confirmed, false, rule.timezone, service.name);
   }
 
   /** Owner declines a `request_created` lead → close it (no calendar event existed,
@@ -1538,7 +1553,17 @@ export class InternalProvider implements BookingProvider {
     // Move the mirrored Google event (best-effort).
     await this.syncCalendarReschedule(ctx, bookingId, service.name, start, end, rule.timezone).catch(() => undefined);
 
-    return { success: true, booking: { id: bookingId, startTime: start.toISOString(), endTime: end.toISOString() } };
+    return {
+      success: true,
+      timezone: rule.timezone,
+      serviceName: service.name,
+      booking: {
+        id: bookingId,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        displayTime: formatBookingDisplayTime(start, rule.timezone),
+      },
+    };
   }
 
   async cancelBooking(ctx: BookingContext, bookingId: string, reason?: string): Promise<CancelResult> {

@@ -151,6 +151,11 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(res.success).toBe(true);
     expect(res.booking.startTime).toBe('2026-06-10T08:00:00.000Z');
     expect(res.booking.endTime).toBe('2026-06-10T08:30:00.000Z');
+    // #6: reschedule result carries the business-local pre-formatted time. 08:00 UTC
+    // = 10:00 in Europe/Brussels — the AI quotes displayTime, never the UTC drift.
+    expect(res.timezone).toBe('Europe/Brussels');
+    expect(res.booking.displayTime).toContain('10:00');
+    expect(res.booking.displayTime).not.toContain('8:00');
     expect(sendBookingEmail).toHaveBeenCalledOnce();
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 1, uid: 'uid-1@axentrio' });
     expect(logSave).toHaveBeenCalledOnce();

@@ -624,6 +624,11 @@
           "title": "Connect a channel",
           "description": "Link Telegram or Facebook so the bot can talk to your visitors.",
           "action": "Connect"
+        },
+        "firstConversation": {
+          "title": "See your bot answer",
+          "description": "Ask your bot a question on the live widget to see your setup in action.",
+          "action": "Try it live"
         }
       }
     },

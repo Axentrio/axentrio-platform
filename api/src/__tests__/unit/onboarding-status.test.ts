@@ -63,10 +63,52 @@ describe('computeOnboardingStatus', () => {
     expect(result.completedCount).toBe(4);
   });
 
-  it('does not count brand voice when name is the default', () => {
+  it('does not count brand voice when name is the legacy default', () => {
     const result = computeOnboardingStatus({
       settings: { ai: { enabled: true, brandVoice: { name: 'Organization Assistant' } } },
     } as any, 0);
+    expect(result.steps.brandVoiceConfigured).toBe(false);
+  });
+
+  it('does not count brand voice when name is the generated default `${orgName} Assistant`', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Assistant' } } },
+    } as any, 0, false, 'Acme');
+    expect(result.steps.brandVoiceConfigured).toBe(false);
+  });
+
+  it('counts brand voice when the user set custom instructions (even on the default name)', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Assistant', customInstructions: 'Be formal.' } } },
+    } as any, 0, false, 'Acme');
+    expect(result.steps.brandVoiceConfigured).toBe(true);
+  });
+
+  it('counts brand voice when the user renamed it away from the default', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Support' } } },
+    } as any, 0, false, 'Acme');
+    expect(result.steps.brandVoiceConfigured).toBe(true);
+  });
+
+  it('counts brand voice when the user set a non-default tone', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Assistant', tone: 'professional' } } },
+    } as any, 0, false, 'Acme');
+    expect(result.steps.brandVoiceConfigured).toBe(true);
+  });
+
+  it('counts brand voice when the user set a business name', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Assistant', businessName: 'Acme Plumbing Co' } } },
+    } as any, 0, false, 'Acme');
+    expect(result.steps.brandVoiceConfigured).toBe(true);
+  });
+
+  it('does not count brand voice when only the default tone is present', () => {
+    const result = computeOnboardingStatus({
+      settings: { ai: { enabled: true, brandVoice: { name: 'Acme Assistant', tone: 'friendly' } } },
+    } as any, 0, false, 'Acme');
     expect(result.steps.brandVoiceConfigured).toBe(false);
   });
 

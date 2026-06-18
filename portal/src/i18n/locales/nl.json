@@ -619,6 +619,11 @@
           "title": "Verbind een kanaal",
           "description": "Koppel Telegram of Facebook zodat de bot met je bezoekers kan praten.",
           "action": "Verbinden"
+        },
+        "firstConversation": {
+          "title": "Zie je bot antwoorden",
+          "description": "Stel je bot een vraag op de live widget om je configuratie in actie te zien.",
+          "action": "Probeer live"
         }
       }
     },

@@ -5,20 +5,20 @@ import { OnboardingChecklist } from './OnboardingChecklist';
 
 function setup(props: Partial<React.ComponentProps<typeof OnboardingChecklist>> = {}) {
   const onGoToKnowledge = vi.fn();
-  const onGoToSocial = vi.fn();
+  const onTryBot = vi.fn();
   const onConfigureBot = vi.fn();
   render(
     <OnboardingChecklist
-      botEnabled={false}
+      aiEnabled={false}
       hasIndexedDocs={false}
-      hasConnectedChannel={false}
+      hadFirstConversation={false}
       onGoToKnowledge={onGoToKnowledge}
-      onGoToSocial={onGoToSocial}
+      onTryBot={onTryBot}
       onConfigureBot={onConfigureBot}
       {...props}
     />,
   );
-  return { onGoToKnowledge, onGoToSocial, onConfigureBot };
+  return { onGoToKnowledge, onTryBot, onConfigureBot };
 }
 
 describe('OnboardingChecklist', () => {
@@ -28,17 +28,17 @@ describe('OnboardingChecklist', () => {
     expect(screen.getByText(/Configure your AI bot/i)).toBeInTheDocument();
     // "Add knowledge" appears as both the step label and the action button.
     expect(screen.getAllByText(/Add knowledge/i).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/Connect a channel/i)).toBeInTheDocument();
+    expect(screen.getByText(/See your bot answer/i)).toBeInTheDocument();
   });
 
   it('renders nothing once all three steps are done', () => {
     const { container } = render(
       <OnboardingChecklist
-        botEnabled
+        aiEnabled
         hasIndexedDocs
-        hasConnectedChannel
+        hadFirstConversation
         onGoToKnowledge={vi.fn()}
-        onGoToSocial={vi.fn()}
+        onTryBot={vi.fn()}
         onConfigureBot={vi.fn()}
       />,
     );
@@ -46,18 +46,18 @@ describe('OnboardingChecklist', () => {
   });
 
   it('hides the action button for a completed step and shows it for an incomplete one', () => {
-    setup({ botEnabled: true });
+    setup({ aiEnabled: true });
     expect(screen.queryByRole('button', { name: /^Configure/i })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^Add knowledge/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /^Connect/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Try it live/i })).toBeInTheDocument();
   });
 
   it('calls the matching callback when an action button is clicked', async () => {
     const user = userEvent.setup();
-    const { onGoToKnowledge, onGoToSocial } = setup();
+    const { onGoToKnowledge, onTryBot } = setup();
     await user.click(screen.getByRole('button', { name: /^Add knowledge/i }));
     expect(onGoToKnowledge).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole('button', { name: /^Connect/i }));
-    expect(onGoToSocial).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole('button', { name: /^Try it live/i }));
+    expect(onTryBot).toHaveBeenCalledOnce();
   });
 });

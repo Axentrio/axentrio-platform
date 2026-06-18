@@ -618,6 +618,11 @@
           "title": "Connecter un canal",
           "description": "Reliez Telegram ou Facebook pour que le bot puisse parler à vos visiteurs.",
           "action": "Connecter"
+        },
+        "firstConversation": {
+          "title": "Voyez votre bot répondre",
+          "description": "Posez une question à votre bot sur le widget en direct pour voir votre configuration en action.",
+          "action": "Essayer en direct"
         }
       }
     },

@@ -50,8 +50,8 @@ import CreateBotDialog from './CreateBotDialog';
 import RenameBotDialog from './RenameBotDialog';
 import EmbedSnippetDialog from './EmbedSnippetDialog';
 import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
-import { useKnowledgeStats } from '@/queries/useKnowledgeQueries';
-import { useChannelConnections } from '@/queries/useChannelQueries';
+import { useOnboardingStatus } from '@/queries/useOnboardingQueries';
+import { useTenantSettings } from '@/queries/useTenantQueries';
 
 function formatDate(iso: string): string {
   try {
@@ -68,10 +68,11 @@ export const BotsList: React.FC = () => {
   const updateBot = useUpdateBot();
   const deleteBot = useDeleteBot();
 
-  // Tenant-wide onboarding signals (relocated here from the removed AI Bot tab).
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: stats } = useKnowledgeStats() as { data: any };
-  const { data: channelConnections } = useChannelConnections();
+  // Onboarding completion comes from the canonical onboarding-status API (the same
+  // source the dashboard banner uses), so this checklist can't diverge from it.
+  const { data: onboarding } = useOnboardingStatus();
+  const { data: tenant } = useTenantSettings();
+  const apiKey = (tenant as { apiKey?: string } | undefined)?.apiKey;
 
   const [createOpen, setCreateOpen] = useState(false);
   const [renaming, setRenaming] = useState<BotListItem | null>(null);
@@ -88,9 +89,20 @@ export const BotsList: React.FC = () => {
   const atQuota = limit !== null && used >= limit;
 
   const defaultBot = bots.find((b) => b.isDefault);
-  const botEnabled = defaultBot?.aiEnabled ?? false;
-  const hasIndexedDocs = parseInt(stats?.documents?.indexed || '0') > 0;
-  const hasConnectedChannel = (channelConnections?.length ?? 0) > 0;
+  const aiEnabled = onboarding?.steps.aiEnabled ?? false;
+  const hasIndexedDocs = onboarding?.steps.knowledgeBaseHasDocs ?? false;
+  const hadFirstConversation = onboarding?.steps.firstConversation ?? false;
+
+  // "Try your bot" = the real out-of-portal widget (new tab, tenant apiKey so
+  // /widget/init resolves) — what actually flips the first-conversation signal.
+  // Fall back to the embed snippet dialog if the apiKey hasn't loaded.
+  const handleTryBot = () => {
+    if (apiKey) {
+      window.open(`/widget-test?apiKey=${encodeURIComponent(apiKey)}`, '_blank', 'noopener,noreferrer');
+    } else if (defaultBot) {
+      setEmbedFor(defaultBot.id);
+    }
+  };
 
   const handleActivate = async (bot: BotListItem) => {
     try {
@@ -162,11 +174,12 @@ export const BotsList: React.FC = () => {
     <TooltipProvider>
       <div className="space-y-6">
         <OnboardingChecklist
-          botEnabled={botEnabled}
+          aiEnabled={aiEnabled}
           hasIndexedDocs={hasIndexedDocs}
-          hasConnectedChannel={hasConnectedChannel}
+          hadFirstConversation={hadFirstConversation}
+          onConfigureBot={() => { if (defaultBot) navigate(`/ai/bots/${defaultBot.id}`); }}
           onGoToKnowledge={() => navigate('/ai?tab=knowledge')}
-          onGoToSocial={() => navigate('/ai?tab=social')}
+          onTryBot={handleTryBot}
         />
 
         {/* Header: usage + new bot button */}

@@ -1,8 +1,12 @@
 /**
  * OnboardingChecklist
  * Shown at the top of the AI & Content "AI Bot" tab until the tenant has done
- * three first-day steps. Hides itself entirely once all three are complete so
- * the page stops nagging returning users.
+ * its first-day steps. Hides itself entirely once they're all complete so the
+ * page stops nagging returning users.
+ *
+ * Completion is sourced from the canonical onboarding-status API (the same data
+ * the dashboard OnboardingBanner uses) so the two surfaces can't diverge — this
+ * is a focused subset of those steps (enable → knowledge → first answer).
  */
 
 import React from 'react';
@@ -11,11 +15,11 @@ import { Check, Circle, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export interface OnboardingChecklistProps {
-  botEnabled: boolean;
+  aiEnabled: boolean;
   hasIndexedDocs: boolean;
-  hasConnectedChannel: boolean;
+  hadFirstConversation: boolean;
   onGoToKnowledge: () => void;
-  onGoToSocial: () => void;
+  onTryBot: () => void;
   onConfigureBot?: () => void;
 }
 
@@ -29,11 +33,11 @@ interface Step {
 }
 
 export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
-  botEnabled,
+  aiEnabled,
   hasIndexedDocs,
-  hasConnectedChannel,
+  hadFirstConversation,
   onGoToKnowledge,
-  onGoToSocial,
+  onTryBot,
   onConfigureBot,
 }) => {
   const { t } = useTranslation();
@@ -42,7 +46,7 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
       key: 'bot',
       label: t('ai.onboarding.steps.enableBot.title'),
       description: t('ai.onboarding.steps.enableBot.description'),
-      done: botEnabled,
+      done: aiEnabled,
       actionLabel: t('ai.onboarding.steps.enableBot.action'),
       onAction: onConfigureBot,
     },
@@ -55,12 +59,12 @@ export const OnboardingChecklist: React.FC<OnboardingChecklistProps> = ({
       onAction: onGoToKnowledge,
     },
     {
-      key: 'social',
-      label: t('ai.onboarding.steps.connectChannel.title'),
-      description: t('ai.onboarding.steps.connectChannel.description'),
-      done: hasConnectedChannel,
-      actionLabel: t('ai.onboarding.steps.connectChannel.action'),
-      onAction: onGoToSocial,
+      key: 'firstConversation',
+      label: t('ai.onboarding.steps.firstConversation.title'),
+      description: t('ai.onboarding.steps.firstConversation.description'),
+      done: hadFirstConversation,
+      actionLabel: t('ai.onboarding.steps.firstConversation.action'),
+      onAction: onTryBot,
     },
   ];
 

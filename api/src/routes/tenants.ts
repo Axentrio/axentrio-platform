@@ -1077,15 +1077,29 @@ router.delete(
   })
 );
 
-export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConversation = false) {
+export function computeOnboardingStatus(tenant: any, kbDocCount: number, hadConversation = false, orgName?: string) {
   const settings = tenant.settings || {};
   const ai = settings.ai || {};
   const automations = settings.automations || {};
+  const bv = ai.brandVoice;
+
+  // A new tenant's anchor bot ships with brandVoice.name = `${orgName} Assistant`
+  // (see defaultBotAi), so the old `!== 'Organization Assistant'` sentinel marked
+  // every real tenant "configured" on day one. Treat brand voice as configured only
+  // if the user actually personalised it: custom instructions, a business name, a
+  // non-default tone, or a name that differs from the generated default (and the
+  // legacy default literal).
+  const defaultBrandName = orgName ? `${orgName} Assistant` : null;
 
   // Cal.com is shelved, so the former `calcomConnected` onboarding step is gone.
   const steps = {
     aiEnabled: !!ai.enabled,
-    brandVoiceConfigured: !!(ai.brandVoice?.name && ai.brandVoice.name !== 'Organization Assistant'),
+    brandVoiceConfigured: !!(
+      bv?.customInstructions?.trim() ||
+      bv?.businessName?.trim() ||
+      (bv?.tone && bv.tone !== 'friendly') ||
+      (bv?.name && bv.name !== 'Organization Assistant' && bv.name !== defaultBrandName)
+    ),
     knowledgeBaseHasDocs: kbDocCount > 0,
     automationsConfigured: !!(
       automations.emailNotifications?.bookingConfirmation?.enabled ||
@@ -1170,6 +1184,7 @@ router.get(
       { settings: botSettings },
       kbResult[0]?.count || 0,
       !!convResult[0]?.has,
+      tenant.name,
     );
     sendSuccess(res, status);
   })

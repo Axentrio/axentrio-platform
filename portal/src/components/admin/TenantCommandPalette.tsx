@@ -20,7 +20,7 @@ export function TenantCommandPalette() {
   const { isTenantPaletteOpen, closeTenantPalette } = useUiStore();
   const { activeTenant } = useTenantContextStore();
   const { tenantId: ownTenantId } = useAppAuth();
-  const { switchTenant } = useTenantSwitch();
+  const { switchTenant, isMemberOrg } = useTenantSwitch();
   // Only fetch when the palette is actually open — saves a 1000-row trip
   // on every page navigation. Cached for 60s, so toggling open/close stays
   // instant after the first open.
@@ -40,14 +40,14 @@ export function TenantCommandPalette() {
   }, [isTenantPaletteOpen]);
 
   const handleSelect = useCallback(
-    (tenantId: string, tenantName: string, status?: string) => {
+    (tenantId: string, tenantName: string, status?: string, clerkOrgId?: string | null) => {
       if (status === 'suspended' || status === 'cancelled') return;
       const currentId = activeTenant?.tenantId ?? ownTenantId;
       if (currentId === tenantId) {
         closeTenantPalette();
         return;
       }
-      switchTenant({ tenantId, tenantName });
+      void switchTenant({ tenantId, tenantName, clerkOrgId });
     },
     [activeTenant, ownTenantId, closeTenantPalette, switchTenant]
   );
@@ -123,7 +123,7 @@ export function TenantCommandPalette() {
               <button
                 type="button"
                 key={tenant.id}
-                onClick={() => handleSelect(tenant.id, tenant.name, tenant.status)}
+                onClick={() => handleSelect(tenant.id, tenant.name, tenant.status, tenant.clerkOrgId)}
                 disabled={isInactive}
                 className={cn(
                   'w-full flex items-center justify-between rounded-md px-2 py-2 text-sm text-left',
@@ -149,6 +149,17 @@ export function TenantCommandPalette() {
                     <Badge variant="outline" className="text-xs capitalize">
                       {tenant.status}
                     </Badge>
+                  )}
+                  {!isActive && !isInactive && (
+                    isMemberOrg(tenant.clerkOrgId) ? (
+                      <Badge variant="outline" className="text-xs text-primary-400 border-primary-500/30">
+                        Member
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs text-text-muted">
+                        Impersonate
+                      </Badge>
+                    )
                   )}
                   <Badge variant="secondary" className="text-xs capitalize">
                     {tenant.tier}

@@ -1459,8 +1459,11 @@ export class InternalProvider implements BookingProvider {
     const service = await this.serviceForBooking(booking);
     const calendarKey = await this.calendarKey(ctx);
 
-    const start = new Date(newStartTime);
-    if (Number.isNaN(start.getTime())) {
+    // Anchor a zoneless/loose time to the business timezone (mirrors create/request):
+    // raw `new Date(newStartTime)` reads a zoneless string as UTC, drifting the booking
+    // by the tz offset (e.g. "4 PM" → 6 PM in a UTC+2 business).
+    const start = parseBookingStart(newStartTime, rule.timezone);
+    if (!start) {
       throw new BookingError('Invalid start time', 'INVALID_START_TIME', 400);
     }
     // P5c: carry the booking's FROZEN length forward (grandfathered — never re-validated

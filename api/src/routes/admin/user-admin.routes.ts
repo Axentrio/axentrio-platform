@@ -129,11 +129,11 @@ router.post('/tenants/:id/invite', validate(inviteMemberSchema), asyncHandler(as
   if (!tenant) throw new NotFoundError('Tenant not found');
   if (!tenant.clerkOrgId) throw new BadRequestError('Tenant has no Clerk organization linked');
 
-  const invited = await inviteToClerkOrganization(
-    tenant.clerkOrgId,
-    email,
-    req.user?.clerkUserId
-  );
+  // No inviter: a super-admin issuing a cross-tenant invite is NOT a member of the
+  // target Clerk org, and Clerk rejects createOrganizationInvitation with a non-member
+  // inviter ("Only organization members can perform this action"). The real actor is
+  // recorded in the DB via invitedBy below for audit.
+  const invited = await inviteToClerkOrganization(tenant.clerkOrgId, email);
   if (!invited) {
     throw new ApiError('Failed to send invite via Clerk', 502, ERROR_CODES.CLERK_UPSTREAM_FAILED);
   }

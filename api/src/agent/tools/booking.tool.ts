@@ -357,7 +357,8 @@ export class RescheduleBookingTool implements ToolAdapter {
       },
       newStartTime: {
         type: 'string',
-        description: 'New start time in ISO 8601 format.',
+        description:
+          'New start time. Prefer the exact slot start returned by check_availability, verbatim. If you must construct it from the customer\'s words, give a ZONELESS ISO 8601 local time in the business\'s timezone — e.g. "2026-06-19T14:00:00" — never append \'Z\' or an offset.',
       },
     },
     required: ['bookingId', 'newStartTime'],

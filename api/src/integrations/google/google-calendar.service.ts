@@ -8,6 +8,7 @@
  */
 import axios from 'axios';
 import jwt from 'jsonwebtoken';
+import { DateTime } from 'luxon';
 import { OAuth2Client } from 'google-auth-library';
 import { config } from '../../config/environment';
 import { AppDataSource } from '../../database/data-source';
@@ -288,24 +289,54 @@ export async function setBotCalendar(botId: string, calendarId: string): Promise
   return { calendarId: newCalendarId };
 }
 
-/** Return a valid access token, refreshing (and persisting) if expired. */
+/** A Google refresh failure that is PERMANENT (token revoked/expired — e.g. OAuth
+ *  app left in "Testing" mode, where refresh tokens die after 7 days). Mirrors the
+ *  Outlook isInvalidGrant guard; google-auth-library surfaces it on err.response.data. */
+function isInvalidGrant(err: unknown): boolean {
+  const data = (err as { response?: { data?: { error?: string } } })?.response?.data;
+  return data?.error === 'invalid_grant';
+}
+
+/** Return a valid access token, refreshing (and persisting) if expired. On a
+ *  PERMANENT refresh failure, set reauthRequired so the portal can surface a dead
+ *  link (Google never set this flag before, so a dead link showed as healthy). */
 export async function getValidAccessToken(cred: CalendarCredential): Promise<string> {
   const notExpired = cred.tokenExpiry && cred.tokenExpiry.getTime() - Date.now() > 60_000;
-  if (notExpired) return decrypt(cred.accessTokenEnc);
+  if (notExpired && !cred.reauthRequired) return decrypt(cred.accessTokenEnc);
 
+  const repo = AppDataSource.getRepository(CalendarCredential);
   if (!cred.refreshTokenEnc) {
+    cred.reauthRequired = true;
+    await repo.save(cred);
     throw new Error('CALENDAR_REAUTH_REQUIRED');
   }
   const client = oauthClient();
   client.setCredentials({ refresh_token: decrypt(cred.refreshTokenEnc) });
   // getAccessToken() refreshes when the access token is missing/expired and
   // populates client.credentials with the new token + expiry.
-  const { token } = await client.getAccessToken();
-  if (!token) throw new Error('CALENDAR_REAUTH_REQUIRED');
+  let token: string | null | undefined;
+  try {
+    ({ token } = await client.getAccessToken());
+  } catch (err) {
+    // Permanent (invalid_grant) → flag for reconnect. Transient (network/5xx) →
+    // rethrow without flagging so a blip doesn't falsely demand re-auth.
+    if (isInvalidGrant(err)) {
+      cred.reauthRequired = true;
+      await repo.save(cred);
+      throw new Error('CALENDAR_REAUTH_REQUIRED');
+    }
+    throw err;
+  }
+  if (!token) {
+    cred.reauthRequired = true;
+    await repo.save(cred);
+    throw new Error('CALENDAR_REAUTH_REQUIRED');
+  }
 
   cred.accessTokenEnc = encrypt(token);
   cred.tokenExpiry = client.credentials.expiry_date ? new Date(client.credentials.expiry_date) : null;
-  await AppDataSource.getRepository(CalendarCredential).save(cred);
+  cred.reauthRequired = false; // a successful refresh clears any prior dead-link flag
+  await repo.save(cred);
   return token;
 }
 
@@ -323,7 +354,8 @@ export interface GoogleBusyInterval {
 export async function getGoogleBusyForBot(
   botId: string,
   startISO: string,
-  endISO: string
+  endISO: string,
+  timezone?: string
 ): Promise<GoogleBusyInterval[] | null> {
   const cred = await getActiveCredential(botId);
   if (!cred) return null;
@@ -363,12 +395,27 @@ export async function getGoogleBusyForBot(
     start?: { dateTime?: string; date?: string };
     end?: { dateTime?: string; date?: string };
   }> = resp.data?.items || [];
+  // An all-day event carries date-only bounds (e.start.date = "2026-06-26", no time).
+  // `new Date("2026-06-26")` is UTC midnight, so for a non-UTC business the busy block
+  // is offset by the tz and can bleed into an adjacent local day. Anchor date-only
+  // bounds to the business timezone (its local midnight) when known; timed events
+  // (dateTime) already carry an offset, so they parse correctly regardless.
+  const parseBound = (dateTime?: string, date?: string): Date | null => {
+    if (dateTime) return new Date(dateTime);
+    if (!date) return null;
+    if (timezone) {
+      const dt = DateTime.fromISO(date, { zone: timezone });
+      if (dt.isValid) return dt.toJSDate();
+    }
+    return new Date(date);
+  };
   return items
     .filter((e) => e.status !== 'cancelled' && e.transparency !== 'transparent' && (e.start?.dateTime || e.start?.date))
-    .map((e) => ({
-      start: new Date(e.start!.dateTime || e.start!.date!),
-      end: new Date(e.end?.dateTime || e.end?.date || e.start!.dateTime || e.start!.date!),
-    }));
+    .map((e) => {
+      const start = parseBound(e.start?.dateTime, e.start?.date)!;
+      const end = parseBound(e.end?.dateTime, e.end?.date) ?? start;
+      return { start, end };
+    });
 }
 
 export interface CalendarEventInput {

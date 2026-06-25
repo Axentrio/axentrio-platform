@@ -4,8 +4,8 @@
  * `ORGANIZER:mailto:Name <email>` made Gmail show "Unable to load event".
  */
 import { describe, it, expect } from 'vitest';
-import { parseAddress } from '../../n8n/booking-providers/booking-email';
-import { buildIcs } from '../../n8n/booking-providers/ics';
+import { parseAddress } from '../../booking/booking-providers/booking-email';
+import { buildIcs } from '../../booking/booking-providers/ics';
 
 describe('parseAddress', () => {
   it('splits "Name <email>" into a bare email + name', () => {

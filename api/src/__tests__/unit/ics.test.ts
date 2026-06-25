@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildIcs } from '../../n8n/booking-providers/ics';
+import { buildIcs } from '../../booking/booking-providers/ics';
 
 const base = {
   uid: 'abc-123@axentrio',

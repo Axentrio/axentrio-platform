@@ -20,7 +20,7 @@ const mockCreateBooking = vi.fn();
 const mockRescheduleBooking = vi.fn();
 const mockCancelBooking = vi.fn();
 
-vi.mock('../../n8n/booking.service', () => {
+vi.mock('../../booking/booking.service', () => {
   class BookingError extends Error {
     constructor(
       message: string,
@@ -61,8 +61,8 @@ vi.mock('../../utils/logger', () => ({
 
 import express from 'express';
 import request from 'supertest';
-import bookingRoutes from '../../n8n/booking.routes';
-import { BookingError } from '../../n8n/booking.service';
+import bookingRoutes from '../../booking/booking.routes';
+import { BookingError } from '../../booking/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
 

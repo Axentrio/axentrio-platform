@@ -102,12 +102,8 @@ const mockSendToWebhook = vi.fn();
 
 import {
   forwardMessageToN8n,
-  initializeForwarding,
   initializeAgentService,
-  buildWebhookConfig,
 } from '../../services/message-forwarding.service';
-import { OutboundService } from '../../n8n/outbound.service';
-import { FallbackService } from '../../n8n/fallback.service';
 import type { AgentService } from '../../agent/agent.service';
 import { config } from '../../config/environment';
 
@@ -174,10 +170,6 @@ async function getBotMessages(sessionId: string): Promise<string[]> {
   return msgs.map((m) => m.contentEncrypted ? decrypt(m.content) : m.content);
 }
 
-function ragSuccess(response: string, confidence = 0.9) {
-  return { response, confidence, shouldHandoff: false, chunks: [] };
-}
-
 // ── Setup ────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
@@ -186,11 +178,11 @@ beforeEach(() => {
   mockSendToWebhook.mockReset();
   mockRouteOutboundMessage.mockReset().mockResolvedValue({ success: true });
 
-  const fakeOutbound = { sendToWebhook: mockSendToWebhook } as unknown as OutboundService;
-  const fakeFallback = new FallbackService({
-    eventEmitter: { emit: vi.fn(), on: vi.fn(), off: vi.fn(), removeAllListeners: vi.fn() } as any,
-  });
-  initializeForwarding(fakeOutbound, fakeFallback);
+  // External n8n forwarding retired: mockSendToWebhook is kept as an inert stub so
+  // surviving "must not POST to any webhook" assertions remain meaningful.
+  // Production always wires the platform agent at boot; mirror that so an AI-on bot
+  // reaches the autoresponse/agent path. Tests asserting the "no agent" state null it.
+  initializeAgentService({ run: vi.fn().mockResolvedValue({ type: 'response', content: 'Hi there' }) } as unknown as AgentService);
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -204,6 +196,7 @@ describe('forwardMessageToN8n', () => {
   describe('no custom webhook routing (issue #3)', () => {
     it('does NOT POST to any webhook when AI is on without a custom webhook', async () => {
       // No custom webhook, no agent service → nothing to forward to.
+      initializeAgentService(null as unknown as AgentService);
       const tenant = await createTestTenant({
         settings: { ai: aiSettings() },
       });
@@ -356,171 +349,11 @@ describe('forwardMessageToN8n', () => {
       expect(mockGenerateResponse).not.toHaveBeenCalled();
       expect(mockSendToWebhook).not.toHaveBeenCalled();
     });
-
-    it('should forward when session is "bot" (n8n path)', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-      expect(mockSendToWebhook).toHaveBeenCalled();
-    });
-
-    it('should forward when session is "waiting" (n8n path)', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {},
-      });
-      const { session, message } = await setup(tenant.id);
-      await sessionRepo.update(session.id, { status: 'waiting' });
-      const reloaded = await sessionRepo.findOneOrFail({ where: { id: session.id } });
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      expect(await forwardMessageToN8n(reloaded, message)).toBe(true);
-      expect(mockSendToWebhook).toHaveBeenCalled();
-    });
   });
 
   // ── 2. n8n happy path ──────────────────────────────────────────────────
 
-  describe('n8n happy path (bot session)', () => {
-    it('should forward to n8n and include tenantConfig in payload', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const { session, message } = await setup(tenant.id, 'What are your hours?');
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-
-      const payload = mockSendToWebhook.mock.calls[0][1];
-      expect(payload.tenantConfig).toBeDefined();
-      expect(payload.tenantConfig.brandName).toBe('TestBot');
-      expect(payload.tenantConfig.brandTone).toBe('friendly');
-    });
-
-    it('should include knowledgeBase metadata in payload', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-
-      const payload = mockSendToWebhook.mock.calls[0][1];
-      expect(payload.knowledgeBase).toBeDefined();
-      expect(typeof payload.knowledgeBase.enabled).toBe('boolean');
-      expect(typeof payload.knowledgeBase.documentCount).toBe('number');
-    });
-
-    it('should include conversation history in payload', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const session = await createTestSession(tenant.id, { status: 'bot' });
-      const user = await createTestParticipant(session.id, { type: 'user' });
-      const bot = await createTestParticipant(session.id, { type: 'bot', name: 'Bot' });
-
-      await createTestMessage(session.id, tenant.id, user.id, { content: 'Hi' });
-      await createTestMessage(session.id, tenant.id, bot.id, { content: 'Hello!' });
-      const lastMsg = await createTestMessage(session.id, tenant.id, user.id, {
-        content: 'Return policy?',
-      });
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, lastMsg);
-
-      const payload = mockSendToWebhook.mock.calls[0][1];
-      expect(payload.context.previousMessages).toBeDefined();
-      expect(payload.context.previousMessages.length).toBeGreaterThanOrEqual(2);
-    });
-
-    it('should NOT call generateResponse directly (n8n handles AI)', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-
-      expect(mockGenerateResponse).not.toHaveBeenCalled();
-    });
-
-    it('should verify payload event and session/tenant IDs', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings() },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-
-      const payload = mockSendToWebhook.mock.calls[0][1];
-      expect(payload.event).toBe('message.received');
-      expect(payload.tenantId).toBe(tenant.id);
-      expect(payload.sessionId).toBe(session.id);
-    });
-  });
-
   // ── 3. n8n failure → RAG fallback ──────────────────────────────────────
-
-  describe('n8n failure → RAG fallback', () => {
-    it('should fall back to RAG when n8n fails and tenant has KB', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const { session, message } = await setup(tenant.id, 'What is your return policy?');
-
-      // n8n fails
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'n8n down' });
-      // RAG fallback succeeds
-      mockGenerateResponse.mockResolvedValue(ragSuccess('30 day returns.'));
-
-      // We need KB to exist for fallback. The knowledgeBase.enabled check uses the payload
-      // which queries the DB. Since no docs exist in test, fallback won't trigger via KB check.
-      // Instead, test the final fallback path (handoff).
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-    });
-
-    it('should handoff when n8n fails and no KB available', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const { session, message } = await setup(tenant.id, 'obscure question');
-
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'n8n down' });
-      await forwardMessageToN8n(session, message);
-
-      // Should handoff since no KB docs exist in test
-      expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).status).toBe('handoff');
-      expect(mockEmitToTenantAgents).toHaveBeenCalledWith(
-        tenant.id,
-        'handoff:requested',
-        expect.objectContaining({ sessionId: session.id }),
-      );
-    });
-  });
 
   // ── 4. Escalation keywords ───────────────────────────────────────────────
 
@@ -563,21 +396,6 @@ describe('forwardMessageToN8n', () => {
       expect(mockSendToWebhook).not.toHaveBeenCalled();
     });
 
-    it('should NOT match absent keywords — proceeds to n8n', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const { session, message } = await setup(tenant.id, 'What is the weather?');
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-
-      expect(mockSendToWebhook).toHaveBeenCalled();
-      expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(0);
-    });
-
     it('should use custom fallback message from guardrails', async () => {
       const tenant = await createTestTenant({
         webhookUrl: 'https://n8n.test/hook',
@@ -593,26 +411,6 @@ describe('forwardMessageToN8n', () => {
 
       await forwardMessageToN8n(session, message);
       expect(await getBotMessages(session.id)).toEqual(['Getting someone now!']);
-    });
-
-    it('should NOT check keywords for non-text messages', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const session = await createTestSession(tenant.id, { status: 'bot' });
-      const p = await createTestParticipant(session.id, { type: 'user' });
-      const message = await createTestMessage(session.id, tenant.id, p.id, {
-        content: 'speak to human',
-        type: 'image',
-      });
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-      // Non-text messages skip pre-checks, go straight to n8n
-      expect(mockSendToWebhook).toHaveBeenCalled();
-      expect(await handoffRepo.count({ where: { sessionId: session.id } })).toBe(0);
     });
   });
 
@@ -667,44 +465,6 @@ describe('forwardMessageToN8n', () => {
 
       await forwardMessageToN8n(session, message);
       expect(await getBotMessages(session.id)).toEqual(['Closed today.']);
-    });
-
-    it('should proceed to n8n when within hours (24h window)', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {
-          ai: aiSettings({ guardrails: { escalationKeywords: [] } }),
-          features: { fileUploadEnabled: true, handoffEnabled: true },
-          businessHours: {
-            enabled: true,
-            timezone: 'UTC',
-            schedule: [{ day: FIXED_DAY, open: '00:00', close: '23:59', closed: false }],
-          },
-        },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-      expect(mockSendToWebhook).toHaveBeenCalled();
-    });
-
-    it('should skip check when businessHours not enabled', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {
-          ai: aiSettings({ guardrails: { escalationKeywords: [] } }),
-          features: { fileUploadEnabled: true, handoffEnabled: true },
-          businessHours: { enabled: false, timezone: 'UTC', schedule: [] },
-        },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-      expect(mockSendToWebhook).toHaveBeenCalled();
     });
 
     it('should send offHoursMessage when no schedule for current day', async () => {
@@ -773,62 +533,6 @@ describe('forwardMessageToN8n', () => {
 
   // ── 6. n8n failure → final fallback → handoff ─────────────────────────
 
-  describe('n8n failure → final fallback → handoff', () => {
-    it('should send fallback, create bot_error handoff, notify agents', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'n8n down' });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-
-      expect((await getBotMessages(session.id)).length).toBeGreaterThanOrEqual(1);
-
-      const h = await handoffRepo.findOne({ where: { sessionId: session.id } });
-      expect(h).toBeDefined();
-      expect(h!.reason).toBe('bot_error');
-
-      expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).status).toBe('handoff');
-
-      expect(mockEmitToTenantAgents).toHaveBeenCalledWith(
-        tenant.id,
-        'handoff:requested',
-        expect.objectContaining({ sessionId: session.id }),
-      );
-    });
-
-    it('should use custom fallback message on n8n failure', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {
-          ai: aiSettings({ guardrails: { fallbackMessage: 'Oops! Getting help.' } }),
-          features: { fileUploadEnabled: true, handoffEnabled: true },
-        },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'fail' });
-      await forwardMessageToN8n(session, message);
-      expect(await getBotMessages(session.id)).toEqual(['Oops! Getting help.']);
-    });
-
-    it('should still return true even if error handler partially fails', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'boom' });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-    });
-  });
-
   // ── 7. Handoff disabled ──────────────────────────────────────────────────
 
   describe('handoff disabled', () => {
@@ -852,75 +556,6 @@ describe('forwardMessageToN8n', () => {
   });
 
   // ── 8. n8n forwarding (AI disabled, custom webhook) ─────────────────────
-
-  describe('n8n forwarding (AI disabled, custom webhook)', () => {
-    it('should forward to n8n and verify payload structure', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 'secret',
-        settings: {},
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-      expect(mockGenerateResponse).not.toHaveBeenCalled();
-
-      const payload = mockSendToWebhook.mock.calls[0][1];
-      expect(payload.event).toBe('message.received');
-      expect(payload.tenantId).toBe(tenant.id);
-      expect(payload.sessionId).toBe(session.id);
-    });
-
-    it('should transition waiting → bot on first forwarded message', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {},
-      });
-      const session = await createTestSession(tenant.id, { status: 'waiting' });
-      const p = await createTestParticipant(session.id, { type: 'user' });
-      const message = await createTestMessage(session.id, tenant.id, p.id, { content: 'Hi' });
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-
-      expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).status).toBe('bot');
-    });
-
-    it('should handoff when n8n fails for non-AI tenant', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {},
-      });
-      const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: false, error: 'Connection refused' });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-
-      expect((await sessionRepo.findOneOrFail({ where: { id: session.id } })).status).toBe('handoff');
-      expect(mockEmitToTenantAgents).toHaveBeenCalledWith(
-        tenant.id,
-        'handoff:requested',
-        expect.objectContaining({ sessionId: session.id }),
-      );
-    });
-
-    it('should build correct webhook config from tenant', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 'my-secret',
-        settings: {},
-      });
-
-      const config = buildWebhookConfig(tenant);
-      expect(config.url).toBe('https://n8n.test/hook');
-      expect(config.secret).toBe('my-secret');
-      expect(config.active).toBe(true);
-      expect(config.events).toContain('message.received');
-    });
-  });
 
   // ── 9. No AI + no webhook ───────────────────────────────────────────────
 
@@ -952,21 +587,6 @@ describe('forwardMessageToN8n', () => {
   // ── 10. Edge cases ──────────────────────────────────────────────────────
 
   describe('edge cases', () => {
-    it('should handle empty escalation keywords — proceeds to n8n', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: {
-          ai: aiSettings({ guardrails: { escalationKeywords: [] } }),
-          features: { fileUploadEnabled: true, handoffEnabled: true },
-        },
-      });
-      const { session, message } = await setup(tenant.id, 'speak to human');
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      await forwardMessageToN8n(session, message);
-      expect(mockSendToWebhook).toHaveBeenCalled();
-    });
 
     it('should handle missing escalationKeywords gracefully', async () => {
       const settings = aiSettings();
@@ -978,43 +598,6 @@ describe('forwardMessageToN8n', () => {
         settings: { ai: settings, features: { fileUploadEnabled: true, handoffEnabled: true } },
       });
       const { session, message } = await setup(tenant.id);
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-      expect(await forwardMessageToN8n(session, message)).toBe(true);
-    });
-
-    it('should handle concurrent messages to same session', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const session = await createTestSession(tenant.id, { status: 'bot' });
-      const p = await createTestParticipant(session.id, { type: 'user' });
-      const msg1 = await createTestMessage(session.id, tenant.id, p.id, { content: 'Msg 1' });
-      const msg2 = await createTestMessage(session.id, tenant.id, p.id, { content: 'Msg 2' });
-
-      mockSendToWebhook.mockResolvedValue({ success: true });
-
-      const [r1, r2] = await Promise.all([
-        forwardMessageToN8n(session, msg1),
-        forwardMessageToN8n(session, msg2),
-      ]);
-
-      expect(r1).toBe(true);
-      expect(r2).toBe(true);
-      expect(mockSendToWebhook).toHaveBeenCalledTimes(2);
-    });
-
-    it('should handle empty message content', async () => {
-      const tenant = await createTestTenant({
-        webhookUrl: 'https://n8n.test/hook',
-        webhookSecret: 's',
-        settings: { ai: aiSettings(), features: { fileUploadEnabled: true, handoffEnabled: true } },
-      });
-      const session = await createTestSession(tenant.id, { status: 'bot' });
-      const p = await createTestParticipant(session.id, { type: 'user' });
-      const message = await createTestMessage(session.id, tenant.id, p.id, { content: '' });
 
       mockSendToWebhook.mockResolvedValue({ success: true });
       expect(await forwardMessageToN8n(session, message)).toBe(true);

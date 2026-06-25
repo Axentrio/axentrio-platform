@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { useTenantSettings } from '../../queries/useTenantQueries';
 import { useWebhookStatus, useWebhookDeliveries, useSaveWebhookUrl, useTestWebhook } from '../../queries/useWebhookQueries';
 import { queryKeys } from '../../queries/queryKeys';
+import { useAppAuth } from '@auth/useAppAuth';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -107,6 +108,11 @@ function formatTimeAgo(dateStr: string): string {
 export const IntegrationTab: React.FC = () => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  // The free-text Webhook URL routes a tenant's whole bot to an external endpoint
+  // (the legacy n8n escape hatch) — losing booking, slot chips, and guardrails. It is
+  // NOT for tenant self-service; restrict it to super_admin. Server enforces the same.
+  const { isRole } = useAppAuth();
+  const canEditWebhookUrl = isRole('super_admin');
 
   // Tenant data
   const { data: tenantData, refetch: refetchTenant } = useTenantSettings();
@@ -212,7 +218,8 @@ export const IntegrationTab: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Webhook URL */}
+      {/* Webhook URL — super_admin only (internal escape hatch, not tenant self-service) */}
+      {canEditWebhookUrl && (
       <Card variant="glass">
         <CardHeader>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
@@ -262,7 +269,11 @@ export const IntegrationTab: React.FC = () => {
           </div>
         </CardContent>
       </Card>
+      )}
 
+      {/* Webhook delivery section — super_admin only (external webhook integration retired) */}
+      {canEditWebhookUrl && (
+        <>
       {/* Connection Health */}
       <Card variant="glass">
         <CardHeader>
@@ -467,6 +478,8 @@ export const IntegrationTab: React.FC = () => {
           )}
         </CardContent>
       </Card>
+        </>
+      )}
 
       {/* Rotate API Key Confirmation Dialog */}
       <AlertDialog open={showRotateConfirm} onOpenChange={setShowRotateConfirm}>

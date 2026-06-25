@@ -9,7 +9,7 @@ import { Agent } from '../database/entities/Agent';
 import { Booking } from '../database/entities/Booking';
 import { Lead } from '../database/entities/Lead';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
-import { isWithinBusinessHours } from '../n8n/booking-providers/slot-engine';
+import { isWithinBusinessHours } from '../booking/booking-providers/slot-engine';
 import type { OutcomesResponse, OutcomeAggregates, OutcomesTimeseriesResponse } from '../contracts/analytics';
 import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';

@@ -19,7 +19,7 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
   }),
 }));
 
-vi.mock('../../n8n/booking.service', () => ({
+vi.mock('../../booking/booking.service', () => ({
   checkAvailability: (...args: unknown[]) => mockCheckAvailability(...args),
   createBooking: (...args: unknown[]) => mockCreateBooking(...args),
   listBookings: (...args: unknown[]) => mockListBookings(...args),

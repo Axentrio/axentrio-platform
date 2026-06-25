@@ -27,11 +27,11 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const sendReminderEmail = vi.fn();
-vi.mock('../../n8n/booking-providers/booking-email', () => ({
+vi.mock('../../booking/booking-providers/booking-email', () => ({
   sendReminderEmail: (...a: any[]) => sendReminderEmail(...a),
 }));
 
-import { scheduleReminders, createBookingReminderProcessor } from '../../n8n/booking-providers/reminders';
+import { scheduleReminders, createBookingReminderProcessor } from '../../booking/booking-providers/reminders';
 
 const NOW = new Date('2026-06-05T00:00:00Z');
 

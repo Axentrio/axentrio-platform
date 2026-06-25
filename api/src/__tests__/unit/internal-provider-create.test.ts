@@ -40,7 +40,7 @@ vi.mock('../../utils/logger', () => ({
 
 const sendBookingEmail = vi.fn();
 const sendRequestNotificationEmail = vi.fn();
-vi.mock('../../n8n/booking-providers/booking-email', () => ({
+vi.mock('../../booking/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
   sendRequestNotificationEmail: (...args: any[]) => sendRequestNotificationEmail(...args),
 }));
@@ -102,8 +102,8 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
   }),
 }));
 
-import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
-import { BookingError } from '../../n8n/booking-providers/types';
+import { InternalProvider } from '../../booking/booking-providers/internal.provider';
+import { BookingError } from '../../booking/booking-providers/types';
 
 const ctx: any = {
   session: { id: 'sess-1' },

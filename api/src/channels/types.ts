@@ -1,6 +1,6 @@
 import { Request } from 'express';
 import { ChannelConnection, ChannelType } from '../database/entities/ChannelConnection';
-import { ResponsePayload } from '../n8n/types/message.types';
+import { ResponsePayload } from './response.types';
 
 // --- Inbound (platform → us) ---
 

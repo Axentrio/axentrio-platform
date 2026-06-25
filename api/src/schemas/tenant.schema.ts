@@ -8,6 +8,8 @@ export const updateTenantSchema = z.object({
 
 export const inviteMemberSchema = z.object({
   email: z.string().email('Valid email is required'),
-  name: z.string().min(1, 'Name is required'),
+  // name is not used by the invite handlers (the member's name comes from Clerk on
+  // provisioning); kept optional so callers may omit it.
+  name: z.string().min(1, 'Name is required').optional(),
   role: z.enum(['admin', 'supervisor', 'agent']),
 });

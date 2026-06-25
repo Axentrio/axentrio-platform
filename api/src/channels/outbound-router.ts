@@ -11,7 +11,7 @@ import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { ChannelConnection } from '../database/entities/ChannelConnection';
 import { MessageDelivery } from '../database/entities/MessageDelivery';
 import { triggerHealthCheckDebounced } from './health-check.service';
-import { ResponsePayload } from '../n8n/types/message.types';
+import { ResponsePayload } from './response.types';
 import { getChannelAdapter } from './channel-registry';
 import { isChannelEntitled } from './channel-entitlement';
 import { formatResponseForChannel, DeliveryResult } from './types';

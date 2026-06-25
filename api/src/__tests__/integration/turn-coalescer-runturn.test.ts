@@ -52,11 +52,8 @@ import {
   runTurn,
   getNewestUnansweredUserMessage,
   getUnansweredBounds,
-  initializeForwarding,
   initializeAgentService,
 } from '../../services/message-forwarding.service';
-import { OutboundService } from '../../n8n/outbound.service';
-import { FallbackService } from '../../n8n/fallback.service';
 import type { AgentService } from '../../agent/agent.service';
 
 const sessionRepo = AppDataSource.getRepository(ChatSession);
@@ -104,11 +101,6 @@ async function countBotMessages(sessionId: string): Promise<number> {
 beforeEach(() => {
   vi.clearAllMocks();
   mockRouteOutboundMessage.mockReset().mockResolvedValue({ success: true });
-  const fakeOutbound = { sendToWebhook: vi.fn() } as unknown as OutboundService;
-  const fakeFallback = new FallbackService({
-    eventEmitter: { emit: vi.fn(), on: vi.fn(), off: vi.fn(), removeAllListeners: vi.fn() } as any,
-  });
-  initializeForwarding(fakeOutbound, fakeFallback);
 });
 
 afterEach(() => {

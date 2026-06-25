@@ -117,6 +117,9 @@ interface AgentCtx {
   /** Resolved bot-template body (layer 2). Empty/absent contributes nothing.
    *  Resolved by the caller via template-resolver (`resolveTemplateBody`). */
   templateBody?: string;
+  /** Business timezone (IANA, e.g. the booking calendar's zone) used to anchor the
+   *  "Today is …" date context. Absent ⇒ server/local tz (legacy behavior). */
+  timezone?: string;
   /** Injectable for deterministic tests; defaults to now. */
   now?: Date;
 }
@@ -314,9 +317,16 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
 
   // Rules
   const now = ctx.now ?? new Date();
-  const today = now.toISOString().split('T')[0];
-  const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
-  const fullDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  // Anchor the date context to the business timezone when known, so "today"/weekday
+  // is correct for a non-UTC business near midnight (a UTC/server date can name the
+  // wrong day, mis-anchoring the bot's "tomorrow"/"next Monday"). Absent ⇒ legacy
+  // behavior: UTC date + server-tz weekday (passing timeZone:undefined ≡ omitting it).
+  const zone = ctx.timezone || undefined;
+  const today = zone
+    ? new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now)
+    : now.toISOString().split('T')[0];
+  const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone });
+  const fullDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: zone });
   sections.push(
     `\n## FORMATTING RULES (CRITICAL — this is a small chat widget, not an email)
 Today is ${dayName}, ${today} (${fullDate}).

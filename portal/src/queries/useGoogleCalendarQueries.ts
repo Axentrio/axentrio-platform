@@ -9,6 +9,9 @@ export interface GoogleCalendarStatus {
   connected: boolean;
   accountEmail: string | null;
   calendarId: string | null;
+  /** True when the stored token can no longer refresh (revoked / expired) and the
+   *  owner must reconnect — otherwise availability silently fails closed. */
+  needsReauth?: boolean;
 }
 
 const statusKey = ['google', 'status'] as const;

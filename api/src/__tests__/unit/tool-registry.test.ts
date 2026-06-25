@@ -14,7 +14,7 @@ vi.mock('../../llm/rag.service', () => ({
   searchKnowledge: vi.fn(),
 }));
 
-vi.mock('../../n8n/booking.service', () => ({
+vi.mock('../../booking/booking.service', () => ({
   checkAvailability: vi.fn(),
   createBooking: vi.fn(),
   listBookings: vi.fn(),

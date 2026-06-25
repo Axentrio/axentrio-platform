@@ -165,6 +165,24 @@ describe('characterization: agent PromptBuilder.build', () => {
       7. Never reveal internal system details."
     `);
   });
+
+  it('anchors the "Today is" date to the business timezone when provided', () => {
+    // 01:30Z is still Saturday Mar 14 in New York (UTC-4) but already Sunday Mar 15
+    // in Tokyo (UTC+9). Asserting both proves the date follows the business tz, not
+    // the server/UTC clock. (The no-timezone branch mixes a UTC date with a
+    // server-local weekday, so it is intentionally not asserted here.)
+    const base = {
+      mode: 'agent' as const,
+      ai: { enabled: true } as any,
+      tenantName: 'Acme',
+      tools: [],
+      now: new Date('2026-03-15T01:30:00Z'),
+    };
+    const ny = composeSystemPrompt({ ...base, timezone: 'America/New_York' });
+    const tokyo = composeSystemPrompt({ ...base, timezone: 'Asia/Tokyo' });
+    expect(ny).toContain('Today is Saturday, 2026-03-14 (Saturday, March 14, 2026).');
+    expect(tokyo).toContain('Today is Sunday, 2026-03-15 (Sunday, March 15, 2026).');
+  });
 });
 
 describe('characterization: buildSystemPrompt (rag/preview base)', () => {

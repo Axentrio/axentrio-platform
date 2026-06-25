@@ -1432,6 +1432,15 @@
           "role": "Rol",
           "status": "Status",
           "lastLogin": "Laatste aanmelding"
+        },
+        "invite": {
+          "button": "Lid uitnodigen",
+          "emailLabel": "E-mail",
+          "emailPlaceholder": "naam@bedrijf.com",
+          "roleLabel": "Rol",
+          "send": "Uitnodiging sturen",
+          "sending": "Versturen…",
+          "errorFallback": "Uitnodiging versturen mislukt"
         }
       },
       "status": {

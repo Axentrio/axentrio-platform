@@ -45,7 +45,7 @@ const internalMethods = vi.hoisted(() => ({
   rescheduleBooking: vi.fn(),
   cancelBooking: vi.fn(),
 }));
-vi.mock('../../n8n/booking-providers/internal.provider', () => ({
+vi.mock('../../booking/booking-providers/internal.provider', () => ({
   // Regular function (not an arrow) so `new InternalProvider()` returns the stub.
   InternalProvider: vi.fn(function () {
     return internalMethods;
@@ -63,7 +63,7 @@ import {
   cancelBooking,
   adminCancelBooking,
   adminAcceptRequest,
-} from '../../n8n/booking.service';
+} from '../../booking/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
 const TENANT_ID = 'aaaa0000-bbbb-cccc-dddd-eeeeeeee0001';

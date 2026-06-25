@@ -1473,6 +1473,15 @@
           "role": "Role",
           "status": "Status",
           "lastLogin": "Last Login"
+        },
+        "invite": {
+          "button": "Invite member",
+          "emailLabel": "Email",
+          "emailPlaceholder": "name@company.com",
+          "roleLabel": "Role",
+          "send": "Send invite",
+          "sending": "Sending…",
+          "errorFallback": "Failed to send invite"
         }
       },
       "status": {

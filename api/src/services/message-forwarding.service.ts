@@ -15,19 +15,13 @@ import { returningRows } from '../utils/raw-sql';
 import { cached } from '../utils/cache';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot, BotSettings } from '../database/entities/Bot';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
-import { getEntitlements } from '../billing/entitlements';
+import { resolveBoundTemplates, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
 import { Participant } from '../database/entities/Participant';
 import { HandoffRequest } from '../database/entities/HandoffRequest';
-import { OutboundService } from '../n8n/outbound.service';
 import { composeSystemPrompt } from '../llm/compose-system-prompt';
-import { FallbackService } from '../n8n/fallback.service';
-import { WebhookConfig, OutboundMessage, MessagePayload, TenantAiConfig, KnowledgeBaseMetadata, IntegrationsConfig } from '../n8n/types';
+import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
-import { generateResponse } from '../llm/rag.service';
-import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
-import { config } from '../config/environment';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -36,7 +30,6 @@ import { getWhatsAppAccessToken } from '../channels/credential-utils';
 import { FB_GRAPH_API } from '../channels/meta/graph-api';
 import {
   getBotConfigForSession,
-  getLlmRuntimeConfigForSession,
   BotPausedConfigError,
   BotNotFoundConfigError,
 } from './bot-config.service';
@@ -53,22 +46,8 @@ const tenantRepository = AppDataSource.getRepository(Tenant);
 const participantRepository = AppDataSource.getRepository(Participant);
 const handoffRepository = AppDataSource.getRepository(HandoffRequest);
 
-// Module-level service references, set via initialize()
-let outboundService: OutboundService | null = null;
-let fallbackServiceRef: FallbackService | null = null;
+// Module-level service reference, set via initializeAgentService().
 let agentService: AgentService | null = null;
-
-/**
- * Initialize with n8n service references
- */
-export function initializeForwarding(
-  outbound: OutboundService,
-  fallback: FallbackService
-): void {
-  outboundService = outbound;
-  fallbackServiceRef = fallback;
-  logger.info('Message forwarding service initialized');
-}
 
 export function initializeAgentService(agent: AgentService): void {
   agentService = agent;
@@ -76,17 +55,13 @@ export function initializeAgentService(agent: AgentService): void {
 }
 
 /**
- * True once both the n8n outbound service and the platform agent service are
- * wired. The turn-coalescer processor checks this before running, so a delayed
- * job that fires during the post-restart boot window re-arms instead of running
- * against half-initialised deps. See plan-message-coalescer.md (deps-ready guard).
+ * True once the platform agent service is wired. The turn-coalescer processor
+ * checks this before running, so a delayed job that fires during the post-restart
+ * boot window re-arms instead of running against an un-wired agent. See
+ * plan-message-coalescer.md (deps-ready guard).
  */
 export function isForwardingReady(): boolean {
-  return outboundService !== null && agentService !== null;
-}
-
-export function getFallbackService(): FallbackService | null {
-  return fallbackServiceRef;
+  return agentService !== null;
 }
 
 /**
@@ -102,26 +77,6 @@ export function isCustomWebhookUrl(
   defaultUrl: string | null | undefined,
 ): boolean {
   return !!webhookUrl && !webhookUrl.includes('localhost') && webhookUrl !== defaultUrl;
-}
-
-/**
- * Build a WebhookConfig from a Tenant entity
- */
-export function buildWebhookConfig(tenant: Tenant): WebhookConfig {
-  return {
-    id: tenant.id,
-    tenantId: tenant.id,
-    name: tenant.name,
-    url: tenant.webhookUrl!,
-    secret: tenant.webhookSecret || '',
-    events: ['message.received', 'session.started', 'session.ended'],
-    active: true,
-    timeout: 30000,
-    retryPolicy: { maxRetries: 3, backoffMultiplier: 2, initialDelay: 1000 },
-    headers: {},
-    createdAt: tenant.createdAt.toISOString(),
-    updatedAt: tenant.updatedAt.toISOString(),
-  };
 }
 
 /**
@@ -176,66 +131,6 @@ export async function buildKnowledgeBaseMetadata(tenantId: string): Promise<Know
 }
 
 /**
- * Build the integrations slice of the n8n outbound payload from the bot's
- * settings. Multi-bot Phase 4 (#16d): reads from `BotSettings` only — no
- * tenant fall-through. The entitlement gate is the canonical egress
- * chokepoint: a tenant who loses the feature stops sending the booking block
- * to n8n without any DB cleanup.
- */
-async function buildIntegrationsConfig(
-  botSettings: BotSettings,
-  tenantId: string,
-): Promise<IntegrationsConfig | undefined> {
-  const timezone = botSettings.businessHours?.timezone || 'UTC';
-
-  // Gated on the resolved `bookings` feature (plan D6/D10/D11) — resolved
-  // entitlements, not raw tier, so per-tenant overrides and the free/
-  // non-active deny apply. The `calcom` key name is load-bearing for external
-  // custom n8n workflows and is kept verbatim; the n8n flow is
-  // provider-agnostic and only needs the block to activate the booking
-  // prompt + tools, which hit /internal/booking/* (internal provider).
-  // Fails closed on resolution errors.
-  try {
-    if (!(await getEntitlements(tenantId)).features.bookings) return undefined;
-  } catch {
-    return undefined;
-  }
-  return {
-    calcom: {
-      enabled: true,
-      language: 'en',
-      collectFields: ['name', 'email'],
-      timezone,
-    },
-  };
-}
-
-/**
- * Load last 10 text messages with timestamps for the n8n outbound payload.
- * Separate from getConversationHistory() which is used by the RAG fallback path.
- */
-async function getConversationHistoryForPayload(
-  sessionId: string
-): Promise<{ role: 'user' | 'assistant' | 'system'; content: string; timestamp: string }[]> {
-  const messages = await messageRepository
-    .createQueryBuilder('message')
-    .leftJoinAndSelect('message.participant', 'participant')
-    .where('message.sessionId = :sessionId', { sessionId })
-    .andWhere('message.isDeleted = false')
-    .andWhere('message.type = :type', { type: 'text' })
-    .andWhere('message.guardrailFlagged = false')
-    .orderBy('message.createdAt', 'DESC')
-    .take(10)
-    .getMany();
-
-  return messages.reverse().map((msg) => ({
-    role: msg.participant?.type === 'bot' ? 'assistant' as const : 'user' as const,
-    content: msg.contentEncrypted ? decrypt(msg.content) : msg.content,
-    timestamp: msg.createdAt?.toISOString() || new Date().toISOString(),
-  }));
-}
-
-/**
  * Forward a visitor message to n8n if applicable.
  * Called after the message is saved to DB and broadcast via WebSocket.
  *
@@ -247,11 +142,6 @@ export async function forwardMessageToN8n(
 ): Promise<boolean> {
   // Only forward visitor messages when session is in bot or waiting status
   if (session.status !== 'bot' && session.status !== 'waiting') {
-    return false;
-  }
-
-  if (!outboundService) {
-    logger.warn('Message forwarding not initialized — outboundService is null');
     return false;
   }
 
@@ -288,24 +178,11 @@ export async function forwardMessageToN8n(
   const resolvedTemplates = await resolveBoundTemplates(bot);
   const aiSettings = botSettings.ai ? withEffectiveConfig(botSettings.ai, effectiveConfigFromList(resolvedTemplates)) : botSettings.ai;
 
-  // Only a genuinely custom n8n webhook is honoured. The auto-provisioned
-  // default (config.n8n.defaultWebhookUrl) is intentionally NOT a fallback: that
-  // workflow is inactive (404), and AI bots without a custom webhook are
-  // answered by the platform agent instead. See issue #3.
-  const customWebhookUrl = isCustomWebhookUrl(tenant.webhookUrl, config.n8n.defaultWebhookUrl)
-    ? tenant.webhookUrl!
-    : undefined;
-
-  const aiEnabled = !!aiSettings?.enabled;
-  // AI-enabled bots without a custom webhook are answered by the platform agent.
-  // The dead default n8n webhook is never used as a fallback. See issue #3.
-  const willUsePlatformAgent = !customWebhookUrl && aiEnabled && !!agentService;
-
-  if (!customWebhookUrl && !willUsePlatformAgent) {
-    // Nothing to forward to: AI is off, or the agent service is unavailable.
-    // Session stays waiting; a human agent picks up. (Previously this fell back
-    // to the dead default n8n webhook → 404 → spurious "connecting you to an
-    // agent" handoff. See issue #3.)
+  // External n8n forwarding has been retired — every AI-enabled bot is answered by
+  // the in-house platform agent. Bots with AI off (or before the agent service is
+  // wired) stay waiting for a human to pick up.
+  const willUsePlatformAgent = !!aiSettings?.enabled && !!agentService;
+  if (!willUsePlatformAgent) {
     return false;
   }
 
@@ -347,148 +224,8 @@ export async function forwardMessageToN8n(
     }
   }
 
-  // ── Platform agent path (AI bots without a custom webhook) ───────────
-  if (willUsePlatformAgent) {
-    return platformAgentPath(session, savedMessage, tenant, aiSettings);
-  }
-
-  // ── Custom webhook path (tenant-configured n8n workflow) ───────────────
-  // (Already gated once at the entry above — covers this branch + the RAG fallback.)
-  const webhookConfig = buildWebhookConfig(tenant);
-  webhookConfig.url = customWebhookUrl!;
-
-  // Layer-2 template body for this bot — used by the n8n systemPrompt and the
-  // RAG fallback below (blank-base → empty → unchanged).
-  const templateBody = composeTemplateBodies(resolvedTemplates, bot.templateMode ?? 'or');
-
-  const outboundPayload: OutboundMessage = {
-    event: 'message.received',
-    tenantId: session.tenantId,
-    botId: session.botId ?? null,
-    sessionId: session.id,
-    timestamp: new Date().toISOString(),
-    payload: {
-      type: (savedMessage.type as MessagePayload['type']) || 'text',
-      content: savedMessage.contentEncrypted
-        ? decrypt(savedMessage.content)
-        : savedMessage.content,
-      metadata: savedMessage.metadata || undefined,
-    },
-    tenantConfig: buildTenantAiConfig(tenant.name, aiSettings, templateBody),
-    knowledgeBase: await buildKnowledgeBaseMetadata(session.tenantId),
-    integrations: await buildIntegrationsConfig(botSettings, tenant.id),
-    context: {
-      previousMessages: await getConversationHistoryForPayload(session.id),
-    },
-  };
-
-  // ── Forward to n8n ─────────────────────────────────────────────────────
-  // NOTE: sendToWebhook() swallows HTTP errors and returns { success: false }
-  // instead of throwing. Must check result.success, not rely on catch.
-  const result = await outboundService.sendToWebhook(webhookConfig, outboundPayload);
-
-  if (result.success) {
-    // Transition waiting → bot atomically on first forwarded message
-    if (session.status === 'waiting') {
-      await sessionRepository
-        .createQueryBuilder()
-        .update(ChatSession)
-        .set({ status: 'bot' })
-        .where('id = :id AND status = :status', { id: session.id, status: 'waiting' })
-        .execute();
-    }
-
-    return true;
-  }
-
-  // ── n8n forwarding failed ──────────────────────────────────────────────
-  logger.error(`n8n forwarding failed for session ${session.id}`, { error: result.error });
-
-  // ── RAG fallback (text messages only, when tenant has KB) ──────────
-  if (
-    session.status === 'bot' &&
-    savedMessage.type === 'text' &&
-    aiSettings?.enabled &&
-    outboundPayload.knowledgeBase?.enabled
-  ) {
-    try {
-      logger.info(`[Fallback] Attempting native RAG for session ${session.id}`);
-      const history = await getConversationHistory(session.id, savedMessage.id);
-      const messageContent = savedMessage.contentEncrypted
-        ? decrypt(savedMessage.content)
-        : savedMessage.content;
-      // Multi-bot: scope retrieval to the session's bot's attached KBs.
-      // Null botId (unattributed/legacy session) → tenant-wide (undefined).
-      const botKbIds = session.botId
-        ? await getBotKnowledgeBaseIds(AppDataSource, session.botId)
-        : undefined;
-      // generateResponse needs the LLM provider apiKey, which stays on
-      // Tenant.settings.ai.apiKey (NEVER on bot.settings). Merge the bot's
-      // behavioural slice with the tenant-held secret only at the call site.
-      const { apiKey: tenantApiKey } = await getLlmRuntimeConfigForSession(session);
-      const ragSettings = {
-        ...aiSettings,
-        apiKey: tenantApiKey,
-      } as Parameters<typeof generateResponse>[2];
-      const ragResult = await generateResponse(
-        AppDataSource,
-        session.tenantId,
-        ragSettings,
-        messageContent,
-        history,
-        botKbIds,
-        templateBody
-      );
-
-      // In-flight guardrail pause: a concurrent inbound block may have disabled
-      // the session during the (slow) RAG generation — re-read before sending so
-      // we don't deliver a reply on a now-paused session (mirrors
-      // platformAgentPath's liveAfter check).
-      const liveRag = await sessionRepository.findOne({
-        where: { id: session.id }, select: { id: true, aiAutoReplyEnabled: true } as never,
-      });
-      if (liveRag && liveRag.aiAutoReplyEnabled === false) {
-        logger.info(`[Fallback] RAG reply suppressed — session ${session.id} guardrail-paused mid-generation`);
-        return true;
-      }
-
-      const botParticipant = await ensureBotParticipant(session, aiSettings);
-
-      // Output guardrails (AC14): validate the RAG-generated reply. A blocked
-      // reply (enforce mode) is replaced with the fallback + a human handoff.
-      const fallbackMessage =
-        aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
-      const guard = await applyOutputGuardrails({
-        tenantId: session.tenantId, session, channel: session.channel,
-        content: ragResult.response, fallbackMessage, generationPath: 'rag',
-      });
-      await sendBotMessage(session, botParticipant.id, guard.content);
-
-      if (guard.blocked) {
-        await handleBotHandoff(session, botParticipant.id, 'bot_error');
-      } else if (ragResult.shouldHandoff && ragResult.handoffReason) {
-        await handleBotHandoff(session, botParticipant.id, ragResult.handoffReason as HandoffRequest['reason']);
-      }
-
-      logger.info(`[Fallback] Native RAG succeeded for session ${session.id}`);
-      return true;
-    } catch (ragError) {
-      logger.error(`[Fallback] Native RAG also failed for session ${session.id}`, ragError);
-    }
-  }
-
-  // ── Final fallback: bot message + proper handoff ────────────────────
-  try {
-    const botParticipant = await ensureBotParticipant(session, aiSettings);
-    const fallbackContent = aiSettings?.guardrails?.fallbackMessage ||
-      "We're connecting you to an agent. Please hold on.";
-    await sendBotMessage(session, botParticipant.id, fallbackContent);
-    await handleBotHandoff(session, botParticipant.id, 'bot_error');
-  } catch (innerError) {
-    logger.error(`Failed to handle n8n failure gracefully for session ${session.id}`, innerError);
-  }
-
-  return true;
+  // ── Platform agent path ──────────────────────────────────────────────
+  return platformAgentPath(session, savedMessage, tenant, aiSettings);
 }
 
 // ── Per-Session Lock + Burst Coalescing ─────────────────────────────────

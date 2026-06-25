@@ -39,8 +39,10 @@ export type DeleteEventResult = 'ok' | 'no_access' | 'no_connection';
 
 export interface CalendarProvider {
   readonly providerType: CalendarProviderType;
-  /** Busy intervals, or null when the bot has no active connection; throws on API failure (fail-closed). */
-  getBusy(botId: string, startISO: string, endISO: string): Promise<BusyInterval[] | null>;
+  /** Busy intervals, or null when the bot has no active connection; throws on API failure (fail-closed).
+   *  `timezone` (IANA) anchors all-day/date-only events to the business's local day
+   *  instead of UTC midnight; absent ⇒ UTC (legacy). */
+  getBusy(botId: string, startISO: string, endISO: string, timezone?: string): Promise<BusyInterval[] | null>;
   /** Create the owner event; null when no connection; throws on non-idempotent failure. */
   createEvent(botId: string, input: CalendarEventInput, opts?: CreateEventOpts): Promise<CalendarEventResult | null>;
   /** Patch event times only (never the body). */

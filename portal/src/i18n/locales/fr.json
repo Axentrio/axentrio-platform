@@ -1431,6 +1431,15 @@
           "role": "Rôle",
           "status": "Statut",
           "lastLogin": "Dernière connexion"
+        },
+        "invite": {
+          "button": "Inviter un membre",
+          "emailLabel": "E-mail",
+          "emailPlaceholder": "nom@entreprise.com",
+          "roleLabel": "Rôle",
+          "send": "Envoyer l'invitation",
+          "sending": "Envoi…",
+          "errorFallback": "Échec de l'envoi de l'invitation"
         }
       },
       "status": {

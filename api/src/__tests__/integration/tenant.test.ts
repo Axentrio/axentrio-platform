@@ -52,7 +52,19 @@ describe('Tenant Management', () => {
   });
 
   describe('PATCH /api/v1/tenants/me', () => {
-    it('should update webhook URL', async () => {
+    it('ignores webhookUrl from a non-super_admin (escape hatch is super_admin only)', async () => {
+      const res = await request(app)
+        .patch('/api/v1/tenants/me')
+        .send({ webhookUrl: 'https://example.com/webhook' });
+
+      expect(res.status).toBe(200);
+      // Silently ignored for a plain admin — the field is super_admin-gated.
+      expect(res.body.data.webhookUrl ?? null).toBeNull();
+    });
+
+    it('allows a super_admin to set the webhook URL', async () => {
+      configureMockAuth(auth, { userId: auth.userId, tenantId, role: 'super_admin' });
+
       const res = await request(app)
         .patch('/api/v1/tenants/me')
         .send({ webhookUrl: 'https://example.com/webhook' });

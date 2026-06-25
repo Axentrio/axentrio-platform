@@ -21,7 +21,7 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
 import { returningRows } from '../utils/raw-sql';
-import { buildBookingEventContent } from '../n8n/booking-providers/booking-content';
+import { buildBookingEventContent } from '../booking/booking-providers/booking-content';
 import { buildManageUrl } from './booking-token';
 
 const LEASE_MINUTES = 2;

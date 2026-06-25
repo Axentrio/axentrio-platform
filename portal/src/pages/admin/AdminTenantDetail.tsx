@@ -20,8 +20,9 @@ import {
   RotateCw,
   X,
   Crown,
+  UserPlus,
 } from 'lucide-react';
-import { api } from '@services/apiClient';
+import { api, extractApiErrorMessage } from '@services/apiClient';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { LoadingOverlay } from '@/components/ui/loading-overlay';
 import {
@@ -29,6 +30,7 @@ import {
   useAdminTenantAudit,
   useOptimisticSuspendTenant,
   useOptimisticActivateTenant,
+  useAdminInviteMember,
   useAdminResendInvite,
   useAdminCancelInvite,
   useSetTenantTier,
@@ -43,6 +45,16 @@ import {
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectTrigger,
+  SelectContent,
+  SelectItem,
+  SelectValue,
+} from '@/components/ui/select';
+import { InlineError } from '@/components/ui/inline-error';
 import { TenantEntitlementsPanel } from '../../components/admin/TenantEntitlementsPanel';
 import {
   Table,
@@ -145,14 +157,40 @@ const AdminTenantDetail: React.FC = () => {
   const [pendingTier, setPendingTier] = useState<ManualTier | null>(null);
   const [disposition, setDisposition] = useState<StripeDisposition | null>(null);
   const [dispositionReason, setDispositionReason] = useState('');
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('agent');
+  const [inviteError, setInviteError] = useState<string | null>(null);
 
   const { data, isLoading, isError } = useAdminTenantDetail(id ?? '');
   const { data: auditData } = useAdminTenantAudit(id ?? '');
 
   const suspendMutation = useOptimisticSuspendTenant();
   const activateMutation = useOptimisticActivateTenant();
+  const inviteMember = useAdminInviteMember(id!);
   const resendInvite = useAdminResendInvite(id!);
   const cancelInvite = useAdminCancelInvite(id!);
+
+  const handleInvite = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inviteEmail.trim()) return;
+    setInviteError(null);
+    inviteMember.mutate(
+      { email: inviteEmail.trim(), role: inviteRole },
+      {
+        onSuccess: () => {
+          setInviteEmail('');
+          setInviteRole('agent');
+          setShowInviteForm(false);
+        },
+        onError: (error: unknown) => {
+          setInviteError(
+            extractApiErrorMessage(error) ?? t('admin.tenantDetail.members.invite.errorFallback')
+          );
+        },
+      }
+    );
+  };
   const setTierMutation = useSetTenantTier();
 
   const rotateMutation = useMutation({
@@ -359,15 +397,63 @@ const AdminTenantDetail: React.FC = () => {
           <h3 className="font-semibold text-text-primary">
             {t('admin.tenantDetail.members.title')} <span className="text-text-muted font-normal">({tenant.userCount})</span>
           </h3>
-          {tenant.userCount > 10 && (
-            <Link
-              to={`/admin/users?tenantId=${tenant.id}`}
-              className="text-sm text-primary-400 hover:underline"
+          <div className="flex items-center gap-3">
+            {tenant.userCount > 10 && (
+              <Link
+                to={`/admin/users?tenantId=${tenant.id}`}
+                className="text-sm text-primary-400 hover:underline"
+              >
+                {t('admin.tenantDetail.members.viewAll')}
+              </Link>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setInviteError(null);
+                setShowInviteForm((v) => !v);
+              }}
             >
-              {t('admin.tenantDetail.members.viewAll')}
-            </Link>
-          )}
+              <UserPlus className="w-4 h-4 mr-2" />
+              {t('admin.tenantDetail.members.invite.button')}
+            </Button>
+          </div>
         </div>
+        {showInviteForm && (
+          <div className="px-6 py-4 border-b border-edge">
+            <form onSubmit={handleInvite} className="flex items-end gap-3">
+              <div className="flex-1">
+                <Label className="mb-1 text-text-secondary">{t('admin.tenantDetail.members.invite.emailLabel')}</Label>
+                <Input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder={t('admin.tenantDetail.members.invite.emailPlaceholder')}
+                  required
+                />
+              </div>
+              <div>
+                <Label className="mb-1 text-text-secondary">{t('admin.tenantDetail.members.invite.roleLabel')}</Label>
+                <Select value={inviteRole} onValueChange={setInviteRole}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="admin">{t('roles.admin')}</SelectItem>
+                    <SelectItem value="supervisor">{t('roles.supervisor')}</SelectItem>
+                    <SelectItem value="agent">{t('roles.agent')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="submit" disabled={inviteMember.isPending}>
+                {inviteMember.isPending
+                  ? t('admin.tenantDetail.members.invite.sending')
+                  : t('admin.tenantDetail.members.invite.send')}
+              </Button>
+            </form>
+            <InlineError message={inviteError} className="mt-2" />
+          </div>
+        )}
         <Table>
           <TableHeader>
             <TableRow>

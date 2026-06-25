@@ -39,7 +39,7 @@ vi.mock('../../utils/logger', () => ({
 
 import express from 'express';
 import request from 'supertest';
-import ragSearchRoutes from '../../n8n/rag-search.routes';
+import ragSearchRoutes from '../../rag/rag-search.routes';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
 

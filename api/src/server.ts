@@ -65,11 +65,9 @@ import sessionManagementRoutes from './routes/session-management.routes';
 import { requireClerkAuth, autoProvision } from './middleware/clerk.middleware';
 
 // Webhook integration
-import { createWebhookModule } from './n8n';
-import { initializeForwarding, initializeAgentService } from './services/message-forwarding.service';
-import ragSearchRoutes from './n8n/rag-search.routes';
-import bookingRoutes from './n8n/booking.routes';
-import { EventEmitter } from './utils/event-emitter';
+import { initializeAgentService } from './services/message-forwarding.service';
+import ragSearchRoutes from './rag/rag-search.routes';
+import bookingRoutes from './booking/booking.routes';
 
 // Platform agent
 import { ToolRegistry } from './agent/tool-registry';
@@ -395,7 +393,7 @@ async function startServer(): Promise<void> {
       registerProcessor('notifications', createNotificationProcessor(AppDataSource));
       logger.info('Notification push processor registered');
 
-      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./n8n/booking-providers/reminders');
+      const { createBookingReminderProcessor, REMINDER_QUEUE } = await import('./booking/booking-providers/reminders');
       registerProcessor(REMINDER_QUEUE, createBookingReminderProcessor());
       logger.info('Booking reminder processor registered');
 
@@ -423,34 +421,8 @@ async function startServer(): Promise<void> {
       }
     }
 
-    // Initialize webhook integration module
-    try {
-      const webhookModule = createWebhookModule({
-        redisUrl: config.redis.url || `redis://${config.redis.host}:${config.redis.port}`,
-        circuitBreaker: {
-          failureThreshold: parseInt(process.env.N8N_CIRCUIT_BREAKER_THRESHOLD || '5'),
-          successThreshold: parseInt(process.env.N8N_CIRCUIT_BREAKER_SUCCESS || '3'),
-          timeout: parseInt(process.env.N8N_CIRCUIT_BREAKER_TIMEOUT || '30000'),
-        },
-        retry: {
-          maxRetries: config.queue.maxAttempts || 3,
-          initialDelay: config.queue.backoffDelay || 1000,
-          backoffMultiplier: 2,
-        },
-        services: {
-          eventEmitter: new EventEmitter(),
-        },
-      });
-
-      apiRouter.use('/webhooks', webhookModule.router);
-
-      // Wire outbound message forwarding
-      initializeForwarding(webhookModule.outboundService, webhookModule.fallbackService);
-
-      logger.info('Webhook integration module initialized');
-    } catch (err) {
-      logger.warn('Webhook module initialization failed — webhooks disabled', { error: err });
-    }
+    // (External n8n webhook integration retired — every AI tenant is answered by
+    // the in-house platform agent, initialized below.)
 
     // Initialize platform agent service
     try {

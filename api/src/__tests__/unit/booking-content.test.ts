@@ -12,7 +12,7 @@ import {
   buildBookingEventContent,
   type BookingContentInput,
   type ServiceContentInput,
-} from '../../n8n/booking-providers/booking-content';
+} from '../../booking/booking-providers/booking-content';
 
 const MANAGE = 'https://app.axentrio.com/m/abc';
 

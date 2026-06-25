@@ -43,7 +43,6 @@ vi.mock('../../middleware/auth.middleware', async (importOriginal) => {
 // Mock n8n forwarding to avoid external calls
 vi.mock('../../services/message-forwarding.service', () => ({
   forwardMessageToN8n: vi.fn().mockResolvedValue(undefined),
-  initializeForwarding: vi.fn(),
 }));
 
 import request from 'supertest';

@@ -40,7 +40,7 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const sendBookingEmail = vi.fn();
-vi.mock('../../n8n/booking-providers/booking-email', () => ({
+vi.mock('../../booking/booking-providers/booking-email', () => ({
   sendBookingEmail: (...args: any[]) => sendBookingEmail(...args),
 }));
 
@@ -73,7 +73,7 @@ vi.mock('../../scheduler/calendar-provider', () => {
   };
 });
 
-import { InternalProvider } from '../../n8n/booking-providers/internal.provider';
+import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 
 const ctx: any = {
   session: { id: 'sess-1', visitorId: 'psid-1' },

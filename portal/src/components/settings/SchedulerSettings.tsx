@@ -217,7 +217,25 @@ export const SchedulerSettings: React.FC = () => {
                 {/* Google Calendar connection (Phase 1) */}
                 <div className="space-y-2 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Google Calendar</h3>
-                  {googleStatus.data?.connected ? (
+                  {googleStatus.data?.connected && googleStatus.data?.needsReauth ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-status-busy flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        Reconnect needed{googleStatus.data.accountEmail ? ` · ${googleStatus.data.accountEmail}` : ''} — the link to Google has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => connectGoogle.mutate()}
+                        disabled={connectGoogle.isPending}
+                      >
+                        {connectGoogle.isPending ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+                        ) : null}
+                        Reconnect
+                      </Button>
+                    </div>
+                  ) : googleStatus.data?.connected ? (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-text-secondary flex items-center gap-2">
                         <Check className="w-4 h-4 text-status-online" />

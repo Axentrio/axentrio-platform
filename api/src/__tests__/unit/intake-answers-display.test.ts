@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildIntakeAnswers } from '../../n8n/booking.service';
+import { buildIntakeAnswers } from '../../booking/booking.service';
 import type { IntakeQuestion } from '../../database/entities/ServiceType';
 
 const Q: IntakeQuestion[] = [

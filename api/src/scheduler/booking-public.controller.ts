@@ -6,8 +6,8 @@
 import { Request, Response } from 'express';
 import { DateTime } from 'luxon';
 import { verifyBookingToken, signBookingToken } from './booking-token';
-import { getManageBooking, adminCancelBooking, adminRescheduleBooking, adminAvailability } from '../n8n/booking.service';
-import { BookingError } from '../n8n/booking-providers/types';
+import { getManageBooking, adminCancelBooking, adminRescheduleBooking, adminAvailability } from '../booking/booking.service';
+import { BookingError } from '../booking/booking-providers/types';
 import { logger } from '../utils/logger';
 
 function esc(s: string): string {

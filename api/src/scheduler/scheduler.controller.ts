@@ -30,9 +30,9 @@ import {
   adminRescheduleBooking,
   adminAcceptRequest,
   adminDeclineRequest,
-} from '../n8n/booking.service';
+} from '../booking/booking.service';
 import { findPreset, listPresetSummaries, presetServiceSchema, presetAvailabilitySchema } from './presets';
-import { BookingError } from '../n8n/booking-providers/types';
+import { BookingError } from '../booking/booking-providers/types';
 import { ApiError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { logger } from '../utils/logger';

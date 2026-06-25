@@ -10,6 +10,7 @@ import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
+import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
@@ -205,9 +206,23 @@ export class AgentService {
         });
         customerName = binding?.externalUserName ?? undefined;
       }
+      // Anchor the prompt's date context to the booking timezone (booking bots only;
+      // one indexed lookup). Non-booking bots fall back to server/UTC as before.
+      let bookingTimezone: string | undefined;
+      if (bookingActive) {
+        try {
+          const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
+            where: { botId: bot.id },
+            select: { timezone: true },
+          });
+          bookingTimezone = rule?.timezone || undefined;
+        } catch (error) {
+          logger.warn('booking timezone lookup failed — using server tz for date context', { tenantId: tenant.id, error });
+        }
+      }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
-      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody);
+      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

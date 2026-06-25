@@ -151,7 +151,11 @@ router.patch(
       }
       tenant.name = name;
     }
-    if (webhookUrl !== undefined) {
+    // The webhook URL is the legacy external-n8n escape hatch: setting it routes the
+    // whole bot to an external endpoint (losing booking/chips/guardrails). It is NOT a
+    // tenant self-service control — only super_admin may set it. A non-super_admin PATCH
+    // carrying webhookUrl is silently ignored (the portal hides the field for them too).
+    if (webhookUrl !== undefined && req.user!.role === 'super_admin') {
       // Reject non-public / non-https webhook URLs up front (SSRF #A). Empty
       // string clears the webhook (preserved).
       if (webhookUrl) {

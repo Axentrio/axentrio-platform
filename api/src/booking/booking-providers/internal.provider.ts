@@ -376,7 +376,7 @@ export class InternalProvider implements BookingProvider {
       );
     }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
-    const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd);
+    const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd, rule.timezone);
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
     const availDuration = effectiveDurationForAvailability(service, durationMin);
@@ -423,6 +423,7 @@ export class InternalProvider implements BookingProvider {
     calendarKey: string,
     rangeStartIso: string,
     rangeEndIso: string,
+    timezone?: string,
     excludeId?: string,
     excludeExternalInterval?: { start: Date; end: Date }
   ): Promise<BusyInterval[]> {
@@ -430,7 +431,9 @@ export class InternalProvider implements BookingProvider {
     let external: BusyInterval[] | null = null;
     try {
       const provider = await resolveCalendarProvider(ctx.bot.id);
-      external = provider ? await provider.getBusy(ctx.bot.id, rangeStartIso, rangeEndIso) : null;
+      // Pass the rule timezone so the provider anchors all-day events to the
+      // business's local day rather than UTC midnight.
+      external = provider ? await provider.getBusy(ctx.bot.id, rangeStartIso, rangeEndIso, timezone) : null;
     } catch (err) {
       logger.warn('[Booking] external calendar free/busy unavailable — failing closed', {
         botId: ctx.bot.id,
@@ -549,7 +552,8 @@ export class InternalProvider implements BookingProvider {
       ctx,
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
-      new Date(end.getTime() + 24 * 3600_000).toISOString()
+      new Date(end.getTime() + 24 * 3600_000).toISOString(),
+      rule.timezone
     );
     const offered = computeSlots({
       rule,
@@ -1266,6 +1270,7 @@ export class InternalProvider implements BookingProvider {
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
+      rule.timezone,
       bookingId
     );
     const offered = computeSlots({
@@ -1471,6 +1476,7 @@ export class InternalProvider implements BookingProvider {
       calendarKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
+      rule.timezone,
       bookingId,
       { start: booking.startUtc, end: booking.endUtc }
     );

@@ -7,11 +7,11 @@ import {
   rescheduleBooking,
   cancelBooking,
   BookingError,
-} from '../../n8n/booking.service';
+} from '../../booking/booking.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
-import type { CreateBookingResult } from '../../n8n/booking-providers/types';
+import type { CreateBookingResult } from '../../booking/booking-providers/types';
 import { logger } from '../../utils/logger';
 
 /**

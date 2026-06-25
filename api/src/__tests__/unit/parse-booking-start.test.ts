@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBookingStart } from '../../n8n/booking-providers/internal.provider';
+import { parseBookingStart } from '../../booking/booking-providers/internal.provider';
 
 describe('parseBookingStart', () => {
   it('reads a ZONELESS time as business-local wall-clock (the "2 PM" fix)', () => {

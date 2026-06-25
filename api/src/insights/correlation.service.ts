@@ -10,7 +10,7 @@
 import { AppDataSource } from '../database/data-source';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
-import { isWithinBusinessHours } from '../n8n/booking-providers/slot-engine';
+import { isWithinBusinessHours } from '../booking/booking-providers/slot-engine';
 import { fisherExactTwoSided, relativeRisk } from './stats/fisher';
 import { logger } from '../utils/logger';
 

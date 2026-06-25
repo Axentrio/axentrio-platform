@@ -51,6 +51,7 @@ vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), e
 import {
   validateState,
   getValidAccessToken,
+  getGoogleBusyForBot,
   resolveCalendarIdentity,
   exchangeAndStore,
   listWritableCalendars,
@@ -99,12 +100,66 @@ describe('google-calendar.service', () => {
     const token = await getValidAccessToken(cred);
     expect(token).toBe('fresh-token');
     expect(cred.accessTokenEnc).toBe('enc(fresh-token)');
+    expect(cred.reauthRequired).toBe(false); // a successful refresh clears any prior flag
     expect(credSave).toHaveBeenCalledOnce();
   });
 
   it('throws CALENDAR_REAUTH_REQUIRED when expired with no refresh token', async () => {
     const cred: any = { accessTokenEnc: 'enc(old)', refreshTokenEnc: null, tokenExpiry: new Date(Date.now() - 1000) };
     await expect(getValidAccessToken(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
+    expect(cred.reauthRequired).toBe(true); // flag the dead link so the portal surfaces it
+    expect(credSave).toHaveBeenCalledOnce();
+  });
+
+  it('flags reauthRequired on a permanent invalid_grant refresh failure', async () => {
+    mockClient.getAccessToken.mockRejectedValue({ response: { data: { error: 'invalid_grant' } } });
+    const cred: any = { accessTokenEnc: 'enc(old)', refreshTokenEnc: 'enc(refresh)', tokenExpiry: new Date(Date.now() - 1000) };
+    await expect(getValidAccessToken(cred)).rejects.toThrow('CALENDAR_REAUTH_REQUIRED');
+    expect(cred.reauthRequired).toBe(true);
+    expect(credSave).toHaveBeenCalledOnce();
+  });
+
+  it('does NOT flag reauthRequired on a transient refresh error (rethrows)', async () => {
+    mockClient.getAccessToken.mockRejectedValue(Object.assign(new Error('network'), { code: 'ETIMEDOUT' }));
+    const cred: any = { accessTokenEnc: 'enc(old)', refreshTokenEnc: 'enc(refresh)', tokenExpiry: new Date(Date.now() - 1000) };
+    await expect(getValidAccessToken(cred)).rejects.toThrow('network');
+    expect(cred.reauthRequired).toBeUndefined(); // a blip must not demand a reconnect
+    expect(credSave).not.toHaveBeenCalled();
+  });
+
+  describe('getGoogleBusyForBot — all-day events', () => {
+    it('anchors an all-day (date-only) event to the business timezone, not UTC midnight', async () => {
+      credFindOne.mockResolvedValue({
+        accessTokenEnc: 'enc(tok)',
+        refreshTokenEnc: 'enc(refresh)',
+        tokenExpiry: new Date(Date.now() + 10 * 60_000), // valid → no refresh
+        calendarId: 'primary',
+        status: 'active',
+      });
+      (axios.get as any).mockResolvedValue({
+        data: { items: [{ status: 'confirmed', start: { date: '2026-03-15' }, end: { date: '2026-03-16' } }] },
+      });
+      // America/New_York is UTC-4 on 2026-03-15 (after DST start), so local midnight = 04:00Z.
+      const busy = await getGoogleBusyForBot('bot1', '2026-03-14T00:00:00Z', '2026-03-17T00:00:00Z', 'America/New_York');
+      expect(busy).not.toBeNull();
+      expect(busy![0].start.toISOString()).toBe('2026-03-15T04:00:00.000Z');
+      expect(busy![0].end.toISOString()).toBe('2026-03-16T04:00:00.000Z');
+    });
+
+    it('falls back to UTC midnight for a date-only event when no timezone is given', async () => {
+      credFindOne.mockResolvedValue({
+        accessTokenEnc: 'enc(tok)',
+        refreshTokenEnc: 'enc(refresh)',
+        tokenExpiry: new Date(Date.now() + 10 * 60_000),
+        calendarId: 'primary',
+        status: 'active',
+      });
+      (axios.get as any).mockResolvedValue({
+        data: { items: [{ status: 'confirmed', start: { date: '2026-03-15' }, end: { date: '2026-03-16' } }] },
+      });
+      const busy = await getGoogleBusyForBot('bot1', '2026-03-14T00:00:00Z', '2026-03-17T00:00:00Z');
+      expect(busy![0].start.toISOString()).toBe('2026-03-15T00:00:00.000Z');
+    });
   });
 
   describe('resolveCalendarIdentity', () => {

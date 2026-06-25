@@ -6,7 +6,7 @@
  * (positive-offset zones), drifting with DST.
  */
 import { describe, it, expect } from 'vitest';
-import { normalizeDateRange } from '../../n8n/booking-providers/internal.provider';
+import { normalizeDateRange } from '../../booking/booking-providers/internal.provider';
 
 describe('normalizeDateRange', () => {
   it('anchors a date-only day to a positive-offset business tz (Brussels +2)', () => {

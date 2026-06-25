@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeSlots, isWithinBusinessHours, SlotEngineInput } from '../../n8n/booking-providers/slot-engine';
+import { computeSlots, isWithinBusinessHours, SlotEngineInput } from '../../booking/booking-providers/slot-engine';
 
 // Helper to build an input with sensible defaults.
 function input(overrides: Partial<SlotEngineInput> & {

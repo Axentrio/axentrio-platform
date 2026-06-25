@@ -326,6 +326,20 @@ export function useDeleteUser() {
   });
 }
 
+export function useAdminInviteMember(tenantId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { email: string; role: string }) =>
+      api.post(`/admin/tenants/${tenantId}/invite`, payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantDetail(tenantId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.admin.tenantAudit(tenantId) });
+      toast.success('Invitation sent');
+    },
+    onError: () => toast.error('Failed to send invite'),
+  });
+}
+
 export function useAdminResendInvite(tenantId: string) {
   const queryClient = useQueryClient();
   return useMutation({

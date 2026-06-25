@@ -295,12 +295,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <h1 className="font-bold text-text-primary truncate">
             {isImpersonating ? activeTenant.tenantName : organization?.name ?? 'Axentrio'}
           </h1>
-          <p className={cn(
-            'text-xs',
-            isImpersonating ? 'text-orange-400 font-medium' : 'text-text-muted'
-          )}>
-            {isImpersonating ? t('sidebar.impersonating') : 'Axentrio'}
-          </p>
+          {isImpersonating && (
+            <p className="text-xs text-orange-400 font-medium">
+              {t('sidebar.impersonating')}
+            </p>
+          )}
         </div>
         {isSuperAdmin && !isImpersonating && (
           <button

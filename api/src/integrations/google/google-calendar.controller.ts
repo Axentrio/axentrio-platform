@@ -19,6 +19,7 @@ import {
   validateState,
   exchangeAndStore,
   getActiveCredential,
+  getValidAccessToken,
   disconnect,
   listWritableCalendars,
   setBotCalendar,
@@ -69,6 +70,20 @@ export async function getGoogleStatus(req: Request, res: Response): Promise<void
   const tenantId = (req as { tenantId?: string }).tenantId!;
   const { bot } = await getAnchorBotConfig(tenantId);
   const cred = await getActiveCredential(bot.id);
+  // Actively verify the token so a dead link never shows as "Connected". A healthy
+  // non-expired token returns instantly (no API call); an expired one is refreshed,
+  // and a terminal failure (revoked / Testing-mode-expired refresh token) makes
+  // getValidAccessToken set reauthRequired + throw. Without this probe the flag only
+  // flips lazily on the next booking/availability call, so the portal could show a
+  // stale "Connected" for a link that is actually dead.
+  if (cred && !cred.reauthRequired) {
+    try {
+      await getValidAccessToken(cred);
+    } catch {
+      // invalid_grant → cred.reauthRequired now set (mutated in place). A transient
+      // error leaves it unset, so a network blip never nags the owner to reconnect.
+    }
+  }
   sendSuccess(res, {
     connected: !!cred,
     accountEmail: cred?.accountEmail ?? null,

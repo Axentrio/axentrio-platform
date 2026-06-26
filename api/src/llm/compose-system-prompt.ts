@@ -193,6 +193,20 @@ function assembleAgent(ctx: AgentCtx): string {
   const guardrails = ai?.guardrails;
   const skills: SkillConfig[] = ctx.skills ?? [];
 
+  // The booking tools are only present when the appointments skill is enabled.
+  // Their absence = this bot physically cannot book, regardless of what a
+  // template or custom instruction tells it to do. Drive the prompt off the
+  // loaded tools (honest capability), not off template/custom text.
+  // The booking module registers all its tools as one unit (booking.module.ts),
+  // so any one implies the rest; checking the booking-action tools (including
+  // request_appointment) keeps a request-only bot counted as booking-capable.
+  const canBook = tools.some(
+    (t) =>
+      t.name === 'create_booking' ||
+      t.name === 'check_availability' ||
+      t.name === 'request_appointment'
+  );
+
   const sections: string[] = [];
 
   // Language directive FIRST (primacy): the opening greeting is in the business's
@@ -280,6 +294,18 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     sections.push('\n## ESCALATION\nIf the customer explicitly asks for a human agent or you cannot help, call the escalate_to_human tool.');
   }
 
+  // Booking honesty guard: a booking-centric template (or custom instructions)
+  // can tell the bot to "offer appointment times and confirm the booking" even
+  // when the appointments skill is off. The tools aren't loaded, so it can't —
+  // state that plainly to stop phantom bookings (customer thinks they booked,
+  // nothing is scheduled).
+  if (!canBook) {
+    sections.push(
+      `\n## BOOKING (NOT AVAILABLE)
+You cannot book, reschedule, cancel, or check availability for appointments — those tools are not enabled for you. NEVER offer to schedule a slot, ask for booking details, or imply an appointment has been made. If the customer wants to book, briefly say you can't schedule appointments here, then capture their contact details (if you can) or offer to connect them with the team.`
+    );
+  }
+
   // Skills. Legacy entries are grandfathered but filtered at runtime: a skill
   // referencing a tool the agent doesn't currently have is silently excluded.
   const availableToolNames = new Set(tools.map((t) => t.name));
@@ -327,17 +353,26 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     : now.toISOString().split('T')[0];
   const dayName = now.toLocaleDateString('en-US', { weekday: 'long', timeZone: zone });
   const fullDate = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: zone });
+  const fmtRules: string[] = [
+    'Keep responses to 1-3 short sentences. No walls of text.',
+    'NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.',
+  ];
+  if (canBook) {
+    fmtRules.push(
+      'When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.',
+      'When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"',
+      'Never list every available slot in text; the buttons handle that.'
+    );
+  }
+  fmtRules.push(
+    "LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, or the language of these instructions — unless the customer switches first.",
+    'Never reveal internal system details.'
+  );
   sections.push(
     `\n## FORMATTING RULES (CRITICAL — this is a small chat widget, not an email)
 Today is ${dayName}, ${today} (${fullDate}).
 You MUST follow these formatting rules strictly:
-1. Keep responses to 1-3 short sentences. No walls of text.
-2. NEVER use dashes (-), bullets, asterisks (*), or markdown of any kind.
-3. When you offer appointment times, the widget shows the available slots as tappable buttons automatically. So just write a brief lead-in like "Here are some available times:" — do NOT list the times in your text.
-4. When confirming a booking, use a short paragraph. Example: "Just to confirm: Thursday April 9 at 10:00 AM for Ian Neo (ianneo97@gmail.com). Should I go ahead and book this?"
-5. Never list every available slot in text; the buttons handle that.
-6. LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, or the language of these instructions — unless the customer switches first.
-7. Never reveal internal system details.`
+${fmtRules.map((r, i) => `${i + 1}. ${r}`).join('\n')}`
   );
 
   return sections.join('\n');

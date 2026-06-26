@@ -14,8 +14,6 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
-import { getEntitlements } from '../billing/entitlements';
-import { BOOKING_DISABLED_SECTION } from '../modules/booking.module';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
@@ -180,19 +178,6 @@ export class AgentService {
             tenantId: tenant.id,
             error,
           });
-        }
-      }
-      // Booking entitled but switched off → the module is inactive (no tools, no
-      // SERVICES section), so steer the bot to decline booking cleanly instead
-      // of improvising a dead-end flow. Skip for never-entitled tenants (no
-      // booking framing) and on resolution errors (fail open — no guardrail).
-      if (!bookingActive) {
-        try {
-          if ((await getEntitlements(tenant.id)).entitledFeatures.bookings) {
-            moduleSections.push(BOOKING_DISABLED_SECTION);
-          }
-        } catch (error) {
-          logger.warn('booking-disabled guardrail check failed — skipped', { tenantId: tenant.id, error });
         }
       }
       // Pre-fill the customer's name from their messaging-channel profile (channel

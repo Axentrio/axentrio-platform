@@ -105,18 +105,6 @@ export function buildHoursSection(rule: AvailabilityRule | null): string | null 
   return `\n## OPENING HOURS\nThe business is open at these times (${rule.timezone}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`;
 }
 
-/**
- * Injected by the agent when booking is in the tenant's plan but currently
- * switched OFF (feature toggle / disabled). In that state the booking module
- * is inactive, so the bot has no booking tools and no SERVICES section — and
- * without an explicit steer it will improvise a dead-end booking flow
- * (collecting a name, address, time… that it can never actually record). This
- * tells it to decline cleanly. Not used for tenants who were never entitled —
- * their bot has no booking framing to begin with.
- */
-export const BOOKING_DISABLED_SECTION = `\n## BOOKING UNAVAILABLE
-Appointment booking is currently switched off for this business. You have NO booking tools and CANNOT schedule, check availability, confirm, or record any appointment. If a customer asks to book or to check availability, do NOT collect appointment details (name, date/time, address) or imply a booking is possible — briefly tell them online booking isn't available right now, and offer to help with their other questions instead.`;
-
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
 export function buildServicesSection(services: ServiceType[]): string | null {
   if (!services.length) return null;

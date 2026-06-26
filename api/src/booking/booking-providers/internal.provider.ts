@@ -42,6 +42,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
+import { getActiveCredential } from '../../integrations/google/google-calendar.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -356,6 +357,14 @@ export class InternalProvider implements BookingProvider {
     return conflictKeyFor(ctx.bot.id, stored.identity, stored.providerType);
   }
 
+  /** Auto-confirmation requires a live calendar the owner actually sees — without one
+   *  a "confirmed" booking would be invisible to them (no sync) and risk a no-show. So
+   *  auto services degrade to request-mode when there is no healthy connected calendar. */
+  private async hasConnectedCalendar(botId: string): Promise<boolean> {
+    const cred = await getActiveCredential(botId);
+    return !!cred && !cred.reauthRequired;
+  }
+
   async checkAvailability(
     ctx: BookingContext,
     startDate: string,
@@ -373,6 +382,13 @@ export class InternalProvider implements BookingProvider {
         `"${service.name}" is request-only and has no bookable time slots. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment.`,
         'REQUEST_ONLY_SERVICE',
         400
+      );
+    }
+    if (!(await this.hasConnectedCalendar(ctx.bot.id))) {
+      throw new BookingError(
+        `Online appointments can't be auto-confirmed because this business has no connected calendar. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+        'CALENDAR_NOT_CONNECTED',
+        409
       );
     }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
@@ -533,7 +549,9 @@ export class InternalProvider implements BookingProvider {
 
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
-    if (service.bookingMode === 'request') {
+    const calendarConnected = await this.hasConnectedCalendar(ctx.bot.id);
+    // Request-only OR no connected calendar → capture a request, not a confirmed booking.
+    if (service.bookingMode === 'request' || !calendarConnected) {
       return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras, effectiveDuration);
     }
 

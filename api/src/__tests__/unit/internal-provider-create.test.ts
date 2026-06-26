@@ -50,12 +50,17 @@ const createCalendarEvent = vi.fn().mockResolvedValue(null);
 const updateCalendarEvent = vi.fn().mockResolvedValue('no_connection');
 const deleteCalendarEvent = vi.fn().mockResolvedValue(undefined);
 const resolveCalendarIdentity = vi.fn().mockResolvedValue(null);
+// Auto-confirm now gates on a healthy connected calendar. Default to a healthy
+// credential so the existing create/confirm assertions hold; individual tests
+// override this (null / reauthRequired) to exercise the no-calendar downgrade.
+const getActiveCredential = vi.fn().mockResolvedValue({ reauthRequired: false });
 vi.mock('../../integrations/google/google-calendar.service', () => ({
   getGoogleBusyForBot: (...args: any[]) => getGoogleBusyForBot(...args),
   createCalendarEvent: (...args: any[]) => createCalendarEvent(...args),
   updateCalendarEvent: (...args: any[]) => updateCalendarEvent(...args),
   deleteCalendarEvent: (...args: any[]) => deleteCalendarEvent(...args),
   resolveCalendarIdentity: (...args: any[]) => resolveCalendarIdentity(...args),
+  getActiveCredential: (...args: any[]) => getActiveCredential(...args),
 }));
 
 // InternalProvider now goes through the CalendarProvider port. Mock it to return
@@ -332,6 +337,54 @@ describe('InternalProvider.createBooking', () => {
     expect(sendBookingEmail).not.toHaveBeenCalled();
     expect(transaction).not.toHaveBeenCalled();
     expect(createCalendarEvent).not.toHaveBeenCalled();
+  });
+
+  // ── No connected calendar → auto downgrades to request ─────────────────────
+
+  it('downgrades an auto booking to a request when no calendar is connected', async () => {
+    getActiveCredential.mockResolvedValue(null); // no connection
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+    const res = await provider.createBooking(ctx, 'idem-nocal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(res.requested).toBe(true); // routed through createRequest, NOT confirmed
+    expect(res.booking.id).toBe('req-1');
+    expect(transaction).not.toHaveBeenCalled(); // no confirmed-booking insert/lock
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('downgrades an auto booking to a request when the calendar link is dead (reauthRequired)', async () => {
+    getActiveCredential.mockResolvedValue({ reauthRequired: true }); // dead link
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+    const res = await provider.createBooking(ctx, 'idem-deadcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.requested).toBe(true);
+    expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('still confirms an auto booking when a healthy calendar is connected (unchanged)', async () => {
+    getActiveCredential.mockResolvedValue({ reauthRequired: false });
+    const res = await provider.createBooking(ctx, 'idem-healthy', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeUndefined(); // confirmed, not a request
+    expect(res.booking.id).toBe('bk-1');
+    expect(transaction).toHaveBeenCalled();
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+  });
+
+  it('keeps a request-only service a request regardless of calendar state', async () => {
+    getActiveCredential.mockResolvedValue({ reauthRequired: false }); // even with a healthy calendar
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' }]);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+    const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req');
+    expect(res.requested).toBe(true);
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   // ── Capacity (P5b) ─────────────────────────────────────────────────────────
@@ -647,5 +700,43 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     const params = insert![1] as any[];
     expect(params[params.length - 4]).toBe('221B Baker Street'); // customer_address
     expect(params[params.length - 3]).toBe('+44 20 7946 0000'); // customer_phone
+  });
+});
+
+describe('InternalProvider.checkAvailability — calendar gate', () => {
+  let provider: InternalProvider;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    serviceTypeFind.mockResolvedValue([EVENT_TYPE]); // sole active auto service
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingQuery.mockResolvedValue([]); // no busy intervals
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('throws CALENDAR_NOT_CONNECTED for an auto service with no connected calendar', async () => {
+    getActiveCredential.mockResolvedValue(null);
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+    ).rejects.toMatchObject({ code: 'CALENDAR_NOT_CONNECTED' });
+  });
+
+  it('throws CALENDAR_NOT_CONNECTED for an auto service whose calendar link is dead', async () => {
+    getActiveCredential.mockResolvedValue({ reauthRequired: true });
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+    ).rejects.toMatchObject({ code: 'CALENDAR_NOT_CONNECTED' });
+  });
+
+  it('returns slots when a healthy calendar is connected', async () => {
+    getActiveCredential.mockResolvedValue({ reauthRequired: false });
+    const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
+    expect(res.serviceId).toBe('et-1');
+    expect(res.timezone).toBe('Europe/Brussels');
   });
 });

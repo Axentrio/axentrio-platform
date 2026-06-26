@@ -11,6 +11,7 @@ import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
@@ -194,6 +195,7 @@ export class AgentService {
       // Anchor the prompt's date context to the booking timezone (booking bots only;
       // one indexed lookup). Non-booking bots fall back to server/UTC as before.
       let bookingTimezone: string | undefined;
+      let bookingConfigured = false;
       if (bookingActive) {
         try {
           const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
@@ -201,13 +203,30 @@ export class AgentService {
             select: { timezone: true },
           });
           bookingTimezone = rule?.timezone || undefined;
+          // ponytail: rule existence is treated as "hours set up". A rule with empty
+          // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
+          // case we target (no rule at all); tighten later if empty-hours configs appear.
+          // "Bookable online" = active AND online-bookable; an inactive or
+          // phone-only service must not flip this true (it isn't bookable via
+          // the chat). isActive matches the catalog's own filter.
+          const services = await AppDataSource.getRepository(ServiceType).find({
+            where: { botId: bot.id, isActive: true, onlineBookable: true },
+            select: { id: true, bookingMode: true },
+          });
+          const hasRequestService = services.some((s) => s.bookingMode === 'request');
+          const hasAutoService = services.some((s) => s.bookingMode !== 'request');
+          bookingConfigured = hasRequestService || (hasAutoService && !!rule);
         } catch (error) {
-          logger.warn('booking timezone lookup failed — using server tz for date context', { tenantId: tenant.id, error });
+          // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
+          // must not falsely decline a CONFIGURED tenant. Worst case is the prior
+          // behavior (unconfigured tenant may still over-offer), never a regression.
+          logger.warn('booking config check failed — treating booking as usable', { tenantId: tenant.id, error });
+          bookingConfigured = true;
         }
       }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
-      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone);
+      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

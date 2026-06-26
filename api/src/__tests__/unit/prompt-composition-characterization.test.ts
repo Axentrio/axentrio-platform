@@ -188,6 +188,18 @@ describe('characterization: agent PromptBuilder.build', () => {
     expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
   });
 
+  it('booking tools present but unconfigured: emits BOOKING (NOT AVAILABLE)', () => {
+    const prompt = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: false });
+    expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
+    expect(prompt).not.toContain('When confirming a booking');
+  });
+
+  it('booking tools present and configured: keeps booking guidance', () => {
+    const prompt = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: true });
+    expect(prompt).toContain('When confirming a booking');
+    expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
+  });
+
   it('anchors the "Today is" date to the business timezone when provided', () => {
     // 01:30Z is still Saturday Mar 14 in New York (UTC-4) but already Sunday Mar 15
     // in Tokyo (UTC+9). Asserting both proves the date follows the business tz, not

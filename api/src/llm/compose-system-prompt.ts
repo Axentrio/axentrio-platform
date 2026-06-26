@@ -120,6 +120,10 @@ interface AgentCtx {
   /** Business timezone (IANA, e.g. the booking calendar's zone) used to anchor the
    *  "Today is …" date context. Absent ⇒ server/local tz (legacy behavior). */
   timezone?: string;
+  /** Runtime signal: false ⇒ booking tools are loaded but booking is not actually
+   *  configured (no availability rule / no bookable service), so the bot must not
+   *  offer it. Absent/true ⇒ trust the loaded tools (back-compat for direct callers/tests). */
+  bookingConfigured?: boolean;
   /** Injectable for deterministic tests; defaults to now. */
   now?: Date;
 }
@@ -200,12 +204,16 @@ function assembleAgent(ctx: AgentCtx): string {
   // The booking module registers all its tools as one unit (booking.module.ts),
   // so any one implies the rest; checking the booking-action tools (including
   // request_appointment) keeps a request-only bot counted as booking-capable.
-  const canBook = tools.some(
+  const hasBookingTools = tools.some(
     (t) =>
       t.name === 'create_booking' ||
       t.name === 'check_availability' ||
       t.name === 'request_appointment'
   );
+  // Offer booking only when the tools are loaded AND the runtime says it's actually
+  // configured. agent.service passes bookingConfigured=false for an entitled-but-
+  // unconfigured bot (Pro defaults bookings ON, so the tools load before setup).
+  const canBook = hasBookingTools && ctx.bookingConfigured !== false;
 
   const sections: string[] = [];
 

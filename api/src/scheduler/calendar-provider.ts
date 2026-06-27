@@ -146,6 +146,20 @@ async function loadActiveCredential(botId: string): Promise<CalendarCredential |
 }
 
 /**
+ * A healthy, usable calendar connection for the bot — ANY provider (Google or
+ * Microsoft/Outlook), active, and not flagged reauth-required. This is the
+ * auto-confirm gate's "the booking will reach the owner's calendar" signal.
+ * Provider-agnostic on purpose: booking I/O already supports Outlook, so the
+ * gate must not single out Google (that regressed Outlook tenants to request-mode).
+ * NOTE: deliberately does NOT gate on isCalendarSyncAllowed — that matches the
+ * existing gate's semantics; sync-entitlement nuance is a separate concern.
+ */
+export async function hasHealthyCalendarConnection(botId: string): Promise<boolean> {
+  const cred = await loadActiveCredential(botId);
+  return !!cred && !cred.reauthRequired;
+}
+
+/**
  * Resolve the adapter for the bot's single active credential, or null when the
  * bot has no connection — or when the tenant's entitlements disallow external
  * calendar sync (stored credentials stay as inert config that re-activates on

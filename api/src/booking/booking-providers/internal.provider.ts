@@ -36,13 +36,13 @@ import {
   providerFor,
   isCalendarSyncAllowed,
   resolveStoredCalendarIdentity,
+  hasHealthyCalendarConnection,
 } from '../../scheduler/calendar-provider';
 import { BookingReference } from '../../database/entities/BookingReference';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { conflictKeyFor } from '../../scheduler/calendar-rekey';
-import { getActiveCredential } from '../../integrations/google/google-calendar.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -361,8 +361,7 @@ export class InternalProvider implements BookingProvider {
    *  a "confirmed" booking would be invisible to them (no sync) and risk a no-show. So
    *  auto services degrade to request-mode when there is no healthy connected calendar. */
   private async hasConnectedCalendar(botId: string): Promise<boolean> {
-    const cred = await getActiveCredential(botId);
-    return !!cred && !cred.reauthRequired;
+    return hasHealthyCalendarConnection(botId);
   }
 
   async checkAvailability(

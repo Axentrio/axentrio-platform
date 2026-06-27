@@ -38,7 +38,7 @@ vi.mock('../../integrations/microsoft/outlook-calendar.service', () => ({
   resolveOutlookIdentity: vi.fn(),
 }));
 
-import { providerFor, resolveCalendarProvider } from '../../scheduler/calendar-provider';
+import { providerFor, resolveCalendarProvider, hasHealthyCalendarConnection } from '../../scheduler/calendar-provider';
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -68,5 +68,27 @@ describe('resolveCalendarProvider', () => {
   it('uses the most-recent (first, ordered DESC) when >1 active', async () => {
     find.mockResolvedValue([{ provider: 'microsoft' }, { provider: 'google' }]);
     expect((await resolveCalendarProvider('b1'))?.providerType).toBe('microsoft');
+  });
+});
+
+describe('hasHealthyCalendarConnection (auto-confirm gate)', () => {
+  it('returns true for an active microsoft/outlook credential (the Outlook regression fix)', async () => {
+    find.mockResolvedValue([{ provider: 'microsoft', reauthRequired: false }]);
+    expect(await hasHealthyCalendarConnection('b1')).toBe(true);
+  });
+
+  it('returns true for an active google credential', async () => {
+    find.mockResolvedValue([{ provider: 'google', reauthRequired: false }]);
+    expect(await hasHealthyCalendarConnection('b1')).toBe(true);
+  });
+
+  it('returns false when the bot has no active credential', async () => {
+    find.mockResolvedValue([]);
+    expect(await hasHealthyCalendarConnection('b1')).toBe(false);
+  });
+
+  it('returns false when the credential is flagged reauth-required (dead link)', async () => {
+    find.mockResolvedValue([{ provider: 'microsoft', reauthRequired: true }]);
+    expect(await hasHealthyCalendarConnection('b1')).toBe(false);
   });
 });

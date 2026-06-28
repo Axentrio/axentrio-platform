@@ -39,6 +39,8 @@ import { createBotSchema, updateBotSchema } from '../schemas/bot.schema';
 import { ensureSharedKbAttached } from '../knowledge/attach-shared-kb';
 import { enforceCountLimit } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
+import { getAnchorBotConfig, getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
+import { getCapabilities, type ReadinessBotCtx, type ReadinessResult } from '../readiness';
 
 const router = Router();
 const botRepository = AppDataSource.getRepository(Bot);
@@ -164,6 +166,73 @@ router.post(
     });
 
     sendCreated(res, { ...toListItem(bot), embedSnippet: embedSnippet(bot.publicKey) });
+  })
+);
+
+/**
+ * GET /bots/readiness?botId=<id> — per-bot, per-capability readiness signal.
+ *
+ * MUST be registered BEFORE `/:id` or Express captures `readiness` as `:id`
+ * (treating it as a bot id → 404).
+ *
+ * Optional `?botId` (a path param can't default — it would be required); defaults
+ * to the tenant's anchor bot. Resolves the bot (paused INCLUDED — the owner may
+ * be mid-setup), resolves entitlements ONCE, then runs `appliesTo` + `check` for
+ * every registered capability and flat-maps the arrays into `capabilities`.
+ *
+ * FAIL-CLOSED: any error — bot lookup, entitlement resolution, a thrown
+ * `appliesTo`, or a thrown `check` — fails the WHOLE endpoint with a 5xx. Never a
+ * partial `capabilities[]`, never an omitted capability standing in for a
+ * failure, never a `not_ready` painted from a swallowed exception. The ONLY
+ * legitimate reason a capability is absent is `appliesTo` returning a clean
+ * `false` (declared-intent off).
+ */
+router.get(
+  '/readiness',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tenantId = (req as ProvisionedRequest).tenantId!;
+    const botIdParam = typeof req.query.botId === 'string' ? req.query.botId : undefined;
+
+    // Resolve the bot (paused INCLUDED — getOwnedBot/anchor do not filter on
+    // status). Map "not found" to 404; anything else propagates to fail-closed.
+    let bot: Bot;
+    try {
+      bot = botIdParam
+        ? await getOwnedBot(botIdParam, tenantId)
+        : (await getAnchorBotConfig(tenantId)).bot;
+    } catch (err) {
+      if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Bot not found');
+      throw err; // resolution failure ⇒ 5xx, fail-closed
+    }
+
+    // Resolve entitlements ONCE; a resolution failure here ⇒ 5xx (fail-closed).
+    const entitlements = await getEntitlements(tenantId);
+    const ctx: ReadinessBotCtx = { tenantId, bot, entitlements };
+
+    // Run every registered capability. ANY appliesTo/check error propagates to
+    // the fail-closed handler — do NOT try/catch-and-omit (that would silently
+    // drop a capability on a transient error). Capabilities run sequentially so
+    // a rejection surfaces deterministically as a whole-endpoint 5xx.
+    const capabilities: ReadinessResult[] = [];
+    for (const capability of getCapabilities()) {
+      if (!(await capability.appliesTo(ctx))) continue;
+      const results = await capability.check(ctx);
+      capabilities.push(...results);
+    }
+
+    const applicableCount = capabilities.length;
+    const liveCount = capabilities.filter((c) => c.state === 'live').length;
+    const overall = {
+      applicableCount,
+      liveCount,
+      // Guard against a naive `.every(live)` returning true on []: require ≥1.
+      allLive: applicableCount > 0 && liveCount === applicableCount,
+      nothingApplicable: applicableCount === 0,
+      botPaused: bot.status === 'paused',
+      aiEnabled: bot.settings?.ai?.enabled === true,
+    };
+
+    sendSuccess(res, { botId: bot.id, capabilities, overall });
   })
 );
 

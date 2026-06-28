@@ -18,6 +18,7 @@ import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
+import { isBookingConfigured } from '../scheduler/booking-readiness';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -213,9 +214,7 @@ export class AgentService {
             where: { botId: bot.id, isActive: true, onlineBookable: true },
             select: { id: true, bookingMode: true },
           });
-          const hasRequestService = services.some((s) => s.bookingMode === 'request');
-          const hasAutoService = services.some((s) => s.bookingMode !== 'request');
-          bookingConfigured = hasRequestService || (hasAutoService && !!rule);
+          bookingConfigured = isBookingConfigured(services, !!rule);
         } catch (error) {
           // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
           // must not falsely decline a CONFIGURED tenant. Worst case is the prior

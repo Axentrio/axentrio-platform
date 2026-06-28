@@ -130,7 +130,14 @@ export async function resolveStoredCalendarIdentity(
   return { identity: null, providerType: 'google' };
 }
 
-async function loadActiveCredential(botId: string): Promise<CalendarCredential | null> {
+/**
+ * The bot's single active calendar credential (most-recent if >1; defensive).
+ * Encodes the active-credential ordering shared by `hasHealthyCalendarConnection`
+ * and `resolveCalendarProvider`. Exported so the capability-readiness endpoint
+ * derives calendar state (`none`/`reauth_required`/`healthy`) off the SAME row —
+ * never a duplicate query that could drift from this ordering / `reauthRequired`.
+ */
+export async function loadActiveCredential(botId: string): Promise<CalendarCredential | null> {
   const active = await AppDataSource.getRepository(CalendarCredential).find({
     where: { botId, status: 'active' },
     order: { createdAt: 'DESC' },

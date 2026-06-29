@@ -96,6 +96,22 @@ describe('CaptureLeadTool', () => {
     expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ channel: 'whatsapp' }));
   });
 
+  it('passes externalUserId (the channel handle) on a channel session so the summary converges onto the channel-identity lead', async () => {
+    sessionRepo.findOne.mockResolvedValueOnce({ id: 'session-abc', botId: 'bot-1', channel: 'whatsapp', visitorId: '32470111222' });
+    const tool = new CaptureLeadTool();
+    await tool.execute({ phone: '+32 470 11 12 22', summary: 'Leak under the sink' }, makeCtx());
+    expect(upsertLead).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'whatsapp', externalUserId: '32470111222' }),
+    );
+  });
+
+  it('passes externalUserId null on the widget (keys on email/phone, not a channel handle)', async () => {
+    // default sessionRepo mock returns channel:'widget'
+    const tool = new CaptureLeadTool();
+    await tool.execute({ email: 'a@b.com' }, makeCtx());
+    expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ channel: 'widget', externalUserId: null }));
+  });
+
   it('reports a friendly "noted" (not an error) when the service no-ops (gated/no key)', async () => {
     upsertLead.mockResolvedValueOnce(null);
     const tool = new CaptureLeadTool();

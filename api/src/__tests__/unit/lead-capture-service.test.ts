@@ -14,12 +14,13 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const emitWebhookEvent = vi.fn();
+const createForTenant = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../webhooks/webhook.emitter', () => ({
   emitWebhookEvent: (...a: unknown[]) => emitWebhookEvent(...a),
   buildEventBase: () => ({ id: 'e', tenantId: 't', sessionId: 's', timestamp: 'now', session: {} }),
 }));
 vi.mock('../../services/notification.service', () => ({
-  notificationService: { createForTenant: vi.fn().mockResolvedValue(undefined) },
+  notificationService: { createForTenant: (...a: unknown[]) => createForTenant(...a) },
 }));
 
 // leadCapture entitlement — flipped per test.
@@ -180,6 +181,19 @@ describe('upsertLead — fan-out (D10)', () => {
     await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'channel', channel: 'whatsapp', externalUserId: '32475464421', name: 'Achraf' });
     await new Promise((r) => setImmediate(r)); // let the fire-and-forget settle
     expect(emitWebhookEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it('threads the request summary (notes) into the lead.created webhook AND the operator notification', async () => {
+    const ds = fakeDs({ id: 'lead-1', inserted: true });
+    await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com', notes: 'Leak under the sink, Kerkstraat 12' });
+    await new Promise((r) => setImmediate(r));
+    // webhook payload carries the request so n8n/automations can route on it
+    const event = emitWebhookEvent.mock.calls[0][0];
+    expect(event.lead.notes).toBe('Leak under the sink, Kerkstraat 12');
+    // operator notification surfaces the request in the body + data, not just the contact
+    const notif = createForTenant.mock.calls[0][0];
+    expect(notif.message).toContain('Leak under the sink');
+    expect(notif.data.notes).toBe('Leak under the sink, Kerkstraat 12');
   });
 
   it('does NOT emit on an update (re-touch of an existing lead)', async () => {

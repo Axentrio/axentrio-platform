@@ -102,6 +102,42 @@ describe('AutomationEngine', () => {
     );
   });
 
+  it('renders the captured request {notes} into the new-lead email body', async () => {
+    const tenant = makeTenant({
+      emailNotifications: {
+        newLeadAlert: {
+          enabled: true,
+          recipients: ['team@acme.com'],
+          subject: 'New lead: {name}',
+          body: 'Request: {notes}',
+        },
+      },
+    });
+
+    const event: LeadCreatedEvent = {
+      id: 'evt-notes',
+      type: 'lead.created',
+      tenantId: 'tenant-1',
+      sessionId: 'session-notes',
+      timestamp: '2026-04-03T10:00:00Z',
+      session: BASE_SESSION,
+      lead: {
+        name: 'Bob',
+        email: 'bob@example.com',
+        phone: '+1-555-0100',
+        notes: 'Leak under the kitchen sink, Kerkstraat 12',
+        source: 'tool',
+      },
+    };
+
+    await engine.process(event, tenant);
+
+    // Guards the engine→template wiring: event.lead.notes must reach the {notes} token.
+    expect(emailService.send).toHaveBeenCalledWith(
+      expect.objectContaining({ body: 'Request: Leak under the kitchen sink, Kerkstraat 12' }),
+    );
+  });
+
   it('does nothing when automations not configured', async () => {
     const tenant = makeTenant();
 

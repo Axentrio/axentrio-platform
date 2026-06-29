@@ -60,7 +60,7 @@ export class AutomationEngine {
         if (recipients.length === 0) return;
 
         const variables = buildVariablesFromEvent(
-          { type: event.type, data: { name: event.lead.name, email: event.lead.email, phone: event.lead.phone } },
+          { type: event.type, data: { name: event.lead.name, email: event.lead.email, phone: event.lead.phone, notes: event.lead.notes } },
           tenantName,
           botName
         );

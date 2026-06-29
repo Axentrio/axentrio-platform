@@ -114,6 +114,29 @@ describe('lead-capture upsert (real ON CONFLICT)', () => {
     expect(await leadByKey(tenantId, 'phone:32475998877')).toHaveLength(1);
   });
 
+  it('a channel capture_lead (source tool) with externalUserId converges onto the Hook-1 channel lead — one row, carrying the summary', async () => {
+    // Hook 1: first inbound on a channel creates the channel-identity lead, no notes.
+    const hook1 = await upsertLead({
+      dataSource: AppDataSource, tenantId, source: 'channel',
+      channel: 'whatsapp', externalUserId: '32470111222', name: 'Ian',
+    });
+    expect(hook1?.inserted).toBe(true);
+
+    // capture_lead later in the SAME channel session: now passes externalUserId + the summary.
+    const captured = await upsertLead({
+      dataSource: AppDataSource, tenantId, source: 'tool',
+      channel: 'whatsapp', externalUserId: '32470111222',
+      name: 'Ian', phone: '32470111222', notes: 'Leak under the kitchen sink, Kerkstraat 12',
+    });
+    expect(captured?.inserted).toBe(false);            // UPDATE, not a new row
+    expect(captured?.leadId).toBe(hook1?.leadId);      // same row as Hook 1
+
+    const rows = await leadByKey(tenantId, 'whatsapp:32470111222');
+    expect(rows).toHaveLength(1);                       // NO duplicate row
+    expect(rows[0].notes).toBe('Leak under the kitchen sink, Kerkstraat 12'); // summary on the channel lead
+    expect(rows[0].source).toBe('tool');               // upgraded channel→tool
+  });
+
   it('persists the request summary as notes; a contact-only re-touch keeps it, a fuller summary replaces it', async () => {
     await upsertLead({
       dataSource: AppDataSource, tenantId, source: 'tool', channel: 'widget',

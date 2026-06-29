@@ -59,6 +59,7 @@ vi.mock('../../billing/entitlements', async (importOriginal) => {
 // ── Imports (after mocks) ───────────────────────────────────────────────────
 
 import { ToolRegistry } from '../../agent/tool-registry';
+import { getEntitlements } from '../../billing/entitlements';
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,37 @@ describe('ToolRegistry', () => {
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain('check_availability');
     expect(toolNames).not.toContain('create_booking');
+  });
+
+  it('omits capture_lead when leadCapture is not entitled (free tier) — no false "saved" confirmation', async () => {
+    const registry = new ToolRegistry();
+    const tenant = { id: 'tenant-free-lead', tier: 'free', settings: { ai: { enabled: true } } };
+    tierById.set(tenant.id, tenant.tier);
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).not.toContain('capture_lead'); // gated off → tool absent → prompt won't promise a save
+    expect(toolNames).toContain('kb_search');          // ungated core tools still load
+    expect(toolNames).toContain('escalate_to_human');
+  });
+
+  it('keeps capture_lead for an entitled tier (essential)', async () => {
+    const registry = new ToolRegistry();
+    const tenant = { id: 'tenant-ess-lead', tier: 'essential', settings: { ai: { enabled: true } } };
+    tierById.set(tenant.id, tenant.tier);
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    expect(tools.map((t) => t.name)).toContain('capture_lead');
+  });
+
+  it('fails closed: omits capture_lead (keeps ungated tools) when the entitlement lookup throws', async () => {
+    const registry = new ToolRegistry();
+    const tenant = { id: 'tenant-ent-err', tier: 'pro', settings: { ai: { enabled: true } } };
+    tierById.set(tenant.id, tenant.tier);
+    // first getEntitlements call in getToolsForTenant is the capture_lead gate
+    vi.mocked(getEntitlements).mockRejectedValueOnce(new Error('redis down'));
+    const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
+    const toolNames = tools.map((t) => t.name);
+    expect(toolNames).not.toContain('capture_lead');
+    expect(toolNames).toContain('kb_search');
   });
 
   it('keeps booking tools off below Pro+ even with legacy Cal.com config (inert)', async () => {

@@ -62,6 +62,7 @@ describe('getAvailableVariables', () => {
     expect(vars).toContain('name');
     expect(vars).toContain('email');
     expect(vars).toContain('phone');
+    expect(vars).toContain('notes'); // the captured request — usable in the new-lead email
   });
 
   it('returns correct variables for conversation.ended', () => {
@@ -95,12 +96,13 @@ describe('buildVariablesFromEvent', () => {
   it('builds variables for lead.created', () => {
     const event = {
       type: 'lead.created',
-      data: { name: 'Bob', email: 'bob@example.com', phone: '+1-555-0100' },
+      data: { name: 'Bob', email: 'bob@example.com', phone: '+1-555-0100', notes: 'Leak under the kitchen sink' },
     };
     const vars = buildVariablesFromEvent(event, 'Acme Corp', 'SupportBot');
     expect(vars.name).toBe('Bob');
     expect(vars.email).toBe('bob@example.com');
     expect(vars.phone).toBe('+1-555-0100');
+    expect(vars.notes).toBe('Leak under the kitchen sink');
     expect(vars.tenantName).toBe('Acme Corp');
     expect(vars.botName).toBe('SupportBot');
   });

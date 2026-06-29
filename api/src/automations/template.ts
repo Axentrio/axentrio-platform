@@ -21,7 +21,7 @@ export function renderTemplate(template: string, variables: Record<string, strin
 
 const EVENT_VARIABLES: Record<string, string[]> = {
   'appointment.booked': ['name', 'email', 'date', 'time', 'tenantName', 'botName'],
-  'lead.created': ['name', 'email', 'phone', 'tenantName', 'botName'],
+  'lead.created': ['name', 'email', 'phone', 'notes', 'tenantName', 'botName'],
   'conversation.ended': ['messageCount', 'duration', 'tags', 'tenantName', 'botName'],
 };
 
@@ -62,6 +62,7 @@ export function buildVariablesFromEvent(
         name: String(data.name ?? ''),
         email: String(data.email ?? ''),
         phone: String(data.phone ?? ''),
+        notes: String(data.notes ?? ''),
       };
 
     case 'conversation.ended':

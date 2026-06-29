@@ -21,7 +21,7 @@ export interface WebhookEventBase {
 
 export interface LeadCreatedEvent extends WebhookEventBase {
   type: 'lead.created';
-  lead: { name: string; email: string; phone?: string; source: 'booking' | 'chat' | 'tool' };
+  lead: { name: string; email: string; phone?: string; notes?: string; source: 'booking' | 'chat' | 'tool' };
 }
 
 export interface AppointmentBookedEvent extends WebhookEventBase {

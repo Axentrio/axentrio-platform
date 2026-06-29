@@ -41,6 +41,14 @@ export class CaptureLeadTool implements ToolAdapter {
         // non-fatal
       }
 
+      // On a messaging channel, pass the channel handle so this UPDATES the
+      // channel-identity lead the inbound hook already created (dedupe_key
+      // `channel:externalUserId`), instead of forking a second row keyed on
+      // email/phone. session.visitorId IS the externalUserId for channel
+      // sessions; mirrors the booking captureLeadFromBooking convergence.
+      const externalUserId =
+        session && session.channel && session.channel !== 'widget' ? (session.visitorId ?? null) : null;
+
       // The single deterministic write path (dedup, entitlement gate, webhook +
       // notification on a new lead). Same service every channel uses.
       const res = await upsertLead({
@@ -50,6 +58,7 @@ export class CaptureLeadTool implements ToolAdapter {
         botId: session?.botId ?? null,
         source: 'tool',
         channel: session?.channel ?? 'widget',
+        externalUserId,
         name,
         email,
         phone,

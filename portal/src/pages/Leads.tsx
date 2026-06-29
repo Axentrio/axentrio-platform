@@ -123,6 +123,14 @@ export default function Leads() {
                               </span>
                             )}
                           </span>
+                          {lead.notes && (
+                            <span
+                              className="mt-0.5 block max-w-[24rem] truncate text-xs font-normal text-text-muted"
+                              title={lead.notes}
+                            >
+                              {lead.notes}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-sm text-text-secondary">
                           {lead.email && (

@@ -179,7 +179,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
     if (row.inserted) {
       logger.info('[leads] captured', { tenantId: input.tenantId, leadId: row.id, channel, source: input.source });
       // Real-time fan-out only on a genuinely NEW lead — never on a re-touch.
-      void emitLeadCreated(input, { leadId: row.id, name, email, phone }).catch(() => {});
+      void emitLeadCreated(input, { leadId: row.id, name, email, phone, notes }).catch(() => {});
     } else {
       logger.debug('[leads] updated', { tenantId: input.tenantId, leadId: row.id, source: input.source });
     }
@@ -201,7 +201,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
 /** Outbound webhook + operator notification for a newly created lead. */
 async function emitLeadCreated(
   input: UpsertLeadInput,
-  lead: { leadId: string; name: string | null; email: string | null; phone: string | null },
+  lead: { leadId: string; name: string | null; email: string | null; phone: string | null; notes: string | null },
 ): Promise<void> {
   let session: ChatSession | null = null;
   if (input.sessionId) {
@@ -233,18 +233,22 @@ async function emitLeadCreated(
       name: lead.name ?? '',
       email: lead.email ?? '',
       ...(lead.phone ? { phone: lead.phone } : {}),
+      ...(lead.notes ? { notes: lead.notes } : {}),
       source: webhookSource,
     },
   };
   emitWebhookEvent(event);
 
+  // Put the captured request in the notification body (the at-a-glance surface)
+  // so the operator knows WHY to reach out, not just who.
+  const contact = lead.name || lead.email || lead.phone || 'New contact';
   await notificationService
     .createForTenant({
       tenantId: input.tenantId,
       type: 'lead_created',
       title: 'New lead captured',
-      message: lead.name || lead.email || lead.phone || 'New contact',
-      data: { leadId: lead.leadId, sessionId: input.sessionId ?? null },
+      message: lead.notes ? `${contact} — ${lead.notes.slice(0, 140)}` : contact,
+      data: { leadId: lead.leadId, sessionId: input.sessionId ?? null, notes: lead.notes ? lead.notes.slice(0, 500) : null },
       dedupeBase: `lead:${lead.leadId}`,
     })
     .catch(() => {});

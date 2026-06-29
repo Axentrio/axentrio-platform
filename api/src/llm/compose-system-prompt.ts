@@ -299,11 +299,15 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   if (tools.some((t) => t.name === 'capture_lead')) {
     const contactRule =
       `\n## CONTACT DETAILS\nThe moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.`;
-    // On a messaging channel the customer's contact is ALREADY known (the channel
-    // handle), so they won't type an email/phone — capture the request directly.
+    // On a messaging channel the customer's contact is already known (the channel
+    // handle), so they won't type an email/phone. A weak "capture when they
+    // describe a need" nudge lost to the KB-answer path (offline harness: 20%
+    // capture, mostly missing question-style messages). This non-negotiable
+    // "capture ALONGSIDE answering" wording measured 100% request capture with
+    // 0 over-capture on pure FAQs — ship exactly what was measured.
     const isChannelSession = !!ctx.channel && ctx.channel !== 'widget';
     const channelRule = isChannelSession
-      ? ` On this messaging channel you ALREADY have the customer's contact, so you do NOT need them to type an email or phone: as soon as they describe what they need, call capture_lead with a short \`summary\` of their request (the issue plus any address or specifics they mention). Always capture the request this way here.`
+      ? ` CHANNEL LEAD CAPTURE (non-negotiable): you already have the customer's contact here (no email/phone needed). The moment the customer describes ANY problem, symptom, or service need, you MUST call capture_lead with a \`summary\` of it — in the same turn, ALONGSIDE answering from the knowledge base. KB answering and lead capture are independent; do both every time. Never finish a turn in which the customer described a need without having called capture_lead.`
       : '';
     sections.push(contactRule + channelRule);
   }

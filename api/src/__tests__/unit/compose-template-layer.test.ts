@@ -44,19 +44,19 @@ describe('agent mode — channel-aware lead capture (CONTACT DETAILS)', () => {
   // composeSystemPrompt only reads tool .name; a lightweight stub is enough.
   const captureTool = [{ name: 'capture_lead' }] as never;
 
-  it('adds the "contact already known" guidance on a non-widget channel', () => {
+  it('adds the channel lead-capture rule on a non-widget channel', () => {
     const out = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'whatsapp' });
     expect(out).toContain('## CONTACT DETAILS');
-    expect(out).toContain('ALREADY have the customer'); // capture without a typed email/phone
-    expect(out).toContain('call capture_lead with a short');
+    expect(out).toContain('CHANNEL LEAD CAPTURE (non-negotiable)'); // capture even without a typed email/phone
+    expect(out).toContain('ALONGSIDE answering from the knowledge base'); // capture in addition to answering
   });
 
   it('omits the channel guidance on widget and when channel is absent', () => {
     const widget = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'widget' });
     const none = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool });
     expect(widget).toContain('## CONTACT DETAILS');
-    expect(widget).not.toContain('ALREADY have the customer');
-    expect(none).not.toContain('ALREADY have the customer');
+    expect(widget).not.toContain('CHANNEL LEAD CAPTURE');
+    expect(none).not.toContain('CHANNEL LEAD CAPTURE');
   });
 });
 

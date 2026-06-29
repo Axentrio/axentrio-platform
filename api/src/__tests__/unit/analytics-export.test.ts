@@ -22,6 +22,14 @@ describe('analytics · CSV serialization (P3 D7)', () => {
     expect(toCsv(['x'], [['he said "hi"']])).toBe('x\r\n"he said ""hi"""');
     expect(toCsv(['x'], [['line1\nline2']])).toBe('x\r\n"line1\nline2"');
   });
+
+  it('neutralizes spreadsheet formula injection (leading = + - @) with a leading quote', () => {
+    expect(toCsv(['x'], [['=HYPERLINK("http://evil")']])).toBe('x\r\n"\'=HYPERLINK(""http://evil"")"');
+    expect(toCsv(['x'], [['+1+2']])).toBe("x\r\n'+1+2");
+    expect(toCsv(['x'], [['@SUM(A1)']])).toBe("x\r\n'@SUM(A1)");
+    expect(toCsv(['x'], [['-2+3']])).toBe("x\r\n'-2+3");
+    expect(toCsv(['x'], [['safe text']])).toBe('x\r\nsafe text'); // untouched
+  });
 });
 
 describe('analytics · exporter registry (P3 D7)', () => {
@@ -36,11 +44,11 @@ describe('analytics · exporter registry (P3 D7)', () => {
   it('leads exporter shapes rows in header order, nulls → empty string', async () => {
     const ex = getExporter('leads')!;
     q.queue = [[
-      { ca: '2026-06-03T10:00:00Z', name: 'Ada', email: 'ada@x.io', phone: null, channel: 'whatsapp', source: 'tool', status: 'new' },
+      { ca: '2026-06-03T10:00:00Z', name: 'Ada', email: 'ada@x.io', phone: null, channel: 'whatsapp', source: 'tool', status: 'new', notes: 'Leak under the sink' },
     ]];
     const rows = await ex.rows('t1', RANGE);
-    expect(ex.headers).toEqual(['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status']);
-    expect(rows[0]).toEqual(['2026-06-03T10:00:00Z', 'Ada', 'ada@x.io', '', 'whatsapp', 'tool', 'new']);
+    expect(ex.headers).toEqual(['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes']);
+    expect(rows[0]).toEqual(['2026-06-03T10:00:00Z', 'Ada', 'ada@x.io', '', 'whatsapp', 'tool', 'new', 'Leak under the sink']);
     expect(ex.filename(RANGE)).toBe('leads_2026-06-01_2026-06-08.csv');
   });
 

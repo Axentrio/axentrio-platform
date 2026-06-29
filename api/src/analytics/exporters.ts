@@ -78,16 +78,16 @@ const exporters: Record<ExportDataset, Exporter> = {
 
   leads: {
     filename: (r) => `leads_${day(r.from)}_${day(r.to)}.csv`,
-    headers: ['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status'],
+    headers: ['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes'],
     rows: async (tenantId, { from, to }) => {
       const rows = await AppDataSource.query(
-        `SELECT created_at AS ca, name, email, phone, channel, source, status
+        `SELECT created_at AS ca, name, email, phone, channel, source, status, notes
          FROM chatbot_leads
          WHERE tenant_id = $1 AND deleted_at IS NULL
            AND created_at >= $2 AND created_at < $3
          ORDER BY created_at DESC`, [tenantId, from, to]);
       return rows.map((r: Record<string, unknown>) => [
-        str(r.ca), str(r.name), str(r.email), str(r.phone), str(r.channel), str(r.source), str(r.status),
+        str(r.ca), str(r.name), str(r.email), str(r.phone), str(r.channel), str(r.source), str(r.status), str(r.notes),
       ]);
     },
   },
@@ -99,9 +99,16 @@ export function getExporter(dataset: string): Exporter | null {
 
 export const EXPORT_DATASETS = Object.keys(exporters) as ExportDataset[];
 
-/** RFC 4180 CSV: quote fields containing comma/quote/newline; double quotes. */
+/** RFC 4180 CSV: quote fields containing comma/quote/newline; double quotes.
+ *  Also neutralize spreadsheet formula injection — a field whose first char is
+ *  =, +, -, @, tab, or CR is executed as a formula by Excel/Sheets, and lead
+ *  fields (notes, name) carry visitor/model-authored free text. Prefix such a
+ *  value with a single quote so it imports as inert text. */
 export function toCsv(headers: string[], rows: string[][]): string {
-  const esc = (f: string) => (/[",\r\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f);
+  const esc = (raw: string) => {
+    const f = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+    return /[",\r\n]/.test(f) ? `"${f.replace(/"/g, '""')}"` : f;
+  };
   const lines = [headers, ...rows].map((row) => row.map(esc).join(','));
   return lines.join('\r\n');
 }

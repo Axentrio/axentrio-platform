@@ -9,12 +9,14 @@
 
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Mail, Phone, MessageSquare, Inbox, ChevronRight } from 'lucide-react';
+import { toast } from 'sonner';
+import { Mail, Phone, MessageSquare, Inbox, ChevronRight, Download, Loader2, Archive, RotateCcw } from 'lucide-react';
 import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
-import { useLeadsInfinite } from '../queries/useLeadsQueries';
+import { useLeadsInfinite, useUpdateLeadStatus } from '../queries/useLeadsQueries';
 import { LockedPreview } from '../components/billing/LockedPreview';
 import { FeatureDisabledNotice } from '../components/billing/FeatureDisabledNotice';
 import { Button } from '@/components/ui/button';
+import { api } from '../services/apiClient';
 
 function formatRelative(iso: string): string {
   const date = new Date(iso);
@@ -41,6 +43,27 @@ export default function Leads() {
     isFetchingNextPage,
   } = useLeadsInfinite();
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const updateStatus = useUpdateLeadStatus();
+  const [exporting, setExporting] = useState(false);
+
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const blob = await api.get<Blob>('/leads/export', { responseType: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'leads.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error(t('leads.export.error', { defaultValue: 'Export failed' }));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   // Not entitled → upsell. Entitled but toggled off → opt-out notice (never upsell).
   if (!isEntitled) {
@@ -66,13 +89,21 @@ export default function Leads() {
 
   return (
     <div className="h-full overflow-y-auto p-6 max-w-5xl mx-auto space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold text-text-primary">
-          {t('leads.title')}
-        </h1>
-        <p className="text-sm text-text-secondary mt-1">
-          {t('leads.intro')}
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-text-primary">
+            {t('leads.title')}
+          </h1>
+          <p className="text-sm text-text-secondary mt-1">
+            {t('leads.intro')}
+          </p>
+        </div>
+        {allLeads.length > 0 && (
+          <Button variant="outline" size="sm" onClick={exportCsv} disabled={exporting}>
+            {exporting ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1.5" />}
+            {t('leads.export.label', { defaultValue: 'Export CSV' })}
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -101,7 +132,7 @@ export default function Leads() {
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.contact')}</th>
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.source')}</th>
                   <th className="text-left px-4 py-2.5 font-medium">{t('leads.table.capturedAt')}</th>
-                  <th className="w-8" aria-label="Expand"></th>
+                  <th className="w-20" aria-label="Actions"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-edge">
@@ -111,7 +142,7 @@ export default function Leads() {
                     <>
                       <tr
                         key={lead.id}
-                        className="hover:bg-surface-2/50 cursor-pointer"
+                        className={`hover:bg-surface-2/50 cursor-pointer ${lead.status === 'archived' ? 'opacity-50' : ''}`}
                         onClick={() => setExpanded((s) => ({ ...s, [lead.id]: !s[lead.id] }))}
                       >
                         <td className="px-4 py-3 text-sm text-text-primary font-medium">
@@ -162,9 +193,30 @@ export default function Leads() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-text-muted">
-                          <ChevronRight
-                            className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
-                          />
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              type="button"
+                              title={lead.status === 'archived'
+                                ? t('leads.actions.reopen', { defaultValue: 'Reopen' })
+                                : t('leads.actions.archive', { defaultValue: 'Mark handled' })}
+                              className="rounded p-1 hover:bg-surface-3 hover:text-text-secondary disabled:opacity-50"
+                              disabled={updateStatus.isPending}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                updateStatus.mutate({
+                                  id: lead.id,
+                                  status: lead.status === 'archived' ? 'new' : 'archived',
+                                });
+                              }}
+                            >
+                              {lead.status === 'archived'
+                                ? <RotateCcw className="h-3.5 w-3.5" />
+                                : <Archive className="h-3.5 w-3.5" />}
+                            </button>
+                            <ChevronRight
+                              className={`h-4 w-4 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                            />
+                          </div>
                         </td>
                       </tr>
                       {isOpen && (

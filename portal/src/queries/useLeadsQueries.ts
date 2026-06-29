@@ -1,8 +1,9 @@
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
 export type LeadSource = 'channel' | 'tool' | 'booking' | 'manual' | 'import' | 'webhook';
+export type LeadStatus = 'new' | 'archived';
 
 export interface Lead {
   id: string;
@@ -16,6 +17,8 @@ export interface Lead {
   /** Channel of origin (widget/whatsapp/messenger/instagram/telegram), null for legacy. */
   channel: string | null;
   source: LeadSource;
+  /** Worklist state — operator marks a handled lead 'archived'. */
+  status: LeadStatus;
   notes: string | null;
   createdAt: string;
 }
@@ -38,5 +41,15 @@ export function useLeadsInfinite() {
     },
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor,
+  });
+}
+
+/** Mark a lead handled (archived) or reopen it. Refreshes the inbox on success. */
+export function useUpdateLeadStatus() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, status }: { id: string; status: LeadStatus }) =>
+      api.patch<{ id: string; status: LeadStatus }>(`/leads/${id}`, { status }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.leads.all() }),
   });
 }

@@ -76,6 +76,7 @@ import { CanonicalTopic } from '../../database/entities/CanonicalTopic';
 import { Gap } from '../../database/entities/Gap';
 import { InsightExperiment } from '../../database/entities/InsightExperiment';
 import { InsightDigest } from '../../database/entities/InsightDigest';
+import { Lead } from '../../database/entities/Lead';
 import { createTestTenant, createTestUser } from '../helpers/factories';
 
 function setAuth(opts: { tenantId: string; userId: string }) {
@@ -334,7 +335,7 @@ describe('analytics export — /analytics/export', () => {
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toMatch(/attachment; filename="leads_.*\.csv"/);
     // Header row is always present even with no leads in range.
-    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status');
+    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status,notes');
   });
 
   it('400s an unknown dataset', async () => {
@@ -348,5 +349,49 @@ describe('analytics export — /analytics/export', () => {
     const res = await request(app).post('/api/v1/analytics/export');
     expect(res.status).toBe(405);
     expect(res.headers['allow']).toBe('GET');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Leads worklist routes — GET /leads/export (leadCapture-gated) + PATCH /leads/:id
+// ---------------------------------------------------------------------------
+
+describe('leads routes — export + status', () => {
+  it('lets a Pro tenant export leads CSV (leadCapture-gated, NOT aiBusinessInsights) with the notes column', async () => {
+    await seedProTenant();
+    const res = await request(app).get('/api/v1/leads/export');
+    expect(res.status).toBe(200); // Pro is 403 on /analytics/export?dataset=leads but 200 here
+    expect(res.headers['content-type']).toMatch(/text\/csv/);
+    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status,notes');
+  });
+
+  it('marks a lead handled (PATCH status=archived); validates value + scopes to tenant', async () => {
+    const tenant = await seedProTenant();
+    const repo = AppDataSource.getRepository(Lead);
+    const lead = await repo.save(
+      repo.create({ tenantId: tenant.id, email: 'arch@x.io', dedupeKey: 'email:arch@x.io', source: 'tool' }),
+    );
+
+    const ok = await request(app).patch(`/api/v1/leads/${lead.id}`).send({ status: 'archived' });
+    expect(ok.status).toBe(200);
+    expect((await repo.findOneByOrFail({ id: lead.id })).status).toBe('archived');
+
+    const bad = await request(app).patch(`/api/v1/leads/${lead.id}`).send({ status: 'nope' });
+    expect(bad.status).toBe(400);
+
+    const missing = await request(app)
+      .patch('/api/v1/leads/00000000-0000-0000-0000-000000000000')
+      .send({ status: 'new' });
+    expect(missing.status).toBe(404);
+  });
+
+  it('402s a tenant without leadCapture (free) on both export and status (requireFeature plan-limit)', async () => {
+    const tenant = await createTestTenant({ tier: 'free' });
+    const admin = await createTestUser(tenant.id, { role: 'admin' });
+    setAuth({ tenantId: tenant.id, userId: admin.id });
+    expect((await request(app).get('/api/v1/leads/export')).status).toBe(402);
+    expect(
+      (await request(app).patch('/api/v1/leads/00000000-0000-0000-0000-000000000000').send({ status: 'new' })).status,
+    ).toBe(402);
   });
 });

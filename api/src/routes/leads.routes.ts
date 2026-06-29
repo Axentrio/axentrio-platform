@@ -16,9 +16,10 @@ import { AppDataSource } from '../database/data-source';
 import { Lead } from '../database/entities/Lead';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
-import { asyncHandler, BadRequestError } from '../middleware/error-handler';
+import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
+import { getExporter, toCsv } from '../analytics/exporters';
 
 const router = Router();
 
@@ -107,11 +108,67 @@ router.get(
         phone: l.phone,
         channel: l.channel ?? null,
         source: l.source,
+        status: l.status,
         notes: l.notes,
         createdAt: l.createdAt.toISOString(),
       })),
       nextCursor,
     });
+  }),
+);
+
+/**
+ * CSV export of the tenant's leads. Gated by `leadCapture` (NOT the
+ * Enterprise `aiBusinessInsights` gate the /analytics/export uses) so the
+ * Essential/Pro tiers that actually own the Leads page can take their leads
+ * — including the captured request `notes` — offline into a CRM. Exports the
+ * full history by default; optional from/to ISO bounds narrow it.
+ */
+router.get(
+  '/export',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const exporter = getExporter('leads')!; // always present
+    const parse = (v: unknown, fallback: Date): Date => {
+      if (typeof v !== 'string' || !v) return fallback;
+      const d = new Date(v);
+      return Number.isNaN(d.getTime()) ? fallback : d;
+    };
+    const from = parse(req.query.from, new Date(0));
+    const to = parse(req.query.to, new Date(Date.now() + 86_400_000)); // through end of today
+
+    const rows = await exporter.rows(tenantId, { from, to });
+    const csv = toCsv(exporter.headers, rows);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to })}"`);
+    res.status(200).send(csv);
+  }),
+);
+
+/**
+ * Update a lead's worklist status ('new' | 'archived') so operators can mark
+ * captured requests as handled. Tenant-scoped; gated by `leadCapture`.
+ */
+router.patch(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const status = (req.body ?? {}).status;
+    if (status !== 'new' && status !== 'archived') {
+      throw new BadRequestError("status must be 'new' or 'archived'");
+    }
+
+    const repo = AppDataSource.getRepository(Lead);
+    const lead = await repo.findOne({ where: { id: req.params.id, tenantId } });
+    if (!lead || lead.deletedAt) throw new NotFoundError('Lead not found');
+    lead.status = status;
+    await repo.save(lead);
+
+    sendSuccess(res, { id: lead.id, status: lead.status });
   }),
 );
 

@@ -23,7 +23,8 @@ export class PromptBuilder {
     customerName?: string,
     templateBody?: string,
     timezone?: string,
-    bookingConfigured?: boolean
+    bookingConfigured?: boolean,
+    channel?: string
   ): string {
     return composeSystemPrompt({
       mode: 'agent',
@@ -37,6 +38,7 @@ export class PromptBuilder {
       templateBody,
       timezone,
       bookingConfigured,
+      channel,
     });
   }
 }

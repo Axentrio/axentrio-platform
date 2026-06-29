@@ -105,6 +105,32 @@ describe('CaptureLeadTool', () => {
     );
   });
 
+  it('captures on a channel with a summary ALONE (no typed email/phone) — the channel handle is the contact', async () => {
+    sessionRepo.findOne.mockResolvedValueOnce({ id: 'session-abc', botId: 'bot-1', channel: 'whatsapp', visitorId: '32470111222' });
+    const tool = new CaptureLeadTool();
+    const res = await tool.execute({ summary: 'Kitchen sink leaking, Kerkstraat 1' }, makeCtx());
+    expect(res.success).toBe(true);
+    expect(upsertLead).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: 'whatsapp', externalUserId: '32470111222', notes: 'Kitchen sink leaking, Kerkstraat 1', email: null, phone: null }),
+    );
+  });
+
+  it('on a channel with neither contact nor summary, nudges (no no-op capture)', async () => {
+    sessionRepo.findOne.mockResolvedValueOnce({ id: 'session-abc', botId: 'bot-1', channel: 'whatsapp', visitorId: '32470111222' });
+    const tool = new CaptureLeadTool();
+    const res = await tool.execute({ name: 'Ian' }, makeCtx());
+    expect(res.success).toBe(false);
+    expect(upsertLead).not.toHaveBeenCalled();
+  });
+
+  it('still rejects an anonymous WIDGET capture with no email/phone (no durable identifier)', async () => {
+    // default sessionRepo mock returns channel:'widget' (no visitorId → externalUserId null)
+    const tool = new CaptureLeadTool();
+    const res = await tool.execute({ summary: 'Just browsing' }, makeCtx());
+    expect(res.success).toBe(false);
+    expect(upsertLead).not.toHaveBeenCalled();
+  });
+
   it('passes externalUserId null on the widget (keys on email/phone, not a channel handle)', async () => {
     // default sessionRepo mock returns channel:'widget'
     const tool = new CaptureLeadTool();

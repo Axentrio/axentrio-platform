@@ -225,7 +225,7 @@ export class AgentService {
       }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
-      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured);
+      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel);
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);

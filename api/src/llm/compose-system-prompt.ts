@@ -124,6 +124,11 @@ interface AgentCtx {
    *  configured (no availability rule / no bookable service), so the bot must not
    *  offer it. Absent/true ⇒ trust the loaded tools (back-compat for direct callers/tests). */
   bookingConfigured?: boolean;
+  /** Session channel (widget/whatsapp/messenger/instagram/telegram). On a
+   *  non-widget channel the customer's contact is already known (the channel
+   *  handle), so the lead-capture guidance is adapted to capture the request
+   *  without waiting for them to type an email/phone. Absent ⇒ treated as widget. */
+  channel?: string;
   /** Injectable for deterministic tests; defaults to now. */
   now?: Date;
 }
@@ -292,9 +297,15 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
 
   // Lead capture — same failure mode as KB, so a hard rule.
   if (tools.some((t) => t.name === 'capture_lead')) {
-    sections.push(
-      `\n## CONTACT DETAILS\nThe moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.`
-    );
+    const contactRule =
+      `\n## CONTACT DETAILS\nThe moment the customer shares an email address OR a phone number — even in passing — you MUST call the capture_lead tool with whatever name and contact details you have. Either an email or a phone is enough; do not wait for both, and do not ask again for something they already gave. Do this in the same turn you receive the detail. Never tell the customer you've "saved" or "noted" their details without actually calling the tool.`;
+    // On a messaging channel the customer's contact is ALREADY known (the channel
+    // handle), so they won't type an email/phone — capture the request directly.
+    const isChannelSession = !!ctx.channel && ctx.channel !== 'widget';
+    const channelRule = isChannelSession
+      ? ` On this messaging channel you ALREADY have the customer's contact, so you do NOT need them to type an email or phone: as soon as they describe what they need, call capture_lead with a short \`summary\` of their request (the issue plus any address or specifics they mention). Always capture the request this way here.`
+      : '';
+    sections.push(contactRule + channelRule);
   }
 
   // Escalation

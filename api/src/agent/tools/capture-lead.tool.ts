@@ -28,10 +28,6 @@ export class CaptureLeadTool implements ToolAdapter {
     const phone = (args.phone as string | undefined) ?? null;
     const summary = (args.summary as string | undefined) ?? null;
 
-    if (!email && !phone) {
-      return { success: false, error: 'Provide at least an email or a phone number.' };
-    }
-
     try {
       // Channel of origin scopes the dedup identity (widget → email/phone key).
       let session: ChatSession | null = null;
@@ -41,13 +37,27 @@ export class CaptureLeadTool implements ToolAdapter {
         // non-fatal
       }
 
-      // On a messaging channel, pass the channel handle so this UPDATES the
-      // channel-identity lead the inbound hook already created (dedupe_key
-      // `channel:externalUserId`), instead of forking a second row keyed on
-      // email/phone. session.visitorId IS the externalUserId for channel
-      // sessions; mirrors the booking captureLeadFromBooking convergence.
+      // On a messaging channel, session.visitorId IS the durable contact handle
+      // (the inbound hook already captured it). Pass it so this UPDATES that
+      // channel-identity lead (dedupe_key `channel:externalUserId`) instead of
+      // forking a row keyed on email/phone — and so a request summary alone is
+      // enough to capture, since customers don't type their number on
+      // WhatsApp/Messenger (mirrors booking captureLeadFromBooking convergence).
       const externalUserId =
         session && session.channel && session.channel !== 'widget' ? (session.visitorId ?? null) : null;
+
+      // Need a durable identifier: a typed email/phone, or (on a channel) the
+      // implicit channel handle. Anonymous widget chat with neither → nothing to
+      // capture (not an error to the model).
+      if (!email && !phone && !externalUserId) {
+        return { success: false, error: 'Provide at least an email or a phone number.' };
+      }
+      // Channel session with no typed contact: only proceed when there's a
+      // request summary to attach — otherwise it's a no-op re-touch of the
+      // existing channel lead, so nudge the model to gather the request first.
+      if (!email && !phone && !summary) {
+        return { success: false, error: 'Ask what the visitor needs, then capture a short summary of their request.' };
+      }
 
       // The single deterministic write path (dedup, entitlement gate, webhook +
       // notification on a new lead). Same service every channel uses.

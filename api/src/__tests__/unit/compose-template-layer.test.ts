@@ -40,6 +40,26 @@ describe('agent mode — template layer', () => {
   });
 });
 
+describe('agent mode — channel-aware lead capture (CONTACT DETAILS)', () => {
+  // composeSystemPrompt only reads tool .name; a lightweight stub is enough.
+  const captureTool = [{ name: 'capture_lead' }] as never;
+
+  it('adds the "contact already known" guidance on a non-widget channel', () => {
+    const out = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'whatsapp' });
+    expect(out).toContain('## CONTACT DETAILS');
+    expect(out).toContain('ALREADY have the customer'); // capture without a typed email/phone
+    expect(out).toContain('call capture_lead with a short');
+  });
+
+  it('omits the channel guidance on widget and when channel is absent', () => {
+    const widget = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'widget' });
+    const none = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool });
+    expect(widget).toContain('## CONTACT DETAILS');
+    expect(widget).not.toContain('ALREADY have the customer');
+    expect(none).not.toContain('ALREADY have the customer');
+  });
+});
+
 describe('{businessName} resolution — per-bot override vs tenant default', () => {
   // Bot with an explicit commercial name set on brandVoice.businessName.
   const aiWithBusiness = {

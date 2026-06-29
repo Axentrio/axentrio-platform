@@ -72,6 +72,23 @@ describe('CaptureLeadTool', () => {
     expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ phone: '+32 475 11 22 33', email: null }));
   });
 
+  it('passes the request summary through as notes (so the team sees WHY to reach out)', async () => {
+    const tool = new CaptureLeadTool();
+    await tool.execute(
+      { email: 'alice@example.com', summary: 'Leak under the kitchen sink, Kerkstraat 12 Antwerp' },
+      makeCtx(),
+    );
+    expect(upsertLead).toHaveBeenCalledWith(
+      expect.objectContaining({ notes: 'Leak under the kitchen sink, Kerkstraat 12 Antwerp' }),
+    );
+  });
+
+  it('passes notes:null when no summary is given (contact-only capture)', async () => {
+    const tool = new CaptureLeadTool();
+    await tool.execute({ email: 'alice@example.com' }, makeCtx());
+    expect(upsertLead).toHaveBeenCalledWith(expect.objectContaining({ notes: null }));
+  });
+
   it('passes the session channel through (so a channel widget-tool call dedups correctly)', async () => {
     sessionRepo.findOne.mockResolvedValueOnce({ id: 'session-abc', botId: 'bot-1', channel: 'whatsapp' });
     const tool = new CaptureLeadTool();

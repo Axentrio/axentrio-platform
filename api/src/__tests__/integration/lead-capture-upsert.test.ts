@@ -21,7 +21,7 @@ import { upsertLead } from '../../leads/lead-capture.service';
 
 async function leadByKey(tenantId: string, dedupeKey: string) {
   const rows = await AppDataSource.query(
-    `SELECT id, name, email, phone, channel, external_user_id, source, status
+    `SELECT id, name, email, phone, channel, external_user_id, source, status, notes
        FROM chatbot_leads WHERE tenant_id = $1 AND dedupe_key = $2 AND deleted_at IS NULL`,
     [tenantId, dedupeKey],
   );
@@ -112,6 +112,30 @@ describe('lead-capture upsert (real ON CONFLICT)', () => {
     });
     expect(p?.inserted).toBe(true);
     expect(await leadByKey(tenantId, 'phone:32475998877')).toHaveLength(1);
+  });
+
+  it('persists the request summary as notes; a contact-only re-touch keeps it, a fuller summary replaces it', async () => {
+    await upsertLead({
+      dataSource: AppDataSource, tenantId, source: 'tool', channel: 'widget',
+      email: 'lead@x.com', notes: 'Leak under the kitchen sink, Kerkstraat 12',
+    });
+    let [row] = await leadByKey(tenantId, 'email:lead@x.com');
+    expect(row.notes).toBe('Leak under the kitchen sink, Kerkstraat 12');
+
+    // A contact-only re-touch (no summary) must NOT blank the captured request.
+    await upsertLead({
+      dataSource: AppDataSource, tenantId, source: 'tool', channel: 'widget', email: 'lead@x.com',
+    });
+    [row] = await leadByKey(tenantId, 'email:lead@x.com');
+    expect(row.notes).toBe('Leak under the kitchen sink, Kerkstraat 12'); // preserved (COALESCE)
+
+    // A later, fuller summary wins (latest non-null).
+    await upsertLead({
+      dataSource: AppDataSource, tenantId, source: 'tool', channel: 'widget',
+      email: 'lead@x.com', notes: 'Leak under the kitchen sink, water on the floor, urgent',
+    });
+    [row] = await leadByKey(tenantId, 'email:lead@x.com');
+    expect(row.notes).toBe('Leak under the kitchen sink, water on the floor, urgent');
   });
 
   it('the at-least-one-identifier CHECK rejects a hand-rolled identifier-less insert', async () => {

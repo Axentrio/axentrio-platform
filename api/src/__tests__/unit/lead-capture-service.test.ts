@@ -114,6 +114,28 @@ describe('upsertLead — normalization (D11)', () => {
   });
 });
 
+describe('upsertLead — request summary (notes)', () => {
+  beforeEach(() => { ent.leadCapture = true; ent.fail = false; vi.clearAllMocks(); });
+
+  it('passes the trimmed notes as SQL param $12', async () => {
+    const ds = fakeDs();
+    await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com', notes: '  Leak under the sink, Kerkstraat 12  ' });
+    expect(paramOf(ds as never, 11)).toBe('Leak under the sink, Kerkstraat 12'); // $12 = notes
+  });
+
+  it('an empty/whitespace summary normalizes to null (never blanks via the empty string)', async () => {
+    const ds = fakeDs();
+    await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com', notes: '   ' });
+    expect(paramOf(ds as never, 11)).toBeNull();
+  });
+
+  it('omitted notes → null param (contact-only capture)', async () => {
+    const ds = fakeDs();
+    await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com' });
+    expect(paramOf(ds as never, 11)).toBeNull();
+  });
+});
+
 describe('upsertLead — gating (D6)', () => {
   beforeEach(() => { ent.leadCapture = true; ent.fail = false; vi.clearAllMocks(); });
 

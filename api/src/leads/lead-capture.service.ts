@@ -47,6 +47,10 @@ export interface UpsertLeadInput {
   name?: string | null;
   email?: string | null;
   phone?: string | null;
+  /** Free-text summary of what the visitor needs — the request/issue plus any
+   *  address or specifics. Persisted to chatbot_leads.notes so the operator
+   *  sees WHY the contact wants to be reached, not just their number. */
+  notes?: string | null;
 }
 
 export interface UpsertLeadResult {
@@ -95,6 +99,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
   const rawPhone = input.phone ?? (input.channel === 'whatsapp' ? input.externalUserId : null);
   const phone = normalizePhone(rawPhone);
   const name = input.name?.trim() || null;
+  const notes = input.notes?.trim() || null;
 
   const dedupeKey = computeDedupeKey({
     channel: input.channel,
@@ -132,8 +137,8 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
     const rows: Array<{ id: string; inserted: boolean }> = await input.dataSource.query(
       `
       INSERT INTO chatbot_leads
-        (tenant_id, session_id, bot_id, name, email, phone, channel, external_user_id, dedupe_key, source, status, metadata)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', '{}'::jsonb)
+        (tenant_id, session_id, bot_id, name, email, phone, channel, external_user_id, dedupe_key, source, status, metadata, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', '{}'::jsonb, $12)
       ON CONFLICT (tenant_id, dedupe_key) WHERE deleted_at IS NULL
       DO UPDATE SET
         name  = COALESCE(chatbot_leads.name, EXCLUDED.name),
@@ -141,6 +146,9 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
         phone = COALESCE(chatbot_leads.phone, EXCLUDED.phone),
         bot_id = COALESCE(chatbot_leads.bot_id, EXCLUDED.bot_id),
         session_id = COALESCE(EXCLUDED.session_id, chatbot_leads.session_id),
+        -- notes prefers the NEW value (latest, usually fuller request) but a
+        -- contact-only re-touch (null) never blanks an existing summary.
+        notes = COALESCE(EXCLUDED.notes, chatbot_leads.notes),
         source = CASE
           WHEN $11 > (CASE chatbot_leads.source
                         WHEN 'channel' THEN 0 WHEN 'tool' THEN 1 WHEN 'booking' THEN 2
@@ -161,6 +169,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
         dedupeKey,
         input.source,
         newRank,
+        notes,
       ],
     );
 

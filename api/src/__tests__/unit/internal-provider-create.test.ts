@@ -55,6 +55,10 @@ const resolveCalendarIdentity = vi.fn().mockResolvedValue(null);
 // existing create/confirm assertions hold; individual tests override it to false
 // to exercise the no-calendar / dead-link downgrade.
 const hasHealthyCalendarConnection = vi.fn().mockResolvedValue(true);
+// Calendar-sync entitlement gate (D9). Auto-confirm now requires BOTH a healthy
+// calendar AND sync (canAutoConfirm) — default to allowed so the existing
+// create/confirm assertions hold; sync-off tests override it to false.
+const isCalendarSyncAllowed = vi.fn().mockResolvedValue(true);
 vi.mock('../../integrations/google/google-calendar.service', () => ({
   getGoogleBusyForBot: (...args: any[]) => getGoogleBusyForBot(...args),
   createCalendarEvent: (...args: any[]) => createCalendarEvent(...args),
@@ -78,9 +82,10 @@ vi.mock('../../scheduler/calendar-provider', () => {
   return {
     resolveCalendarProvider: async () => googleAdapter,
     providerFor: () => googleAdapter,
-    // D9 additions: sync allowed in these tests; stored identity delegates to
-    // the same resolveCalendarIdentity stub so conflict-key assertions hold.
-    isCalendarSyncAllowed: async () => true,
+    // D9 additions: sync allowed by default (overridable per test); stored
+    // identity delegates to the same resolveCalendarIdentity stub so conflict-key
+    // assertions hold.
+    isCalendarSyncAllowed: (...a: any[]) => isCalendarSyncAllowed(...a),
     resolveStoredCalendarIdentity: async (...a: any[]) => ({
       identity: await resolveCalendarIdentity(...a),
       providerType: 'google',
@@ -309,7 +314,7 @@ describe('InternalProvider.createBooking', () => {
       ctx, 'idem-svc', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hair'
     );
     expect(res.success).toBe(true);
-    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hair', botId: 'bot-1', isActive: true } });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hair', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
@@ -376,6 +381,57 @@ describe('InternalProvider.createBooking', () => {
     expect(res.booking.id).toBe('bk-1');
     expect(transaction).toHaveBeenCalled();
     expect(sendBookingEmail).toHaveBeenCalledOnce();
+  });
+
+  // ── Calendar-sync entitlement → auto-confirm requires sync (matches readiness) ──
+
+  it('downgrades an auto booking to a request when the calendar is healthy but sync is disabled', async () => {
+    hasHealthyCalendarConnection.mockResolvedValue(true); // healthy calendar…
+    isCalendarSyncAllowed.mockResolvedValue(false); // …but sync off by plan
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
+    );
+    const res = await provider.createBooking(ctx, 'idem-syncoff', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(res.requested).toBe(true); // request, NOT a confirmed booking (no ghosting)
+    expect(res.booking.id).toBe('req-1');
+    expect(transaction).not.toHaveBeenCalled(); // no confirmed-booking insert/lock
+    expect(createCalendarEvent).not.toHaveBeenCalled();
+    expect(sendBookingEmail).not.toHaveBeenCalled();
+  });
+
+  it('still confirms an auto booking when calendar is healthy AND sync is on (unchanged happy path)', async () => {
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
+    const res = await provider.createBooking(ctx, 'idem-syncon', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.success).toBe(true);
+    expect(res.requested).toBeUndefined(); // confirmed, not a request
+    expect(res.booking.id).toBe('bk-1');
+    expect(transaction).toHaveBeenCalled();
+    expect(sendBookingEmail).toHaveBeenCalledOnce();
+  });
+
+  // ── onlineBookable filter mirrors the runtime gate + readiness ───────────────
+
+  it('does NOT resolve a sole service that is not onlineBookable (BOOKING_NOT_CONFIGURED)', async () => {
+    // resolveService now filters isActive && onlineBookable. A service hidden from
+    // online booking is filtered out of the sole-active find → no service resolves.
+    serviceTypeFind.mockResolvedValue([]); // the onlineBookable:false service is filtered by the query
+    await expect(
+      provider.createBooking(ctx, 'idem-nob', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'BOOKING_NOT_CONFIGURED' });
+    expect(serviceTypeFind).toHaveBeenCalledWith({
+      where: { botId: 'bot-1', isActive: true, onlineBookable: true },
+      order: { sortOrder: 'ASC' },
+    });
+  });
+
+  it('does NOT resolve an explicit serviceId that is not onlineBookable (SERVICE_NOT_FOUND)', async () => {
+    eventTypeFindOne.mockResolvedValue(null); // the onlineBookable:true filter excludes it
+    await expect(
+      provider.createBooking(ctx, 'idem-nob2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-hidden')
+    ).rejects.toMatchObject({ code: 'SERVICE_NOT_FOUND' });
+    expect(eventTypeFindOne).toHaveBeenCalledWith({ where: { id: 'svc-hidden', botId: 'bot-1', isActive: true, onlineBookable: true } });
   });
 
   it('keeps a request-only service a request regardless of calendar state', async () => {
@@ -718,6 +774,10 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
     serviceTypeFind.mockResolvedValue([EVENT_TYPE]); // sole active auto service
     ruleFindOne.mockResolvedValue(RULE);
     bookingQuery.mockResolvedValue([]); // no busy intervals
+    // canAutoConfirm = healthy calendar AND sync; reset both to the permissive
+    // default so each test sets only the dimension it exercises.
+    hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
   });
 
   afterEach(() => vi.useRealTimers());
@@ -736,8 +796,17 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
     ).rejects.toMatchObject({ code: 'CALENDAR_NOT_CONNECTED' });
   });
 
-  it('returns slots when a healthy calendar is connected', async () => {
+  it('throws CALENDAR_SYNC_DISABLED for an auto service whose calendar is healthy but sync is off', async () => {
+    hasHealthyCalendarConnection.mockResolvedValue(true); // healthy calendar…
+    isCalendarSyncAllowed.mockResolvedValue(false); // …but sync disabled by plan
+    await expect(
+      provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+    ).rejects.toMatchObject({ code: 'CALENDAR_SYNC_DISABLED' });
+  });
+
+  it('returns slots when a healthy calendar is connected and sync is on', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(true);
+    isCalendarSyncAllowed.mockResolvedValue(true);
     const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
     expect(res.serviceId).toBe('et-1');
     expect(res.timezone).toBe('Europe/Brussels');

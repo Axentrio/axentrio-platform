@@ -295,19 +295,21 @@ export class InternalProvider implements BookingProvider {
 
   /**
    * Resolve the service to book against. `serviceId` selects it explicitly (must
-   * be active + belong to this bot). When omitted: the sole active service is
-   * used; zero active → `BOOKING_NOT_CONFIGURED`; ≥2 active → `SERVICE_REQUIRED`
-   * (so a slot chip / pre-multi-service payload without a serviceId can never
-   * silently book the wrong service — the caller must disambiguate).
+   * be active + onlineBookable + belong to this bot). When omitted: the sole
+   * active+onlineBookable service is used; zero → `BOOKING_NOT_CONFIGURED`; ≥2 →
+   * `SERVICE_REQUIRED` (so a slot chip / pre-multi-service payload without a
+   * serviceId can never silently book the wrong service — the caller must
+   * disambiguate). The `onlineBookable` filter mirrors the runtime GATE +
+   * readiness so a service hidden from online booking is never silently resolved.
    */
   private async resolveService(botId: string, serviceId?: string): Promise<ServiceType> {
     const repo = AppDataSource.getRepository(ServiceType);
     if (serviceId) {
-      const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true } });
+      const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true, onlineBookable: true } });
       if (!svc) throw new BookingError('That service is unavailable', 'SERVICE_NOT_FOUND', 404);
       return svc;
     }
-    const active = await repo.find({ where: { botId, isActive: true }, order: { sortOrder: 'ASC' } });
+    const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC' } });
     if (active.length === 0) {
       throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
     }
@@ -364,6 +366,13 @@ export class InternalProvider implements BookingProvider {
     return hasHealthyCalendarConnection(botId);
   }
 
+  /** Auto-confirm requires BOTH a healthy connected calendar AND calendar-sync entitlement
+   *  — otherwise the booking would confirm without ever reaching the owner's external
+   *  calendar (ghosting). Mirrors readiness willAutoConfirm. */
+  private async canAutoConfirm(ctx: BookingContext): Promise<boolean> {
+    return (await this.hasConnectedCalendar(ctx.bot.id)) && (await isCalendarSyncAllowed(ctx.tenant.id));
+  }
+
   async checkAvailability(
     ctx: BookingContext,
     startDate: string,
@@ -383,12 +392,25 @@ export class InternalProvider implements BookingProvider {
         400
       );
     }
-    if (!(await this.hasConnectedCalendar(ctx.bot.id))) {
-      throw new BookingError(
-        `Online appointments can't be auto-confirmed because this business has no connected calendar. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
-        'CALENDAR_NOT_CONNECTED',
-        409
-      );
+    if (!(await this.canAutoConfirm(ctx))) {
+      // Distinguish the two reasons so the bot's guidance is accurate: a healthy
+      // calendar with sync OFF (entitlement) is CALENDAR_SYNC_DISABLED; otherwise
+      // (no/dead calendar) CALENDAR_NOT_CONNECTED. Both capture a request — no
+      // bookable slots are offered because the booking can't reach the owner's
+      // external calendar. Mirrors readiness willAutoConfirm.
+      // canAutoConfirm failed; a still-healthy calendar means the blocker is sync.
+      const calendarHealthy = await this.hasConnectedCalendar(ctx.bot.id);
+      throw calendarHealthy
+        ? new BookingError(
+            `Online appointments can't be auto-confirmed because calendar sync is disabled on this plan. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+            'CALENDAR_SYNC_DISABLED',
+            409
+          )
+        : new BookingError(
+            `Online appointments can't be auto-confirmed because this business has no connected calendar. Do not offer specific times — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+            'CALENDAR_NOT_CONNECTED',
+            409
+          );
     }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
     const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd, rule.timezone);
@@ -548,9 +570,10 @@ export class InternalProvider implements BookingProvider {
 
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
-    const calendarConnected = await this.hasConnectedCalendar(ctx.bot.id);
-    // Request-only OR no connected calendar → capture a request, not a confirmed booking.
-    if (service.bookingMode === 'request' || !calendarConnected) {
+    const canAuto = await this.canAutoConfirm(ctx);
+    // Request-only OR can't auto-confirm (no healthy calendar OR sync disabled) →
+    // capture a request, not a confirmed booking. Mirrors readiness willAutoConfirm.
+    if (service.bookingMode === 'request' || !canAuto) {
       return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras, effectiveDuration);
     }
 

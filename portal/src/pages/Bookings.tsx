@@ -35,6 +35,10 @@ import {
   type BookingScope,
 } from '../queries/useSchedulerQueries';
 import { SchedulerSettings } from '../components/settings/SchedulerSettings';
+import { CAPABILITY_READINESS_ENABLED } from '../config/featureFlags';
+import { useBotReadiness } from '../queries/useReadinessQueries';
+import { BookingReadinessCard } from '../components/bookings/BookingReadinessCard';
+import { BookingSetupBanner } from '../components/bookings/BookingSetupBanner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
 import { Button } from '../components/ui/button';
 import {
@@ -144,12 +148,39 @@ export default function Bookings() {
             <InternalBookingsDashboard timezone={config?.availability?.timezone ?? DEFAULT_TZ} />
           </TabsContent>
           <TabsContent value="setup">
+            <BookingReadinessSection enabled={hasBookings} />
             <SchedulerSettings />
           </TabsContent>
         </Tabs>
       )}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Capability-readiness (change 7), booking slice — mounted on the Setup tab.
+ *
+ * ANCHOR-scoped (P1): we call the readiness endpoint with NO `botId`, so it
+ * resolves the tenant's anchor bot and returns its booking capability. The CTA
+ * routes are anchor deep-links, so this only ever reflects the anchor — never a
+ * non-anchor bot. Behind the CAPABILITY_READINESS_ENABLED flag (ON in dev).
+ */
+function BookingReadinessSection({ enabled }: { enabled: boolean }) {
+  const active = CAPABILITY_READINESS_ENABLED && enabled;
+  const { data } = useBotReadiness(undefined, { enabled: active });
+
+  if (!active || !data) return null;
+
+  const booking = data.capabilities.find((c) => c.capability === 'booking');
+
+  return (
+    <>
+      <BookingSetupBanner botId={data.botId} booking={booking} />
+      <BookingReadinessCard booking={booking} />
+    </>
   );
 }
 

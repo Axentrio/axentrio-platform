@@ -63,6 +63,23 @@
   "bookings": {
     "title": "Réservations",
     "intro": "Laissez votre chatbot planifier des rendez-vous — il vérifie les disponibilités en temps réel et réserve directement dans la conversation.",
+    "readiness": {
+      "title": "Préparation des réservations",
+      "subtitleLive": "Les réservations sont actives. Terminez les éléments ci-dessous pour en débloquer davantage.",
+      "subtitleNotReady": "Terminez ces étapes pour que votre bot puisse réserver des rendez-vous.",
+      "stepDone": "terminé",
+      "stepNotDone": "non terminé",
+      "liveStep": "Les réservations sont configurées",
+      "state": {
+        "live": "Actif",
+        "notReady": "Pas encore actif"
+      },
+      "banner": {
+        "title": "Les réservations ne sont pas encore actives",
+        "subtitle": "Votre bot ne peut pas réserver de rendez-vous tant que la configuration n'est pas terminée. Terminez les étapes ci-dessous.",
+        "dismiss": "Fermer"
+      }
+    },
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Connecté",

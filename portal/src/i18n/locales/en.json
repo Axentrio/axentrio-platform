@@ -63,6 +63,23 @@
   "bookings": {
     "title": "Bookings",
     "intro": "Let your chatbot schedule appointments — it checks real-time availability and books right inside the conversation.",
+    "readiness": {
+      "title": "Booking readiness",
+      "subtitleLive": "Booking is live. Finish the items below to unlock more.",
+      "subtitleNotReady": "Finish these steps so your bot can book appointments.",
+      "stepDone": "done",
+      "stepNotDone": "not done",
+      "liveStep": "Booking is set up",
+      "state": {
+        "live": "Live",
+        "notReady": "Not live yet"
+      },
+      "banner": {
+        "title": "Booking isn't live yet",
+        "subtitle": "Your bot can't book appointments until setup is complete. Finish the steps below.",
+        "dismiss": "Dismiss"
+      }
+    },
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Connected",

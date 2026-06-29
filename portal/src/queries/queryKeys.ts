@@ -116,6 +116,7 @@ export const queryKeys = {
     aiSettings: (botId: string) => [...queryKeys.bots.all(), 'ai-settings', botId] as const,
     knowledge: (botId: string) => [...queryKeys.bots.all(), 'knowledge', botId] as const,
     templates: (botId: string) => [...queryKeys.bots.all(), 'templates', botId] as const,
+    readiness: (botId?: string) => [...queryKeys.bots.all(), 'readiness', botId ?? null] as const,
   },
   leads: {
     all: () => ['leads'] as const,

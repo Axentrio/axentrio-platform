@@ -63,6 +63,23 @@
   "bookings": {
     "title": "Boekingen",
     "intro": "Laat je chatbot afspraken inplannen — hij controleert realtime beschikbaarheid en boekt direct in het gesprek.",
+    "readiness": {
+      "title": "Gereedheid van boekingen",
+      "subtitleLive": "Boeken is actief. Rond de onderstaande punten af om meer te ontgrendelen.",
+      "subtitleNotReady": "Rond deze stappen af zodat je bot afspraken kan boeken.",
+      "stepDone": "klaar",
+      "stepNotDone": "niet klaar",
+      "liveStep": "Boeken is ingesteld",
+      "state": {
+        "live": "Actief",
+        "notReady": "Nog niet actief"
+      },
+      "banner": {
+        "title": "Boeken is nog niet actief",
+        "subtitle": "Je bot kan geen afspraken boeken totdat de configuratie is voltooid. Rond de onderstaande stappen af.",
+        "dismiss": "Sluiten"
+      }
+    },
     "calcom": {
       "title": "Cal.com",
       "statusConnected": "Verbonden",

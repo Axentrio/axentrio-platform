@@ -54,10 +54,29 @@ export interface ResolvedTemplate {
   config: BotTemplateConfig;
   /** The published version actually used, or null when none was resolvable. */
   resolvedVersion: number | null;
+  /** The template's vertical/category slug (S2) — scopes the SpecialtyCatalog.
+   *  null when unbound/unreachable or the template has no category. */
+  category: string | null;
+  /** Modules the resolved version expects (advisory) — feeds the trace's
+   *  MODULE_<id> expected-but-inactive exclusions (L7). [] when unbound/unreachable. */
+  expectedModules: string[];
   /** The bot pinned a fixed version that isn't published → fell back to latest/empty. */
   pinnedButUnavailable: boolean;
   /** The bound template is missing/archived/has no published version → fell back to empty. */
   templateUnavailable: boolean;
+}
+
+/**
+ * AC4: classify a resolved template's unavailability so the caller (which has the
+ * bot/tenant context the resolver lacks) can log "the missing vertical" for
+ * superadmin review. Returns null when the template resolved normally.
+ */
+export function templateUnavailabilityReason(
+  t: Pick<ResolvedTemplate, 'templateUnavailable' | 'pinnedButUnavailable'>,
+): 'missing_or_archived' | 'pinned_version_unavailable' | null {
+  if (t.templateUnavailable) return 'missing_or_archived';
+  if (t.pinnedButUnavailable) return 'pinned_version_unavailable';
+  return null;
 }
 
 const UNBOUND: ResolvedTemplate = {
@@ -65,6 +84,8 @@ const UNBOUND: ResolvedTemplate = {
   body: '',
   config: {},
   resolvedVersion: null,
+  category: null,
+  expectedModules: [],
   pinnedButUnavailable: false,
   templateUnavailable: false,
 };
@@ -73,10 +94,14 @@ interface PublishedVersion {
   version: number;
   body: string;
   config: BotTemplateConfig;
+  /** Modules the template version expects (advisory, T13) — drives the trace's
+   *  MODULE_<id> "expected but not active" exclusions (L7). */
+  expectedModules: string[];
 }
 interface TemplateBundle {
   id: string;
   status: string;
+  category: string | null;
   /** Published versions only, sorted DESC by version. */
   publishedVersions: PublishedVersion[];
 }
@@ -86,18 +111,24 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
   return cached(bundleCacheKey(templateId), TEMPLATES_TTL_SECONDS, async () => {
     const tmpl = await AppDataSource.getRepository(BotTemplate).findOne({
       where: { id: templateId },
-      select: ['id', 'status'],
+      select: ['id', 'status', 'category'],
     });
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
       where: { templateId, status: 'published' },
-      select: ['version', 'body', 'config'],
+      select: ['version', 'body', 'config', 'expectedModules'],
       order: { version: 'DESC' },
     });
     return {
       id: tmpl.id,
       status: tmpl.status,
-      publishedVersions: versions.map((v) => ({ version: v.version, body: v.body, config: v.config ?? {} })),
+      category: tmpl.category ?? null,
+      publishedVersions: versions.map((v) => ({
+        version: v.version,
+        body: v.body,
+        config: v.config ?? {},
+        expectedModules: v.expectedModules ?? [],
+      })),
     };
   });
 }
@@ -188,6 +219,8 @@ export async function resolveBoundTemplate(bot: {
     }
     return {
       templateId: bot.templateId,
+      category: bundle.category,
+      expectedModules: latest.expectedModules,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -202,6 +235,8 @@ export async function resolveBoundTemplate(bot: {
   if (exact) {
     return {
       templateId: bot.templateId,
+      category: bundle.category,
+      expectedModules: exact.expectedModules,
       body: exact.body,
       config: exact.config,
       resolvedVersion: exact.version,
@@ -214,6 +249,8 @@ export async function resolveBoundTemplate(bot: {
   if (latest) {
     return {
       templateId: bot.templateId,
+      category: bundle.category,
+      expectedModules: latest.expectedModules,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,

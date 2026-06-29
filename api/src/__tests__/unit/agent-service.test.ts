@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { AgentService } from '../../agent/agent.service';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
+import { createBlockLedger } from '../../llm/block-ledger';
 
 // Create mock dependencies
 const mockProvider: LLMProvider = {
@@ -55,7 +56,9 @@ const mockKbSearch: ToolAdapter = {
 const mockGetToolsForTenant = vi.fn().mockResolvedValue([mockKbSearch]);
 const mockToolRegistry = { getToolsForTenant: mockGetToolsForTenant, getBuiltinToolNames: vi.fn() };
 
-const mockPromptBuilder = { build: vi.fn().mockReturnValue('You are TestBot.') };
+// Mock ledger mirrors the loaded tools (mockGetToolsForTenant returns kb_search)
+// so the persisted trace's allowedTools reflects the real pipeline.
+const mockPromptBuilder = { build: vi.fn().mockReturnValue({ prompt: 'You are TestBot.', ledger: createBlockLedger(['kb_search']) }) };
 
 describe('AgentService', () => {
   let agent: AgentService;
@@ -89,6 +92,27 @@ describe('AgentService', () => {
     if (result.type === 'response') expect(result.content).toBe('Hello! How can I help?');
     expect(mockMeteringRecord).toHaveBeenCalled();
     expect(mockTraceSave).toHaveBeenCalled();
+  });
+
+  it('persists the prompt-build ledger on the saved trace', async () => {
+    (mockProvider.chat as any).mockResolvedValue({
+      content: 'Hi.',
+      usage: { promptTokens: 5, completionTokens: 2 },
+      finishReason: 'stop',
+    });
+
+    await agent.run(
+      'hi',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    const savedTrace = mockTraceSave.mock.calls.at(-1)?.[0];
+    expect(savedTrace.prompt).toBeDefined();
+    expect(Array.isArray(savedTrace.prompt.includedBlocks)).toBe(true);
+    expect(Array.isArray(savedTrace.prompt.excludedBlocks)).toBe(true);
+    expect(savedTrace.prompt.allowedTools).toContain('kb_search');
   });
 
   it('attaches an image to the live user turn as a multimodal message', async () => {

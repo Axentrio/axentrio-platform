@@ -108,6 +108,7 @@ describe('KbSearchTool', () => {
       [],
       undefined,
       undefined,
+      undefined, // S5 specialtyTerms (none on this ctx)
     );
   });
 

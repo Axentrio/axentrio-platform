@@ -1,6 +1,7 @@
 import { AppDataSource } from '../database/data-source';
 import { AgentTrace as AgentTraceEntity } from '../database/entities/AgentTrace';
 import { logger } from '../utils/logger';
+import type { PromptTrace } from '../llm/block-ledger';
 
 export interface AgentTrace {
   sessionId: string;
@@ -17,6 +18,10 @@ export interface AgentTrace {
     }>;
   }>;
   finishReason: 'completed' | 'max_iterations' | 'budget_exceeded' | 'error';
+  /** Prompt-build legibility record (which blocks the customer prompt received
+   *  and why) — nests into the `trace` jsonb, no schema change. Absent on the
+   *  RAG/legacy paths that don't run the agent composer. */
+  prompt?: PromptTrace;
 }
 
 const PII_FIELDS = ['email', 'attendeeemail', 'attendee_email', 'phone', 'phonenumber'];
@@ -72,7 +77,16 @@ export class TraceLogger {
         }),
       );
     } catch (error) {
-      logger.warn('Failed to save agent trace', { sessionId: trace.sessionId, error });
+      // Escalated from warn → error: the ledger is an audit trail, so a dropped
+      // save loses the record of what the customer prompt contained. Emit the
+      // block keys so the decision is still recoverable from logs (L7).
+      logger.error('Failed to save agent trace (prompt-build audit record lost)', {
+        sessionId: trace.sessionId,
+        tenantId: trace.tenantId,
+        includedBlocks: trace.prompt?.includedBlocks,
+        excludedBlocks: trace.prompt?.excludedBlocks,
+        error,
+      });
     }
   }
 }

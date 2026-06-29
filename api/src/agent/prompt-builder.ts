@@ -2,6 +2,8 @@ import { Tenant } from '../database/entities/Tenant';
 import type { BotSettings } from '../database/entities/Bot';
 import { ToolAdapter } from './tool-adapter';
 import { composeSystemPrompt, type SkillConfig } from '../llm/compose-system-prompt';
+import type { BlockLedger } from '../llm/block-ledger';
+import type { ResolvedSpecialty } from '../llm/specialty-catalog';
 
 export class PromptBuilder {
   /**
@@ -24,12 +26,15 @@ export class PromptBuilder {
     templateBody?: string,
     timezone?: string,
     bookingConfigured?: boolean,
-    channel?: string
-  ): string {
+    channel?: string,
+    specialties?: ResolvedSpecialty[]
+  ): { prompt: string; ledger: BlockLedger } {
     return composeSystemPrompt({
       mode: 'agent',
       ai: botSettings.ai,
       tenantName: tenant.name,
+      tier: tenant.tier,
+      specialties,
       tools,
       skills: (botSettings.skills as SkillConfig[]) || [],
       kbContext,

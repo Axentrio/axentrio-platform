@@ -113,6 +113,12 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     ...(data.extraInfo === undefined
       ? (existing.extraInfo ? { extraInfo: existing.extraInfo } : {})
       : (data.extraInfo.trim() ? { extraInfo: data.extraInfo.trim() } : {})),
+    // Selected specialties (S3): same full-replace semantics — preserve when
+    // omitted, persist when non-empty, clear on an explicit []. Dropped otherwise
+    // because this rebuilds the ai object field-by-field.
+    ...(data.selectedSpecialties === undefined
+      ? (existing.selectedSpecialties?.length ? { selectedSpecialties: existing.selectedSpecialties } : {})
+      : (data.selectedSpecialties.length ? { selectedSpecialties: data.selectedSpecialties } : {})),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

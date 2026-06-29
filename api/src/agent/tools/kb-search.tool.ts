@@ -36,7 +36,8 @@ export class KbSearchTool implements ToolAdapter {
         query,
         ctx.conversationHistory.map(m => ({ role: m.role as 'user' | 'assistant', content: contentToText(m.content) })),
         undefined,
-        botKbIds
+        botKbIds,
+        ctx.specialtyTerms
       );
       return { success: true, data: result };
     } catch (err) {

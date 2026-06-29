@@ -48,7 +48,7 @@ describe('characterization: agent PromptBuilder.build', () => {
 
   it('full: kb + lead + escalate tools, module section, customer name', () => {
     const tools = [tool('kb_search'), tool('capture_lead'), tool('escalate_to_human'), tool('create_booking')];
-    const prompt = builder.build(
+    const { prompt } = builder.build(
       tenant,
       tenant.settings as any,
       tools,
@@ -128,7 +128,7 @@ describe('characterization: agent PromptBuilder.build', () => {
         },
       },
     } as unknown as Tenant;
-    const prompt = builder.build(bare, bare.settings as any, []);
+    const { prompt } = builder.build(bare, bare.settings as any, []);
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
       "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
       You are Bot.
@@ -167,7 +167,7 @@ describe('characterization: agent PromptBuilder.build', () => {
   });
 
   it('no booking tools: emits BOOKING (NOT AVAILABLE), drops booking formatting rules', () => {
-    const prompt = composeSystemPrompt({
+    const { prompt } = composeSystemPrompt({
       mode: 'agent',
       ai: { enabled: true } as any,
       tenantName: 'Acme',
@@ -178,7 +178,7 @@ describe('characterization: agent PromptBuilder.build', () => {
   });
 
   it('with booking tools: no BOOKING (NOT AVAILABLE) section, keeps booking formatting rules', () => {
-    const prompt = composeSystemPrompt({
+    const { prompt } = composeSystemPrompt({
       mode: 'agent',
       ai: { enabled: true } as any,
       tenantName: 'Acme',
@@ -189,13 +189,13 @@ describe('characterization: agent PromptBuilder.build', () => {
   });
 
   it('booking tools present but unconfigured: emits BOOKING (NOT AVAILABLE)', () => {
-    const prompt = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: false });
+    const { prompt } = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: false });
     expect(prompt).toContain('## BOOKING (NOT AVAILABLE)');
     expect(prompt).not.toContain('When confirming a booking');
   });
 
   it('booking tools present and configured: keeps booking guidance', () => {
-    const prompt = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: true });
+    const { prompt } = composeSystemPrompt({ mode: 'agent', ai: { enabled: true } as any, tenantName: 'Acme', tools: [tool('create_booking')], bookingConfigured: true });
     expect(prompt).toContain('When confirming a booking');
     expect(prompt).not.toContain('## BOOKING (NOT AVAILABLE)');
   });
@@ -212,8 +212,8 @@ describe('characterization: agent PromptBuilder.build', () => {
       tools: [],
       now: new Date('2026-03-15T01:30:00Z'),
     };
-    const ny = composeSystemPrompt({ ...base, timezone: 'America/New_York' });
-    const tokyo = composeSystemPrompt({ ...base, timezone: 'Asia/Tokyo' });
+    const { prompt: ny } = composeSystemPrompt({ ...base, timezone: 'America/New_York' });
+    const { prompt: tokyo } = composeSystemPrompt({ ...base, timezone: 'Asia/Tokyo' });
     expect(ny).toContain('Today is Saturday, 2026-03-14 (Saturday, March 14, 2026).');
     expect(tokyo).toContain('Today is Sunday, 2026-03-15 (Sunday, March 15, 2026).');
   });

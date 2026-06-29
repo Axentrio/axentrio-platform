@@ -6,6 +6,8 @@ import { MeteringService } from './metering.service';
 import { TraceLogger, AgentTrace } from './trace-logger';
 import { ToolContext } from './tool-adapter';
 import { getProvider } from '../llm/provider-factory';
+import { buildPromptTrace } from '../llm/block-ledger';
+import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
@@ -17,7 +19,7 @@ import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
@@ -146,6 +148,19 @@ export class AgentService {
     // builder, fallback messages) uses the effective values; escalationKeywords
     // and other operational fields are preserved. One resolve → body + config.
     const resolvedTemplates = await resolveBoundTemplates(bot);
+    // AC4: surface "the missing vertical" — a bound template that resolved to a
+    // fallback (archived/missing/unpublished) is invisible otherwise. Log it with
+    // bot+tenant context (the resolver has neither). The superadmin endpoint lists
+    // these bots for review.
+    const unavailableReason = resolvedTemplates[0] ? templateUnavailabilityReason(resolvedTemplates[0]) : null;
+    if (unavailableReason) {
+      logger.warn('Bound bot template unavailable — fell back', {
+        botId: bot.id,
+        tenantId: tenant.id,
+        templateId: resolvedTemplates[0].templateId,
+        reason: unavailableReason,
+      });
+    }
     const templateBody = composeTemplateBodies(resolvedTemplates, bot.templateMode ?? 'or');
     const eff = effectiveConfigFromList(resolvedTemplates);
     const aiSettings = botAiSettings ? withEffectiveConfig(botAiSettings, eff) : botAiSettings;
@@ -166,7 +181,9 @@ export class AgentService {
       // Each active module builds (and loads data for) its own section; the
       // resolver call hits the same per-tenant caches the tool registry used.
       const moduleSections: string[] = [];
-      for (const active of await listActiveModules(tenant.id)) {
+      const activeModules = await listActiveModules(tenant.id);
+      const activeModuleIds = activeModules.map((a) => a.module.id);
+      for (const active of activeModules) {
         if (!active.module.buildPromptSection) continue;
         try {
           const section = await active.module.buildPromptSection({
@@ -225,7 +242,23 @@ export class AgentService {
       }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
-      const systemPrompt = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel);
+      // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
+      // resolve the bot's effective specialties, and pass them to the composer so a
+      // requiresSpecialPrompt specialty injects its exception block.
+      const vertical = resolvedTemplates[0]?.category ?? null;
+      const selectedSpecialtyDefs = effectiveSelectedSpecialties(effBotSettings.ai?.selectedSpecialties, vertical);
+      const specialties = resolveSpecialties(selectedSpecialtyDefs);
+      const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties);
+      // Merge the composer's block ledger with agent.service's module knowledge
+      // (the composer can't name modules) onto the trace — nests in trace.jsonb,
+      // no migration. Persisted on every fire-and-forget save below.
+      trace.prompt = buildPromptTrace(ledger, {
+        activeModuleIds,
+        expectedModuleIds: resolvedTemplates[0]?.expectedModules,
+        resolvedTemplateId: resolvedTemplates[0]?.templateId,
+        resolvedTemplateVersion: resolvedTemplates[0]?.resolvedVersion,
+      });
       // Model/provider are platform-standardised — always the platform default,
       // never per-bot/tenant (see llm/defaults).
       const provider = getProvider(DEFAULT_PROVIDER, apiKey ?? undefined);
@@ -357,6 +390,7 @@ export class AgentService {
             toolsCalledThisTurn: toolsCalled,
             dataSource: AppDataSource,
             conversationHistory: messages,
+            specialtyTerms: specialtyTerms.length ? specialtyTerms : undefined,
           };
 
           try {

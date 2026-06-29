@@ -37,6 +37,7 @@ import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
+  usePreviewLedger,
   forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
@@ -138,6 +139,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   const rollbackMut = useRollbackTemplate(id);
   const grantsMut = useUpdateTemplateGrants(id);
   const testChat = useTemplateTestChat();
+  const preview = usePreviewLedger();
   const draftBaselineRef = useRef<string>('');
 
   const [meta, setMeta] = useState<{ displayName: string; description: string; availableToAllTenants: boolean } | null>(null);
@@ -146,6 +148,9 @@ const AdminBotTemplateDetail: React.FC = () => {
   const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
   const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
+  const [pvTier, setPvTier] = useState<'free' | 'essential' | 'pro' | 'enterprise'>('pro');
+  const [pvChannel, setPvChannel] = useState('widget');
+  const [pvBooking, setPvBooking] = useState(false);
   const [confirm, setConfirm] = useState<{ open: boolean; title: string; description: string; onConfirm: () => void }>({
     open: false, title: '', description: '', onConfirm: () => {},
   });
@@ -217,6 +222,19 @@ const AdminBotTemplateDetail: React.FC = () => {
       setTestLog((l) => [...l, { role: 'assistant', content: t('admin.botTemplates.editor.testError') }]);
     }
   };
+
+  // L10/Phase 4: compile the current draft under a mock runtime context and show the
+  // block ledger (which blocks would be included/excluded, and why). No LLM call.
+  // (preview/pv* hooks are declared at the top with the other hooks — before the
+  // loading early-return — to keep hook order stable.)
+  const runPreview = () =>
+    preview.mutate({
+      body: draft.body,
+      config: draftToConfig(draft.config),
+      tier: pvTier,
+      channel: pvChannel,
+      activeModules: pvBooking ? ['booking'] : [],
+    });
 
   // Discard with a guard: confirm if there are unsaved edits (create/edit only).
   const requestCloseDraft = () => {
@@ -698,6 +716,46 @@ const AdminBotTemplateDetail: React.FC = () => {
                     </Button>
                   </div>
                   <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.testHint')}</p>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+
+            {/* Preview the compiled prompt's block ledger under a mock runtime context
+                (tier / channel / modules). Internal superadmin tool — labels are literal. */}
+            <Accordion type="single" collapsible className="w-full">
+              <AccordionItem value="ledger" className="rounded-xl border border-edge px-4 border-b">
+                <AccordionTrigger className="hover:no-underline text-sm font-medium">Preview block ledger (mock context)</AccordionTrigger>
+                <AccordionContent className="space-y-3 text-xs">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-1">Tier
+                      <select className="rounded border border-edge bg-surface-2 px-1 py-0.5" value={pvTier} onChange={(e) => setPvTier(e.target.value as typeof pvTier)}>
+                        <option value="free">free</option><option value="essential">essential</option><option value="pro">pro</option><option value="enterprise">enterprise</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1">Channel
+                      <select className="rounded border border-edge bg-surface-2 px-1 py-0.5" value={pvChannel} onChange={(e) => setPvChannel(e.target.value)}>
+                        <option value="widget">widget</option><option value="whatsapp">whatsapp</option><option value="instagram">instagram</option><option value="messenger">messenger</option><option value="telegram">telegram</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1"><input type="checkbox" checked={pvBooking} onChange={(e) => setPvBooking(e.target.checked)} /> booking active</label>
+                    <Button type="button" size="sm" disabled={preview.isPending} onClick={() => runPreview()}>Preview</Button>
+                  </div>
+                  {preview.data && (
+                    <div className="space-y-1.5">
+                      <div><span className="font-medium">Included:</span>{' '}
+                        {preview.data.includedBlocks.map((b) => (
+                          <span key={b} className="mr-1 inline-block rounded bg-surface-3 px-1.5 py-0.5 text-text-primary">{b}</span>
+                        ))}
+                      </div>
+                      <div><span className="font-medium">Excluded:</span>{' '}
+                        {preview.data.excludedBlocks.map((e) => (
+                          <span key={e.key} className="mr-1 inline-block rounded bg-surface-2 px-1.5 py-0.5 text-text-tertiary">{e.key} <span className="opacity-60">({e.reason})</span></span>
+                        ))}
+                      </div>
+                      <div><span className="font-medium">Allowed tools:</span> {preview.data.allowedTools.join(', ') || '—'}</div>
+                      <p className="text-[10px] text-warning-600">{preview.data.caveat}</p>
+                    </div>
+                  )}
                 </AccordionContent>
               </AccordionItem>
             </Accordion>

@@ -33,6 +33,7 @@ vi.mock('@/queries/useBotTemplatesQueries', () => {
     useRollbackTemplate: m,
     useUpdateTemplateGrants: m,
     useTemplateTestChat: m,
+    usePreviewLedger: m,
     forceConflict: () => null,
   };
 });

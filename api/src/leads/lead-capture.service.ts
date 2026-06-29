@@ -134,8 +134,12 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
     // name/email/phone; source upgrades toward the stronger signal (D8).
     // A soft-deleted same-key row is invisible to the partial index → a fresh
     // lead is created (re-engaging an archived contact). xmax=0 ⇒ inserted.
-    const rows: Array<{ id: string; inserted: boolean }> = await input.dataSource.query(
+    const rows: Array<{ id: string; inserted: boolean; old_notes: string | null }> = await input.dataSource.query(
       `
+      WITH prior AS (
+        SELECT notes AS old_notes FROM chatbot_leads
+        WHERE tenant_id = $1 AND dedupe_key = $9 AND deleted_at IS NULL
+      )
       INSERT INTO chatbot_leads
         (tenant_id, session_id, bot_id, name, email, phone, channel, external_user_id, dedupe_key, source, status, metadata, notes)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'new', '{}'::jsonb, $12)
@@ -155,7 +159,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
                         WHEN 'manual' THEN 3 WHEN 'import' THEN 3 WHEN 'webhook' THEN 1 ELSE 1 END)
           THEN EXCLUDED.source ELSE chatbot_leads.source END,
         updated_at = now()
-      RETURNING id, (xmax = 0) AS inserted
+      RETURNING id, (xmax = 0) AS inserted, (SELECT old_notes FROM prior) AS old_notes
       `,
       [
         input.tenantId,
@@ -178,8 +182,18 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
 
     if (row.inserted) {
       logger.info('[leads] captured', { tenantId: input.tenantId, leadId: row.id, channel, source: input.source });
-      // Real-time fan-out only on a genuinely NEW lead — never on a re-touch.
+      // Full fan-out (webhook + email + notification) on a genuinely NEW lead.
       void emitLeadCreated(input, { leadId: row.id, name, email, phone, notes }).catch(() => {});
+    } else if (notes && !row.old_notes) {
+      // Channel case: the request summary just landed on a lead the inbound hook
+      // created earlier WITHOUT it (lead.created webhook/email already fired then,
+      // contact-only). Re-notify the OPERATOR — once — with the request so the
+      // channel alert is actionable. Notification only: we deliberately do NOT
+      // re-emit the webhook/email here (that would duplicate the first-contact
+      // lead.created event); a distinct dedupe key avoids suppression by the
+      // first notification.
+      logger.debug('[leads] request landed on existing lead', { tenantId: input.tenantId, leadId: row.id, source: input.source });
+      void createLeadNotification(input, { leadId: row.id, name, email, phone, notes }, { dedupeSuffix: 'request' }).catch(() => {});
     } else {
       logger.debug('[leads] updated', { tenantId: input.tenantId, leadId: row.id, source: input.source });
     }
@@ -239,8 +253,21 @@ async function emitLeadCreated(
   };
   emitWebhookEvent(event);
 
-  // Put the captured request in the notification body (the at-a-glance surface)
-  // so the operator knows WHY to reach out, not just who.
+  // Operator notification (in-app + push) — the at-a-glance surface.
+  await createLeadNotification(input, lead, {});
+}
+
+/**
+ * In-app + push notification for a captured lead. Puts the request in the body
+ * (the at-a-glance surface) so the operator knows WHY to reach out, not just who.
+ * `dedupeSuffix` lets a later "request landed on an existing channel lead" alert
+ * through past the first-contact notification, which deduped on `lead:<id>`.
+ */
+async function createLeadNotification(
+  input: UpsertLeadInput,
+  lead: { leadId: string; name: string | null; email: string | null; phone: string | null; notes: string | null },
+  opts: { dedupeSuffix?: string },
+): Promise<void> {
   const contact = lead.name || lead.email || lead.phone || 'New contact';
   await notificationService
     .createForTenant({
@@ -249,7 +276,7 @@ async function emitLeadCreated(
       title: 'New lead captured',
       message: lead.notes ? `${contact} — ${lead.notes.slice(0, 140)}` : contact,
       data: { leadId: lead.leadId, sessionId: input.sessionId ?? null, notes: lead.notes ? lead.notes.slice(0, 500) : null },
-      dedupeBase: `lead:${lead.leadId}`,
+      dedupeBase: opts.dedupeSuffix ? `lead:${lead.leadId}:${opts.dedupeSuffix}` : `lead:${lead.leadId}`,
     })
     .catch(() => {});
 }

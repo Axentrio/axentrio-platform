@@ -36,9 +36,12 @@ import { upsertLead } from '../../leads/lead-capture.service';
 
 const TENANT = 'aaaa0000-bbbb-cccc-dddd-eeeeeeee0001';
 
-/** A fake DataSource whose query() records calls and returns a scripted row. */
-function fakeDs(row: { id: string; inserted: boolean } | null = { id: 'lead-1', inserted: true }) {
-  const query = vi.fn().mockResolvedValue(row ? [row] : []);
+/** A fake DataSource whose query() records calls and returns a scripted row.
+ *  old_notes drives the "request landed on an existing lead" re-notify path. */
+function fakeDs(
+  row: { id: string; inserted: boolean; old_notes?: string | null } | null = { id: 'lead-1', inserted: true, old_notes: null },
+) {
+  const query = vi.fn().mockResolvedValue(row ? [{ old_notes: null, ...row }] : []);
   return {
     query,
     getRepository: () => ({ findOne: vi.fn().mockResolvedValue(null) }),
@@ -201,6 +204,35 @@ describe('upsertLead — fan-out (D10)', () => {
     await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'channel', channel: 'whatsapp', externalUserId: '32475464421' });
     await new Promise((r) => setImmediate(r));
     expect(emitWebhookEvent).not.toHaveBeenCalled();
+  });
+
+  it('re-notifies the operator (notification only) when the request first lands on an existing channel lead', async () => {
+    // Hook 1 made the lead earlier (no notes); now capture_lead adds the summary → UPDATE.
+    const ds = fakeDs({ id: 'lead-9', inserted: false, old_notes: null });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'whatsapp',
+      externalUserId: '32475464421', phone: '32475464421', notes: 'Burst pipe in the basement',
+    });
+    await new Promise((r) => setImmediate(r));
+    // NO duplicate webhook/email (that already fired at first contact).
+    expect(emitWebhookEvent).not.toHaveBeenCalled();
+    // ONE operator notification carrying the request, with a distinct dedupe key.
+    expect(createForTenant).toHaveBeenCalledTimes(1);
+    const notif = createForTenant.mock.calls[0][0];
+    expect(notif.message).toContain('Burst pipe in the basement');
+    expect(notif.dedupeBase).toBe('lead:lead-9:request');
+    expect(notif.data.notes).toBe('Burst pipe in the basement');
+  });
+
+  it('does NOT re-notify when notes were already present (true re-touch, not a first landing)', async () => {
+    const ds = fakeDs({ id: 'lead-9', inserted: false, old_notes: 'Earlier request' });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'whatsapp',
+      externalUserId: '32475464421', notes: 'A later, fuller request',
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(emitWebhookEvent).not.toHaveBeenCalled();
+    expect(createForTenant).not.toHaveBeenCalled();
   });
 
   it('an upsert DB error returns null (no throw) and logs', async () => {

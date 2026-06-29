@@ -280,7 +280,7 @@ describe('buildSystemPrompt (llm)', () => {
     expect(prompt).toContain('## TENANT INSTRUCTIONS');
     expect(prompt).toContain('## PLATFORM RULES');
     expect(prompt).toContain('Ava');
-    expect(prompt).toContain('Answer visitor questions clearly and concisely');
+    expect(prompt).toContain('this service business'); // AC4 generic-service-business core
   });
 
   it('renders guardrails into the platform rules block', () => {

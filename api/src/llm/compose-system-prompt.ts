@@ -47,12 +47,20 @@ const PLACEHOLDER_RE = /\{(\w+)\}/g;
 // exactly as before (existing prompts unchanged).
 const IF_BLOCK_RE = /\{\{#if (\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g;
 
-// Default tenant block used when no customInstructions are set (base/rag/preview
-// modes only — never the agent flow, never n8n). Kept intentionally minimal —
-// the platform rules block covers guardrails.
-const DEFAULT_TENANT_BLOCK = `You are {botName}, a helpful assistant.
-Tone: {tone}
-Answer visitor questions clearly and concisely.`;
+// AC4 — the safe generic-service-business core used when a bot has no resolved
+// vertical template (unbound, or bound-but-unavailable, or the neutral blank-base).
+// A real generic vertical identity (not just a name+tone) so an unbound bot still
+// behaves usefully. Code-defined (decision: block text stays in code for now).
+// Used as the agent-mode template-body fallback AND the base/rag empty-instructions
+// fallback. Variables substituted at composition time.
+// NOTE: does NOT restate identity ("You are …") or tone — the agent brand-voice
+// lines and the base-mode preamble already do. This adds the generic vertical
+// CONTEXT only, so it composes after them without duplication.
+const GENERIC_SERVICE_CORE = `You help customers of {businessName}. Answer their questions about this service business — its services, opening hours, pricing, location, contact details, and policies. Use the knowledge base for anything factual; if you don't have the information, say so honestly and offer to pass the question to the team. Keep replies clear and practical, focused on what this business actually offers — never invent details, and don't answer unrelated or general-knowledge questions.`;
+
+// Back-compat alias: the base/rag empty-instructions fallback historically used a
+// minimal block; it now resolves to the richer generic core (AC4).
+const DEFAULT_TENANT_BLOCK = GENERIC_SERVICE_CORE;
 
 /** One-line hygiene for owner text in the prompt: collapse whitespace → drop `·`/`"` → trim. */
 function sanitizeForLine(value: string): string {
@@ -278,8 +286,12 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
   sections.push(`Tone: ${brandVoice?.tone || 'professional'}`);
   // ── Template layer (layer 2): the resolved bot-template identity, before the
   //    tenant's own additions. Empty/absent (e.g. blank-base) contributes nothing.
-  if (ai && ctx.templateBody?.trim()) {
-    sections.push(substituteVariables(ctx.templateBody, ai, { businessName: tenantName }));
+  // AC4: a resolved vertical template body if present, else the safe generic
+  // service-business core — so an unbound / blank-base / unavailable-template bot
+  // still gets a usable vertical identity. (Only a missing ai slice yields no core.)
+  if (ai) {
+    const coreBody = ctx.templateBody?.trim() ? ctx.templateBody : GENERIC_SERVICE_CORE;
+    sections.push(substituteVariables(coreBody, ai, { businessName: tenantName }));
     ledger.include(K.TEMPLATE_BODY);
   } else {
     ledger.exclude(K.TEMPLATE_BODY, 'empty');

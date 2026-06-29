@@ -69,9 +69,12 @@ describe('block ledger — agent mode', () => {
     expect(excluded({ tools: [] })).toContainEqual({ key: 'BOOKING', reason: 'toolAbsent' });
   });
 
-  it('TEMPLATE_BODY: include when present, exclude(empty) when blank', () => {
+  it('TEMPLATE_BODY: included with a real body, AND via the generic-core fallback when blank (AC4); empty only when no ai slice', () => {
     expect(included({ tools: [], templateBody: 'You are a plumber bot.' })).toContain('TEMPLATE_BODY');
-    expect(excluded({ tools: [], templateBody: '' })).toContainEqual({ key: 'TEMPLATE_BODY', reason: 'empty' });
+    // empty real body + ai present → generic service-business core fallback → still TEMPLATE_BODY
+    expect(included({ tools: [], templateBody: '' })).toContain('TEMPLATE_BODY');
+    // only a missing ai slice yields no core
+    expect(excluded({ ai: undefined, tools: [] })).toContainEqual({ key: 'TEMPLATE_BODY', reason: 'empty' });
   });
 
   it('CUSTOM_INSTRUCTIONS: include when present, exclude(empty) when absent', () => {

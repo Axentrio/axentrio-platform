@@ -108,7 +108,8 @@ describe('base mode — template layer', () => {
 
   it('empty template AND empty custom falls back to the default block', () => {
     const out = composeSystemPrompt({ mode: 'base', ai: aiNoCustom, businessName: 'Acme', templateBody: '' });
-    expect(out).toContain('Answer visitor questions clearly and concisely');
+    expect(out).toContain('this service business'); // AC4 generic-service-business core
+
   });
 });
 

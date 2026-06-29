@@ -88,6 +88,7 @@ type FormSnapshot = {
   maxResponseLength: number;
   escalationKeywords: string[];
   topicsToAvoid: string[];
+  selectedSpecialties: string[];
 };
 
 const snapshotKey = (s: FormSnapshot): string => JSON.stringify(s);
@@ -143,6 +144,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [maxResponseLength, setMaxResponseLength] = useState(500);
   const [escalationKeywords, setEscalationKeywords] = useState<string[]>([]);
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
+  const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
   // Business hours editor state (hydrated from the bot detail, saved separately).
   const [bhEnabled, setBhEnabled] = useState(false);
   const [bhTimezone, setBhTimezone] = useState('UTC');
@@ -181,6 +183,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const hMaxLen = aiSettings.guardrails?.maxResponseLength ?? 500;
     const hEscalation = aiSettings.guardrails?.escalationKeywords ?? [];
     const hTopics = aiSettings.guardrails?.topicsToAvoid ?? [];
+    const hSpecialties = (aiSettings.selectedSpecialties ?? []) as string[];
 
     setEnabled(hEnabled);
     setBotName(hBotName);
@@ -196,6 +199,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setMaxResponseLength(hMaxLen);
     setEscalationKeywords(hEscalation);
     setTopicsToAvoid(hTopics);
+    setSelectedSpecialties(hSpecialties);
 
     setInitialSnapshot(snapshotKey({
       enabled: hEnabled,
@@ -211,6 +215,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       maxResponseLength: hMaxLen,
       escalationKeywords: hEscalation,
       topicsToAvoid: hTopics,
+      selectedSpecialties: hSpecialties,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
 
@@ -254,7 +259,20 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     maxResponseLength,
     escalationKeywords,
     topicsToAvoid,
+    selectedSpecialties,
   });
+
+  // Specialties available for this bot's vertical (from the GET ai-settings response).
+  const availableSpecialties = (aiSettings?.availableSpecialties ?? []) as Array<{
+    key: string; name: string; description: string; requiresSpecialPrompt: boolean;
+  }>;
+  // Toggle, rebuilding the selection in catalog order so the autosave snapshot is
+  // stable regardless of click order.
+  const toggleSpecialty = (key: string) =>
+    setSelectedSpecialties((prev) => {
+      const has = prev.includes(key);
+      return availableSpecialties.map((s) => s.key).filter((k) => (k === key ? !has : prev.includes(k)));
+    });
 
   // Inline validation. Auto-save skips while invalid so the backend never
   // sees garbage; the leave dialog re-appears specifically for this case to
@@ -285,11 +303,12 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             escalationKeywords,
             topicsToAvoid,
           },
+          selectedSpecialties,
         },
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid],
+    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -540,6 +559,35 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             </p>
           )}
         </section>
+
+        {/* Specialties — scoped to the bot's vertical (bound template category). Only
+            shown when the vertical defines specialties. Selecting biases KB retrieval;
+            a specialty flagged requiresSpecialPrompt also injects its exception block. */}
+        {availableSpecialties.length > 0 && (
+          <section className="space-y-2">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">Specialties</h3>
+              <p className="text-xs text-text-muted mt-0.5">Pick what this bot specialises in. This sharpens knowledge-base answers; some specialties also add tailored handling.</p>
+            </div>
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {availableSpecialties.map((s) => (
+                <label key={s.key} className="flex items-start gap-2 rounded-lg border border-edge p-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={selectedSpecialties.includes(s.key)}
+                    onChange={() => toggleSpecialty(s.key)}
+                  />
+                  <span>
+                    <span className="font-medium text-text-primary">{s.name}</span>
+                    {s.requiresSpecialPrompt && <span className="ml-1 text-[10px] text-amber-400">(special handling)</span>}
+                    {s.description && <span className="block text-xs text-text-muted">{s.description}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </section>
+        )}
 
 
         {/* Operational settings (tenant-owned: escalation + business hours).

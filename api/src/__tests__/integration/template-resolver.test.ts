@@ -125,6 +125,8 @@ describe('resolveBoundTemplate', () => {
       body: '',
       config: {},
       resolvedVersion: null,
+      category: null,
+      expectedModules: [],
       pinnedButUnavailable: false,
       templateUnavailable: false,
     });

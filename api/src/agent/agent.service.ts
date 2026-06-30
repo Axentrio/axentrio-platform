@@ -10,10 +10,13 @@ import { buildPromptTrace } from '../llm/block-ledger';
 import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTerms } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
+import { In } from 'typeorm';
 import { ChatSession } from '../database/entities/ChatSession';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { ServiceType } from '../database/entities/ServiceType';
+import { Module } from '../database/entities/Module';
+import { ModuleVersion } from '../database/entities/ModuleVersion';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
@@ -22,7 +25,7 @@ import { resolveSkillStates, dropUnreadySkillTools } from '../modules/skill-stat
 import { readinessRefinement } from '../llm/skill-readiness';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
-import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason } from '../templates/template-resolver';
+import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, selectSkillIds } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
@@ -252,18 +255,86 @@ export class AgentService {
       const selectedSpecialtyDefs = effectiveSelectedSpecialties(effBotSettings.ai?.selectedSpecialties, vertical);
       const specialties = resolveSpecialties(selectedSpecialtyDefs);
       const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
-      // Resolve each selected/active skill's STATE from locals already in hand
-      // (no extra DB call): active modules + the bound template's selected skills +
-      // the booking readiness computed above. Phase 3a uses it for the trace;
-      // Phase 3b (behind SKILL_STATE_ENABLED) uses it to physically drop the tools
-      // of any non-ready skill so the model can't call them (no phantom bookings).
       const expectedModuleIds = resolvedTemplates[0]?.expectedModules;
+      // Composable-templates Phase 4 — runtime bridge. The bound template may pin
+      // authored module prose ({moduleId, moduleVersion} → immutable ModuleVersion).
+      // Load the pinned prose + each module's skill bindings here so we can surface
+      // the prose, gated on skill readiness, below. DORMANT for legacy templates
+      // (no selectedModuleRefs): we skip the DB entirely and behaviour is unchanged.
+      const moduleRefs = resolvedTemplates[0]?.selectedModuleRefs ?? null;
+      const skillsByModule = new Map<string, string[]>();
+      const proseByRef = new Map<string, string>();
+      if (moduleRefs && moduleRefs.length) {
+        try {
+          const moduleIds = [...new Set(moduleRefs.map((r) => r.moduleId))];
+          const moduleRows = await AppDataSource.getRepository(Module).find({
+            where: { id: In(moduleIds) },
+            select: { id: true, skillIds: true },
+          });
+          for (const m of moduleRows) skillsByModule.set(m.id, m.skillIds ?? []);
+          // Pinned versions only — never dereference a newer ModuleVersion (a published
+          // template must resolve the exact (moduleId, version) it was pinned to).
+          const versionRows = await AppDataSource.getRepository(ModuleVersion).find({
+            where: moduleRefs.map((r) => ({ moduleId: r.moduleId, version: r.moduleVersion })),
+            select: { moduleId: true, version: true, prose: true },
+          });
+          for (const v of versionRows) proseByRef.set(`${v.moduleId}:${v.version}`, v.prose);
+        } catch (error) {
+          // Fail SAFE: a load failure must never block prompt composition. Empty maps
+          // → selectSkillIds falls back to expectedModules and no prose is surfaced.
+          logger.warn('authored module load failed — falling back to expectedModules', {
+            tenantId: tenant.id,
+            botId: bot.id,
+            error,
+          });
+          skillsByModule.clear();
+          proseByRef.clear();
+        }
+      }
+      // Resolve each selected/active skill's STATE. The selected skill ids come from
+      // selectSkillIds: with authored module refs they resolve to the modules' bound
+      // skills; without refs (legacy) they fall back to expectedModules — byte-
+      // identical. Phase 3a uses the states for the trace; Phase 3b (behind
+      // SKILL_STATE_ENABLED) physically drops the tools of any non-ready skill so the
+      // model can't call them (no phantom bookings).
+      const selectedSkillIds = selectSkillIds(
+        { selectedModuleRefs: moduleRefs, expectedModules: expectedModuleIds ?? [] },
+        (id) => skillsByModule.get(id) ?? [],
+      );
       const skillStates = resolveSkillStates({
-        selected: expectedModuleIds ?? [],
+        selected: selectedSkillIds,
         active: activeModuleIds,
         gateKind: (id) => getModule(id)?.gate.kind,
         readiness: (id) => readinessRefinement(id, { bookingConfigured }),
       });
+      // Phase 4 — authored module prose, gated on skill readiness: a module's prose is
+      // surfaced ONLY when every skill it binds resolved `ready` (entitled ∧ enabled ∧
+      // configured). The composer emits each as an AUTHORED_MODULE_<id> block and itself
+      // drops empty prose, so we pass prose through unfiltered and let it decide. A ref
+      // whose pinned version is missing (deleted) is omitted with a warning, never blocks.
+      let authoredModules: { id: string; prose: string }[] | undefined;
+      if (moduleRefs && moduleRefs.length) {
+        authoredModules = [];
+        const seen = new Set<string>();
+        for (const ref of moduleRefs) {
+          if (seen.has(ref.moduleId)) continue;
+          seen.add(ref.moduleId);
+          const skills = skillsByModule.get(ref.moduleId) ?? [];
+          const ready = skills.length > 0 && skills.every((s) => skillStates[s] === 'ready');
+          if (!ready) continue;
+          const key = `${ref.moduleId}:${ref.moduleVersion}`;
+          if (!proseByRef.has(key)) {
+            logger.warn('pinned module version not found — authored prose omitted', {
+              tenantId: tenant.id,
+              botId: bot.id,
+              moduleId: ref.moduleId,
+              moduleVersion: ref.moduleVersion,
+            });
+            continue;
+          }
+          authoredModules.push({ id: ref.moduleId, prose: proseByRef.get(key)! });
+        }
+      }
       // Phase 3b (behind SKILL_STATE_ENABLED, default OFF). ON → drop a non-ready
       // skill's tools before the model sees them, so an entitled-but-unconfigured
       // booking bot physically cannot call create_booking (no phantom bookings);
@@ -272,7 +343,7 @@ export class AgentService {
       if (process.env.SKILL_STATE_ENABLED === 'true') {
         tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
       }
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties);
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, authoredModules);
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.

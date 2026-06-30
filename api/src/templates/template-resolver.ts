@@ -60,6 +60,10 @@ export interface ResolvedTemplate {
   /** Modules the resolved version expects (advisory) — feeds the trace's
    *  MODULE_<id> expected-but-inactive exclusions (L7). [] when unbound/unreachable. */
   expectedModules: string[];
+  /** Composable-templates Phase 4: the authored module refs pinned by the resolved
+   *  version ({moduleId, moduleVersion} → immutable ModuleVersion records). null for
+   *  legacy templates (→ runtime falls back to expectedModules; behaviour unchanged). */
+  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
   /** The bot pinned a fixed version that isn't published → fell back to latest/empty. */
   pinnedButUnavailable: boolean;
   /** The bound template is missing/archived/has no published version → fell back to empty. */
@@ -86,6 +90,7 @@ const UNBOUND: ResolvedTemplate = {
   resolvedVersion: null,
   category: null,
   expectedModules: [],
+  selectedModuleRefs: null,
   pinnedButUnavailable: false,
   templateUnavailable: false,
 };
@@ -97,6 +102,8 @@ interface PublishedVersion {
   /** Modules the template version expects (advisory, T13) — drives the trace's
    *  MODULE_<id> "expected but not active" exclusions (L7). */
   expectedModules: string[];
+  /** Composable-templates Phase 4: pinned authored module refs (null for legacy). */
+  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
 }
 interface TemplateBundle {
   id: string;
@@ -116,7 +123,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
       where: { templateId, status: 'published' },
-      select: ['version', 'body', 'config', 'expectedModules'],
+      select: ['version', 'body', 'config', 'expectedModules', 'selectedModuleRefs'],
       order: { version: 'DESC' },
     });
     return {
@@ -128,6 +135,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
         body: v.body,
         config: v.config ?? {},
         expectedModules: v.expectedModules ?? [],
+        selectedModuleRefs: v.selectedModuleRefs ?? null,
       })),
     };
   });
@@ -221,6 +229,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
+      selectedModuleRefs: latest.selectedModuleRefs,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -237,6 +246,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: exact.expectedModules,
+      selectedModuleRefs: exact.selectedModuleRefs,
       body: exact.body,
       config: exact.config,
       resolvedVersion: exact.version,
@@ -251,6 +261,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
+      selectedModuleRefs: latest.selectedModuleRefs,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,

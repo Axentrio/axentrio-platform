@@ -18,7 +18,7 @@ import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
 import { getModule } from '../modules/module-catalog';
-import { resolveSkillStates } from '../modules/skill-state';
+import { resolveSkillStates, dropUnreadySkillTools } from '../modules/skill-state';
 import { readinessRefinement } from '../llm/skill-readiness';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
@@ -176,7 +176,7 @@ export class AgentService {
     };
 
     try {
-      const tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
+      let tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
       // Booking activeness drives the egress guard below (a bot without the
       // booking tools can't be nudged to "actually call create_booking").
       const bookingActive = tools.some((t) => t.name === 'create_booking');
@@ -252,15 +252,11 @@ export class AgentService {
       const selectedSpecialtyDefs = effectiveSelectedSpecialties(effBotSettings.ai?.selectedSpecialties, vertical);
       const specialties = resolveSpecialties(selectedSpecialtyDefs);
       const specialtyTerms = specialtyRetrievalTerms(selectedSpecialtyDefs);
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties);
-      // Merge the composer's block ledger with agent.service's module knowledge
-      // (the composer can't name modules) onto the trace — nests in trace.jsonb,
-      // no migration. Persisted on every fire-and-forget save below.
-      // Phase 3a (dark): resolve the booking skill's STATE from locals already in
-      // hand (active modules + the bound template's selected skills + the booking
-      // readiness we just computed) and record it on the trace. The prompt is
-      // unchanged — promptBuilder still ran on the bookingConfigured boolean above;
-      // this only enriches the SKILL_ trace fields. No extra DB call.
+      // Resolve each selected/active skill's STATE from locals already in hand
+      // (no extra DB call): active modules + the bound template's selected skills +
+      // the booking readiness computed above. Phase 3a uses it for the trace;
+      // Phase 3b (behind SKILL_STATE_ENABLED) uses it to physically drop the tools
+      // of any non-ready skill so the model can't call them (no phantom bookings).
       const expectedModuleIds = resolvedTemplates[0]?.expectedModules;
       const skillStates = resolveSkillStates({
         selected: expectedModuleIds ?? [],
@@ -268,6 +264,18 @@ export class AgentService {
         gateKind: (id) => getModule(id)?.gate.kind,
         readiness: (id) => readinessRefinement(id, { bookingConfigured }),
       });
+      // Phase 3b (behind SKILL_STATE_ENABLED, default OFF). ON → drop a non-ready
+      // skill's tools before the model sees them, so an entitled-but-unconfigured
+      // booking bot physically cannot call create_booking (no phantom bookings);
+      // the existing tool-driven composer then renders "BOOKING (NOT AVAILABLE)".
+      // OFF → unchanged (the prompt drives off bookingConfigured, as before).
+      if (process.env.SKILL_STATE_ENABLED === 'true') {
+        tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
+      }
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties);
+      // Merge the composer's block ledger with agent.service's module knowledge
+      // (the composer can't name modules) onto the trace — nests in trace.jsonb,
+      // no migration. Persisted on every fire-and-forget save below.
       trace.prompt = buildPromptTrace(ledger, {
         activeModuleIds,
         expectedModuleIds,

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { EXCLUSION_REASONS } from '../../llm/block-ledger';
-import { SKILL_STATES, resolveSkillStates, type SkillResolution } from '../../modules/skill-state';
+import { SKILL_STATES, resolveSkillStates, dropUnreadySkillTools, type SkillResolution } from '../../modules/skill-state';
 
 // Composable-templates Phase 1 — lock the canonical SkillState machine and the
 // ledger ExclusionReason set as committed, runtime-introspectable contracts.
@@ -64,5 +64,25 @@ describe('resolveSkillStates — entitlement/enablement (+ readiness) → state'
     const readiness = () => 'ready' as const; // even if a readiness check says ready...
     // ...an unentitled skill stays unentitled (entitlement is the hard ceiling).
     expect(resolveSkillStates({ selected: ['booking'], active: [], gateKind, readiness }).booking).toBe('unentitled');
+  });
+});
+
+// Phase 3b — a non-ready skill's tools are physically dropped so the model can't
+// call them (no phantom actions), not just discouraged in the prompt. Pure.
+describe('dropUnreadySkillTools — Phase 3b tool-drop', () => {
+  const toolNames = (id: string) => (id === 'booking' ? ['create_booking', 'check_availability'] : []);
+  const tools = [{ name: 'create_booking' }, { name: 'check_availability' }, { name: 'kb_search' }];
+
+  it("drops a non-ready skill's tools, keeps the rest", () => {
+    const out = dropUnreadySkillTools(tools, { booking: 'unconfigured' }, toolNames);
+    expect(out.map((t) => t.name)).toEqual(['kb_search']);
+  });
+
+  it('keeps all tools (same array reference) when the skill is ready', () => {
+    expect(dropUnreadySkillTools(tools, { booking: 'ready' }, toolNames)).toBe(tools);
+  });
+
+  it('drops nothing for an empty state map', () => {
+    expect(dropUnreadySkillTools(tools, {}, toolNames)).toBe(tools);
   });
 });

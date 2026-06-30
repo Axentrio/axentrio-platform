@@ -64,3 +64,21 @@ export function resolveSkillStates(opts: {
   }
   return out;
 }
+
+/**
+ * Phase 3b — drop the tools belonging to any skill that isn't `ready`, so a
+ * degraded skill is physically uncallable by the model (no phantom actions),
+ * not merely discouraged in the prompt. Pure: the caller supplies the per-skill
+ * tool-name lookup. Returns the same array reference when nothing is dropped.
+ */
+export function dropUnreadySkillTools<T extends { name: string }>(
+  tools: T[],
+  skillStates: Record<string, SkillState>,
+  skillToolNames: (skillId: string) => string[],
+): T[] {
+  const drop = new Set<string>();
+  for (const [id, state] of Object.entries(skillStates)) {
+    if (state !== 'ready') for (const n of skillToolNames(id)) drop.add(n);
+  }
+  return drop.size === 0 ? tools : tools.filter((t) => !drop.has(t.name));
+}

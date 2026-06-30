@@ -29,3 +29,38 @@ export interface SkillResolution {
   id: string;
   state: SkillState;
 }
+
+/**
+ * Resolve the state of each selected/active skill (Phase 3a). PURE — no DB:
+ * `agent.service` feeds it already-resolved locals (active modules, the bound
+ * template's selected skills, a gate-kind lookup, and an optional readiness
+ * refinement). Returns a `{ skillId: state }` map.
+ *
+ * The state machine:
+ *   - active (entitled ∧ enabled ∧ valid) → `ready`, then refined by `readiness`
+ *     (booking: `ready` only when configured, else `unconfigured`).
+ *   - selected but not active → why: feature-gate → `unentitled`, enablement-gate
+ *     → `disabled`, unknown id → `absent`.
+ *
+ * Entitlement is the hard ceiling: `readiness` only ever refines a `ready` base —
+ * it can never upgrade an unentitled/disabled skill.
+ */
+export function resolveSkillStates(opts: {
+  selected: string[];
+  active: string[];
+  gateKind: (id: string) => 'feature' | 'enablement' | undefined;
+  readiness?: (id: string) => SkillState | undefined;
+}): Record<string, SkillState> {
+  const activeSet = new Set(opts.active);
+  const ids = new Set<string>([...opts.selected, ...opts.active]);
+  const out: Record<string, SkillState> = {};
+  for (const id of ids) {
+    if (activeSet.has(id)) {
+      out[id] = opts.readiness?.(id) ?? 'ready';
+    } else {
+      const gate = opts.gateKind(id);
+      out[id] = gate === undefined ? 'absent' : gate === 'enablement' ? 'disabled' : 'unentitled';
+    }
+  }
+  return out;
+}

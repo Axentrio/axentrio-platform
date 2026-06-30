@@ -111,6 +111,10 @@ export function buildPromptTrace(
   opts: {
     activeModuleIds: string[];
     expectedModuleIds?: string[];
+    /** Phase 3a: resolved skill state per id. When supplied it drives the SKILL_
+     *  fields (ready → included, else excluded with the state as reason). When
+     *  absent, the SKILL_ fields fall back to the plain Phase-2 module mirror. */
+    skillStates?: Record<string, ExclusionReason | 'ready'>;
     resolvedTemplateId?: string | null;
     resolvedTemplateVersion?: number | null;
   },
@@ -122,12 +126,23 @@ export function buildPromptTrace(
     key: `MODULE_${id}`,
     reason: 'module' as const,
   }));
-  // Additive SKILL_<id> mirror — same module ids, distinct fields (Phase 2).
-  const includedSkills = opts.activeModuleIds.map((id) => `SKILL_${id}`);
-  const excludedSkills: ExcludedBlock[] = inactiveExpected.map((id) => ({
-    key: `SKILL_${id}`,
-    reason: 'module' as const,
-  }));
+
+  // SKILL_<id> family — additive, in distinct fields, never touching MODULE_<id>.
+  let includedSkills: string[];
+  let excludedSkills: ExcludedBlock[];
+  if (opts.skillStates) {
+    // Phase 3a: real state drives inclusion.
+    includedSkills = [];
+    excludedSkills = [];
+    for (const [id, state] of Object.entries(opts.skillStates)) {
+      if (state === 'ready') includedSkills.push(`SKILL_${id}`);
+      else excludedSkills.push({ key: `SKILL_${id}`, reason: state });
+    }
+  } else {
+    // Phase 2 fallback: plain mirror of the module active/inactive split.
+    includedSkills = opts.activeModuleIds.map((id) => `SKILL_${id}`);
+    excludedSkills = inactiveExpected.map((id) => ({ key: `SKILL_${id}`, reason: 'module' as const }));
+  }
 
   return {
     scope: 'customer_reply',

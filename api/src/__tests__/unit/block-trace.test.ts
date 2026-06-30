@@ -43,6 +43,30 @@ describe('buildPromptTrace — merge composer ledger with agent.service module e
     expect(out.excludedBlocks).toContainEqual({ key: 'MODULE_booking', reason: 'module' }); // legacy, unchanged
   });
 
+  // Composable-templates Phase 3a — when the resolved skillStates map is supplied,
+  // the SKILL_ trace reflects real state: ready → includedSkills, anything else →
+  // excludedSkills with the state as the reason. MODULE_<id> stays a plain active/
+  // inactive mirror (the prompt is unchanged — this enriches the trace only).
+  it('Phase 3a: skillStates drives SKILL_ inclusion (ready) vs exclusion (state as reason)', () => {
+    const ledger = createBlockLedger([]);
+    const out = buildPromptTrace(ledger, {
+      activeModuleIds: ['booking'],
+      skillStates: { booking: 'unconfigured' },
+    });
+    expect(out.includedBlocks).toContain('MODULE_booking'); // legacy active mirror, unchanged
+    expect(out.includedSkills).not.toContain('SKILL_booking'); // not ready → not included
+    expect(out.excludedSkills).toContainEqual({ key: 'SKILL_booking', reason: 'unconfigured' });
+  });
+
+  it('Phase 3a: a ready skill lands in includedSkills', () => {
+    const out = buildPromptTrace(createBlockLedger([]), {
+      activeModuleIds: ['booking'],
+      skillStates: { booking: 'ready' },
+    });
+    expect(out.includedSkills).toContain('SKILL_booking');
+    expect(out.excludedSkills.some((e) => e.key === 'SKILL_booking')).toBe(false);
+  });
+
   it('passes through allowedTools and the resolved template id/version', () => {
     const ledger = createBlockLedger(['kb_search', 'capture_lead']);
     const out = buildPromptTrace(ledger, { activeModuleIds: [], resolvedTemplateId: 'tpl-1', resolvedTemplateVersion: 3 });

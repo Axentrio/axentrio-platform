@@ -17,6 +17,9 @@ import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { listActiveModules } from '../modules';
+import { getModule } from '../modules/module-catalog';
+import { resolveSkillStates } from '../modules/skill-state';
+import { readinessRefinement } from '../llm/skill-readiness';
 import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason } from '../templates/template-resolver';
@@ -253,9 +256,22 @@ export class AgentService {
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
+      // Phase 3a (dark): resolve the booking skill's STATE from locals already in
+      // hand (active modules + the bound template's selected skills + the booking
+      // readiness we just computed) and record it on the trace. The prompt is
+      // unchanged — promptBuilder still ran on the bookingConfigured boolean above;
+      // this only enriches the SKILL_ trace fields. No extra DB call.
+      const expectedModuleIds = resolvedTemplates[0]?.expectedModules;
+      const skillStates = resolveSkillStates({
+        selected: expectedModuleIds ?? [],
+        active: activeModuleIds,
+        gateKind: (id) => getModule(id)?.gate.kind,
+        readiness: (id) => readinessRefinement(id, { bookingConfigured }),
+      });
       trace.prompt = buildPromptTrace(ledger, {
         activeModuleIds,
-        expectedModuleIds: resolvedTemplates[0]?.expectedModules,
+        expectedModuleIds,
+        skillStates,
         resolvedTemplateId: resolvedTemplates[0]?.templateId,
         resolvedTemplateVersion: resolvedTemplates[0]?.resolvedVersion,
       });

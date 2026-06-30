@@ -36,6 +36,7 @@
     "platformAnalytics": "Platform Analytics",
     "guardrails": "Guardrails",
     "botTemplates": "Bot Templates",
+    "modules": "Modules",
     "faqEditor": "FAQ Editor"
   },
   "sidebar": {

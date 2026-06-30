@@ -462,6 +462,15 @@ router.put(
 // Super-admin CRUD for authored Modules + their immutable versions. Same auth +
 // audit posture as the template routes above (mounted behind requireSuperAdmin).
 
+// GET /admin/skills — the engineered skill catalog (read-only; skills are code,
+// not authorable). Feeds the module authoring page's "binds skill" picker.
+router.get(
+  '/skills',
+  asyncHandler(async (_req: Request, res: Response) => {
+    sendSuccess(res, { skills: allModules().map((m) => ({ id: m.id, displayName: m.displayName })) });
+  }),
+);
+
 // GET /admin/modules — list modules with their versions.
 router.get(
   '/modules',

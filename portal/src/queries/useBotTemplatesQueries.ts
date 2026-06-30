@@ -338,3 +338,45 @@ export function useAdminModules(opts: { enabled?: boolean } = {}) {
     enabled: opts.enabled ?? true,
   });
 }
+
+/** The engineered skill catalog (read-only) — the options a module may bind. */
+export interface AdminSkill {
+  id: string;
+  displayName: string;
+}
+export function useAdminSkills(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ['admin', 'skills'] as const,
+    queryFn: async () => {
+      const res = await api.get<{ skills: AdminSkill[] }>('/admin/skills');
+      return res.skills;
+    },
+    enabled: opts.enabled ?? true,
+  });
+}
+
+/** Create a module + its first draft version (name, bound skill, prose). */
+export function useCreateModule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; description?: string; skillIds: string[]; prose?: string }) =>
+      api.post<{ module: AdminModule; version: AdminModuleVersion }>('/admin/modules', input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
+      toast.success('Module created');
+    },
+  });
+}
+
+/** Publish a module's draft version (draft → published, frozen). */
+export function usePublishModuleVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ moduleId, version }: { moduleId: string; version: number }) =>
+      api.post<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions/${version}/publish`, {}),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
+      toast.success('Module published');
+    },
+  });
+}

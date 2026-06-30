@@ -52,6 +52,9 @@ export interface BotTemplateVersion {
   body: string;
   changelog: string | null;
   expectedModules: string[];
+  /** Composable-templates: super-admin-selected module refs (authoritative when
+   *  present; falls back to expectedModules when null). Pinned at publish time. */
+  selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null;
   config: BotTemplateConfig;
   status: VersionStatus;
   publishedAt: string | null;
@@ -161,7 +164,7 @@ export function useArchiveBotTemplate(id: string) {
 export function useCreateTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[]; config?: BotTemplateConfig }) =>
+    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[]; selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null; config?: BotTemplateConfig }) =>
       api.post<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions`, input),
     onSuccess: (res) => {
       invalidate(id);
@@ -174,7 +177,7 @@ export function useCreateTemplateVersion(id: string) {
 export function useEditTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; config?: BotTemplateConfig; lockVersion: number }) =>
+    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null; config?: BotTemplateConfig; lockVersion: number }) =>
       api.put<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions/${input.version}`, input),
     onSuccess: (res) => {
       invalidate(id);
@@ -293,5 +296,45 @@ export function useUpdateTemplateGrants(id: string) {
       toast.success('Access updated');
     },
     onError: toastUnlessForceConflict,
+  });
+}
+
+// ── Authored Modules (composable-templates Phase 5) ──────────────────────────
+
+export interface AdminModuleVersion {
+  id: string;
+  moduleId: string;
+  version: number;
+  prose: string;
+  status: 'draft' | 'published' | 'unpublished';
+  lockVersion: number;
+}
+
+export interface AdminModule {
+  id: string;
+  name: string;
+  description: string | null;
+  /** Engineered skill ids this module binds (v1: exactly 1). */
+  skillIds: string[];
+}
+
+export interface AdminModuleRow {
+  module: AdminModule;
+  versions: AdminModuleVersion[];
+}
+
+/**
+ * Super-admin authored-module catalog (GET /admin/modules) — feeds the composable
+ * editor's module multi-select. `enabled` lets the page skip the fetch when the
+ * composable-templates flag is OFF (the legacy editor never reads it).
+ */
+export function useAdminModules(opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ['admin', 'modules'] as const,
+    queryFn: async () => {
+      const res = await api.get<{ modules: AdminModuleRow[] }>('/admin/modules');
+      return res.modules;
+    },
+    enabled: opts.enabled ?? true,
   });
 }

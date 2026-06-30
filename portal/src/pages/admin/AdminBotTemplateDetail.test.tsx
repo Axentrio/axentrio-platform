@@ -1,16 +1,29 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AdminBotTemplateDetail from './AdminBotTemplateDetail';
 
 // Mutable query state so a single test can drive the loading → loaded transition
 // (the exact shape that surfaced the hooks-after-early-return crash, React #310).
-const { state, updateSpy, createVersionSpy, publishSpy } = vi.hoisted(() => ({
+// `flags` toggles the composable-templates editor per-test (default OFF = legacy).
+const { state, updateSpy, createVersionSpy, publishSpy, flags } = vi.hoisted(() => ({
   state: { detail: { data: undefined, isLoading: true, isError: false } as { data: unknown; isLoading: boolean; isError: boolean } },
   updateSpy: vi.fn(async () => ({})),
   createVersionSpy: vi.fn(async () => ({ version: { version: 2, lockVersion: 0 } })),
   publishSpy: vi.fn(async () => ({ version: { version: 2 } })),
+  flags: { composable: false },
 }));
+
+// Flag mock — the editor reads COMPOSABLE_TEMPLATES_ENABLED at render via a live
+// binding, so the getter lets each test pick legacy (OFF) vs composable (ON).
+vi.mock('@/config/featureFlags', () => ({
+  get COMPOSABLE_TEMPLATES_ENABLED() { return flags.composable; },
+  CAPABILITY_READINESS_ENABLED: false,
+}));
+
+beforeEach(() => {
+  flags.composable = false; // default: legacy editor (existing tests)
+});
 
 const MOCK_DETAIL = {
   template: { id: 't1', key: 'plumber', displayName: 'Plumber Booking Bot', status: 'active', category: null, description: 'Books plumbers', availableToAllTenants: true, createdAt: '', updatedAt: '' },
@@ -37,6 +50,14 @@ vi.mock('@/queries/useBotTemplatesQueries', () => {
     useUpdateTemplateGrants: m,
     useTemplateTestChat: m,
     usePreviewLedger: m,
+    useAdminModules: () => ({
+      data: [
+        {
+          module: { id: 'mod1', name: 'Booking flow', description: null, skillIds: ['booking'] },
+          versions: [{ id: 'mv1', moduleId: 'mod1', version: 1, prose: '', status: 'published', lockVersion: 0 }],
+        },
+      ],
+    }),
     forceConflict: () => null,
   };
 });
@@ -119,6 +140,35 @@ describe('AdminBotTemplateDetail — two-pane authoring editor', () => {
     fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
     fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
     await waitFor(() => expect(createVersionSpy).toHaveBeenCalled());
+    await waitFor(() => expect(publishSpy).toHaveBeenCalledWith(2));
+  });
+});
+
+describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () => {
+  it('renders the module multi-select and saves selectedModuleRefs on publish', async () => {
+    flags.composable = true;
+    createVersionSpy.mockClear();
+    publishSpy.mockClear();
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+
+    // The module multi-select renders the published module as a selectable option,
+    // and the legacy free-text "Expected modules" control is gone.
+    const moduleButton = screen.getByRole('button', { name: /booking flow/i });
+    expect(moduleButton).toBeInTheDocument();
+    expect(screen.queryByText(/expected modules/i)).not.toBeInTheDocument();
+
+    fireEvent.click(moduleButton);
+    fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+
+    // The version save pins the selected module to its latest published version.
+    await waitFor(() =>
+      expect(createVersionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ selectedModuleRefs: [{ moduleId: 'mod1', moduleVersion: 1 }] }),
+      ),
+    );
     await waitFor(() => expect(publishSpy).toHaveBeenCalledWith(2));
   });
 });

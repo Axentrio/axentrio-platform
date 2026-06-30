@@ -29,6 +29,9 @@ import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, Command
 import TagInput from '@/pages/knowledge/TagInput';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { useAdminTenantsAll } from '@/queries/useAdminQueries';
+import { SkillStateCard } from '@/components/SkillStateCard';
+import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
+import type { SkillState, SkillRemedy } from '@contracts/skill-readiness';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -39,8 +42,8 @@ import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
-  usePreviewLedger,
-  forceConflict, type BotTemplateVersion, type BotTemplateConfig,
+  usePreviewLedger, useAdminModules,
+  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type AdminModuleRow,
 } from '../../queries/useBotTemplatesQueries';
 
 // Platform defaults — seeded as REAL values in the editor (not grey placeholders)
@@ -131,6 +134,16 @@ const REASON_TEXT: Record<string, string> = {
   bookingConfigured: 'booking isn’t set up yet',
 };
 
+// Composable-templates (Phase 5): the engineered skills a module can bind, with
+// the preview tools each exposes. v1 = booking only; used to (a) feed the bound
+// skills into the scenario preview and (b) derive a per-skill state badge from the
+// ledger. ponytail: booking-only by design — extend this map as skills land.
+const SKILL_PREVIEW: Record<string, { tools: string[]; label: string }> = {
+  booking: { tools: ['create_booking', 'check_availability', 'request_appointment'], label: 'Bookings' },
+};
+const stateToRemedy = (s: SkillState): SkillRemedy =>
+  s === 'unentitled' ? 'upgrade' : s === 'disabled' ? 'turn on' : s === 'unconfigured' ? 'finish setup' : null;
+
 // Blocks the author can't touch from a template — they need a bound bot, a live
 // conversation, or tenant-level config, so they can NEVER appear in a template
 // preview. Hidden entirely (they're not gaps, and not actionable here).
@@ -192,8 +205,8 @@ function countGuardrails(c: BotTemplateConfig): number {
   return n;
 }
 
-type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; config: ConfigDraft };
-const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', config: EMPTY_CONFIG };
+type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedModuleIds: string[]; config: ConfigDraft };
+const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', selectedModuleIds: [], config: EMPTY_CONFIG };
 
 const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
@@ -214,6 +227,9 @@ const AdminBotTemplateDetail: React.FC = () => {
   const grantsMut = useUpdateTemplateGrants(id);
   const testChat = useTemplateTestChat();
   const preview = usePreviewLedger();
+  // Composable-templates: authored-module catalog for the module multi-select.
+  // Only fetched when the flag is ON (the legacy editor never reads it).
+  const { data: modulesData } = useAdminModules({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
   const draftBaselineRef = useRef<string>('');
 
   const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
@@ -233,8 +249,38 @@ const AdminBotTemplateDetail: React.FC = () => {
   // safe to fire on every edit. preview.data is NOT a dependency → no refresh loop.
   const previewMutate = preview.mutate;
   const draftConfigKey = JSON.stringify(draft.config);
-  // Preview re-compiles on body/config or scenario change. Modules come from THIS
-  // form's Expected modules, so the preview reflects what the author declared.
+
+  // Map selected module ids → the engineered skills they bind, and → the publish-
+  // pinned {moduleId, moduleVersion} refs (latest published version). Defined as
+  // closures over modulesData so both the preview effect (above the early returns)
+  // and save (below) share one source of truth.
+  const moduleRows: AdminModuleRow[] = modulesData ?? [];
+  const boundSkillIds = (ids: string[]): string[] => {
+    const out = new Set<string>();
+    for (const id of ids) {
+      const row = moduleRows.find((r) => r.module.id === id);
+      for (const s of row?.module.skillIds ?? []) out.add(s);
+    }
+    return [...out];
+  };
+  const boundModuleRefs = (ids: string[]): { moduleId: string; moduleVersion: number }[] =>
+    ids.map((id) => {
+      const published = (moduleRows.find((r) => r.module.id === id)?.versions ?? []).filter((v) => v.status === 'published');
+      const moduleVersion = published.length ? Math.max(...published.map((v) => v.version)) : 1;
+      return { moduleId: id, moduleVersion };
+    });
+
+  // The skills the scenario preview activates. Composable: the selected modules'
+  // bound skills; legacy: the free-text Expected modules. (When composable, the
+  // saved expectedModules mirror these bound skills, so both agree.)
+  const previewActiveModules = COMPOSABLE_TEMPLATES_ENABLED
+    ? boundSkillIds(draft.selectedModuleIds)
+    : draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
+  const previewActiveModulesKey = previewActiveModules.join(',');
+
+  // Preview re-compiles on body/config or scenario change. The active skills come
+  // from THIS form (selected modules when composable, else Expected modules), so
+  // the preview reflects what the author declared.
   useEffect(() => {
     if (!draft.open) return;
     const handle = setTimeout(() => {
@@ -243,13 +289,14 @@ const AdminBotTemplateDetail: React.FC = () => {
         config: draftToConfig(draft.config),
         tier: pvTier,
         channel: pvChannel,
-        activeModules: draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean),
+        activeModules: previewActiveModulesKey ? previewActiveModulesKey.split(',') : [],
       });
     }, 300);
     return () => clearTimeout(handle);
-    // draftConfigKey stands in for draft.config (object identity is unstable).
+    // draftConfigKey stands in for draft.config (object identity is unstable);
+    // previewActiveModulesKey stands in for the derived active-skills array.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [previewMutate, draft.open, draft.body, draftConfigKey, pvTier, pvChannel, draft.expectedModules]);
+  }, [previewMutate, draft.open, draft.body, draftConfigKey, pvTier, pvChannel, previewActiveModulesKey]);
 
   if (isLoading) return <PageSkeleton variant="list" rows={4} />;
   if (isError || !data) return <InlineError message={t('admin.botTemplates.errors.load')} />;
@@ -301,7 +348,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   // Serialized snapshot of the editable fields, captured when a draft opens, to
   // detect unsaved changes before discarding. (draftBaselineRef hook is declared
   // above the early returns to keep hook order stable.)
-  const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, config: d.config });
+  const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, selectedModuleIds: d.selectedModuleIds, config: d.config });
   const openDraft = (d: VersionDraft) => {
     draftBaselineRef.current = draftKey(d);
     setTestLog([]);
@@ -344,6 +391,7 @@ const AdminBotTemplateDetail: React.FC = () => {
 
   // Prefill a new draft from the most recent version (body + modules + config) so
   // it's an edit-from-here, not a blank slate. Changelog stays empty (new entry).
+  const refIds = (v: BotTemplateVersion | undefined) => (v?.selectedModuleRefs ?? []).map((r) => r.moduleId);
   const openCreate = () => {
     const latest = versions[0];
     openDraft({
@@ -352,13 +400,14 @@ const AdminBotTemplateDetail: React.FC = () => {
       mode: 'create',
       body: latest?.body ?? '',
       expectedModules: latest ? latest.expectedModules.join(', ') : '',
+      selectedModuleIds: refIds(latest),
       config: latest ? configToDraft(latest.config) : EMPTY_CONFIG,
     });
   };
   const openEdit = (v: BotTemplateVersion) =>
-    openDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedModuleIds: refIds(v), config: configToDraft(v.config) });
   const openView = (v: BotTemplateVersion) =>
-    openDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedModuleIds: refIds(v), config: configToDraft(v.config) });
 
   // Delete a draft/unpublished version: always confirm; an unpublished version that
   // bots pin then runs the block-or-force flow (unpins them to latest).
@@ -380,12 +429,29 @@ const AdminBotTemplateDetail: React.FC = () => {
       },
     });
 
-  const saveDraft = async () => {
+  // The version body shared by save + publish. Composable: persist selectedModuleRefs
+  // (authoritative) and mirror the bound skills into expectedModules so the legacy
+  // fallback stays consistent. Legacy: free-text Expected modules, no refs (flag OFF
+  // = unchanged wire shape).
+  const versionPayload = () => {
     const config = draftToConfig(draft.config);
+    if (COMPOSABLE_TEMPLATES_ENABLED) {
+      return {
+        body: draft.body,
+        changelog: draft.changelog || null,
+        expectedModules: boundSkillIds(draft.selectedModuleIds),
+        selectedModuleRefs: boundModuleRefs(draft.selectedModuleIds),
+        config,
+      };
+    }
+    return { body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config };
+  };
+
+  const saveDraft = async () => {
     if (draft.mode === 'create') {
-      await createVersionMut.mutateAsync({ body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+      await createVersionMut.mutateAsync(versionPayload());
     } else {
-      await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+      await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, ...versionPayload() });
     }
     setDraft(EMPTY_DRAFT);
   };
@@ -397,15 +463,14 @@ const AdminBotTemplateDetail: React.FC = () => {
   // creating a duplicate (create mode) or sending a stale lockVersion (edit mode).
   // Mutations toast their own errors, so a failure just leaves the editor open.
   const publishDraft = async () => {
-    const config = draftToConfig(draft.config);
     try {
       let version: number;
       if (draft.mode === 'create') {
-        const res = await createVersionMut.mutateAsync({ body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+        const res = await createVersionMut.mutateAsync(versionPayload());
         version = res.version.version;
         setDraft((d) => ({ ...d, mode: 'edit', version, lockVersion: res.version.lockVersion }));
       } else {
-        const res = await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+        const res = await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, ...versionPayload() });
         version = draft.version!;
         setDraft((d) => ({ ...d, lockVersion: res.version.lockVersion }));
       }
@@ -718,7 +783,7 @@ const AdminBotTemplateDetail: React.FC = () => {
             {/* LEFT — author */}
             <div className="space-y-4 overflow-y-auto p-6">
             <div className="space-y-1.5">
-              <Label htmlFor="d-body">{t('admin.botTemplates.editor.body')}</Label>
+              <Label htmlFor="d-body">{COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}</Label>
               <Textarea id="d-body" rows={14} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
               {draft.mode !== 'view' && (
                 <div className="flex flex-wrap gap-1.5">
@@ -734,38 +799,68 @@ const AdminBotTemplateDetail: React.FC = () => {
                   ))}
                 </div>
               )}
-              {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.bodyHint')}</p>}
+              {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPromptHint') : t('admin.botTemplates.editor.bodyHint')}</p>}
               {draft.mode !== 'view' && unknownPlaceholders(draft.body).length > 0 && (
                 <p className="text-xs text-amber-400">
                   {t('admin.botTemplates.editor.unknownPlaceholders', { placeholders: unknownPlaceholders(draft.body).map((p) => `{${p}}`).join(', ') })}
                 </p>
               )}
             </div>
-            <div className="space-y-1.5">
-              <Label>{t('admin.botTemplates.editor.expectedModules')}</Label>
-              {(() => {
-                const ro = draft.mode === 'view';
-                const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
-                const toggleModule = (mid: string) => {
-                  const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
-                  setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
-                };
-                if (moduleCatalog.length === 0) return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
-                return (
-                  <div className="flex flex-wrap gap-1.5">
-                    {moduleCatalog.map((mod) => {
-                      const selected = modulesArr.includes(mod.id);
-                      return (
-                        <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
-                          {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
-                        </Button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.expectedModulesHint')}</p>
-            </div>
+            {COMPOSABLE_TEMPLATES_ENABLED ? (
+              <div className="space-y-1.5">
+                <Label>{t('admin.botTemplates.editor.modules')}</Label>
+                {(() => {
+                  const ro = draft.mode === 'view';
+                  // v1 = at most one module per version: selecting one replaces any
+                  // current pick; clicking the selected one clears it.
+                  const toggleModule = (mid: string) =>
+                    setDraft((d) => ({ ...d, selectedModuleIds: d.selectedModuleIds.includes(mid) ? [] : [mid] }));
+                  const publishedRows = moduleRows.filter((r) => r.versions.some((v) => v.status === 'published'));
+                  if (publishedRows.length === 0) {
+                    return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-1.5">
+                      {publishedRows.map(({ module }) => {
+                        const selected = draft.selectedModuleIds.includes(module.id);
+                        return (
+                          <Button key={module.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(module.id)}>
+                            {selected && <Check className="h-3 w-3 mr-1" />}{module.name}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.modulesHint')}</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label>{t('admin.botTemplates.editor.expectedModules')}</Label>
+                {(() => {
+                  const ro = draft.mode === 'view';
+                  const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
+                  const toggleModule = (mid: string) => {
+                    const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
+                    setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
+                  };
+                  if (moduleCatalog.length === 0) return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
+                  return (
+                    <div className="flex flex-wrap gap-1.5">
+                      {moduleCatalog.map((mod) => {
+                        const selected = modulesArr.includes(mod.id);
+                        return (
+                          <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
+                            {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
+                          </Button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.expectedModulesHint')}</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="d-changelog">{t('admin.botTemplates.editor.changelog')}</Label>
               <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
@@ -909,7 +1004,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                     <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <p className="text-[10px] text-text-tertiary">Booking and other modules follow the template’s Expected modules above. Channel only tweaks reply length and proactive contact.</p>
+                <p className="text-[10px] text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select above. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules above. Channel only tweaks reply length and proactive contact.'}</p>
               </div>
 
               {preview.isPending && <p className="text-xs text-text-tertiary">Compiling…</p>}
@@ -933,6 +1028,28 @@ const AdminBotTemplateDetail: React.FC = () => {
                         );
                       })}
                     </div>
+
+                    {/* Composable-templates: per-skill state badges for the modules
+                        this template binds, derived from the scenario ledger. */}
+                    {COMPOSABLE_TEMPLATES_ENABLED && (() => {
+                      const skills = boundSkillIds(draft.selectedModuleIds);
+                      if (skills.length === 0) {
+                        return <p className="text-xs text-text-tertiary">Add a module on the left to preview its skill.</p>;
+                      }
+                      return (
+                        <div className="space-y-1.5">
+                          <div className="text-[10px] uppercase tracking-wider text-text-tertiary">Skills from modules</div>
+                          {skills.map((sid) => {
+                            const readyTools = (SKILL_PREVIEW[sid]?.tools ?? []).filter((tn) => ledger.allowedTools.includes(tn));
+                            // Preview ledger bypasses entitlements, so a selected skill
+                            // reads ready when its tools surface, else degraded (unconfigured).
+                            const state: SkillState = readyTools.length > 0 ? 'ready' : 'unconfigured';
+                            const name = moduleCatalog.find((mc) => mc.id === sid)?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
+                            return <SkillStateCard key={sid} skill={{ id: sid, name, state, remedy: stateToRemedy(state) }} readyTools={readyTools} />;
+                          })}
+                        </div>
+                      );
+                    })()}
 
                     <Accordion type="single" collapsible className="w-full">
                       <AccordionItem value="tech" className="rounded-xl border border-edge px-4 border-b">

@@ -9,14 +9,29 @@
 // (the composer is handed module sections as opaque strings); SPECIALTY_<key> is
 // added by the SpecialtyCatalog work. See plan-dynamic-prompt-builder.md L5–L7.
 
-export type ExclusionReason =
-  | 'toolAbsent'
-  | 'channel'
-  | 'tier'
-  | 'bookingConfigured'
-  | 'empty'
-  | 'module'
-  | 'specialty';
+// Canonical exclusion reasons. Runtime-introspectable (a `const` tuple, not a
+// bare type union) so the set is testable and a single source of truth — Phase 6
+// of the composable-templates work maps reason → tenant remedy off this list.
+// The first 7 are original and MUST NOT be removed (existing ledger consumers +
+// persisted AgentTrace rows depend on them); the last 5 back the skill-state
+// machine (skill-state.ts). See .scratch/plan-composable-templates-implementation.md.
+export const EXCLUSION_REASONS = [
+  'toolAbsent',
+  'channel',
+  'tier',
+  'bookingConfigured',
+  'empty',
+  'module',
+  'specialty',
+  // skill-state machine (Phase 1)
+  'unentitled',
+  'disabled',
+  'unconfigured',
+  'error',
+  'absent',
+] as const;
+
+export type ExclusionReason = (typeof EXCLUSION_REASONS)[number];
 
 export interface ExcludedBlock {
   key: string;
@@ -25,8 +40,13 @@ export interface ExcludedBlock {
 
 // Canonical ledger block keys — the composition's vocabulary. Impl and tests
 // reference these, never bare string literals, so they can't drift.
-// MODULE_<id> and SPECIALTY_<key> are dynamic families recorded outside the
-// composer and so are not listed here.
+// Dynamic key families recorded OUTSIDE the static set below (so not listed here):
+//   MODULE_<id>          — engineered module sections, owned by agent.service (legacy; kept).
+//   SPECIALTY_<key>      — SpecialtyCatalog exception blocks.
+//   SKILL_<id>           — skill-state machine (additive, Phase 2+); state carried in the exclusion reason.
+//   AUTHORED_MODULE_<id> — authored module prose (Phase 4). Distinct from MODULE_<id> on purpose:
+//                          the composer still never emits MODULE_<id> for authored content (see test),
+//                          and these three families coexist with no key reuse.
 export const PROMPT_BLOCK_KEYS = {
   TEMPLATE_BODY: 'TEMPLATE_BODY',
   CUSTOM_INSTRUCTIONS: 'CUSTOM_INSTRUCTIONS',
@@ -70,6 +90,12 @@ export interface PromptTrace {
   resolvedTemplateVersion?: number;
   includedBlocks: string[];
   excludedBlocks: ExcludedBlock[];
+  /** Additive skill-state mirror (composable-templates Phase 2): each module is
+   *  also recorded as SKILL_<id> here, in fields SEPARATE from includedBlocks /
+   *  excludedBlocks so the legacy MODULE_<id> family is never touched or shadowed.
+   *  No consumer reads these yet; Phase 3a enriches them with real skill state. */
+  includedSkills: string[];
+  excludedSkills: ExcludedBlock[];
   allowedTools: string[];
 }
 
@@ -90,10 +116,18 @@ export function buildPromptTrace(
   },
 ): PromptTrace {
   const active = new Set(opts.activeModuleIds);
+  const inactiveExpected = (opts.expectedModuleIds ?? []).filter((id) => !active.has(id));
   const includedModules = opts.activeModuleIds.map((id) => `MODULE_${id}`);
-  const excludedModules: ExcludedBlock[] = (opts.expectedModuleIds ?? [])
-    .filter((id) => !active.has(id))
-    .map((id) => ({ key: `MODULE_${id}`, reason: 'module' as const }));
+  const excludedModules: ExcludedBlock[] = inactiveExpected.map((id) => ({
+    key: `MODULE_${id}`,
+    reason: 'module' as const,
+  }));
+  // Additive SKILL_<id> mirror — same module ids, distinct fields (Phase 2).
+  const includedSkills = opts.activeModuleIds.map((id) => `SKILL_${id}`);
+  const excludedSkills: ExcludedBlock[] = inactiveExpected.map((id) => ({
+    key: `SKILL_${id}`,
+    reason: 'module' as const,
+  }));
 
   return {
     scope: 'customer_reply',
@@ -103,6 +137,8 @@ export function buildPromptTrace(
       : {}),
     includedBlocks: [...ledger.getIncluded(), ...includedModules],
     excludedBlocks: [...ledger.getExcluded(), ...excludedModules],
+    includedSkills,
+    excludedSkills,
     allowedTools: ledger.getAllowedTools(),
   };
 }

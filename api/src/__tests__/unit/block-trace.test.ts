@@ -25,6 +25,24 @@ describe('buildPromptTrace — merge composer ledger with agent.service module e
     expect(out.excludedBlocks.some((e) => e.key === 'MODULE_booking')).toBe(false);
   });
 
+  // Composable-templates Phase 2 — the trace additively mirrors each module as a
+  // SKILL_<id> in a SEPARATE field. MODULE_<id> stays untouched (analytics depend
+  // on it); SKILL_ is purely additive and must never collide with it.
+  it('mirrors each active module as SKILL_<id> in includedSkills, leaving MODULE_<id> untouched', () => {
+    const ledger = createBlockLedger([]);
+    const out = buildPromptTrace(ledger, { activeModuleIds: ['booking'] });
+    expect(out.includedBlocks).toContain('MODULE_booking'); // legacy, unchanged
+    expect(out.includedSkills).toContain('SKILL_booking'); // additive forward alias
+    expect(out.includedBlocks).not.toContain('SKILL_booking'); // distinct arrays, no collision
+  });
+
+  it('mirrors expected-but-inactive modules as excluded SKILL_<id> (reason module)', () => {
+    const ledger = createBlockLedger([]);
+    const out = buildPromptTrace(ledger, { activeModuleIds: [], expectedModuleIds: ['booking'] });
+    expect(out.excludedSkills).toContainEqual({ key: 'SKILL_booking', reason: 'module' });
+    expect(out.excludedBlocks).toContainEqual({ key: 'MODULE_booking', reason: 'module' }); // legacy, unchanged
+  });
+
   it('passes through allowedTools and the resolved template id/version', () => {
     const ledger = createBlockLedger(['kb_search', 'capture_lead']);
     const out = buildPromptTrace(ledger, { activeModuleIds: [], resolvedTemplateId: 'tpl-1', resolvedTemplateVersion: 3 });

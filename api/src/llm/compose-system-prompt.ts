@@ -135,6 +135,11 @@ interface AgentCtx {
   skills?: SkillConfig[];
   kbContext?: string;
   moduleSections?: string[];
+  /** Composable-templates Phase 4: authored MODULE prose (workflow intent, no tool
+   *  claims) for the modules selected by the bound template, already filtered by the
+   *  caller to ready skills. Emitted as AUTHORED_MODULE_<id> blocks — distinct from
+   *  the engineered MODULE_<id> (which the composer never emits). */
+  authoredModules?: { id: string; prose: string }[];
   customerName?: string;
   /** Resolved bot-template body (layer 2). Empty/absent contributes nothing.
    *  Resolved by the caller via template-resolver (`resolveTemplateBody`). */
@@ -243,7 +248,7 @@ function joinInstructionLayers(
 // owns those); the merge with agent.service's module entries is a no-overlap
 // union. Any NEW customer-facing composition mode must thread its own ledger.
 function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
-  const { ai, tenantName, tools, customerName, kbContext, moduleSections } = ctx;
+  const { ai, tenantName, tools, customerName, kbContext, moduleSections, authoredModules } = ctx;
   const brandVoice = ai?.brandVoice;
   const guardrails = ai?.guardrails;
   const skills: SkillConfig[] = ctx.skills ?? [];
@@ -451,6 +456,20 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
   // composed in catalog order.
   for (const section of moduleSections ?? []) {
     if (section) sections.push(section);
+  }
+
+  // Authored MODULE prose (composable-templates Phase 4) — workflow wording the
+  // super-admin authored for the bound template's selected modules. Recorded under
+  // the AUTHORED_MODULE_<id> family, distinct from the engineered MODULE_<id> the
+  // composer never emits. The prose carries no tool claims (lint-enforced upstream).
+  for (const m of authoredModules ?? []) {
+    const prose = m.prose?.trim();
+    if (prose) {
+      sections.push(`\n${prose}`);
+      ledger.include(`AUTHORED_MODULE_${m.id}`);
+    } else {
+      ledger.exclude(`AUTHORED_MODULE_${m.id}`, 'empty');
+    }
   }
 
   // KB context (pre-fetched) — fenced as untrusted reference data (T9 trust

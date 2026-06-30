@@ -107,6 +107,28 @@ export function validateModuleProse(value: unknown): string {
   return prose;
 }
 
+/** Validates a template version's selected module refs (composable-templates
+ *  Phase 4). null/undefined → undefined (legacy expectedModules path). Shape-only:
+ *  existence of each (moduleId, moduleVersion) is enforced when the editor binds
+ *  them; here we guarantee well-formed refs so the resolver can trust them. */
+export function validateSelectedModuleRefs(
+  value: unknown,
+): { moduleId: string; moduleVersion: number }[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new ValidationError('selectedModuleRefs must be an array or null');
+  return value.map((r, i) => {
+    if (!r || typeof r !== 'object') throw new ValidationError(`selectedModuleRefs[${i}] must be an object`);
+    const ref = r as Record<string, unknown>;
+    if (typeof ref.moduleId !== 'string' || !ref.moduleId.trim()) {
+      throw new ValidationError(`selectedModuleRefs[${i}].moduleId must be a non-empty string`);
+    }
+    if (typeof ref.moduleVersion !== 'number' || !Number.isInteger(ref.moduleVersion) || ref.moduleVersion < 1) {
+      throw new ValidationError(`selectedModuleRefs[${i}].moduleVersion must be a positive integer`);
+    }
+    return { moduleId: ref.moduleId, moduleVersion: ref.moduleVersion };
+  });
+}
+
 /** Caps for the template-owned policy guardrails (mirror the per-bot form caps). */
 const GUARDRAIL_TEXT_MAX = 1000;
 const TOPICS_MAX = 50;
@@ -346,10 +368,11 @@ async function fanOutTemplateInvalidation(templateId: string, extraTenantIds: st
 /** Create a draft version with a row-locked, transactionally-allocated number. */
 export async function createDraftVersion(
   templateId: string,
-  input: { body: string; changelog?: string | null; expectedModules?: unknown; config?: unknown },
+  input: { body: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown },
 ): Promise<BotTemplateVersion> {
   const { warnings: _w } = validateBody(input.body);
   const expectedModules = validateExpectedModules(input.expectedModules);
+  const selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs);
   const config = validateConfig(input.config);
 
   return AppDataSource.transaction(async (manager) => {
@@ -377,6 +400,7 @@ export async function createDraftVersion(
       body: input.body,
       changelog: input.changelog?.trim() || null,
       expectedModules,
+      ...(selectedModuleRefs !== undefined ? { selectedModuleRefs } : {}),
       config,
       status: 'draft',
       lockVersion: 0,
@@ -389,7 +413,7 @@ export async function createDraftVersion(
 export async function editDraftVersion(
   templateId: string,
   version: number,
-  input: { body?: string; changelog?: string | null; expectedModules?: unknown; config?: unknown; lockVersion?: number },
+  input: { body?: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown; lockVersion?: number },
 ): Promise<BotTemplateVersion> {
   return AppDataSource.transaction(async (manager) => {
     const repo = manager.getRepository(BotTemplateVersion);
@@ -412,6 +436,7 @@ export async function editDraftVersion(
     }
     if (input.changelog !== undefined) row.changelog = input.changelog?.trim() || null;
     if (input.expectedModules !== undefined) row.expectedModules = validateExpectedModules(input.expectedModules);
+    if (input.selectedModuleRefs !== undefined) row.selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs) ?? null;
     if (input.config !== undefined) row.config = validateConfig(input.config);
     row.lockVersion += 1;
     const saved = await repo.save(row);

@@ -34,6 +34,14 @@ import {
   validateConfig,
   type Replacement,
 } from '../../templates/template-admin.service';
+import {
+  createModule,
+  editModule,
+  createModuleDraftVersion,
+  editModuleDraftVersion,
+  publishModuleVersion,
+  listModules,
+} from '../../templates/module-admin.service';
 import { buildSystemPrompt } from '../../llm/prompt-builder';
 import { previewLedger } from '../../templates/template-preview';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
@@ -331,6 +339,7 @@ router.post(
       body: text,
       changelog: reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null,
       expectedModules: body.expectedModules,
+      selectedModuleRefs: body.selectedModuleRefs,
       config: body.config,
     });
     await logAudit(req.userId!, 'bot_template.version_created', 'bot_template', req.params.id, undefined, { version: version.version });
@@ -352,6 +361,7 @@ router.put(
       body: typeof body.body === 'string' ? body.body : undefined,
       changelog: body.changelog === undefined ? undefined : (reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null),
       expectedModules: body.expectedModules,
+      selectedModuleRefs: body.selectedModuleRefs,
       config: body.config,
       lockVersion,
     });
@@ -445,6 +455,86 @@ router.put(
       reassignedTenants: result.reassignedTenants.length,
     });
     sendSuccess(res, result);
+  }),
+);
+
+// ── Authored Modules (composable-templates Phase 4) ──────────────────────────
+// Super-admin CRUD for authored Modules + their immutable versions. Same auth +
+// audit posture as the template routes above (mounted behind requireSuperAdmin).
+
+// GET /admin/modules — list modules with their versions.
+router.get(
+  '/modules',
+  asyncHandler(async (_req: Request, res: Response) => {
+    sendSuccess(res, { modules: await listModules() });
+  }),
+);
+
+// POST /admin/modules — create a module + its first draft version.
+router.post(
+  '/modules',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await createModule({
+      name: body.name,
+      description: body.description,
+      skillIds: body.skillIds,
+      prose: body.prose,
+    });
+    await logAudit(req.userId!, 'module.created', 'module', result.module.id, undefined, { name: result.module.name });
+    res.status(201);
+    sendSuccess(res, result);
+  }),
+);
+
+// PUT /admin/modules/:id — edit a module's catalog fields.
+router.put(
+  '/modules/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const module = await editModule(req.params.id, {
+      name: body.name,
+      description: body.description,
+      skillIds: body.skillIds,
+    });
+    await logAudit(req.userId!, 'module.edited', 'module', req.params.id, undefined, undefined);
+    sendSuccess(res, { module });
+  }),
+);
+
+// POST /admin/modules/:id/versions — create a draft version.
+router.post(
+  '/modules/:id/versions',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const version = await createModuleDraftVersion(req.params.id, { prose: body.prose });
+    await logAudit(req.userId!, 'module.version_created', 'module', req.params.id, undefined, { version: version.version });
+    res.status(201);
+    sendSuccess(res, { version });
+  }),
+);
+
+// PUT /admin/modules/:id/versions/:version — edit a DRAFT (optimistic concurrency).
+router.put(
+  '/modules/:id/versions/:version',
+  asyncHandler(async (req: Request, res: Response) => {
+    const version = parseVersion(req.params.version);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const lockVersion = body.lockVersion === undefined ? undefined : Number(body.lockVersion);
+    const updated = await editModuleDraftVersion(req.params.id, version, { prose: body.prose, lockVersion });
+    await logAudit(req.userId!, 'module.version_edited', 'module', req.params.id, undefined, { version });
+    sendSuccess(res, { version: updated });
+  }),
+);
+
+// POST /admin/modules/:id/versions/:version/publish — draft → published (frozen).
+router.post(
+  '/modules/:id/versions/:version/publish',
+  asyncHandler(async (req: Request, res: Response) => {
+    const version = parseVersion(req.params.version);
+    const published = await publishModuleVersion(req.params.id, version, req.userId!);
+    await logAudit(req.userId!, 'module.version_published', 'module', req.params.id, undefined, { version });
+    sendSuccess(res, { version: published });
   }),
 );
 

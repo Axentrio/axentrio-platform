@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { validateModuleProse } from '../../templates/template-admin.service';
+import { validateModuleProse, validateSelectedModuleRefs } from '../../templates/template-admin.service';
 import { selectSkillIds } from '../../templates/template-resolver';
+import { validateSkillIds } from '../../templates/module-admin.service';
 
 // Composable-templates Phase 4 — authored-module guards.
 // validateModuleProse: prose carries workflow INTENT only, never tool claims (the
@@ -45,5 +46,39 @@ describe('selectSkillIds — selected modules → skills, fallback to expectedMo
 
   it('treats an empty refs array as "no refs" (uses expectedModules)', () => {
     expect(selectSkillIds({ selectedModuleRefs: [], expectedModules: ['booking'] }, () => [])).toEqual(['booking']);
+  });
+});
+
+describe('validateSelectedModuleRefs — well-formed refs or the legacy path', () => {
+  it('null/undefined → undefined (use expectedModules)', () => {
+    expect(validateSelectedModuleRefs(null)).toBeUndefined();
+    expect(validateSelectedModuleRefs(undefined)).toBeUndefined();
+  });
+
+  it('accepts well-formed refs', () => {
+    expect(validateSelectedModuleRefs([{ moduleId: 'm1', moduleVersion: 2 }])).toEqual([
+      { moduleId: 'm1', moduleVersion: 2 },
+    ]);
+  });
+
+  it('rejects malformed refs', () => {
+    expect(() => validateSelectedModuleRefs('x')).toThrow();
+    expect(() => validateSelectedModuleRefs([{ moduleId: 'm1' }])).toThrow(/moduleVersion/i);
+    expect(() => validateSelectedModuleRefs([{ moduleId: '', moduleVersion: 1 }])).toThrow(/moduleId/i);
+  });
+});
+
+describe('validateSkillIds — exactly one known skill (v1)', () => {
+  it('accepts a single known catalog skill', () => {
+    expect(validateSkillIds(['booking'])).toEqual(['booking']);
+  });
+
+  it('rejects an unknown skill id', () => {
+    expect(() => validateSkillIds(['nope'])).toThrow(/unknown skill/i);
+  });
+
+  it('rejects zero or multiple skills in v1', () => {
+    expect(() => validateSkillIds([])).toThrow(/exactly one/i);
+    expect(() => validateSkillIds(['booking', 'booking'])).toThrow(/exactly one/i);
   });
 });

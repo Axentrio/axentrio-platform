@@ -52,6 +52,7 @@ vi.mock('@/queries/useBotsQueries', () => ({
     },
   }),
   useBindBotTemplate: () => ({ mutate: mockBind, isPending: false }),
+  useSkillReadiness: () => ({ data: [] }),
   useBotDetail: () => ({ data: { businessHours: null } }),
   useUpdateBot: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));

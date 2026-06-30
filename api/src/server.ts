@@ -54,6 +54,7 @@ import integrationsRoutes from './knowledge/integrations.routes';
 import featureTogglesRoutes from './routes/feature-toggles.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import botsRoutes from './routes/bots.routes';
+import skillReadinessRoutes from './routes/skill-readiness.routes';
 import demandSignalsRoutes from './routes/demand-signals.routes';
 import leadsRoutes from './routes/leads.routes';
 import entitlementsRoutes from './routes/entitlements.routes';
@@ -314,6 +315,8 @@ apiRouter.use('/integrations/google', googleCalendarRoutes);
 apiRouter.use('/integrations/outlook', outlookCalendarRoutes);
 apiRouter.use('/canned-responses', cannedResponseRoutes);
 apiRouter.use('/bots', botsRoutes);
+// Additive Phase-6 endpoint on the same base (own router, won't touch bots CRUD).
+apiRouter.use('/bots', skillReadinessRoutes);
 apiRouter.use('/demand-signals', demandSignalsRoutes);
 apiRouter.use('/leads', leadsRoutes);
 apiRouter.use('/entitlements', entitlementsRoutes);

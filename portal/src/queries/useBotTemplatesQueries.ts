@@ -238,6 +238,27 @@ export function usePreviewLedger() {
   });
 }
 
+export interface UnavailableTemplateBot {
+  botId: string;
+  tenantId: string;
+  botName: string;
+  templateId: string;
+  pinnedVersion: string | null;
+  tenantName: string;
+  reason: 'missing_or_archived' | 'no_published_version';
+}
+
+/** L9 — superadmin: bots whose bound template is unavailable (missing/archived or
+ *  has no published version). Read-only operational snapshot. */
+export function useUnavailableTemplates() {
+  return useQuery({
+    queryKey: ['admin', 'observability', 'unavailable-templates'],
+    queryFn: () => api.get<{ bots: UnavailableTemplateBot[]; count: number }>(
+      '/admin/observability/unavailable-templates',
+    ),
+  });
+}
+
 export function useDeleteTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({

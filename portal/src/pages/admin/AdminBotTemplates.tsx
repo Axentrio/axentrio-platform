@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronRight, FileText } from 'lucide-react';
+import { Plus, ChevronRight, FileText, CircleCheck, TriangleAlert } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,13 +17,15 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { useAdminBotTemplates, useCreateBotTemplate } from '../../queries/useBotTemplatesQueries';
+import { useAdminBotTemplates, useCreateBotTemplate, useUnavailableTemplates } from '../../queries/useBotTemplatesQueries';
 
 const AdminBotTemplates: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: templates, isLoading, isError } = useAdminBotTemplates();
   const createMut = useCreateBotTemplate();
+  const health = useUnavailableTemplates();
+  const strandedBots = health.data?.bots ?? [];
 
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ key: '', displayName: '', description: '', availableToAllTenants: false });
@@ -121,6 +123,66 @@ const AdminBotTemplates: React.FC = () => {
           </Table>
         </CardContent>
       </Card>
+
+      {/* Template health (L9) — bots stranded on an unavailable template. Independent
+          + fail-soft: its own loading/error/all-clear states never block the list above. */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <h2 className="text-sm font-semibold text-text-primary">{t('admin.botTemplates.health.title')}</h2>
+          {strandedBots.length > 0 && (
+            <Badge variant="destructive">{t('admin.botTemplates.health.stranded', { count: health.data?.count ?? strandedBots.length })}</Badge>
+          )}
+        </div>
+        <p className="text-xs text-text-secondary">{t('admin.botTemplates.health.subtitle')}</p>
+        <Card variant="glass">
+          <CardContent className="p-0">
+            {health.isLoading ? (
+              <div className="p-4 text-sm text-text-tertiary">…</div>
+            ) : health.isError ? (
+              <div className="p-4 text-sm text-status-away">{t('admin.botTemplates.health.loadError')}</div>
+            ) : strandedBots.length === 0 ? (
+              <div className="flex items-center gap-2 p-4 text-sm text-text-secondary">
+                <CircleCheck className="h-4 w-4 text-status-online" />
+                {t('admin.botTemplates.health.allClear')}
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t('admin.botTemplates.health.columns.bot')}</TableHead>
+                    <TableHead>{t('admin.botTemplates.health.columns.tenant')}</TableHead>
+                    <TableHead>{t('admin.botTemplates.health.columns.template')}</TableHead>
+                    <TableHead>{t('admin.botTemplates.health.columns.reason')}</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {strandedBots.map((b) => (
+                    <TableRow key={b.botId}>
+                      <TableCell>
+                        <div className="flex items-center gap-2">
+                          <TriangleAlert className="h-4 w-4 text-status-away" />
+                          <span className="font-medium text-text-primary">{b.botName}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell><span className="text-sm text-text-secondary">{b.tenantName}</span></TableCell>
+                      <TableCell>
+                        <span className="font-mono text-xs text-text-tertiary">
+                          {b.templateId}{b.pinnedVersion && b.pinnedVersion !== 'latest' ? ` @${b.pinnedVersion}` : ''}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={b.reason === 'missing_or_archived' ? 'destructive' : 'warning'}>
+                          {t(`admin.botTemplates.health.reason.${b.reason}`)}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </CardContent>
+        </Card>
+      </section>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>

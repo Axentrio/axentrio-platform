@@ -1397,6 +1397,23 @@
       },
       "errors": {
         "load": "Failed to load templates."
+      },
+      "health": {
+        "title": "Template health",
+        "subtitle": "Bots whose bound template is missing, archived, or has no published version. Each falls back to the generic assistant until you fix it.",
+        "allClear": "Every bound template resolves — no bots are stranded.",
+        "loadError": "Couldn't check template health.",
+        "stranded": "{{count}} stranded",
+        "columns": {
+          "bot": "Bot",
+          "tenant": "Tenant",
+          "template": "Bound template",
+          "reason": "Reason"
+        },
+        "reason": {
+          "missing_or_archived": "Missing or archived",
+          "no_published_version": "No published version"
+        }
       }
     },
     "tenants": {

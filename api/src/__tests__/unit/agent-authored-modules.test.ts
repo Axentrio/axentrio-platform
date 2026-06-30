@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AgentService } from '../../agent/agent.service';
 import type { ToolAdapter } from '../../agent/tool-adapter';
 import type { LLMProvider } from '../../llm/llm.types';
@@ -104,6 +104,9 @@ describe('AgentService — Phase 4 authored module prose bridge', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Authored-module consumption is server-flag-gated (robust dark-ship). The
+    // on-path tests below run with it enabled; one test asserts the off path.
+    vi.stubEnv('COMPOSABLE_TEMPLATES_ENABLED', 'true');
     h.bookingConfigured = true;
     agent = new AgentService(mockToolRegistry as any, mockPromptBuilder as any, mockMetering as any, mockTraceLogger as any);
     mockGetToolsForTenant.mockResolvedValue([createBooking]);
@@ -113,8 +116,9 @@ describe('AgentService — Phase 4 authored module prose bridge', () => {
       finishReason: 'stop',
     });
   });
+  afterEach(() => vi.unstubAllEnvs());
 
-  it('ready skill: surfaces the pinned ModuleVersion prose as authoredModules', async () => {
+  it('ready skill (flag on): surfaces the pinned ModuleVersion prose as authoredModules', async () => {
     await run(agent);
     expect(buildAuthoredModules()).toEqual([{ id: 'mod-booking', prose: 'Booking workflow prose.' }]);
   });
@@ -123,5 +127,12 @@ describe('AgentService — Phase 4 authored module prose bridge', () => {
     h.bookingConfigured = false;
     await run(agent);
     expect(buildAuthoredModules()).toEqual([]);
+  });
+
+  it('flag OFF (dark): withholds the prose even with a pinned ref present', async () => {
+    vi.stubEnv('COMPOSABLE_TEMPLATES_ENABLED', 'false');
+    await run(agent);
+    const am = buildAuthoredModules();
+    expect(am === undefined || am.length === 0).toBe(true);
   });
 });

@@ -261,7 +261,12 @@ export class AgentService {
       // Load the pinned prose + each module's skill bindings here so we can surface
       // the prose, gated on skill readiness, below. DORMANT for legacy templates
       // (no selectedModuleRefs): we skip the DB entirely and behaviour is unchanged.
-      const moduleRefs = resolvedTemplates[0]?.selectedModuleRefs ?? null;
+      // Server-side dark-ship gate: even if a template has refs (authored via the
+      // super-admin API), authored prose is consumed ONLY when the feature is
+      // explicitly enabled in prod — so behaviour is flag-dependent, not merely
+      // data-dependent. OFF → treat as legacy (no prose), exactly as before.
+      const composableEnabled = process.env.COMPOSABLE_TEMPLATES_ENABLED === 'true';
+      const moduleRefs = composableEnabled ? (resolvedTemplates[0]?.selectedModuleRefs ?? null) : null;
       const skillsByModule = new Map<string, string[]>();
       const proseByRef = new Map<string, string>();
       if (moduleRefs && moduleRefs.length) {

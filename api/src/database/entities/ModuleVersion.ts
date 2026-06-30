@@ -15,7 +15,10 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  ManyToOne,
+  JoinColumn,
 } from 'typeorm';
+import { Module } from './Module';
 
 export type ModuleVersionStatus = 'draft' | 'published' | 'unpublished';
 
@@ -27,6 +30,12 @@ export class ModuleVersion {
 
   @Column({ type: 'uuid', name: 'module_id' })
   moduleId!: string;
+
+  /** FK to the parent module (ON DELETE CASCADE). Declared so test-synchronize
+   *  creates the same constraint the migration does (test/prod parity). */
+  @ManyToOne(() => Module, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'module_id' })
+  module!: Module;
 
   /** Monotonic per module; allocated transactionally on draft create. */
   @Column({ type: 'int' })

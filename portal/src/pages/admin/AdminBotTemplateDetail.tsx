@@ -436,6 +436,18 @@ const AdminBotTemplateDetail: React.FC = () => {
   const versionPayload = () => {
     const config = draftToConfig(draft.config);
     if (COMPOSABLE_TEMPLATES_ENABLED) {
+      // Guard against silent data loss: with NO authored module selected, do not
+      // overwrite expectedModules with [] (that would drop e.g. booking from a
+      // legacy template). Preserve the prefilled expectation + clear refs instead.
+      if (draft.selectedModuleIds.length === 0) {
+        return {
+          body: draft.body,
+          changelog: draft.changelog || null,
+          expectedModules: parseModules(draft.expectedModules),
+          selectedModuleRefs: null,
+          config,
+        };
+      }
       return {
         body: draft.body,
         changelog: draft.changelog || null,

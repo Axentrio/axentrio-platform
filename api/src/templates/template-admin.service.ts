@@ -74,6 +74,39 @@ export function validateExpectedModules(value: unknown): string[] {
   return out;
 }
 
+// Composable-templates Phase 4: an authored module's prose carries workflow INTENT
+// only — never tool-availability claims. The bound skill's posture is the ONLY
+// place that may say what the bot can/can't do, so prose that names or invokes a
+// tool is rejected at publish (the guard against over-promising). Conservative by
+// design (literal tool ids + "call/use the X tool" phrasing) to avoid false flags.
+const MODULE_PROSE_MAX = 4000;
+const TOOL_CLAIM_PATTERNS: { pattern: RegExp; hint: string }[] = [
+  {
+    pattern:
+      /\b(create_booking|check_availability|request_appointment|reschedule_booking|cancel_booking|kb_search|capture_lead|escalate_to_human)\b/i,
+    hint: 'names a tool directly',
+  },
+  { pattern: /\b(call|use|invoke|trigger)\s+(the\s+)?[\w-]+\s+tool\b/i, hint: 'instructs which tool to call' },
+];
+
+/** Validates an authored module's prose. Throws on tool-availability claims or an
+ *  over-cap/non-string value; returns the trimmed prose. */
+export function validateModuleProse(value: unknown): string {
+  if (typeof value !== 'string') throw new ValidationError('module prose must be a string');
+  const prose = value.trim();
+  if (prose.length > MODULE_PROSE_MAX) {
+    throw new ValidationError(`module prose exceeds ${MODULE_PROSE_MAX} characters (${prose.length})`);
+  }
+  for (const { pattern, hint } of TOOL_CLAIM_PATTERNS) {
+    if (pattern.test(prose)) {
+      throw new ValidationError(
+        `module prose must not make tool-availability claims (it ${hint}); describe the workflow intent, not the tools`,
+      );
+    }
+  }
+  return prose;
+}
+
 /** Caps for the template-owned policy guardrails (mirror the per-bot form caps). */
 const GUARDRAIL_TEXT_MAX = 1000;
 const TOPICS_MAX = 50;

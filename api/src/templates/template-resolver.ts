@@ -398,6 +398,33 @@ export function composeTemplateBodies(resolved: ResolvedTemplate[], mode: 'and' 
 }
 
 /**
+ * Composable-templates Phase 4 — the skill ids a template version selects. When it
+ * has authored module refs, resolve them to their bound skills (deduped, order-
+ * stable) via the supplied lookup; otherwise fall back to the legacy expectedModules
+ * (1:1 skill ids). Pure — the caller injects `moduleSkills` (a Module.skillIds
+ * lookup) so the selection logic is testable without the DB. An empty refs array
+ * is treated as "no refs".
+ */
+export function selectSkillIds(
+  version: { selectedModuleRefs?: { moduleId: string }[] | null; expectedModules: string[] },
+  moduleSkills: (moduleId: string) => string[],
+): string[] {
+  const refs = version.selectedModuleRefs;
+  if (!refs || refs.length === 0) return [...new Set(version.expectedModules)];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const moduleId of new Set(refs.map((r) => r.moduleId))) {
+    for (const skill of moduleSkills(moduleId)) {
+      if (!seen.has(skill)) {
+        seen.add(skill);
+        out.push(skill);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Effective guardrails for a (possibly multi-) binding: taken from the PRIMARY
  * template ([0]), with topics-to-avoid UNIONED across all bound templates
  * (additive safety). Tone is bot-owned and intentionally NOT set here — see

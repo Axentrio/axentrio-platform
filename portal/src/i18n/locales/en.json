@@ -1300,13 +1300,16 @@
         "title": "Create template",
         "key": "Key (slug)",
         "displayName": "Display name",
-        "category": "Category (optional)",
+        "category": "Vertical",
+        "categoryHint": "Lowercase slug like plumber — optional here, also editable on the template page.",
         "availableToAll": "Available to all tenants"
       },
       "detail": {
         "back": "Back to templates",
         "metadata": "Details",
         "description": "Description",
+        "category": "Vertical",
+        "categoryHint": "Lowercase slug (e.g. plumber). Matches a specialty catalog to unlock vertical-specific specialties; tenants choose which apply per bot.",
         "availabilityHint": "When on, every active tenant can bind this template. When off, only granted tenants can.",
         "descriptionHint": "Shown to tenants when they pick this bot in the template picker.",
         "usage": "{{bots}} bot(s) · {{tenants}} tenant(s)",
@@ -1335,7 +1338,7 @@
         "body": "Prompt body",
         "bodyHint": "Supports placeholders like {botName}, {businessName}, {tone}. Max 20,000 characters.",
         "expectedModules": "Expected modules",
-        "expectedModulesHint": "Capabilities this template needs; tenants must have them enabled to use it fully.",
+        "expectedModulesHint": "Declares what this template needs to work fully — tenants must enable these. Preview the effect with the scenario controls on the right.",
         "noModules": "No modules available.",
         "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",
@@ -1381,7 +1384,7 @@
         "testSend": "Send",
         "testThinking": "Thinking…",
         "testError": "Test failed — check the platform API key.",
-        "testHint": "Runs the current draft (unsaved) on the platform model with sample {botName}/{businessName}. Knowledge base not included."
+        "testHint": "Tests the prompt wording only — no tools, booking, or knowledge base. A real bot also uses those."
       },
       "confirm": {
         "archiveTitle": "Archive this template?",

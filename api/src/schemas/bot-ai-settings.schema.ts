@@ -20,6 +20,9 @@ export const putBotAiSettingsSchema = z
     // Free-text supplementary context (guardrails §11b) — rendered as a fenced
     // lowest-authority prompt block; can never override platform rules.
     extraInfo: z.string().max(2000).optional(),
+    // Selected specialty keys (SpecialtyCatalog S3). The .strict() object would
+    // reject an unknown key, so it must be declared here to be writable.
+    selectedSpecialties: z.array(z.string().max(100)).max(100).optional(),
     brandVoice: z
       .object({
         name: z.string().min(1).max(100),

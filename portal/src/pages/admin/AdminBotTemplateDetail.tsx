@@ -7,10 +7,10 @@
  * the API answers 409 with an impacted count → confirm → retry with force,
  * which reassigns affected bots to blank-base (T21).
  */
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -22,21 +22,24 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Slider } from '@/components/ui/slider';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command';
 import TagInput from '@/pages/knowledge/TagInput';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
 import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
+  usePreviewLedger,
   forceConflict, type BotTemplateVersion, type BotTemplateConfig,
 } from '../../queries/useBotTemplatesQueries';
 
@@ -98,6 +101,78 @@ function draftToConfig(d: ConfigDraft): BotTemplateConfig {
 
 // Canonical {placeholder} set (mirrors the API's KNOWN_PLACEHOLDERS) for live linting.
 const KNOWN_PLACEHOLDERS = new Set(['botName', 'tone', 'supportEmail', 'businessName', 'fallbackMessage', 'offHoursMessage', 'greetingMessage', 'maxResponseLength', 'topicsToAvoid']);
+// Tap-to-insert chips for the most common placeholders (appended at the end).
+const PLACEHOLDER_CHIPS = ['{botName}', '{businessName}', '{tone}', '{supportEmail}'];
+
+// Preview pane — the author previews mostly by PLAN (which gates capabilities);
+// channel is a secondary toggle (it only tweaks reply length + proactive contact).
+// Modules are NOT a knob: the preview assumes the template's Expected modules are
+// enabled, so it reflects what THIS form declares.
+const TIER_LABELS: Record<string, string> = { free: 'Free', essential: 'Essential', pro: 'Pro', enterprise: 'Enterprise' };
+const CHANNEL_LABELS: Record<string, string> = { widget: 'Website widget', whatsapp: 'WhatsApp', instagram: 'Instagram', messenger: 'Messenger', telegram: 'Telegram' };
+
+// Outcome-language capabilities, keyed off the tools the bot would actually have.
+// Absent → shown as a warning with a plain reason (no engineer jargon).
+const PREVIEW_CAPABILITIES: { tool: string; label: string; whenAbsent?: string }[] = [
+  { tool: 'kb_search', label: 'Answer questions from its knowledge base' },
+  { tool: 'capture_lead', label: 'Capture leads and take contact details', whenAbsent: 'available on paid plans' },
+  { tool: 'create_booking', label: 'Book appointments', whenAbsent: 'needs the Bookings module on' },
+  { tool: 'escalate_to_human', label: 'Hand off to a person' },
+];
+
+// Plain-English gloss for the composer's exclusion reason codes (technical view).
+const REASON_TEXT: Record<string, string> = {
+  empty: 'not set',
+  channel: 'not used on this channel',
+  toolAbsent: 'needs a capability that isn’t on',
+  tier: 'available on higher plans',
+  module: 'needs the matching module on',
+  specialty: 'specialty not selected on the bot',
+  bookingConfigured: 'booking isn’t set up yet',
+};
+
+// Blocks the author can't touch from a template — they need a bound bot, a live
+// conversation, or tenant-level config, so they can NEVER appear in a template
+// preview. Hidden entirely (they're not gaps, and not actionable here).
+const PREVIEW_HIDDEN_BLOCKS = new Set([
+  'CUSTOM_INSTRUCTIONS', 'EXTRA_INFO', 'CUSTOMER_NAME', 'AVAILABLE_SKILLS', 'KB_CONTEXT',
+]);
+
+// Actionable note for an excluded block the author CAN fix from the template here.
+const EXCLUDED_NOTE: Record<string, string> = {
+  BOOKING: 'add Bookings to Expected modules',
+};
+
+// Plain-English "what is this block" for the preview tooltips.
+const BLOCK_INFO: Record<string, string> = {
+  TEMPLATE_BODY: 'The prompt body you write above (or a generic service fallback if it’s blank).',
+  KNOWLEDGE: 'Tells the bot to search its knowledge base before answering factual questions.',
+  KB_CONTEXT: 'Knowledge-base snippets retrieved for the customer’s current question.',
+  CONTACT_DETAILS: 'Lets the bot take the customer’s contact details (lead capture).',
+  CHANNEL_LEAD_CAPTURE: 'On messaging channels, the bot proactively confirms the customer’s contact details.',
+  SOCIAL_SHORT_REPLY: 'On messaging channels, keeps replies short and chat-style.',
+  CUSTOMER_NAME: 'The customer’s name, taken from their messaging profile.',
+  CUSTOM_INSTRUCTIONS: 'Extra instructions set per-bot by the tenant.',
+  EXTRA_INFO: 'Extra background the tenant adds on the bot (reference only).',
+  AVAILABLE_SKILLS: 'The skills the bound bot has enabled.',
+  ESCALATION: 'Lets the bot hand the conversation off to a human.',
+  BOOKING: 'Booking behaviour and tools — check availability and create a booking.',
+};
+function getBlockInfo(key: string): string {
+  if (BLOCK_INFO[key]) return BLOCK_INFO[key];
+  if (key.startsWith('MODULE_')) return `Instructions added by the ${key.slice(7)} module.`;
+  if (key.startsWith('SPECIALTY_')) return `Tailored handling for the ${key.slice(10).replace(/_/g, ' ')} specialty.`;
+  return 'A prompt block contributed at runtime.';
+}
+// A block key with a hover/focus tooltip explaining what it is.
+const BlockKey: React.FC<{ name: string }> = ({ name }) => (
+  <Tooltip>
+    <TooltipTrigger asChild>
+      <span className="cursor-help underline decoration-dotted decoration-text-tertiary/60 underline-offset-2">{name}</span>
+    </TooltipTrigger>
+    <TooltipContent className="max-w-[240px] font-sans text-xs">{getBlockInfo(name)}</TooltipContent>
+  </Tooltip>
+);
 function unknownPlaceholders(body: string): string[] {
   const out = new Set<string>();
   for (const m of body.matchAll(/\{(\w+)\}/g)) if (!KNOWN_PLACEHOLDERS.has(m[1])) out.add(m[1]);
@@ -138,17 +213,43 @@ const AdminBotTemplateDetail: React.FC = () => {
   const rollbackMut = useRollbackTemplate(id);
   const grantsMut = useUpdateTemplateGrants(id);
   const testChat = useTemplateTestChat();
+  const preview = usePreviewLedger();
   const draftBaselineRef = useRef<string>('');
 
-  const [meta, setMeta] = useState<{ displayName: string; description: string; availableToAllTenants: boolean } | null>(null);
+  const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
   const [tenantPickerOpen, setTenantPickerOpen] = useState(false);
+  const [pvTier, setPvTier] = useState<'free' | 'essential' | 'pro' | 'enterprise'>('pro');
+  const [pvChannel, setPvChannel] = useState('widget');
   const [confirm, setConfirm] = useState<{ open: boolean; title: string; description: string; onConfirm: () => void }>({
     open: false, title: '', description: '', onConfirm: () => {},
   });
+
+  // Live block-ledger: re-compile the preview whenever the open draft's body/config
+  // or the mock context changes (debounced). Read-only (no persistence), so it's
+  // safe to fire on every edit. preview.data is NOT a dependency → no refresh loop.
+  const previewMutate = preview.mutate;
+  const draftConfigKey = JSON.stringify(draft.config);
+  // Preview re-compiles on body/config or scenario change. Modules come from THIS
+  // form's Expected modules, so the preview reflects what the author declared.
+  useEffect(() => {
+    if (!draft.open) return;
+    const handle = setTimeout(() => {
+      previewMutate({
+        body: draft.body,
+        config: draftToConfig(draft.config),
+        tier: pvTier,
+        channel: pvChannel,
+        activeModules: draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean),
+      });
+    }, 300);
+    return () => clearTimeout(handle);
+    // draftConfigKey stands in for draft.config (object identity is unstable).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewMutate, draft.open, draft.body, draftConfigKey, pvTier, pvChannel, draft.expectedModules]);
 
   if (isLoading) return <PageSkeleton variant="list" rows={4} />;
   if (isError || !data) return <InlineError message={t('admin.botTemplates.errors.load')} />;
@@ -158,6 +259,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   const publishedVersion = versions.find((v) => v.status === 'published');
   const m = meta ?? {
     displayName: template.displayName,
+    category: template.category ?? '',
     description: template.description ?? '',
     availableToAllTenants: template.availableToAllTenants,
   };
@@ -200,7 +302,15 @@ const AdminBotTemplateDetail: React.FC = () => {
   // detect unsaved changes before discarding. (draftBaselineRef hook is declared
   // above the early returns to keep hook order stable.)
   const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, config: d.config });
-  const openDraft = (d: VersionDraft) => { draftBaselineRef.current = draftKey(d); setTestLog([]); setTestInput(''); setDraft(d); };
+  const openDraft = (d: VersionDraft) => {
+    draftBaselineRef.current = draftKey(d);
+    setTestLog([]);
+    setTestInput('');
+    preview.reset();
+    setPvTier('pro');      // preview defaults: Pro plan…
+    setPvChannel('widget'); // …on the website widget; modules follow Expected modules
+    setDraft(d);
+  };
 
   // Test-this-prompt panel — runs the current draft body+config against the LLM
   // without saving, so authors can try before publishing.
@@ -280,6 +390,41 @@ const AdminBotTemplateDetail: React.FC = () => {
     setDraft(EMPTY_DRAFT);
   };
 
+  // Save the draft, then publish that version — the one-step path from the editor.
+  // Save and publish are separate server calls, so after the save half succeeds we
+  // advance the local draft to edit-mode with the server's returned version+lock.
+  // That way a retry after a publish failure re-publishes the SAME draft instead of
+  // creating a duplicate (create mode) or sending a stale lockVersion (edit mode).
+  // Mutations toast their own errors, so a failure just leaves the editor open.
+  const publishDraft = async () => {
+    const config = draftToConfig(draft.config);
+    try {
+      let version: number;
+      if (draft.mode === 'create') {
+        const res = await createVersionMut.mutateAsync({ body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+        version = res.version.version;
+        setDraft((d) => ({ ...d, mode: 'edit', version, lockVersion: res.version.lockVersion }));
+      } else {
+        const res = await editVersionMut.mutateAsync({ version: draft.version!, lockVersion: draft.lockVersion!, body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config });
+        version = draft.version!;
+        setDraft((d) => ({ ...d, lockVersion: res.version.lockVersion }));
+      }
+      await publishMut.mutateAsync(version);
+      setDraft(EMPTY_DRAFT);
+    } catch {
+      // Save or publish failed (already toasted). Keep the editor open in its now
+      // edit-mode state so the next Publish click resumes from the saved version.
+    }
+  };
+
+  const editorTitle =
+    draft.mode === 'create'
+      ? t('admin.botTemplates.editor.newTitle')
+      : draft.mode === 'view'
+        ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
+        : t('admin.botTemplates.editor.editTitle', { version: draft.version });
+  const editorBusy = createVersionMut.isPending || editVersionMut.isPending || publishMut.isPending;
+
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
       <div>
@@ -321,6 +466,11 @@ const AdminBotTemplateDetail: React.FC = () => {
             <Input id="m-name" value={m.displayName} onChange={(e) => setMeta({ ...m, displayName: e.target.value })} />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="m-vertical">{t('admin.botTemplates.detail.category')}</Label>
+            <Input id="m-vertical" value={m.category} placeholder="plumber" onChange={(e) => setMeta({ ...m, category: e.target.value })} />
+            <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.categoryHint')}</p>
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="m-desc">{t('admin.botTemplates.detail.description')}</Label>
             <Textarea id="m-desc" rows={2} value={m.description} onChange={(e) => setMeta({ ...m, description: e.target.value })} />
             <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.descriptionHint')}</p>
@@ -335,7 +485,7 @@ const AdminBotTemplateDetail: React.FC = () => {
           <div className="flex justify-end">
             <Button
               onClick={async () => {
-                await updateMut.mutateAsync({ displayName: m.displayName, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });
+                await updateMut.mutateAsync({ displayName: m.displayName, category: m.category.trim() || null, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });
                 setMeta(null);
               }}
               disabled={updateMut.isPending}
@@ -531,25 +681,59 @@ const AdminBotTemplateDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Version editor dialog */}
-      <Dialog open={draft.open} onOpenChange={(o) => { if (!o) requestCloseDraft(); else setDraft((d) => ({ ...d, open: o })); }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
-          <DialogHeader className="shrink-0">
-            <DialogTitle>
-              {draft.mode === 'create'
-                ? t('admin.botTemplates.editor.newTitle')
-                : draft.mode === 'view'
-                  ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
-                  : t('admin.botTemplates.editor.editTitle', { version: draft.version })}
-            </DialogTitle>
-            {draft.mode === 'create' && versions[0] && (
-              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</p>
-            )}
-          </DialogHeader>
-          <div className="space-y-4 overflow-y-auto flex-1 -mx-1 px-1">
+      {/* Version editor — full-page two-pane takeover (author | live ledger).
+          Uses the Radix Dialog primitive for focus-trap / Escape / aria-modal / focus
+          return; outside-click close is disabled so a stray click can't lose edits. */}
+      <DialogPrimitive.Root open={draft.open} onOpenChange={(o) => { if (!o) requestCloseDraft(); }}>
+        <DialogPrimitive.Portal>
+          <DialogPrimitive.Content
+            aria-label={editorTitle}
+            onInteractOutside={(e) => e.preventDefault()}
+            className="fixed inset-0 z-50 flex flex-col bg-surface-0 focus:outline-none"
+          >
+            <DialogPrimitive.Title className="sr-only">{editorTitle}</DialogPrimitive.Title>
+            <header className="flex flex-wrap items-center gap-3 border-b border-edge px-6 py-3 shrink-0">
+            <div className="flex items-center gap-3 min-w-0">
+              <h2 className="text-lg font-semibold text-text-primary truncate">{editorTitle}</h2>
+              {template.category && (
+                <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.detail.category')}: {template.category}</Badge>
+              )}
+              {draft.mode === 'create' && versions[0] && (
+                <span className="text-xs text-text-tertiary truncate">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</span>
+              )}
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              {draft.mode === 'view' ? (
+                <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
+              ) : (
+                <>
+                  <Button variant="ghost" onClick={requestCloseDraft}>{t('common.cancel')}</Button>
+                  <Button variant="outline" onClick={saveDraft} disabled={editorBusy}>{t('admin.botTemplates.editor.saveDraft')}</Button>
+                  <Button onClick={publishDraft} disabled={editorBusy}>{t('admin.botTemplates.actions.publish')}</Button>
+                </>
+              )}
+            </div>
+          </header>
+          <div className="flex-1 min-h-0 grid lg:grid-cols-[1fr_minmax(0,440px)]">
+            {/* LEFT — author */}
+            <div className="space-y-4 overflow-y-auto p-6">
             <div className="space-y-1.5">
               <Label htmlFor="d-body">{t('admin.botTemplates.editor.body')}</Label>
-              <Textarea id="d-body" rows={12} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
+              <Textarea id="d-body" rows={14} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
+              {draft.mode !== 'view' && (
+                <div className="flex flex-wrap gap-1.5">
+                  {PLACEHOLDER_CHIPS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      className="rounded border border-edge bg-surface-2 px-2 py-0.5 font-mono text-xs text-text-secondary hover:border-primary hover:text-text-primary"
+                      onClick={() => setDraft((d) => ({ ...d, body: d.body + (d.body && !d.body.endsWith(' ') ? ' ' : '') + p }))}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+              )}
               {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.bodyHint')}</p>}
               {draft.mode !== 'view' && unknownPlaceholders(draft.body).length > 0 && (
                 <p className="text-xs text-amber-400">
@@ -701,19 +885,89 @@ const AdminBotTemplateDetail: React.FC = () => {
                 </AccordionContent>
               </AccordionItem>
             </Accordion>
+
+            </div>
+            {/* RIGHT — scenario preview: outcomes first, technical ledger on demand. */}
+            <aside className="space-y-4 overflow-y-auto border-t border-edge bg-surface-1 p-6 lg:border-l lg:border-t-0">
+              <div>
+                <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
+                <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
+              </div>
+
+              <div className="space-y-2">
+                <div>
+                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Plan</label>
+                  <Select value={pvTier} onValueChange={(v) => setPvTier(v as typeof pvTier)}>
+                    <SelectTrigger aria-label="Plan" className="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>{(['free', 'essential', 'pro', 'enterprise'] as const).map((x) => <SelectItem key={x} value={x}>{TIER_LABELS[x]}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-text-tertiary">
+                  <span>Preview channel</span>
+                  <Select value={pvChannel} onValueChange={setPvChannel}>
+                    <SelectTrigger aria-label="Channel" className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+                <p className="text-[10px] text-text-tertiary">Booking and other modules follow the template’s Expected modules above. Channel only tweaks reply length and proactive contact.</p>
+              </div>
+
+              {preview.isPending && <p className="text-xs text-text-tertiary">Compiling…</p>}
+              {preview.data ? (() => {
+                const ledger = preview.data;
+                const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS.has(b));
+                const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS.has(e.key));
+                return (
+                  <>
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] uppercase tracking-wider text-text-tertiary">In this scenario the bot can</div>
+                      {PREVIEW_CAPABILITIES.map((cap) => {
+                        const on = ledger.allowedTools.includes(cap.tool);
+                        return (
+                          <div key={cap.tool} className={`flex items-start gap-2 text-xs ${on ? 'text-text-primary' : 'text-text-tertiary'}`}>
+                            {on
+                              ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-online" />
+                              : <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-away" />}
+                            <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="tech" className="rounded-xl border border-edge px-4 border-b">
+                        <AccordionTrigger className="hover:no-underline text-xs font-medium">Show technical details</AccordionTrigger>
+                        <AccordionContent className="space-y-3 text-xs">
+                          <TooltipProvider delayDuration={150}>
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Prompt blocks included ({included.length})</div>
+                              {included.map((b) => (
+                                <div key={b} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-primary"><Check className="h-3 w-3 shrink-0 text-status-online" /><BlockKey name={b} /></div>
+                              ))}
+                            </div>
+                            {excluded.length > 0 && (
+                              <div>
+                                <div className="mb-1 text-[10px] uppercase tracking-wider text-text-tertiary">Not in this scenario ({excluded.length})</div>
+                                {excluded.map((e) => (
+                                  <div key={e.key} className="flex items-center gap-2 border-b border-edge/40 py-1 font-mono text-text-tertiary"><X className="h-3 w-3 shrink-0" /><BlockKey name={e.key} /><span className="ml-auto rounded border border-edge bg-surface-2 px-1.5 py-0.5 font-sans text-[10px]">{EXCLUDED_NOTE[e.key] ?? REASON_TEXT[e.reason] ?? e.reason}</span></div>
+                                ))}
+                              </div>
+                            )}
+                            <div className="font-mono text-text-secondary"><span className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Tools available</span>{ledger.allowedTools.join(', ') || '—'}</div>
+                          </TooltipProvider>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+                  </>
+                );
+              })() : !preview.isPending ? (
+                <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
+              ) : null}
+            </aside>
           </div>
-          <DialogFooter className="shrink-0 pt-2">
-            {draft.mode === 'view' ? (
-              <Button variant="outline" onClick={() => setDraft(EMPTY_DRAFT)}>{t('common.close')}</Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={requestCloseDraft}>{t('common.cancel')}</Button>
-                <Button onClick={saveDraft} disabled={createVersionMut.isPending || editVersionMut.isPending}>{t('admin.botTemplates.editor.saveDraft')}</Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </DialogPrimitive.Content>
+        </DialogPrimitive.Portal>
+      </DialogPrimitive.Root>
 
       {/* Force-confirm dialog */}
       <AlertDialog open={confirm.open} onOpenChange={(o) => setConfirm((c) => ({ ...c, open: o }))}>

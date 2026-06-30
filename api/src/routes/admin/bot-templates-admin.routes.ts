@@ -35,6 +35,7 @@ import {
   type Replacement,
 } from '../../templates/template-admin.service';
 import { buildSystemPrompt } from '../../llm/prompt-builder';
+import { previewLedger } from '../../templates/template-preview';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
@@ -272,6 +273,47 @@ router.post(
       throw new ApiError('LLM call failed. Check the platform API key.', 500, ERROR_CODES.UPSTREAM_FAILED);
     }
     sendSuccess(res, { response: response.content, provider: DEFAULT_PROVIDER, model: DEFAULT_MODEL });
+  }),
+);
+
+/**
+ * L10/Phase 4 — preview the COMPILED agent-mode prompt + block ledger for a template
+ * under a mock runtime context (tier / activeModules / channel). Pure composition, no
+ * LLM call. The base-mode test-chat above is untouched. Lets a superadmin see exactly
+ * which blocks a given context would include/exclude (and why) before publishing.
+ *
+ *   POST /admin/bot-templates/preview-ledger  { body, config, tier?, channel?, activeModules? }
+ *
+ * CAVEAT: mock tier/modules bypass entitlement checks — this is a what-if, not a
+ * guarantee the live ledger matches on that tier.
+ */
+router.post(
+  '/bot-templates/preview-ledger',
+  asyncHandler(async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const body = typeof b.body === 'string' ? b.body : '';
+    validateBody(body);
+    const config = validateConfig(b.config);
+    const tier = (['free', 'essential', 'pro', 'enterprise'] as const).find((t) => t === b.tier);
+    const channel = typeof b.channel === 'string' ? b.channel : 'widget';
+    const activeModules = Array.isArray(b.activeModules)
+      ? (b.activeModules as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [];
+
+    const result = previewLedger({
+      body,
+      tone: config.tone,
+      topicsToAvoid: config.guardrails?.topicsToAvoid ?? [],
+      maxResponseLength: config.guardrails?.maxResponseLength ?? 500,
+      tier,
+      channel,
+      activeModules,
+    });
+
+    sendSuccess(res, {
+      ...result,
+      caveat: 'Preview only — mock tier/modules bypass entitlement checks; the live ledger may differ.',
+    });
   }),
 );
 

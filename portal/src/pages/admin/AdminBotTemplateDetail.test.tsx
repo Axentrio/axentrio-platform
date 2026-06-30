@@ -1,12 +1,15 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AdminBotTemplateDetail from './AdminBotTemplateDetail';
 
 // Mutable query state so a single test can drive the loading → loaded transition
 // (the exact shape that surfaced the hooks-after-early-return crash, React #310).
-const { state } = vi.hoisted(() => ({
+const { state, updateSpy, createVersionSpy, publishSpy } = vi.hoisted(() => ({
   state: { detail: { data: undefined, isLoading: true, isError: false } as { data: unknown; isLoading: boolean; isError: boolean } },
+  updateSpy: vi.fn(async () => ({})),
+  createVersionSpy: vi.fn(async () => ({ version: { version: 2, lockVersion: 0 } })),
+  publishSpy: vi.fn(async () => ({ version: { version: 2 } })),
 }));
 
 const MOCK_DETAIL = {
@@ -20,19 +23,20 @@ const MOCK_DETAIL = {
 };
 
 vi.mock('@/queries/useBotTemplatesQueries', () => {
-  const m = () => ({ mutate: () => {}, mutateAsync: async () => ({}), isPending: false });
+  const m = () => ({ mutate: () => {}, mutateAsync: async () => ({}), reset: () => {}, isPending: false });
   return {
     useAdminBotTemplateDetail: () => state.detail,
-    useUpdateBotTemplate: m,
+    useUpdateBotTemplate: () => ({ mutate: () => {}, mutateAsync: updateSpy, isPending: false }),
     useArchiveBotTemplate: m,
-    useCreateTemplateVersion: m,
+    useCreateTemplateVersion: () => ({ mutate: () => {}, mutateAsync: createVersionSpy, isPending: false }),
     useEditTemplateVersion: m,
-    usePublishTemplateVersion: m,
+    usePublishTemplateVersion: () => ({ mutate: () => {}, mutateAsync: publishSpy, isPending: false }),
     useUnpublishTemplateVersion: m,
     useDeleteTemplateVersion: m,
     useRollbackTemplate: m,
     useUpdateTemplateGrants: m,
     useTemplateTestChat: m,
+    usePreviewLedger: m,
     forceConflict: () => null,
   };
 });
@@ -72,5 +76,49 @@ describe('AdminBotTemplateDetail', () => {
       ),
     ).not.toThrow();
     expect(screen.getByText('Plumber Booking Bot')).toBeInTheDocument();
+  });
+
+  it('shows the Vertical field prefilled from category and saves it', async () => {
+    updateSpy.mockClear();
+    state.detail = {
+      data: { ...MOCK_DETAIL, template: { ...MOCK_DETAIL.template, category: 'plumber' } },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    const vertical = screen.getByLabelText(/vertical/i);
+    expect(vertical).toHaveValue('plumber');
+
+    fireEvent.change(vertical, { target: { value: 'hairdresser' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+
+    await waitFor(() =>
+      expect(updateSpy).toHaveBeenCalledWith(expect.objectContaining({ category: 'hairdresser' })),
+    );
+  });
+});
+
+describe('AdminBotTemplateDetail — two-pane authoring editor', () => {
+  it('opens a two-pane editor with the prompt body and live-ledger context shown together', () => {
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    // Body and the scenario-preview pane are visible at once — the whole point of
+    // the two-pane layout (the preview is no longer buried behind an accordion).
+    expect(screen.getByLabelText('Prompt body')).toBeInTheDocument();
+    expect(screen.getByText(/preview a scenario/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^publish$/i })).toBeInTheDocument();
+  });
+
+  it('Publish saves the draft then publishes that version', async () => {
+    createVersionSpy.mockClear();
+    publishSpy.mockClear();
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+    await waitFor(() => expect(createVersionSpy).toHaveBeenCalled());
+    await waitFor(() => expect(publishSpy).toHaveBeenCalledWith(2));
   });
 });

@@ -104,7 +104,12 @@ export async function searchKnowledge(
   // Multi-bot RAG scoping. `undefined` → tenant-wide (legacy behaviour);
   // a list → restrict to those KnowledgeBases; `[]` → the bot has no knowledge
   // attached, so retrieve nothing (no tenant-wide fallback — see I12).
-  knowledgeBaseIds?: string[]
+  knowledgeBaseIds?: string[],
+  // SpecialtyCatalog S5: selected-specialty aliases/tags that bias retrieval toward
+  // specialty vocabulary. Appended to the EMBEDDING input only (semantic bias) — NOT
+  // to the shared tsquery $5, which ANDs terms and would over-constrain the keyword
+  // branch. A soft bias, not a hard filter (ponytail: chunk metadata is empty today).
+  specialtyTerms?: string[]
 ): Promise<{ chunks: RetrievedChunk[]; totalChunks: number }> {
   if (knowledgeBaseIds !== undefined && knowledgeBaseIds.length === 0) {
     logger.info(`[RAG Search] Bot has no attached KnowledgeBases | tenant: ${tenantId} — returning no chunks`);
@@ -114,7 +119,12 @@ export async function searchKnowledge(
   const searchQuery = await rewriteQuery(query, conversationHistory);
   logger.debug(`[RAG Search] Query: "${searchQuery}" | tenant: ${tenantId}`);
 
-  const queryEmbedding = await embed(searchQuery);
+  // Bias the embedding (semantic) toward specialty vocabulary; leave the keyword
+  // tsquery ($5 = searchQuery) untouched so it isn't AND-over-constrained.
+  const embedInput = specialtyTerms && specialtyTerms.length > 0
+    ? `${searchQuery} ${specialtyTerms.join(' ')}`
+    : searchQuery;
+  const queryEmbedding = await embed(embedInput);
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
   const params: unknown[] = [embeddingStr, tenantId, config.rag.minSimilarity, maxChunks, searchQuery];

@@ -8,6 +8,9 @@ export interface ToolContext {
   toolsCalledThisTurn: string[];
   dataSource: DataSource;
   conversationHistory: ChatMessage[];
+  /** SpecialtyCatalog S5: selected-specialty aliases/tags that bias KB retrieval
+   *  (embedding only). Set by agent.service; absent ⇒ no bias. */
+  specialtyTerms?: string[];
 }
 
 export interface ToolResult {

@@ -15,6 +15,7 @@ import { generateResponse } from '../llm/rag.service';
 import { buildSystemPrompt } from '../llm/prompt-builder';
 import { rethrowIfUpstreamRateLimit } from '../llm/upstream-error';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig } from '../templates/template-resolver';
+import { specialtiesForVertical } from '../llm/specialty-catalog';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { ERROR_CODES } from '../middleware/error-codes';
@@ -73,7 +74,23 @@ export async function getBotAiSettings(req: Request, res: Response) {
   const tenantId = (req as Request & { tenantId: string }).tenantId;
   const bot = await loadOwnedBotOr404(req.params.id, tenantId);
   const tenant = await AppDataSource.getRepository(Tenant).findOneOrFail({ where: { id: tenantId } });
-  sendSuccess(res, toAiSettingsResponse(withAiDefaults(bot), tenant.settings?.ai?.apiKey));
+  // SpecialtyCatalog (S3): the specialties available for this bot's vertical (its
+  // bound template's category), so the editor can render the selection picker.
+  // Current selection rides on the ai slice (selectedSpecialties). Fail-soft: if
+  // template resolution hiccups, just return no available specialties.
+  let availableSpecialties: Array<{ key: string; name: string; description: string; requiresSpecialPrompt: boolean }> = [];
+  try {
+    const resolved = await resolveBoundTemplates(bot);
+    availableSpecialties = specialtiesForVertical(resolved[0]?.category ?? null).map((s) => ({
+      key: s.specialtyKey,
+      name: s.name,
+      description: s.description,
+      requiresSpecialPrompt: s.requiresSpecialPrompt,
+    }));
+  } catch (err) {
+    logger.warn('Failed to resolve available specialties for bot', { botId: bot.id, error: err });
+  }
+  sendSuccess(res, { ...toAiSettingsResponse(withAiDefaults(bot), tenant.settings?.ai?.apiKey), availableSpecialties });
 }
 
 /**
@@ -113,6 +130,12 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     ...(data.extraInfo === undefined
       ? (existing.extraInfo ? { extraInfo: existing.extraInfo } : {})
       : (data.extraInfo.trim() ? { extraInfo: data.extraInfo.trim() } : {})),
+    // Selected specialties (S3): same full-replace semantics — preserve when
+    // omitted, persist when non-empty, clear on an explicit []. Dropped otherwise
+    // because this rebuilds the ai object field-by-field.
+    ...(data.selectedSpecialties === undefined
+      ? (existing.selectedSpecialties?.length ? { selectedSpecialties: existing.selectedSpecialties } : {})
+      : (data.selectedSpecialties.length ? { selectedSpecialties: data.selectedSpecialties } : {})),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

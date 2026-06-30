@@ -215,6 +215,50 @@ export function useTemplateTestChat() {
   });
 }
 
+export interface PreviewLedgerResponse {
+  prompt: string;
+  scope: 'customer_reply';
+  includedBlocks: string[];
+  excludedBlocks: { key: string; reason: string }[];
+  allowedTools: string[];
+  caveat: string;
+}
+
+/** L10/Phase 4 — compile a template under a mock {tier, channel, activeModules}
+ *  context and return the block ledger (no LLM call). */
+export function usePreviewLedger() {
+  return useMutation({
+    mutationFn: (input: {
+      body: string;
+      config: BotTemplateConfig;
+      tier?: 'free' | 'essential' | 'pro' | 'enterprise';
+      channel?: string;
+      activeModules?: string[];
+    }) => api.post<PreviewLedgerResponse>(`/admin/bot-templates/preview-ledger`, input),
+  });
+}
+
+export interface UnavailableTemplateBot {
+  botId: string;
+  tenantId: string;
+  botName: string;
+  templateId: string;
+  pinnedVersion: string | null;
+  tenantName: string;
+  reason: 'missing_or_archived' | 'no_published_version';
+}
+
+/** L9 — superadmin: bots whose bound template is unavailable (missing/archived or
+ *  has no published version). Read-only operational snapshot. */
+export function useUnavailableTemplates() {
+  return useQuery({
+    queryKey: ['admin', 'observability', 'unavailable-templates'],
+    queryFn: () => api.get<{ bots: UnavailableTemplateBot[]; count: number }>(
+      '/admin/observability/unavailable-templates',
+    ),
+  });
+}
+
 export function useDeleteTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({

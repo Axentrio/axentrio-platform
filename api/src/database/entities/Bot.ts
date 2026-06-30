@@ -67,6 +67,10 @@ export interface BotSettings {
     /** Free-text supplementary context — rendered as a fenced, LOWEST-authority
      *  block in the prompt; can never override platform rules. Guardrails §11b. */
     extraInfo?: string;
+    /** Selected specialty keys (SpecialtyCatalog S3) — scoped to the bot's vertical
+     *  (bound template category). Bias KB retrieval and, for requiresSpecialPrompt
+     *  specialties, inject an exception block. jsonb, no migration. */
+    selectedSpecialties?: string[];
     brandVoice: {
       name: string;
       tone: string;

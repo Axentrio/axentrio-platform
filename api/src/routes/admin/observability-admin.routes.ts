@@ -236,4 +236,46 @@ router.get(
   }),
 );
 
+/**
+ * L9/AC4 — list bots whose bound template is UNAVAILABLE (the "missing vertical"),
+ * so an operator can find stranded bots instead of scraping warn logs. Deterministic
+ * query (no new table, no AgentTrace scan): a bound, live bot whose template is
+ * missing/archived OR has no published version. (Pinned-but-unavailable is excluded —
+ * it still serves the latest published version.) Mirrors the templateUnavailable
+ * classification in template-resolver.
+ *
+ *   GET /admin/observability/unavailable-templates
+ */
+router.get(
+  '/observability/unavailable-templates',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const bots = await safe(
+      'unavailableTemplates',
+      AppDataSource.query(
+        `SELECT b.id AS "botId", b.tenant_id AS "tenantId", b.name AS "botName",
+                b.template_id AS "templateId", b.template_version AS "pinnedVersion",
+                t.name AS "tenantName",
+                CASE WHEN bt.id IS NULL OR bt.status <> 'active'
+                     THEN 'missing_or_archived' ELSE 'no_published_version' END AS reason
+           FROM chatbot_bots b
+           JOIN tenants t ON t.id = b.tenant_id
+           LEFT JOIN bot_templates bt ON bt.id = b.template_id
+          WHERE b.template_id IS NOT NULL
+            AND b.deleted_at IS NULL
+            AND (
+              bt.id IS NULL
+              OR bt.status <> 'active'
+              OR NOT EXISTS (
+                SELECT 1 FROM bot_template_versions v
+                 WHERE v.template_id = b.template_id AND v.status = 'published')
+            )
+          ORDER BY t.name, b.name
+          LIMIT 200`,
+      ) as Promise<Array<Record<string, unknown>>>,
+      [],
+    );
+    sendSuccess(res, { bots, count: bots.length });
+  }),
+);
+
 export default router;

@@ -20,7 +20,7 @@ const aiNoCustom = {
 
 describe('agent mode — template layer', () => {
   it('inserts the template body after Tone and before custom instructions, substituted', () => {
-    const out = composeSystemPrompt({
+    const { prompt: out } = composeSystemPrompt({
       mode: 'agent', ai, tenantName: 'Acme', tools: [],
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
@@ -34,7 +34,7 @@ describe('agent mode — template layer', () => {
   });
 
   it('empty template body contributes nothing (custom still present)', () => {
-    const out = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: [], templateBody: '' });
+    const { prompt: out } = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: [], templateBody: '' });
     expect(out).toContain('CUSTOM_MARKER for Acme.');
     expect(out).not.toContain('TEMPLATE_MARKER');
   });
@@ -45,15 +45,16 @@ describe('agent mode — channel-aware lead capture (CONTACT DETAILS)', () => {
   const captureTool = [{ name: 'capture_lead' }] as never;
 
   it('adds the channel lead-capture rule on a non-widget channel', () => {
-    const out = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'whatsapp' });
+    const { prompt: out } = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'whatsapp', tier: 'pro' });
     expect(out).toContain('## CONTACT DETAILS');
     expect(out).toContain('CHANNEL LEAD CAPTURE (non-negotiable)'); // capture even without a typed email/phone
     expect(out).toContain('ALONGSIDE answering from the knowledge base'); // capture in addition to answering
   });
 
   it('omits the channel guidance on widget and when channel is absent', () => {
-    const widget = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'widget' });
-    const none = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool });
+    // tier: 'pro' on both — proving the exclusion here is the channel/widget gate, not the tier gate.
+    const { prompt: widget } = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, channel: 'widget', tier: 'pro' });
+    const { prompt: none } = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: captureTool, tier: 'pro' });
     expect(widget).toContain('## CONTACT DETAILS');
     expect(widget).not.toContain('CHANNEL LEAD CAPTURE');
     expect(none).not.toContain('CHANNEL LEAD CAPTURE');
@@ -68,7 +69,7 @@ describe('{businessName} resolution — per-bot override vs tenant default', () 
   } as unknown as AiSettings;
 
   it('uses the per-bot businessName when set, ignoring the tenant name', () => {
-    const out = composeSystemPrompt({
+    const { prompt: out } = composeSystemPrompt({
       mode: 'agent', ai: aiWithBusiness, tenantName: 'Acme Holdings', tools: [],
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
@@ -78,7 +79,7 @@ describe('{businessName} resolution — per-bot override vs tenant default', () 
   });
 
   it('falls back to the tenant name when no per-bot businessName is set', () => {
-    const out = composeSystemPrompt({
+    const { prompt: out } = composeSystemPrompt({
       mode: 'agent', ai, tenantName: 'Acme Holdings', tools: [],
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
@@ -107,7 +108,8 @@ describe('base mode — template layer', () => {
 
   it('empty template AND empty custom falls back to the default block', () => {
     const out = composeSystemPrompt({ mode: 'base', ai: aiNoCustom, businessName: 'Acme', templateBody: '' });
-    expect(out).toContain('Answer visitor questions clearly and concisely');
+    expect(out).toContain('this service business'); // AC4 generic-service-business core
+
   });
 });
 

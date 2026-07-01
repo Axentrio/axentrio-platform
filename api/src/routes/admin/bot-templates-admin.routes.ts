@@ -49,6 +49,7 @@ import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
 import { allModules, getModule } from '../../modules';
 import type { ToolDefinition } from '../../llm/llm.types';
+import { ToolRegistry } from '../../agent/tool-registry';
 
 const router = Router();
 
@@ -568,6 +569,7 @@ router.post(
     const b = (req.body ?? {}) as Record<string, unknown>;
     const message = reqStr(b.message, 'message', { max: 4000 })!;
     const prose = typeof b.prose === 'string' ? b.prose : '';
+    if (prose.length > 8000) throw new ValidationError('prose is too long to test (max 8000 chars)');
     const skillIds = Array.isArray(b.skillIds) ? b.skillIds.filter((x): x is string => typeof x === 'string') : [];
     const history = Array.isArray(b.history)
       ? (b.history as unknown[])
@@ -579,6 +581,7 @@ router.post(
     // Advertise the bound skills' tools (deduped by name). Inert catalog skills have no
     // `tools`, so synthesise a minimal def from their `provides` names — enough for the
     // model to decide to call them.
+    const registry = new ToolRegistry();
     const seen = new Set<string>();
     const toolDefs: ToolDefinition[] = [];
     for (const sid of skillIds) {
@@ -591,10 +594,18 @@ router.post(
           toolDefs.push({ name: t.name, description: t.description, parameters: t.parameters });
         }
       } else {
+        // Inert catalog skill (no tools of its own): advertise the REAL builtin tool
+        // it provides (with its actual parameters), falling back to a minimal def.
         for (const name of def.provides ?? []) {
           if (seen.has(name)) continue;
           seen.add(name);
-          toolDefs.push({ name, description: `Run the ${def.displayName} skill.`, parameters: { type: 'object', properties: {} } });
+          toolDefs.push(
+            registry.builtinToolDef(name) ?? {
+              name,
+              description: `Run the ${def.displayName} skill.`,
+              parameters: { type: 'object', properties: {} },
+            },
+          );
         }
       }
     }

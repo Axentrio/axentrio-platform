@@ -213,10 +213,12 @@ const AdminModuleDetail: React.FC = () => {
                 <MessageSquare className="h-4 w-4 text-text-muted" />
                 <h2 className="text-sm font-semibold text-text-primary">Test this module</h2>
               </div>
-              <label className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
-                <Switch checked={runSkills} onCheckedChange={setRunSkills} />
-                Run skills (dry-run)
-              </label>
+              <div className="flex items-center gap-2">
+                <Switch id="run-skills" checked={runSkills} onCheckedChange={setRunSkills} />
+                <label htmlFor="run-skills" className="cursor-pointer text-xs text-text-secondary">
+                  Run skills (dry-run)
+                </label>
+              </div>
             </div>
             <p className="text-xs text-text-muted">
               {runSkills

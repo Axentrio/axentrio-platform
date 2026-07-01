@@ -33,6 +33,14 @@ export class ToolRegistry {
     ];
   }
 
+  /** The real ToolDefinition for a builtin tool by name (for the dry-run skill
+   *  test, so inert catalog skills advertise the tool's actual parameters, not an
+   *  empty stub). Undefined if the name isn't a builtin. */
+  builtinToolDef(name: string): { name: string; description: string; parameters: Record<string, unknown> } | undefined {
+    const t = this.builtinTools.get(name);
+    return t ? { name: t.name, description: t.description, parameters: t.parameters } : undefined;
+  }
+
   /**
    * Compose the tenant's tool set: core built-ins + the tools of every Module
    * the resolver says is active (feature-gated modules follow the tenant's

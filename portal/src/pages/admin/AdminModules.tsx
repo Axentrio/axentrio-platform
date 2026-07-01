@@ -8,7 +8,7 @@
  */
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Boxes, Cpu, ChevronRight } from 'lucide-react';
+import { Plus, Boxes, Cpu } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,7 +17,6 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { SkillMultiSelect } from '@/components/admin/SkillMultiSelect';
 import {
@@ -28,7 +27,7 @@ import {
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import { SkillsReference } from '@/components/admin/SkillsReference';
 
-const latestVersion = (versions: { version: number; status: string }[]) =>
+const latestVersion = <T extends { version: number }>(versions: T[]): T | undefined =>
   versions.length ? [...versions].sort((a, b) => b.version - a.version)[0] : undefined;
 
 const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
@@ -75,13 +74,13 @@ const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) =>
       <div className="flex items-center justify-between">
         {embedded ? (
           <p className="text-sm text-text-secondary">
-            Reusable prose that binds one engineered skill. Selected in bot templates.
+            Reusable prose that binds one or more skills. Add modules to your bot templates.
           </p>
         ) : (
           <div>
             <h1 className="text-2xl font-semibold text-text-primary">Modules</h1>
             <p className="text-sm text-text-secondary">
-              Authored, reusable prose that binds one engineered skill. Selected in bot templates.
+              Authored, reusable prose that binds one or more engineered skills. Added to bot templates.
             </p>
           </div>
         )}
@@ -91,74 +90,80 @@ const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) =>
         </Button>
       </div>
 
-      <Card variant="glass">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Binds skill</TableHead>
-                <TableHead>Latest version</TableHead>
-                <TableHead className="w-10" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(modules ?? []).map(({ module, versions }) => {
-                const latest = latestVersion(versions);
-                return (
-                  <TableRow
-                    key={module.id}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/admin/modules/${module.id}`)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Boxes className="h-4 w-4 text-text-muted" />
-                        <div>
-                          <div className="font-medium text-text-primary">{module.name}</div>
-                          {module.description && (
-                            <div className="text-xs text-text-muted">{module.description}</div>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(module.skillIds.length ? module.skillIds : ['—']).map((sid) => (
-                          <span key={sid} className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
-                            <Cpu className="h-3 w-3 text-text-muted" />
-                            {skillName(sid)}
-                          </span>
-                        ))}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {latest ? (
-                        <span className="text-sm text-text-secondary">
-                          v{latest.version}{' '}
-                          <Badge variant={latest.status === 'published' ? 'default' : 'secondary'}>{latest.status}</Badge>
-                        </span>
-                      ) : (
-                        <span className="text-sm text-text-muted">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <ChevronRight className="h-4 w-4 text-text-muted" />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {(modules ?? []).length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-sm text-text-muted py-8">
-                    No modules yet — create one to use it in a bot template.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      {(modules ?? []).length === 0 ? (
+        <Card variant="glass">
+          <CardContent className="flex flex-col items-center gap-2 py-14 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-edge bg-surface-2">
+              <Boxes className="h-5 w-5 text-text-muted" />
+            </span>
+            <p className="text-sm text-text-primary">No modules yet</p>
+            <p className="max-w-sm text-xs text-text-muted">
+              Author reusable prose once — a booking flow, an after-hours message — then add it to any template.
+            </p>
+            <Button className="mt-2" onClick={() => setCreateOpen(true)} disabled={!skills?.length}>
+              <Plus className="mr-2 h-4 w-4" />
+              New module
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {(modules ?? []).map(({ module, versions }) => {
+            const latest = latestVersion(versions);
+            return (
+              <Card
+                key={module.id}
+                variant="glass"
+                className="cursor-pointer transition-colors hover:border-edge-light"
+                onClick={() => navigate(`/admin/modules/${module.id}`)}
+              >
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-edge bg-surface-2">
+                        <Boxes className="h-4 w-4 text-text-secondary" />
+                      </span>
+                      <div className="truncate font-medium text-text-primary">{module.name}</div>
+                    </div>
+                    {latest && (
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-text-muted">
+                        v{latest.version}
+                        <Badge variant={latest.status === 'published' ? 'default' : 'secondary'}>{latest.status}</Badge>
+                      </span>
+                    )}
+                  </div>
+
+                  {/* A module is its prose — lead with a preview of its voice. */}
+                  <p className="line-clamp-3 min-h-[3.75rem] text-sm text-text-secondary">
+                    {latest?.prose?.trim() || <span className="text-text-muted">No prose yet — open to write it.</span>}
+                  </p>
+
+                  <div className="flex flex-wrap gap-1.5">
+                    {(module.skillIds.length ? module.skillIds : ['—']).map((sid) => (
+                      <span
+                        key={sid}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary"
+                      >
+                        <Cpu className="h-3 w-3 text-text-muted" />
+                        {skillName(sid)}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+          {/* Ghost card — fills the grid + an inline way to add another module. */}
+          <button
+            onClick={() => setCreateOpen(true)}
+            disabled={!skills?.length}
+            className="flex min-h-[11rem] flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-edge text-text-muted transition-colors hover:border-edge-light hover:text-text-secondary disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-5 w-5" />
+            <span className="text-sm">New module</span>
+          </button>
+        </div>
+      )}
 
       {/* Standalone page shows the skills reference inline; in Studio it's its own tab. */}
       {!embedded && <SkillsReference />}

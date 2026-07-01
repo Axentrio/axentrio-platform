@@ -31,7 +31,7 @@ describe('AdminModules', () => {
     renderPage();
     expect(screen.getByRole('heading', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByText('Salon Booking Concierge')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /new module/i })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /new module/i }).length).toBeGreaterThan(0);
     // The row shows the version status; editing/publishing happens on the detail page.
     expect(screen.getByText('draft')).toBeInTheDocument();
   });

@@ -16,6 +16,7 @@ import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -823,22 +824,41 @@ const AdminBotTemplateDetail: React.FC = () => {
                 <Label>{t('admin.botTemplates.editor.modules')}</Label>
                 {(() => {
                   const ro = draft.mode === 'view';
-                  // v1 = at most one module per version: selecting one replaces any
-                  // current pick; clicking the selected one clears it.
+                  // One or more modules per version — the resolver unions their bound skills.
                   const toggleModule = (mid: string) =>
-                    setDraft((d) => ({ ...d, selectedModuleIds: d.selectedModuleIds.includes(mid) ? [] : [mid] }));
+                    setDraft((d) => ({
+                      ...d,
+                      selectedModuleIds: d.selectedModuleIds.includes(mid)
+                        ? d.selectedModuleIds.filter((x) => x !== mid)
+                        : [...d.selectedModuleIds, mid],
+                    }));
                   const publishedRows = moduleRows.filter((r) => r.versions.some((v) => v.status === 'published'));
                   if (publishedRows.length === 0) {
                     return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
                   }
                   return (
-                    <div className="flex flex-wrap gap-1.5">
-                      {publishedRows.map(({ module }) => {
-                        const selected = draft.selectedModuleIds.includes(module.id);
+                    <div className="space-y-1 rounded-md border border-edge bg-surface-1 p-1.5">
+                      {publishedRows.map((r) => {
+                        const module = r.module;
+                        const checked = draft.selectedModuleIds.includes(module.id);
+                        const pub = [...r.versions]
+                          .filter((v) => v.status === 'published')
+                          .sort((a, b) => b.version - a.version)[0];
                         return (
-                          <Button key={module.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(module.id)}>
-                            {selected && <Check className="h-3 w-3 mr-1" />}{module.name}
-                          </Button>
+                          <label
+                            key={module.id}
+                            className={`flex items-start gap-2.5 rounded px-2 py-1.5 ${
+                              ro ? 'pointer-events-none opacity-70' : 'cursor-pointer hover:bg-surface-2'
+                            } ${checked ? 'bg-surface-2' : ''}`}
+                          >
+                            <Checkbox checked={checked} onCheckedChange={() => toggleModule(module.id)} disabled={ro} className="mt-0.5" />
+                            <span className="min-w-0">
+                              <span className="block text-sm text-text-primary">{module.name}</span>
+                              {pub?.prose && (
+                                <span className="line-clamp-1 block text-xs text-text-tertiary">{pub.prose}</span>
+                              )}
+                            </span>
+                          </label>
                         );
                       })}
                     </div>

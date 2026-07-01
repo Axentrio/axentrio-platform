@@ -154,13 +154,13 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
 
     fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
 
-    // The module multi-select renders the published module as a selectable option,
+    // The module multi-select renders the published module as a checkbox option,
     // and the legacy free-text "Expected modules" control is gone.
-    const moduleButton = screen.getByRole('button', { name: /booking flow/i });
-    expect(moduleButton).toBeInTheDocument();
+    const moduleOption = screen.getByRole('checkbox', { name: /booking flow/i });
+    expect(moduleOption).toBeInTheDocument();
     expect(screen.queryByText(/expected modules/i)).not.toBeInTheDocument();
 
-    fireEvent.click(moduleButton);
+    fireEvent.click(moduleOption);
     fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
 
     // The version save pins the selected module to its latest published version.

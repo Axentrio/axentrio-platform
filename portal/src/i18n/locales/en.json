@@ -1345,7 +1345,7 @@
         "generalPrompt": "General prompt",
         "generalPromptHint": "Personality and tone only. What the bot can do comes from the modules below — don't claim capabilities here. Supports placeholders like {botName}, {businessName}, {tone}.",
         "modules": "Modules",
-        "modulesHint": "Add a module to give this template a capability (e.g. Bookings). One module per version for now.",
+        "modulesHint": "Pick one or more modules — this template composes their prose, and the resolver combines their bound skills.",
         "noModulesPublished": "No published modules yet — create and publish one under Modules first.",
         "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",

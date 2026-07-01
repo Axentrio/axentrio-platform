@@ -7,7 +7,7 @@
  * read-only, as the options a module may bind.
  */
 import React, { useState } from 'react';
-import { Plus, Boxes, Cpu, CircleCheck } from 'lucide-react';
+import { Plus, Boxes, Cpu } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -96,17 +96,20 @@ const AdminModules: React.FC = () => {
                   <TableRow key={module.id}>
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <Boxes className="h-4 w-4 text-text-tertiary" />
+                        <Boxes className="h-4 w-4 text-text-muted" />
                         <div>
                           <div className="font-medium text-text-primary">{module.name}</div>
                           {module.description && (
-                            <div className="text-xs text-text-tertiary">{module.description}</div>
+                            <div className="text-xs text-text-muted">{module.description}</div>
                           )}
                         </div>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{skillName(module.skillIds[0] ?? '—')}</Badge>
+                      <span className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
+                        <Cpu className="h-3 w-3 text-text-muted" />
+                        {skillName(module.skillIds[0] ?? '—')}
+                      </span>
                     </TableCell>
                     <TableCell>
                       {latest ? (
@@ -115,7 +118,7 @@ const AdminModules: React.FC = () => {
                           <Badge variant={latest.status === 'published' ? 'default' : 'secondary'}>{latest.status}</Badge>
                         </span>
                       ) : (
-                        <span className="text-sm text-text-tertiary">—</span>
+                        <span className="text-sm text-text-muted">—</span>
                       )}
                     </TableCell>
                     <TableCell>
@@ -135,7 +138,7 @@ const AdminModules: React.FC = () => {
               })}
               {(modules ?? []).length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-sm text-text-tertiary py-8">
+                  <TableCell colSpan={4} className="text-center text-sm text-text-muted py-8">
                     No modules yet — create one to use it in a bot template.
                   </TableCell>
                 </TableRow>
@@ -148,7 +151,7 @@ const AdminModules: React.FC = () => {
       {/* Engineered skills (read-only) — code-defined; a module binds exactly one. */}
       <section className="space-y-2">
         <div className="flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-text-tertiary" />
+          <Cpu className="h-4 w-4 text-text-muted" />
           <h2 className="text-sm font-semibold text-text-primary">Skills (engineered — read-only)</h2>
         </div>
         <p className="text-xs text-text-secondary">
@@ -156,12 +159,12 @@ const AdminModules: React.FC = () => {
         </p>
         <div className="flex flex-wrap gap-2">
           {(skills ?? []).map((s) => (
-            <Badge key={s.id} variant="outline" className="gap-1">
-              <CircleCheck className="h-3 w-3 text-status-online" />
+            <Badge key={s.id} variant="outline" className="gap-1.5">
+              <Cpu className="h-3 w-3 text-text-muted" />
               {s.displayName}
             </Badge>
           ))}
-          {(skills ?? []).length === 0 && <span className="text-sm text-text-tertiary">No skills registered.</span>}
+          {(skills ?? []).length === 0 && <span className="text-sm text-text-muted">No skills registered.</span>}
         </div>
       </section>
 
@@ -195,7 +198,7 @@ const AdminModules: React.FC = () => {
                 id="mod-skill"
                 value={form.skillId}
                 onChange={(e) => setForm((f) => ({ ...f, skillId: e.target.value }))}
-                className="flex h-9 w-full rounded-md border border-border-default bg-surface-base px-3 py-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent-primary"
+                className="flex h-9 w-full rounded-md border border-edge bg-surface-2 px-3 py-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-edge-focus focus:border-edge-focus"
               >
                 <option value="">Select a skill…</option>
                 {(skills ?? []).map((s) => (
@@ -212,7 +215,7 @@ const AdminModules: React.FC = () => {
                 placeholder="Workflow intent + wording. Describe HOW the bot should handle this — no tool names or capability claims."
                 onChange={(e) => setForm((f) => ({ ...f, prose: e.target.value }))}
               />
-              <p className="text-xs text-text-tertiary">
+              <p className="text-xs text-text-muted">
                 Intent only — naming a tool (e.g. "call create_booking") is rejected on publish.
               </p>
             </div>

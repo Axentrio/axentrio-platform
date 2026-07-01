@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -204,6 +204,25 @@ function countGuardrails(c: BotTemplateConfig): number {
   if (g.confidenceThreshold !== undefined) n++;
   if (g.maxResponseLength !== undefined) n++;
   return n;
+}
+
+/** Render a prompt body with its {placeholders} highlighted as fill-in slots:
+ *  known ones (resolved per business) in primary, unknown ones flagged amber. */
+function renderPromptWithVars(body: string): React.ReactNode {
+  return body.split(/(\{\w+\})/g).map((part, i) => {
+    const m = part.match(/^\{(\w+)\}$/);
+    if (!m) return <span key={i}>{part}</span>;
+    const known = KNOWN_PLACEHOLDERS.has(m[1]);
+    return (
+      <span
+        key={i}
+        title={known ? 'Filled in per business' : 'Unknown variable — will not resolve'}
+        className={`rounded px-1 font-medium ${known ? 'bg-primary-500/10 text-primary-300' : 'bg-amber-500/10 text-amber-300'}`}
+      >
+        {part}
+      </span>
+    );
+  });
 }
 
 type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedModuleIds: string[]; config: ConfigDraft };
@@ -693,34 +712,40 @@ const AdminBotTemplateDetail: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Current prompt — the live (latest published) prompt, surfaced so you can
-          see what the bot does without opening a version, with a clear edit path. */}
+      {/* Current prompt — the live (latest published) system prompt, shown as
+          readable prose with its {variables} highlighted as fill-in slots, sized to
+          content instead of an empty textarea, with a clear edit path. */}
       <Card variant="glass">
         <CardHeader className="flex flex-row items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <CardTitle>{t('admin.botTemplates.detail.currentPrompt')}</CardTitle>
             {publishedVersion && <Badge variant="default">{`v${publishedVersion.version}`}</Badge>}
           </div>
-          <Button size="sm" onClick={() => openCreate()}>{t('admin.botTemplates.actions.editNewVersion')}</Button>
+          <Button size="sm" variant="outline" onClick={() => openCreate()}>
+            <Pencil className="h-3.5 w-3.5" />{t('admin.botTemplates.actions.editNewVersion')}
+          </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           {publishedVersion ? (
             <>
-              <Textarea
-                readOnly
-                rows={8}
-                value={publishedVersion.body || ''}
-                placeholder={t('admin.botTemplates.detail.promptEmpty')}
-                className="font-mono text-xs bg-surface-2"
-              />
-              <p className="text-xs text-text-tertiary">
+              {publishedVersion.body?.trim() ? (
+                <div className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-edge bg-surface-1 p-4 text-sm leading-relaxed text-text-secondary">
+                  {renderPromptWithVars(publishedVersion.body)}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-edge bg-surface-1 p-4 text-sm text-text-muted">
+                  {t('admin.botTemplates.detail.promptEmpty')}
+                </div>
+              )}
+              <div className="flex items-center gap-1.5 text-xs text-text-muted">
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0" />
                 {countGuardrails(publishedVersion.config) === 0
                   ? t('admin.botTemplates.detail.promptConfigDefaults')
                   : t('admin.botTemplates.detail.promptConfigSummary', { count: countGuardrails(publishedVersion.config) })}
-              </p>
+              </div>
             </>
           ) : (
-            <p className="text-sm text-text-tertiary">{t('admin.botTemplates.detail.noPublishedPrompt')}</p>
+            <p className="text-sm text-text-muted">{t('admin.botTemplates.detail.noPublishedPrompt')}</p>
           )}
         </CardContent>
       </Card>

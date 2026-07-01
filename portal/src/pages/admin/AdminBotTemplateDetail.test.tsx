@@ -123,6 +123,22 @@ describe('AdminBotTemplateDetail', () => {
   });
 });
 
+describe('AdminBotTemplateDetail — Current prompt variable highlighting', () => {
+  it('marks known placeholders as fill-in slots and flags unknown ones', () => {
+    state.detail = {
+      data: {
+        ...MOCK_DETAIL,
+        versions: [{ ...MOCK_DETAIL.versions[0], body: 'Greeting {businessName}, ask {mystery}.' }],
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+    expect(screen.getByTitle('Filled in per business')).toHaveTextContent('{businessName}');
+    expect(screen.getByTitle('Unknown variable — will not resolve')).toHaveTextContent('{mystery}');
+  });
+});
+
 describe('AdminBotTemplateDetail — two-pane authoring editor', () => {
   it('opens a two-pane editor with the prompt body and live-ledger context shown together', () => {
     state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };

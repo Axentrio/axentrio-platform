@@ -5,7 +5,7 @@
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, Cpu, Send, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Cpu, Send, MessageSquare, Zap } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Switch } from '@/components/ui/switch';
 import { SkillMultiSelect } from '@/components/admin/SkillMultiSelect';
 import {
   useAdminModules,
@@ -23,9 +24,11 @@ import {
   useCreateModuleDraftVersion,
   usePublishModuleVersion,
   useTemplateTestChat,
+  useModuleAgentTest,
 } from '../../queries/useBotTemplatesQueries';
 
-type ChatMsg = { role: 'user' | 'assistant'; content: string };
+type ToolCall = { name: string; arguments: Record<string, unknown> };
+type ChatMsg = { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCall[] };
 
 const AdminModuleDetail: React.FC = () => {
   const { id = '' } = useParams();
@@ -37,6 +40,7 @@ const AdminModuleDetail: React.FC = () => {
   const newDraft = useCreateModuleDraftVersion();
   const publish = usePublishModuleVersion();
   const testChat = useTemplateTestChat();
+  const agentTest = useModuleAgentTest();
 
   const row = useMemo(() => modules?.find((r) => r.module.id === id), [modules, id]);
   const module = row?.module;
@@ -62,18 +66,26 @@ const AdminModuleDetail: React.FC = () => {
     setProse(latest?.prose ?? '');
   }, [latest?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Test chat — runs against the prose currently on screen.
+  // Test chat — runs against the prose currently on screen. With "Run skills" on it
+  // does a DRY-RUN agent turn (bound skills' tools advertised, calls captured not run).
   const [chat, setChat] = useState<ChatMsg[]>([]);
   const [message, setMessage] = useState('');
+  const [runSkills, setRunSkills] = useState(false);
+  const busy = testChat.isPending || agentTest.isPending;
   const send = async () => {
     const text = message.trim();
-    if (!text || testChat.isPending) return;
+    if (!text || busy) return;
     setMessage('');
-    const history = chat;
+    const history = chat.map(({ role, content }) => ({ role, content }));
     setChat((c) => [...c, { role: 'user', content: text }]);
     try {
-      const res = await testChat.mutateAsync({ body: prose, config: {}, message: text, history });
-      setChat((c) => [...c, { role: 'assistant', content: res.response }]);
+      if (runSkills) {
+        const res = await agentTest.mutateAsync({ prose, skillIds: skillIds, message: text, history });
+        setChat((c) => [...c, { role: 'assistant', content: res.response ?? '', toolCalls: res.toolCalls }]);
+      } else {
+        const res = await testChat.mutateAsync({ body: prose, config: {}, message: text, history });
+        setChat((c) => [...c, { role: 'assistant', content: res.response }]);
+      }
     } catch {
       setChat((c) => [...c, { role: 'assistant', content: '(test failed — check the platform LLM key)' }]);
     }
@@ -196,30 +208,58 @@ const AdminModuleDetail: React.FC = () => {
         {/* Right column: test */}
         <Card variant="glass" className="flex flex-col">
           <CardContent className="flex min-h-[28rem] flex-col gap-3 p-4">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-text-muted" />
-              <h2 className="text-sm font-semibold text-text-primary">Test this module</h2>
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-text-muted" />
+                <h2 className="text-sm font-semibold text-text-primary">Test this module</h2>
+              </div>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-text-secondary">
+                <Switch checked={runSkills} onCheckedChange={setRunSkills} />
+                Run skills (dry-run)
+              </label>
             </div>
             <p className="text-xs text-text-muted">
-              Chat against the prose above — a quick behaviour check (no tools; the bound skill is exercised at runtime).
+              {runSkills
+                ? 'The bound skills’ tools are offered to the bot; any tool it decides to call is shown but not executed — no real bookings.'
+                : 'Chat against the prose above — a quick voice check. Turn on “Run skills” to see the bound skills fire.'}
             </p>
             <div className="flex-1 space-y-2 overflow-y-auto rounded-md border border-edge bg-surface-1 p-3">
               {chat.length === 0 ? (
-                <p className="pt-8 text-center text-sm text-text-muted">Send a message to see how a bot following this prose replies.</p>
+                <p className="pt-8 text-center text-sm text-text-muted">
+                  {runSkills
+                    ? 'Send a message the skills should act on (e.g. “book me a cut Thursday”).'
+                    : 'Send a message to see how a bot following this prose replies.'}
+                </p>
               ) : (
                 chat.map((m, i) => (
-                  <div key={i} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-                    <span
-                      className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-1.5 text-sm ${
-                        m.role === 'user' ? 'bg-primary/20 text-text-primary' : 'bg-surface-3 text-text-secondary'
-                      }`}
-                    >
-                      {m.content}
-                    </span>
+                  <div key={i} className={`space-y-1 ${m.role === 'user' ? 'text-right' : 'text-left'}`}>
+                    {/* Dry-run tool calls — the skills the bot decided to fire (not executed). */}
+                    {m.toolCalls?.map((tc, j) => (
+                      <div
+                        key={j}
+                        className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-primary/40 bg-primary/10 px-2 py-1 font-mono text-[11px] text-text-secondary"
+                      >
+                        <Zap className="h-3 w-3 shrink-0 text-primary" />
+                        <span className="truncate">
+                          {tc.name}({Object.keys(tc.arguments).length ? JSON.stringify(tc.arguments) : ''})
+                        </span>
+                      </div>
+                    ))}
+                    {m.content && (
+                      <div>
+                        <span
+                          className={`inline-block max-w-[85%] whitespace-pre-wrap rounded-lg px-3 py-1.5 text-sm ${
+                            m.role === 'user' ? 'bg-primary/20 text-text-primary' : 'bg-surface-3 text-text-secondary'
+                          }`}
+                        >
+                          {m.content}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ))
               )}
-              {testChat.isPending && <p className="text-left text-sm text-text-muted">…</p>}
+              {busy && <p className="text-left text-sm text-text-muted">…</p>}
             </div>
             <div className="flex gap-2">
               <Input
@@ -228,7 +268,7 @@ const AdminModuleDetail: React.FC = () => {
                 onKeyDown={(e) => e.key === 'Enter' && send()}
                 placeholder="Ask something a customer might…"
               />
-              <Button onClick={send} disabled={!message.trim() || testChat.isPending}>
+              <Button onClick={send} disabled={!message.trim() || busy}>
                 <Send className="h-4 w-4" />
               </Button>
             </div>

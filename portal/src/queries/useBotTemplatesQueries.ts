@@ -218,6 +218,20 @@ export function useTemplateTestChat() {
   });
 }
 
+/** Dry-run skill test for a module: one agent turn with the bound skills' tools
+ *  advertised; the model's tool calls are captured (never executed). */
+export interface ModuleAgentTestResult {
+  response: string | null;
+  toolCalls: { name: string; arguments: Record<string, unknown> }[];
+  availableTools: string[];
+}
+export function useModuleAgentTest() {
+  return useMutation({
+    mutationFn: (input: { prose: string; skillIds: string[]; message: string; history: { role: 'user' | 'assistant'; content: string }[] }) =>
+      api.post<ModuleAgentTestResult>('/admin/modules/test-agent', input),
+  });
+}
+
 export interface PreviewLedgerResponse {
   prompt: string;
   scope: 'customer_reply';

@@ -22,6 +22,7 @@ vi.mock('../../queries/useBotTemplatesQueries', () => ({
   useCreateModuleDraftVersion: () => ({ mutate: vi.fn(), isPending: false }),
   usePublishModuleVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useTemplateTestChat: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useModuleAgentTest: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
 const renderPage = () =>

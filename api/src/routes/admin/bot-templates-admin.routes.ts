@@ -47,7 +47,8 @@ import { previewLedger } from '../../templates/template-preview';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
-import { allModules } from '../../modules';
+import { allModules, getModule } from '../../modules';
+import type { ToolDefinition } from '../../llm/llm.types';
 
 const router = Router();
 
@@ -553,6 +554,82 @@ router.post(
     const published = await publishModuleVersion(req.params.id, version, req.userId!);
     await logAudit(req.userId!, 'module.version_published', 'module', req.params.id, undefined, { version });
     sendSuccess(res, { version: published });
+  }),
+);
+
+// POST /admin/modules/test-agent — DRY-RUN skill test. Runs ONE agent-mode turn with
+// the bound skills' tools ADVERTISED to the model, but NEVER executes a tool: we
+// capture the tool call(s) the model decides to make (name + args) so an author can
+// see the skill "fire" with zero side effects (no real booking/handoff). Prose-driven,
+// platform LLM, no KB — the authoring-time counterpart to the base prose test-chat.
+router.post(
+  '/modules/test-agent',
+  asyncHandler(async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const message = reqStr(b.message, 'message', { max: 4000 })!;
+    const prose = typeof b.prose === 'string' ? b.prose : '';
+    const skillIds = Array.isArray(b.skillIds) ? b.skillIds.filter((x): x is string => typeof x === 'string') : [];
+    const history = Array.isArray(b.history)
+      ? (b.history as unknown[])
+          .filter((m): m is { role: string; content: string } => !!m && typeof (m as { content?: unknown }).content === 'string')
+          .slice(-10)
+          .map((m) => ({ role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: m.content }))
+      : [];
+
+    // Advertise the bound skills' tools (deduped by name). Inert catalog skills have no
+    // `tools`, so synthesise a minimal def from their `provides` names — enough for the
+    // model to decide to call them.
+    const seen = new Set<string>();
+    const toolDefs: ToolDefinition[] = [];
+    for (const sid of skillIds) {
+      const def = getModule(sid);
+      if (!def) continue;
+      if (def.tools.length) {
+        for (const t of def.tools) {
+          if (seen.has(t.name)) continue;
+          seen.add(t.name);
+          toolDefs.push({ name: t.name, description: t.description, parameters: t.parameters });
+        }
+      } else {
+        for (const name of def.provides ?? []) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          toolDefs.push({ name, description: `Run the ${def.displayName} skill.`, parameters: { type: 'object', properties: {} } });
+        }
+      }
+    }
+
+    const ai = {
+      enabled: true,
+      brandVoice: { name: 'Assistant', tone: 'friendly', customInstructions: '' },
+      guardrails: {},
+    } as Parameters<typeof buildSystemPrompt>[0];
+    const base = buildSystemPrompt(ai, { businessName: 'Your Business', templateBody: prose });
+    const systemPrompt = `${base}\n\nWhen the customer's request calls for it, use the appropriate tool.`;
+
+    const { getProvider } = await import('../../llm/provider-factory');
+    const llm = getProvider(DEFAULT_PROVIDER);
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...history,
+      { role: 'user' as const, content: message },
+    ];
+    let out;
+    try {
+      out = await llm.chat(messages, {
+        model: DEFAULT_MODEL,
+        maxTokens: 800,
+        temperature: 0.3,
+        jsonMode: false,
+        tools: toolDefs.length ? toolDefs : undefined,
+      });
+    } catch (err) {
+      logger.error('Module dry-run skill test failed', err);
+      throw new ApiError('LLM call failed. Check the platform API key.', 500, ERROR_CODES.UPSTREAM_FAILED);
+    }
+    // DRY RUN — we never execute a tool; we only report the model's decision.
+    const toolCalls = (out.toolCalls ?? []).map((tc) => ({ name: tc.name, arguments: tc.arguments }));
+    sendSuccess(res, { response: out.content || null, toolCalls, availableTools: toolDefs.map((t) => t.name) });
   }),
 );
 

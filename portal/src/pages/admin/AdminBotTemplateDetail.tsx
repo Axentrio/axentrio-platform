@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -535,6 +535,74 @@ const AdminBotTemplateDetail: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Composition — the hero: general prompt + modules → skills, from the current
+          published version. Makes "a template is a composition" legible at a glance. */}
+      {COMPOSABLE_TEMPLATES_ENABLED && (() => {
+        const current = versions.filter((v) => v.status === 'published').sort((a, b) => b.version - a.version)[0];
+        if (!current) return null;
+        const modIds = (current.selectedModuleRefs ?? []).map((r) => r.moduleId);
+        const mods = modIds
+          .map((id) => moduleRows.find((r) => r.module.id === id)?.module)
+          .filter((mo): mo is { id: string; name: string; description: string | null; skillIds: string[] } => !!mo);
+        const skillIds = mods.length ? [...new Set(mods.flatMap((mo) => mo.skillIds))] : current.expectedModules;
+        const skillLabel = (id: string) => skillsCatalog?.find((s) => s.id === id)?.displayName ?? id;
+        const Col = ({ label, children }: { label: string; children: React.ReactNode }) => (
+          <div className="flex-1 rounded-lg border border-edge bg-surface-1 p-3">
+            <div className="mb-1.5 text-[10px] uppercase tracking-wider text-text-tertiary">{label}</div>
+            {children}
+          </div>
+        );
+        return (
+          <Card variant="glass">
+            <CardContent className="p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <h2 className="text-sm font-semibold text-text-primary">Composition</h2>
+                <span className="text-xs text-text-tertiary">from v{current.version}</span>
+              </div>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
+                <Col label="General prompt">
+                  <p className="line-clamp-4 text-sm text-text-secondary">{current.body?.trim() || 'Platform generic core.'}</p>
+                </Col>
+                <div className="flex items-center justify-center text-text-tertiary lg:flex-col">
+                  <Plus className="h-4 w-4" />
+                </div>
+                <Col label={`Modules (${mods.length})`}>
+                  {mods.length ? (
+                    <div className="space-y-1">
+                      {mods.map((mo) => (
+                        <div key={mo.id} className="flex items-center gap-1.5 text-sm text-text-primary">
+                          <Boxes className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                          <span className="truncate">{mo.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-text-tertiary">None — this template is prompt-only.</p>
+                  )}
+                </Col>
+                <div className="flex items-center justify-center text-text-tertiary lg:flex-col">
+                  <ArrowRight className="h-4 w-4" />
+                </div>
+                <Col label="Skills the bot gets">
+                  {skillIds.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {skillIds.map((sid) => (
+                        <span key={sid} className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
+                          <Cpu className="h-3 w-3 text-text-muted" />
+                          {skillLabel(sid)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-text-tertiary">No skills — prompt-only.</p>
+                  )}
+                </Col>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })()}
 
       {/* Metadata */}
       <Card variant="glass">

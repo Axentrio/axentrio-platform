@@ -84,11 +84,12 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
                   onClick={() => navigate(`/admin/bot-templates/${tpl.id}`)}
                 >
                   <TableCell>
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-4 w-4 text-text-tertiary" />
-                      <div>
+                    <div className="flex items-start gap-2">
+                      <FileText className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+                      <div className="min-w-0">
                         <div className="font-medium text-text-primary">{tpl.displayName}</div>
-                        <div className="text-xs text-text-tertiary font-mono">{tpl.key}</div>
+                        {tpl.description && <div className="max-w-md truncate text-xs text-text-secondary">{tpl.description}</div>}
+                        <div className="font-mono text-[10px] text-text-muted">{tpl.key}{tpl.category ? ` · ${tpl.category}` : ''}</div>
                       </div>
                     </div>
                   </TableCell>

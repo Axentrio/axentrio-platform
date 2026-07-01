@@ -58,6 +58,9 @@ vi.mock('@/queries/useBotTemplatesQueries', () => {
         },
       ],
     }),
+    useAdminSkills: () => ({
+      data: [{ id: 'booking', displayName: 'Bookings', description: null, readinessHint: null, feature: 'bookings', provides: ['create_booking'], needsSetup: true }],
+    }),
     forceConflict: () => null,
   };
 });

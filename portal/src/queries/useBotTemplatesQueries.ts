@@ -363,6 +363,8 @@ export interface AdminSkill {
   feature: string | null;
   /** Tool names the skill gives the bot (display). */
   provides: string[];
+  /** Whether the skill needs per-bot setup (e.g. booking's calendar) vs ready-once-entitled. */
+  needsSetup: boolean;
 }
 export function useAdminSkills(opts: { enabled?: boolean } = {}) {
   return useQuery({

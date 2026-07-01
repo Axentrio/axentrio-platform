@@ -43,7 +43,7 @@ import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
-  usePreviewLedger, useAdminModules,
+  usePreviewLedger, useAdminModules, useAdminSkills,
   forceConflict, type BotTemplateVersion, type BotTemplateConfig, type AdminModuleRow,
 } from '../../queries/useBotTemplatesQueries';
 
@@ -231,6 +231,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   // Composable-templates: authored-module catalog for the module multi-select.
   // Only fetched when the flag is ON (the legacy editor never reads it).
   const { data: modulesData } = useAdminModules({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
+  const { data: skillsCatalog } = useAdminSkills({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
   const draftBaselineRef = useRef<string>('');
 
   const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
@@ -1072,11 +1073,15 @@ const AdminBotTemplateDetail: React.FC = () => {
                         <div className="space-y-1.5">
                           <div className="text-[10px] uppercase tracking-wider text-text-tertiary">Skills from modules</div>
                           {skills.map((sid) => {
-                            const readyTools = (SKILL_PREVIEW[sid]?.tools ?? []).filter((tn) => ledger.allowedTools.includes(tn));
-                            // Preview ledger bypasses entitlements, so a selected skill
-                            // reads ready when its tools surface, else degraded (unconfigured).
-                            const state: SkillState = readyTools.length > 0 ? 'ready' : 'unconfigured';
-                            const name = moduleCatalog.find((mc) => mc.id === sid)?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
+                            const meta = skillsCatalog?.find((s) => s.id === sid);
+                            const provides = meta?.provides ?? SKILL_PREVIEW[sid]?.tools ?? [];
+                            const readyTools = provides.filter((tn) => ledger.allowedTools.includes(tn));
+                            // A skill that needs per-bot setup (booking) reads ready only when its
+                            // tools surface; inert catalog skills (handoff, lead capture) need no
+                            // setup, so they read ready as soon as the template composes them.
+                            const state: SkillState =
+                              meta && !meta.needsSetup ? 'ready' : readyTools.length > 0 ? 'ready' : 'unconfigured';
+                            const name = meta?.displayName ?? moduleCatalog.find((mc) => mc.id === sid)?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
                             return <SkillStateCard key={sid} skill={{ id: sid, name, state, remedy: stateToRemedy(state) }} readyTools={readyTools} />;
                           })}
                         </div>

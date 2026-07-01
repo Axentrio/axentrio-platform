@@ -477,6 +477,10 @@ router.get(
         readinessHint: m.readinessHint ?? null,
         feature: m.gate.kind === 'feature' ? m.gate.feature : null,
         provides: m.provides ?? m.tools.map((t) => t.name),
+        // Skills that ship their own tools may need per-bot setup (e.g. booking's
+        // calendar/services). Inert catalog skills (tools in the builtin registry)
+        // are ready once entitled — no setup.
+        needsSetup: m.tools.length > 0,
       })),
     });
   }),

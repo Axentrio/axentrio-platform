@@ -343,6 +343,12 @@ export function useAdminModules(opts: { enabled?: boolean } = {}) {
 export interface AdminSkill {
   id: string;
   displayName: string;
+  description: string | null;
+  readinessHint: string | null;
+  /** Entitlement feature that gates the skill (e.g. 'bookings'), or null. */
+  feature: string | null;
+  /** Tool names the skill gives the bot (display). */
+  provides: string[];
 }
 export function useAdminSkills(opts: { enabled?: boolean } = {}) {
   return useQuery({

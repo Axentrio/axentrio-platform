@@ -17,7 +17,9 @@ vi.mock('../../queries/useBotTemplatesQueries', () => ({
     isLoading: false,
     isError: false,
   }),
-  useAdminSkills: () => ({ data: [{ id: 'booking', displayName: 'Booking' }] }),
+  useAdminSkills: () => ({
+    data: [{ id: 'booking', displayName: 'Booking', description: 'Books appointments.', readinessHint: null, feature: 'bookings', provides: ['create_booking'] }],
+  }),
   useCreateModule: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePublishModuleVersion: () => ({ mutate: vi.fn(), isPending: false }),
 }));
@@ -34,8 +36,8 @@ describe('AdminModules', () => {
     expect(screen.getByText('draft')).toBeInTheDocument();
   });
 
-  it('surfaces engineered skills as a read-only reference', () => {
+  it('surfaces the engineered skills reference', () => {
     renderPage();
-    expect(screen.getByText(/Skills \(engineered/i)).toBeInTheDocument();
+    expect(screen.getByText(/built-in capabilities/i)).toBeInTheDocument();
   });
 });

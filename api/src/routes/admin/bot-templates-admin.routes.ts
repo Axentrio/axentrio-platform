@@ -463,11 +463,20 @@ router.put(
 // audit posture as the template routes above (mounted behind requireSuperAdmin).
 
 // GET /admin/skills — the engineered skill catalog (read-only; skills are code,
-// not authorable). Feeds the module authoring page's "binds skill" picker.
+// not authorable). Rich metadata feeds the Studio Skills tab + the module picker.
 router.get(
   '/skills',
   asyncHandler(async (_req: Request, res: Response) => {
-    sendSuccess(res, { skills: allModules().map((m) => ({ id: m.id, displayName: m.displayName })) });
+    sendSuccess(res, {
+      skills: allModules().map((m) => ({
+        id: m.id,
+        displayName: m.displayName,
+        description: m.description ?? null,
+        readinessHint: m.readinessHint ?? null,
+        feature: m.gate.kind === 'feature' ? m.gate.feature : null,
+        provides: m.provides ?? m.tools.map((t) => t.name),
+      })),
+    });
   }),
 );
 

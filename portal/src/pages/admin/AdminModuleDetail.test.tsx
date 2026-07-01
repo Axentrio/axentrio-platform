@@ -14,7 +14,9 @@ vi.mock('../../queries/useBotTemplatesQueries', () => ({
     isLoading: false,
     isError: false,
   }),
-  useAdminSkills: () => ({ data: [{ id: 'booking', displayName: 'Booking' }] }),
+  useAdminSkills: () => ({
+    data: [{ id: 'booking', displayName: 'Booking', description: 'Books appointments.', readinessHint: null, feature: 'bookings', provides: ['create_booking'] }],
+  }),
   useEditModule: () => ({ mutate: vi.fn(), isPending: false }),
   useEditModuleDraftVersion: () => ({ mutate: vi.fn(), isPending: false }),
   useCreateModuleDraftVersion: () => ({ mutate: vi.fn(), isPending: false }),

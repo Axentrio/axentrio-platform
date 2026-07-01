@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SkillMultiSelect } from '@/components/admin/SkillMultiSelect';
 import {
   useAdminModules,
   useAdminSkills,
@@ -38,21 +38,26 @@ const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) =>
   const createMut = useCreateModule();
 
   const [createOpen, setCreateOpen] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', skillId: '', prose: '' });
+  const [form, setForm] = useState<{ name: string; description: string; skillIds: string[]; prose: string }>({
+    name: '',
+    description: '',
+    skillIds: [],
+    prose: '',
+  });
 
   const skillName = (id: string) => skills?.find((s) => s.id === id)?.displayName ?? id;
-  const canSubmit = form.name.trim() && form.skillId && !createMut.isPending;
+  const canSubmit = form.name.trim() && form.skillIds.length > 0 && !createMut.isPending;
 
   const submit = async () => {
     if (!canSubmit) return;
     await createMut.mutateAsync({
       name: form.name.trim(),
       description: form.description.trim() || undefined,
-      skillIds: [form.skillId],
+      skillIds: form.skillIds,
       prose: form.prose.trim() || undefined,
     });
     setCreateOpen(false);
-    setForm({ name: '', description: '', skillId: '', prose: '' });
+    setForm({ name: '', description: '', skillIds: [], prose: '' });
   };
 
   if (!COMPOSABLE_TEMPLATES_ENABLED) {
@@ -118,10 +123,14 @@ const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) =>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <span className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
-                        <Cpu className="h-3 w-3 text-text-muted" />
-                        {skillName(module.skillIds[0] ?? '—')}
-                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(module.skillIds.length ? module.skillIds : ['—']).map((sid) => (
+                          <span key={sid} className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
+                            <Cpu className="h-3 w-3 text-text-muted" />
+                            {skillName(sid)}
+                          </span>
+                        ))}
+                      </div>
                     </TableCell>
                     <TableCell>
                       {latest ? (
@@ -179,17 +188,12 @@ const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) =>
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="mod-skill">Binds skill</Label>
-              <Select value={form.skillId} onValueChange={(v) => setForm((f) => ({ ...f, skillId: v }))}>
-                <SelectTrigger id="mod-skill">
-                  <SelectValue placeholder="Select a skill…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {(skills ?? []).map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.displayName}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Binds skills</Label>
+              <SkillMultiSelect
+                skills={skills ?? []}
+                value={form.skillIds}
+                onChange={(ids) => setForm((f) => ({ ...f, skillIds: ids }))}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="mod-prose">Prose</Label>

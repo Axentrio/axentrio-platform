@@ -68,17 +68,24 @@ describe('validateSelectedModuleRefs — well-formed refs or the legacy path', (
   });
 });
 
-describe('validateSkillIds — exactly one known skill (v1)', () => {
+describe('validateSkillIds — one or more known skills (deduped)', () => {
   it('accepts a single known catalog skill', () => {
     expect(validateSkillIds(['booking'])).toEqual(['booking']);
+  });
+
+  it('accepts multiple known skills', () => {
+    expect(validateSkillIds(['booking', 'lead_capture', 'handoff'])).toEqual(['booking', 'lead_capture', 'handoff']);
+  });
+
+  it('dedupes repeated skills', () => {
+    expect(validateSkillIds(['booking', 'booking'])).toEqual(['booking']);
   });
 
   it('rejects an unknown skill id', () => {
     expect(() => validateSkillIds(['nope'])).toThrow(/unknown skill/i);
   });
 
-  it('rejects zero or multiple skills in v1', () => {
-    expect(() => validateSkillIds([])).toThrow(/exactly one/i);
-    expect(() => validateSkillIds(['booking', 'booking'])).toThrow(/exactly one/i);
+  it('rejects binding zero skills', () => {
+    expect(() => validateSkillIds([])).toThrow(/at least one/i);
   });
 });

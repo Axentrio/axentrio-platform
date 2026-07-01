@@ -14,7 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SkillMultiSelect } from '@/components/admin/SkillMultiSelect';
 import {
   useAdminModules,
   useAdminSkills,
@@ -49,13 +49,13 @@ const AdminModuleDetail: React.FC = () => {
   // Catalog form + prose draft, hydrated from the loaded module.
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [skillId, setSkillId] = useState('');
+  const [skillIds, setSkillIds] = useState<string[]>([]);
   const [prose, setProse] = useState('');
   useEffect(() => {
     if (module) {
       setName(module.name);
       setDescription(module.description ?? '');
-      setSkillId(module.skillIds[0] ?? '');
+      setSkillIds(module.skillIds);
     }
   }, [module?.id]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -102,10 +102,14 @@ const AdminModuleDetail: React.FC = () => {
         </button>
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold text-text-primary">{module.name}</h1>
-          <span className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
-            <Cpu className="h-3 w-3 text-text-muted" />
-            {skillName(module.skillIds[0] ?? '—')}
-          </span>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {(module.skillIds.length ? module.skillIds : ['—']).map((sid) => (
+              <span key={sid} className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
+                <Cpu className="h-3 w-3 text-text-muted" />
+                {skillName(sid)}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -125,20 +129,13 @@ const AdminModuleDetail: React.FC = () => {
                 <Input id="m-desc" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this module is for" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="m-skill">Binds skill</Label>
-                <Select value={skillId} onValueChange={setSkillId}>
-                  <SelectTrigger id="m-skill"><SelectValue placeholder="Select a skill…" /></SelectTrigger>
-                  <SelectContent>
-                    {(skills ?? []).map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.displayName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label>Binds skills</Label>
+                <SkillMultiSelect skills={skills ?? []} value={skillIds} onChange={setSkillIds} />
               </div>
               <div className="flex justify-end">
                 <Button
-                  disabled={editModule.isPending || !name.trim() || !skillId}
-                  onClick={() => editModule.mutate({ id: module.id, name: name.trim(), description: description.trim(), skillIds: [skillId] })}
+                  disabled={editModule.isPending || !name.trim() || skillIds.length === 0}
+                  onClick={() => editModule.mutate({ id: module.id, name: name.trim(), description: description.trim(), skillIds })}
                 >
                   Save changes
                 </Button>

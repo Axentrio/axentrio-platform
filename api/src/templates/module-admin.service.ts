@@ -15,16 +15,20 @@ import { getModule as getSkill } from '../modules';
 import { ConflictError, NotFoundError, ValidationError } from '../middleware/error-handler';
 import { validateModuleProse } from './template-admin.service';
 
-/** Validates the skill bindings: known catalog ids, exactly one in v1. */
+/** Validates the skill bindings: one or more known catalog ids (deduped). */
 export function validateSkillIds(value: unknown): string[] {
   if (!Array.isArray(value)) throw new ValidationError('skillIds must be an array of skill ids');
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const id of value) {
     if (typeof id !== 'string' || !id.trim()) throw new ValidationError('skillIds entries must be non-empty strings');
     if (!getSkill(id)) throw new ValidationError(`skillIds: unknown skill id "${id}"`);
-    out.push(id);
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
   }
-  if (out.length !== 1) throw new ValidationError('a module must bind exactly one skill (v1)');
+  if (out.length === 0) throw new ValidationError('a module must bind at least one skill');
   return out;
 }
 

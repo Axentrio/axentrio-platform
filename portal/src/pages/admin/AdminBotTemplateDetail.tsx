@@ -545,7 +545,12 @@ const AdminBotTemplateDetail: React.FC = () => {
         const mods = modIds
           .map((id) => moduleRows.find((r) => r.module.id === id)?.module)
           .filter((mo): mo is { id: string; name: string; description: string | null; skillIds: string[] } => !!mo);
+        // Mirrors the runtime `selectSkillIds`: module refs win; else the legacy
+        // `expectedModules` binds skills directly (pre-modules templates). When we
+        // fall through to that path, say so — a skill with no module is legacy, not
+        // magic.
         const skillIds = mods.length ? [...new Set(mods.flatMap((mo) => mo.skillIds))] : current.expectedModules;
+        const legacyBinding = mods.length === 0 && skillIds.length > 0;
         const skillLabel = (id: string) => skillsCatalog?.find((s) => s.id === id)?.displayName ?? id;
         const Col = ({ label, children }: { label: string; children: React.ReactNode }) => (
           <div className="flex-1 rounded-lg border border-edge bg-surface-1 p-3">
@@ -577,8 +582,13 @@ const AdminBotTemplateDetail: React.FC = () => {
                         </div>
                       ))}
                     </div>
+                  ) : legacyBinding ? (
+                    <p className="flex items-start gap-1.5 text-xs text-amber-300/90">
+                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>None bound — the skill is bound directly (a legacy binding from before modules).</span>
+                    </p>
                   ) : (
-                    <p className="text-xs text-text-tertiary">None — this template is prompt-only.</p>
+                    <p className="text-xs text-text-muted">None — this template is prompt-only.</p>
                   )}
                 </Col>
                 <div className="flex items-center justify-center text-text-tertiary lg:flex-col">
@@ -586,16 +596,25 @@ const AdminBotTemplateDetail: React.FC = () => {
                 </div>
                 <Col label="Skills the bot gets">
                   {skillIds.length ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {skillIds.map((sid) => (
-                        <span key={sid} className="inline-flex items-center gap-1.5 rounded-md border border-edge bg-surface-2 px-2 py-0.5 text-xs text-text-secondary">
-                          <Cpu className="h-3 w-3 text-text-muted" />
-                          {skillLabel(sid)}
-                        </span>
-                      ))}
-                    </div>
+                    <>
+                      <div className="flex flex-wrap gap-1.5">
+                        {skillIds.map((sid) => (
+                          <span
+                            key={sid}
+                            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs ${legacyBinding ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-edge bg-surface-2 text-text-secondary'}`}
+                          >
+                            <Cpu className="h-3 w-3 opacity-70" />
+                            {skillLabel(sid)}
+                            {legacyBinding && <span className="ml-0.5 rounded bg-amber-500/20 px-1 text-[9px] uppercase tracking-wide">direct</span>}
+                          </span>
+                        ))}
+                      </div>
+                      {legacyBinding && (
+                        <p className="mt-2 text-[11px] text-text-muted">Bound directly, bypassing modules. Re-bind through a module to modernise.</p>
+                      )}
+                    </>
                   ) : (
-                    <p className="text-xs text-text-tertiary">No skills — prompt-only.</p>
+                    <p className="text-xs text-text-muted">No skills — prompt-only.</p>
                   )}
                 </Col>
               </div>

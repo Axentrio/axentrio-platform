@@ -175,6 +175,26 @@ describe('AdminBotTemplateDetail — Composition card (flag ON, view mode)', () 
     expect(screen.getByText('Bookings')).toBeInTheDocument();
   });
 
+  it('flags a legacy direct binding (skill via expectedModules, no module) instead of implying a module produced it', () => {
+    flags.composable = true;
+    state.detail = {
+      data: {
+        ...MOCK_DETAIL,
+        // legacy shape: skill bound directly via expectedModules, no selectedModuleRefs
+        versions: [{ ...MOCK_DETAIL.versions[0], expectedModules: ['booking'], selectedModuleRefs: null }],
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+    // The skill still shows (it's real at runtime) — but marked "direct", with the
+    // Modules column explaining the legacy binding rather than a false "prompt-only".
+    expect(screen.getByText('Bookings')).toBeInTheDocument();
+    expect(screen.getByText('direct')).toBeInTheDocument();
+    expect(screen.getByText(/legacy binding from before modules/i)).toBeInTheDocument();
+    expect(screen.queryByText(/prompt-only/i)).not.toBeInTheDocument();
+  });
+
   it('reads "prompt-only" when the published version binds no modules', () => {
     flags.composable = true;
     state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };

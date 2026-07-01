@@ -26,11 +26,12 @@ import {
   useCreateModule,
 } from '../../queries/useBotTemplatesQueries';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
+import { SkillsReference } from '@/components/admin/SkillsReference';
 
 const latestVersion = (versions: { version: number; status: string }[]) =>
   versions.length ? [...versions].sort((a, b) => b.version - a.version)[0] : undefined;
 
-const AdminModules: React.FC = () => {
+const AdminModules: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const navigate = useNavigate();
   const { data: modules, isLoading, isError } = useAdminModules();
   const { data: skills } = useAdminSkills();
@@ -65,14 +66,20 @@ const AdminModules: React.FC = () => {
   if (isError) return <InlineError message="Couldn't load modules." />;
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className={embedded ? 'space-y-6' : 'h-full overflow-y-auto p-6 space-y-6'}>
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-text-primary">Modules</h1>
+        {embedded ? (
           <p className="text-sm text-text-secondary">
-            Authored, reusable prose that binds one engineered skill. Selected in bot templates.
+            Reusable prose that binds one engineered skill. Selected in bot templates.
           </p>
-        </div>
+        ) : (
+          <div>
+            <h1 className="text-2xl font-semibold text-text-primary">Modules</h1>
+            <p className="text-sm text-text-secondary">
+              Authored, reusable prose that binds one engineered skill. Selected in bot templates.
+            </p>
+          </div>
+        )}
         <Button onClick={() => setCreateOpen(true)} disabled={!skills?.length}>
           <Plus className="h-4 w-4 mr-2" />
           New module
@@ -144,25 +151,8 @@ const AdminModules: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Engineered skills (read-only) — code-defined; a module binds exactly one. */}
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-4 w-4 text-text-muted" />
-          <h2 className="text-sm font-semibold text-text-primary">Skills (engineered — read-only)</h2>
-        </div>
-        <p className="text-xs text-text-secondary">
-          Skills are platform capabilities defined in code (tools + readiness). Admins can't author them; a module binds one.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {(skills ?? []).map((s) => (
-            <Badge key={s.id} variant="outline" className="gap-1.5">
-              <Cpu className="h-3 w-3 text-text-muted" />
-              {s.displayName}
-            </Badge>
-          ))}
-          {(skills ?? []).length === 0 && <span className="text-sm text-text-muted">No skills registered.</span>}
-        </div>
-      </section>
+      {/* Standalone page shows the skills reference inline; in Studio it's its own tab. */}
+      {!embedded && <SkillsReference />}
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>

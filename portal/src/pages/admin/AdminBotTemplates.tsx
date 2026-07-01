@@ -19,7 +19,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { useAdminBotTemplates, useCreateBotTemplate, useUnavailableTemplates } from '../../queries/useBotTemplatesQueries';
 
-const AdminBotTemplates: React.FC = () => {
+const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data: templates, isLoading, isError } = useAdminBotTemplates();
@@ -48,12 +48,16 @@ const AdminBotTemplates: React.FC = () => {
   if (isError) return <InlineError message={t('admin.botTemplates.errors.load')} />;
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className={embedded ? 'space-y-6' : 'h-full overflow-y-auto p-6 space-y-6'}>
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-text-primary">{t('admin.botTemplates.header.title')}</h1>
+        {embedded ? (
           <p className="text-sm text-text-secondary">{t('admin.botTemplates.header.subtitle')}</p>
-        </div>
+        ) : (
+          <div>
+            <h1 className="text-2xl font-semibold text-text-primary">{t('admin.botTemplates.header.title')}</h1>
+            <p className="text-sm text-text-secondary">{t('admin.botTemplates.header.subtitle')}</p>
+          </div>
+        )}
         <Button onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
           {t('admin.botTemplates.actions.create')}

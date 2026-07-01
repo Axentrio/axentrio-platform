@@ -84,8 +84,8 @@ const AdminModuleDetail: React.FC = () => {
   if (!module || !latest) {
     return (
       <div className="p-6 space-y-4">
-        <button onClick={() => navigate('/admin/modules')} className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
-          <ArrowLeft className="h-4 w-4" /> Back to modules
+        <button onClick={() => navigate('/admin/studio?tab=modules')} className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
+          <ArrowLeft className="h-4 w-4" /> Back to Studio
         </button>
         <InlineError message="Module not found." />
       </div>
@@ -97,8 +97,8 @@ const AdminModuleDetail: React.FC = () => {
   return (
     <div className="h-full overflow-y-auto p-6 space-y-6">
       <div className="space-y-2">
-        <button onClick={() => navigate('/admin/modules')} className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
-          <ArrowLeft className="h-4 w-4" /> Back to modules
+        <button onClick={() => navigate('/admin/studio?tab=modules')} className="flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary">
+          <ArrowLeft className="h-4 w-4" /> Back to Studio
         </button>
         <div className="flex items-center justify-between gap-4">
           <h1 className="text-2xl font-semibold text-text-primary">{module.name}</h1>

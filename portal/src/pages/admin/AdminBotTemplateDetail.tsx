@@ -623,32 +623,63 @@ const AdminBotTemplateDetail: React.FC = () => {
         );
       })()}
 
-      {/* Metadata */}
+      {/* Details — a settings surface, not a raw form. Two decision groups, each with
+          a left-rail explanation: Identity (what the template is) and Distribution
+          (who can pick it). Every field keeps its id/label wiring. */}
       <Card variant="glass">
-        <CardHeader><CardTitle>{t('admin.botTemplates.detail.metadata')}</CardTitle></CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="m-name">{t('admin.botTemplates.create.displayName')}</Label>
-            <Input id="m-name" value={m.displayName} onChange={(e) => setMeta({ ...m, displayName: e.target.value })} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="m-vertical">{t('admin.botTemplates.detail.category')}</Label>
-            <Input id="m-vertical" value={m.category} placeholder="plumber" onChange={(e) => setMeta({ ...m, category: e.target.value })} />
-            <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.categoryHint')}</p>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="m-desc">{t('admin.botTemplates.detail.description')}</Label>
-            <Textarea id="m-desc" rows={2} value={m.description} onChange={(e) => setMeta({ ...m, description: e.target.value })} />
-            <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.descriptionHint')}</p>
-          </div>
-          <div className="flex items-center justify-between">
+        <CardContent className="p-0">
+          {/* Identity */}
+          <section className="grid gap-4 border-b border-edge p-5 lg:grid-cols-[220px_1fr] lg:gap-8">
             <div>
-              <Label htmlFor="m-global">{t('admin.botTemplates.create.availableToAll')}</Label>
-              <p className="text-xs text-text-tertiary">{t('admin.botTemplates.detail.availabilityHint')}</p>
+              <h3 className="text-sm font-semibold text-text-primary">Identity</h3>
+              <p className="mt-1 text-xs text-text-muted">How this template is named and catalogued.</p>
             </div>
-            <Switch id="m-global" checked={m.availableToAllTenants} onCheckedChange={(v) => setMeta({ ...m, availableToAllTenants: v })} />
-          </div>
-          <div className="flex justify-end">
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="m-name">{t('admin.botTemplates.create.displayName')}</Label>
+                <Input id="m-name" value={m.displayName} onChange={(e) => setMeta({ ...m, displayName: e.target.value })} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-vertical">{t('admin.botTemplates.detail.category')}</Label>
+                <Input id="m-vertical" value={m.category} placeholder="plumber" onChange={(e) => setMeta({ ...m, category: e.target.value })} />
+                {m.category.trim() ? (
+                  <p className="text-xs text-text-secondary">
+                    Unlocks the{' '}
+                    <span className="rounded bg-surface-2 px-1 font-mono text-text-primary">{m.category.trim()}</span>{' '}
+                    specialty catalog.
+                  </p>
+                ) : (
+                  <p className="text-xs text-text-muted">{t('admin.botTemplates.detail.categoryHint')}</p>
+                )}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="m-desc">{t('admin.botTemplates.detail.description')}</Label>
+                <Textarea id="m-desc" rows={2} value={m.description} onChange={(e) => setMeta({ ...m, description: e.target.value })} />
+                <p className="text-xs text-text-muted">{t('admin.botTemplates.detail.descriptionHint')}</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Distribution */}
+          <section className="grid gap-4 border-b border-edge p-5 lg:grid-cols-[220px_1fr] lg:gap-8">
+            <div>
+              <h3 className="text-sm font-semibold text-text-primary">Distribution</h3>
+              <p className="mt-1 text-xs text-text-muted">Who can pick this template.</p>
+            </div>
+            <label
+              htmlFor="m-global"
+              className="flex cursor-pointer items-center justify-between gap-4 rounded-lg border border-edge bg-surface-1 p-3 transition-colors hover:border-edge-light"
+            >
+              <div>
+                <div className="text-sm font-medium text-text-primary">{t('admin.botTemplates.create.availableToAll')}</div>
+                <p className="mt-0.5 text-xs text-text-muted">{t('admin.botTemplates.detail.availabilityHint')}</p>
+              </div>
+              <Switch id="m-global" checked={m.availableToAllTenants} onCheckedChange={(v) => setMeta({ ...m, availableToAllTenants: v })} />
+            </label>
+          </section>
+
+          {/* Save */}
+          <div className="flex items-center justify-end gap-3 p-5">
             <Button
               onClick={async () => {
                 await updateMut.mutateAsync({ displayName: m.displayName, category: m.category.trim() || null, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });

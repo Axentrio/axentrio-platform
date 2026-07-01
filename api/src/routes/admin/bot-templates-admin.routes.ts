@@ -14,7 +14,7 @@
  */
 import { Router, Request, Response } from 'express';
 import { AppDataSource } from '../../database/data-source';
-import { BotTemplate } from '../../database/entities/BotTemplate';
+import { BotTemplate, BOT_TEMPLATE_TIERS, BotTemplateTier } from '../../database/entities/BotTemplate';
 import { BotTemplateVersion } from '../../database/entities/BotTemplateVersion';
 import { TenantBotTemplate } from '../../database/entities/TenantBotTemplate';
 import { asyncHandler, ValidationError, NotFoundError, ConflictError, ApiError } from '../../middleware/error-handler';
@@ -98,6 +98,19 @@ async function loadTemplate(id: string): Promise<BotTemplate> {
 
 // ── Templates ────────────────────────────────────────────────────────────────
 
+/** Validate a tier value from the request body. `required: false` → returns
+ *  undefined when absent (leave the column untouched on update). */
+function parseTier(value: unknown, opts: { required?: boolean } = {}): BotTemplateTier | undefined {
+  if (value === undefined || value === null) {
+    if (opts.required) throw new ValidationError('tier is required');
+    return undefined;
+  }
+  if (!BOT_TEMPLATE_TIERS.includes(value as BotTemplateTier)) {
+    throw new ValidationError(`tier must be one of: ${BOT_TEMPLATE_TIERS.join(', ')}`);
+  }
+  return value as BotTemplateTier;
+}
+
 // GET /admin/bot-templates — all templates with a version summary.
 router.get(
   '/bot-templates',
@@ -120,6 +133,7 @@ router.get(
           displayName: t.displayName,
           category: t.category,
           description: t.description,
+          tier: t.tier,
           availableToAllTenants: t.availableToAllTenants,
           status: t.status,
           versionCount: vs.length,
@@ -141,12 +155,13 @@ router.post(
     const category = reqStr(body.category, 'category', { max: 100, required: false }) ?? null;
     const description = reqStr(body.description, 'description', { max: 10_000, required: false }) ?? null;
     const availableToAllTenants = body.availableToAllTenants === true;
+    const tier = parseTier(body.tier) ?? 'essential';
 
     const repo = AppDataSource.getRepository(BotTemplate);
     if (await repo.findOne({ where: { key } })) {
       throw new ConflictError(`A template with key "${key}" already exists`);
     }
-    const tmpl = await repo.save(repo.create({ key, displayName, category, description, availableToAllTenants, status: 'active' }));
+    const tmpl = await repo.save(repo.create({ key, displayName, category, description, tier, availableToAllTenants, status: 'active' }));
     await logAudit(req.userId!, 'bot_template.created', 'bot_template', tmpl.id, undefined, { key });
     if (availableToAllTenants) {
       // A new global template appears in every tenant's picker.
@@ -196,6 +211,7 @@ router.put(
     if (body.displayName !== undefined) tmpl.displayName = reqStr(body.displayName, 'displayName', { max: 200 })!;
     if (body.category !== undefined) tmpl.category = reqStr(body.category, 'category', { max: 100, required: false }) ?? null;
     if (body.description !== undefined) tmpl.description = reqStr(body.description, 'description', { max: 10_000, required: false }) ?? null;
+    if (body.tier !== undefined) tmpl.tier = parseTier(body.tier, { required: true })!;
 
     let availabilityChanged = false;
     if (body.availableToAllTenants !== undefined) {

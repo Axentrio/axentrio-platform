@@ -18,6 +18,11 @@ import {
 
 export type BotTemplateStatus = 'active' | 'archived';
 
+/** Commercial tier this template belongs to; mirrors the tenant plan names
+ *  (minus 'free'). A template lives in exactly one tier — tiers do not cross. */
+export type BotTemplateTier = 'essential' | 'pro' | 'enterprise';
+export const BOT_TEMPLATE_TIERS: readonly BotTemplateTier[] = ['essential', 'pro', 'enterprise'];
+
 @Entity('bot_templates')
 @Index('ux_bot_templates_key', ['key'], { unique: true })
 export class BotTemplate {
@@ -36,6 +41,11 @@ export class BotTemplate {
 
   @Column({ type: 'text', nullable: true })
   description?: string | null;
+
+  /** Commercial tier bucket (essential | pro | enterprise). Curation only —
+   *  it groups the catalog; it does not by itself gate tenant access. */
+  @Column({ type: 'varchar', length: 20, default: 'essential' })
+  tier!: BotTemplateTier;
 
   /**
    * Access scope. A tenant may bind this template iff this is true OR a

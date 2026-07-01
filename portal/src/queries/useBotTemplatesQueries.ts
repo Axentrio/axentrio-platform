@@ -6,6 +6,8 @@ import { toast } from 'sonner';
 
 export type TemplateStatus = 'active' | 'archived';
 export type VersionStatus = 'draft' | 'published' | 'unpublished';
+/** Commercial tier the template is catalogued under (mirrors plan names). */
+export type TemplateTier = 'essential' | 'pro' | 'enterprise';
 
 export interface BotTemplateSummary {
   id: string;
@@ -13,6 +15,7 @@ export interface BotTemplateSummary {
   displayName: string;
   category: string | null;
   description: string | null;
+  tier: TemplateTier;
   availableToAllTenants: boolean;
   status: TemplateStatus;
   versionCount: number;
@@ -26,6 +29,7 @@ export interface BotTemplate {
   displayName: string;
   category: string | null;
   description: string | null;
+  tier: TemplateTier;
   availableToAllTenants: boolean;
   status: TemplateStatus;
   createdAt: string;
@@ -127,7 +131,7 @@ function useInvalidate() {
 export function useCreateBotTemplate() {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { key: string; displayName: string; category?: string; description?: string; availableToAllTenants?: boolean }) =>
+    mutationFn: (input: { key: string; displayName: string; category?: string; description?: string; tier?: TemplateTier; availableToAllTenants?: boolean }) =>
       api.post<{ template: BotTemplate }>('/admin/bot-templates', input),
     onSuccess: () => {
       invalidate();
@@ -139,7 +143,7 @@ export function useCreateBotTemplate() {
 export function useUpdateBotTemplate(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: Partial<Pick<BotTemplate, 'displayName' | 'category' | 'description' | 'availableToAllTenants'>>) =>
+    mutationFn: (input: Partial<Pick<BotTemplate, 'displayName' | 'category' | 'description' | 'tier' | 'availableToAllTenants'>>) =>
       api.put<{ template: BotTemplate }>(`/admin/bot-templates/${id}`, input),
     onSuccess: () => {
       invalidate(id);

@@ -44,8 +44,15 @@ import {
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
   usePreviewLedger, useAdminModules, useAdminSkills,
-  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type AdminModuleRow,
+  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type AdminModuleRow, type TemplateTier,
 } from '../../queries/useBotTemplatesQueries';
+
+/** Tier options for the Identity control (mirrors the list page's ladder). */
+const TIER_OPTIONS: { id: TemplateTier; label: string }[] = [
+  { id: 'essential', label: 'Essential' },
+  { id: 'pro', label: 'Pro' },
+  { id: 'enterprise', label: 'Enterprise' },
+];
 
 // Platform defaults — seeded as REAL values in the editor (not grey placeholders)
 // so an author always sees the effective template, per the UX review.
@@ -293,7 +300,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   const { data: skillsCatalog } = useAdminSkills({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
   const draftBaselineRef = useRef<string>('');
 
-  const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; availableToAllTenants: boolean } | null>(null);
+  const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; tier: TemplateTier; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
@@ -369,6 +376,7 @@ const AdminBotTemplateDetail: React.FC = () => {
     displayName: template.displayName,
     category: template.category ?? '',
     description: template.description ?? '',
+    tier: template.tier ?? 'essential',
     availableToAllTenants: template.availableToAllTenants,
   };
   const selectedTenantIds = selectedTenants ?? grantedTenantIds;
@@ -727,6 +735,23 @@ const AdminBotTemplateDetail: React.FC = () => {
                 <Textarea id="m-desc" rows={2} value={m.description} onChange={(e) => setMeta({ ...m, description: e.target.value })} />
                 <p className="text-xs text-text-muted">{t('admin.botTemplates.detail.descriptionHint')}</p>
               </div>
+              <div className="space-y-1.5">
+                <Label>Tier</Label>
+                <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tier">
+                  {TIER_OPTIONS.map((tr) => (
+                    <button
+                      key={tr.id}
+                      type="button"
+                      aria-pressed={m.tier === tr.id}
+                      onClick={() => setMeta({ ...m, tier: tr.id })}
+                      className={`rounded-lg border px-3 py-2 text-sm transition-colors ${m.tier === tr.id ? 'border-primary-400 bg-primary-500/10 text-text-primary' : 'border-edge text-text-secondary hover:border-edge-light'}`}
+                    >
+                      {tr.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-text-muted">Which tier's table this template appears under.</p>
+              </div>
             </div>
           </section>
 
@@ -752,7 +777,7 @@ const AdminBotTemplateDetail: React.FC = () => {
           <div className="flex items-center justify-end gap-3 p-5">
             <Button
               onClick={async () => {
-                await updateMut.mutateAsync({ displayName: m.displayName, category: m.category.trim() || null, description: m.description || undefined, availableToAllTenants: m.availableToAllTenants });
+                await updateMut.mutateAsync({ displayName: m.displayName, category: m.category.trim() || null, description: m.description || undefined, tier: m.tier, availableToAllTenants: m.availableToAllTenants });
                 setMeta(null);
               }}
               disabled={updateMut.isPending}

@@ -147,6 +147,43 @@ describe('AdminBotTemplateDetail — two-pane authoring editor', () => {
   });
 });
 
+describe('AdminBotTemplateDetail — Composition card (flag ON, view mode)', () => {
+  it('shows general prompt + the bound module → its skill from the published version', () => {
+    flags.composable = true;
+    state.detail = {
+      data: {
+        ...MOCK_DETAIL,
+        versions: [
+          {
+            ...MOCK_DETAIL.versions[0],
+            body: 'You are a dental assistant.',
+            selectedModuleRefs: [{ moduleId: 'mod1', moduleVersion: 1 }],
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    };
+    renderPage();
+
+    // The card names itself, echoes the prompt (also shown in the Current-prompt
+    // pane, hence 2), and resolves the ref chain: module 'mod1' → name "Booking
+    // flow" → skill 'booking' → display "Bookings".
+    expect(screen.getByText('Composition')).toBeInTheDocument();
+    expect(screen.getAllByText(/You are a dental assistant/).length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Booking flow')).toBeInTheDocument();
+    expect(screen.getByText('Bookings')).toBeInTheDocument();
+  });
+
+  it('reads "prompt-only" when the published version binds no modules', () => {
+    flags.composable = true;
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+    expect(screen.getByText('Composition')).toBeInTheDocument();
+    expect(screen.getByText('None — this template is prompt-only.')).toBeInTheDocument();
+  });
+});
+
 describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () => {
   it('renders the module multi-select and saves selectedModuleRefs on publish', async () => {
     flags.composable = true;

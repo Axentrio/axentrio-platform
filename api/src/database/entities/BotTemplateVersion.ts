@@ -61,6 +61,12 @@ export class BotTemplateVersion {
   @Column({ type: 'jsonb', default: [], name: 'expected_modules' })
   expectedModules!: string[];
 
+  /** Composable-templates Phase 4: authored module refs selected for this version,
+   *  shape [{ moduleId, moduleVersion }], snapshotted at publish. NULL = use the
+   *  legacy expectedModules path (additive, fully back-compatible). */
+  @Column({ type: 'jsonb', nullable: true, name: 'selected_module_refs' })
+  selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null;
+
   /** Identity/policy the template owns (tone + policy guardrails). Versioned
    *  with the body; consumed at runtime via effectiveBotConfig(). */
   @Column({ type: 'jsonb', default: {} })

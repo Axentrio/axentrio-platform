@@ -74,6 +74,61 @@ export function validateExpectedModules(value: unknown): string[] {
   return out;
 }
 
+// Composable-templates Phase 4: an authored module's prose carries workflow INTENT
+// only — never tool-availability claims. The bound skill's posture is the ONLY
+// place that may say what the bot can/can't do, so prose that names or invokes a
+// tool is rejected at publish (the guard against over-promising). Conservative by
+// design (literal tool ids + "call/use the X tool" phrasing) to avoid false flags.
+const MODULE_PROSE_MAX = 4000;
+const TOOL_CLAIM_PATTERNS: { pattern: RegExp; hint: string }[] = [
+  {
+    pattern:
+      /\b(create_booking|check_availability|request_appointment|reschedule_booking|cancel_booking|kb_search|capture_lead|escalate_to_human)\b/i,
+    hint: 'names a tool directly',
+  },
+  { pattern: /\b(call|use|invoke|trigger)\s+(the\s+)?[\w-]+\s+tool\b/i, hint: 'instructs which tool to call' },
+];
+
+/** Validates an authored module's prose. Throws on tool-availability claims or an
+ *  over-cap/non-string value; returns the trimmed prose. */
+export function validateModuleProse(value: unknown): string {
+  if (typeof value !== 'string') throw new ValidationError('module prose must be a string');
+  const prose = value.trim();
+  if (prose.length > MODULE_PROSE_MAX) {
+    throw new ValidationError(`module prose exceeds ${MODULE_PROSE_MAX} characters (${prose.length})`);
+  }
+  for (const { pattern, hint } of TOOL_CLAIM_PATTERNS) {
+    if (pattern.test(prose)) {
+      throw new ValidationError(
+        `module prose must not make tool-availability claims (it ${hint}); describe the workflow intent, not the tools`,
+      );
+    }
+  }
+  return prose;
+}
+
+/** Validates a template version's selected module refs (composable-templates
+ *  Phase 4). null/undefined → undefined (legacy expectedModules path). Shape-only:
+ *  existence of each (moduleId, moduleVersion) is enforced when the editor binds
+ *  them; here we guarantee well-formed refs so the resolver can trust them. */
+export function validateSelectedModuleRefs(
+  value: unknown,
+): { moduleId: string; moduleVersion: number }[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new ValidationError('selectedModuleRefs must be an array or null');
+  return value.map((r, i) => {
+    if (!r || typeof r !== 'object') throw new ValidationError(`selectedModuleRefs[${i}] must be an object`);
+    const ref = r as Record<string, unknown>;
+    if (typeof ref.moduleId !== 'string' || !ref.moduleId.trim()) {
+      throw new ValidationError(`selectedModuleRefs[${i}].moduleId must be a non-empty string`);
+    }
+    if (typeof ref.moduleVersion !== 'number' || !Number.isInteger(ref.moduleVersion) || ref.moduleVersion < 1) {
+      throw new ValidationError(`selectedModuleRefs[${i}].moduleVersion must be a positive integer`);
+    }
+    return { moduleId: ref.moduleId, moduleVersion: ref.moduleVersion };
+  });
+}
+
 /** Caps for the template-owned policy guardrails (mirror the per-bot form caps). */
 const GUARDRAIL_TEXT_MAX = 1000;
 const TOPICS_MAX = 50;
@@ -313,10 +368,11 @@ async function fanOutTemplateInvalidation(templateId: string, extraTenantIds: st
 /** Create a draft version with a row-locked, transactionally-allocated number. */
 export async function createDraftVersion(
   templateId: string,
-  input: { body: string; changelog?: string | null; expectedModules?: unknown; config?: unknown },
+  input: { body: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown },
 ): Promise<BotTemplateVersion> {
   const { warnings: _w } = validateBody(input.body);
   const expectedModules = validateExpectedModules(input.expectedModules);
+  const selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs);
   const config = validateConfig(input.config);
 
   return AppDataSource.transaction(async (manager) => {
@@ -344,6 +400,7 @@ export async function createDraftVersion(
       body: input.body,
       changelog: input.changelog?.trim() || null,
       expectedModules,
+      ...(selectedModuleRefs !== undefined ? { selectedModuleRefs } : {}),
       config,
       status: 'draft',
       lockVersion: 0,
@@ -356,7 +413,7 @@ export async function createDraftVersion(
 export async function editDraftVersion(
   templateId: string,
   version: number,
-  input: { body?: string; changelog?: string | null; expectedModules?: unknown; config?: unknown; lockVersion?: number },
+  input: { body?: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown; lockVersion?: number },
 ): Promise<BotTemplateVersion> {
   return AppDataSource.transaction(async (manager) => {
     const repo = manager.getRepository(BotTemplateVersion);
@@ -379,6 +436,7 @@ export async function editDraftVersion(
     }
     if (input.changelog !== undefined) row.changelog = input.changelog?.trim() || null;
     if (input.expectedModules !== undefined) row.expectedModules = validateExpectedModules(input.expectedModules);
+    if (input.selectedModuleRefs !== undefined) row.selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs) ?? null;
     if (input.config !== undefined) row.config = validateConfig(input.config);
     row.lockVersion += 1;
     const saved = await repo.save(row);

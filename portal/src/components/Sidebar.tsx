@@ -33,7 +33,7 @@ import {
   HelpCircle,
   ChevronDown,
   Lock,
-  FileText,
+  Boxes,
 } from 'lucide-react';
 import { useClerk, useOrganization, useOrganizationList } from '@clerk/clerk-react';
 import {
@@ -54,6 +54,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import { useHandoffsQuery } from '../queries/useHandoffQueries';
 import {
   useIsEntitled,
@@ -124,7 +125,12 @@ const adminMenuItems: AdminMenuItem[] = [
   { path: '/admin/users', labelKey: 'nav.allUsers', icon: UserCog, roles: ['super_admin'] },
   { path: '/admin/analytics', labelKey: 'nav.platformAnalytics', icon: TrendingUp, roles: ['super_admin'] },
   { path: '/admin/guardrails', labelKey: 'nav.guardrails', icon: ShieldAlert, roles: ['super_admin'] },
-  { path: '/admin/bot-templates', labelKey: 'nav.botTemplates', icon: FileText, roles: ['super_admin'] },
+  {
+    path: '/admin/studio',
+    labelKey: COMPOSABLE_TEMPLATES_ENABLED ? 'nav.botStudio' : 'nav.botTemplates',
+    icon: Boxes,
+    roles: ['super_admin'],
+  },
   { path: '/admin/faq', labelKey: 'nav.faqEditor', icon: HelpCircle, roles: ['super_admin'] },
 ];
 

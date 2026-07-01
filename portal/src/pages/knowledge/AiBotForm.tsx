@@ -32,6 +32,7 @@ import {
   useUpdateBotAiSettings,
   useBotTemplates,
   useBindBotTemplate,
+  useSkillReadiness,
   useBotDetail,
   useUpdateBot,
   type BusinessHours,
@@ -39,6 +40,8 @@ import {
 } from '@/queries/useBotsQueries';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
+import { SkillStateCard } from '@/components/SkillStateCard';
+import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import TagInput from './TagInput';
 
 interface AiBotFormProps {
@@ -123,6 +126,11 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   // immediately via the bind mutation; the query is the source of truth.
   const { data: templateView } = useBotTemplates(botId, { enabled: isAdminOrSupervisor });
   const bindTemplate = useBindBotTemplate(botId);
+  // Phase 6 skill-state badges — gated behind the composable-templates flag (same
+  // gate as the Phase-5 editor, for a coherent rollout).
+  const { data: skillReadiness } = useSkillReadiness(botId, {
+    enabled: isAdminOrSupervisor && COMPOSABLE_TEMPLATES_ENABLED,
+  });
 
   // Business hours (operational, tenant-owned). Its own resource (bot settings),
   // saved explicitly with its own button — separate from the auto-saved AI form.
@@ -557,6 +565,16 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
               {t('ai.bot.template.warnings.missingModulesAction')}
             </p>
+          )}
+
+          {/* Phase 6 — per-skill state badges (composable templates). Dual-rendered
+              alongside the legacy missingModules warning during rollout. */}
+          {COMPOSABLE_TEMPLATES_ENABLED && skillReadiness && skillReadiness.length > 0 && (
+            <div className="space-y-1.5">
+              {skillReadiness.map((skill) => (
+                <SkillStateCard key={skill.id} skill={skill} />
+              ))}
+            </div>
           )}
         </section>
 

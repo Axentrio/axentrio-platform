@@ -192,6 +192,9 @@ ${lines}`;
 export const bookingModule: ModuleDefinition = {
   id: 'booking',
   displayName: 'Bookings',
+  description: 'Lets the bot check availability and book, reschedule, or cancel appointments for the customer.',
+  readinessHint: 'Ready once the bot has at least one online-bookable service and business hours set.',
+  provides: ['check_availability', 'create_booking', 'request_appointment', 'reschedule_booking', 'cancel_booking'],
   gate: { kind: 'feature', feature: 'bookings' },
   tools: [
     new CheckAvailabilityTool(),

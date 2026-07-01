@@ -27,7 +27,8 @@ export class PromptBuilder {
     timezone?: string,
     bookingConfigured?: boolean,
     channel?: string,
-    specialties?: ResolvedSpecialty[]
+    specialties?: ResolvedSpecialty[],
+    authoredModules?: { id: string; prose: string }[]
   ): { prompt: string; ledger: BlockLedger } {
     return composeSystemPrompt({
       mode: 'agent',
@@ -39,6 +40,7 @@ export class PromptBuilder {
       skills: (botSettings.skills as SkillConfig[]) || [],
       kbContext,
       moduleSections,
+      authoredModules,
       customerName,
       templateBody,
       timezone,

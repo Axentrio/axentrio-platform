@@ -34,12 +34,22 @@ import {
   validateConfig,
   type Replacement,
 } from '../../templates/template-admin.service';
+import {
+  createModule,
+  editModule,
+  createModuleDraftVersion,
+  editModuleDraftVersion,
+  publishModuleVersion,
+  listModules,
+} from '../../templates/module-admin.service';
 import { buildSystemPrompt } from '../../llm/prompt-builder';
 import { previewLedger } from '../../templates/template-preview';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
-import { allModules } from '../../modules';
+import { allModules, getModule } from '../../modules';
+import type { ToolDefinition } from '../../llm/llm.types';
+import { ToolRegistry } from '../../agent/tool-registry';
 
 const router = Router();
 
@@ -331,6 +341,7 @@ router.post(
       body: text,
       changelog: reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null,
       expectedModules: body.expectedModules,
+      selectedModuleRefs: body.selectedModuleRefs,
       config: body.config,
     });
     await logAudit(req.userId!, 'bot_template.version_created', 'bot_template', req.params.id, undefined, { version: version.version });
@@ -352,6 +363,7 @@ router.put(
       body: typeof body.body === 'string' ? body.body : undefined,
       changelog: body.changelog === undefined ? undefined : (reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null),
       expectedModules: body.expectedModules,
+      selectedModuleRefs: body.selectedModuleRefs,
       config: body.config,
       lockVersion,
     });
@@ -445,6 +457,194 @@ router.put(
       reassignedTenants: result.reassignedTenants.length,
     });
     sendSuccess(res, result);
+  }),
+);
+
+// ── Authored Modules (composable-templates Phase 4) ──────────────────────────
+// Super-admin CRUD for authored Modules + their immutable versions. Same auth +
+// audit posture as the template routes above (mounted behind requireSuperAdmin).
+
+// GET /admin/skills — the engineered skill catalog (read-only; skills are code,
+// not authorable). Rich metadata feeds the Studio Skills tab + the module picker.
+router.get(
+  '/skills',
+  asyncHandler(async (_req: Request, res: Response) => {
+    sendSuccess(res, {
+      skills: allModules().map((m) => ({
+        id: m.id,
+        displayName: m.displayName,
+        description: m.description ?? null,
+        readinessHint: m.readinessHint ?? null,
+        feature: m.gate.kind === 'feature' ? m.gate.feature : null,
+        provides: m.provides ?? m.tools.map((t) => t.name),
+        // Skills that ship their own tools may need per-bot setup (e.g. booking's
+        // calendar/services). Inert catalog skills (tools in the builtin registry)
+        // are ready once entitled — no setup.
+        needsSetup: m.tools.length > 0,
+      })),
+    });
+  }),
+);
+
+// GET /admin/modules — list modules with their versions.
+router.get(
+  '/modules',
+  asyncHandler(async (_req: Request, res: Response) => {
+    sendSuccess(res, { modules: await listModules() });
+  }),
+);
+
+// POST /admin/modules — create a module + its first draft version.
+router.post(
+  '/modules',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await createModule({
+      name: body.name,
+      description: body.description,
+      skillIds: body.skillIds,
+      prose: body.prose,
+    });
+    await logAudit(req.userId!, 'module.created', 'module', result.module.id, undefined, { name: result.module.name });
+    res.status(201);
+    sendSuccess(res, result);
+  }),
+);
+
+// PUT /admin/modules/:id — edit a module's catalog fields.
+router.put(
+  '/modules/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const module = await editModule(req.params.id, {
+      name: body.name,
+      description: body.description,
+      skillIds: body.skillIds,
+    });
+    await logAudit(req.userId!, 'module.edited', 'module', req.params.id, undefined, undefined);
+    sendSuccess(res, { module });
+  }),
+);
+
+// POST /admin/modules/:id/versions — create a draft version.
+router.post(
+  '/modules/:id/versions',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const version = await createModuleDraftVersion(req.params.id, { prose: body.prose });
+    await logAudit(req.userId!, 'module.version_created', 'module', req.params.id, undefined, { version: version.version });
+    res.status(201);
+    sendSuccess(res, { version });
+  }),
+);
+
+// PUT /admin/modules/:id/versions/:version — edit a DRAFT (optimistic concurrency).
+router.put(
+  '/modules/:id/versions/:version',
+  asyncHandler(async (req: Request, res: Response) => {
+    const version = parseVersion(req.params.version);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const lockVersion = body.lockVersion === undefined ? undefined : Number(body.lockVersion);
+    const updated = await editModuleDraftVersion(req.params.id, version, { prose: body.prose, lockVersion });
+    await logAudit(req.userId!, 'module.version_edited', 'module', req.params.id, undefined, { version });
+    sendSuccess(res, { version: updated });
+  }),
+);
+
+// POST /admin/modules/:id/versions/:version/publish — draft → published (frozen).
+router.post(
+  '/modules/:id/versions/:version/publish',
+  asyncHandler(async (req: Request, res: Response) => {
+    const version = parseVersion(req.params.version);
+    const published = await publishModuleVersion(req.params.id, version, req.userId!);
+    await logAudit(req.userId!, 'module.version_published', 'module', req.params.id, undefined, { version });
+    sendSuccess(res, { version: published });
+  }),
+);
+
+// POST /admin/modules/test-agent — DRY-RUN skill test. Runs ONE agent-mode turn with
+// the bound skills' tools ADVERTISED to the model, but NEVER executes a tool: we
+// capture the tool call(s) the model decides to make (name + args) so an author can
+// see the skill "fire" with zero side effects (no real booking/handoff). Prose-driven,
+// platform LLM, no KB — the authoring-time counterpart to the base prose test-chat.
+router.post(
+  '/modules/test-agent',
+  asyncHandler(async (req: Request, res: Response) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const message = reqStr(b.message, 'message', { max: 4000 })!;
+    const prose = typeof b.prose === 'string' ? b.prose : '';
+    if (prose.length > 8000) throw new ValidationError('prose is too long to test (max 8000 chars)');
+    const skillIds = Array.isArray(b.skillIds) ? b.skillIds.filter((x): x is string => typeof x === 'string') : [];
+    const history = Array.isArray(b.history)
+      ? (b.history as unknown[])
+          .filter((m): m is { role: string; content: string } => !!m && typeof (m as { content?: unknown }).content === 'string')
+          .slice(-10)
+          .map((m) => ({ role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: m.content }))
+      : [];
+
+    // Advertise the bound skills' tools (deduped by name). Inert catalog skills have no
+    // `tools`, so synthesise a minimal def from their `provides` names — enough for the
+    // model to decide to call them.
+    const registry = new ToolRegistry();
+    const seen = new Set<string>();
+    const toolDefs: ToolDefinition[] = [];
+    for (const sid of skillIds) {
+      const def = getModule(sid);
+      if (!def) continue;
+      if (def.tools.length) {
+        for (const t of def.tools) {
+          if (seen.has(t.name)) continue;
+          seen.add(t.name);
+          toolDefs.push({ name: t.name, description: t.description, parameters: t.parameters });
+        }
+      } else {
+        // Inert catalog skill (no tools of its own): advertise the REAL builtin tool
+        // it provides (with its actual parameters), falling back to a minimal def.
+        for (const name of def.provides ?? []) {
+          if (seen.has(name)) continue;
+          seen.add(name);
+          toolDefs.push(
+            registry.builtinToolDef(name) ?? {
+              name,
+              description: `Run the ${def.displayName} skill.`,
+              parameters: { type: 'object', properties: {} },
+            },
+          );
+        }
+      }
+    }
+
+    const ai = {
+      enabled: true,
+      brandVoice: { name: 'Assistant', tone: 'friendly', customInstructions: '' },
+      guardrails: {},
+    } as Parameters<typeof buildSystemPrompt>[0];
+    const base = buildSystemPrompt(ai, { businessName: 'Your Business', templateBody: prose });
+    const systemPrompt = `${base}\n\nWhen the customer's request calls for it, use the appropriate tool.`;
+
+    const { getProvider } = await import('../../llm/provider-factory');
+    const llm = getProvider(DEFAULT_PROVIDER);
+    const messages = [
+      { role: 'system' as const, content: systemPrompt },
+      ...history,
+      { role: 'user' as const, content: message },
+    ];
+    let out;
+    try {
+      out = await llm.chat(messages, {
+        model: DEFAULT_MODEL,
+        maxTokens: 800,
+        temperature: 0.3,
+        jsonMode: false,
+        tools: toolDefs.length ? toolDefs : undefined,
+      });
+    } catch (err) {
+      logger.error('Module dry-run skill test failed', err);
+      throw new ApiError('LLM call failed. Check the platform API key.', 500, ERROR_CODES.UPSTREAM_FAILED);
+    }
+    // DRY RUN — we never execute a tool; we only report the model's decision.
+    const toolCalls = (out.toolCalls ?? []).map((tc) => ({ name: tc.name, arguments: tc.arguments }));
+    sendSuccess(res, { response: out.content || null, toolCalls, availableTools: toolDefs.map((t) => t.name) });
   }),
 );
 

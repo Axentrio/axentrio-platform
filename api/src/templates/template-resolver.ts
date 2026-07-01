@@ -60,6 +60,10 @@ export interface ResolvedTemplate {
   /** Modules the resolved version expects (advisory) — feeds the trace's
    *  MODULE_<id> expected-but-inactive exclusions (L7). [] when unbound/unreachable. */
   expectedModules: string[];
+  /** Composable-templates Phase 4: the authored module refs pinned by the resolved
+   *  version ({moduleId, moduleVersion} → immutable ModuleVersion records). null for
+   *  legacy templates (→ runtime falls back to expectedModules; behaviour unchanged). */
+  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
   /** The bot pinned a fixed version that isn't published → fell back to latest/empty. */
   pinnedButUnavailable: boolean;
   /** The bound template is missing/archived/has no published version → fell back to empty. */
@@ -86,6 +90,7 @@ const UNBOUND: ResolvedTemplate = {
   resolvedVersion: null,
   category: null,
   expectedModules: [],
+  selectedModuleRefs: null,
   pinnedButUnavailable: false,
   templateUnavailable: false,
 };
@@ -97,6 +102,8 @@ interface PublishedVersion {
   /** Modules the template version expects (advisory, T13) — drives the trace's
    *  MODULE_<id> "expected but not active" exclusions (L7). */
   expectedModules: string[];
+  /** Composable-templates Phase 4: pinned authored module refs (null for legacy). */
+  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
 }
 interface TemplateBundle {
   id: string;
@@ -116,7 +123,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
       where: { templateId, status: 'published' },
-      select: ['version', 'body', 'config', 'expectedModules'],
+      select: ['version', 'body', 'config', 'expectedModules', 'selectedModuleRefs'],
       order: { version: 'DESC' },
     });
     return {
@@ -128,6 +135,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
         body: v.body,
         config: v.config ?? {},
         expectedModules: v.expectedModules ?? [],
+        selectedModuleRefs: v.selectedModuleRefs ?? null,
       })),
     };
   });
@@ -221,6 +229,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
+      selectedModuleRefs: latest.selectedModuleRefs,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -237,6 +246,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: exact.expectedModules,
+      selectedModuleRefs: exact.selectedModuleRefs,
       body: exact.body,
       config: exact.config,
       resolvedVersion: exact.version,
@@ -251,6 +261,7 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
+      selectedModuleRefs: latest.selectedModuleRefs,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -395,6 +406,33 @@ export function composeTemplateBodies(resolved: ResolvedTemplate[], mode: 'and' 
       : "You cover the following INDEPENDENT specialities. Use ONLY the speciality that matches the customer's request; do not assume they want more than one unless they say so:";
   const sections = bodies.map((b, i) => `### Speciality ${i + 1}\n${b}`).join('\n\n');
   return `${header}\n\n${sections}`;
+}
+
+/**
+ * Composable-templates Phase 4 — the skill ids a template version selects. When it
+ * has authored module refs, resolve them to their bound skills (deduped, order-
+ * stable) via the supplied lookup; otherwise fall back to the legacy expectedModules
+ * (1:1 skill ids). Pure — the caller injects `moduleSkills` (a Module.skillIds
+ * lookup) so the selection logic is testable without the DB. An empty refs array
+ * is treated as "no refs".
+ */
+export function selectSkillIds(
+  version: { selectedModuleRefs?: { moduleId: string }[] | null; expectedModules: string[] },
+  moduleSkills: (moduleId: string) => string[],
+): string[] {
+  const refs = version.selectedModuleRefs;
+  if (!refs || refs.length === 0) return [...new Set(version.expectedModules)];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const moduleId of new Set(refs.map((r) => r.moduleId))) {
+    for (const skill of moduleSkills(moduleId)) {
+      if (!seen.has(skill)) {
+        seen.add(skill);
+        out.push(skill);
+      }
+    }
+  }
+  return out;
 }
 
 /**

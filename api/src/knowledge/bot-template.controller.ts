@@ -16,9 +16,12 @@ import { BotTemplateVersion } from '../database/entities/BotTemplateVersion';
 import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 import { listAvailableTemplates, resolveBoundTemplates, bindingsOf } from '../templates/template-resolver';
 import { listActiveModules } from '../modules';
+import { computeBotSkillReadiness } from '../modules/bot-skill-readiness';
 import { sendSuccess } from '../utils/response';
 import { NotFoundError, ForbiddenError, ValidationError } from '../middleware/error-handler';
 import { putBotTemplateBindingSchema } from '../schemas/bot-template-binding.schema';
+import { logger } from '../utils/logger';
+import type { SkillReadinessDto } from '../contracts/skill-readiness';
 
 async function loadOwnedBotOr404(botId: string, tenantId: string): Promise<Bot> {
   try {
@@ -71,11 +74,29 @@ async function buildView(bot: Bot, tenantId: string) {
 
   const missingModules = [...new Set(boundIds.flatMap((tid) => (perTemplate[tid]?.expectedModules ?? []).filter((id) => !activeIds.has(id))))];
 
+  // Composable-templates Phase 6 — per-skill state + remedy (advisory). Computed
+  // from the SAME function as GET /bots/:id/skill-readiness, so the two surfaces
+  // can never disagree. Fails SAFE here (the dedicated endpoint fails CLOSED):
+  // a transient readiness error must never break the template picker, so we fall
+  // back to [] and keep the legacy missingModules advisory. Dual-rendered during
+  // rollout — the old UI reads missingModules, the new UI reads perSkillStates.
+  let perSkillStates: SkillReadinessDto[] = [];
+  try {
+    perSkillStates = await computeBotSkillReadiness(bot, tenantId);
+  } catch (error) {
+    logger.warn('[BotTemplate] skill-readiness compute failed — perSkillStates omitted', {
+      botId: bot.id,
+      tenantId,
+      error,
+    });
+  }
+
   return {
     available,
     mode: bot.templateMode ?? 'or',
     bindings: bindingsView,
     missingModules,
+    perSkillStates,
     // Back-compat: primary binding + a flattened resolved preview for the old UI.
     binding: { templateId: bot.templateId ?? null, templateVersion: bot.templateVersion },
     publishedVersions: bindingsView[0]?.publishedVersions ?? [],

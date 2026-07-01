@@ -6,8 +6,12 @@
  */
 import { registerModule } from './module-catalog';
 import { bookingModule } from './booking.module';
+import { leadCaptureSkill, handoffSkill } from './catalog-skills';
 
 registerModule(bookingModule);
+// Catalog-only skills: bindable + insightful, runtime-inert (no tools/section).
+registerModule(leadCaptureSkill);
+registerModule(handoffSkill);
 
 export { registerModule, getModule, allModules } from './module-catalog';
 export type { ModuleDefinition, ModuleGate, ModulePromptContext } from './module-catalog';

@@ -35,6 +35,13 @@ export interface ModuleDefinition {
   /** Catalog id — also the tenant_modules.module_id value for bespoke modules. */
   id: string;
   displayName: string;
+  /** Plain-English "what this skill does" — shown in the Bot Studio skills catalog. */
+  description?: string;
+  /** What makes this skill `ready` (its config requirement), for the catalog. */
+  readinessHint?: string;
+  /** Tool names this skill gives the bot, for DISPLAY (decoupled from `tools`, so a
+   *  skill whose runtime tools live in the builtin registry can still show them). */
+  provides?: string[];
   gate: ModuleGate;
   /** Tool adapters this module contributes to the agent loop. */
   tools: ToolAdapter[];

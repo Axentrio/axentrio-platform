@@ -27,3 +27,14 @@ export const CAPABILITY_READINESS_ENABLED = flag(
   import.meta.env.VITE_FEATURE_CAPABILITY_READINESS,
   import.meta.env.DEV,
 );
+
+/**
+ * Composable templates (a.k.a. `showComposableTemplates`) — the COMPOSITE gate for
+ * the redesign: the Phase-5 module-select editor AND the Phase-6 tenant skill-state
+ * badges. ON → new editor + per-skill state badges; OFF → legacy editor, no badges.
+ * ON in local/dev; gate via VITE_FEATURE_COMPOSABLE_TEMPLATES in deployed envs.
+ */
+export const COMPOSABLE_TEMPLATES_ENABLED = flag(
+  import.meta.env.VITE_FEATURE_COMPOSABLE_TEMPLATES,
+  import.meta.env.DEV,
+);

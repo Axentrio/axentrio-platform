@@ -15,6 +15,7 @@ import axios from 'axios';
 import { useQuery, useMutation, useQueryClient, queryOptions } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
+import type { SkillReadinessResponse } from '@contracts/skill-readiness';
 
 const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
@@ -220,6 +221,19 @@ export function useBotTemplates(botId: string, opts: { enabled?: boolean } = {})
   return useQuery({
     queryKey: queryKeys.bots.templates(botId),
     queryFn: () => api.get<BotTemplateView>(`/bots/${botId}/templates`),
+    enabled: !!botId && (opts.enabled ?? true),
+  });
+}
+
+/**
+ * GET /bots/:id/skill-readiness — advisory per-skill state + remedy (composable
+ * templates Phase 6). Bot-specific (includes booking-readiness), unlike the
+ * template view's coarser missingModules advisory.
+ */
+export function useSkillReadiness(botId: string, opts: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: [...queryKeys.bots.templates(botId), 'skill-readiness'] as const,
+    queryFn: () => api.get<SkillReadinessResponse>(`/bots/${botId}/skill-readiness`),
     enabled: !!botId && (opts.enabled ?? true),
   });
 }

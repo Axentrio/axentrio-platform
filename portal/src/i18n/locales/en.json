@@ -36,6 +36,8 @@
     "platformAnalytics": "Platform Analytics",
     "guardrails": "Guardrails",
     "botTemplates": "Bot Templates",
+    "botStudio": "Bot Studio",
+    "modules": "Modules",
     "faqEditor": "FAQ Editor"
   },
   "sidebar": {
@@ -1340,6 +1342,11 @@
         "expectedModules": "Expected modules",
         "expectedModulesHint": "Declares what this template needs to work fully — tenants must enable these. Preview the effect with the scenario controls on the right.",
         "noModules": "No modules available.",
+        "generalPrompt": "General prompt",
+        "generalPromptHint": "Personality and tone only. What the bot can do comes from the modules below — don't claim capabilities here. Supports placeholders like {botName}, {businessName}, {tone}.",
+        "modules": "Modules",
+        "modulesHint": "Pick one or more modules — this template composes their prose, and the resolver combines their bound skills.",
+        "noModulesPublished": "No published modules yet — create and publish one under Modules first.",
         "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",
         "configTitle": "Guardrails",
@@ -1379,6 +1386,12 @@
           "1200": "Long"
         },
         "saveDraft": "Save draft",
+        "unsaved": "Unsaved changes",
+        "promptSection": "Prompt",
+        "modulesSection": "Capabilities",
+        "notesSection": "Version notes",
+        "charCount": "{{n}} / 20,000",
+        "insertLabel": "Insert",
         "testTitle": "Test this prompt",
         "testPlaceholder": "Type a visitor message…",
         "testSend": "Send",

@@ -19,7 +19,7 @@ import { createTestTenant } from '../helpers/factories';
 
 const rt = (body: string, topics: string[] = []): ResolvedTemplate => ({
   templateId: 't', body, config: { guardrails: { topicsToAvoid: topics } }, resolvedVersion: 1,
-  category: null, expectedModules: [], pinnedButUnavailable: false, templateUnavailable: false,
+  category: null, expectedModules: [], selectedModuleRefs: null, pinnedButUnavailable: false, templateUnavailable: false,
 });
 
 describe('composeTemplateBodies (AND/OR stitching)', () => {
@@ -127,6 +127,7 @@ describe('resolveBoundTemplate', () => {
       resolvedVersion: null,
       category: null,
       expectedModules: [],
+      selectedModuleRefs: null,
       pinnedButUnavailable: false,
       templateUnavailable: false,
     });

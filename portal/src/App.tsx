@@ -58,7 +58,8 @@ import AdminAnalytics from '@pages/admin/AdminAnalytics';
 import AdminGuardrails from '@pages/admin/AdminGuardrails';
 import AdminGuardrailConversation from '@pages/admin/AdminGuardrailConversation';
 import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
-import AdminBotTemplates from '@pages/admin/AdminBotTemplates';
+import AdminModuleDetail from '@pages/admin/AdminModuleDetail';
+import AdminStudio from '@pages/admin/AdminStudio';
 import AdminBotTemplateDetail from '@pages/admin/AdminBotTemplateDetail';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
@@ -341,8 +342,11 @@ function AppRoutes() {
                       <Route path="/admin/guardrails" element={<AdminGuardrails />} />
                       <Route path="/admin/guardrails/:conversationId" element={<AdminGuardrailConversation />} />
                       <Route path="/admin/faq" element={<AdminFaqEditor />} />
-                      <Route path="/admin/bot-templates" element={<AdminBotTemplates />} />
+                      <Route path="/admin/studio" element={<AdminStudio />} />
+                      <Route path="/admin/bot-templates" element={<Navigate to="/admin/studio?tab=templates" replace />} />
                       <Route path="/admin/bot-templates/:id" element={<AdminBotTemplateDetail />} />
+                      <Route path="/admin/modules" element={<Navigate to="/admin/studio?tab=modules" replace />} />
+                      <Route path="/admin/modules/:id" element={<AdminModuleDetail />} />
                     </Route>
 
                     {/* Redirects for old routes */}

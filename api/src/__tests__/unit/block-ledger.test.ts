@@ -122,6 +122,23 @@ describe('block ledger — agent mode', () => {
     expect(excluded({ tools: [], specialties })).toContainEqual({ key: 'SPECIALTY_x', reason: 'empty' });
   });
 
+  it('AUTHORED_MODULE_<id> (Phase 4): emits authored module prose as its own block, distinct from MODULE_', () => {
+    const out = composeSystemPrompt({
+      ...base,
+      tools: [],
+      authoredModules: [{ id: 'salon-concierge', prose: 'Greet warmly, then offer the next available time.' }],
+    });
+    expect(out.ledger.getIncluded()).toContain('AUTHORED_MODULE_salon-concierge');
+    expect(out.prompt).toContain('Greet warmly, then offer the next available time.');
+    // the composer still never emits an engineered MODULE_<id> key
+    expect(out.ledger.getIncluded().some((k) => k.startsWith('MODULE_'))).toBe(false);
+  });
+
+  it('AUTHORED_MODULE_<id>: empty prose is excluded(empty), not pushed', () => {
+    const out = composeSystemPrompt({ ...base, tools: [], authoredModules: [{ id: 'blank', prose: '   ' }] });
+    expect(out.ledger.getExcluded()).toContainEqual({ key: 'AUTHORED_MODULE_blank', reason: 'empty' });
+  });
+
   it('does NOT record MODULE_<id> keys (those are owned by agent.service)', () => {
     const out = composeSystemPrompt({ ...base, tools: [], moduleSections: ['## SERVICES\nHaircut'] });
     expect(out.ledger.getIncluded().some((k) => k.startsWith('MODULE_'))).toBe(false);

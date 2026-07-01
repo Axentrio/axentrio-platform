@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -224,6 +224,46 @@ function renderPromptWithVars(body: string): React.ReactNode {
     );
   });
 }
+
+// Section shell for the authoring canvas: a numbered icon-chip + title + optional
+// helper and trailing action, with content indented under a connecting rail. Turns
+// the long left column into legible, ordered steps instead of a flat stack of fields.
+const AuthorSection: React.FC<{
+  step: number;
+  icon: React.ElementType;
+  title: string;
+  hint?: React.ReactNode;
+  action?: React.ReactNode;
+  last?: boolean;
+  children: React.ReactNode;
+}> = ({ step, icon: Icon, title, hint, action, last, children }) => (
+  <section className="relative grid grid-cols-[2rem_1fr] gap-x-4">
+    <div className="flex flex-col items-center">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-primary-300 ring-1 ring-inset ring-edge">
+        <Icon className="h-4 w-4" />
+      </span>
+      {!last && <span aria-hidden className="mt-1 w-px flex-1 bg-edge/70" />}
+    </div>
+    <div className={last ? '' : 'pb-8'}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="font-mono text-[11px] tabular-nums text-text-muted">{String(step).padStart(2, '0')}</span>
+            <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+          </div>
+          {hint && <p className="mt-1 max-w-prose text-xs leading-relaxed text-text-tertiary">{hint}</p>}
+        </div>
+        {action && <div className="shrink-0">{action}</div>}
+      </div>
+      <div className="mt-3">{children}</div>
+    </div>
+  </section>
+);
+
+// A compact grouping label for the live-preview rail (uppercase eyebrow + count).
+const RailLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">{children}</div>
+);
 
 type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedModuleIds: string[]; config: ConfigDraft };
 const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', selectedModuleIds: [], config: EMPTY_CONFIG };
@@ -522,22 +562,30 @@ const AdminBotTemplateDetail: React.FC = () => {
         ? t('admin.botTemplates.editor.viewTitle', { version: draft.version })
         : t('admin.botTemplates.editor.editTitle', { version: draft.version });
   const editorBusy = createVersionMut.isPending || editVersionMut.isPending || publishMut.isPending;
+  // Unsaved-edits signal for the editor header, mirroring the discard guard.
+  const dirty = draft.mode !== 'view' && draftKey(draft) !== draftBaselineRef.current;
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
+    <div className="h-full overflow-y-auto">
+    <div className="mx-auto max-w-6xl p-6 space-y-6">
       <div>
-        <Link to="/admin/bot-templates" className="inline-flex items-center text-sm text-text-secondary hover:text-text-primary">
+        <Link to="/admin/bot-templates" className="inline-flex items-center text-sm text-text-secondary transition-colors hover:text-text-primary">
           <ArrowLeft className="h-4 w-4 mr-1" />
           {t('admin.botTemplates.detail.back')}
         </Link>
-        <div className="mt-2 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-text-primary">{template.displayName}</h1>
-            <Badge variant={template.status === 'active' ? 'default' : 'secondary'}>
-              {t(`admin.botTemplates.templateStatus.${template.status}`)}
-            </Badge>
-            <span className="text-xs font-mono text-text-tertiary">{template.key}</span>
-            <Badge variant="secondary">{t('admin.botTemplates.detail.usage', { bots: usage.bots, tenants: usage.tenants })}</Badge>
+        <div className="mt-3 flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 space-y-2">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <h1 className="text-2xl font-semibold tracking-tight text-text-primary">{template.displayName}</h1>
+              <Badge variant={template.status === 'active' ? 'default' : 'secondary'}>
+                {t(`admin.botTemplates.templateStatus.${template.status}`)}
+              </Badge>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-tertiary">
+              <span className="inline-flex items-center rounded-md bg-surface-2 px-2 py-0.5 font-mono text-text-secondary ring-1 ring-inset ring-edge">{template.key}</span>
+              <span className="text-text-muted">·</span>
+              <span>{t('admin.botTemplates.detail.usage', { bots: usage.bots, tenants: usage.tenants })}</span>
+            </div>
           </div>
           {template.status === 'active' && (
             <Button
@@ -581,8 +629,11 @@ const AdminBotTemplateDetail: React.FC = () => {
           <Card variant="glass">
             <CardContent className="p-5">
               <div className="mb-4 flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-1 text-primary-300 ring-1 ring-inset ring-edge">
+                  <Boxes className="h-3.5 w-3.5" />
+                </span>
                 <h2 className="text-sm font-semibold text-text-primary">Composition</h2>
-                <span className="text-xs text-text-tertiary">from v{current.version}</span>
+                <Badge variant="secondary" className="ml-auto">from v{current.version}</Badge>
               </div>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
                 <Col label="General prompt">
@@ -914,15 +965,32 @@ const AdminBotTemplateDetail: React.FC = () => {
             className="fixed inset-0 z-50 flex flex-col bg-surface-0 focus:outline-none"
           >
             <DialogPrimitive.Title className="sr-only">{editorTitle}</DialogPrimitive.Title>
-            <header className="flex flex-wrap items-center gap-3 border-b border-edge px-6 py-3 shrink-0">
-            <div className="flex items-center gap-3 min-w-0">
-              <h2 className="text-lg font-semibold text-text-primary truncate">{editorTitle}</h2>
-              {template.category && (
-                <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.detail.category')}: {template.category}</Badge>
-              )}
-              {draft.mode === 'create' && versions[0] && (
-                <span className="text-xs text-text-tertiary truncate">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</span>
-              )}
+            <header className="relative flex flex-wrap items-center gap-3 border-b border-edge bg-surface-1/70 px-5 py-3 shrink-0 backdrop-blur">
+            <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary-500/60 to-transparent" />
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-500/10 text-primary-300 ring-1 ring-inset ring-primary-500/25">
+                {draft.mode === 'view' ? <Eye className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+              </span>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h2 className="truncate text-base font-semibold text-text-primary">{editorTitle}</h2>
+                  {draft.mode === 'view'
+                    ? <Badge variant="secondary" className="shrink-0">{t('admin.botTemplates.versionStatus.published')}</Badge>
+                    : dirty && (
+                      <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25">
+                        <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />{t('admin.botTemplates.editor.unsaved')}
+                      </span>
+                    )}
+                </div>
+                <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-text-tertiary">
+                  {template.category && (
+                    <span className="truncate">{t('admin.botTemplates.detail.category')}: <span className="font-mono text-text-secondary">{template.category}</span></span>
+                  )}
+                  {draft.mode === 'create' && versions[0] && (
+                    <><span className="text-text-muted">·</span><span className="truncate">{t('admin.botTemplates.editor.prefilledFrom', { version: versions[0].version })}</span></>
+                  )}
+                </div>
+              </div>
             </div>
             <div className="ml-auto flex items-center gap-2">
               {draft.mode === 'view' ? (
@@ -931,42 +999,73 @@ const AdminBotTemplateDetail: React.FC = () => {
                 <>
                   <Button variant="ghost" onClick={requestCloseDraft}>{t('common.cancel')}</Button>
                   <Button variant="outline" onClick={saveDraft} disabled={editorBusy}>{t('admin.botTemplates.editor.saveDraft')}</Button>
-                  <Button onClick={publishDraft} disabled={editorBusy}>{t('admin.botTemplates.actions.publish')}</Button>
+                  <Button onClick={publishDraft} disabled={editorBusy} className="gap-1.5">
+                    <Check className="h-4 w-4" />{t('admin.botTemplates.actions.publish')}
+                  </Button>
                 </>
               )}
             </div>
           </header>
           <div className="flex-1 min-h-0 grid lg:grid-cols-[1fr_minmax(0,440px)]">
-            {/* LEFT — author */}
-            <div className="space-y-4 overflow-y-auto p-6">
-            <div className="space-y-1.5">
-              <Label htmlFor="d-body">{COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}</Label>
-              <Textarea id="d-body" rows={14} className="font-mono text-sm" value={draft.body} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))} />
-              {draft.mode !== 'view' && (
-                <div className="flex flex-wrap gap-1.5">
-                  {PLACEHOLDER_CHIPS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      className="rounded border border-edge bg-surface-2 px-2 py-0.5 font-mono text-xs text-text-secondary hover:border-primary hover:text-text-primary"
-                      onClick={() => setDraft((d) => ({ ...d, body: d.body + (d.body && !d.body.endsWith(' ') ? ' ' : '') + p }))}
-                    >
-                      {p}
-                    </button>
-                  ))}
+            {/* LEFT — author: numbered steps down a connecting rail. */}
+            <div className="overflow-y-auto">
+            <div className="mx-auto max-w-3xl px-6 py-8 lg:px-8">
+
+            {/* 01 — Prompt: the hero, framed as a real editor surface. */}
+            <AuthorSection
+              step={1}
+              icon={Sparkles}
+              title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.promptSection')}
+              hint={draft.mode !== 'view' ? (COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPromptHint') : t('admin.botTemplates.editor.bodyHint')) : undefined}
+            >
+              <div className="overflow-hidden rounded-xl border border-edge bg-surface-1 transition-colors focus-within:border-primary-400 focus-within:ring-2 focus-within:ring-primary-500/25">
+                <div className="flex items-center justify-between gap-2 border-b border-edge/70 bg-surface-2/40 px-3 py-2">
+                  <Label htmlFor="d-body" className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                    {COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPrompt') : t('admin.botTemplates.editor.body')}
+                  </Label>
+                  <span className="font-mono text-[11px] tabular-nums text-text-muted">{t('admin.botTemplates.editor.charCount', { n: draft.body.length.toLocaleString() })}</span>
                 </div>
-              )}
-              {draft.mode !== 'view' && <p className="text-xs text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.generalPromptHint') : t('admin.botTemplates.editor.bodyHint')}</p>}
+                <Textarea
+                  id="d-body"
+                  rows={16}
+                  className="rounded-none border-0 bg-transparent font-mono text-sm leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
+                  value={draft.body}
+                  readOnly={draft.mode === 'view'}
+                  onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
+                />
+                {draft.mode !== 'view' && (
+                  <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
+                    <span className="mr-1 text-[11px] font-medium text-text-muted">{t('admin.botTemplates.editor.insertLabel')}</span>
+                    {PLACEHOLDER_CHIPS.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className="rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200"
+                        onClick={() => setDraft((d) => ({ ...d, body: d.body + (d.body && !d.body.endsWith(' ') ? ' ' : '') + p }))}
+                      >
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {draft.mode !== 'view' && unknownPlaceholders(draft.body).length > 0 && (
-                <p className="text-xs text-amber-400">
-                  {t('admin.botTemplates.editor.unknownPlaceholders', { placeholders: unknownPlaceholders(draft.body).map((p) => `{${p}}`).join(', ') })}
+                <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-400">
+                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <span>{t('admin.botTemplates.editor.unknownPlaceholders', { placeholders: unknownPlaceholders(draft.body).map((p) => `{${p}}`).join(', ') })}</span>
                 </p>
               )}
-            </div>
-            {COMPOSABLE_TEMPLATES_ENABLED ? (
-              <div className="space-y-1.5">
-                <Label>{t('admin.botTemplates.editor.modules')}</Label>
-                {(() => {
+            </AuthorSection>
+
+            {/* 02 — Capabilities: the modules → skills the bot actually gets. */}
+            <AuthorSection
+              step={2}
+              icon={Boxes}
+              title={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modules') : t('admin.botTemplates.editor.expectedModules')}
+              hint={COMPOSABLE_TEMPLATES_ENABLED ? t('admin.botTemplates.editor.modulesHint') : t('admin.botTemplates.editor.expectedModulesHint')}
+            >
+              {COMPOSABLE_TEMPLATES_ENABLED ? (
+                (() => {
                   const ro = draft.mode === 'view';
                   // One or more modules per version — the resolver unions their bound skills.
                   const toggleModule = (mid: string) =>
@@ -978,10 +1077,10 @@ const AdminBotTemplateDetail: React.FC = () => {
                     }));
                   const publishedRows = moduleRows.filter((r) => r.versions.some((v) => v.status === 'published'));
                   if (publishedRows.length === 0) {
-                    return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
+                    return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
                   }
                   return (
-                    <div className="space-y-1 rounded-md border border-edge bg-surface-1 p-1.5">
+                    <div className="grid gap-2 sm:grid-cols-2">
                       {publishedRows.map((r) => {
                         const module = r.module;
                         const checked = draft.selectedModuleIds.includes(module.id);
@@ -991,15 +1090,17 @@ const AdminBotTemplateDetail: React.FC = () => {
                         return (
                           <label
                             key={module.id}
-                            className={`flex items-start gap-2.5 rounded px-2 py-1.5 ${
-                              ro ? 'pointer-events-none opacity-70' : 'cursor-pointer hover:bg-surface-2'
-                            } ${checked ? 'bg-surface-2' : ''}`}
+                            className={`flex items-start gap-2.5 rounded-lg border p-3 transition-colors ${
+                              ro ? 'pointer-events-none opacity-70' : 'cursor-pointer'
+                            } ${checked ? 'border-primary-400/60 bg-primary-500/10' : 'border-edge bg-surface-1 hover:border-edge-light hover:bg-surface-2'}`}
                           >
                             <Checkbox checked={checked} onCheckedChange={() => toggleModule(module.id)} disabled={ro} className="mt-0.5" />
                             <span className="min-w-0">
-                              <span className="block text-sm text-text-primary">{module.name}</span>
+                              <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+                                <Boxes className="h-3.5 w-3.5 shrink-0 text-text-muted" />{module.name}
+                              </span>
                               {pub?.prose && (
-                                <span className="line-clamp-1 block text-xs text-text-tertiary">{pub.prose}</span>
+                                <span className="mt-0.5 line-clamp-2 block text-xs text-text-tertiary">{pub.prose}</span>
                               )}
                             </span>
                           </label>
@@ -1007,202 +1108,215 @@ const AdminBotTemplateDetail: React.FC = () => {
                       })}
                     </div>
                   );
-                })()}
-                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.modulesHint')}</p>
-              </div>
-            ) : (
-              <div className="space-y-1.5">
-                <Label>{t('admin.botTemplates.editor.expectedModules')}</Label>
-                {(() => {
+                })()
+              ) : (
+                (() => {
                   const ro = draft.mode === 'view';
                   const modulesArr = draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
                   const toggleModule = (mid: string) => {
                     const next = modulesArr.includes(mid) ? modulesArr.filter((x) => x !== mid) : [...modulesArr, mid];
                     setDraft((d) => ({ ...d, expectedModules: next.join(', ') }));
                   };
-                  if (moduleCatalog.length === 0) return <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
+                  if (moduleCatalog.length === 0) return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModules')}</p>;
                   return (
                     <div className="flex flex-wrap gap-1.5">
                       {moduleCatalog.map((mod) => {
                         const selected = modulesArr.includes(mod.id);
                         return (
-                          <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-7 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
+                          <Button key={mod.id} type="button" size="sm" variant={selected ? 'default' : 'outline'} className="h-8 text-xs" disabled={ro} onClick={() => toggleModule(mod.id)}>
                             {selected && <Check className="h-3 w-3 mr-1" />}{mod.displayName}
                           </Button>
                         );
                       })}
                     </div>
                   );
-                })()}
-                <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.expectedModulesHint')}</p>
-              </div>
-            )}
-            <div className="space-y-1.5">
-              <Label htmlFor="d-changelog">{t('admin.botTemplates.editor.changelog')}</Label>
-              <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
-            </div>
+                })()
+              )}
+            </AuthorSection>
 
-            {/* Template-owned policy guardrails (admin-controlled). Tone is bot-owned. */}
-            {(() => {
-              const ro = draft.mode === 'view';
-              const cfg = draft.config;
-              const setCfg = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, config: { ...d.config, ...patch } }));
-              const topicsArr = cfg.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
-              const confidence = Number(cfg.confidenceThreshold || DEFAULT_CONFIDENCE);
-              const insertMsg = (key: 'greetingMessage' | 'fallbackMessage' | 'offHoursMessage', i18nKey: string) =>
-                setCfg({ [key]: t(i18nKey) } as Partial<ConfigDraft>);
-              return (
-                <div className="border-t border-border/50 pt-4 space-y-4">
-                  <div>
-                    <h4 className="text-sm font-medium text-text-primary">{t('admin.botTemplates.editor.configTitle')}</h4>
-                    <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.configHint')}</p>
-                  </div>
+            {/* 03 — Guardrails: template-owned policy (tone stays bot-owned). */}
+            <AuthorSection
+              step={3}
+              icon={ShieldCheck}
+              title={t('admin.botTemplates.editor.configTitle')}
+              hint={t('admin.botTemplates.editor.configHint')}
+            >
+              {(() => {
+                const ro = draft.mode === 'view';
+                const cfg = draft.config;
+                const setCfg = (patch: Partial<ConfigDraft>) => setDraft((d) => ({ ...d, config: { ...d.config, ...patch } }));
+                const topicsArr = cfg.topicsToAvoid.split(',').map((x) => x.trim()).filter(Boolean);
+                const confidence = Number(cfg.confidenceThreshold || DEFAULT_CONFIDENCE);
+                const insertMsg = (key: 'greetingMessage' | 'fallbackMessage' | 'offHoursMessage', i18nKey: string) =>
+                  setCfg({ [key]: t(i18nKey) } as Partial<ConfigDraft>);
+                return (
+                  <div className="space-y-5">
+                    {/* Customer-facing messages, each with an opt-in "Insert suggested" starter */}
+                    <div className="space-y-4 rounded-xl border border-edge bg-surface-1 p-4">
+                      {([
+                        { key: 'greetingMessage', label: 'greetingMessage', suggest: 'admin.botTemplates.editor.greetingSuggested' },
+                        { key: 'fallbackMessage', label: 'fallbackMessage', suggest: 'admin.botTemplates.editor.fallbackSuggested' },
+                        { key: 'offHoursMessage', label: 'offHoursMessage', suggest: 'admin.botTemplates.editor.offHoursSuggested' },
+                      ] as const).map((f) => (
+                        <div key={f.key} className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor={`c-${f.key}`}>{t(`admin.botTemplates.editor.${f.label}`)}</Label>
+                            {!ro && !cfg[f.key].trim() && (
+                              <button type="button" className="text-xs font-medium text-primary-400 hover:text-primary-300" onClick={() => insertMsg(f.key, f.suggest)}>
+                                {t('admin.botTemplates.editor.insertSuggested')}
+                              </button>
+                            )}
+                          </div>
+                          <Textarea id={`c-${f.key}`} rows={2} value={cfg[f.key]} readOnly={ro} onChange={(e) => setCfg({ [f.key]: e.target.value } as Partial<ConfigDraft>)} />
+                        </div>
+                      ))}
+                    </div>
 
-                  {/* Customer-facing messages, each with an opt-in "Insert suggested" starter */}
-                  {([
-                    { key: 'greetingMessage', label: 'greetingMessage', suggest: 'admin.botTemplates.editor.greetingSuggested' },
-                    { key: 'fallbackMessage', label: 'fallbackMessage', suggest: 'admin.botTemplates.editor.fallbackSuggested' },
-                    { key: 'offHoursMessage', label: 'offHoursMessage', suggest: 'admin.botTemplates.editor.offHoursSuggested' },
-                  ] as const).map((f) => (
-                    <div key={f.key} className="space-y-1.5">
+                    {/* Topics to avoid — chips + one-click common bundle */}
+                    <div className="space-y-1.5 rounded-xl border border-edge bg-surface-1 p-4">
                       <div className="flex items-center justify-between">
-                        <Label htmlFor={`c-${f.key}`}>{t(`admin.botTemplates.editor.${f.label}`)}</Label>
-                        {!ro && !cfg[f.key].trim() && (
-                          <button type="button" className="text-xs text-primary-400 hover:text-primary-300" onClick={() => insertMsg(f.key, f.suggest)}>
-                            {t('admin.botTemplates.editor.insertSuggested')}
+                        <Label>{t('admin.botTemplates.editor.topicsToAvoid')}</Label>
+                        {!ro && (
+                          <button type="button" className="text-xs font-medium text-primary-400 hover:text-primary-300" onClick={() => setCfg({ topicsToAvoid: Array.from(new Set([...topicsArr, ...COMMON_TOPICS])).join(', ') })}>
+                            {t('admin.botTemplates.editor.topicsAddCommon')}
                           </button>
                         )}
                       </div>
-                      <Textarea id={`c-${f.key}`} rows={2} value={cfg[f.key]} readOnly={ro} onChange={(e) => setCfg({ [f.key]: e.target.value } as Partial<ConfigDraft>)} />
+                      <TagInput value={topicsArr} onChange={(arr) => setCfg({ topicsToAvoid: arr.join(', ') })} placeholder={t('admin.botTemplates.editor.topicsPlaceholder')} disabled={ro} />
+                      <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.topicsHint')}</p>
                     </div>
-                  ))}
 
-                  {/* Topics to avoid — chips + one-click common bundle */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <Label>{t('admin.botTemplates.editor.topicsToAvoid')}</Label>
-                      {!ro && (
-                        <button type="button" className="text-xs text-primary-400 hover:text-primary-300" onClick={() => setCfg({ topicsToAvoid: Array.from(new Set([...topicsArr, ...COMMON_TOPICS])).join(', ') })}>
-                          {t('admin.botTemplates.editor.topicsAddCommon')}
-                        </button>
-                      )}
-                    </div>
-                    <TagInput value={topicsArr} onChange={(arr) => setCfg({ topicsToAvoid: arr.join(', ') })} placeholder={t('admin.botTemplates.editor.topicsPlaceholder')} disabled={ro} />
-                    <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.topicsHint')}</p>
-                  </div>
-
-                  {/* Confidence — labeled slider */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>{t('admin.botTemplates.editor.confidenceThreshold')}</Label>
-                      <span className="text-xs font-medium text-text-secondary">{confidence.toFixed(2)}</span>
-                    </div>
-                    <Slider value={[confidence]} min={0.4} max={0.95} step={0.05} disabled={ro} onValueChange={([v]) => setCfg({ confidenceThreshold: String(v) })} />
-                    <div className="flex justify-between text-[10px] text-text-tertiary">
-                      <span>{t('admin.botTemplates.editor.confidenceFlexible')}</span>
-                      <span>{t('admin.botTemplates.editor.confidenceBalanced')}</span>
-                      <span>{t('admin.botTemplates.editor.confidenceStrict')}</span>
-                    </div>
-                    <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.confidenceHelper')}</p>
-                  </div>
-
-                  {/* Max response length — preset chips + number */}
-                  <div className="space-y-1.5">
-                    <Label htmlFor="c-maxlen">{t('admin.botTemplates.editor.maxResponseLength')}</Label>
-                    {!ro && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {LENGTH_PRESETS.map((p) => (
-                          <Button key={p.value} type="button" variant={cfg.maxResponseLength === p.value ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setCfg({ maxResponseLength: p.value })}>
-                            {t(`admin.botTemplates.editor.length.${p.value}`)} <span className="ml-1 opacity-60">{p.words}</span>
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                    <Input id="c-maxlen" type="number" step="50" min="1" className="max-w-[140px]" value={cfg.maxResponseLength} readOnly={ro} onChange={(e) => setCfg({ maxResponseLength: e.target.value })} />
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Test this prompt — try the current draft (body + config) before publishing. */}
-            <Accordion type="single" collapsible className="w-full">
-              <AccordionItem value="test" className="rounded-xl border border-edge px-4 border-b">
-                <AccordionTrigger className="hover:no-underline text-sm font-medium">{t('admin.botTemplates.editor.testTitle')}</AccordionTrigger>
-                <AccordionContent className="space-y-3">
-                  {testLog.length > 0 && (
-                    <div className="max-h-48 overflow-y-auto space-y-2 rounded-lg bg-surface-2 p-2">
-                      {testLog.map((mtest, i) => (
-                        <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
-                          <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
-                            {mtest.content}
-                          </span>
+                    <div className="grid items-start gap-4 sm:grid-cols-2">
+                      {/* Confidence — labeled slider */}
+                      <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-4">
+                        <div className="flex items-center justify-between">
+                          <Label>{t('admin.botTemplates.editor.confidenceThreshold')}</Label>
+                          <span className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-xs font-medium text-text-primary">{confidence.toFixed(2)}</span>
                         </div>
-                      ))}
-                      {testChat.isPending && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.testThinking')}</p>}
+                        <Slider value={[confidence]} min={0.4} max={0.95} step={0.05} disabled={ro} onValueChange={([v]) => setCfg({ confidenceThreshold: String(v) })} />
+                        <div className="flex justify-between text-[10px] text-text-tertiary">
+                          <span>{t('admin.botTemplates.editor.confidenceFlexible')}</span>
+                          <span>{t('admin.botTemplates.editor.confidenceBalanced')}</span>
+                          <span>{t('admin.botTemplates.editor.confidenceStrict')}</span>
+                        </div>
+                        <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.confidenceHelper')}</p>
+                      </div>
+
+                      {/* Max response length — preset chips + number */}
+                      <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-4">
+                        <Label htmlFor="c-maxlen">{t('admin.botTemplates.editor.maxResponseLength')}</Label>
+                        {!ro && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {LENGTH_PRESETS.map((p) => (
+                              <Button key={p.value} type="button" variant={cfg.maxResponseLength === p.value ? 'default' : 'outline'} size="sm" className="h-7 text-xs" onClick={() => setCfg({ maxResponseLength: p.value })}>
+                                {t(`admin.botTemplates.editor.length.${p.value}`)} <span className="ml-1 opacity-60">{p.words}</span>
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                        <Input id="c-maxlen" type="number" step="50" min="1" className="max-w-[140px]" value={cfg.maxResponseLength} readOnly={ro} onChange={(e) => setCfg({ maxResponseLength: e.target.value })} />
+                      </div>
                     </div>
-                  )}
-                  <div className="flex gap-2">
-                    <Input
-                      value={testInput}
-                      placeholder={t('admin.botTemplates.editor.testPlaceholder')}
-                      onChange={(e) => setTestInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void runTest(); } }}
-                    />
-                    <Button type="button" onClick={() => void runTest()} disabled={testChat.isPending || !testInput.trim()}>
-                      {t('admin.botTemplates.editor.testSend')}
-                    </Button>
                   </div>
-                  <p className="text-[10px] text-text-tertiary">{t('admin.botTemplates.editor.testHint')}</p>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
+                );
+              })()}
+            </AuthorSection>
+
+            {/* 04 — Version notes: what changed in this draft. */}
+            <AuthorSection step={4} icon={Pencil} title={t('admin.botTemplates.editor.changelog')}>
+              <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
+            </AuthorSection>
+
+            {/* 05 — Test this prompt: try the current draft (body + config) before publishing. */}
+            <AuthorSection step={5} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
+              <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-4">
+                {testLog.length > 0 && (
+                  <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">
+                    {testLog.map((mtest, i) => (
+                      <div key={i} className={mtest.role === 'user' ? 'text-right' : 'text-left'}>
+                        <span className={`inline-block rounded-lg px-2.5 py-1.5 text-xs ${mtest.role === 'user' ? 'bg-primary-600 text-white' : 'bg-surface-3 text-text-primary'}`}>
+                          {mtest.content}
+                        </span>
+                      </div>
+                    ))}
+                    {testChat.isPending && <p className="text-xs text-text-tertiary">{t('admin.botTemplates.editor.testThinking')}</p>}
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    value={testInput}
+                    placeholder={t('admin.botTemplates.editor.testPlaceholder')}
+                    onChange={(e) => setTestInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void runTest(); } }}
+                  />
+                  <Button type="button" onClick={() => void runTest()} disabled={testChat.isPending || !testInput.trim()}>
+                    {t('admin.botTemplates.editor.testSend')}
+                  </Button>
+                </div>
+              </div>
+            </AuthorSection>
 
             </div>
-            {/* RIGHT — scenario preview: outcomes first, technical ledger on demand. */}
-            <aside className="space-y-4 overflow-y-auto border-t border-edge bg-surface-1 p-6 lg:border-l lg:border-t-0">
-              <div>
-                <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
-                <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
-              </div>
-
-              <div className="space-y-2">
+            </div>
+            {/* RIGHT — live preview: a "monitor" rail. Outcomes first, ledger on demand. */}
+            <aside className="relative space-y-4 overflow-y-auto border-t border-edge bg-surface-0 p-5 lg:border-l lg:border-t-0">
+              <span aria-hidden className="pointer-events-none absolute inset-x-0 top-0 hidden h-px bg-gradient-to-r from-transparent via-primary-500/40 to-transparent lg:block" />
+              <div className="flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-2 text-primary-300 ring-1 ring-inset ring-edge">
+                  <Eye className="h-3.5 w-3.5" />
+                </span>
                 <div>
-                  <label className="mb-1 block text-[10px] uppercase tracking-wider text-text-tertiary">Plan</label>
+                  <h3 className="text-sm font-semibold text-text-primary">Preview a scenario</h3>
+                </div>
+              </div>
+              <p className="text-xs text-text-tertiary">Simulated — what a bot on this template would receive. Not this bot’s real settings.</p>
+
+              <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-3">
+                <div>
+                  <label className="mb-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-text-tertiary">
+                    <SlidersHorizontal className="h-3 w-3" />Plan
+                  </label>
                   <Select value={pvTier} onValueChange={(v) => setPvTier(v as typeof pvTier)}>
                     <SelectTrigger aria-label="Plan" className="w-full"><SelectValue /></SelectTrigger>
                     <SelectContent>{(['free', 'essential', 'pro', 'enterprise'] as const).map((x) => <SelectItem key={x} value={x}>{TIER_LABELS[x]}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-2 text-xs text-text-tertiary">
-                  <span>Preview channel</span>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-text-tertiary">Preview channel</span>
                   <Select value={pvChannel} onValueChange={setPvChannel}>
-                    <SelectTrigger aria-label="Channel" className="h-7 w-[150px] text-xs"><SelectValue /></SelectTrigger>
+                    <SelectTrigger aria-label="Channel" className="h-8 w-[150px] text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>{(['widget', 'whatsapp', 'instagram', 'messenger', 'telegram'] as const).map((x) => <SelectItem key={x} value={x}>{CHANNEL_LABELS[x]}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
-                <p className="text-[10px] text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select above. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules above. Channel only tweaks reply length and proactive contact.'}</p>
+                <p className="text-[10px] leading-relaxed text-text-tertiary">{COMPOSABLE_TEMPLATES_ENABLED ? 'Booking and other skills follow the modules you select. Channel only tweaks reply length and proactive contact.' : 'Booking and other modules follow the template’s Expected modules. Channel only tweaks reply length and proactive contact.'}</p>
               </div>
 
-              {preview.isPending && <p className="text-xs text-text-tertiary">Compiling…</p>}
+              {preview.isPending && (
+                <p className="flex items-center gap-2 text-xs text-text-tertiary">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary-400" />Compiling…
+                </p>
+              )}
               {preview.data ? (() => {
                 const ledger = preview.data;
                 const included = ledger.includedBlocks.filter((b) => !PREVIEW_HIDDEN_BLOCKS.has(b));
                 const excluded = ledger.excludedBlocks.filter((e) => !PREVIEW_HIDDEN_BLOCKS.has(e.key));
                 return (
                   <>
-                    <div className="space-y-1.5">
-                      <div className="text-[10px] uppercase tracking-wider text-text-tertiary">In this scenario the bot can</div>
-                      {PREVIEW_CAPABILITIES.map((cap) => {
-                        const on = ledger.allowedTools.includes(cap.tool);
-                        return (
-                          <div key={cap.tool} className={`flex items-start gap-2 text-xs ${on ? 'text-text-primary' : 'text-text-tertiary'}`}>
-                            {on
-                              ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-online" />
-                              : <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-status-away" />}
-                            <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
-                          </div>
-                        );
-                      })}
+                    <div className="space-y-2 rounded-xl border border-edge bg-surface-1 p-3">
+                      <RailLabel>In this scenario the bot can</RailLabel>
+                      <div className="space-y-1.5">
+                        {PREVIEW_CAPABILITIES.map((cap) => {
+                          const on = ledger.allowedTools.includes(cap.tool);
+                          return (
+                            <div key={cap.tool} className={`flex items-start gap-2 text-xs ${on ? 'text-text-primary' : 'text-text-muted'}`}>
+                              {on
+                                ? <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-online/15"><Check className="h-2.5 w-2.5 text-status-online" /></span>
+                                : <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-away/15"><TriangleAlert className="h-2.5 w-2.5 text-status-away" /></span>}
+                              <span>{cap.label}{!on && cap.whenAbsent ? ` — ${cap.whenAbsent}` : ''}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* Composable-templates: per-skill state badges for the modules
@@ -1210,11 +1324,11 @@ const AdminBotTemplateDetail: React.FC = () => {
                     {COMPOSABLE_TEMPLATES_ENABLED && (() => {
                       const skills = boundSkillIds(draft.selectedModuleIds);
                       if (skills.length === 0) {
-                        return <p className="text-xs text-text-tertiary">Add a module on the left to preview its skill.</p>;
+                        return <p className="rounded-xl border border-dashed border-edge px-3 py-3 text-xs text-text-tertiary">Add a module on the left to preview its skill.</p>;
                       }
                       return (
                         <div className="space-y-1.5">
-                          <div className="text-[10px] uppercase tracking-wider text-text-tertiary">Skills from modules</div>
+                          <RailLabel>Skills from modules</RailLabel>
                           {skills.map((sid) => {
                             const meta = skillsCatalog?.find((s) => s.id === sid);
                             const provides = meta?.provides ?? SKILL_PREVIEW[sid]?.tools ?? [];
@@ -1258,7 +1372,10 @@ const AdminBotTemplateDetail: React.FC = () => {
                   </>
                 );
               })() : !preview.isPending ? (
-                <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
+                <div className="rounded-xl border border-dashed border-edge px-4 py-8 text-center">
+                  <Eye className="mx-auto mb-2 h-5 w-5 text-text-muted" />
+                  <p className="text-xs text-text-tertiary">Write the prompt — a preview of what the bot can do appears here.</p>
+                </div>
               ) : null}
             </aside>
           </div>
@@ -1279,6 +1396,7 @@ const AdminBotTemplateDetail: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
     </div>
   );
 };

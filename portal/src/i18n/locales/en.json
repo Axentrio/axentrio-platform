@@ -1386,6 +1386,12 @@
           "1200": "Long"
         },
         "saveDraft": "Save draft",
+        "unsaved": "Unsaved changes",
+        "promptSection": "Prompt",
+        "modulesSection": "Capabilities",
+        "notesSection": "Version notes",
+        "charCount": "{{n}} / 20,000",
+        "insertLabel": "Insert",
         "testTitle": "Test this prompt",
         "testPlaceholder": "Type a visitor message…",
         "testSend": "Send",

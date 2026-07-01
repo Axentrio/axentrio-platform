@@ -60,6 +60,7 @@ import AdminGuardrailConversation from '@pages/admin/AdminGuardrailConversation'
 import AdminFaqEditor from '@pages/admin/AdminFaqEditor';
 import AdminBotTemplates from '@pages/admin/AdminBotTemplates';
 import AdminModules from '@pages/admin/AdminModules';
+import AdminModuleDetail from '@pages/admin/AdminModuleDetail';
 import AdminBotTemplateDetail from '@pages/admin/AdminBotTemplateDetail';
 import AdminTenantDetail from '@pages/admin/AdminTenantDetail';
 import Help from '@pages/help/Help';
@@ -345,6 +346,7 @@ function AppRoutes() {
                       <Route path="/admin/bot-templates" element={<AdminBotTemplates />} />
                       <Route path="/admin/bot-templates/:id" element={<AdminBotTemplateDetail />} />
                       <Route path="/admin/modules" element={<AdminModules />} />
+                      <Route path="/admin/modules/:id" element={<AdminModuleDetail />} />
                     </Route>
 
                     {/* Redirects for old routes */}

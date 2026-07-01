@@ -376,7 +376,46 @@ export function usePublishModuleVersion() {
       api.post<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions/${version}/publish`, {}),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('Module published');
+      toast.success('Published');
+    },
+  });
+}
+
+/** Edit a module's catalog fields (name / description / bound skill). */
+export function useEditModule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string; name?: string; description?: string; skillIds?: string[] }) =>
+      api.put<{ module: AdminModule }>(`/admin/modules/${id}`, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
+      toast.success('Saved');
+    },
+  });
+}
+
+/** Start a new draft version (author fresh prose from the latest). */
+export function useCreateModuleDraftVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ moduleId, prose }: { moduleId: string; prose?: string }) =>
+      api.post<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions`, { prose }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
+      toast.success('New draft started');
+    },
+  });
+}
+
+/** Edit a DRAFT version's prose (optimistic concurrency via lockVersion). */
+export function useEditModuleDraftVersion() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ moduleId, version, ...input }: { moduleId: string; version: number; prose?: string; lockVersion?: number }) =>
+      api.put<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions/${version}`, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
+      toast.success('Draft saved');
     },
   });
 }

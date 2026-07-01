@@ -25,12 +25,13 @@ vi.mock('../../queries/useBotTemplatesQueries', () => ({
 const renderPage = () => render(<MemoryRouter><AdminModules /></MemoryRouter>);
 
 describe('AdminModules', () => {
-  it('renders the list with the bound skill + a publish action for a draft', () => {
+  it('renders the list with the module name, bound skill, and version status', () => {
     renderPage();
     expect(screen.getByRole('heading', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByText('Salon Booking Concierge')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /new module/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /publish v1/i })).toBeInTheDocument();
+    // The row shows the version status; editing/publishing happens on the detail page.
+    expect(screen.getByText('draft')).toBeInTheDocument();
   });
 
   it('surfaces engineered skills as a read-only reference', () => {

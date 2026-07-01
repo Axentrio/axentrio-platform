@@ -7,7 +7,8 @@
  * read-only, as the options a module may bind.
  */
 import React, { useState } from 'react';
-import { Plus, Boxes, Cpu } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Boxes, Cpu, ChevronRight } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -18,11 +19,11 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   useAdminModules,
   useAdminSkills,
   useCreateModule,
-  usePublishModuleVersion,
 } from '../../queries/useBotTemplatesQueries';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 
@@ -30,10 +31,10 @@ const latestVersion = (versions: { version: number; status: string }[]) =>
   versions.length ? [...versions].sort((a, b) => b.version - a.version)[0] : undefined;
 
 const AdminModules: React.FC = () => {
+  const navigate = useNavigate();
   const { data: modules, isLoading, isError } = useAdminModules();
   const { data: skills } = useAdminSkills();
   const createMut = useCreateModule();
-  const publishMut = usePublishModuleVersion();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({ name: '', description: '', skillId: '', prose: '' });
@@ -86,14 +87,18 @@ const AdminModules: React.FC = () => {
                 <TableHead>Name</TableHead>
                 <TableHead>Binds skill</TableHead>
                 <TableHead>Latest version</TableHead>
-                <TableHead className="w-32" />
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {(modules ?? []).map(({ module, versions }) => {
                 const latest = latestVersion(versions);
                 return (
-                  <TableRow key={module.id}>
+                  <TableRow
+                    key={module.id}
+                    className="cursor-pointer"
+                    onClick={() => navigate(`/admin/modules/${module.id}`)}
+                  >
                     <TableCell>
                       <div className="flex items-center gap-2">
                         <Boxes className="h-4 w-4 text-text-muted" />
@@ -122,16 +127,7 @@ const AdminModules: React.FC = () => {
                       )}
                     </TableCell>
                     <TableCell>
-                      {latest?.status === 'draft' && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={publishMut.isPending}
-                          onClick={() => publishMut.mutate({ moduleId: module.id, version: latest.version })}
-                        >
-                          Publish v{latest.version}
-                        </Button>
-                      )}
+                      <ChevronRight className="h-4 w-4 text-text-muted" />
                     </TableCell>
                   </TableRow>
                 );
@@ -194,17 +190,16 @@ const AdminModules: React.FC = () => {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="mod-skill">Binds skill</Label>
-              <select
-                id="mod-skill"
-                value={form.skillId}
-                onChange={(e) => setForm((f) => ({ ...f, skillId: e.target.value }))}
-                className="flex h-9 w-full rounded-md border border-edge bg-surface-2 px-3 py-1 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-edge-focus focus:border-edge-focus"
-              >
-                <option value="">Select a skill…</option>
-                {(skills ?? []).map((s) => (
-                  <option key={s.id} value={s.id}>{s.displayName}</option>
-                ))}
-              </select>
+              <Select value={form.skillId} onValueChange={(v) => setForm((f) => ({ ...f, skillId: v }))}>
+                <SelectTrigger id="mod-skill">
+                  <SelectValue placeholder="Select a skill…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(skills ?? []).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.displayName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="mod-prose">Prose</Label>

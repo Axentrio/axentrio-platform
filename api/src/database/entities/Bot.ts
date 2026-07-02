@@ -71,6 +71,10 @@ export interface BotSettings {
      *  (bound template category). Bias KB retrieval and, for requiresSpecialPrompt
      *  specialties, inject an exception block. jsonb, no migration. */
     selectedSpecialties?: string[];
+    /** Tenant-filled values for the bound template's custom {placeholders}
+     *  (key → value). Substituted into the prompt at runtime (built-ins win).
+     *  jsonb, no migration. */
+    templateVariables?: Record<string, string>;
     brandVoice: {
       name: string;
       tone: string;

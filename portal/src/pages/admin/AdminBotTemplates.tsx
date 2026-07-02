@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronRight, FileText, CircleCheck, TriangleAlert } from 'lucide-react';
+import { Plus, ChevronRight, FileText, CircleCheck, TriangleAlert, Cpu } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { useAdminBotTemplates, useCreateBotTemplate, useUnavailableTemplates, type BotTemplateSummary, type TemplateTier } from '../../queries/useBotTemplatesQueries';
+import { useAdminBotTemplates, useCreateBotTemplate, useUnavailableTemplates, useAdminSkills, type BotTemplateSummary, type TemplateTier } from '../../queries/useBotTemplatesQueries';
 
 /**
  * The tiers are an ascending ladder, so the page climbs it: the left rail
@@ -37,6 +37,8 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
   const { data: templates, isLoading, isError } = useAdminBotTemplates();
   const createMut = useCreateBotTemplate();
   const health = useUnavailableTemplates();
+  const { data: skillsCatalog } = useAdminSkills();
+  const skillLabel = (id: string) => skillsCatalog?.find((s) => s.id === id)?.displayName ?? id;
   const strandedBots = health.data?.bots ?? [];
 
   const [createOpen, setCreateOpen] = useState(false);
@@ -75,7 +77,20 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
           <div className="min-w-0">
             <div className="font-medium text-text-primary">{tpl.displayName}</div>
             {tpl.description && <div className="max-w-md truncate text-xs text-text-secondary">{tpl.description}</div>}
-            <div className="font-mono text-[10px] text-text-muted">{tpl.key}{tpl.category ? ` · ${tpl.category}` : ''}</div>
+            {/* Composition at a glance — the skills this template's published version binds. */}
+            {tpl.skills.length > 0 ? (
+              <div className="mt-1 flex flex-wrap items-center gap-1">
+                {tpl.skills.slice(0, 3).map((sid) => (
+                  <span key={sid} className="inline-flex items-center gap-1 rounded border border-edge bg-surface-2 px-1.5 py-0.5 text-[10px] text-text-secondary">
+                    <Cpu className="h-2.5 w-2.5 text-text-muted" />{skillLabel(sid)}
+                  </span>
+                ))}
+                {tpl.skills.length > 3 && <span className="text-[10px] text-text-muted">+{tpl.skills.length - 3}</span>}
+              </div>
+            ) : (
+              <div className="mt-1 text-[10px] text-text-muted">Prompt-only · no skills</div>
+            )}
+            <div className="mt-1 font-mono text-[10px] text-text-muted">{tpl.key}{tpl.category ? ` · ${tpl.category}` : ''}</div>
           </div>
         </div>
       </TableCell>

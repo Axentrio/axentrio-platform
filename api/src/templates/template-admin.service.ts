@@ -17,7 +17,7 @@
 import { EntityManager } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { BotTemplate } from '../database/entities/BotTemplate';
-import { BotTemplateVersion, BotTemplateConfig } from '../database/entities/BotTemplateVersion';
+import { BotTemplateVersion, BotTemplateConfig, TemplateVariable } from '../database/entities/BotTemplateVersion';
 import { TenantBotTemplate } from '../database/entities/TenantBotTemplate';
 import { Bot } from '../database/entities/Bot';
 import { getModule } from '../modules';
@@ -49,12 +49,15 @@ export function findUnknownPlaceholders(body: string): string[] {
 }
 
 /** Throws on an over-cap body. Returns placeholder-lint warnings (non-blocking on save). */
-export function validateBody(body: string): { warnings: string[] } {
+export function validateBody(body: string, declaredKeys: string[] = []): { warnings: string[] } {
   if (typeof body !== 'string') throw new ValidationError('body must be a string');
   if (body.length > TEMPLATE_BODY_MAX) {
     throw new ValidationError(`body exceeds ${TEMPLATE_BODY_MAX} characters (${body.length})`);
   }
-  const unknown = findUnknownPlaceholders(body);
+  // A placeholder declared as a template variable is intentional (tenants fill it),
+  // so it isn't "unknown" — only truly-undeclared ones warn as literal text.
+  const declared = new Set(declaredKeys);
+  const unknown = findUnknownPlaceholders(body).filter((k) => !declared.has(k));
   const warnings = unknown.length
     ? [`Unknown placeholders (left as literal text): ${unknown.map((k) => `{${k}}`).join(', ')}`]
     : [];
@@ -107,26 +110,61 @@ export function validateModuleProse(value: unknown): string {
   return prose;
 }
 
-/** Validates a template version's selected module refs (composable-templates
- *  Phase 4). null/undefined → undefined (legacy expectedModules path). Shape-only:
- *  existence of each (moduleId, moduleVersion) is enforced when the editor binds
- *  them; here we guarantee well-formed refs so the resolver can trust them. */
-export function validateSelectedModuleRefs(
-  value: unknown,
-): { moduleId: string; moduleVersion: number }[] | undefined {
+/** Validates a template version's bound skill ids (composable-templates,
+ *  module==skill 1:1). null/undefined → undefined (legacy expectedModules path).
+ *  Shape-only: deduped non-empty strings; skill existence is enforced at bind time. */
+export function validateSelectedSkillIds(value: unknown): string[] | undefined {
   if (value === undefined || value === null) return undefined;
-  if (!Array.isArray(value)) throw new ValidationError('selectedModuleRefs must be an array or null');
-  return value.map((r, i) => {
-    if (!r || typeof r !== 'object') throw new ValidationError(`selectedModuleRefs[${i}] must be an object`);
-    const ref = r as Record<string, unknown>;
-    if (typeof ref.moduleId !== 'string' || !ref.moduleId.trim()) {
-      throw new ValidationError(`selectedModuleRefs[${i}].moduleId must be a non-empty string`);
+  if (!Array.isArray(value)) throw new ValidationError('selectedSkillIds must be an array or null');
+  const out: string[] = [];
+  const seen = new Set<string>();
+  value.forEach((s, i) => {
+    if (typeof s !== 'string' || !s.trim()) throw new ValidationError(`selectedSkillIds[${i}] must be a non-empty string`);
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
     }
-    if (typeof ref.moduleVersion !== 'number' || !Number.isInteger(ref.moduleVersion) || ref.moduleVersion < 1) {
-      throw new ValidationError(`selectedModuleRefs[${i}].moduleVersion must be a positive integer`);
-    }
-    return { moduleId: ref.moduleId, moduleVersion: ref.moduleVersion };
   });
+  return out;
+}
+
+/** Validates a version's declared template VARIABLES (the custom {placeholders}
+ *  tenants fill). null/undefined → undefined (no change). */
+export function validateVariables(value: unknown): TemplateVariable[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new ValidationError('variables must be an array or null');
+  const seen = new Set<string>();
+  const str = (x: unknown, i: number, name: string, max: number): string | undefined => {
+    if (x === undefined || x === null || x === '') return undefined;
+    if (typeof x !== 'string') throw new ValidationError(`variables[${i}].${name} must be a string`);
+    if (x.length > max) throw new ValidationError(`variables[${i}].${name} is too long`);
+    return x;
+  };
+  return value.map((v, i) => {
+    if (!v || typeof v !== 'object') throw new ValidationError(`variables[${i}] must be an object`);
+    const o = v as Record<string, unknown>;
+    const key = typeof o.key === 'string' ? o.key.trim() : '';
+    if (!/^\w+$/.test(key)) throw new ValidationError(`variables[${i}].key must be a placeholder name (letters, digits, underscore)`);
+    if (KNOWN_PLACEHOLDERS.has(key)) throw new ValidationError(`variables[${i}].key "${key}" is a built-in placeholder — it's filled automatically and can't be a template variable`);
+    if (seen.has(key)) throw new ValidationError(`variables[${i}]: duplicate key "${key}"`);
+    seen.add(key);
+    return { key, label: str(o.label, i, 'label', 100), help: str(o.help, i, 'help', 500), required: o.required === true, default: str(o.default, i, 'default', 4000) };
+  });
+}
+
+/** Validates a version's per-skill prose OVERRIDES (skillId → prose). Empty/blank
+ *  overrides are dropped (fall back to the skill's code default). null/undefined →
+ *  undefined (no change). */
+export function validateSkillProse(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'object' || Array.isArray(value)) throw new ValidationError('skillProse must be an object or null');
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v !== 'string') throw new ValidationError(`skillProse["${k}"] must be a string`);
+    if (v.length > 8000) throw new ValidationError(`skillProse["${k}"] is too long (max 8000 chars)`);
+    if (v.trim()) out[k] = v;
+  }
+  return out;
 }
 
 /** Caps for the template-owned policy guardrails (mirror the per-bot form caps). */
@@ -368,11 +406,13 @@ async function fanOutTemplateInvalidation(templateId: string, extraTenantIds: st
 /** Create a draft version with a row-locked, transactionally-allocated number. */
 export async function createDraftVersion(
   templateId: string,
-  input: { body: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown },
+  input: { body: string; changelog?: string | null; expectedModules?: unknown; selectedSkillIds?: unknown; skillProse?: unknown; variables?: unknown; config?: unknown },
 ): Promise<BotTemplateVersion> {
   const { warnings: _w } = validateBody(input.body);
   const expectedModules = validateExpectedModules(input.expectedModules);
-  const selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs);
+  const selectedSkillIds = validateSelectedSkillIds(input.selectedSkillIds);
+  const skillProse = validateSkillProse(input.skillProse);
+  const variables = validateVariables(input.variables);
   const config = validateConfig(input.config);
 
   return AppDataSource.transaction(async (manager) => {
@@ -400,7 +440,9 @@ export async function createDraftVersion(
       body: input.body,
       changelog: input.changelog?.trim() || null,
       expectedModules,
-      ...(selectedModuleRefs !== undefined ? { selectedModuleRefs } : {}),
+      ...(selectedSkillIds !== undefined ? { selectedSkillIds } : {}),
+      ...(skillProse !== undefined ? { skillProse } : {}),
+      ...(variables !== undefined ? { variables } : {}),
       config,
       status: 'draft',
       lockVersion: 0,
@@ -413,7 +455,7 @@ export async function createDraftVersion(
 export async function editDraftVersion(
   templateId: string,
   version: number,
-  input: { body?: string; changelog?: string | null; expectedModules?: unknown; selectedModuleRefs?: unknown; config?: unknown; lockVersion?: number },
+  input: { body?: string; changelog?: string | null; expectedModules?: unknown; selectedSkillIds?: unknown; skillProse?: unknown; variables?: unknown; config?: unknown; lockVersion?: number },
 ): Promise<BotTemplateVersion> {
   return AppDataSource.transaction(async (manager) => {
     const repo = manager.getRepository(BotTemplateVersion);
@@ -436,7 +478,9 @@ export async function editDraftVersion(
     }
     if (input.changelog !== undefined) row.changelog = input.changelog?.trim() || null;
     if (input.expectedModules !== undefined) row.expectedModules = validateExpectedModules(input.expectedModules);
-    if (input.selectedModuleRefs !== undefined) row.selectedModuleRefs = validateSelectedModuleRefs(input.selectedModuleRefs) ?? null;
+    if (input.selectedSkillIds !== undefined) row.selectedSkillIds = validateSelectedSkillIds(input.selectedSkillIds) ?? null;
+    if (input.skillProse !== undefined) row.skillProse = validateSkillProse(input.skillProse) ?? null;
+    if (input.variables !== undefined) row.variables = validateVariables(input.variables) ?? null;
     if (input.config !== undefined) row.config = validateConfig(input.config);
     row.lockVersion += 1;
     const saved = await repo.save(row);
@@ -457,8 +501,11 @@ export async function publishVersion(
     throw new ConflictError(`Only a draft can be published (this version is ${row.status})`, { status: row.status });
   }
   // Block publishing a body with unknown {placeholders} — drafts may be WIP, but a
-  // published version must be clean (a typo'd placeholder ships as literal text).
-  const unknown = findUnknownPlaceholders(row.body);
+  // published version must be clean. A placeholder DECLARED as a template variable
+  // is intentional (tenants fill it), so it's known; only truly-undeclared ones
+  // (typos) would ship as literal text and must be fixed.
+  const declared = new Set((row.variables ?? []).map((v) => v.key));
+  const unknown = findUnknownPlaceholders(row.body).filter((k) => !declared.has(k));
   if (unknown.length) {
     throw new ValidationError(`Fix unknown placeholders before publishing: ${unknown.map((k) => `{${k}}`).join(', ')}`);
   }
@@ -562,6 +609,11 @@ export async function rollbackToVersion(
     body: source.body,
     changelog: `Rollback to v${fromVersion}`,
     expectedModules: source.expectedModules,
+    // Carry the full composition forward — a rollback must reproduce the source
+    // version exactly, not just its prompt body (else skills/prose/variables are lost).
+    selectedSkillIds: source.selectedSkillIds ?? undefined,
+    skillProse: source.skillProse ?? undefined,
+    variables: source.variables ?? undefined,
     config: source.config,
   });
   return publishVersion(templateId, draft.version, publishedBy);

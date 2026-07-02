@@ -192,6 +192,8 @@ export interface BotTemplateOption {
   description: string | null;
   availableToAllTenants: boolean;
   latestPublishedVersion: number | null;
+  /** Skill ids the latest published version composes — for the "what it gives" pills. */
+  skills: string[];
 }
 
 export type TemplateMode = 'and' | 'or';
@@ -205,11 +207,26 @@ export interface BoundTemplate {
   templateUnavailable: boolean;
 }
 
+/** A custom {placeholder} the bound template declares for the tenant to fill. */
+export interface TemplateVariableDef {
+  key: string;
+  label?: string;
+  help?: string;
+  required?: boolean;
+  default?: string;
+}
+
 export interface BotTemplateView {
   available: BotTemplateOption[];
   mode: TemplateMode;
   bindings: BoundTemplate[];
   missingModules: string[];
+  /** Custom placeholders the bound template(s) declare — the tenant fill-form. */
+  variables: TemplateVariableDef[];
+  /** The tenant's current filled-in values (skillId→value); missing → use default. */
+  templateVariables: Record<string, string>;
+  /** Skill id → display name, for every skill any available template composes. */
+  skillNames: Record<string, string>;
   // Back-compat (primary binding) — older callers.
   binding: { templateId: string | null; templateVersion: string };
   resolved: { resolvedVersion: number | null; body: string; pinnedButUnavailable: boolean; templateUnavailable: boolean };

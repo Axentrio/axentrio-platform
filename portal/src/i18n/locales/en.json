@@ -1346,7 +1346,7 @@
         "generalPromptHint": "Personality and tone only. What the bot can do comes from the modules below — don't claim capabilities here. Supports placeholders like {botName}, {businessName}, {tone}.",
         "modules": "Modules",
         "modulesHint": "Pick one or more modules — this template composes their prose, and the resolver combines their bound skills.",
-        "noModulesPublished": "No published modules yet — create and publish one under Modules first.",
+        "noModulesPublished": "No skills are available yet — skills are defined in code and appear here once registered.",
         "unknownPlaceholders": "Unknown placeholders: {{placeholders}} — fix or remove before publishing (they'd ship as literal text).",
         "changelog": "Changelog (optional)",
         "configTitle": "Guardrails",

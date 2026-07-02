@@ -39,6 +39,10 @@ export interface ModuleDefinition {
   description?: string;
   /** What makes this skill `ready` (its config requirement), for the catalog. */
   readinessHint?: string;
+  /** Canonical behavioural prose for this skill (frozen in code). Emitted for a
+   *  template that binds the skill, and the seed a per-template override starts
+   *  from. Complements — does not replace — the skill's hard tool-gated rules. */
+  defaultProse?: string;
   /** Tool names this skill gives the bot, for DISPLAY (decoupled from `tools`, so a
    *  skill whose runtime tools live in the builtin registry can still show them). */
   provides?: string[];
@@ -75,6 +79,38 @@ export function getModule(id: string): ModuleDefinition | undefined {
 
 export function allModules(): ModuleDefinition[] {
   return Array.from(catalog.values());
+}
+
+/**
+ * Template-authoritative skill gating: the set of tool names to DROP when a bot's
+ * skills are pinned to `selectedSkillIds`. For every ACTIVE skill the template did
+ * NOT select, drop its tools. Uses the UNION of the skill's declared `provides`
+ * (which may be a curated subset) and its ACTUAL registered `tools`, so a real tool
+ * absent from `provides` (e.g. booking's `list_bookings`) is gated, never leaked.
+ * Pure — the caller filters its loaded tool list against this set.
+ */
+export function gatedToolNames(selectedSkillIds: string[], activeModuleIds: string[]): Set<string> {
+  const selected = new Set(selectedSkillIds);
+  const drop = new Set<string>();
+  for (const id of activeModuleIds) {
+    if (selected.has(id)) continue;
+    const def = catalog.get(id);
+    for (const n of def?.provides ?? []) drop.add(n);
+    for (const tl of def?.tools ?? []) drop.add(tl.name);
+  }
+  return drop;
+}
+
+/**
+ * The PROMPT-surface twin of gatedToolNames. Whether an active skill's prompt
+ * contribution (buildPromptSection) should be included for this bot: when composable
+ * gating is on, a skill's prompt is included IFF its template selected it — so a
+ * gated skill's guidance (e.g. booking's SERVICES catalog + "you MUST call
+ * create_booking") can't leak into the prompt even though its tools were dropped.
+ * Flag OFF → legacy behaviour (every active skill's section is included).
+ */
+export function skillPromptAllowed(moduleId: string, selectedSkillIds: string[], composableEnabled: boolean): boolean {
+  return !composableEnabled || selectedSkillIds.includes(moduleId);
 }
 
 /** Test seam — clears the catalog so registration tests can re-register. */

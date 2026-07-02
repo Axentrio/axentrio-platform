@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, ArrowRight, X } from 'lucide-react';
+import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -92,9 +92,36 @@ type FormSnapshot = {
   escalationKeywords: string[];
   topicsToAvoid: string[];
   selectedSpecialties: string[];
+  templateVariables: Record<string, string>;
 };
 
 const snapshotKey = (s: FormSnapshot): string => JSON.stringify(s);
+
+/** A consistent settings section: an icon-led header + a card body. Turns the
+ *  form's flat stack of headings into scannable, grouped cards. */
+const Section: React.FC<{
+  icon: React.ElementType;
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}> = ({ icon: Icon, title, description, action, children }) => (
+  <section className="overflow-hidden rounded-xl border border-edge bg-surface-1">
+    <div className="flex items-start justify-between gap-3 border-b border-edge/60 px-5 py-3.5">
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-surface-2 text-primary-400">
+          <Icon className="h-4 w-4" />
+        </span>
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary">{title}</h3>
+          {description && <p className="mt-0.5 text-xs text-text-muted">{description}</p>}
+        </div>
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+    <div className="space-y-4 p-5">{children}</div>
+  </section>
+);
 
 const computeEffectiveTone = (tone: string, customTone: string): string => {
   const isCustom = !TONE_PRESETS.some((p) => p.value === tone);
@@ -153,6 +180,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [escalationKeywords, setEscalationKeywords] = useState<string[]>([]);
   const [topicsToAvoid, setTopicsToAvoid] = useState<string[]>([]);
   const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
+  // Tenant-filled values for the bound template's custom {placeholders}.
+  const [templateVarValues, setTemplateVarValues] = useState<Record<string, string>>({});
   // Business hours editor state (hydrated from the bot detail, saved separately).
   const [bhEnabled, setBhEnabled] = useState(false);
   const [bhTimezone, setBhTimezone] = useState('UTC');
@@ -192,6 +221,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const hEscalation = aiSettings.guardrails?.escalationKeywords ?? [];
     const hTopics = aiSettings.guardrails?.topicsToAvoid ?? [];
     const hSpecialties = (aiSettings.selectedSpecialties ?? []) as string[];
+    const hTemplateVars = ((aiSettings as { templateVariables?: Record<string, string> }).templateVariables) ?? {};
 
     setEnabled(hEnabled);
     setBotName(hBotName);
@@ -208,6 +238,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setEscalationKeywords(hEscalation);
     setTopicsToAvoid(hTopics);
     setSelectedSpecialties(hSpecialties);
+    setTemplateVarValues(hTemplateVars);
 
     setInitialSnapshot(snapshotKey({
       enabled: hEnabled,
@@ -224,6 +255,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       escalationKeywords: hEscalation,
       topicsToAvoid: hTopics,
       selectedSpecialties: hSpecialties,
+      templateVariables: hTemplateVars,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
 
@@ -268,6 +300,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     escalationKeywords,
     topicsToAvoid,
     selectedSpecialties,
+    templateVariables: templateVarValues,
   });
 
   // Specialties available for this bot's vertical (from the GET ai-settings response).
@@ -312,11 +345,12 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             topicsToAvoid,
           },
           selectedSpecialties,
+          templateVariables: templateVarValues,
         },
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties],
+    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -348,8 +382,25 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const missingModules = templateView?.missingModules ?? [];
   const bindingsInput = bindings.map((b) => ({ templateId: b.templateId, version: b.version }));
 
+  // Skill labelling + per-skill state, for the "what this speciality gives" pills.
+  const skillNames = templateView?.skillNames ?? {};
+  const skillLabel = (id: string) => skillNames[id] ?? id.replace(/[_-]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+  const skillStateById: Record<string, string> = {};
+  for (const s of skillReadiness ?? []) skillStateById[s.id] = s.state;
+  // Short amber footnote for a skill that isn't ready to use yet.
+  const skillIssue = (state?: string): string | null => {
+    switch (state) {
+      case 'unconfigured': return t('ai.bot.template.skillIssue.unconfigured', { defaultValue: 'needs setup' });
+      case 'unentitled': return t('ai.bot.template.skillIssue.unentitled', { defaultValue: 'not in plan' });
+      case 'disabled': return t('ai.bot.template.skillIssue.disabled', { defaultValue: 'turned off' });
+      case 'absent': return t('ai.bot.template.skillIssue.absent', { defaultValue: 'unavailable' });
+      case 'error': return t('ai.bot.template.skillIssue.error', { defaultValue: 'error' });
+      default: return null;
+    }
+  };
+
   const saveBindings = (next: { templateId: string; version: string }[], nextMode: 'and' | 'or' = templateMode) => {
-    if (next.length === 0) return; // at least one template must stay bound
+    // Empty is allowed — an explicit unbind leaves the bot blank (generic KB bot).
     bindTemplate.mutate({ bindings: next, mode: nextMode });
   };
   // Toggle a template in/out of the binding set (cap 3); selecting defaults to 'latest'.
@@ -396,11 +447,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
 
       <div className={enabled ? 'space-y-8' : 'space-y-8 opacity-50 pointer-events-none'}>
         {/* Bot Identity */}
-        <section className="space-y-4">
-          <div>
-            <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.identity.title')}</h3>
-            <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.identity.description')}</p>
-          </div>
+        <Section icon={Fingerprint} title={t('ai.bot.identity.title')} description={t('ai.bot.identity.description')}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
@@ -462,20 +509,17 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.voiceTone.helper')}</p>
             </div>
           </div>
-        </section>
+        </Section>
 
         {/* Bot Templates (specialities, managed centrally; bind up to 3, AND/OR) */}
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold text-text-primary">{t('ai.bot.template.title')}</h3>
-              <p className="text-xs text-text-muted mt-0.5">{t('ai.bot.template.descriptionMulti')}</p>
-            </div>
-            {availableTemplates.length > 0 && (
-              <span className="text-[11px] text-text-muted whitespace-nowrap">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
-            )}
-          </div>
-
+        <Section
+          icon={Boxes}
+          title={t('ai.bot.template.title')}
+          description={t('ai.bot.template.descriptionMulti')}
+          action={availableTemplates.length > 0 ? (
+            <span className="whitespace-nowrap text-[11px] text-text-muted">{t('ai.bot.template.selectedCount', { count: bindings.length })}</span>
+          ) : undefined}
+        >
           {availableTemplates.length === 0 ? (
             <div className="rounded-lg border border-edge bg-surface-2 p-3 text-xs text-text-muted">
               {t('ai.bot.template.noneAvailable')}
@@ -494,9 +538,14 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                     <SelectContent>
                       {unselected.map((tpl) => (
                         <SelectItem key={tpl.id} value={tpl.id}>
-                          <span className="flex flex-col">
+                          <span className="flex flex-col gap-0.5">
                             <span>{tpl.displayName}</span>
                             {tpl.description && <span className="text-[11px] text-text-muted">{tpl.description}</span>}
+                            {(tpl.skills?.length ?? 0) > 0 && (
+                              <span className="text-[10px] text-text-muted">
+                                {t('ai.bot.template.gives', { defaultValue: 'Gives' })}: {(tpl.skills ?? []).map(skillLabel).join(' · ')}
+                              </span>
+                            )}
                           </span>
                         </SelectItem>
                       ))}
@@ -505,33 +554,65 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 );
               })()}
 
-              {/* Selected specialities as chips (name + version pill + remove). */}
+              {/* Selected specialities as cards — name + version + remove, and the
+                  skills each one gives the bot (state-coloured pills). */}
               {bindings.length > 0 && (
-                <div className="flex flex-wrap gap-2">
+                <div className="space-y-2">
                   {bindings.map((b) => {
                     const tpl = availableTemplates.find((x) => x.id === b.templateId);
+                    const skills = tpl?.skills ?? [];
                     return (
-                      <div key={b.templateId} className="flex items-center gap-1.5 rounded-full border border-edge bg-surface-2 py-1 pl-3 pr-1.5 text-sm">
-                        <span className="text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</span>
-                        {b.publishedVersions.length > 0 && (
-                          <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || bindTemplate.isPending}>
-                            <SelectTrigger className="h-6 rounded-full border-0 bg-surface-3 px-2 text-[10px] gap-1"><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
-                              {b.publishedVersions.map((v) => (
-                                <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        )}
-                        {!readOnly && (
-                          <button type="button" onClick={() => toggleTemplate(b.templateId)} aria-label={t('ai.bot.template.removeAria')} className="rounded-full p-0.5 text-text-muted hover:text-text-primary">
-                            <X className="h-3.5 w-3.5" />
-                          </button>
+                      <div key={b.templateId} className="rounded-xl border border-edge bg-surface-2 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-text-primary">{tpl?.displayName ?? t('ai.bot.template.unknownTemplate')}</div>
+                            {tpl?.description && <div className="truncate text-[11px] text-text-muted">{tpl.description}</div>}
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {b.publishedVersions.length > 0 && (
+                              <Select value={b.version} onValueChange={(v) => setVersionFor(b.templateId, v)} disabled={readOnly || bindTemplate.isPending}>
+                                <SelectTrigger className="h-7 gap-1 rounded-full border border-edge bg-surface-3 px-2.5 text-[11px] text-text-secondary" title={b.version === 'latest' ? t('ai.bot.template.latest') : t('ai.bot.template.pinTo', { version: b.version })}>
+                                  {b.version === 'latest' ? t('ai.bot.template.latestShort', { defaultValue: 'Latest' }) : `v${b.version}`}
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="latest">{t('ai.bot.template.latest')}</SelectItem>
+                                  {b.publishedVersions.map((v) => (
+                                    <SelectItem key={v} value={String(v)}>{t('ai.bot.template.pinTo', { version: v })}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {!readOnly && (
+                              <button type="button" onClick={() => toggleTemplate(b.templateId)} aria-label={t('ai.bot.template.removeAria')} className="rounded-full p-1 text-text-muted hover:bg-surface-3 hover:text-text-primary">
+                                <X className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        {skills.length > 0 && (
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-edge/50 pt-3">
+                            <span className="mr-0.5 text-[10px] uppercase tracking-wide text-text-muted">{t('ai.bot.template.gives', { defaultValue: 'Gives' })}</span>
+                            {skills.map((id) => {
+                              const issue = skillIssue(skillStateById[id]);
+                              return (
+                                <span key={id} className="inline-flex items-center gap-1.5 rounded-md bg-surface-3 px-2 py-1 text-[11px] text-text-secondary">
+                                  <span className={`h-1.5 w-1.5 rounded-full ${issue ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                                  {skillLabel(id)}
+                                  {issue && <span className="text-amber-400/90">· {issue}</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
                     );
                   })}
+                </div>
+              )}
+
+              {bindings.length === 0 && (
+                <div className="rounded-lg border border-dashed border-edge bg-surface-2 p-3 text-xs text-text-muted">
+                  {t('ai.bot.template.none', { defaultValue: 'No speciality bound — this bot answers generically from your knowledge base only. Add one above to give it skills like booking, lead capture, or handoff.' })}
                 </div>
               )}
 
@@ -560,33 +641,70 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
             </div>
           )}
 
-          {missingModules.length > 0 && (
+          {/* Legacy advisory — only when the composable per-skill states aren't shown. */}
+          {!COMPOSABLE_TEMPLATES_ENABLED && missingModules.length > 0 && (
             <p className="text-[11px] text-amber-400">
               {t('ai.bot.template.warnings.missingModules', { modules: missingModules.join(', ') })}{' '}
               {t('ai.bot.template.warnings.missingModulesAction')}
             </p>
           )}
 
-          {/* Phase 6 — per-skill state badges (composable templates). Dual-rendered
-              alongside the legacy missingModules warning during rollout. */}
-          {COMPOSABLE_TEMPLATES_ENABLED && skillReadiness && skillReadiness.length > 0 && (
+          {/* Actionable remedies only for skills that aren't ready yet — the ready ones
+              already show as green pills on their speciality card above. */}
+          {COMPOSABLE_TEMPLATES_ENABLED && (skillReadiness ?? []).some((s) => s.state !== 'ready') && (
             <div className="space-y-1.5">
-              {skillReadiness.map((skill) => (
+              {(skillReadiness ?? []).filter((s) => s.state !== 'ready').map((skill) => (
                 <SkillStateCard key={skill.id} skill={skill} />
               ))}
             </div>
           )}
-        </section>
+        </Section>
+
+        {/* Your template details — the custom {placeholders} the bound template declares
+            for the tenant to complete. Saved into ai.templateVariables; substituted into
+            the prompt at runtime (an unfilled field falls back to the template's default). */}
+        {(templateView?.variables?.length ?? 0) > 0 && (
+          <Section
+            icon={PenLine}
+            title={t('ai.bot.templateDetails.title', { defaultValue: 'Your template details' })}
+            description={t('ai.bot.templateDetails.subtitle', { defaultValue: "Your bot's template asks for a few details — they're filled into its prompt where the template expects them." })}
+          >
+            <div className="space-y-3">
+              {(templateView?.variables ?? []).map((v) => {
+                const value = templateVarValues[v.key] ?? v.default ?? '';
+                const missing = !!v.required && !value.trim();
+                return (
+                  <div key={v.key} className="space-y-1">
+                    <label htmlFor={`tv-${v.key}`} className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
+                      {v.label || v.key}
+                      {v.required && <span className="text-amber-400">*</span>}
+                    </label>
+                    <textarea
+                      id={`tv-${v.key}`}
+                      rows={2}
+                      readOnly={readOnly}
+                      value={value}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setTemplateVarValues((prev) => ({ ...prev, [v.key]: e.target.value }))}
+                      className={`w-full rounded-lg border bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:opacity-50 ${missing ? 'border-amber-500/50' : 'border-edge'}`}
+                    />
+                    {v.help && <p className="text-[11px] text-text-muted">{v.help}</p>}
+                    {missing && <p className="text-[11px] text-amber-400">{t('ai.bot.templateDetails.required', { defaultValue: 'Required — your bot needs this to answer correctly.' })}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
 
         {/* Specialties — scoped to the bot's vertical (bound template category). Only
             shown when the vertical defines specialties. Selecting biases KB retrieval;
             a specialty flagged requiresSpecialPrompt also injects its exception block. */}
         {availableSpecialties.length > 0 && (
-          <section className="space-y-2">
-            <div>
-              <h3 className="text-sm font-semibold text-text-primary">Specialties</h3>
-              <p className="text-xs text-text-muted mt-0.5">Pick what this bot specialises in. This sharpens knowledge-base answers; some specialties also add tailored handling.</p>
-            </div>
+          <Section
+            icon={Sparkles}
+            title="Specialties"
+            description="Pick what this bot specialises in. This sharpens knowledge-base answers; some specialties also add tailored handling."
+          >
             <div className="grid gap-1.5 sm:grid-cols-2">
               {availableSpecialties.map((s) => (
                 <label key={s.key} className="flex items-start gap-2 rounded-lg border border-edge p-2 text-sm">
@@ -604,7 +722,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
                 </label>
               ))}
             </div>
-          </section>
+          </Section>
         )}
 
 

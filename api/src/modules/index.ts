@@ -13,7 +13,7 @@ registerModule(bookingModule);
 registerModule(leadCaptureSkill);
 registerModule(handoffSkill);
 
-export { registerModule, getModule, allModules } from './module-catalog';
+export { registerModule, getModule, allModules, gatedToolNames, skillPromptAllowed } from './module-catalog';
 export type { ModuleDefinition, ModuleGate, ModulePromptContext } from './module-catalog';
 export {
   listActiveModules,

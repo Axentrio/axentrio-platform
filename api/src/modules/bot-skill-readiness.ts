@@ -14,11 +14,9 @@
  * INSIDE the per-skill readiness refinement is contained to that one skill (→
  * `error`) via safeReadiness.
  */
-import { In } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { ServiceType } from '../database/entities/ServiceType';
-import { Module } from '../database/entities/Module';
 import type { Bot } from '../database/entities/Bot';
 import { listActiveModules } from './module-resolver';
 import { getModule } from './module-catalog';
@@ -41,23 +39,13 @@ export async function computeBotSkillReadiness(bot: Bot, tenantId: string): Prom
   ]);
   const activeModuleIds = activeModules.map((a) => a.module.id);
 
-  // Selected skills = the primary binding's authored-module skills, else its
-  // expectedModules (legacy 1:1) — identical to the agent's own selection.
-  const moduleRefs = resolvedTemplates[0]?.selectedModuleRefs ?? null;
-  const expectedModuleIds = resolvedTemplates[0]?.expectedModules ?? [];
-  const skillsByModule = new Map<string, string[]>();
-  if (moduleRefs && moduleRefs.length) {
-    const moduleIds = [...new Set(moduleRefs.map((r) => r.moduleId))];
-    const rows = await AppDataSource.getRepository(Module).find({
-      where: { id: In(moduleIds) },
-      select: { id: true, skillIds: true },
-    });
-    for (const m of rows) skillsByModule.set(m.id, m.skillIds ?? []);
-  }
-  const selectedSkillIds = selectSkillIds(
-    { selectedModuleRefs: moduleRefs, expectedModules: expectedModuleIds },
-    (id) => skillsByModule.get(id) ?? [],
-  );
+  // Selected skills = the UNION of every bound template's skills (H6) — identical to
+  // the agent's own selection, so the readiness display and runtime never disagree.
+  const selectedSkillIds = [...new Set(
+    resolvedTemplates.flatMap((rt) =>
+      selectSkillIds({ selectedSkillIds: rt.selectedSkillIds ?? null, expectedModules: rt.expectedModules ?? [] }),
+    ),
+  )];
 
   // Booking readiness — only when booking is ACTIVE (resolveSkillStates refines
   // active skills only). Same predicate + same gate set the agent uses. No
@@ -90,5 +78,14 @@ export async function computeBotSkillReadiness(bot: Bot, tenantId: string): Prom
     ),
   });
 
-  return skillStatesToReadiness(skillStates, (id) => getModule(id)?.displayName ?? id);
+  // Templates are the SOLE source of skills: the readiness list shows exactly the
+  // skills the template composes (a selected-but-unentitled one still surfaces, as a
+  // plan gap). No template → nothing shown (the bot answers from the KB only). Matches
+  // the agent's runtime tool-gating so the two never disagree. Flag-gated.
+  const composableEnabled = process.env.COMPOSABLE_TEMPLATES_ENABLED === 'true';
+  const shown = composableEnabled
+    ? Object.fromEntries(Object.entries(skillStates).filter(([id]) => selectedSkillIds.includes(id)))
+    : skillStates;
+
+  return skillStatesToReadiness(shown, (id) => getModule(id)?.displayName ?? id);
 }

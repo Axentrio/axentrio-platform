@@ -157,8 +157,10 @@ describe('ToolRegistry', () => {
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain('capture_lead'); // gated off → tool absent → prompt won't promise a save
-    expect(toolNames).toContain('kb_search');          // ungated core tools still load
-    expect(toolNames).toContain('escalate_to_human');
+    expect(toolNames).toContain('kb_search');          // ungated core capability still loads
+    // escalate_to_human is now gated on the handoff entitlement too (LEAK-2 fix) —
+    // free tier lacks handoff, so it drops just like capture_lead.
+    expect(toolNames).not.toContain('escalate_to_human');
   });
 
   it('keeps capture_lead for an entitled tier (essential)', async () => {
@@ -169,15 +171,17 @@ describe('ToolRegistry', () => {
     expect(tools.map((t) => t.name)).toContain('capture_lead');
   });
 
-  it('fails closed: omits capture_lead (keeps ungated tools) when the entitlement lookup throws', async () => {
+  it('fails closed: omits both entitlement-gated tools (keeps ungated core) when the lookup throws', async () => {
     const registry = new ToolRegistry();
     const tenant = { id: 'tenant-ent-err', tier: 'pro', settings: { ai: { enabled: true } } };
     tierById.set(tenant.id, tenant.tier);
-    // first getEntitlements call in getToolsForTenant is the capture_lead gate
-    vi.mocked(getEntitlements).mockRejectedValueOnce(new Error('redis down'));
+    // The two entitlement-gated builtins each call getEntitlements (escalate_to_human,
+    // then capture_lead); both must fail closed (omit the tool) on a lookup error.
+    vi.mocked(getEntitlements).mockRejectedValueOnce(new Error('redis down')).mockRejectedValueOnce(new Error('redis down'));
     const tools = await registry.getToolsForTenant(tenant as any, (tenant.settings ?? {}) as any);
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain('capture_lead');
+    expect(toolNames).not.toContain('escalate_to_human');
     expect(toolNames).toContain('kb_search');
   });
 

@@ -55,8 +55,20 @@ export class ToolRegistry {
     const kbSearch = this.builtinTools.get('kb_search');
     if (kbSearch) tools.push(kbSearch);
 
+    // Gate escalate_to_human on the EFFECTIVE handoff entitlement, mirroring
+    // capture_lead below — handoff is a plan FEATURE, not a universal affordance, so
+    // a tenant/bot without it must not escalate. Fail closed on a resolution error
+    // (the ## ESCALATION prompt block keys off tool presence, so it drops too). This
+    // also lets the template gate drop it normally — handoff appears in
+    // activeModuleIds only when entitled, so gatedToolNames couldn't reach it before.
     const escalation = this.builtinTools.get('escalate_to_human');
-    if (escalation) tools.push(escalation);
+    if (escalation) {
+      try {
+        if ((await getEntitlements(tenant.id)).features.handoff) tools.push(escalation);
+      } catch (error) {
+        logger.warn(`handoff entitlement check failed — escalate_to_human omitted for tenant ${tenant.id}`, { error });
+      }
+    }
 
     // Gate capture_lead on the EFFECTIVE leadCapture entitlement (already folds
     // in the tenant feature-toggle). If the tool is loaded for a gated-off

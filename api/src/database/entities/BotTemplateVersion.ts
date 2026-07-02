@@ -18,6 +18,20 @@ import {
 
 export type BotTemplateVersionStatus = 'draft' | 'published' | 'unpublished';
 
+/** A custom placeholder a template declares for tenants to fill (a "blank"). */
+export interface TemplateVariable {
+  /** The `{key}` used in the prompt body (e.g. 'cancellationPolicy'). */
+  key: string;
+  /** Human label shown on the tenant's fill form (defaults to a prettified key). */
+  label?: string;
+  /** Optional help text under the field. */
+  help?: string;
+  /** Whether the tenant must provide a value. */
+  required?: boolean;
+  /** Pre-fills the tenant's field; used until they change it. */
+  default?: string;
+}
+
 /**
  * Identity/policy config the template owns (the "pre-defined bot"), versioned
  * with the body. Tone + the policy guardrails move here from the per-bot AI
@@ -61,11 +75,22 @@ export class BotTemplateVersion {
   @Column({ type: 'jsonb', default: [], name: 'expected_modules' })
   expectedModules!: string[];
 
-  /** Composable-templates Phase 4: authored module refs selected for this version,
-   *  shape [{ moduleId, moduleVersion }], snapshotted at publish. NULL = use the
-   *  legacy expectedModules path (additive, fully back-compatible). */
-  @Column({ type: 'jsonb', nullable: true, name: 'selected_module_refs' })
-  selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null;
+  /** Composable-templates: skill ids bound to this version (module==skill, 1:1),
+   *  snapshotted at publish. NULL = use the legacy expectedModules path. */
+  @Column({ type: 'jsonb', nullable: true, name: 'selected_skill_ids' })
+  selectedSkillIds?: string[] | null;
+
+  /** Per-template prose OVERRIDES for bound skills (skillId → prose). A skill's
+   *  default prose is frozen in code; this replaces it for THIS template version
+   *  only. NULL/absent skill = use the code default. */
+  @Column({ type: 'jsonb', nullable: true, name: 'skill_prose' })
+  skillProse?: Record<string, string> | null;
+
+  /** Custom placeholders this template declares — the "blanks" a tenant fills when
+   *  they adopt it (e.g. {cancellationPolicy}). Auto-seeded in the editor from the
+   *  unknown {placeholders} in the body; each may carry a label/help/required/default. */
+  @Column({ type: 'jsonb', nullable: true, name: 'variables' })
+  variables?: TemplateVariable[] | null;
 
   /** Identity/policy the template owns (tone + policy guardrails). Versioned
    *  with the body; consumed at runtime via effectiveBotConfig(). */

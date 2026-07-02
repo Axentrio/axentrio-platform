@@ -136,6 +136,11 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     ...(data.selectedSpecialties === undefined
       ? (existing.selectedSpecialties?.length ? { selectedSpecialties: existing.selectedSpecialties } : {})
       : (data.selectedSpecialties.length ? { selectedSpecialties: data.selectedSpecialties } : {})),
+    // Template variable VALUES (tenant fill) — same full-replace semantics: preserve
+    // when omitted, persist when non-empty, clear on an explicit {}.
+    ...(data.templateVariables === undefined
+      ? (existing.templateVariables && Object.keys(existing.templateVariables).length ? { templateVariables: existing.templateVariables } : {})
+      : (Object.keys(data.templateVariables).length ? { templateVariables: data.templateVariables } : {})),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

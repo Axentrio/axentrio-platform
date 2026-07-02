@@ -20,6 +20,7 @@ vi.mock('@/queries/useBotTemplatesQueries', () => {
     useAdminBotTemplates: () => ({ data: state.templates, isLoading: false, isError: false }),
     useCreateBotTemplate: () => ({ mutate: () => {}, mutateAsync: createSpy, isPending: false }),
     useUnavailableTemplates: () => state.health,
+    useAdminSkills: () => ({ data: [{ id: 'booking', displayName: 'Bookings' }] }),
   };
 });
 
@@ -30,7 +31,7 @@ beforeEach(() => {
 
 const tpl = (over: Record<string, unknown>) => ({
   id: 'x', key: 'k', displayName: 'X', category: null, description: null, tier: 'essential',
-  availableToAllTenants: true, status: 'active', versionCount: 0, draftCount: 0, latestPublishedVersion: null,
+  availableToAllTenants: true, status: 'active', skills: [], versionCount: 0, draftCount: 0, latestPublishedVersion: null,
   ...over,
 });
 

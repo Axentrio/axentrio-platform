@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -33,7 +33,6 @@ import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { SkillStateCard } from '@/components/SkillStateCard';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import type { SkillState, SkillRemedy } from '@contracts/skill-readiness';
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -43,8 +42,8 @@ import {
   useAdminBotTemplateDetail, useUpdateBotTemplate, useArchiveBotTemplate,
   useCreateTemplateVersion, useEditTemplateVersion, usePublishTemplateVersion,
   useUnpublishTemplateVersion, useDeleteTemplateVersion, useRollbackTemplate, useUpdateTemplateGrants, useTemplateTestChat,
-  usePreviewLedger, useAdminModules, useAdminSkills,
-  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type AdminModuleRow, type TemplateTier,
+  usePreviewLedger, useAdminSkills,
+  forceConflict, type BotTemplateVersion, type BotTemplateConfig, type TemplateTier, type TemplateVariable,
 } from '../../queries/useBotTemplatesQueries';
 
 /** Tier options for the Identity control (mirrors the list page's ladder). */
@@ -114,6 +113,11 @@ function draftToConfig(d: ConfigDraft): BotTemplateConfig {
 const KNOWN_PLACEHOLDERS = new Set(['botName', 'tone', 'supportEmail', 'businessName', 'fallbackMessage', 'offHoursMessage', 'greetingMessage', 'maxResponseLength', 'topicsToAvoid']);
 // Tap-to-insert chips for the most common placeholders (appended at the end).
 const PLACEHOLDER_CHIPS = ['{botName}', '{businessName}', '{tone}', '{supportEmail}'];
+
+/** A human label for a variable key, e.g. 'cancellationPolicy' → 'Cancellation policy'. */
+function prettifyKey(key: string): string {
+  return key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
+}
 
 // Preview pane — the author previews mostly by PLAN (which gates capabilities);
 // channel is a secondary toggle (it only tweaks reply length + proactive contact).
@@ -272,8 +276,8 @@ const RailLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <div className="text-[10px] font-medium uppercase tracking-wider text-text-tertiary">{children}</div>
 );
 
-type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedModuleIds: string[]; config: ConfigDraft };
-const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', selectedModuleIds: [], config: EMPTY_CONFIG };
+type VersionDraft = { open: boolean; mode: 'create' | 'edit' | 'view'; version?: number; lockVersion?: number; body: string; changelog: string; expectedModules: string; selectedSkillIds: string[]; skillProse: Record<string, string>; variables: TemplateVariable[]; config: ConfigDraft };
+const EMPTY_DRAFT: VersionDraft = { open: false, mode: 'create', body: '', changelog: '', expectedModules: '', selectedSkillIds: [], skillProse: {}, variables: [], config: EMPTY_CONFIG };
 
 const AdminBotTemplateDetail: React.FC = () => {
   const { t } = useTranslation();
@@ -294,14 +298,14 @@ const AdminBotTemplateDetail: React.FC = () => {
   const grantsMut = useUpdateTemplateGrants(id);
   const testChat = useTemplateTestChat();
   const preview = usePreviewLedger();
-  // Composable-templates: authored-module catalog for the module multi-select.
-  // Only fetched when the flag is ON (the legacy editor never reads it).
-  const { data: modulesData } = useAdminModules({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
+  // Composable-templates: the skill catalog for the skill multi-select (module==
+  // skill). Only fetched when the flag is ON (the legacy editor never reads it).
   const { data: skillsCatalog } = useAdminSkills({ enabled: COMPOSABLE_TEMPLATES_ENABLED });
   const draftBaselineRef = useRef<string>('');
 
   const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; tier: TemplateTier; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
+  const [newVarName, setNewVarName] = useState('');
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
@@ -318,31 +322,10 @@ const AdminBotTemplateDetail: React.FC = () => {
   const previewMutate = preview.mutate;
   const draftConfigKey = JSON.stringify(draft.config);
 
-  // Map selected module ids → the engineered skills they bind, and → the publish-
-  // pinned {moduleId, moduleVersion} refs (latest published version). Defined as
-  // closures over modulesData so both the preview effect (above the early returns)
-  // and save (below) share one source of truth.
-  const moduleRows: AdminModuleRow[] = modulesData ?? [];
-  const boundSkillIds = (ids: string[]): string[] => {
-    const out = new Set<string>();
-    for (const id of ids) {
-      const row = moduleRows.find((r) => r.module.id === id);
-      for (const s of row?.module.skillIds ?? []) out.add(s);
-    }
-    return [...out];
-  };
-  const boundModuleRefs = (ids: string[]): { moduleId: string; moduleVersion: number }[] =>
-    ids.map((id) => {
-      const published = (moduleRows.find((r) => r.module.id === id)?.versions ?? []).filter((v) => v.status === 'published');
-      const moduleVersion = published.length ? Math.max(...published.map((v) => v.version)) : 1;
-      return { moduleId: id, moduleVersion };
-    });
-
-  // The skills the scenario preview activates. Composable: the selected modules'
-  // bound skills; legacy: the free-text Expected modules. (When composable, the
-  // saved expectedModules mirror these bound skills, so both agree.)
+  // The skills the scenario preview activates. Composable: the bound skill ids
+  // directly (module==skill, 1:1); legacy: the free-text Expected modules.
   const previewActiveModules = COMPOSABLE_TEMPLATES_ENABLED
-    ? boundSkillIds(draft.selectedModuleIds)
+    ? draft.selectedSkillIds
     : draft.expectedModules.split(',').map((x) => x.trim()).filter(Boolean);
   const previewActiveModulesKey = previewActiveModules.join(',');
 
@@ -417,7 +400,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   // Serialized snapshot of the editable fields, captured when a draft opens, to
   // detect unsaved changes before discarding. (draftBaselineRef hook is declared
   // above the early returns to keep hook order stable.)
-  const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, selectedModuleIds: d.selectedModuleIds, config: d.config });
+  const draftKey = (d: VersionDraft) => JSON.stringify({ body: d.body, changelog: d.changelog, expectedModules: d.expectedModules, selectedSkillIds: d.selectedSkillIds, skillProse: d.skillProse, variables: d.variables, config: d.config });
   const openDraft = (d: VersionDraft) => {
     draftBaselineRef.current = draftKey(d);
     setTestLog([]);
@@ -460,7 +443,7 @@ const AdminBotTemplateDetail: React.FC = () => {
 
   // Prefill a new draft from the most recent version (body + modules + config) so
   // it's an edit-from-here, not a blank slate. Changelog stays empty (new entry).
-  const refIds = (v: BotTemplateVersion | undefined) => (v?.selectedModuleRefs ?? []).map((r) => r.moduleId);
+  const refIds = (v: BotTemplateVersion | undefined): string[] => v?.selectedSkillIds ?? [];
   const openCreate = () => {
     const latest = versions[0];
     openDraft({
@@ -469,14 +452,16 @@ const AdminBotTemplateDetail: React.FC = () => {
       mode: 'create',
       body: latest?.body ?? '',
       expectedModules: latest ? latest.expectedModules.join(', ') : '',
-      selectedModuleIds: refIds(latest),
+      selectedSkillIds: refIds(latest),
+      skillProse: latest?.skillProse ?? {},
+      variables: latest?.variables ?? [],
       config: latest ? configToDraft(latest.config) : EMPTY_CONFIG,
     });
   };
   const openEdit = (v: BotTemplateVersion) =>
-    openDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedModuleIds: refIds(v), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'edit', version: v.version, lockVersion: v.lockVersion, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedSkillIds: refIds(v), skillProse: v.skillProse ?? {}, variables: v.variables ?? [], config: configToDraft(v.config) });
   const openView = (v: BotTemplateVersion) =>
-    openDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedModuleIds: refIds(v), config: configToDraft(v.config) });
+    openDraft({ open: true, mode: 'view', version: v.version, body: v.body, changelog: v.changelog ?? '', expectedModules: v.expectedModules.join(', '), selectedSkillIds: refIds(v), skillProse: v.skillProse ?? {}, variables: v.variables ?? [], config: configToDraft(v.config) });
 
   // Delete a draft/unpublished version: always confirm; an unpublished version that
   // bots pin then runs the block-or-force flow (unpins them to latest).
@@ -498,34 +483,44 @@ const AdminBotTemplateDetail: React.FC = () => {
       },
     });
 
-  // The version body shared by save + publish. Composable: persist selectedModuleRefs
-  // (authoritative) and mirror the bound skills into expectedModules so the legacy
-  // fallback stays consistent. Legacy: free-text Expected modules, no refs (flag OFF
+  // The version body shared by save + publish. Composable: persist selectedSkillIds
+  // (authoritative, module==skill) and mirror them into expectedModules so the
+  // legacy fallback stays consistent. Legacy: free-text Expected modules (flag OFF
   // = unchanged wire shape).
   const versionPayload = () => {
     const config = draftToConfig(draft.config);
+    // One declared variable per custom {placeholder} actually in the body (drops
+    // annotations for placeholders the author removed).
+    const variables = unknownPlaceholders(draft.body).map((key) => draft.variables.find((v) => v.key === key) ?? { key });
     if (COMPOSABLE_TEMPLATES_ENABLED) {
-      // Guard against silent data loss: with NO authored module selected, do not
-      // overwrite expectedModules with [] (that would drop e.g. booking from a
-      // legacy template). Preserve the prefilled expectation + clear refs instead.
-      if (draft.selectedModuleIds.length === 0) {
+      // Keep prose overrides only for still-bound skills; blanks fall back to default.
+      const skillProse = Object.fromEntries(
+        Object.entries(draft.skillProse).filter(([k, v]) => draft.selectedSkillIds.includes(k) && v.trim()),
+      );
+      // No skills selected → don't clobber a legacy template's expectedModules;
+      // leave selectedSkillIds null so the runtime falls back to expectedModules.
+      if (draft.selectedSkillIds.length === 0) {
         return {
           body: draft.body,
           changelog: draft.changelog || null,
           expectedModules: parseModules(draft.expectedModules),
-          selectedModuleRefs: null,
+          selectedSkillIds: null,
+          skillProse: null,
+          variables,
           config,
         };
       }
       return {
         body: draft.body,
         changelog: draft.changelog || null,
-        expectedModules: boundSkillIds(draft.selectedModuleIds),
-        selectedModuleRefs: boundModuleRefs(draft.selectedModuleIds),
+        expectedModules: draft.selectedSkillIds,
+        selectedSkillIds: draft.selectedSkillIds,
+        skillProse,
+        variables,
         config,
       };
     }
-    return { body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), config };
+    return { body: draft.body, changelog: draft.changelog || null, expectedModules: parseModules(draft.expectedModules), variables, config };
   };
 
   const saveDraft = async () => {
@@ -611,95 +606,6 @@ const AdminBotTemplateDetail: React.FC = () => {
         </div>
       </div>
 
-      {/* Composition — the hero: general prompt + modules → skills, from the current
-          published version. Makes "a template is a composition" legible at a glance. */}
-      {COMPOSABLE_TEMPLATES_ENABLED && (() => {
-        const current = versions.filter((v) => v.status === 'published').sort((a, b) => b.version - a.version)[0];
-        if (!current) return null;
-        const modIds = (current.selectedModuleRefs ?? []).map((r) => r.moduleId);
-        const mods = modIds
-          .map((id) => moduleRows.find((r) => r.module.id === id)?.module)
-          .filter((mo): mo is { id: string; name: string; description: string | null; skillIds: string[] } => !!mo);
-        // Mirrors the runtime `selectSkillIds`: module refs win; else the legacy
-        // `expectedModules` binds skills directly (pre-modules templates). When we
-        // fall through to that path, say so — a skill with no module is legacy, not
-        // magic.
-        const skillIds = mods.length ? [...new Set(mods.flatMap((mo) => mo.skillIds))] : current.expectedModules;
-        const legacyBinding = mods.length === 0 && skillIds.length > 0;
-        const skillLabel = (id: string) => skillsCatalog?.find((s) => s.id === id)?.displayName ?? id;
-        const Col = ({ label, children }: { label: string; children: React.ReactNode }) => (
-          <div className="flex-1 rounded-lg border border-edge bg-surface-1 p-3">
-            <div className="mb-1.5 text-[10px] uppercase tracking-wider text-text-tertiary">{label}</div>
-            {children}
-          </div>
-        );
-        return (
-          <Card variant="glass">
-            <CardContent className="p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <span className="flex h-6 w-6 items-center justify-center rounded-md bg-surface-1 text-primary-300 ring-1 ring-inset ring-edge">
-                  <Boxes className="h-3.5 w-3.5" />
-                </span>
-                <h2 className="text-sm font-semibold text-text-primary">Composition</h2>
-                <Badge variant="secondary" className="ml-auto">from v{current.version}</Badge>
-              </div>
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-                <Col label="General prompt">
-                  <p className="line-clamp-4 text-sm text-text-secondary">{current.body?.trim() || 'Platform generic core.'}</p>
-                </Col>
-                <div className="flex items-center justify-center text-text-tertiary lg:flex-col">
-                  <Plus className="h-4 w-4" />
-                </div>
-                <Col label={`Modules (${mods.length})`}>
-                  {mods.length ? (
-                    <div className="space-y-1">
-                      {mods.map((mo) => (
-                        <div key={mo.id} className="flex items-center gap-1.5 text-sm text-text-primary">
-                          <Boxes className="h-3.5 w-3.5 shrink-0 text-text-muted" />
-                          <span className="truncate">{mo.name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : legacyBinding ? (
-                    <p className="flex items-start gap-1.5 text-xs text-amber-300/90">
-                      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>None bound — the skill is bound directly (a legacy binding from before modules).</span>
-                    </p>
-                  ) : (
-                    <p className="text-xs text-text-muted">None — this template is prompt-only.</p>
-                  )}
-                </Col>
-                <div className="flex items-center justify-center text-text-tertiary lg:flex-col">
-                  <ArrowRight className="h-4 w-4" />
-                </div>
-                <Col label="Skills the bot gets">
-                  {skillIds.length ? (
-                    <>
-                      <div className="flex flex-wrap gap-1.5">
-                        {skillIds.map((sid) => (
-                          <span
-                            key={sid}
-                            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-xs ${legacyBinding ? 'border-amber-500/30 bg-amber-500/10 text-amber-200' : 'border-edge bg-surface-2 text-text-secondary'}`}
-                          >
-                            <Cpu className="h-3 w-3 opacity-70" />
-                            {skillLabel(sid)}
-                            {legacyBinding && <span className="ml-0.5 rounded bg-amber-500/20 px-1 text-[9px] uppercase tracking-wide">direct</span>}
-                          </span>
-                        ))}
-                      </div>
-                      {legacyBinding && (
-                        <p className="mt-2 text-[11px] text-text-muted">Bound directly, bypassing modules. Re-bind through a module to modernise.</p>
-                      )}
-                    </>
-                  ) : (
-                    <p className="text-xs text-text-muted">No skills — prompt-only.</p>
-                  )}
-                </Col>
-              </div>
-            </CardContent>
-          </Card>
-        );
-      })()}
 
       {/* Details — a settings surface, not a raw form. Two decision groups, each with
           a left-rail explanation: Identity (what the template is) and Distribution
@@ -832,76 +738,91 @@ const AdminBotTemplateDetail: React.FC = () => {
           <CardTitle>{t('admin.botTemplates.detail.versions')}</CardTitle>
           <Button size="sm" onClick={openCreate}><Plus className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.newDraft')}</Button>
         </CardHeader>
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('admin.botTemplates.versionColumns.version')}</TableHead>
-                <TableHead>{t('admin.botTemplates.versionColumns.status')}</TableHead>
-                <TableHead>{t('admin.botTemplates.versionColumns.changelog')}</TableHead>
-                <TableHead className="text-right">{t('admin.botTemplates.versionColumns.actions')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {versions.map((v) => (
-                <TableRow key={v.id}>
-                  <TableCell className="font-medium">v{v.version}</TableCell>
-                  <TableCell>
-                    <Badge variant={v.status === 'published' ? 'default' : v.status === 'draft' ? 'outline' : 'secondary'}>
-                      {t(`admin.botTemplates.versionStatus.${v.status}`)}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-sm text-text-secondary max-w-xs truncate">{v.changelog ?? '—'}</TableCell>
-                  <TableCell className="text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {/* Primary action stays visible; the rest live in the ⋯ menu. */}
-                      {v.status === 'draft' ? (
-                        <Button size="sm" onClick={() => publishMut.mutate(v.version)}>{t('admin.botTemplates.actions.publish')}</Button>
-                      ) : (
-                        <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
-                      )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" aria-label={t('admin.botTemplates.versionColumns.actions')}>
-                            <MoreVertical className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          {v.status === 'draft' && (
-                            <DropdownMenuItem onClick={() => openEdit(v)}>{t('common.edit')}</DropdownMenuItem>
-                          )}
-                          {v.status === 'published' && (
-                            <DropdownMenuItem
-                              onClick={() =>
-                                withForce(
-                                  (force) => unpublishMut.mutateAsync({ version: v.version, force }),
-                                  (n) => ({ title: t('admin.botTemplates.confirm.unpublishTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
-                                )
-                              }
-                            >
-                              {t('admin.botTemplates.actions.unpublish')}
-                            </DropdownMenuItem>
-                          )}
-                          {v.status !== 'draft' && (
-                            <DropdownMenuItem onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</DropdownMenuItem>
-                          )}
-                          {v.status !== 'published' && (
+        <CardContent>
+          {versions.length === 0 ? (
+            <p className="py-6 text-center text-sm text-text-muted">{t('admin.botTemplates.detail.noVersions')}</p>
+          ) : (
+            <div className="relative">
+              {/* Connecting rail — versions are a timeline; one is Live, the rest are
+                  drafts (WIP) or superseded. The dot colour encodes that at a glance. */}
+              <div className="absolute bottom-5 left-[9px] top-5 w-px bg-edge" aria-hidden />
+              <div className="space-y-1.5">
+                {versions.map((v) => {
+                  const isLive = v.status === 'published' && v.version === publishedVersion?.version;
+                  const dot = isLive
+                    ? 'bg-emerald-400'
+                    : v.status === 'draft'
+                      ? 'bg-amber-400'
+                      : v.status === 'published'
+                        ? 'bg-text-muted'
+                        : 'border border-text-muted bg-surface-1';
+                  const label = isLive ? 'Live' : v.status === 'draft' ? 'Draft' : v.status === 'published' ? 'Superseded' : 'Withdrawn';
+                  const labelCls = isLive
+                    ? 'bg-emerald-500/10 text-emerald-300'
+                    : v.status === 'draft'
+                      ? 'bg-amber-500/10 text-amber-300'
+                      : 'bg-surface-3 text-text-muted';
+                  return (
+                    <div key={v.id} className="relative flex gap-3">
+                      <span className={`relative z-10 mt-[15px] h-[11px] w-[11px] shrink-0 rounded-full ring-4 ring-surface-2 ${dot}`} aria-hidden />
+                      <div className={`flex flex-1 items-center justify-between gap-3 rounded-lg border px-3 py-2.5 transition-colors ${isLive ? 'border-emerald-500/25 bg-emerald-500/[0.05]' : 'border-edge bg-surface-1'}`}>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-sm font-semibold text-text-primary">v{v.version}</span>
+                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${labelCls}`}>{label}</span>
+                          </div>
+                          <p className="mt-0.5 truncate text-xs text-text-muted">{v.changelog?.trim() || 'No release notes'}</p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          {v.status === 'draft' ? (
                             <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem className="text-red-400 focus:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</DropdownMenuItem>
+                              <Button size="sm" variant="ghost" onClick={() => openEdit(v)}><Pencil className="h-3.5 w-3.5" />{t('common.edit')}</Button>
+                              <Button size="sm" onClick={() => publishMut.mutate(v.version)}>{t('admin.botTemplates.actions.publish')}</Button>
                             </>
+                          ) : (
+                            <Button size="sm" variant="ghost" onClick={() => openView(v)}><Eye className="h-4 w-4 mr-1" />{t('admin.botTemplates.actions.view')}</Button>
                           )}
-                        </DropdownMenuContent>
-                      </DropdownMenu>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" aria-label={t('admin.botTemplates.versionColumns.actions')}>
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {v.status === 'draft' && (
+                                <DropdownMenuItem onClick={() => openEdit(v)}>{t('common.edit')}</DropdownMenuItem>
+                              )}
+                              {v.status === 'published' && (
+                                <DropdownMenuItem
+                                  onClick={() =>
+                                    withForce(
+                                      (force) => unpublishMut.mutateAsync({ version: v.version, force }),
+                                      (n) => ({ title: t('admin.botTemplates.confirm.unpublishTitle'), description: t('admin.botTemplates.confirm.reassign', { count: n }) }),
+                                    )
+                                  }
+                                >
+                                  {t('admin.botTemplates.actions.unpublish')}
+                                </DropdownMenuItem>
+                              )}
+                              {v.status !== 'draft' && !isLive && (
+                                <DropdownMenuItem onClick={() => rollbackMut.mutate(v.version)}>{t('admin.botTemplates.actions.rollback')}</DropdownMenuItem>
+                              )}
+                              {v.status !== 'published' && (
+                                <>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuItem className="text-red-400 focus:text-red-300" onClick={() => askDelete(v)}>{t('admin.botTemplates.actions.delete')}</DropdownMenuItem>
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                      </div>
                     </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-              {versions.length === 0 && (
-                <TableRow><TableCell colSpan={4} className="text-center text-sm text-text-tertiary py-6">{t('admin.botTemplates.detail.noVersions')}</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -926,7 +847,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                  <Command>
+                  <Command filter={(value, search) => (value.toLowerCase().includes(search.toLowerCase()) ? 1 : 0)}>
                     <CommandInput placeholder={t('admin.botTemplates.detail.tenantsSearch')} />
                     <CommandList>
                       <CommandEmpty>{t('admin.botTemplates.detail.tenantsNone')}</CommandEmpty>
@@ -1074,12 +995,80 @@ const AdminBotTemplateDetail: React.FC = () => {
                   </div>
                 )}
               </div>
-              {draft.mode !== 'view' && unknownPlaceholders(draft.body).length > 0 && (
-                <p className="mt-2 flex items-start gap-1.5 text-xs text-amber-400">
-                  <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{t('admin.botTemplates.editor.unknownPlaceholders', { placeholders: unknownPlaceholders(draft.body).map((p) => `{${p}}`).join(', ') })}</span>
-                </p>
-              )}
+              {draft.mode !== 'view' && (() => {
+                const keys = unknownPlaceholders(draft.body);
+                const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
+                const setVar = (key: string, patch: Partial<TemplateVariable>) =>
+                  setDraft((d) => {
+                    const has = d.variables.some((v) => v.key === key);
+                    const variables = has
+                      ? d.variables.map((v) => (v.key === key ? { ...v, ...patch } : v))
+                      : [...d.variables, { key, ...patch }];
+                    return { ...d, variables };
+                  });
+                const cleanKey = newVarName.trim().replace(/[^\w]/g, '');
+                const addVar = () => {
+                  if (!cleanKey || keys.includes(cleanKey)) { setNewVarName(''); return; }
+                  setDraft((d) => ({ ...d, body: d.body + (d.body && !/\s$/.test(d.body) ? ' ' : '') + `{${cleanKey}}` }));
+                  setNewVarName('');
+                };
+                return (
+                  <div className="mt-3 space-y-2.5 rounded-xl border border-edge bg-surface-1 p-3.5">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
+                        <Pencil className="h-3.5 w-3.5 text-amber-400" />Template variables
+                      </div>
+                      <p className="mt-0.5 text-xs text-text-muted">
+                        The blanks tenants fill in. Add one below (or type a <span className="font-mono text-amber-300">{'{placeholder}'}</span> straight into the prompt) — anything that isn’t a built-in becomes a field tenants complete when they adopt this template.
+                      </p>
+                    </div>
+
+                    {keys.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-edge bg-surface-0/50 px-3 py-3 text-xs text-text-muted">
+                        No custom variables yet. Add one below and it’s inserted into the prompt as <span className="font-mono">{'{yourVariable}'}</span>.
+                      </p>
+                    ) : (
+                      keys.map((key) => {
+                        const v = getVar(key);
+                        return (
+                          <div key={key} className="space-y-2 rounded-lg border border-edge bg-surface-0/50 p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-inset ring-amber-500/20">{`{${key}}`}</span>
+                              <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                                <Switch checked={v.required ?? false} onCheckedChange={(c) => setVar(key, { required: c })} />Required
+                              </label>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Input value={v.label ?? ''} placeholder={`Label — ${prettifyKey(key)}`} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
+                              <Input value={v.default ?? ''} placeholder="Default value (optional)" onChange={(e) => setVar(key, { default: e.target.value })} className="h-8 text-xs" />
+                            </div>
+                            <Input value={v.help ?? ''} placeholder="Help text tenants see (optional)" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
+                          </div>
+                        );
+                      })
+                    )}
+
+                    {/* Add a variable by name → inserts {name} into the prompt, where it's auto-detected. */}
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <span className="shrink-0 text-xs text-text-muted">Add variable</span>
+                      <div className="relative flex-1">
+                        <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>
+                        <Input
+                          value={newVarName}
+                          onChange={(e) => setNewVarName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVar(); } }}
+                          placeholder="cancellationPolicy"
+                          className="h-8 px-5 font-mono text-xs"
+                        />
+                        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'}'}</span>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" disabled={!cleanKey} onClick={addVar}>
+                        <Plus className="h-3.5 w-3.5" />Add
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })()}
             </AuthorSection>
 
             {/* 02 — Capabilities: the modules → skills the bot actually gets. */}
@@ -1092,43 +1081,72 @@ const AdminBotTemplateDetail: React.FC = () => {
               {COMPOSABLE_TEMPLATES_ENABLED ? (
                 (() => {
                   const ro = draft.mode === 'view';
-                  // One or more modules per version — the resolver unions their bound skills.
-                  const toggleModule = (mid: string) =>
+                  const toggleSkill = (sid: string) =>
                     setDraft((d) => ({
                       ...d,
-                      selectedModuleIds: d.selectedModuleIds.includes(mid)
-                        ? d.selectedModuleIds.filter((x) => x !== mid)
-                        : [...d.selectedModuleIds, mid],
+                      selectedSkillIds: d.selectedSkillIds.includes(sid)
+                        ? d.selectedSkillIds.filter((x) => x !== sid)
+                        : [...d.selectedSkillIds, sid],
                     }));
-                  const publishedRows = moduleRows.filter((r) => r.versions.some((v) => v.status === 'published'));
-                  if (publishedRows.length === 0) {
-                    return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-tertiary">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
+                  const skills = skillsCatalog ?? [];
+                  if (skills.length === 0) {
+                    return <p className="rounded-lg border border-dashed border-edge bg-surface-1 px-3 py-4 text-xs text-text-muted">{t('admin.botTemplates.editor.noModulesPublished')}</p>;
                   }
+                  const setProse = (sid: string, val: string) =>
+                    setDraft((d) => ({ ...d, skillProse: { ...d.skillProse, [sid]: val } }));
+                  const resetProse = (sid: string) =>
+                    setDraft((d) => { const next = { ...d.skillProse }; delete next[sid]; return { ...d, skillProse: next }; });
+                  // One card per skill: tick to bind, and a bound skill reveals its prose
+                  // inline (pre-filled with the code default; edit to override for this
+                  // template only). Skill + its prose live together — no wall of textareas.
                   return (
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {publishedRows.map((r) => {
-                        const module = r.module;
-                        const checked = draft.selectedModuleIds.includes(module.id);
-                        const pub = [...r.versions]
-                          .filter((v) => v.status === 'published')
-                          .sort((a, b) => b.version - a.version)[0];
+                    <div className="space-y-2">
+                      {skills.map((skill) => {
+                        const checked = draft.selectedSkillIds.includes(skill.id);
+                        const custom = draft.skillProse[skill.id] !== undefined && draft.skillProse[skill.id].trim() !== skill.defaultProse.trim();
                         return (
-                          <label
-                            key={module.id}
-                            className={`flex items-start gap-2.5 rounded-lg border p-3 transition-colors ${
-                              ro ? 'pointer-events-none opacity-70' : 'cursor-pointer'
-                            } ${checked ? 'border-primary-400/60 bg-primary-500/10' : 'border-edge bg-surface-1 hover:border-edge-light hover:bg-surface-2'}`}
+                          <div
+                            key={skill.id}
+                            className={`overflow-hidden rounded-lg border transition-colors ${checked ? 'border-primary-400/50 bg-primary-500/[0.06]' : 'border-edge bg-surface-1'}`}
                           >
-                            <Checkbox checked={checked} onCheckedChange={() => toggleModule(module.id)} disabled={ro} className="mt-0.5" />
-                            <span className="min-w-0">
-                              <span className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-                                <Boxes className="h-3.5 w-3.5 shrink-0 text-text-muted" />{module.name}
+                            <label className={`flex items-start gap-2.5 p-3 ${ro ? 'pointer-events-none opacity-70' : 'cursor-pointer'} ${checked ? '' : 'hover:bg-surface-2'}`}>
+                              <Checkbox checked={checked} onCheckedChange={() => toggleSkill(skill.id)} disabled={ro} className="mt-0.5" />
+                              <span className="min-w-0 flex-1">
+                                <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm font-medium text-text-primary">
+                                  <Cpu className="h-3.5 w-3.5 shrink-0 text-text-muted" />{skill.displayName}
+                                  {checked && (
+                                    <span className={`rounded px-1 text-[9px] font-medium uppercase tracking-wide ${custom ? 'bg-primary-500/15 text-primary-300' : 'bg-surface-3 text-text-muted'}`}>
+                                      {custom ? 'custom prose' : 'default prose'}
+                                    </span>
+                                  )}
+                                </span>
+                                {skill.description && (
+                                  <span className="mt-0.5 block text-xs text-text-muted">{skill.description}</span>
+                                )}
                               </span>
-                              {pub?.prose && (
-                                <span className="mt-0.5 line-clamp-2 block text-xs text-text-tertiary">{pub.prose}</span>
-                              )}
-                            </span>
-                          </label>
+                            </label>
+
+                            {checked && (
+                              <div className="space-y-1.5 border-t border-edge/60 bg-surface-0/40 p-3 pt-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-medium uppercase tracking-wider text-text-muted">Prose · this template only</span>
+                                  {!ro && custom && (
+                                    <button type="button" onClick={() => resetProse(skill.id)} className="text-[11px] font-medium text-primary-400 hover:text-primary-300">
+                                      Reset to default
+                                    </button>
+                                  )}
+                                </div>
+                                <Textarea
+                                  aria-label={`${skill.displayName} prose`}
+                                  rows={3}
+                                  readOnly={ro}
+                                  value={draft.skillProse[skill.id] ?? skill.defaultProse}
+                                  onChange={(e) => setProse(skill.id, e.target.value)}
+                                  className="text-xs leading-relaxed"
+                                />
+                              </div>
+                            )}
+                          </div>
                         );
                       })}
                     </div>
@@ -1347,13 +1365,13 @@ const AdminBotTemplateDetail: React.FC = () => {
                     {/* Composable-templates: per-skill state badges for the modules
                         this template binds, derived from the scenario ledger. */}
                     {COMPOSABLE_TEMPLATES_ENABLED && (() => {
-                      const skills = boundSkillIds(draft.selectedModuleIds);
+                      const skills = draft.selectedSkillIds;
                       if (skills.length === 0) {
-                        return <p className="rounded-xl border border-dashed border-edge px-3 py-3 text-xs text-text-tertiary">Add a module on the left to preview its skill.</p>;
+                        return <p className="rounded-xl border border-dashed border-edge px-3 py-3 text-xs text-text-muted">Add a skill on the left to preview it.</p>;
                       }
                       return (
                         <div className="space-y-1.5">
-                          <RailLabel>Skills from modules</RailLabel>
+                          <RailLabel>Skills</RailLabel>
                           {skills.map((sid) => {
                             const meta = skillsCatalog?.find((s) => s.id === sid);
                             const provides = meta?.provides ?? SKILL_PREVIEW[sid]?.tools ?? [];
@@ -1363,7 +1381,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                             // setup, so they read ready as soon as the template composes them.
                             const state: SkillState =
                               meta && !meta.needsSetup ? 'ready' : readyTools.length > 0 ? 'ready' : 'unconfigured';
-                            const name = meta?.displayName ?? moduleCatalog.find((mc) => mc.id === sid)?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
+                            const name = meta?.displayName ?? SKILL_PREVIEW[sid]?.label ?? sid;
                             return <SkillStateCard key={sid} skill={{ id: sid, name, state, remedy: stateToRemedy(state) }} readyTools={readyTools} />;
                           })}
                         </div>

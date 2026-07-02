@@ -133,6 +133,21 @@ describe('bot template binding', () => {
       expect(reloaded.templateMode).toBe('or');
     });
 
+    it('unbinds all templates (empty bindings) → bot resolves unbound/blank', async () => {
+      const a = await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'Plumbing role' }] });
+      await request(app).put(`/api/v1/bots/${botId}/template`).send({ templateId: a.id, templateVersion: 'latest' });
+
+      const res = await request(app).put(`/api/v1/bots/${botId}/template`).send({ bindings: [] });
+      expect(res.status).toBe(200);
+      expect(res.body.data.bindings).toEqual([]);
+      expect(res.body.data.binding.templateId).toBeNull();
+      expect(res.body.data.resolved.templateUnavailable).toBe(false);
+      expect(res.body.data.resolved.body).toBe('');
+      const reloaded = await AppDataSource.getRepository(Bot).findOneByOrFail({ id: botId });
+      expect(reloaded.templateId).toBeNull();
+      expect(reloaded.templateBindings).toEqual([]);
+    });
+
     it('rejects more than 3 templates (422)', async () => {
       const mk = async () => (await makeTemplate({ availableToAllTenants: true, versions: [{ version: 1, body: 'x' }] })).id;
       const ids = [await mk(), await mk(), await mk(), await mk()];

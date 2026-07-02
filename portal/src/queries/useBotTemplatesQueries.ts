@@ -9,6 +9,15 @@ export type VersionStatus = 'draft' | 'published' | 'unpublished';
 /** Commercial tier the template is catalogued under (mirrors plan names). */
 export type TemplateTier = 'essential' | 'pro' | 'enterprise';
 
+/** A custom placeholder a template declares for tenants to fill (a "blank"). */
+export interface TemplateVariable {
+  key: string;
+  label?: string;
+  help?: string;
+  required?: boolean;
+  default?: string;
+}
+
 export interface BotTemplateSummary {
   id: string;
   key: string;
@@ -18,6 +27,8 @@ export interface BotTemplateSummary {
   tier: TemplateTier;
   availableToAllTenants: boolean;
   status: TemplateStatus;
+  /** Skill ids the current published version binds — the template's composition. */
+  skills: string[];
   versionCount: number;
   draftCount: number;
   latestPublishedVersion: number | null;
@@ -56,9 +67,13 @@ export interface BotTemplateVersion {
   body: string;
   changelog: string | null;
   expectedModules: string[];
-  /** Composable-templates: super-admin-selected module refs (authoritative when
-   *  present; falls back to expectedModules when null). Pinned at publish time. */
-  selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null;
+  /** Composable-templates: bound skill ids (module==skill, 1:1). Authoritative when
+   *  present; falls back to expectedModules when null. Pinned at publish time. */
+  selectedSkillIds?: string[] | null;
+  /** Per-template prose overrides (skillId → prose) for this version. */
+  skillProse?: Record<string, string> | null;
+  /** Custom {placeholders} this version declares for tenants to fill. */
+  variables?: TemplateVariable[] | null;
   config: BotTemplateConfig;
   status: VersionStatus;
   publishedAt: string | null;
@@ -168,7 +183,7 @@ export function useArchiveBotTemplate(id: string) {
 export function useCreateTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[]; selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null; config?: BotTemplateConfig }) =>
+    mutationFn: (input: { body: string; changelog?: string | null; expectedModules?: string[]; selectedSkillIds?: string[] | null; skillProse?: Record<string, string> | null; variables?: TemplateVariable[] | null; config?: BotTemplateConfig }) =>
       api.post<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions`, input),
     onSuccess: (res) => {
       invalidate(id);
@@ -181,7 +196,7 @@ export function useCreateTemplateVersion(id: string) {
 export function useEditTemplateVersion(id: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; selectedModuleRefs?: { moduleId: string; moduleVersion: number }[] | null; config?: BotTemplateConfig; lockVersion: number }) =>
+    mutationFn: (input: { version: number; body?: string; changelog?: string | null; expectedModules?: string[]; selectedSkillIds?: string[] | null; skillProse?: Record<string, string> | null; variables?: TemplateVariable[] | null; config?: BotTemplateConfig; lockVersion: number }) =>
       api.put<{ version: BotTemplateVersion; warnings: string[] }>(`/admin/bot-templates/${id}/versions/${input.version}`, input),
     onSuccess: (res) => {
       invalidate(id);
@@ -219,20 +234,6 @@ export function useTemplateTestChat() {
   return useMutation({
     mutationFn: (input: { body: string; config: BotTemplateConfig; message: string; history: { role: 'user' | 'assistant'; content: string }[] }) =>
       api.post<{ response: string }>(`/admin/bot-templates/test-chat`, input),
-  });
-}
-
-/** Dry-run skill test for a module: one agent turn with the bound skills' tools
- *  advertised; the model's tool calls are captured (never executed). */
-export interface ModuleAgentTestResult {
-  response: string | null;
-  toolCalls: { name: string; arguments: Record<string, unknown> }[];
-  availableTools: string[];
-}
-export function useModuleAgentTest() {
-  return useMutation({
-    mutationFn: (input: { prose: string; skillIds: string[]; message: string; history: { role: 'user' | 'assistant'; content: string }[] }) =>
-      api.post<ModuleAgentTestResult>('/admin/modules/test-agent', input),
   });
 }
 
@@ -317,52 +318,16 @@ export function useUpdateTemplateGrants(id: string) {
   });
 }
 
-// ── Authored Modules (composable-templates Phase 5) ──────────────────────────
+// ── Skills catalog (composable-templates: module==skill, 1:1) ────────────────
 
-export interface AdminModuleVersion {
-  id: string;
-  moduleId: string;
-  version: number;
-  prose: string;
-  status: 'draft' | 'published' | 'unpublished';
-  lockVersion: number;
-}
-
-export interface AdminModule {
-  id: string;
-  name: string;
-  description: string | null;
-  /** Engineered skill ids this module binds (v1: exactly 1). */
-  skillIds: string[];
-}
-
-export interface AdminModuleRow {
-  module: AdminModule;
-  versions: AdminModuleVersion[];
-}
-
-/**
- * Super-admin authored-module catalog (GET /admin/modules) — feeds the composable
- * editor's module multi-select. `enabled` lets the page skip the fetch when the
- * composable-templates flag is OFF (the legacy editor never reads it).
- */
-export function useAdminModules(opts: { enabled?: boolean } = {}) {
-  return useQuery({
-    queryKey: ['admin', 'modules'] as const,
-    queryFn: async () => {
-      const res = await api.get<{ modules: AdminModuleRow[] }>('/admin/modules');
-      return res.modules;
-    },
-    enabled: opts.enabled ?? true,
-  });
-}
-
-/** The engineered skill catalog (read-only) — the options a module may bind. */
+/** The engineered skill catalog (read-only) — the bindable skills. */
 export interface AdminSkill {
   id: string;
   displayName: string;
   description: string | null;
   readinessHint: string | null;
+  /** The skill's canonical prose (frozen in code) — seeds a per-template override. */
+  defaultProse: string;
   /** Entitlement feature that gates the skill (e.g. 'bookings'), or null. */
   feature: string | null;
   /** Tool names the skill gives the bot (display). */
@@ -381,67 +346,17 @@ export function useAdminSkills(opts: { enabled?: boolean } = {}) {
   });
 }
 
-/** Create a module + its first draft version (name, bound skill, prose). */
-export function useCreateModule() {
-  const qc = useQueryClient();
+/** Bulk-bind a skill to every active template in a tier (unions it into each
+ *  template's latest published version). One click, tier-wide. */
+export function useApplySkillToTier() {
+  const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: (input: { name: string; description?: string; skillIds: string[]; prose?: string }) =>
-      api.post<{ module: AdminModule; version: AdminModuleVersion }>('/admin/modules', input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('Module created');
+    mutationFn: ({ skillId, tier }: { skillId: string; tier: TemplateTier }) =>
+      api.post<{ applied: number; skipped: number; total: number }>(`/admin/skills/${skillId}/apply-to-tier`, { tier }),
+    onSuccess: (res) => {
+      invalidate();
+      toast.success(`Applied to ${res.applied} template${res.applied === 1 ? '' : 's'}${res.skipped ? ` · ${res.skipped} already had it` : ''}`);
     },
   });
 }
 
-/** Publish a module's draft version (draft → published, frozen). */
-export function usePublishModuleVersion() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ moduleId, version }: { moduleId: string; version: number }) =>
-      api.post<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions/${version}/publish`, {}),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('Published');
-    },
-  });
-}
-
-/** Edit a module's catalog fields (name / description / bound skill). */
-export function useEditModule() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; name?: string; description?: string; skillIds?: string[] }) =>
-      api.put<{ module: AdminModule }>(`/admin/modules/${id}`, input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('Saved');
-    },
-  });
-}
-
-/** Start a new draft version (author fresh prose from the latest). */
-export function useCreateModuleDraftVersion() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ moduleId, prose }: { moduleId: string; prose?: string }) =>
-      api.post<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions`, { prose }),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('New draft started');
-    },
-  });
-}
-
-/** Edit a DRAFT version's prose (optimistic concurrency via lockVersion). */
-export function useEditModuleDraftVersion() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ moduleId, version, ...input }: { moduleId: string; version: number; prose?: string; lockVersion?: number }) =>
-      api.put<{ version: AdminModuleVersion }>(`/admin/modules/${moduleId}/versions/${version}`, input),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ['admin', 'modules'] });
-      toast.success('Draft saved');
-    },
-  });
-}

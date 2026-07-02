@@ -23,6 +23,10 @@ export const putBotAiSettingsSchema = z
     // Selected specialty keys (SpecialtyCatalog S3). The .strict() object would
     // reject an unknown key, so it must be declared here to be writable.
     selectedSpecialties: z.array(z.string().max(100)).max(100).optional(),
+    // Template variables the tenant filled in — the values for the custom
+    // {placeholders} their bound template declares (key → value). Substituted into
+    // the prompt at runtime (built-in placeholders always take precedence).
+    templateVariables: z.record(z.string().max(100), z.string().max(4000)).optional(),
     brandVoice: z
       .object({
         name: z.string().min(1).max(100),

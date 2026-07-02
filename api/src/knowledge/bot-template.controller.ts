@@ -12,10 +12,10 @@
 import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { Bot } from '../database/entities/Bot';
-import { BotTemplateVersion } from '../database/entities/BotTemplateVersion';
+import { BotTemplateVersion, type TemplateVariable } from '../database/entities/BotTemplateVersion';
 import { getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 import { listAvailableTemplates, resolveBoundTemplates, bindingsOf } from '../templates/template-resolver';
-import { listActiveModules } from '../modules';
+import { listActiveModules, getModule } from '../modules';
 import { computeBotSkillReadiness } from '../modules/bot-skill-readiness';
 import { sendSuccess } from '../utils/response';
 import { NotFoundError, ForbiddenError, ValidationError } from '../middleware/error-handler';
@@ -49,12 +49,14 @@ async function buildView(bot: Bot, tenantId: string) {
     boundIds.map(async (tid) => {
       const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
         where: { templateId: tid, status: 'published' },
-        select: ['version', 'expectedModules'],
+        select: ['version', 'expectedModules', 'selectedSkillIds'],
         order: { version: 'DESC' },
       });
       perTemplate[tid] = {
         publishedVersions: versions.map((v) => v.version),
-        expectedModules: [...new Set(versions.flatMap((v) => v.expectedModules ?? []))],
+        // Effective skills per version: bound skill ids win, else legacy expectedModules
+        // — mirrors selectSkillIds so the advisory reflects composable-templates too.
+        expectedModules: [...new Set(versions.flatMap((v) => (v.selectedSkillIds && v.selectedSkillIds.length ? v.selectedSkillIds : (v.expectedModules ?? []))))],
       };
     }),
   );
@@ -91,12 +93,28 @@ async function buildView(bot: Bot, tenantId: string) {
     });
   }
 
+  // Composable-templates: the custom {placeholders} the bound template(s) declare
+  // (union, deduped by key) + the bot's current filled-in values — powers the
+  // tenant fill-form so the tenant can complete their template's blanks.
+  const varByKey = new Map<string, TemplateVariable>();
+  for (const r of resolvedList) for (const v of r.variables ?? []) if (!varByKey.has(v.key)) varByKey.set(v.key, v);
+  const variables = [...varByKey.values()];
+  const templateVariables = ((bot.settings?.ai as { templateVariables?: Record<string, string> } | undefined)?.templateVariables) ?? {};
+
+  // Skill id → display name for every skill any available template composes, so the
+  // UI can label the per-template skill pills (and the add-picker preview).
+  const skillNames: Record<string, string> = {};
+  for (const tpl of available) for (const id of tpl.skills) if (!(id in skillNames)) skillNames[id] = getModule(id)?.displayName ?? id;
+
   return {
     available,
     mode: bot.templateMode ?? 'or',
     bindings: bindingsView,
     missingModules,
     perSkillStates,
+    variables,
+    templateVariables,
+    skillNames,
     // Back-compat: primary binding + a flattened resolved preview for the old UI.
     binding: { templateId: bot.templateId ?? null, templateVersion: bot.templateVersion },
     publishedVersions: bindingsView[0]?.publishedVersions ?? [],
@@ -142,9 +160,11 @@ export async function updateBotTemplateBinding(req: Request, res: Response) {
 
   bot.templateBindings = bindings;
   bot.templateMode = input.mode ?? bot.templateMode ?? 'or';
-  // Mirror the primary onto the legacy columns for back-compat queries.
-  bot.templateId = bindings[0].templateId;
-  bot.templateVersion = bindings[0].version;
+  // Mirror the primary onto the legacy columns for back-compat queries. Empty
+  // bindings = an explicit unbind → clear it so the bot resolves to UNBOUND
+  // (generic service core + its own identity/guardrails, no template skills).
+  bot.templateId = bindings[0]?.templateId ?? null;
+  bot.templateVersion = bindings[0]?.version ?? 'latest';
   await AppDataSource.getRepository(Bot).save(bot);
 
   sendSuccess(res, await buildView(bot, tenantId));

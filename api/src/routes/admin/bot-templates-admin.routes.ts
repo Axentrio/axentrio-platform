@@ -34,22 +34,12 @@ import {
   validateConfig,
   type Replacement,
 } from '../../templates/template-admin.service';
-import {
-  createModule,
-  editModule,
-  createModuleDraftVersion,
-  editModuleDraftVersion,
-  publishModuleVersion,
-  listModules,
-} from '../../templates/module-admin.service';
-import { buildSystemPrompt } from '../../llm/prompt-builder';
 import { previewLedger } from '../../templates/template-preview';
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../../llm/defaults';
 import { ERROR_CODES } from '../../middleware/error-codes';
 import { logger } from '../../utils/logger';
 import { allModules, getModule } from '../../modules';
-import type { ToolDefinition } from '../../llm/llm.types';
-import { ToolRegistry } from '../../agent/tool-registry';
+import { buildSystemPrompt } from '../../llm/prompt-builder';
 
 const router = Router();
 
@@ -111,13 +101,22 @@ function parseTier(value: unknown, opts: { required?: boolean } = {}): BotTempla
   return value as BotTemplateTier;
 }
 
+/** Pull the declared variable keys out of a request body's `variables` (best-effort,
+ *  for the save-time unknown-placeholder warning — full validation happens in the service). */
+function declaredVariableKeys(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((v) => (v && typeof v === 'object' ? (v as Record<string, unknown>).key : undefined))
+    .filter((k): k is string => typeof k === 'string');
+}
+
 // GET /admin/bot-templates — all templates with a version summary.
 router.get(
   '/bot-templates',
   asyncHandler(async (_req: Request, res: Response) => {
     const templates = await AppDataSource.getRepository(BotTemplate).find({ order: { displayName: 'ASC' } });
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
-      select: ['templateId', 'version', 'status'],
+      select: ['templateId', 'version', 'status', 'selectedSkillIds', 'expectedModules'],
     });
     const byTemplate = new Map<string, BotTemplateVersion[]>();
     for (const v of versions) {
@@ -126,7 +125,14 @@ router.get(
     sendSuccess(res, {
       templates: templates.map((t) => {
         const vs = byTemplate.get(t.id) ?? [];
-        const published = vs.filter((v) => v.status === 'published').map((v) => v.version);
+        const publishedVers = vs.filter((v) => v.status === 'published').sort((a, b) => b.version - a.version);
+        const latest = publishedVers[0];
+        // The skills the bot gets, from the current published version (bound skill
+        // ids, else the legacy expectedModules) — surfaced so the list shows each
+        // template's composition at a glance.
+        const skills = latest
+          ? (latest.selectedSkillIds && latest.selectedSkillIds.length ? latest.selectedSkillIds : (latest.expectedModules ?? []))
+          : [];
         return {
           id: t.id,
           key: t.key,
@@ -136,9 +142,10 @@ router.get(
           tier: t.tier,
           availableToAllTenants: t.availableToAllTenants,
           status: t.status,
+          skills,
           versionCount: vs.length,
           draftCount: vs.filter((v) => v.status === 'draft').length,
-          latestPublishedVersion: published.length ? Math.max(...published) : null,
+          latestPublishedVersion: latest ? latest.version : null,
         };
       }),
     });
@@ -352,12 +359,14 @@ router.post(
     await loadTemplate(req.params.id);
     const body = (req.body ?? {}) as Record<string, unknown>;
     const text = typeof body.body === 'string' ? body.body : '';
-    const { warnings } = validateBody(text);
+    const { warnings } = validateBody(text, declaredVariableKeys(body.variables));
     const version = await createDraftVersion(req.params.id, {
       body: text,
       changelog: reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null,
       expectedModules: body.expectedModules,
-      selectedModuleRefs: body.selectedModuleRefs,
+      selectedSkillIds: body.selectedSkillIds,
+      skillProse: body.skillProse,
+      variables: body.variables,
       config: body.config,
     });
     await logAudit(req.userId!, 'bot_template.version_created', 'bot_template', req.params.id, undefined, { version: version.version });
@@ -373,13 +382,15 @@ router.put(
     const version = parseVersion(req.params.version);
     const body = (req.body ?? {}) as Record<string, unknown>;
     let warnings: string[] = [];
-    if (typeof body.body === 'string') warnings = validateBody(body.body).warnings;
+    if (typeof body.body === 'string') warnings = validateBody(body.body, declaredVariableKeys(body.variables)).warnings;
     const lockVersion = body.lockVersion === undefined ? undefined : Number(body.lockVersion);
     const updated = await editDraftVersion(req.params.id, version, {
       body: typeof body.body === 'string' ? body.body : undefined,
       changelog: body.changelog === undefined ? undefined : (reqStr(body.changelog, 'changelog', { max: 500, required: false }) ?? null),
       expectedModules: body.expectedModules,
-      selectedModuleRefs: body.selectedModuleRefs,
+      selectedSkillIds: body.selectedSkillIds,
+      skillProse: body.skillProse,
+      variables: body.variables,
       config: body.config,
       lockVersion,
     });
@@ -491,6 +502,7 @@ router.get(
         displayName: m.displayName,
         description: m.description ?? null,
         readinessHint: m.readinessHint ?? null,
+        defaultProse: m.defaultProse ?? '',
         feature: m.gate.kind === 'feature' ? m.gate.feature : null,
         provides: m.provides ?? m.tools.map((t) => t.name),
         // Skills that ship their own tools may need per-bot setup (e.g. booking's
@@ -502,165 +514,34 @@ router.get(
   }),
 );
 
-// GET /admin/modules — list modules with their versions.
-router.get(
-  '/modules',
-  asyncHandler(async (_req: Request, res: Response) => {
-    sendSuccess(res, { modules: await listModules() });
-  }),
-);
-
-// POST /admin/modules — create a module + its first draft version.
+// POST /admin/skills/:skillId/apply-to-tier — bulk-bind a skill to EVERY active
+// template in a tier (unions it into each template's latest published version).
+// The intent is "enable this everywhere in this tier", so it mutates the live
+// published version; already-bound templates are skipped.
 router.post(
-  '/modules',
+  '/skills/:skillId/apply-to-tier',
   asyncHandler(async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const result = await createModule({
-      name: body.name,
-      description: body.description,
-      skillIds: body.skillIds,
-      prose: body.prose,
-    });
-    await logAudit(req.userId!, 'module.created', 'module', result.module.id, undefined, { name: result.module.name });
-    res.status(201);
-    sendSuccess(res, result);
-  }),
-);
+    const skillId = req.params.skillId;
+    if (!getModule(skillId)) throw new ValidationError(`Unknown skill: ${skillId}`);
+    const tier = parseTier((req.body ?? {}).tier, { required: true })!;
 
-// PUT /admin/modules/:id — edit a module's catalog fields.
-router.put(
-  '/modules/:id',
-  asyncHandler(async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const module = await editModule(req.params.id, {
-      name: body.name,
-      description: body.description,
-      skillIds: body.skillIds,
-    });
-    await logAudit(req.userId!, 'module.edited', 'module', req.params.id, undefined, undefined);
-    sendSuccess(res, { module });
-  }),
-);
-
-// POST /admin/modules/:id/versions — create a draft version.
-router.post(
-  '/modules/:id/versions',
-  asyncHandler(async (req: Request, res: Response) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const version = await createModuleDraftVersion(req.params.id, { prose: body.prose });
-    await logAudit(req.userId!, 'module.version_created', 'module', req.params.id, undefined, { version: version.version });
-    res.status(201);
-    sendSuccess(res, { version });
-  }),
-);
-
-// PUT /admin/modules/:id/versions/:version — edit a DRAFT (optimistic concurrency).
-router.put(
-  '/modules/:id/versions/:version',
-  asyncHandler(async (req: Request, res: Response) => {
-    const version = parseVersion(req.params.version);
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const lockVersion = body.lockVersion === undefined ? undefined : Number(body.lockVersion);
-    const updated = await editModuleDraftVersion(req.params.id, version, { prose: body.prose, lockVersion });
-    await logAudit(req.userId!, 'module.version_edited', 'module', req.params.id, undefined, { version });
-    sendSuccess(res, { version: updated });
-  }),
-);
-
-// POST /admin/modules/:id/versions/:version/publish — draft → published (frozen).
-router.post(
-  '/modules/:id/versions/:version/publish',
-  asyncHandler(async (req: Request, res: Response) => {
-    const version = parseVersion(req.params.version);
-    const published = await publishModuleVersion(req.params.id, version, req.userId!);
-    await logAudit(req.userId!, 'module.version_published', 'module', req.params.id, undefined, { version });
-    sendSuccess(res, { version: published });
-  }),
-);
-
-// POST /admin/modules/test-agent — DRY-RUN skill test. Runs ONE agent-mode turn with
-// the bound skills' tools ADVERTISED to the model, but NEVER executes a tool: we
-// capture the tool call(s) the model decides to make (name + args) so an author can
-// see the skill "fire" with zero side effects (no real booking/handoff). Prose-driven,
-// platform LLM, no KB — the authoring-time counterpart to the base prose test-chat.
-router.post(
-  '/modules/test-agent',
-  asyncHandler(async (req: Request, res: Response) => {
-    const b = (req.body ?? {}) as Record<string, unknown>;
-    const message = reqStr(b.message, 'message', { max: 4000 })!;
-    const prose = typeof b.prose === 'string' ? b.prose : '';
-    if (prose.length > 8000) throw new ValidationError('prose is too long to test (max 8000 chars)');
-    const skillIds = Array.isArray(b.skillIds) ? b.skillIds.filter((x): x is string => typeof x === 'string') : [];
-    const history = Array.isArray(b.history)
-      ? (b.history as unknown[])
-          .filter((m): m is { role: string; content: string } => !!m && typeof (m as { content?: unknown }).content === 'string')
-          .slice(-10)
-          .map((m) => ({ role: m.role === 'assistant' ? ('assistant' as const) : ('user' as const), content: m.content }))
-      : [];
-
-    // Advertise the bound skills' tools (deduped by name). Inert catalog skills have no
-    // `tools`, so synthesise a minimal def from their `provides` names — enough for the
-    // model to decide to call them.
-    const registry = new ToolRegistry();
-    const seen = new Set<string>();
-    const toolDefs: ToolDefinition[] = [];
-    for (const sid of skillIds) {
-      const def = getModule(sid);
-      if (!def) continue;
-      if (def.tools.length) {
-        for (const t of def.tools) {
-          if (seen.has(t.name)) continue;
-          seen.add(t.name);
-          toolDefs.push({ name: t.name, description: t.description, parameters: t.parameters });
-        }
-      } else {
-        // Inert catalog skill (no tools of its own): advertise the REAL builtin tool
-        // it provides (with its actual parameters), falling back to a minimal def.
-        for (const name of def.provides ?? []) {
-          if (seen.has(name)) continue;
-          seen.add(name);
-          toolDefs.push(
-            registry.builtinToolDef(name) ?? {
-              name,
-              description: `Run the ${def.displayName} skill.`,
-              parameters: { type: 'object', properties: {} },
-            },
-          );
-        }
-      }
+    const templates = await AppDataSource.getRepository(BotTemplate).find({ where: { tier, status: 'active' } });
+    const vRepo = AppDataSource.getRepository(BotTemplateVersion);
+    let applied = 0;
+    let skipped = 0;
+    for (const tmpl of templates) {
+      const v = await vRepo.findOne({ where: { templateId: tmpl.id, status: 'published' }, order: { version: 'DESC' } });
+      if (!v) { skipped++; continue; }
+      const current = v.selectedSkillIds && v.selectedSkillIds.length ? v.selectedSkillIds : (v.expectedModules ?? []);
+      if (current.includes(skillId)) { skipped++; continue; }
+      v.selectedSkillIds = [...new Set([...current, skillId])];
+      await vRepo.save(v);
+      await invalidateTemplateBundle(tmpl.id);
+      applied++;
     }
-
-    const ai = {
-      enabled: true,
-      brandVoice: { name: 'Assistant', tone: 'friendly', customInstructions: '' },
-      guardrails: {},
-    } as Parameters<typeof buildSystemPrompt>[0];
-    const base = buildSystemPrompt(ai, { businessName: 'Your Business', templateBody: prose });
-    const systemPrompt = `${base}\n\nWhen the customer's request calls for it, use the appropriate tool.`;
-
-    const { getProvider } = await import('../../llm/provider-factory');
-    const llm = getProvider(DEFAULT_PROVIDER);
-    const messages = [
-      { role: 'system' as const, content: systemPrompt },
-      ...history,
-      { role: 'user' as const, content: message },
-    ];
-    let out;
-    try {
-      out = await llm.chat(messages, {
-        model: DEFAULT_MODEL,
-        maxTokens: 800,
-        temperature: 0.3,
-        jsonMode: false,
-        tools: toolDefs.length ? toolDefs : undefined,
-      });
-    } catch (err) {
-      logger.error('Module dry-run skill test failed', err);
-      throw new ApiError('LLM call failed. Check the platform API key.', 500, ERROR_CODES.UPSTREAM_FAILED);
-    }
-    // DRY RUN — we never execute a tool; we only report the model's decision.
-    const toolCalls = (out.toolCalls ?? []).map((tc) => ({ name: tc.name, arguments: tc.arguments }));
-    sendSuccess(res, { response: out.content || null, toolCalls, availableTools: toolDefs.map((t) => t.name) });
+    if (applied > 0) await invalidateAllTenantTemplates();
+    await logAudit(req.userId!, 'skill.applied_to_tier', 'skill', skillId, undefined, { tier, applied, skipped });
+    sendSuccess(res, { applied, skipped, total: templates.length });
   }),
 );
 

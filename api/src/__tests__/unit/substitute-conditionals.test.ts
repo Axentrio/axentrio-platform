@@ -28,4 +28,14 @@ describe('substituteVariables — {{#if}} conditional sections (AC17, L12)', () 
   it('drops a conditional keyed on an unknown/empty placeholder', () => {
     expect(substituteVariables('{{#if missingKey}}X{{/if}}Y', ai())).toBe('Y');
   });
+
+  it('substitutes a custom template variable from ai.templateVariables', () => {
+    const out = substituteVariables('Policy: {cancellationPolicy}', ai({ templateVariables: { cancellationPolicy: '24h notice' } }));
+    expect(out).toBe('Policy: 24h notice');
+  });
+
+  it('a built-in placeholder always wins over a same-named custom variable (no override of {botName})', () => {
+    const out = substituteVariables('Hi from {botName}.', ai({ templateVariables: { botName: 'HACKED' } }));
+    expect(out).toBe('Hi from Ava.');
+  });
 });

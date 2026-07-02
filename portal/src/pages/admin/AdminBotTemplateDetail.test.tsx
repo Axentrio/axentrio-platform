@@ -50,16 +50,8 @@ vi.mock('@/queries/useBotTemplatesQueries', () => {
     useUpdateTemplateGrants: m,
     useTemplateTestChat: m,
     usePreviewLedger: m,
-    useAdminModules: () => ({
-      data: [
-        {
-          module: { id: 'mod1', name: 'Booking flow', description: null, skillIds: ['booking'] },
-          versions: [{ id: 'mv1', moduleId: 'mod1', version: 1, prose: '', status: 'published', lockVersion: 0 }],
-        },
-      ],
-    }),
     useAdminSkills: () => ({
-      data: [{ id: 'booking', displayName: 'Bookings', description: null, readinessHint: null, feature: 'bookings', provides: ['create_booking'], needsSetup: true }],
+      data: [{ id: 'booking', displayName: 'Bookings', description: null, readinessHint: null, defaultProse: 'DEFAULT BOOKING PROSE', feature: 'bookings', provides: ['create_booking'], needsSetup: true }],
     }),
     forceConflict: () => null,
   };
@@ -163,65 +155,8 @@ describe('AdminBotTemplateDetail — two-pane authoring editor', () => {
   });
 });
 
-describe('AdminBotTemplateDetail — Composition card (flag ON, view mode)', () => {
-  it('shows general prompt + the bound module → its skill from the published version', () => {
-    flags.composable = true;
-    state.detail = {
-      data: {
-        ...MOCK_DETAIL,
-        versions: [
-          {
-            ...MOCK_DETAIL.versions[0],
-            body: 'You are a dental assistant.',
-            selectedModuleRefs: [{ moduleId: 'mod1', moduleVersion: 1 }],
-          },
-        ],
-      },
-      isLoading: false,
-      isError: false,
-    };
-    renderPage();
-
-    // The card names itself, echoes the prompt (also shown in the Current-prompt
-    // pane, hence 2), and resolves the ref chain: module 'mod1' → name "Booking
-    // flow" → skill 'booking' → display "Bookings".
-    expect(screen.getByText('Composition')).toBeInTheDocument();
-    expect(screen.getAllByText(/You are a dental assistant/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('Booking flow')).toBeInTheDocument();
-    expect(screen.getByText('Bookings')).toBeInTheDocument();
-  });
-
-  it('flags a legacy direct binding (skill via expectedModules, no module) instead of implying a module produced it', () => {
-    flags.composable = true;
-    state.detail = {
-      data: {
-        ...MOCK_DETAIL,
-        // legacy shape: skill bound directly via expectedModules, no selectedModuleRefs
-        versions: [{ ...MOCK_DETAIL.versions[0], expectedModules: ['booking'], selectedModuleRefs: null }],
-      },
-      isLoading: false,
-      isError: false,
-    };
-    renderPage();
-    // The skill still shows (it's real at runtime) — but marked "direct", with the
-    // Modules column explaining the legacy binding rather than a false "prompt-only".
-    expect(screen.getByText('Bookings')).toBeInTheDocument();
-    expect(screen.getByText('direct')).toBeInTheDocument();
-    expect(screen.getByText(/legacy binding from before modules/i)).toBeInTheDocument();
-    expect(screen.queryByText(/prompt-only/i)).not.toBeInTheDocument();
-  });
-
-  it('reads "prompt-only" when the published version binds no modules', () => {
-    flags.composable = true;
-    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
-    renderPage();
-    expect(screen.getByText('Composition')).toBeInTheDocument();
-    expect(screen.getByText('None — this template is prompt-only.')).toBeInTheDocument();
-  });
-});
-
 describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () => {
-  it('renders the module multi-select and saves selectedModuleRefs on publish', async () => {
+  it('renders the skill multi-select and saves selectedSkillIds on publish', async () => {
     flags.composable = true;
     createVersionSpy.mockClear();
     publishSpy.mockClear();
@@ -230,21 +165,42 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
 
     fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
 
-    // The module multi-select renders the published module as a checkbox option,
-    // and the legacy free-text "Expected modules" control is gone.
-    const moduleOption = screen.getByRole('checkbox', { name: /booking flow/i });
-    expect(moduleOption).toBeInTheDocument();
-    expect(screen.queryByText(/expected modules/i)).not.toBeInTheDocument();
+    // The skill multi-select renders the catalog skill (booking → "Bookings") as a
+    // checkbox option, bound directly (module==skill).
+    const skillOption = screen.getByRole('checkbox', { name: /bookings/i });
+    expect(skillOption).toBeInTheDocument();
 
-    fireEvent.click(moduleOption);
+    fireEvent.click(skillOption);
     fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
 
-    // The version save pins the selected module to its latest published version.
     await waitFor(() =>
       expect(createVersionSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ selectedModuleRefs: [{ moduleId: 'mod1', moduleVersion: 1 }] }),
+        expect.objectContaining({ selectedSkillIds: ['booking'] }),
       ),
     );
     await waitFor(() => expect(publishSpy).toHaveBeenCalledWith(2));
+  });
+
+  it("auto-fills a bound skill's prose with its default, and saves an edit as a per-template override", async () => {
+    flags.composable = true;
+    createVersionSpy.mockClear();
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /bookings/i }));
+
+    // The prose editor for the bound skill is pre-filled with the skill's default.
+    const prose = screen.getByRole('textbox', { name: /bookings/i }) as HTMLTextAreaElement;
+    expect(prose.value).toBe('DEFAULT BOOKING PROSE');
+
+    fireEvent.change(prose, { target: { value: 'Custom booking prose for this template.' } });
+    fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+
+    await waitFor(() =>
+      expect(createVersionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ skillProse: { booking: 'Custom booking prose for this template.' } }),
+      ),
+    );
   });
 });

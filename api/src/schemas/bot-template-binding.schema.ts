@@ -27,15 +27,17 @@ const bindingSchema = z
 
 export const putBotTemplateBindingSchema = z
   .object({
-    bindings: z.array(bindingSchema).min(1).max(3).optional(),
+    // An empty array is an explicit UNBIND — the bot runs unbound (generic core +
+    // its own identity/guardrails, no template skills). `undefined` = "no change".
+    bindings: z.array(bindingSchema).max(3).optional(),
     mode: z.enum(['and', 'or']).optional(),
     // Legacy single-binding fields (normalized below when `bindings` is absent).
     templateId: z.string().uuid().optional(),
     templateVersion: versionSchema.optional(),
   })
   .strict()
-  .refine((v) => (v.bindings && v.bindings.length > 0) || !!v.templateId, {
-    message: 'Provide either bindings[] or templateId',
+  .refine((v) => v.bindings !== undefined || !!v.templateId, {
+    message: 'Provide bindings[] (may be empty to unbind) or templateId',
   })
   // No duplicate template ids in a binding set.
   .refine((v) => {

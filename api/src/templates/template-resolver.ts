@@ -20,7 +20,7 @@
  */
 import { AppDataSource } from '../database/data-source';
 import { BotTemplate } from '../database/entities/BotTemplate';
-import { BotTemplateVersion, type BotTemplateConfig } from '../database/entities/BotTemplateVersion';
+import { BotTemplateVersion, type BotTemplateConfig, type TemplateVariable } from '../database/entities/BotTemplateVersion';
 import { getEntitlements } from '../billing/entitlements';
 import { cached, invalidate, readCounter, bumpCounter } from '../utils/cache';
 import { logger } from '../utils/logger';
@@ -43,6 +43,9 @@ export interface AvailableTemplate {
   availableToAllTenants: boolean;
   /** Highest published version, or null if the template has no published version yet. */
   latestPublishedVersion: number | null;
+  /** Skill ids the latest published version composes (selected_skill_ids, else the
+   *  legacy expected_modules) — powers the "what this speciality gives" preview. */
+  skills: string[];
 }
 
 export interface ResolvedTemplate {
@@ -60,10 +63,13 @@ export interface ResolvedTemplate {
   /** Modules the resolved version expects (advisory) — feeds the trace's
    *  MODULE_<id> expected-but-inactive exclusions (L7). [] when unbound/unreachable. */
   expectedModules: string[];
-  /** Composable-templates Phase 4: the authored module refs pinned by the resolved
-   *  version ({moduleId, moduleVersion} → immutable ModuleVersion records). null for
-   *  legacy templates (→ runtime falls back to expectedModules; behaviour unchanged). */
-  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
+  /** Composable-templates: skill ids bound by the resolved version (module==skill,
+   *  1:1). null for legacy templates (→ runtime falls back to expectedModules). */
+  selectedSkillIds: string[] | null;
+  /** Per-template prose overrides (skillId → prose) for the resolved version. */
+  skillProse: Record<string, string> | null;
+  /** Declared custom {placeholder} variables (for runtime defaults + tenant fill). */
+  variables: TemplateVariable[] | null;
   /** The bot pinned a fixed version that isn't published → fell back to latest/empty. */
   pinnedButUnavailable: boolean;
   /** The bound template is missing/archived/has no published version → fell back to empty. */
@@ -90,7 +96,9 @@ const UNBOUND: ResolvedTemplate = {
   resolvedVersion: null,
   category: null,
   expectedModules: [],
-  selectedModuleRefs: null,
+  selectedSkillIds: null,
+  skillProse: null,
+  variables: null,
   pinnedButUnavailable: false,
   templateUnavailable: false,
 };
@@ -102,8 +110,12 @@ interface PublishedVersion {
   /** Modules the template version expects (advisory, T13) — drives the trace's
    *  MODULE_<id> "expected but not active" exclusions (L7). */
   expectedModules: string[];
-  /** Composable-templates Phase 4: pinned authored module refs (null for legacy). */
-  selectedModuleRefs: { moduleId: string; moduleVersion: number }[] | null;
+  /** Composable-templates: bound skill ids (null for legacy). */
+  selectedSkillIds: string[] | null;
+  /** Per-template prose overrides (skillId → prose) for the resolved version. */
+  skillProse: Record<string, string> | null;
+  /** Declared custom {placeholder} variables (for runtime defaults + tenant fill). */
+  variables: TemplateVariable[] | null;
 }
 interface TemplateBundle {
   id: string;
@@ -123,7 +135,7 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
     if (!tmpl) return null;
     const versions = await AppDataSource.getRepository(BotTemplateVersion).find({
       where: { templateId, status: 'published' },
-      select: ['version', 'body', 'config', 'expectedModules', 'selectedModuleRefs'],
+      select: ['version', 'body', 'config', 'expectedModules', 'selectedSkillIds', 'skillProse', 'variables'],
       order: { version: 'DESC' },
     });
     return {
@@ -135,7 +147,9 @@ async function getTemplateBundle(templateId: string): Promise<TemplateBundle | n
         body: v.body,
         config: v.config ?? {},
         expectedModules: v.expectedModules ?? [],
-        selectedModuleRefs: v.selectedModuleRefs ?? null,
+        selectedSkillIds: v.selectedSkillIds ?? null,
+        skillProse: v.skillProse ?? null,
+        variables: v.variables ?? null,
       })),
     };
   });
@@ -165,10 +179,15 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
       description: string | null;
       available_to_all_tenants: boolean;
       latest_published: number | null;
+      skills: string[] | null;
     }> = await AppDataSource.query(
       `SELECT t.id, t.key, t.display_name, t.category, t.description, t.available_to_all_tenants,
               (SELECT MAX(v.version) FROM bot_template_versions v
-                 WHERE v.template_id = t.id AND v.status = 'published') AS latest_published
+                 WHERE v.template_id = t.id AND v.status = 'published') AS latest_published,
+              (SELECT COALESCE(v.selected_skill_ids, v.expected_modules, '[]'::jsonb)
+                 FROM bot_template_versions v
+                WHERE v.template_id = t.id AND v.status = 'published'
+                ORDER BY v.version DESC LIMIT 1) AS skills
          FROM bot_templates t
         WHERE t.status = 'active'
           AND (t.available_to_all_tenants = true
@@ -185,6 +204,7 @@ export async function listAvailableTemplates(tenantId: string): Promise<Availabl
       description: r.description,
       availableToAllTenants: r.available_to_all_tenants,
       latestPublishedVersion: r.latest_published === null ? null : Number(r.latest_published),
+      skills: Array.isArray(r.skills) ? r.skills : [],
     }));
   });
 }
@@ -229,7 +249,9 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
-      selectedModuleRefs: latest.selectedModuleRefs,
+      selectedSkillIds: latest.selectedSkillIds,
+      skillProse: latest.skillProse,
+      variables: latest.variables,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -246,7 +268,9 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: exact.expectedModules,
-      selectedModuleRefs: exact.selectedModuleRefs,
+      selectedSkillIds: exact.selectedSkillIds,
+      skillProse: exact.skillProse,
+      variables: exact.variables,
       body: exact.body,
       config: exact.config,
       resolvedVersion: exact.version,
@@ -261,7 +285,9 @@ export async function resolveBoundTemplate(bot: {
       templateId: bot.templateId,
       category: bundle.category,
       expectedModules: latest.expectedModules,
-      selectedModuleRefs: latest.selectedModuleRefs,
+      selectedSkillIds: latest.selectedSkillIds,
+      skillProse: latest.skillProse,
+      variables: latest.variables,
       body: latest.body,
       config: latest.config,
       resolvedVersion: latest.version,
@@ -409,30 +435,15 @@ export function composeTemplateBodies(resolved: ResolvedTemplate[], mode: 'and' 
 }
 
 /**
- * Composable-templates Phase 4 — the skill ids a template version selects. When it
- * has authored module refs, resolve them to their bound skills (deduped, order-
- * stable) via the supplied lookup; otherwise fall back to the legacy expectedModules
- * (1:1 skill ids). Pure — the caller injects `moduleSkills` (a Module.skillIds
- * lookup) so the selection logic is testable without the DB. An empty refs array
- * is treated as "no refs".
+ * Composable-templates — the skill ids a template version binds (module==skill,
+ * 1:1). Returns `selectedSkillIds` when set, else falls back to the legacy
+ * `expectedModules` (also skill ids); deduped, order-stable. Pure.
  */
 export function selectSkillIds(
-  version: { selectedModuleRefs?: { moduleId: string }[] | null; expectedModules: string[] },
-  moduleSkills: (moduleId: string) => string[],
+  version: { selectedSkillIds?: string[] | null; expectedModules: string[] },
 ): string[] {
-  const refs = version.selectedModuleRefs;
-  if (!refs || refs.length === 0) return [...new Set(version.expectedModules)];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const moduleId of new Set(refs.map((r) => r.moduleId))) {
-    for (const skill of moduleSkills(moduleId)) {
-      if (!seen.has(skill)) {
-        seen.add(skill);
-        out.push(skill);
-      }
-    }
-  }
-  return out;
+  const s = version.selectedSkillIds;
+  return s && s.length ? [...new Set(s)] : [...new Set(version.expectedModules)];
 }
 
 /**

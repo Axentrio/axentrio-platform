@@ -63,8 +63,6 @@ import { SentimentTheme } from './entities/SentimentTheme';
 import { BotTemplate } from './entities/BotTemplate';
 import { BotTemplateVersion } from './entities/BotTemplateVersion';
 import { TenantBotTemplate } from './entities/TenantBotTemplate';
-import { Module } from './entities/Module';
-import { ModuleVersion } from './entities/ModuleVersion';
 import { SpamScamLog } from './entities/SpamScamLog';
 import { GuardrailOutputLog } from './entities/GuardrailOutputLog';
 
@@ -134,8 +132,6 @@ export const AppDataSource = new DataSource({
     BotTemplate,
     BotTemplateVersion,
     TenantBotTemplate,
-    Module,
-    ModuleVersion,
     InsightExperiment,
     InsightDigest,
     SentimentTheme,

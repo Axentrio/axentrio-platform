@@ -14,7 +14,7 @@
  */
 
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   MessageSquare,
@@ -91,6 +91,9 @@ interface AdminMenuItem {
   labelKey: string;
   icon: React.ElementType;
   roles: UserRole[];
+  /** Extra path prefixes that also mark this item active (e.g. Bot Studio owns
+   *  the /admin/bot-templates editor routes, which live outside /admin/studio). */
+  match?: string[];
 }
 
 const menuItems: MenuItem[] = [
@@ -129,6 +132,7 @@ const adminMenuItems: AdminMenuItem[] = [
     path: '/admin/studio',
     labelKey: COMPOSABLE_TEMPLATES_ENABLED ? 'nav.botStudio' : 'nav.botTemplates',
     icon: Boxes,
+    match: ['/admin/bot-templates', '/admin/modules'],
     roles: ['super_admin'],
   },
   { path: '/admin/faq', labelKey: 'nav.faqEditor', icon: HelpCircle, roles: ['super_admin'] },
@@ -216,6 +220,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   className = ''
 }) => {
   const { t } = useTranslation();
+  const { pathname } = useLocation();
   const { pendingCount } = useHandoffsQuery('pending');
   const { user } = useAppAuth();
   const { signOut } = useClerk();
@@ -375,14 +380,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   <li key={item.path}>
                     <NavLink
                       to={item.path}
-                      className={({ isActive }) =>
-                        cn(
+                      className={({ isActive }) => {
+                        const active = isActive || (item.match?.some((m) => pathname === m || pathname.startsWith(`${m}/`) || pathname.startsWith(`${m}?`)) ?? false);
+                        return cn(
                           'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-                          isActive
+                          active
                             ? 'bg-primary-600/10 text-primary-400 border-l-2 border-primary-500'
                             : 'text-text-secondary hover:bg-surface-3 hover:text-text-primary'
-                        )
-                      }
+                        );
+                      }}
                     >
                       <Tooltip>
                         <TooltipTrigger asChild>

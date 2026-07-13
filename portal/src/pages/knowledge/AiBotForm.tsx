@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine } from 'lucide-react';
+import { Sparkles, ArrowRight, X, Fingerprint, Boxes, PenLine, MessagesSquare } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -77,6 +77,12 @@ const TONE_PRESETS = [
   { value: 'formal', labelKey: 'ai.bot.identity.tones.formal' },
 ] as const;
 
+/** Per-channel prompt overrides — mirrors the API's `ai.channelOverrides.social`.
+ *  `social` = every messaging channel (WhatsApp / Messenger / Instagram / Telegram);
+ *  the web widget is never affected. An empty tone means "same as the main tone". */
+type SocialOverride = { enabled: boolean; tone: string; instructions: string; maxResponseLength?: number };
+const EMPTY_SOCIAL: SocialOverride = { enabled: false, tone: '', instructions: '' };
+
 type FormSnapshot = {
   enabled: boolean;
   botName: string;
@@ -93,6 +99,7 @@ type FormSnapshot = {
   topicsToAvoid: string[];
   selectedSpecialties: string[];
   templateVariables: Record<string, string>;
+  socialOverride: SocialOverride;
 };
 
 const snapshotKey = (s: FormSnapshot): string => JSON.stringify(s);
@@ -182,6 +189,8 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [selectedSpecialties, setSelectedSpecialties] = useState<string[]>([]);
   // Tenant-filled values for the bound template's custom {placeholders}.
   const [templateVarValues, setTemplateVarValues] = useState<Record<string, string>>({});
+  // Per-channel prompt overrides for messaging channels (not the web widget).
+  const [socialOverride, setSocialOverride] = useState<SocialOverride>(EMPTY_SOCIAL);
   // Business hours editor state (hydrated from the bot detail, saved separately).
   const [bhEnabled, setBhEnabled] = useState(false);
   const [bhTimezone, setBhTimezone] = useState('UTC');
@@ -222,6 +231,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const hTopics = aiSettings.guardrails?.topicsToAvoid ?? [];
     const hSpecialties = (aiSettings.selectedSpecialties ?? []) as string[];
     const hTemplateVars = ((aiSettings as { templateVariables?: Record<string, string> }).templateVariables) ?? {};
+    const hSocial: SocialOverride = { ...EMPTY_SOCIAL, ...((aiSettings as { channelOverrides?: { social?: SocialOverride } }).channelOverrides?.social ?? {}) };
 
     setEnabled(hEnabled);
     setBotName(hBotName);
@@ -239,6 +249,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setTopicsToAvoid(hTopics);
     setSelectedSpecialties(hSpecialties);
     setTemplateVarValues(hTemplateVars);
+    setSocialOverride(hSocial);
 
     setInitialSnapshot(snapshotKey({
       enabled: hEnabled,
@@ -256,6 +267,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       topicsToAvoid: hTopics,
       selectedSpecialties: hSpecialties,
       templateVariables: hTemplateVars,
+      socialOverride: hSocial,
     }));
   }, [aiSettings, tenantId, hydrationKey]);
 
@@ -301,6 +313,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     topicsToAvoid,
     selectedSpecialties,
     templateVariables: templateVarValues,
+    socialOverride,
   });
 
   // Specialties available for this bot's vertical (from the GET ai-settings response).
@@ -346,11 +359,12 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           },
           selectedSpecialties,
           templateVariables: templateVarValues,
+          channelOverrides: { social: socialOverride },
         },
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues],
+    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues, socialOverride],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({
@@ -725,6 +739,80 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           </Section>
         )}
 
+
+        {/* Social & messaging — per-channel prompt overrides. Applies to WhatsApp /
+            Messenger / Instagram / Telegram only; the web widget is unaffected. */}
+        <Section
+          icon={MessagesSquare}
+          title={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
+          description={t('ai.bot.social.subtitle', { defaultValue: 'Reply differently on WhatsApp, Messenger, Instagram and Telegram. Your website widget is unaffected.' })}
+          action={
+            <Switch
+              checked={socialOverride.enabled}
+              onCheckedChange={(v) => setSocialOverride((s) => ({ ...s, enabled: v }))}
+              disabled={readOnly}
+              aria-label={t('ai.bot.social.title', { defaultValue: 'Social & messaging' })}
+            />
+          }
+        >
+          {!socialOverride.enabled ? (
+            <p className="text-xs text-text-muted">
+              {t('ai.bot.social.off', { defaultValue: 'Off — messaging channels use the same voice and length as your widget, plus the built-in short-reply rule.' })}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <div>
+                  <Label className="mb-1 text-text-secondary">{t('ai.bot.social.tone', { defaultValue: 'Voice tone on messaging' })}</Label>
+                  <Select
+                    value={socialOverride.tone || '__same__'}
+                    onValueChange={(v) => setSocialOverride((s) => ({ ...s, tone: v === '__same__' ? '' : v }))}
+                    disabled={readOnly}
+                  >
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__same__">{t('ai.bot.social.sameTone', { defaultValue: 'Same as main tone' })}</SelectItem>
+                      {TONE_PRESETS.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>{t(p.labelKey)}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.toneHelper', { defaultValue: 'Used only on messaging channels.' })}</p>
+                </div>
+                <div>
+                  <Label className="mb-1 text-text-secondary">{t('ai.bot.social.maxLen', { defaultValue: 'Max reply length (characters)' })}</Label>
+                  <Input
+                    type="number"
+                    min={50}
+                    max={5000}
+                    value={socialOverride.maxResponseLength ?? ''}
+                    placeholder={String(maxResponseLength)}
+                    onChange={(e) =>
+                      setSocialOverride((s) => ({ ...s, maxResponseLength: e.target.value ? Number(e.target.value) : undefined }))
+                    }
+                    disabled={readOnly}
+                  />
+                  <p className="mt-1 text-[10px] text-text-muted">{t('ai.bot.social.maxLenHelper', { defaultValue: 'Leave blank to use the main limit. Shorter suits phone screens.' })}</p>
+                </div>
+              </div>
+              <div>
+                <Label className="mb-1 text-text-secondary">{t('ai.bot.social.instructions', { defaultValue: 'Extra instructions for messaging' })}</Label>
+                <textarea
+                  rows={3}
+                  readOnly={readOnly}
+                  maxLength={2000}
+                  value={socialOverride.instructions}
+                  onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setSocialOverride((s) => ({ ...s, instructions: e.target.value }))}
+                  placeholder={t('ai.bot.social.instructionsPlaceholder', { defaultValue: 'e.g. Keep replies under two sentences and always end with a question.' })}
+                  className="w-full rounded-lg border border-edge bg-surface-2 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+                />
+                <p className="mt-1 text-[10px] text-text-muted">
+                  {t('ai.bot.social.instructionsHelper', { defaultValue: "Added on top of the built-in short-reply rule — it can't be removed, only tightened." })}
+                </p>
+              </div>
+            </div>
+          )}
+        </Section>
 
         {/* Operational settings (tenant-owned: escalation + business hours).
             Collapsed by default to keep the page lean — most tenants won't touch it. */}

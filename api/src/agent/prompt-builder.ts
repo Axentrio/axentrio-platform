@@ -28,7 +28,10 @@ export class PromptBuilder {
     bookingConfigured?: boolean,
     channel?: string,
     specialties?: ResolvedSpecialty[],
-    skillProse?: { id: string; prose: string }[]
+    skillProse?: { id: string; prose: string }[],
+    /** Live values for the {services} / {openingHours} placeholders. `services` is
+     *  only substituted when the bot can actually book; `openingHours` always is. */
+    liveFields?: { services?: string; openingHours?: string }
   ): { prompt: string; ledger: BlockLedger } {
     return composeSystemPrompt({
       mode: 'agent',
@@ -45,6 +48,8 @@ export class PromptBuilder {
       templateBody,
       timezone,
       bookingConfigured,
+      bookingServices: liveFields?.services,
+      openingHours: liveFields?.openingHours,
       channel,
     });
   }

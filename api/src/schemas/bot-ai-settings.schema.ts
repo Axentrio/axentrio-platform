@@ -54,6 +54,24 @@ export const putBotAiSettingsSchema = z
         offHoursMessage: z.string().max(1000),
       })
       .strict(),
+    // Per-channel prompt overrides. `social` = every messaging channel (anything
+    // that isn't the web widget). Absent/disabled ⇒ behaviour unchanged.
+    channelOverrides: z
+      .object({
+        social: z
+          .object({
+            enabled: z.boolean().optional(),
+            // Parity with brandVoice.tone.
+            tone: z.string().max(50).optional(),
+            // Appended to the built-in short-reply rule; rendered as a block.
+            instructions: z.string().max(2000).optional(),
+            maxResponseLength: z.number().min(50).max(5000).optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

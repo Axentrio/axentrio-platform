@@ -26,6 +26,10 @@ import type { ToolAdapter } from '../agent/tool-adapter';
 import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from './platform-rules';
 import { createBlockLedger, PROMPT_BLOCK_KEYS as K, type BlockLedger } from './block-ledger';
 import type { ResolvedSpecialty } from './specialty-catalog';
+import { buildVariableMap, type PromptExtras } from './placeholder-registry';
+
+// Re-exported for callers that type their extras against the composer.
+export type { PromptExtras };
 
 type AiSettings = NonNullable<NonNullable<Tenant['settings']>['ai']>;
 
@@ -67,43 +71,56 @@ function sanitizeForLine(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
 }
 
+/** Per-channel prompt overrides for messaging channels. `channelOverrides` lives on
+ *  Bot.settings.ai (jsonb), which is structurally wider than the Tenant-derived
+ *  AiSettings alias — hence the cast, mirroring `templateVariables`. */
+export type SocialOverride = { enabled?: boolean; tone?: string; instructions?: string; maxResponseLength?: number };
+function socialOverride(ai: AiSettings | undefined): SocialOverride | undefined {
+  return (ai as { channelOverrides?: { social?: SocialOverride } } | undefined)?.channelOverrides?.social;
+}
+
+/**
+ * The social override IFF it applies to this session: a messaging channel AND the
+ * tenant switched it on. The SINGLE gate — every consumer (tone, maxResponseLength,
+ * instructions) must read through this, or a disabled override leaks one of them.
+ */
+function activeSocialOverride(ai: AiSettings | undefined, isChannelSession: boolean): SocialOverride | undefined {
+  const social = socialOverride(ai);
+  return isChannelSession && social?.enabled ? social : undefined;
+}
+
+/**
+ * Merge the `social` channel override into the ai slice ONCE, at the top of the
+ * agent composition. Returns the SAME object (identity) for the web widget, or when
+ * the override is absent/disabled — so every legacy bot's prompt stays byte-identical.
+ * Never mutates the caller's ai. Pure.
+ */
+export function resolveChannelAi(ai: AiSettings | undefined, isChannelSession: boolean): AiSettings | undefined {
+  const social = activeSocialOverride(ai, isChannelSession);
+  if (!ai || !social) return ai;
+  const next: AiSettings = { ...ai };
+  if (social.tone) next.brandVoice = { ...ai.brandVoice, tone: social.tone };
+  if (typeof social.maxResponseLength === 'number') {
+    next.guardrails = { ...ai.guardrails, maxResponseLength: social.maxResponseLength } as AiSettings['guardrails'];
+  }
+  return next;
+}
+
 // NOTE: keys in the returned vars map are echoed into the LLM system prompt —
 // never include secrets (API keys, tokens, webhooks).
-function buildVariableMap(
-  ai: AiSettings,
-  extras?: { businessName?: string }
-): Record<string, string> {
-  const g = ai.guardrails;
-  // Custom template variables the tenant filled in (per bot). Spread FIRST so the
-  // reserved built-in keys below always win — a tenant can never redefine
-  // {businessName} etc. via a custom var.
-  const custom = (ai as { templateVariables?: Record<string, string> }).templateVariables ?? {};
-  return {
-    ...custom,
-    botName: ai.brandVoice?.name || 'AI Assistant',
-    tone: ai.brandVoice?.tone || 'friendly',
-    supportEmail: ai.supportEmail || '',
-    // Per-bot override wins; otherwise the tenant business name passed by the
-    // caller (tenant.name / org name) is the inherited default.
-    businessName: ai.brandVoice?.businessName || extras?.businessName || '',
-    fallbackMessage: g?.fallbackMessage || '',
-    offHoursMessage: g?.offHoursMessage || '',
-    greetingMessage: g?.greetingMessage || '',
-    maxResponseLength: String(g?.maxResponseLength ?? 500),
-    topicsToAvoid: (g?.topicsToAvoid ?? []).join(', ') || 'N/A',
-    // NOTE: extraInfo is deliberately NOT a placeholder. It is rendered ONLY as a
-    // fenced lowest-authority block in assembleAgent (§11b) — exposing it as a
-    // {extra_info} substitution would let a template/custom layer inject the raw
-    // tenant text UNFENCED into a higher-authority position (codex review).
-  };
-}
+// The {placeholder} catalog + its resolvers now live in ./placeholder-registry
+// (backed by contracts/prompt-placeholders.ts) so the composer, the template
+// linter, and the portal editor all derive from ONE list. `extraInfo` remains
+// deliberately absent from the catalog — it renders only as a fenced,
+// lowest-authority block, and exposing it as a substitution would inject the raw
+// tenant text UNFENCED into a higher-authority position (codex review).
 
 // Substitutes {placeholders} in an arbitrary string using the tenant's ai vars.
 // Unknown keys are preserved as `{key}` rather than stripped.
 export function substituteVariables(
   template: string,
   ai: AiSettings,
-  extras?: { businessName?: string }
+  extras?: PromptExtras
 ): string {
   if (!template) return '';
   const vars = buildVariableMap(ai, extras);
@@ -155,6 +172,13 @@ interface AgentCtx {
    *  configured (no availability rule / no bookable service), so the bot must not
    *  offer it. Absent/true ⇒ trust the loaded tools (back-compat for direct callers/tests). */
   bookingConfigured?: boolean;
+  /** Live bookable services for {services}. Substituted ONLY when the bot can
+   *  actually book — a gated/unconfigured bot must never advertise them. */
+  bookingServices?: string;
+  /** The business's opening hours for {openingHours}: the booking availability rule
+   *  when one exists, else the operational businessHours. A business FACT, not a
+   *  capability, so every bot may state it (unlike {services}). */
+  openingHours?: string;
   /** Session channel (widget/whatsapp/messenger/instagram/telegram). On a
    *  non-widget channel the customer's contact is already known (the channel
    *  handle), so the lead-capture guidance is adapted to capture the request
@@ -252,15 +276,20 @@ function joinInstructionLayers(
 // owns those); the merge with agent.service's module entries is a no-overlap
 // union. Any NEW customer-facing composition mode must thread its own ledger.
 function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
-  const { ai, tenantName, tools, customerName, kbContext, moduleSections, skillProse } = ctx;
-  const brandVoice = ai?.brandVoice;
-  const guardrails = ai?.guardrails;
+  const { tenantName, tools, customerName, kbContext, moduleSections, skillProse } = ctx;
   const skills: SkillConfig[] = ctx.skills ?? [];
   const ledger = createBlockLedger(tools.map((t) => t.name));
   // Non-widget channels are messaging DMs where the customer's contact is already
   // known. Drives the social short-reply adapter (L11) and the channel lead-capture
   // adaptation below.
   const isChannelSession = !!ctx.channel && ctx.channel !== 'widget';
+  // Per-channel overrides resolved ONCE, before anything reads the ai slice. Every
+  // downstream read then flows from this one object, so the `Tone:` line, the {tone}
+  // / {maxResponseLength} placeholders and the GUARDRAILS max-length line are all
+  // channel-correct by construction — no per-site branching, no tone divergence.
+  const ai = resolveChannelAi(ctx.ai, isChannelSession);
+  const brandVoice = ai?.brandVoice;
+  const guardrails = ai?.guardrails;
 
   // The booking tools are only present when the appointments skill is enabled.
   // Their absence = this bot physically cannot book, regardless of what a
@@ -298,16 +327,26 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
   // AC4: a resolved vertical template body if present, else the safe generic
   // service-business core — so an unbound / blank-base / unavailable-template bot
   // still gets a usable vertical identity. (Only a missing ai slice yields no core.)
+  // {placeholder} values for the authored layers.
+  const varExtras: PromptExtras = {
+    businessName: tenantName,
+    // Services are a booking CAPABILITY: a gated/unconfigured bot must never
+    // advertise services it physically cannot book.
+    services: canBook ? (ctx.bookingServices ?? '') : '',
+    // Opening hours are a business FACT, not a capability — every bot may state
+    // them (booking availability when set, else the operational business hours).
+    openingHours: ctx.openingHours ?? '',
+  };
   if (ai) {
     const coreBody = ctx.templateBody?.trim() ? ctx.templateBody : GENERIC_SERVICE_CORE;
-    sections.push(substituteVariables(coreBody, ai, { businessName: tenantName }));
+    sections.push(substituteVariables(coreBody, ai, varExtras));
     ledger.include(K.TEMPLATE_BODY);
   } else {
     ledger.exclude(K.TEMPLATE_BODY, 'empty');
   }
   // ── Custom-instructions layer (layer 4): tenant's own additions.
   if (ai && brandVoice?.customInstructions) {
-    sections.push(substituteVariables(brandVoice.customInstructions, ai, { businessName: tenantName }));
+    sections.push(substituteVariables(brandVoice.customInstructions, ai, varExtras));
     ledger.include(K.CUSTOM_INSTRUCTIONS);
   } else {
     ledger.exclude(K.CUSTOM_INSTRUCTIONS, 'empty');
@@ -341,9 +380,15 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
   // already caps length; this adds the messaging-DM conversational style.) The
   // website widget never gets it — recorded so the exclusion is provable.
   if (isChannelSession) {
-    sections.push(
-      `\n## SOCIAL REPLIES\nThis is a messaging-app conversation. Keep replies short and easy to answer on a phone: ask ONE clear question at a time and avoid long paragraphs.`,
-    );
+    const base = `\n## SOCIAL REPLIES\nThis is a messaging-app conversation. Keep replies short and easy to answer on a phone: ask ONE clear question at a time and avoid long paragraphs.`;
+    // The tenant's own social instruction is APPENDED, never a replacement: it comes
+    // last (so it wins on recency and can tighten the style further), but a careless
+    // edit can't delete the built-in short-reply behaviour that makes messaging work.
+    // Sanitised like other owner text, and rendered as a BLOCK — never a substitutable
+    // placeholder (same reasoning that keeps extraInfo fenced). Read through the SAME
+    // gate as tone/maxResponseLength: a disabled override must leak nothing.
+    const custom = activeSocialOverride(ai, isChannelSession)?.instructions?.trim();
+    sections.push(custom ? `${base}\n${sanitizeForLine(custom)}` : base);
     ledger.include(K.SOCIAL_SHORT_REPLY);
   } else {
     ledger.exclude(K.SOCIAL_SHORT_REPLY, 'channel');

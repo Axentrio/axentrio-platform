@@ -23,16 +23,13 @@ import { Bot } from '../database/entities/Bot';
 import { getModule } from '../modules';
 import { ConflictError, NotFoundError, ValidationError } from '../middleware/error-handler';
 import { invalidateTemplateBundle, invalidateTenantTemplates, invalidateAllTenantTemplates } from './template-resolver';
+import { PLACEHOLDER_KEYS } from '../contracts/prompt-placeholders';
 
 /** Template body cap (T22) — characters, matching the codebase's char-based caps. */
 export const TEMPLATE_BODY_MAX = 20_000;
 
-/** Canonical {placeholder} set (mirrors compose-system-prompt's buildVariableMap). */
-const KNOWN_PLACEHOLDERS = new Set([
-  'botName', 'tone', 'supportEmail', 'businessName',
-  'fallbackMessage', 'offHoursMessage', 'greetingMessage',
-  'maxResponseLength', 'topicsToAvoid',
-]);
+/** Canonical {placeholder} set — the ONE catalog the composer + portal also use. */
+const KNOWN_PLACEHOLDERS = PLACEHOLDER_KEYS;
 const PLACEHOLDER_RE = /\{(\w+)\}/g;
 
 const BLANK_BASE_KEY = 'blank-base';

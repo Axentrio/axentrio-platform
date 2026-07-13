@@ -24,6 +24,8 @@ export default defineConfig({
       '@utils': path.resolve(__dirname, 'src/utils'),
       '@auth': path.resolve(__dirname, 'src/auth'),
       '@websocket': path.resolve(__dirname, 'src/websocket'),
+      // Shared wire contracts (prompt-placeholders.ts is inert runtime data).
+      '@contracts': path.resolve(__dirname, '../api/src/contracts'),
     },
   },
 });

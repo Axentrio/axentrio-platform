@@ -24,6 +24,8 @@ import { logger } from '../utils/logger';
 import { getLlmRuntimeConfigForSession } from '../services/bot-config.service';
 import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, withEffectiveConfig, templateUnavailabilityReason, selectSkillIds } from '../templates/template-resolver';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
+import { formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
+import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -183,9 +185,11 @@ export class AgentService {
 
     try {
       let tools = await this.toolRegistry.getToolsForTenant(tenant, botSettings);
-      // Booking activeness drives the egress guard below (a bot without the
-      // booking tools can't be nudged to "actually call create_booking").
-      const bookingActive = tools.some((t) => t.name === 'create_booking');
+      // Armed from the ENTITLED (pre-gate) tool list, because a template-gated
+      // booking bot is exactly the one most likely to be pushed into hallucinating
+      // "I've booked you in" — and BOOKING_CORRECTION_NOTE has a branch for a model
+      // holding no booking tool. Deliberately NOT `bookingActive` (see below).
+      const bookingClaimGuardArmed = tools.some((t) => t.name === 'create_booking');
       // Module prompt contributions (e.g. booking's bookable-services catalog).
       // Each active module builds (and loads data for) its own section; the
       // resolver call hits the same per-tenant caches the tool registry used.
@@ -211,6 +215,26 @@ export class AgentService {
       const moduleSections: string[] = [];
       const activeModules = await listActiveModules(tenant.id);
       const activeModuleIds = activeModules.map((a) => a.module.id);
+      // Templates are the SOLE source of skills: the bot's skills are exactly what
+      // its template composes (∩ entitlements). A Dental template that binds {booking}
+      // won't also offer handoff just because the plan allows it; and NO template (or
+      // one gone unavailable) → selectedSkillIds is empty → no skills, matching the
+      // "answers from your knowledge base only" empty-state. Drop every active skill's
+      // tools the template didn't select. Flag-gated (OFF → legacy, entitlement-only).
+      //
+      // This runs BEFORE anything reads `tools`, because `bookingActive` below is
+      // derived from it: gating late let an entitled-but-unselected booking skill
+      // pull the AvailabilityRule into {openingHours} and silently discard the
+      // tenant's businessHours (which the pre-AI off-hours gate *does* honour, so
+      // the two contradicted each other).
+      if (composableEnabled) {
+        const drop = gatedToolNames(selectedSkillIds, activeModuleIds);
+        if (drop.size) tools = tools.filter((tl) => !drop.has(tl.name));
+      }
+      // Whether the bot can ACTUALLY book — read from the GATED tools. Drives the
+      // {openingHours}/{services} sources: a bot that can't book must never quote a
+      // booking availability rule it has no skill to use, nor advertise its services.
+      const bookingActive = tools.some((t) => t.name === 'create_booking');
       for (const active of activeModules) {
         if (!active.module.buildPromptSection) continue;
         // Prompt gate: skip the section of an active skill the template didn't select.
@@ -244,24 +268,37 @@ export class AgentService {
       // one indexed lookup). Non-booking bots fall back to server/UTC as before.
       let bookingTimezone: string | undefined;
       let bookingConfigured = false;
+      // Rendered values for the {services} / {openingHours} placeholders. Built from
+      // the SAME rows this block already loads (no extra queries).
+      let bookingServices = '';
+      // Hours prefer the booking availability rule (authoritative for a booking bot)
+      // and fall back to the operational businessHours — which until now never
+      // reached the prompt at all, leaving non-booking bots blind to opening hours.
+      let openingHours = '';
       if (bookingActive) {
         try {
+          // Full row: the placeholder formatter needs availabilityMode/weeklyHours,
+          // not just the timezone.
           const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({
             where: { botId: bot.id },
-            select: { timezone: true },
           });
           bookingTimezone = rule?.timezone || undefined;
+          openingHours = formatHoursForPlaceholder(rule);
           // ponytail: rule existence is treated as "hours set up". A rule with empty
           // weeklyHours would still pass here (ceiling) — fine for the phantom-booking
           // case we target (no rule at all); tighten later if empty-hours configs appear.
           // "Bookable online" = active AND online-bookable; an inactive or
           // phone-only service must not flip this true (it isn't bookable via
           // the chat). isActive matches the catalog's own filter.
+          // Full rows: the placeholder formatter needs name/duration/price. These are
+          // the genuinely bookable services (active + online-bookable), which is what
+          // {services} should advertise.
           const services = await AppDataSource.getRepository(ServiceType).find({
             where: { botId: bot.id, isActive: true, onlineBookable: true },
-            select: { id: true, bookingMode: true },
+            order: { sortOrder: 'ASC' },
           });
           bookingConfigured = isBookingConfigured(services, !!rule);
+          bookingServices = formatServicesForPlaceholder(services);
         } catch (error) {
           // Fail OPEN: on a lookup error don't suppress booking — a transient DB blip
           // must not falsely decline a CONFIGURED tenant. Worst case is the prior
@@ -270,6 +307,11 @@ export class AgentService {
           bookingConfigured = true;
         }
       }
+      // No booking availability rule (or no booking skill at all) → fall back to the
+      // tenant's operational business hours, which previously only drove the pre-AI
+      // off-hours gate and never reached the prompt. Exactly ONE hours source per bot,
+      // so the booking rule and businessHours can never contradict each other.
+      if (!openingHours) openingHours = formatBusinessHoursForPlaceholder(effBotSettings.businessHours);
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
       // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
@@ -289,16 +331,7 @@ export class AgentService {
         gateKind: (id) => getModule(id)?.gate.kind,
         readiness: (id) => readinessRefinement(id, { bookingConfigured }),
       });
-      // Templates are the SOLE source of skills: the bot's skills are exactly what
-      // its template composes (∩ entitlements). A Dental template that binds {booking}
-      // won't also offer handoff just because the plan allows it; and NO template (or
-      // one gone unavailable) → selectedSkillIds is empty → no skills, matching the
-      // "answers from your knowledge base only" empty-state. Drop every active skill's
-      // tools the template didn't select. Flag-gated (OFF → legacy, entitlement-only).
-      if (composableEnabled) {
-        const drop = gatedToolNames(selectedSkillIds, activeModuleIds);
-        if (drop.size) tools = tools.filter((tl) => !drop.has(tl.name));
-      }
+      // (The template tool-gate ran above, before `bookingActive` was read.)
       // Per-template skill prose: the version's OVERRIDE if set, else the skill's
       // code-default (defaultProse). Only for skills that resolved `ready`, so an
       // unconfigured skill contributes no prose. Behind the flag (OFF → unchanged).
@@ -332,7 +365,7 @@ export class AgentService {
       if (process.env.SKILL_STATE_ENABLED === 'true') {
         tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
       }
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse);
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
@@ -410,7 +443,7 @@ export class AgentService {
           const finalContent = response.content ?? '';
           // Egress guard (issue #35): never let the model tell the customer a
           // booking/request happened unless one was actually recorded this run.
-          if (bookingActive && !bookingRecorded && claimsBookingDone(finalContent)) {
+          if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingDone(finalContent)) {
             if (!correctionAttempted && i < MAX_ITERATIONS - 1) {
               correctionAttempted = true;
               logger.warn('[agent] blocked unrecorded booking claim; nudging model to act', { sessionId: session.id });

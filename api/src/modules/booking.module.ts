@@ -105,6 +105,41 @@ export function buildHoursSection(rule: AvailabilityRule | null): string | null 
   return `\n## OPENING HOURS\nThe business is open at these times (${rule.timezone}). State these when the customer asks about opening hours; days not listed are closed.\n${lines.join('\n')}`;
 }
 
+/**
+ * Concise, customer-facing service list for the `{services}` placeholder — names,
+ * duration and price only. Deliberately omits internal ids, booking modes and
+ * intake rules: those belong in the SERVICES block the agent reads, not in a line
+ * a template author drops into prose. Pure. Empty list → ''.
+ */
+export function formatServicesForPlaceholder(services: ServiceType[]): string {
+  return services
+    .map((s) => {
+      const price = priceHint(s);
+      const isRange =
+        (s.durationMode === 'range' || s.durationMode === 'ai') &&
+        typeof s.minDurationMin === 'number' &&
+        typeof s.maxDurationMin === 'number' &&
+        s.minDurationMin > 0 &&
+        s.maxDurationMin >= s.minDurationMin;
+      const duration = isRange ? `${s.minDurationMin}-${s.maxDurationMin} min` : `${s.durationMin} min`;
+      return `${s.name} (${duration}${price ? `, ${price}` : ''})`;
+    })
+    .join(', ');
+}
+
+/**
+ * Concise opening hours for the `{openingHours}` placeholder, e.g.
+ * "Mon 09:00-17:00, Tue 09:00-17:00". Pure. No rule / no windows → ''.
+ */
+export function formatHoursForPlaceholder(rule: AvailabilityRule | null): string {
+  if (!rule) return '';
+  if (rule.availabilityMode === 'always_open') return 'open 24/7';
+  return WEEKDAY_ORDER.flatMap(({ key, label }) => {
+    const wins = rule.weeklyHours?.[key];
+    return wins && wins.length ? [`${label} ${fmtWindows(wins)}`] : [];
+  }).join(', ');
+}
+
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
 export function buildServicesSection(services: ServiceType[]): string | null {
   if (!services.length) return null;
@@ -131,7 +166,11 @@ export function buildServicesSection(services: ServiceType[]): string | null {
         ? `${s.minDurationMin}-${s.maxDurationMin} min (${s.durationMode === 'ai' ? 'AI-estimated' : 'choose length'})`
         : `${s.durationMin} min`;
       const head = `- ${s.id} · ${s.name}${s.category ? ` (${s.category})` : ''} · ${durationLabel} · ${mode}${price ? ` · ${price}` : ''}${contact ? ` · ${contact}` : ''}`;
-      return `${head}${intakeLines(s)}`;
+      // The owner's own description of the service — the single most useful field a
+      // client fills that the bot otherwise never sees. Sanitised + capped so a long
+      // description can't bloat the prompt or break the line-oriented catalog.
+      const desc = s.description?.trim() ? `\n  ${sanitizeForLine(s.description).slice(0, 200)}` : '';
+      return `${head}${desc}${intakeLines(s)}`;
     })
     .join('\n');
   // Only inject the ask-intake rule when a service actually renders questions

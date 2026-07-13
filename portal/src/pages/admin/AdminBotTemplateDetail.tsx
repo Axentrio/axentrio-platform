@@ -33,6 +33,7 @@ import { useAdminTenantsAll } from '@/queries/useAdminQueries';
 import { SkillStateCard } from '@/components/SkillStateCard';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import type { SkillState, SkillRemedy } from '@contracts/skill-readiness';
+import { PLACEHOLDER_CATALOG, PLACEHOLDER_KEYS } from '@contracts/prompt-placeholders';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -109,10 +110,13 @@ function draftToConfig(d: ConfigDraft): BotTemplateConfig {
   return config;
 }
 
-// Canonical {placeholder} set (mirrors the API's KNOWN_PLACEHOLDERS) for live linting.
-const KNOWN_PLACEHOLDERS = new Set(['botName', 'tone', 'supportEmail', 'businessName', 'fallbackMessage', 'offHoursMessage', 'greetingMessage', 'maxResponseLength', 'topicsToAvoid']);
-// Tap-to-insert chips for the most common placeholders (appended at the end).
-const PLACEHOLDER_CHIPS = ['{botName}', '{businessName}', '{tone}', '{supportEmail}'];
+// Canonical {placeholder} set — derived from the ONE catalog the API composer and
+// linter also use (api/src/contracts/prompt-placeholders.ts), so the editor can
+// never flag a key the composer supports (or accept one it doesn't).
+const KNOWN_PLACEHOLDERS = PLACEHOLDER_KEYS;
+// Tap-to-insert chips, straight off the catalog (label + description → tooltip).
+const PLACEHOLDER_CHIPS = PLACEHOLDER_CATALOG.map((e) => `{${e.key}}`);
+const PLACEHOLDER_HELP = new Map(PLACEHOLDER_CATALOG.map((e) => [`{${e.key}}`, `${e.label} — ${e.description}`]));
 
 /** A human label for a variable key, e.g. 'cancellationPolicy' → 'Cancellation policy'. */
 function prettifyKey(key: string): string {
@@ -986,6 +990,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                       <button
                         key={p}
                         type="button"
+                        title={PLACEHOLDER_HELP.get(p)}
                         className="rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200"
                         onClick={() => setDraft((d) => ({ ...d, body: d.body + (d.body && !d.body.endsWith(' ') ? ' ' : '') + p }))}
                       >

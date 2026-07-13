@@ -75,6 +75,20 @@ export interface BotSettings {
      *  (key → value). Substituted into the prompt at runtime (built-ins win).
      *  jsonb, no migration. */
     templateVariables?: Record<string, string>;
+    /** Per-channel prompt overrides. `social` covers every messaging channel
+     *  (messenger/instagram/whatsapp/telegram) — i.e. anything that isn't the web
+     *  widget. Absent or `enabled:false` ⇒ the bot behaves exactly as before.
+     *  `instructions` is APPENDED to the built-in short-reply rule (never replaces
+     *  it), and renders as a block — never as a substitutable placeholder.
+     *  jsonb, no migration. */
+    channelOverrides?: {
+      social?: {
+        enabled?: boolean;
+        tone?: string;
+        instructions?: string;
+        maxResponseLength?: number;
+      };
+    };
     brandVoice: {
       name: string;
       tone: string;

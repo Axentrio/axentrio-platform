@@ -18,11 +18,17 @@ export default defineConfig({
       '@auth': path.resolve(__dirname, './src/auth'),
       '@websocket': path.resolve(__dirname, './src/websocket'),
       '@clerk/shared': path.resolve(__dirname, 'node_modules/@clerk/shared'),
+      // Shared wire contracts with the API. Historically type-only (erased at
+      // build), but prompt-placeholders.ts is inert RUNTIME data the editor needs,
+      // so the bundler must resolve it. The portal Dockerfile already COPYs this dir.
+      '@contracts': path.resolve(__dirname, '../api/src/contracts'),
     },
     dedupe: ['@clerk/shared', '@clerk/clerk-react', 'react', 'react-dom'],
   },
   server: {
     port: 4080,
+    // Allow the dev server to read the aliased ../api/src/contracts (outside root).
+    fs: { allow: [path.resolve(__dirname, '..')] },
     proxy: {
       '/api': {
         target: 'http://localhost:4081',

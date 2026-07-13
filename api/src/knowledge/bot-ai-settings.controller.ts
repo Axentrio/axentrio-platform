@@ -141,6 +141,11 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     ...(data.templateVariables === undefined
       ? (existing.templateVariables && Object.keys(existing.templateVariables).length ? { templateVariables: existing.templateVariables } : {})
       : (Object.keys(data.templateVariables).length ? { templateVariables: data.templateVariables } : {})),
+    // Per-channel overrides — same full-replace semantics. This object rebuilds `ai`
+    // field-by-field, so an unlisted key would be silently DROPPED on every save.
+    ...(data.channelOverrides === undefined
+      ? (existing.channelOverrides ? { channelOverrides: existing.channelOverrides } : {})
+      : (Object.keys(data.channelOverrides).length ? { channelOverrides: data.channelOverrides } : {})),
   };
 
   // Wholesale replace of the `ai` section on this bot (apiKey stripped defensively).

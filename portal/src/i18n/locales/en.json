@@ -1392,6 +1392,7 @@
         "notesSection": "Version notes",
         "charCount": "{{n}} / 20,000",
         "insertLabel": "Insert",
+        "availableLabel": "Placeholders available",
         "testTitle": "Test this prompt",
         "testPlaceholder": "Type a visitor message…",
         "testSend": "Send",

@@ -1339,7 +1339,8 @@
         "testSend": "Envoyer",
         "testThinking": "Réflexion…",
         "testError": "Échec du test — vérifiez la clé API de la plateforme.",
-        "testHint": "Exécute le brouillon actuel (non enregistré) sur le modèle de la plateforme avec des {botName}/{businessName} d'exemple. Base de connaissances non incluse."
+        "testHint": "Exécute le brouillon actuel (non enregistré) sur le modèle de la plateforme avec des {botName}/{businessName} d'exemple. Base de connaissances non incluse.",
+        "availableLabel": "Espaces réservés disponibles"
       },
       "confirm": {
         "archiveTitle": "Archiver ce modèle ?",

@@ -1340,7 +1340,8 @@
         "testSend": "Versturen",
         "testThinking": "Bezig…",
         "testError": "Test mislukt — controleer de platform-API-sleutel.",
-        "testHint": "Voert het huidige (niet-opgeslagen) concept uit op het platformmodel met voorbeeld-{botName}/{businessName}. Kennisbank niet inbegrepen."
+        "testHint": "Voert het huidige (niet-opgeslagen) concept uit op het platformmodel met voorbeeld-{botName}/{businessName}. Kennisbank niet inbegrepen.",
+        "availableLabel": "Beschikbare placeholders"
       },
       "confirm": {
         "archiveTitle": "Dit sjabloon archiveren?",

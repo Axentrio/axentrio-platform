@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import AdminBotTemplateDetail from './AdminBotTemplateDetail';
 
@@ -250,16 +250,30 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
     );
   });
 
-  it('places the Template variables step AFTER Modules (so a var defined in a module is configured below it)', () => {
+  it('manages template variables in a modal (no separate step), and edits persist on publish', async () => {
     flags.composable = true;
+    createVersionSpy.mockClear();
     state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
     renderPage();
-    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
 
-    const modules = screen.getByRole('heading', { name: 'Modules' });
-    const vars = screen.getByRole('heading', { name: 'Template variables' });
-    // Template variables must FOLLOW Modules in document order.
-    expect(modules.compareDocumentPosition(vars) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /bookings/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: /bookings/i }), { target: { value: 'Book them in. {bro}' } });
+
+    // Variables are NOT a numbered step; they live in a modal opened from the Insert bar.
+    fireEvent.click(screen.getAllByRole('button', { name: /manage variables/i })[0]);
+
+    const dialog = screen.getByRole('dialog', { name: /template variables/i });
+    expect(within(dialog).getByText('{bro}')).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByPlaceholderText('Bro'), { target: { value: 'Buddy' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^done$/i }));
+
+    fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+    await waitFor(() =>
+      expect(createVersionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ variables: expect.arrayContaining([expect.objectContaining({ key: 'bro', label: 'Buddy' })]) }),
+      ),
+    );
   });
 
   it('a custom var typed into module prose becomes a clickable chip in the insert bars', () => {

@@ -10,7 +10,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal } from 'lucide-react';
+import { ArrowLeft, Plus, Check, X, ChevronsUpDown, Eye, MoreVertical, TriangleAlert, Boxes, Cpu, Pencil, ShieldCheck, Sparkles, FlaskConical, SlidersHorizontal, Info } from 'lucide-react';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { Slider } from '@/components/ui/slider';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -133,10 +134,12 @@ function PlaceholderBar({
   readOnly,
   onInsert,
   customChips = [],
+  onManage,
 }: {
   readOnly: boolean;
   onInsert: (chip: string) => void;
   customChips?: string[];
+  onManage?: () => void;
 }) {
   const { t } = useTranslation();
   const builtinClass = readOnly
@@ -174,6 +177,16 @@ function PlaceholderBar({
           {p}
         </button>
       ))}
+      {!readOnly && onManage && customChips.length > 0 && (
+        <button
+          type="button"
+          onClick={onManage}
+          title="Set labels, defaults, and required for your custom variables"
+          className="ml-0.5 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-amber-300/90 transition-colors hover:bg-amber-500/10 hover:text-amber-200"
+        >
+          <SlidersHorizontal className="h-3 w-3" />Manage variables
+        </button>
+      )}
     </div>
   );
 }
@@ -261,6 +274,22 @@ const BlockKey: React.FC<{ name: string }> = ({ name }) => (
     </TooltipTrigger>
     <TooltipContent className="max-w-[240px] font-sans text-xs">{getBlockInfo(name)}</TooltipContent>
   </Tooltip>
+);
+
+// A small field caption with an info tooltip — used to explain the template-variable
+// fields (label / default / help / required), which aren't self-explanatory.
+const FieldHint: React.FC<{ label: string; tip: string }> = ({ label, tip }) => (
+  <span className="mb-1 flex items-center gap-1 text-[11px] font-medium text-text-muted">
+    {label}
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button type="button" tabIndex={-1} aria-label={`About ${label}`} className="cursor-help text-text-tertiary transition-colors hover:text-text-secondary">
+          <Info className="h-3 w-3" />
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-[240px] font-sans text-xs">{tip}</TooltipContent>
+    </Tooltip>
+  </span>
 );
 function unknownPlaceholders(body: string): string[] {
   const out = new Set<string>();
@@ -370,6 +399,7 @@ const AdminBotTemplateDetail: React.FC = () => {
   const [meta, setMeta] = useState<{ displayName: string; category: string; description: string; tier: TemplateTier; availableToAllTenants: boolean } | null>(null);
   const [draft, setDraft] = useState<VersionDraft>(EMPTY_DRAFT);
   const [newVarName, setNewVarName] = useState('');
+  const [varsModalOpen, setVarsModalOpen] = useState(false);
   const [testInput, setTestInput] = useState('');
   const [testLog, setTestLog] = useState<{ role: 'user' | 'assistant'; content: string }[]>([]);
   const [selectedTenants, setSelectedTenants] = useState<string[] | null>(null);
@@ -1061,6 +1091,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                 <PlaceholderBar
                   readOnly={draft.mode === 'view'}
                   customChips={draftCustomKeys().map((k) => `{${k}}`)}
+                  onManage={() => setVarsModalOpen(true)}
                   onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
                 />
               </div>
@@ -1143,6 +1174,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                                   <PlaceholderBar
                                     readOnly={ro}
                                     customChips={draftCustomKeys().map((k) => `{${k}}`)}
+                                    onManage={() => setVarsModalOpen(true)}
                                     onInsert={(p) => setProse(skill.id, appendChip(draft.skillProse[skill.id] ?? skill.defaultProse, p))}
                                   />
                                 </div>
@@ -1179,88 +1211,9 @@ const AdminBotTemplateDetail: React.FC = () => {
               )}
             </AuthorSection>
 
-            {/* 03 — Template variables: the blanks tenants fill in, collected from the
-                prompt AND every module's prose — so a variable defined in a module is
-                configured here (below Modules), not above it. */}
+            {/* 03 — Guardrails: template-owned policy (tone stays bot-owned). */}
             <AuthorSection
               step={3}
-              icon={Pencil}
-              title="Template variables"
-              hint={<>The blanks tenants fill in — any <span className="font-mono text-amber-300">{'{placeholder}'}</span> you use in the prompt <b className="font-semibold text-text-secondary">or a module’s prose</b> that isn’t a built-in. Configure each here; tenants complete them when they adopt this template.</>}
-            >
-              {(() => {
-                const ro = draft.mode === 'view';
-                const keys = draftCustomKeys();
-                const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
-                const setVar = (key: string, patch: Partial<TemplateVariable>) =>
-                  setDraft((d) => {
-                    const has = d.variables.some((v) => v.key === key);
-                    const variables = has
-                      ? d.variables.map((v) => (v.key === key ? { ...v, ...patch } : v))
-                      : [...d.variables, { key, ...patch }];
-                    return { ...d, variables };
-                  });
-                const cleanKey = newVarName.trim().replace(/[^\w]/g, '');
-                const addVar = () => {
-                  if (!cleanKey || keys.includes(cleanKey)) { setNewVarName(''); return; }
-                  setDraft((d) => ({ ...d, body: d.body + (d.body && !/\s$/.test(d.body) ? ' ' : '') + `{${cleanKey}}` }));
-                  setNewVarName('');
-                };
-                return (
-                  <div className="space-y-2.5">
-                    {keys.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-edge bg-surface-0/50 px-3 py-3 text-xs text-text-muted">
-                        {ro
-                          ? 'This template has no custom variables.'
-                          : <>No custom variables yet. Type a <span className="font-mono text-amber-300">{'{placeholder}'}</span> into the prompt or a module’s prose, or add one below.</>}
-                      </p>
-                    ) : (
-                      keys.map((key) => {
-                        const v = getVar(key);
-                        return (
-                          <div key={key} className="space-y-2 rounded-lg border border-edge bg-surface-0/50 p-3">
-                            <div className="flex items-center gap-2">
-                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-inset ring-amber-500/20">{`{${key}}`}</span>
-                              <label className={`ml-auto flex items-center gap-1.5 text-xs text-text-muted ${ro ? '' : 'cursor-pointer'}`}>
-                                <Switch checked={v.required ?? false} disabled={ro} onCheckedChange={(c) => setVar(key, { required: c })} />Required
-                              </label>
-                            </div>
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <Input value={v.label ?? ''} readOnly={ro} placeholder={`Label — ${prettifyKey(key)}`} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
-                              <Input value={v.default ?? ''} readOnly={ro} placeholder="Default value (optional)" onChange={(e) => setVar(key, { default: e.target.value })} className="h-8 text-xs" />
-                            </div>
-                            <Input value={v.help ?? ''} readOnly={ro} placeholder="Help text tenants see (optional)" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
-                          </div>
-                        );
-                      })
-                    )}
-                    {!ro && (
-                      <div className="flex items-center gap-2 pt-0.5">
-                        <span className="shrink-0 text-xs text-text-muted">Add variable</span>
-                        <div className="relative flex-1">
-                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>
-                          <Input
-                            value={newVarName}
-                            onChange={(e) => setNewVarName(e.target.value)}
-                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVar(); } }}
-                            placeholder="cancellationPolicy"
-                            className="h-8 px-5 font-mono text-xs"
-                          />
-                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'}'}</span>
-                        </div>
-                        <Button type="button" size="sm" variant="outline" disabled={!cleanKey} onClick={addVar}>
-                          <Plus className="h-3.5 w-3.5" />Add
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </AuthorSection>
-
-            {/* 04 — Guardrails: template-owned policy (tone stays bot-owned). */}
-            <AuthorSection
-              step={4}
               icon={ShieldCheck}
               title={t('admin.botTemplates.editor.configTitle')}
               hint={t('admin.botTemplates.editor.configHint')}
@@ -1347,12 +1300,12 @@ const AdminBotTemplateDetail: React.FC = () => {
             </AuthorSection>
 
             {/* 04 — Version notes: what changed in this draft. */}
-            <AuthorSection step={5} icon={Pencil} title={t('admin.botTemplates.editor.changelog')}>
+            <AuthorSection step={4} icon={Pencil} title={t('admin.botTemplates.editor.changelog')}>
               <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
             </AuthorSection>
 
             {/* 05 — Test this prompt: try the current draft (body + config) before publishing. */}
-            <AuthorSection step={6} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
+            <AuthorSection step={5} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
               <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-4">
                 {testLog.length > 0 && (
                   <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">
@@ -1503,7 +1456,102 @@ const AdminBotTemplateDetail: React.FC = () => {
               ) : null}
             </aside>
           </div>
-          </DialogPrimitive.Content>
+    
+            {/* Manage all custom template variables — opened from any Insert bar's
+                "Manage variables" link. One home for the blanks used across the
+                prompt body and every module's prose. */}
+            <Dialog open={varsModalOpen} onOpenChange={setVarsModalOpen}>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2"><Pencil className="h-4 w-4 text-amber-400" />Template variables</DialogTitle>
+                  <DialogDescription>
+                    The blanks tenants fill in — any <span className="font-mono text-amber-300">{'{placeholder}'}</span> you use in the prompt or a module’s prose. Tenants complete them when they adopt this template.
+                  </DialogDescription>
+                </DialogHeader>
+                <TooltipProvider delayDuration={150}>
+                {(() => {
+                  const keys = draftCustomKeys();
+                  const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
+                  const setVar = (key: string, patch: Partial<TemplateVariable>) =>
+                    setDraft((d) => {
+                      const has = d.variables.some((v) => v.key === key);
+                      const variables = has
+                        ? d.variables.map((v) => (v.key === key ? { ...v, ...patch } : v))
+                        : [...d.variables, { key, ...patch }];
+                      return { ...d, variables };
+                    });
+                  const cleanKey = newVarName.trim().replace(/[^\w]/g, '');
+                  const addVar = () => {
+                    if (!cleanKey || keys.includes(cleanKey)) { setNewVarName(''); return; }
+                    setDraft((d) => ({ ...d, body: d.body + (d.body && !/\s$/.test(d.body) ? ' ' : '') + `{${cleanKey}}` }));
+                    setNewVarName('');
+                  };
+                  return (
+                    <div className="space-y-2.5">
+                      <div className="max-h-[55vh] space-y-2.5 overflow-y-auto pr-0.5">
+                        {keys.length === 0 ? (
+                          <p className="rounded-lg border border-dashed border-edge bg-surface-0/50 px-3 py-4 text-xs text-text-muted">
+                            No custom variables yet. Type a <span className="font-mono text-amber-300">{'{placeholder}'}</span> into the prompt or a module’s prose, or add one below.
+                          </p>
+                        ) : (
+                          keys.map((key) => {
+                            const v = getVar(key);
+                            return (
+                              <div key={key} className="space-y-2.5 rounded-lg border border-edge bg-surface-0/50 p-3">
+                                <div className="flex items-center gap-2">
+                                  <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-inset ring-amber-500/20">{`{${key}}`}</span>
+                                  <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
+                                    <Switch checked={v.required ?? false} onCheckedChange={(c) => setVar(key, { required: c })} />
+                                    <FieldHint label="Required" tip="Tenants must fill this in before they can finish setting up their bot. Leave off if it's optional." />
+                                  </label>
+                                </div>
+                                <div className="grid gap-x-2 gap-y-0 sm:grid-cols-2">
+                                  <div>
+                                    <FieldHint label="Label" tip="The friendly name tenants see for this blank instead of the raw {key} — e.g. 'Cancellation policy'." />
+                                    <Input value={v.label ?? ''} placeholder={prettifyKey(key)} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
+                                  </div>
+                                  <div>
+                                    <FieldHint label="Default value" tip="Pre-fills the blank if the tenant leaves it empty. Leave blank to make them enter their own." />
+                                    <Input value={v.default ?? ''} placeholder="Optional" onChange={(e) => setVar(key, { default: e.target.value })} className="h-8 text-xs" />
+                                  </div>
+                                </div>
+                                <div>
+                                  <FieldHint label="Help text" tip="A short hint shown to the tenant under this field, telling them what to enter." />
+                                  <Input value={v.help ?? ''} placeholder="Optional — shown to tenants" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
+                                </div>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 border-t border-edge/60 pt-3">
+                        <span className="shrink-0 text-xs text-text-muted">Add variable</span>
+                        <div className="relative flex-1">
+                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>
+                          <Input
+                            value={newVarName}
+                            onChange={(e) => setNewVarName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVar(); } }}
+                            placeholder="cancellationPolicy"
+                            className="h-8 px-5 font-mono text-xs"
+                          />
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'}'}</span>
+                        </div>
+                        <Button type="button" size="sm" variant="outline" disabled={!cleanKey} onClick={addVar}>
+                          <Plus className="h-3.5 w-3.5" />Add
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })()}
+                </TooltipProvider>
+                <DialogFooter>
+                  <Button size="sm" onClick={() => setVarsModalOpen(false)}>Done</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+      </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
 

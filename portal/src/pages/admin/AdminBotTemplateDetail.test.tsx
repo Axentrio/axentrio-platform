@@ -250,6 +250,18 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
     );
   });
 
+  it('places the Template variables step AFTER Modules (so a var defined in a module is configured below it)', () => {
+    flags.composable = true;
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+
+    const modules = screen.getByRole('heading', { name: 'Modules' });
+    const vars = screen.getByRole('heading', { name: 'Template variables' });
+    // Template variables must FOLLOW Modules in document order.
+    expect(modules.compareDocumentPosition(vars) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('a custom var typed into module prose becomes a clickable chip in the insert bars', () => {
     flags.composable = true;
     state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };

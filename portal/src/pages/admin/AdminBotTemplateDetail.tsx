@@ -1064,80 +1064,6 @@ const AdminBotTemplateDetail: React.FC = () => {
                   onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
                 />
               </div>
-              {draft.mode !== 'view' && (() => {
-                const keys = draftCustomKeys();
-                const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
-                const setVar = (key: string, patch: Partial<TemplateVariable>) =>
-                  setDraft((d) => {
-                    const has = d.variables.some((v) => v.key === key);
-                    const variables = has
-                      ? d.variables.map((v) => (v.key === key ? { ...v, ...patch } : v))
-                      : [...d.variables, { key, ...patch }];
-                    return { ...d, variables };
-                  });
-                const cleanKey = newVarName.trim().replace(/[^\w]/g, '');
-                const addVar = () => {
-                  if (!cleanKey || keys.includes(cleanKey)) { setNewVarName(''); return; }
-                  setDraft((d) => ({ ...d, body: d.body + (d.body && !/\s$/.test(d.body) ? ' ' : '') + `{${cleanKey}}` }));
-                  setNewVarName('');
-                };
-                return (
-                  <div className="mt-3 space-y-2.5 rounded-xl border border-edge bg-surface-1 p-3.5">
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm font-medium text-text-primary">
-                        <Pencil className="h-3.5 w-3.5 text-amber-400" />Template variables
-                      </div>
-                      <p className="mt-0.5 text-xs text-text-muted">
-                        The blanks tenants fill in. Add one below (or type a <span className="font-mono text-amber-300">{'{placeholder}'}</span> straight into the prompt) — anything that isn’t a built-in becomes a field tenants complete when they adopt this template.
-                      </p>
-                    </div>
-
-                    {keys.length === 0 ? (
-                      <p className="rounded-lg border border-dashed border-edge bg-surface-0/50 px-3 py-3 text-xs text-text-muted">
-                        No custom variables yet. Add one below and it’s inserted into the prompt as <span className="font-mono">{'{yourVariable}'}</span>.
-                      </p>
-                    ) : (
-                      keys.map((key) => {
-                        const v = getVar(key);
-                        return (
-                          <div key={key} className="space-y-2 rounded-lg border border-edge bg-surface-0/50 p-3">
-                            <div className="flex items-center gap-2">
-                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-inset ring-amber-500/20">{`{${key}}`}</span>
-                              <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-xs text-text-muted">
-                                <Switch checked={v.required ?? false} onCheckedChange={(c) => setVar(key, { required: c })} />Required
-                              </label>
-                            </div>
-                            <div className="grid gap-2 sm:grid-cols-2">
-                              <Input value={v.label ?? ''} placeholder={`Label — ${prettifyKey(key)}`} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
-                              <Input value={v.default ?? ''} placeholder="Default value (optional)" onChange={(e) => setVar(key, { default: e.target.value })} className="h-8 text-xs" />
-                            </div>
-                            <Input value={v.help ?? ''} placeholder="Help text tenants see (optional)" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
-                          </div>
-                        );
-                      })
-                    )}
-
-                    {/* Add a variable by name → inserts {name} into the prompt, where it's auto-detected. */}
-                    <div className="flex items-center gap-2 pt-0.5">
-                      <span className="shrink-0 text-xs text-text-muted">Add variable</span>
-                      <div className="relative flex-1">
-                        <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>
-                        <Input
-                          value={newVarName}
-                          onChange={(e) => setNewVarName(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVar(); } }}
-                          placeholder="cancellationPolicy"
-                          className="h-8 px-5 font-mono text-xs"
-                        />
-                        <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'}'}</span>
-                      </div>
-                      <Button type="button" size="sm" variant="outline" disabled={!cleanKey} onClick={addVar}>
-                        <Plus className="h-3.5 w-3.5" />Add
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })()}
             </AuthorSection>
 
             {/* 02 — Capabilities: the modules → skills the bot actually gets. */}
@@ -1253,9 +1179,88 @@ const AdminBotTemplateDetail: React.FC = () => {
               )}
             </AuthorSection>
 
-            {/* 03 — Guardrails: template-owned policy (tone stays bot-owned). */}
+            {/* 03 — Template variables: the blanks tenants fill in, collected from the
+                prompt AND every module's prose — so a variable defined in a module is
+                configured here (below Modules), not above it. */}
             <AuthorSection
               step={3}
+              icon={Pencil}
+              title="Template variables"
+              hint={<>The blanks tenants fill in — any <span className="font-mono text-amber-300">{'{placeholder}'}</span> you use in the prompt <b className="font-semibold text-text-secondary">or a module’s prose</b> that isn’t a built-in. Configure each here; tenants complete them when they adopt this template.</>}
+            >
+              {(() => {
+                const ro = draft.mode === 'view';
+                const keys = draftCustomKeys();
+                const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
+                const setVar = (key: string, patch: Partial<TemplateVariable>) =>
+                  setDraft((d) => {
+                    const has = d.variables.some((v) => v.key === key);
+                    const variables = has
+                      ? d.variables.map((v) => (v.key === key ? { ...v, ...patch } : v))
+                      : [...d.variables, { key, ...patch }];
+                    return { ...d, variables };
+                  });
+                const cleanKey = newVarName.trim().replace(/[^\w]/g, '');
+                const addVar = () => {
+                  if (!cleanKey || keys.includes(cleanKey)) { setNewVarName(''); return; }
+                  setDraft((d) => ({ ...d, body: d.body + (d.body && !/\s$/.test(d.body) ? ' ' : '') + `{${cleanKey}}` }));
+                  setNewVarName('');
+                };
+                return (
+                  <div className="space-y-2.5">
+                    {keys.length === 0 ? (
+                      <p className="rounded-lg border border-dashed border-edge bg-surface-0/50 px-3 py-3 text-xs text-text-muted">
+                        {ro
+                          ? 'This template has no custom variables.'
+                          : <>No custom variables yet. Type a <span className="font-mono text-amber-300">{'{placeholder}'}</span> into the prompt or a module’s prose, or add one below.</>}
+                      </p>
+                    ) : (
+                      keys.map((key) => {
+                        const v = getVar(key);
+                        return (
+                          <div key={key} className="space-y-2 rounded-lg border border-edge bg-surface-0/50 p-3">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 font-mono text-xs text-amber-300 ring-1 ring-inset ring-amber-500/20">{`{${key}}`}</span>
+                              <label className={`ml-auto flex items-center gap-1.5 text-xs text-text-muted ${ro ? '' : 'cursor-pointer'}`}>
+                                <Switch checked={v.required ?? false} disabled={ro} onCheckedChange={(c) => setVar(key, { required: c })} />Required
+                              </label>
+                            </div>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <Input value={v.label ?? ''} readOnly={ro} placeholder={`Label — ${prettifyKey(key)}`} onChange={(e) => setVar(key, { label: e.target.value })} className="h-8 text-xs" />
+                              <Input value={v.default ?? ''} readOnly={ro} placeholder="Default value (optional)" onChange={(e) => setVar(key, { default: e.target.value })} className="h-8 text-xs" />
+                            </div>
+                            <Input value={v.help ?? ''} readOnly={ro} placeholder="Help text tenants see (optional)" onChange={(e) => setVar(key, { help: e.target.value })} className="h-8 text-xs" />
+                          </div>
+                        );
+                      })
+                    )}
+                    {!ro && (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        <span className="shrink-0 text-xs text-text-muted">Add variable</span>
+                        <div className="relative flex-1">
+                          <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'{'}</span>
+                          <Input
+                            value={newVarName}
+                            onChange={(e) => setNewVarName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addVar(); } }}
+                            placeholder="cancellationPolicy"
+                            className="h-8 px-5 font-mono text-xs"
+                          />
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-text-muted">{'}'}</span>
+                        </div>
+                        <Button type="button" size="sm" variant="outline" disabled={!cleanKey} onClick={addVar}>
+                          <Plus className="h-3.5 w-3.5" />Add
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </AuthorSection>
+
+            {/* 04 — Guardrails: template-owned policy (tone stays bot-owned). */}
+            <AuthorSection
+              step={4}
               icon={ShieldCheck}
               title={t('admin.botTemplates.editor.configTitle')}
               hint={t('admin.botTemplates.editor.configHint')}
@@ -1342,12 +1347,12 @@ const AdminBotTemplateDetail: React.FC = () => {
             </AuthorSection>
 
             {/* 04 — Version notes: what changed in this draft. */}
-            <AuthorSection step={4} icon={Pencil} title={t('admin.botTemplates.editor.changelog')}>
+            <AuthorSection step={5} icon={Pencil} title={t('admin.botTemplates.editor.changelog')}>
               <Input id="d-changelog" value={draft.changelog} readOnly={draft.mode === 'view'} onChange={(e) => setDraft((d) => ({ ...d, changelog: e.target.value }))} />
             </AuthorSection>
 
             {/* 05 — Test this prompt: try the current draft (body + config) before publishing. */}
-            <AuthorSection step={5} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
+            <AuthorSection step={6} icon={FlaskConical} title={t('admin.botTemplates.editor.testTitle')} hint={t('admin.botTemplates.editor.testHint')} last>
               <div className="space-y-3 rounded-xl border border-edge bg-surface-1 p-4">
                 {testLog.length > 0 && (
                   <div className="max-h-48 space-y-2 overflow-y-auto rounded-lg bg-surface-2 p-2">

@@ -125,9 +125,26 @@ const appendChip = (text: string, chip: string) => text + (text && !text.endsWit
  * Tap-to-insert placeholder chips. In read-only mode it renders as a non-inserting
  * REFERENCE (so a viewer still sees which placeholders exist). Used under BOTH the
  * main prompt body and each module's prose editor — placeholders resolve in both.
+ * `customChips` are the template's own custom variables ({placeholder}s the author
+ * declared): rendered in amber (matching the Template-variables fields) to set them
+ * apart from the built-ins, and clickable the same way.
  */
-function PlaceholderBar({ readOnly, onInsert }: { readOnly: boolean; onInsert: (chip: string) => void }) {
+function PlaceholderBar({
+  readOnly,
+  onInsert,
+  customChips = [],
+}: {
+  readOnly: boolean;
+  onInsert: (chip: string) => void;
+  customChips?: string[];
+}) {
   const { t } = useTranslation();
+  const builtinClass = readOnly
+    ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
+    : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200';
+  const customClass = readOnly
+    ? 'cursor-default rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300'
+    : 'rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 font-mono text-[11px] text-amber-300 transition-colors hover:border-amber-400 hover:bg-amber-500/20';
   return (
     <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
       <span className="mr-1 text-[11px] font-medium text-text-muted">
@@ -139,11 +156,19 @@ function PlaceholderBar({ readOnly, onInsert }: { readOnly: boolean; onInsert: (
           type="button"
           disabled={readOnly}
           title={PLACEHOLDER_HELP.get(p)}
-          className={
-            readOnly
-              ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
-              : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200'
-          }
+          className={builtinClass}
+          onClick={readOnly ? undefined : () => onInsert(p)}
+        >
+          {p}
+        </button>
+      ))}
+      {customChips.map((p) => (
+        <button
+          key={p}
+          type="button"
+          disabled={readOnly}
+          title="Custom template variable"
+          className={customClass}
           onClick={readOnly ? undefined : () => onInsert(p)}
         >
           {p}
@@ -526,11 +551,22 @@ const AdminBotTemplateDetail: React.FC = () => {
   // (authoritative, module==skill) and mirror them into expectedModules so the
   // legacy fallback stays consistent. Legacy: free-text Expected modules (flag OFF
   // = unchanged wire shape).
+  // Custom {placeholders} the author used ANYWHERE they write — the main body OR a
+  // bound skill's prose override — so a variable typed only into module prose is still
+  // declared, becomes a tenant-fillable field, and resolves at runtime. Bound skills
+  // only (an unbound skill's prose isn't saved).
+  const draftCustomKeys = (): string[] => {
+    const proseText = Object.entries(draft.skillProse)
+      .filter(([k]) => draft.selectedSkillIds.includes(k))
+      .map(([, v]) => v)
+      .join(' ');
+    return unknownPlaceholders(`${draft.body} ${proseText}`);
+  };
   const versionPayload = () => {
     const config = draftToConfig(draft.config);
-    // One declared variable per custom {placeholder} actually in the body (drops
-    // annotations for placeholders the author removed).
-    const variables = unknownPlaceholders(draft.body).map((key) => draft.variables.find((v) => v.key === key) ?? { key });
+    // One declared variable per custom {placeholder} used in the body OR module prose
+    // (drops annotations for placeholders the author removed).
+    const variables = draftCustomKeys().map((key) => draft.variables.find((v) => v.key === key) ?? { key });
     if (COMPOSABLE_TEMPLATES_ENABLED) {
       // Keep prose overrides only for still-bound skills; blanks fall back to default.
       const skillProse = Object.fromEntries(
@@ -1024,11 +1060,12 @@ const AdminBotTemplateDetail: React.FC = () => {
                     placeholders were "missing"). In edit mode the chips insert. */}
                 <PlaceholderBar
                   readOnly={draft.mode === 'view'}
+                  customChips={draftCustomKeys().map((k) => `{${k}}`)}
                   onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
                 />
               </div>
               {draft.mode !== 'view' && (() => {
-                const keys = unknownPlaceholders(draft.body);
+                const keys = draftCustomKeys();
                 const getVar = (key: string): TemplateVariable => draft.variables.find((v) => v.key === key) ?? { key };
                 const setVar = (key: string, patch: Partial<TemplateVariable>) =>
                   setDraft((d) => {
@@ -1179,6 +1216,7 @@ const AdminBotTemplateDetail: React.FC = () => {
                                   />
                                   <PlaceholderBar
                                     readOnly={ro}
+                                    customChips={draftCustomKeys().map((k) => `{${k}}`)}
                                     onInsert={(p) => setProse(skill.id, appendChip(draft.skillProse[skill.id] ?? skill.defaultProse, p))}
                                   />
                                 </div>

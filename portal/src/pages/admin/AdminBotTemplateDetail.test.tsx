@@ -225,4 +225,47 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
     fireEvent.click(servicesChips[1]);
     expect(prose().value).toBe('DEFAULT BOOKING PROSE {services}');
   });
+
+  it('a custom var used ONLY in module prose is still declared as a template variable on publish', async () => {
+    flags.composable = true;
+    createVersionSpy.mockClear();
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /bookings/i }));
+
+    // {bro} appears ONLY in the module prose — the main body ('You are {botName}.') has
+    // no custom placeholder. Before the fix, detection scanned the body only, so {bro}
+    // was never declared and would silently never resolve.
+    fireEvent.change(screen.getByRole('textbox', { name: /bookings/i }), {
+      target: { value: 'Book them in. {bro}' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^publish$/i }));
+
+    await waitFor(() =>
+      expect(createVersionSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ variables: expect.arrayContaining([expect.objectContaining({ key: 'bro' })]) }),
+      ),
+    );
+  });
+
+  it('a custom var typed into module prose becomes a clickable chip in the insert bars', () => {
+    flags.composable = true;
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /bookings/i }));
+
+    // no custom chip yet
+    expect(screen.queryAllByRole('button', { name: '{bro}' })).toHaveLength(0);
+
+    fireEvent.change(screen.getByRole('textbox', { name: /bookings/i }), {
+      target: { value: 'Book them in. {bro}' },
+    });
+
+    // {bro} now shows as a custom chip in BOTH bars (main body + module prose).
+    expect(screen.getAllByRole('button', { name: '{bro}' })).toHaveLength(2);
+  });
 });

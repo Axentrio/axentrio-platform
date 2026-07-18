@@ -513,7 +513,10 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
   for (const sp of skillProse ?? []) {
     const prose = sp.prose?.trim();
     if (prose) {
-      sections.push(`\n${prose}`);
+      // Same {placeholder} substitution as the main body / custom instructions —
+      // otherwise a placeholder an author types into a module's prose ships to the
+      // model as the literal string "{key}" (unknown keys still stay literal).
+      sections.push(`\n${ai ? substituteVariables(prose, ai, varExtras) : prose}`);
       ledger.include(`SKILL_PROSE_${sp.id}`);
     }
   }

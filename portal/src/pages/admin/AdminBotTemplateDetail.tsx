@@ -118,6 +118,41 @@ const KNOWN_PLACEHOLDERS = PLACEHOLDER_KEYS;
 const PLACEHOLDER_CHIPS = PLACEHOLDER_CATALOG.map((e) => `{${e.key}}`);
 const PLACEHOLDER_HELP = new Map(PLACEHOLDER_CATALOG.map((e) => [`{${e.key}}`, `${e.label} — ${e.description}`]));
 
+/** Append a chip to a text value with a single separating space. */
+const appendChip = (text: string, chip: string) => text + (text && !text.endsWith(' ') ? ' ' : '') + chip;
+
+/**
+ * Tap-to-insert placeholder chips. In read-only mode it renders as a non-inserting
+ * REFERENCE (so a viewer still sees which placeholders exist). Used under BOTH the
+ * main prompt body and each module's prose editor — placeholders resolve in both.
+ */
+function PlaceholderBar({ readOnly, onInsert }: { readOnly: boolean; onInsert: (chip: string) => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
+      <span className="mr-1 text-[11px] font-medium text-text-muted">
+        {t(readOnly ? 'admin.botTemplates.editor.availableLabel' : 'admin.botTemplates.editor.insertLabel')}
+      </span>
+      {PLACEHOLDER_CHIPS.map((p) => (
+        <button
+          key={p}
+          type="button"
+          disabled={readOnly}
+          title={PLACEHOLDER_HELP.get(p)}
+          className={
+            readOnly
+              ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
+              : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200'
+          }
+          onClick={readOnly ? undefined : () => onInsert(p)}
+        >
+          {p}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** A human label for a variable key, e.g. 'cancellationPolicy' → 'Cancellation policy'. */
 function prettifyKey(key: string): string {
   return key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
@@ -987,27 +1022,10 @@ const AdminBotTemplateDetail: React.FC = () => {
                     non-inserting REFERENCE so anyone reading a template can see which
                     placeholders exist (hiding it entirely made authors think booking
                     placeholders were "missing"). In edit mode the chips insert. */}
-                <div className="flex flex-wrap items-center gap-1.5 border-t border-edge/70 bg-surface-2/40 px-3 py-2">
-                  <span className="mr-1 text-[11px] font-medium text-text-muted">
-                    {t(draft.mode === 'view' ? 'admin.botTemplates.editor.availableLabel' : 'admin.botTemplates.editor.insertLabel')}
-                  </span>
-                  {PLACEHOLDER_CHIPS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      disabled={draft.mode === 'view'}
-                      title={PLACEHOLDER_HELP.get(p)}
-                      className={
-                        draft.mode === 'view'
-                          ? 'cursor-default rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary'
-                          : 'rounded-md border border-edge bg-surface-2 px-2 py-1 font-mono text-[11px] text-text-secondary transition-colors hover:border-primary-400 hover:bg-primary-500/10 hover:text-primary-200'
-                      }
-                      onClick={draft.mode === 'view' ? undefined : () => setDraft((d) => ({ ...d, body: d.body + (d.body && !d.body.endsWith(' ') ? ' ' : '') + p }))}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
+                <PlaceholderBar
+                  readOnly={draft.mode === 'view'}
+                  onInsert={(p) => setDraft((d) => ({ ...d, body: appendChip(d.body, p) }))}
+                />
               </div>
               {draft.mode !== 'view' && (() => {
                 const keys = unknownPlaceholders(draft.body);
@@ -1150,14 +1168,20 @@ const AdminBotTemplateDetail: React.FC = () => {
                                     </button>
                                   )}
                                 </div>
-                                <Textarea
-                                  aria-label={`${skill.displayName} prose`}
-                                  rows={3}
-                                  readOnly={ro}
-                                  value={draft.skillProse[skill.id] ?? skill.defaultProse}
-                                  onChange={(e) => setProse(skill.id, e.target.value)}
-                                  className="text-xs leading-relaxed"
-                                />
+                                <div className="overflow-hidden rounded-md border border-edge bg-surface-1">
+                                  <Textarea
+                                    aria-label={`${skill.displayName} prose`}
+                                    rows={3}
+                                    readOnly={ro}
+                                    value={draft.skillProse[skill.id] ?? skill.defaultProse}
+                                    onChange={(e) => setProse(skill.id, e.target.value)}
+                                    className="rounded-none border-0 bg-transparent text-xs leading-relaxed hover:border-0 focus-visible:border-0 focus-visible:ring-0"
+                                  />
+                                  <PlaceholderBar
+                                    readOnly={ro}
+                                    onInsert={(p) => setProse(skill.id, appendChip(draft.skillProse[skill.id] ?? skill.defaultProse, p))}
+                                  />
+                                </div>
                               </div>
                             )}
                           </div>

@@ -203,4 +203,26 @@ describe('AdminBotTemplateDetail — composable-templates editor (flag ON)', () 
       ),
     );
   });
+
+  it("a bound skill's prose editor has its own placeholder Insert bar, and a chip appends to the prose", () => {
+    flags.composable = true;
+    state.detail = { data: MOCK_DETAIL, isLoading: false, isError: false };
+    renderPage();
+
+    fireEvent.click(screen.getByRole('button', { name: /new draft/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /bookings/i }));
+
+    const prose = () => screen.getByRole('textbox', { name: /bookings/i }) as HTMLTextAreaElement;
+    expect(prose().value).toBe('DEFAULT BOOKING PROSE');
+
+    // Before this fix the {services} chip existed only under the MAIN body. The module
+    // prose now has its own Insert bar too → two chips with that name on the page.
+    const servicesChips = screen.getAllByRole('button', { name: '{services}' });
+    expect(servicesChips.length).toBe(2);
+
+    // Clicking the prose bar's chip (DOM order: main body first, module prose second)
+    // appends it to that skill's prose.
+    fireEvent.click(servicesChips[1]);
+    expect(prose().value).toBe('DEFAULT BOOKING PROSE {services}');
+  });
 });

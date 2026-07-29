@@ -146,6 +146,11 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       return enqueueOrRun(widget => widget.sendMessage(text));
     },
 
+    // Start a fresh conversation (new session against the bot's current config).
+    newConversation() {
+      return enqueueOrRun(widget => widget.startNewConversation());
+    },
+
     isReady() {
       return !!widgetInstance;
     },
@@ -197,7 +202,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // ==========================================================================
   const POSTMESSAGE_SOURCE = 'chatbot-widget';
   const POSTMESSAGE_ALLOWED_TYPES = new Set([
-    'open', 'close', 'toggle', 'sendMessage', 'destroy', 'ping',
+    'open', 'close', 'toggle', 'sendMessage', 'newConversation', 'destroy', 'ping',
   ]);
   let postMessageBridgeInstalled = false;
 
@@ -238,6 +243,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           if (data.payload && typeof data.payload.text === 'string') {
             chatbotWidgetApi.sendMessage(data.payload.text);
           }
+          break;
+        case 'newConversation':
+          chatbotWidgetApi.newConversation();
           break;
         case 'destroy':
           chatbotWidgetApi.destroy();
@@ -446,7 +454,8 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       padding: 14px 12px 13px 18px;
       background: var(--cb-paper-raised);
       display: grid;
-      grid-template-columns: auto 1fr auto auto;
+      /* avatar | info(1fr) | status | new-conversation | close */
+      grid-template-columns: auto 1fr auto auto auto;
       align-items: center;
       column-gap: 10px;
       flex-shrink: 0;
@@ -493,6 +502,35 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     .cb-header__close svg { width: 18px; height: 18px; }
     .cb-header__close svg path { stroke-width: 1.75; }
+    /* "New conversation" — same affordance as close, sits to its left. */
+    .cb-header__new {
+      width: 44px;
+      height: 44px;
+      border: none;
+      background: transparent;
+      color: var(--cb-ink-muted);
+      border-radius: 9px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      transition:
+        background 180ms var(--cb-ease),
+        color 180ms var(--cb-ease),
+        transform 260ms var(--cb-ease);
+    }
+    .cb-header__new:hover {
+      background: var(--cb-paper-sunk);
+      color: var(--cb-ink);
+    }
+    .cb-header__new:active { transform: scale(0.96); }
+    .cb-header__new:focus-visible {
+      outline: 2px solid color-mix(in oklch, var(--cb-primary) 50%, transparent);
+      outline-offset: 2px;
+    }
+    .cb-header__new svg { width: 18px; height: 18px; }
+    .cb-header__new svg path { stroke-width: 1.75; }
 
     .cb-header__avatar {
       width: 36px;
@@ -1022,7 +1060,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
     /* ============================================================
        Narrow widths (small phones, tight embeds) — drop the status
-       label to keep the 4-column header from wrapping.
+       label to keep the 5-column header from wrapping.
        ============================================================ */
     @media (max-width: 420px) {
       .cb-header { column-gap: 8px; padding-right: 10px; }
@@ -1137,6 +1175,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   const ICONS = {
     chat: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" /></svg>',
     close: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>',
+    newChat: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4 12.5-12.5z" /></svg>',
     send: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M13 6l6 6-6 6" /></svg>',
     attach: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>',
     camera: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>',
@@ -1269,6 +1308,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.storageKey = this.getStorageKey();
       this._connected = false;
       this._hasEverConnected = false;
+      // Monotonic session-lifecycle counter. Bumped whenever a NEW session
+      // lifecycle starts (recovery, new-conversation). Each async init path
+      // captures the epoch at its start; a stale path (superseded by a newer
+      // one) checks `epoch !== this._sessionEpoch` and bails before it assigns
+      // this.socket / this.sessionId — so a click during the initial connect or
+      // a reconnect can't leak a second live socket (duplicate bot messages).
+      this._sessionEpoch = 0;
       this._agent = null; // { name, lastActive }
       this._agentActivityTimer = null;
       this.appearance = (this.config && this.config.appearance) || {};
@@ -1515,17 +1561,18 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         this.setConnectionState('offline');
         return;
       }
+      const epoch = this._sessionEpoch;
       try {
         await loadSocketIO();
-        await this._initSession();
-        this._connectSocketIO();
+        await this._initSession(epoch);
+        this._connectSocketIO(epoch);
       } catch (err) {
         this.setConnectionState('offline');
         this.log('Connection init failed:', err.message);
       }
     }
 
-    async _initSession() {
+    async _initSession(epoch) {
       // Try to restore existing session
       const storedSession = this.readStoredSession();
       if (storedSession) {
@@ -1562,6 +1609,14 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       if (!resp.ok) throw new Error(`Widget init failed: ${resp.status}`);
 
       const { data } = await resp.json();
+      // Superseded by a newer session lifecycle (e.g. the user hit "New
+      // conversation" while this init was in flight) — don't clobber the newer
+      // session's state. The server session we just created is abandoned and
+      // idle-closes on its own.
+      if (epoch !== undefined && epoch !== this._sessionEpoch) {
+        this.log('Stale _initSession discarded (epoch', epoch, '!=', this._sessionEpoch, ')');
+        return;
+      }
       this.sessionId = data.session.id;
       this.tenantId = data.session.tenantId || data.tenantId;
       // Widget JWT — needed to call /widget/history for reconnect backfill.
@@ -1590,6 +1645,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     _recoverWidgetSession(reason) {
       if (this._recovering) return; // one-shot — avoid init/connect loops
       this._recovering = true;
+      const epoch = ++this._sessionEpoch;
       this.log('Recovering widget session:', reason);
       try {
         if (this.socket) { this.socket.removeAllListeners(); this.socket.disconnect(); }
@@ -1598,12 +1654,99 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.clearStoredSession();
       this.token = null;
       this.setConnectionState('connecting');
-      this._initSession()
-        .then(() => { this._connectSocketIO(); })
-        .catch((err) => { this.log('Session recovery failed:', err && err.message); });
+      this._initSession(epoch)
+        .then(() => { this._connectSocketIO(epoch); })
+        .catch((err) => {
+          // Reset the one-shot guard on FAILURE only (not .finally — on success
+          // the 'connect' handler clears it; clearing here would drop the guard
+          // mid-connect and let a second recovery race). A rejected init would
+          // otherwise leave _recovering stuck true, blocking all future recovery.
+          this._recovering = false;
+          this.log('Session recovery failed:', err && err.message);
+        });
     }
 
-    _connectSocketIO() {
+    // Start a brand-new conversation. A widget session is restored from
+    // localStorage on every load (see _initSession), so its transcript keeps
+    // being replayed to the model — which is why a bot that was reconfigured
+    // (new specialty, removed services/docs) still behaves like the old one
+    // until the session ends. This forgets the stored session, mints a fresh
+    // one against the CURRENT bot config, clears the transcript, and re-greets.
+    // The old session is left to the server's idle auto-close.
+    startNewConversation() {
+      if (this._startingNew) return; // guard against concurrent double-taps
+      // Light throttle: each new conversation mints a fresh server session, so
+      // ignore rapid repeats (fat-fingers, or a scripted newConversation loop)
+      // on top of the in-flight guard. The server also rate-limits /widget/init.
+      const now = (typeof Date !== 'undefined' && Date.now) ? Date.now() : 0;
+      if (now && this._lastNewConversationAt && (now - this._lastNewConversationAt) < 1500) return;
+      this._lastNewConversationAt = now;
+      this._startingNew = true;
+
+      // A fresh session lifecycle: bump the epoch so any in-flight init (the
+      // initial connect, or a reconnect recovery) bails before it assigns a
+      // socket, and clear the recovery guard it may have left set.
+      const epoch = ++this._sessionEpoch;
+      this._recovering = false;
+
+      // Tear down the socket bound to the old session.
+      try {
+        if (this.socket) { this.socket.removeAllListeners(); this.socket.disconnect(); }
+      } catch (e) { /* ignore */ }
+      this.socket = null;
+
+      // Forget the old session so _initSession creates a new one (fresh visitorId).
+      this.clearStoredSession();
+      this.sessionId = null;
+      this.token = null;
+      this.visitorId = null;
+      // Drop the old session's queued messages so they aren't flushed into the
+      // new one, and treat the next join as a cold load (_joinedOnce=false) so
+      // syncHistory doesn't re-fetch + re-render the server-persisted greeting
+      // on top of the client greeting.
+      this.pendingMessages = [];
+      this._joinedOnce = false;
+
+      // Clear the transcript now for responsive feedback. (_initSession clears it
+      // again on the new-session path; the greeting is re-added on resolve. We do
+      // NOT call render() here — it would rebuild the DOM and drop bound refs.)
+      this.messages = [];
+      if (this.messagesContainer) {
+        while (this.messagesContainer.firstChild) {
+          this.messagesContainer.removeChild(this.messagesContainer.firstChild);
+        }
+      }
+
+      this.setConnectionState('connecting');
+      this._initSession(epoch)
+        .then(() => {
+          if (epoch !== this._sessionEpoch) return; // superseded mid-flight
+          // Re-show the client greeting exactly like a first load.
+          if (this.config.greetingMessage) {
+            this.addMessage({
+              id: utils.generateId(),
+              text: this.config.greetingMessage,
+              sender: 'bot',
+              timestamp: new Date(),
+              isGreeting: true,
+            });
+          }
+          this._connectSocketIO(epoch);
+        })
+        .catch((err) => {
+          this.setConnectionState('offline');
+          this.log('New conversation failed:', err && err.message);
+        })
+        .finally(() => { this._startingNew = false; });
+    }
+
+    _connectSocketIO(epoch) {
+      // Superseded by a newer session lifecycle — never connect a stale socket
+      // (that's what leaks a second live socket → duplicate bot messages).
+      if (epoch !== undefined && epoch !== this._sessionEpoch) {
+        this.log('Stale _connectSocketIO skipped (epoch', epoch, '!=', this._sessionEpoch, ')');
+        return;
+      }
       if (!window.io) {
         this.log('Socket.IO not loaded');
         return;
@@ -1614,6 +1757,14 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       if (!this.token) {
         this.log('No widget token yet; deferring socket connect');
         return;
+      }
+
+      // Defensive: never leave a previous socket connected (it would keep
+      // receiving message:receive for the old session). Belt-and-braces with
+      // the epoch guard above.
+      if (this.socket) {
+        try { this.socket.removeAllListeners(); this.socket.disconnect(); } catch (e) { /* ignore */ }
+        this.socket = null;
       }
 
       this.socket = window.io(this.config.apiUrl, {
@@ -1903,6 +2054,9 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
               <span class="cb-header__status-dot"></span>
               <span class="cb-header__status-text">Connecting...</span>
             </div>
+            <button class="cb-header__new" type="button" aria-label="New conversation" title="New conversation">
+              ${ICONS.newChat}
+            </button>
             <button class="cb-header__close" type="button" aria-label="Close chat" title="Close chat">
               ${ICONS.close}
             </button>
@@ -1985,6 +2139,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         }
       }
       this.headerCloseBtn = this.container.querySelector('.cb-header__close');
+      this.headerNewBtn = this.container.querySelector('.cb-header__new');
       this.messagesContainer = this.container.querySelector('.cb-messages');
       this.input = this.container.querySelector('.cb-input');
       this.sendBtn = this.container.querySelector('.cb-btn--send');
@@ -2061,6 +2216,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       // is the only reliable way to dismiss on narrow viewports.
       if (this.headerCloseBtn) {
         this.headerCloseBtn.addEventListener('click', () => this.close());
+      }
+
+      // Header "new conversation" button — start a fresh session so the CURRENT
+      // bot config takes effect (a restored session keeps replaying old turns).
+      if (this.headerNewBtn) {
+        this.headerNewBtn.addEventListener('click', () => this.startNewConversation());
       }
 
       // Quick-reply / slot chips — delegated so it covers chips added later.

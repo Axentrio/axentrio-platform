@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Send, Bot, User } from 'lucide-react';
+import { X, Send, Bot, User, MessageSquarePlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -104,6 +104,18 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
     );
   };
 
+  // Restart the test conversation in place (the panel also resets on open, but
+  // this lets you start over without closing it). The transcript is the ONLY
+  // thing carrying the bot's previous behaviour into a reply — the system prompt
+  // is rebuilt from the bot's current config on every message — so a fresh chat
+  // is what surfaces edits (new specialty, removed services/docs) instead of the
+  // model continuing its old persona from the replayed history.
+  const handleNewChat = () => {
+    setMessages([]);
+    setInput('');
+    inputRef.current?.focus();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -136,9 +148,21 @@ const TestChatPanel: React.FC<TestChatPanelProps> = ({
               <p className="text-xs text-text-muted">{provider} / {model}</p>
             </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} className="flex-shrink-0">
-            <X className="w-4 h-4" />
-          </Button>
+          <div className="flex items-center gap-1 flex-shrink-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleNewChat}
+              disabled={messages.length === 0 || testChat.isPending}
+              aria-label={t('ai.testChat.newChat')}
+              title={t('ai.testChat.newChatHint')}
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+            </Button>
+            <Button variant="ghost" size="icon" onClick={onClose} className="flex-shrink-0" aria-label={t('common.close')}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
         </div>
 
         {/* KB Toggle */}

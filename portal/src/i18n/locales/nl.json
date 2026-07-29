@@ -977,9 +977,11 @@
       },
       "empty": {
         "title": "Stuur een bericht om je bot te testen",
-        "subtitle": "Met opgeslagen AI-instellingen"
+        "subtitle": "Elke nieuwe chat gebruikt je laatst opgeslagen instellingen"
       },
       "placeholder": "Typ een bericht…",
+      "newChat": "Nieuwe chat",
+      "newChatHint": "Een nieuw gesprek starten",
       "errors": {
         "emptyResponse": "(Geen antwoord — controleer je merkstem en vangrail-configuratie)",
         "sendFailed": "Er ging iets mis. Controleer je API-sleutel en modelconfiguratie."

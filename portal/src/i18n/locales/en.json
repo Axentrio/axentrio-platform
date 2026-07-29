@@ -984,9 +984,11 @@
       },
       "empty": {
         "title": "Send a message to test your bot",
-        "subtitle": "Using saved AI settings"
+        "subtitle": "Each new chat uses your latest saved settings"
       },
       "placeholder": "Type a message…",
+      "newChat": "New chat",
+      "newChatHint": "Start a new conversation",
       "errors": {
         "emptyResponse": "(No response — check your brand voice and guardrails configuration)",
         "sendFailed": "Something went wrong. Check your API key and model configuration."

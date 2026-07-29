@@ -976,9 +976,11 @@
       },
       "empty": {
         "title": "Envoyez un message pour tester votre bot",
-        "subtitle": "Utilise les paramètres IA enregistrés"
+        "subtitle": "Chaque nouvelle conversation utilise vos derniers paramètres enregistrés"
       },
       "placeholder": "Tapez un message…",
+      "newChat": "Nouveau chat",
+      "newChatHint": "Démarrer une nouvelle conversation",
       "errors": {
         "emptyResponse": "(Aucune réponse — vérifiez votre ton de marque et la configuration des garde-fous)",
         "sendFailed": "Une erreur s'est produite. Vérifiez votre clé API et la configuration du modèle."

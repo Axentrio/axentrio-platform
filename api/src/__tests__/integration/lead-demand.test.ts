@@ -212,3 +212,35 @@ describe('aggregateLeadDemand — scoping', () => {
     expect(out.topServices).toEqual([]);
   });
 });
+
+describe('enrichment health endpoint backing data', () => {
+  it('reports null (not 0%) when nothing has been analysed', async () => {
+    // "0% abstention" reads as a healthy system; the truth is we have no data. The
+    // endpoint distinguishes them, because the whole point of this metric is to notice
+    // a DROP in abstentions after a model change.
+    const { tenant } = await setup(1);
+    const { enrichmentAbstainStats } = await import('../../leads/enrichment/enrich-lead.job');
+    const stats = await enrichmentAbstainStats(tenant.id, 7);
+    expect(Number(stats.total)).toBe(0);
+  });
+
+  it('counts abstentions separately from enrichments', async () => {
+    const { tenant, leads } = await setup(3);
+    const convRepo = AppDataSource.getRepository(LeadConversation);
+    await convRepo.save(
+      convRepo.create({ tenantId: tenant.id, leadId: leads[0].id, enrichState: 'abstained' }),
+    );
+    await convRepo.save(
+      convRepo.create({ tenantId: tenant.id, leadId: leads[1].id, enrichState: 'enriched', request: 'x' }),
+    );
+    // A pending row is neither — it has not run yet and must not dilute the rate.
+    await convRepo.save(
+      convRepo.create({ tenantId: tenant.id, leadId: leads[2].id, enrichState: 'pending' }),
+    );
+
+    const { enrichmentAbstainStats } = await import('../../leads/enrichment/enrich-lead.job');
+    const stats = await enrichmentAbstainStats(tenant.id, 7);
+    expect(Number(stats.total)).toBe(2);
+    expect(Number(stats.abstained)).toBe(1);
+  });
+});

@@ -18,9 +18,10 @@
  *    capture path refuse to re-create an erased identity.
  *
  * 3. **PII outlives the lead row.** The same values were copied into operator
- *    notifications (message body + `data.notes`) and into outbound webhook request
- *    bodies. Scrubbing only `chatbot_leads` leaves those copies readable in the
- *    portal and in the delivery log.
+ *    notifications (message body + `data.notes`), outbound webhook request bodies, and
+ *    agent traces (which record `capture_lead`'s arguments verbatim). Scrubbing only
+ *    `chatbot_leads` leaves those copies readable in the portal, the delivery log and
+ *    the trace viewer.
  *
  * 4. **A downstream CRM has its own copy.** `lead.created`/`lead.updated` already
  *    shipped this person's details out. Erasure that does not emit `lead.deleted`
@@ -46,7 +47,13 @@ export { ERASED_PREFIX, isErasedDedupeKey } from './lead-tombstone';
 export interface ErasureResult {
   leadId: string;
   /** Rows whose lead-derived PII was overwritten, per store. */
-  scrubbed: { conversations: number; notifications: number; webhookLogs: number };
+  scrubbed: {
+    conversations: number;
+    notifications: number;
+    webhookLogs: number;
+    /** Traces carry `capture_lead`'s arguments — the contact and the request. */
+    agentTraces: number;
+  };
   /** Always true today — see the SCOPE BOUNDARY note above. */
   transcriptRetained: boolean;
 }
@@ -140,6 +147,27 @@ export async function eraseLead(
       [leadId, tenantId],
     );
 
+    // 5. Agent traces record every tool call INCLUDING `capture_lead`'s arguments —
+    //    the customer's name, phone and request, in jsonb. Scrubbing the lead while
+    //    leaving those intact would defeat the erasure for anyone who reads a trace.
+    //    Scoped to this lead's conversations, so unrelated traces are untouched.
+    //    NOTE: agent_traces uses QUOTED camelCase columns ("tenantId", "sessionId"),
+    //    unlike every other table in this schema — it predates the snake_case
+    //    convention. Unquoted snake_case here fails with `column does not exist`.
+    const traces = await manager.query(
+      `UPDATE agent_traces
+          SET trace = jsonb_build_object('erased', true, 'leadId', $1::text)
+        WHERE "tenantId" = $2
+          AND "sessionId" IN (
+            SELECT session_id FROM chatbot_lead_conversations
+             WHERE lead_id = $1 AND tenant_id = $2 AND session_id IS NOT NULL
+            UNION
+            SELECT session_id FROM chatbot_leads
+             WHERE id = $1 AND tenant_id = $2 AND session_id IS NOT NULL
+          )`,
+      [leadId, tenantId],
+    );
+
     return {
       priorDedupeKey,
       sessionId: lead.session_id,
@@ -148,6 +176,7 @@ export async function eraseLead(
         conversations: rowCount(conv),
         notifications: rowCount(notif),
         webhookLogs: rowCount(hooks),
+        agentTraces: rowCount(traces),
       },
     };
   });

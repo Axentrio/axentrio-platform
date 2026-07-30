@@ -23,6 +23,10 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'failed' | '
 export type BookingMode = 'auto' | 'request';
 
 @Index(['tenantId', 'botId', 'status'])
+// Declared here AND in migration 1787800000000 so the synchronize-built test schema and
+// the migration-built prod schema agree — an index that exists only in prod means its
+// query plan is never exercised by any test.
+@Index('ix_bookings_lead', ['leadId'], { where: '"lead_id" IS NOT NULL' })
 @Entity('chatbot_bookings')
 export class Booking {
   @PrimaryGeneratedColumn('uuid')

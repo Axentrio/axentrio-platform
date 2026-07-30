@@ -8,6 +8,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { aggregateLeadDemand } from '../insights/lead-demand.service';
+import { enrichmentAbstainStats } from '../leads/enrichment/enrich-lead.job';
 import { Gap } from '../database/entities/Gap';
 import { Judgment } from '../database/entities/Judgment';
 import { CanonicalTopic } from '../database/entities/CanonicalTopic';
@@ -322,6 +323,46 @@ router.get(
     );
 
     sendSuccess(res, await aggregateLeadDemand(tenantId, days));
+  }),
+);
+
+/**
+ * GET /insights/lead-enrichment-health — is extraction still working?
+ *
+ * Exists because the operational advice for Release B is "watch the abstain rate", and
+ * that was previously unfollowable: the stats function was written and exported but had
+ * no caller, no endpoint and no surface. Guidance you cannot act on is worse than none.
+ *
+ * The signal to watch is counter-intuitive: a sharp DROP in abstentions after a model
+ * change is the alarm, not good news. Fail-closed extraction is SUPPOSED to abstain
+ * often; a sudden fall means the grounding checks stopped biting and values are being
+ * accepted that previously were not.
+ */
+router.get(
+  '/lead-enrichment-health',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+    const days = Math.min(Math.max(parseInt(String(req.query.days ?? 7), 10) || 7, 1), 90);
+    const stats = await enrichmentAbstainStats(tenantId, days);
+
+    const total = Number(stats.total ?? 0);
+    const abstained = Number(stats.abstained ?? 0);
+    sendSuccess(res, {
+      windowDays: days,
+      analyzed: total,
+      abstained,
+      // Null rather than 0 when nothing ran: "0% abstention" reads as a healthy system,
+      // whereas the truth is that we have no data.
+      abstainRate: total > 0 ? Math.round((abstained / total) * 1000) / 1000 : null,
+      perField: {
+        request: Number(stats.no_request ?? 0),
+        address: Number(stats.no_address ?? 0),
+        urgency: Number(stats.no_urgency ?? 0),
+        intent: Number(stats.no_intent ?? 0),
+      },
+    });
   }),
 );
 

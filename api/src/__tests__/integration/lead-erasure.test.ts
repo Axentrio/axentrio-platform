@@ -29,7 +29,7 @@ import { Lead } from '../../database/entities/Lead';
 import { LeadConversation } from '../../database/entities/LeadConversation';
 import { eraseLead, isErasedDedupeKey, ERASED_PREFIX } from '../../leads/lead-erasure.service';
 import { upsertLead } from '../../leads/lead-capture.service';
-import { createTestTenant } from '../helpers/factories';
+import { createTestTenant, createTestSession } from '../helpers/factories';
 
 async function seedLead(tenantId: string, over: Partial<Lead> = {}) {
   const repo = AppDataSource.getRepository(Lead);
@@ -249,6 +249,52 @@ describe('eraseLead', () => {
     expect(JSON.stringify(log.request_body)).not.toContain('Achraf');
     expect(JSON.stringify(log.request_body)).not.toContain('32475464421');
     expect(log.request_body.redacted).toBe(true);
+  });
+
+  it('scrubs agent traces, which record capture_lead arguments verbatim', async () => {
+    // A trace holds the tool call that CREATED the lead — name, phone and request in
+    // jsonb. Erasing the lead while leaving that readable would defeat the erasure for
+    // anyone opening the trace viewer.
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const session = await createTestSession(tenant.id);
+    const lead = await seedLead(tenant.id, { sessionId: session.id });
+
+    await AppDataSource.query(
+      `INSERT INTO agent_traces ("tenantId", "sessionId", trace) VALUES ($1, $2, $3::jsonb)`,
+      [
+        tenant.id,
+        session.id,
+        JSON.stringify({
+          iterations: [
+            { toolCalls: [{ name: 'capture_lead', args: { name: 'Achraf Peeters', phone: '32475464421' } }] },
+          ],
+        }),
+      ],
+    );
+
+    const res = await eraseLead(AppDataSource, tenant.id, lead.id);
+    expect(res!.scrubbed.agentTraces).toBe(1);
+
+    const [row] = await AppDataSource.query(`SELECT trace FROM agent_traces WHERE "tenantId" = $1`, [tenant.id]);
+    expect(JSON.stringify(row.trace)).not.toContain('Achraf');
+    expect(JSON.stringify(row.trace)).not.toContain('32475464421');
+    expect(row.trace.erased).toBe(true);
+  });
+
+  it('does not touch agent traces belonging to OTHER conversations', async () => {
+    const tenant = await createTestTenant({ tier: 'pro' });
+    const mine = await createTestSession(tenant.id);
+    const theirs = await createTestSession(tenant.id);
+    const lead = await seedLead(tenant.id, { sessionId: mine.id });
+
+    await AppDataSource.query(
+      `INSERT INTO agent_traces ("tenantId", "sessionId", trace) VALUES ($1, $2, '{"keep":"me"}'::jsonb)`,
+      [tenant.id, theirs.id],
+    );
+
+    await eraseLead(AppDataSource, tenant.id, lead.id);
+    const [row] = await AppDataSource.query(`SELECT trace FROM agent_traces WHERE "sessionId" = $1`, [theirs.id]);
+    expect(row.trace.keep).toBe('me');
   });
 
   it('is idempotent — a second erase is a no-op and emits no second event', async () => {

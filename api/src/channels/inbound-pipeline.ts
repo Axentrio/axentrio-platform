@@ -100,14 +100,24 @@ export async function processInboundEvent(
     }
 
     // ── 4. Message / postback events ─────────────────────────────────────
-    const { session, participant, binding, created } = await findOrCreateConversation(event, connection);
+    const { session, participant, binding, created, sessionCreated } = await findOrCreateConversation(event, connection);
 
-    // Hook 1 (leads-across-all-channels): a brand-new binding = a new contact
-    // reachable on this channel → capture a Lead deterministically, no LLM.
+    // Hook 1 (leads-across-all-channels): capture a Lead deterministically, no LLM.
     // Gated by the per-channel auto-capture toggle (default on). Fire-and-forget:
     // the service logs its own failures and must never block message processing
     // or the (already-sent) webhook ACK.
-    if (created && (connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads !== false) {
+    //
+    // Fires on a new CONTACT (`created`) *or* a new CONVERSATION (`sessionCreated`,
+    // i.e. a returning contact whose previous session had closed). The second case
+    // used to be skipped, which meant a returning customer's later conversations were
+    // never linked and their history was unrecoverable — `chatbot_leads.session_id`
+    // only ever points at the most recent one.
+    //
+    // Widening this guard does NOT duplicate the lead-created webhook or operator
+    // alert: that fan-out is keyed on `row.inserted` inside `upsertLead`, and a
+    // returning contact takes the ON CONFLICT update path. What the extra call does
+    // is link the new conversation — exactly once per conversation, not per message.
+    if ((created || sessionCreated) && (connection.config as { autoCaptureLeads?: boolean })?.autoCaptureLeads !== false) {
       // Guardrails: a clearly spam/scam/solicitation first message must not become
       // a lead (AC17/19). Classify (pure, cheap); only when flagged do we check the
       // tenant's enforce flag — shadow mode stays behaviour-neutral. See §1A.
@@ -315,7 +325,20 @@ async function resolveChannelBotId(connection: ChannelConnection): Promise<strin
 export async function findOrCreateConversation(
   event: NormalizedEvent,
   connection: ChannelConnection,
-): Promise<{ session: ChatSession; participant: Participant; binding: ConversationBinding; created: boolean }> {
+): Promise<{
+  session: ChatSession;
+  participant: Participant;
+  binding: ConversationBinding;
+  /** Brand-new BINDING = a new contact. Drives Hook 1's lead-creation fan-out. */
+  created: boolean;
+  /**
+   * Brand-new SESSION = a new conversation. TRUE for both a new binding and a
+   * REOPENED session (binding existed, previous session closed) — the latter
+   * reports `created: false` because the contact is not new, which is correct for
+   * the fan-out but wrong for per-conversation linking. Keep the two separate.
+   */
+  sessionCreated: boolean;
+}> {
   const bindingRepo = getRepository(ConversationBinding);
 
   // Look for existing binding
@@ -355,6 +378,7 @@ export async function findOrCreateConversation(
         participant: participant as Participant,
         binding: existingBinding as ConversationBinding,
         created: false,
+        sessionCreated: false, // same conversation continuing
       };
     }
   }
@@ -435,6 +459,7 @@ export async function findOrCreateConversation(
         participant: savedParticipant,
         binding: updatedBinding,
         created: false, // binding pre-existed (returning contact) — not a new lead
+        sessionCreated: true, // but this IS a new conversation → must be linked
       };
     });
   }
@@ -506,6 +531,7 @@ export async function findOrCreateConversation(
       participant: savedParticipant,
       binding: savedBinding,
       created: true, // brand-new binding → Hook 1 captures a Lead
+      sessionCreated: true,
     };
   });
 }

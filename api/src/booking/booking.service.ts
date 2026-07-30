@@ -125,7 +125,7 @@ export async function createBooking(
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
-  captureLeadFromBooking(ctx, attendee, extras);
+  captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
   return result;
 }
 
@@ -149,7 +149,7 @@ export async function requestBooking(
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
-  captureLeadFromBooking(ctx, attendee, extras);
+  captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
   return result;
 }
 
@@ -168,21 +168,43 @@ function captureLeadFromBooking(
   ctx: BookingContext,
   attendee: { name: string; email?: string },
   extras?: BookingExtras,
+  bookingId?: string,
 ): void {
   const channel = ctx.session.channel ?? 'widget';
   const isChannel = channel !== 'widget' && !!ctx.session.channelConnectionId;
-  void upsertLead({
-    dataSource: AppDataSource,
-    tenantId: ctx.tenant.id,
-    sessionId: ctx.session.id,
-    botId: ctx.bot.id,
-    source: 'booking',
-    channel,
-    externalUserId: isChannel ? ctx.session.visitorId : null,
-    name: attendee.name,
-    email: attendee.email ?? null,
-    phone: extras?.customerPhone ?? null,
-  }).catch(() => {});
+  void (async () => {
+    const res = await upsertLead({
+      dataSource: AppDataSource,
+      tenantId: ctx.tenant.id,
+      sessionId: ctx.session.id,
+      botId: ctx.bot.id,
+      source: 'booking',
+      channel,
+      externalUserId: isChannel ? ctx.session.visitorId : null,
+      name: attendee.name,
+      email: attendee.email ?? null,
+      phone: extras?.customerPhone ?? null,
+      // NOTE: `notes` is deliberately NOT passed. `upsertLead` merges notes
+      // new-value-wins, and booking is the highest-ranked source, so passing booking
+      // prose here would overwrite the request summary that `capture_lead` captured —
+      // the one field whose prompt wording was empirically measured. Booking detail is
+      // reached by join instead (see below), never by copying over the summary.
+    });
+    if (!res || !bookingId) return;
+
+    // Link the booking to the lead. This single FK is the whole "Pro structured
+    // fields" projection: address, requested service, preferred date, booking status
+    // and list price are then DERIVED by joining chatbot_bookings → chatbot_service_types
+    // at read time. Nothing is copied onto the lead, because a copy would go stale the
+    // moment the booking is rescheduled or cancelled and neither path notifies the lead.
+    await AppDataSource.query(
+      `UPDATE chatbot_bookings SET lead_id = $1 WHERE id = $2 AND tenant_id = $3 AND lead_id IS NULL`,
+      [res.leadId, bookingId, ctx.tenant.id],
+    );
+  })().catch(() => {
+    // Fire-and-forget by design: a lead-capture failure must never fail a booking the
+    // customer has already been told about. upsertLead logs its own errors.
+  });
 }
 
 export async function rescheduleBooking(caller: BookingCaller, sessionId: string, bookingId: string, newStartTime: string) {

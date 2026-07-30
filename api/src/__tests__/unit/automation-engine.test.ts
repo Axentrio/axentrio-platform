@@ -86,7 +86,7 @@ describe('AutomationEngine', () => {
       sessionId: 'session-2',
       timestamp: '2026-04-03T10:00:00Z',
       session: BASE_SESSION,
-      lead: {
+      lead: { leadId: '11111111-1111-4111-8111-111111111111',
         name: 'Bob',
         email: 'bob@example.com',
         phone: '+1-555-0100',
@@ -121,7 +121,7 @@ describe('AutomationEngine', () => {
       sessionId: 'session-notes',
       timestamp: '2026-04-03T10:00:00Z',
       session: BASE_SESSION,
-      lead: {
+      lead: { leadId: '11111111-1111-4111-8111-111111111111',
         name: 'Bob',
         email: 'bob@example.com',
         phone: '+1-555-0100',
@@ -148,7 +148,7 @@ describe('AutomationEngine', () => {
       sessionId: 'session-3',
       timestamp: '2026-04-03T10:00:00Z',
       session: BASE_SESSION,
-      lead: { name: 'Carol', email: 'carol@example.com', source: 'chat' },
+      lead: { leadId: '11111111-1111-4111-8111-111111111111', name: 'Carol', email: 'carol@example.com', source: 'chat' },
     };
 
     await engine.process(event, tenant);

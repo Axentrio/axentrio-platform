@@ -36,6 +36,7 @@ import {
 import { runInboundGate } from '../guardrails/inbound-guardrails.service';
 import { applyOutputGuardrails } from '../guardrails/output-guardrails.service';
 import { localizeMessage } from '../llm/localize';
+import { detectCallbackReply, humanizeCallbackReply, withOfferState } from '../leads/callback-offer';
 
 /** Bot.settings['ai'] alias — the behavioural slice (no apiKey). */
 type BotAiSettings = BotSettings['ai'];
@@ -611,6 +612,7 @@ async function platformAgentPath(
       // so the agent sees the whole burst.
       const history = await getConversationHistory(session.id, pending.id);
 
+      messageContent = await applyCallbackChipTap(session, messageContent);
       const result: AgentResult = await agentService!.run(
         messageContent,
         session,
@@ -1238,6 +1240,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
 
   let result: AgentResult;
   try {
+    messageContent = await applyCallbackChipTap(session, messageContent);
     result = await agentService.run(messageContent, session, tenant, history, images);
   } finally {
     emitToSession(session.tenantId, session.id, 'typing:stop', {});
@@ -1515,4 +1518,54 @@ async function handleBotHandoff(
     .catch(() => {});
 
   logger.info(`Bot handoff triggered for session ${session.id}`, { reason });
+}
+
+/**
+ * Recognise a tap on the Pro callback-offer chips and record the answer.
+ *
+ * The chips send a reserved sentinel as an ordinary text message, so the answer only
+ * becomes durable if it is caught here. Two things must happen before the agent runs:
+ *
+ *  1. Persist `acceptedAt` / `declinedAt`. The DECLINE is the important one — it is what
+ *     makes "we will not ask again" enforceable rather than a prompt promise.
+ *  2. Replace the sentinel with the visible label. The raw `__lead_callback_*` token must
+ *     never reach the model, the transcript, or the enrichment extractor as if the
+ *     customer had typed it.
+ *
+ * Returns the text the agent should actually see.
+ */
+async function applyCallbackChipTap(session: ChatSession, content: string): Promise<string> {
+  const reply = detectCallbackReply(content);
+  if (!reply) return content;
+
+  const labels = callbackChipLabels(session);
+  try {
+    const patch = reply === 'accepted'
+      ? { acceptedAt: new Date().toISOString() }
+      : { declinedAt: new Date().toISOString() };
+    const metadata = withOfferState(session.metadata as Record<string, unknown>, patch);
+    await AppDataSource.query(
+      `UPDATE chat_sessions SET metadata = $2::jsonb, updated_at = now() WHERE id = $1`,
+      [session.id, JSON.stringify(metadata)],
+    );
+    // Keep the in-memory session consistent for the rest of this turn.
+    (session as ChatSession).metadata = metadata as ChatSession['metadata'];
+    logger.info('[leads] callback offer answered', { sessionId: session.id, reply });
+  } catch (error) {
+    // A failed write must not drop the customer's message — worst case we could offer
+    // again in a later conversation, which is far better than losing the turn.
+    logger.warn('[leads] could not persist callback offer answer', {
+      sessionId: session.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return humanizeCallbackReply(reply, labels);
+}
+
+/** Mirrors agent.service's labels — the consent wording must match what was shown. */
+function callbackChipLabels(session: ChatSession): { yes: string; no: string } {
+  const lang = (session.metadata?.customData?.language as string | undefined)?.slice(0, 2)?.toLowerCase();
+  if (lang === 'nl') return { yes: 'Ja, bel me terug', no: 'Nee, bedankt' };
+  if (lang === 'fr') return { yes: 'Oui, rappelez-moi', no: 'Non merci' };
+  return { yes: 'Yes, call me back', no: 'No thanks' };
 }

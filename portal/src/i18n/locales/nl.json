@@ -105,18 +105,29 @@
     "loadMore": "Meer laden",
     "empty": {
       "title": "Nog geen leads",
-      "body": "Zodra een bezoeker een e-mailadres of telefoonnummer deelt — of contact opneemt via een gekoppeld kanaal — verschijnt deze hier."
+      "body": "Zodra een bezoeker een e-mailadres of telefoonnummer deelt — of contact opneemt via een gekoppeld kanaal — verschijnt deze hier.",
+      "filtered": "Geen leads met dit filter"
     },
     "table": {
       "name": "Naam",
       "contact": "Contact",
       "source": "Bron",
-      "capturedAt": "Vastgelegd"
+      "capturedAt": "Vastgelegd",
+      "request": "Aanvraag",
+      "status": "Status",
+      "service": "Dienst",
+      "appointment": "Afspraak",
+      "address": "Adres",
+      "preferredAt": "Voorkeur",
+      "booking": "Boeking",
+      "noName": "Geen naam",
+      "reachVia": "Antwoord via {{channel}}"
     },
     "detail": {
       "fromSession": "Uit sessie",
       "notes": "Notities",
-      "createdAt": "Aangemaakt op"
+      "createdAt": "Aangemaakt op",
+      "conversations": "({{count}} gesprekken)"
     },
     "locked": {
       "title": "Leads vastleggen",
@@ -126,6 +137,40 @@
         "2": "Aangepaste velden en routeringsregels zodat de juiste persoon de juiste lead krijgt.",
         "3": "Exporteer leads naar CSV of je CRM via webhook."
       }
+    },
+    "export": {
+      "label": "Exporteren naar Excel",
+      "error": "Exporteren mislukt",
+      "forbidden": "Alleen beheerders en supervisors kunnen leads exporteren.",
+      "truncated": "Alleen de {{limit}} meest recente leads zijn geëxporteerd. Beperk het datumbereik om de rest te exporteren."
+    },
+    "filter": {
+      "all": "Alle",
+      "new": "Open",
+      "archived": "Afgehandeld",
+      "searchPlaceholder": "Naam, e-mail, telefoon of vraag",
+      "searchLabel": "Leads zoeken",
+      "apply": "Zoeken",
+      "clear": "Wissen",
+      "label": "Leads filteren op status"
+    },
+    "status": {
+      "new": "Open",
+      "archived": "Afgehandeld"
+    },
+    "erase": {
+      "confirm": "Verwijderen",
+      "thisLead": "deze lead",
+      "done": "Persoonsgegevens verwijderd. Het chatgesprek is bewaard.",
+      "forbidden": "Alleen beheerders en supervisors kunnen een lead verwijderen.",
+      "error": "Kon deze lead niet verwijderen",
+      "title": "Persoonsgegevens van deze lead verwijderen?",
+      "body": "Hiermee verwijder je definitief de naam, contactgegevens en aanvraag van deze lead, uit alle meldingen erover en uit alles wat al naar een gekoppeld systeem is gestuurd. Dit kan niet ongedaan worden gemaakt. Het chatgesprek zelf blijft bewaard."
+    },
+    "actions": {
+      "erase": "Persoonsgegevens verwijderen",
+      "archive": "Markeer als afgehandeld",
+      "reopen": "Heropenen"
     }
   },
   "socialMedia": {
@@ -598,6 +643,18 @@
       "loadError": "Facturatiestatus kon niet geladen worden: {{error}}",
       "unknownError": "onbekende fout",
       "subscribedJustNow": "Abonnement ontvangen — wachten op bevestiging van Stripe. Deze pagina wordt automatisch bijgewerkt."
+    },
+    "webhooks": {
+      "title": "Leads naar je CRM sturen",
+      "subtitle": "Stuur nieuwe en bijgewerkte leads naar een URL — koppel HubSpot, Salesforce, Odoo, Zoho of Pipedrive via Zapier, Make of n8n. Dit is eenrichtingsverkeer, geen tweewegsynchronisatie.",
+      "empty": "Nog geen endpoints.",
+      "add": "Endpoint toevoegen",
+      "remove": "Endpoint verwijderen",
+      "saved": "Webhooks opgeslagen",
+      "error": "Kon webhooks niet opslaan",
+      "deletedWarning": "Zonder lead.deleted houdt je CRM zijn kopie wanneer een klant om verwijdering vraagt — je zou die daar handmatig moeten wissen.",
+      "secretSet": "Ondertekeningssleutel ingesteld — typ om te vervangen",
+      "secretNew": "Ondertekeningssleutel (wordt gegenereerd indien leeg)"
     }
   },
   "ai": {
@@ -2131,6 +2188,13 @@
         "gaps": "Hiaten",
         "leads": "Leads"
       }
+    },
+    "demand": {
+      "title": "Waar klanten om vragen",
+      "denominator": "Van de {{classified}} van {{total}} leads die we aan een dienst konden koppelen, over de laatste {{days}} dagen.",
+      "noServices": "Nog geen dienst aan een lead gekoppeld — dit vult zich aan naarmate klanten boeken.",
+      "tagsTitle": "Genoemde onderwerpen (door AI afgeleid)",
+      "tagsDenominator": "Uit de {{tagged}} gesprekken die we konden analyseren."
     }
   },
   "analytics": {
@@ -2484,6 +2548,14 @@
       "gapInsights": {
         "label": "Succesmeter",
         "description": "AI-inzichten in gesprekslacunes en resultaten."
+      },
+      "proactiveLeadCapture": {
+        "label": "Vraag om ontbrekende gegevens",
+        "description": "Laat je bot vriendelijk om een telefoonnummer of e-mailadres vragen wanneer het die nog niet heeft. Standaard uit — je bot bewaart altijd gegevens die een klant zelf geeft."
+      },
+      "leadEnrichment": {
+        "label": "Gestructureerde leadgegevens",
+        "description": "Adres, gevraagde dienst, voorkeursdatum en boekingsstatus bij elke lead."
       }
     },
     "allChannels": "Alle kanalen",

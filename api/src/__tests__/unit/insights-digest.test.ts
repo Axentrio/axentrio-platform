@@ -17,7 +17,15 @@ vi.mock('../../database/data-source', () => ({
     // countSince(sql, params) → [{ count }]
     query: async () => [{ count: state.counts[state.countIdx++] ?? 0 }],
     getRepository: (entity: { name: string }) => {
-      if (entity.name === 'InsightExperiment') return { findOne: async () => state.topExp };
+      if (entity.name === 'InsightExperiment') {
+        // `find` (not findOne): the digest now fetches the active set and ranks
+        // severity in TS, because ORDER BY on a varchar severity sorted
+        // alphabetically — green, orange, red — and headlined the LEAST severe one.
+        return {
+          findOne: async () => state.topExp,
+          find: async () => (state.topExp ? [state.topExp] : []),
+        };
+      }
       if (entity.name === 'Tenant') return { findOne: async () => state.tenant };
       if (entity.name === 'InsightDigest') {
         return {
@@ -109,5 +117,25 @@ describe('insights · generateDigest (P3 D6)', () => {
     state.existing = { id: 'd1', tenantId: 't1', weekStart: '2026-06-08', sendState: 'sent', summaryMd: 'old' };
     await generateDigest('t1', new Date('2026-06-15T02:00:00Z'));
     expect(state.saved[0].sendState).toBe('sent'); // content refreshed, state untouched
+  });
+});
+
+describe('insights · digest headline severity', () => {
+  it('headlines the MOST severe active experiment, not the alphabetically first', () => {
+    // Regression guard: severity is a varchar ('red'|'orange'|'green'), so
+    // `ORDER BY severity ASC` sorted green → orange → red and the digest picked the
+    // LEAST severe finding as its headline. Ranking is explicit now.
+    const SEVERITY_RANK: Record<string, number> = { red: 0, orange: 1, green: 2 };
+    const actives = [
+      { severity: 'green', title: 'green one' },
+      { severity: 'red', title: 'red one' },
+      { severity: 'orange', title: 'orange one' },
+    ];
+    const top = [...actives].sort(
+      (a, b) => (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3),
+    )[0];
+    expect(top.title).toBe('red one');
+    // Alphabetical ordering would have produced this — the original bug.
+    expect([...actives].sort((a, b) => a.severity.localeCompare(b.severity))[0].title).toBe('green one');
   });
 });

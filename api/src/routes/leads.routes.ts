@@ -16,10 +16,15 @@ import { AppDataSource } from '../database/data-source';
 import { Lead } from '../database/entities/Lead';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
+import { requireRole } from '../middleware/auth.middleware';
 import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
-import { getExporter, toCsv } from '../analytics/exporters';
+import { getEntitlements } from '../billing/entitlements';
+import { getExporter, toCsv, EXCEL_CSV } from '../analytics/exporters';
+import { eraseLead } from '../leads/lead-erasure.service';
+import { computeLeadReadiness } from '../leads/readiness';
+import { logAudit } from '../utils/audit';
 
 const router = Router();
 
@@ -27,6 +32,103 @@ router.use(requireClerkAuth, autoProvision, resolveTenantContext);
 
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
+
+/** Closed sets for the list filters. Values reach SQL, so they are matched, never interpolated. */
+const ALLOWED_CHANNELS: ReadonlySet<string> = new Set([
+  'widget',
+  'whatsapp',
+  'messenger',
+  'instagram',
+  'telegram',
+]);
+const ALLOWED_SOURCES: ReadonlySet<string> = new Set([
+  'channel',
+  'tool',
+  'booking',
+  'manual',
+  'import',
+  'webhook',
+]);
+
+/** node-pg returns `numeric` as a string; keep it a number or null on the wire. */
+function num(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Derive the Pro structured fields from the joined booking.
+ *
+ * `servicePrice` is the tenant's OWN list price for the requested service, not an
+ * estimate — hence `priceBasis`, so the UI can label it honestly ("from €80" is not
+ * "€80"). `on_request` and `none` yield no number at all rather than a guess: a
+ * fabricated monetary figure attached to a named person is inaccurate personal data
+ * the subject could demand be rectified.
+ */
+function projectBookingFields(l: Record<string, unknown>) {
+  const display = (l.price_display_type as string | null) ?? 'none';
+  let servicePrice: number | null = null;
+  let priceBasis: 'fixed' | 'from' | 'range_mid' | 'none' = 'none';
+  if (display === 'fixed') {
+    servicePrice = num(l.fixed_price);
+    priceBasis = servicePrice === null ? 'none' : 'fixed';
+  } else if (display === 'from') {
+    servicePrice = num(l.min_price);
+    priceBasis = servicePrice === null ? 'none' : 'from';
+  } else if (display === 'range') {
+    const lo = num(l.min_price);
+    const hi = num(l.max_price);
+    if (lo !== null && hi !== null) {
+      servicePrice = Math.round(((lo + hi) / 2) * 100) / 100;
+      priceBasis = 'range_mid';
+    }
+  }
+
+  // The customer's answers to the owner-authored intake questions ARE the "reason for
+  // contact" Story 3 asks for — already collected at booking time, previously discarded.
+  const intake = l.intake_answers;
+  const intakeAnswers =
+    intake && typeof intake === 'object' && !Array.isArray(intake) ? (intake as Record<string, unknown>) : null;
+
+  const readiness = computeLeadReadiness({
+    phone: l.phone as string | null,
+    email: l.email as string | null,
+    name: l.name as string | null,
+    notes: l.notes as string | null,
+    address: (l.customer_address as string | null) ?? (l.extracted_address as string | null),
+    bookingId: l.booking_id as string | null,
+    bookingStatus: l.booking_status as string | null,
+    conversationCount: l.conversation_count as number | null,
+    override: (l.readiness_override as number | null) ?? null,
+  });
+
+  return {
+    bookingId: (l.booking_id as string | null) ?? null,
+    bookingStatus: (l.booking_status as string | null) ?? null,
+    // Booking facts OUTRANK extracted ones, per field. A booking's `start_utc` is a
+    // real appointment the customer confirmed; the extractor's reading of "tomorrow"
+    // is an inference. Where both exist, the fact wins and the inference is discarded.
+    preferredAt: l.start_utc ? new Date(l.start_utc as string).toISOString() : null,
+    preferredAtText: l.start_utc ? null : ((l.preferred_at_text as string | null) ?? null),
+    address: (l.customer_address as string | null) ?? (l.extracted_address as string | null) ?? null,
+    serviceRequested:
+      (l.service_name as string | null) ?? (l.extracted_service as string | null) ?? null,
+    servicePrice,
+    priceBasis,
+    intakeAnswers,
+    bookingCount: (l.booking_count as number | null) ?? 0,
+    conversationCount: (l.conversation_count as number | null) ?? 0,
+    // Inferred, never facts — the UI must present these as AI-derived and never act
+    // on them. `null` whenever the extractor abstained, which is the common case.
+    urgency: (l.urgency as string | null) ?? null,
+    intent: (l.intent as string | null) ?? null,
+    tags: Array.isArray(l.tags) ? (l.tags as string[]) : null,
+    // Computed on READ from the facts above, never stored: a persisted score would keep
+    // counting a booking that was cancelled afterwards, and nothing notifies the lead.
+    readiness,
+  };
+}
 
 interface CursorParts {
   createdAt: Date;
@@ -68,49 +170,133 @@ router.get(
       MAX_LIMIT,
     );
 
-    const repo = AppDataSource.getRepository(Lead);
-    const qb = repo
-      .createQueryBuilder('l')
-      .where('l.tenant_id = :tenantId', { tenantId })
-      .andWhere('l.deleted_at IS NULL')
-      .orderBy('l.created_at', 'DESC')
-      .addOrderBy('l.id', 'DESC')
-      .limit(limit + 1); // ask for one extra to detect "has more"
+    // Structured (Pro) columns are gated on `leadEnrichment`; the basic set is
+    // always returned. Gating the PROJECTION, not just the UI, means an Essential
+    // tenant cannot read Pro fields by calling the API directly.
+    const { features } = await getEntitlements(tenantId);
+    const wide = features.leadEnrichment === true;
+
+    // Server-side filters. Validated against closed sets — never interpolated —
+    // because these land in SQL. An unknown value is a 400, not a silent full scan:
+    // a filter that quietly does nothing reads as "no matching leads".
+    const params: unknown[] = [tenantId];
+    const where: string[] = ['l.tenant_id = $1', 'l.deleted_at IS NULL'];
+
+    const status = req.query.status;
+    if (typeof status === 'string' && status.length > 0) {
+      // 'erased' is deliberately NOT selectable: those rows carry no data and are
+      // already excluded by `deleted_at IS NULL`.
+      if (status !== 'new' && status !== 'archived') {
+        throw new BadRequestError("status must be 'new' or 'archived'");
+      }
+      params.push(status);
+      where.push(`l.status = $${params.length}`);
+    }
+
+    const channel = req.query.channel;
+    if (typeof channel === 'string' && channel.length > 0) {
+      if (!ALLOWED_CHANNELS.has(channel)) throw new BadRequestError('Unknown channel');
+      params.push(channel);
+      where.push(`l.channel = $${params.length}`);
+    }
+
+    const source = req.query.source;
+    if (typeof source === 'string' && source.length > 0) {
+      if (!ALLOWED_SOURCES.has(source)) throw new BadRequestError('Unknown source');
+      params.push(source);
+      where.push(`l.source = $${params.length}`);
+    }
 
     if (typeof req.query.cursor === 'string' && req.query.cursor.length > 0) {
       const { createdAt, id } = decodeCursor(req.query.cursor);
       // Tuple ordering: skip rows older than the cursor row, OR same
       // timestamp with a smaller id (stable tiebreak).
-      qb.andWhere(
-        '(l.created_at, l.id) < (:cursorCreatedAt, :cursorId)',
-        { cursorCreatedAt: createdAt.toISOString(), cursorId: id },
-      );
+      params.push(createdAt.toISOString(), id);
+      where.push(`(l.created_at, l.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`);
     }
 
-    const rows = await qb.getMany();
+    params.push(limit + 1); // ask for one extra to detect "has more"
+    const limitParam = `$${params.length}`;
+
+    /**
+     * Booking facts are DERIVED here, never stored on the lead. A session can hold
+     * 0..n bookings and neither reschedule nor cancel notifies the lead row, so any
+     * cached `booking_status` would go stale invisibly.
+     *
+     * The LATERAL picks the lead's most recent NON-CANCELLED booking — `(status IN
+     * (...)) ASC` sorts live bookings (false) ahead of cancelled ones (true), so a
+     * lead whose only booking was cancelled still shows it rather than showing blank.
+     * `booking_count` tells the operator there are others.
+     */
+    const rows: Array<Record<string, unknown>> = await AppDataSource.query(
+      `SELECT l.id, l.session_id, l.bot_id, l.name, l.email, l.phone, l.channel,
+              l.source, l.status, l.notes, l.created_at, l.updated_at,
+              bk.booking_id, bk.booking_status, bk.start_utc, bk.customer_address,
+              bk.service_name, bk.price_display_type, bk.fixed_price, bk.min_price, bk.max_price,
+              bk.intake_answers,
+              (SELECT count(*)::int FROM chatbot_bookings cb
+                WHERE cb.lead_id = l.id AND cb.tenant_id = l.tenant_id) AS booking_count,
+              (SELECT count(*)::int FROM chatbot_lead_conversations lc
+                WHERE lc.lead_id = l.id AND lc.tenant_id = l.tenant_id) AS conversation_count,
+              l.readiness_override,
+              ec.urgency, ec.intent, ec.tags, ec.enrich_state,
+              ec.request AS extracted_request,
+              ec.address AS extracted_address,
+              ec.service_requested AS extracted_service,
+              ec.preferred_at_text
+         FROM chatbot_leads l
+         LEFT JOIN LATERAL (
+           SELECT b.id AS booking_id, b.status AS booking_status, b.start_utc,
+                  b.customer_address, b.intake_answers,
+                  st.name AS service_name, st.price_display_type,
+                  st.fixed_price, st.min_price, st.max_price
+             FROM chatbot_bookings b
+             LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
+            WHERE b.lead_id = l.id AND b.tenant_id = l.tenant_id
+            ORDER BY (b.status IN ('cancelled', 'failed')) ASC, b.start_utc DESC, b.id DESC
+            LIMIT 1
+         ) bk ON TRUE
+         -- The lead's most recent ENRICHED conversation. Only 'enriched' rows are
+         -- joined: 'abstained' deliberately produced nothing, and surfacing a
+         -- half-populated abstained row would read as "we found nothing" when the
+         -- honest answer is "we could not establish anything".
+         LEFT JOIN LATERAL (
+           SELECT lc2.urgency, lc2.intent, lc2.tags, lc2.enrich_state,
+                  lc2.request, lc2.address, lc2.service_requested, lc2.preferred_at_text
+             FROM chatbot_lead_conversations lc2
+            WHERE lc2.lead_id = l.id AND lc2.tenant_id = l.tenant_id
+              AND lc2.enrich_state = 'enriched'
+            ORDER BY lc2.updated_at DESC
+            LIMIT 1
+         ) ec ON TRUE
+        WHERE ${where.join(' AND ')}
+        ORDER BY l.created_at DESC, l.id DESC
+        LIMIT ${limitParam}`,
+      params,
+    );
+
     const hasMore = rows.length > limit;
     const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    const last = pageRows[pageRows.length - 1];
 
-    const nextCursor = hasMore
-      ? encodeCursor({
-          createdAt: pageRows[pageRows.length - 1].createdAt,
-          id: pageRows[pageRows.length - 1].id,
-        })
+    const nextCursor = hasMore && last
+      ? encodeCursor({ createdAt: new Date(last.created_at as string), id: last.id as string })
       : null;
 
     sendSuccess(res, {
       leads: pageRows.map((l) => ({
         id: l.id,
-        sessionId: l.sessionId,
-        botId: l.botId,
-        name: l.name,
-        email: l.email,
-        phone: l.phone,
+        sessionId: l.session_id ?? null,
+        botId: l.bot_id ?? null,
+        name: l.name ?? null,
+        email: l.email ?? null,
+        phone: l.phone ?? null,
         channel: l.channel ?? null,
         source: l.source,
         status: l.status,
-        notes: l.notes,
-        createdAt: l.createdAt.toISOString(),
+        notes: l.notes ?? null,
+        createdAt: new Date(l.created_at as string).toISOString(),
+        ...(wide ? projectBookingFields(l) : {}),
       })),
       nextCursor,
     });
@@ -121,11 +307,43 @@ router.get(
  * CSV export of the tenant's leads. Gated by `leadCapture` (NOT the
  * Enterprise `aiBusinessInsights` gate the /analytics/export uses) so the
  * Essential/Pro tiers that actually own the Leads page can take their leads
- * — including the captured request `notes` — offline into a CRM. Exports the
- * full history by default; optional from/to ISO bounds narrow it.
+ * — including the captured request `notes` — offline into a CRM.
+ *
+ * This is bulk PII egress, so it carries three controls the first version lacked:
+ *   - `requireRole('admin', 'supervisor')` — previously ANY authenticated seat,
+ *     including `agent` (the default auto-provision role, `clerk.middleware.ts:278`),
+ *     could pull every lead the tenant has ever had. House convention is
+ *     all-roles for ordinary reads and admin-only for privileged actions; a
+ *     full-dataset PII download is the latter, but managers keep it so this is
+ *     not a regression for anyone who legitimately exports today.
+ *   - a hard row cap (`EXPORT_MAX_ROWS`) pushed into SQL — the query had no LIMIT
+ *     and the whole result set is held in memory before send. When it bites we say
+ *     so (`X-Export-Truncated`) rather than handing back a silently short file.
+ *   - `logAudit` — without it there is no answer to "who accessed this personal
+ *     data", which GDPR Art 15 / Art 33 both require. `impersonated` records a
+ *     super-admin acting inside a tenant via X-Tenant-Context.
+ *
+ * The default window is the last 365 days, not epoch: an unbounded default meant
+ * the cheapest request was also the largest possible PII extraction.
+ *
+ * Output is Excel-safe (`EXCEL_CSV`: UTF-8 BOM + `sep=;` + `;`). Our SMBs are
+ * BE/NL/FR and a comma CSV with no BOM opens in their Excel as a single mojibake
+ * column — the previous behaviour.
+ *
+ * NOT rate-limited, deliberately and visibly: `rateLimitByTenant` / `rateLimit()`
+ * both key on `req.tenant?.id`, which is only ever set by `tenant.middleware.ts`.
+ * That middleware is NOT in this route's chain (`requireClerkAuth, autoProvision,
+ * resolveTenantContext` set `req.tenantId` only), so attaching it here would be a
+ * silent no-op — a control that reads as protection and enforces nothing. This
+ * affects every clerk-authenticated route, not just this one; fixing it properly
+ * is its own change. The role gate + row cap + audit are the real controls here.
  */
+const EXPORT_MAX_ROWS = 10_000;
+const EXPORT_DEFAULT_WINDOW_DAYS = 365;
+
 router.get(
   '/export',
+  requireRole('admin', 'supervisor'),
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.tenantId!;
     await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
@@ -136,13 +354,35 @@ router.get(
       const d = new Date(v);
       return Number.isNaN(d.getTime()) ? fallback : d;
     };
-    const from = parse(req.query.from, new Date(0));
     const to = parse(req.query.to, new Date(Date.now() + 86_400_000)); // through end of today
+    const from = parse(
+      req.query.from,
+      new Date(Date.now() - EXPORT_DEFAULT_WINDOW_DAYS * 86_400_000),
+    );
 
-    const rows = await exporter.rows(tenantId, { from, to });
-    const csv = toCsv(exporter.headers, rows);
+    const rows = await exporter.rows(tenantId, { from, to, limit: EXPORT_MAX_ROWS });
+    const truncated = rows.length >= EXPORT_MAX_ROWS;
+    const csv = toCsv(exporter.headers, rows, EXCEL_CSV);
+
+    // Audited before send: a truncated export must still be recorded, and the
+    // row count is what tells an auditor how much data actually left.
+    await logAudit(req.userId!, 'leads.exported', 'lead', tenantId, tenantId, {
+      rowCount: rows.length,
+      truncated,
+      from: from.toISOString(),
+      to: to.toISOString(),
+      format: 'csv',
+      impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
+    });
+
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to })}"`);
+    // A capped export is incomplete data. Say so on the wire so the client can warn
+    // the user, instead of letting a short file pass as the whole history.
+    if (truncated) {
+      res.setHeader('X-Export-Truncated', 'true');
+      res.setHeader('X-Export-Row-Limit', String(EXPORT_MAX_ROWS));
+    }
     res.status(200).send(csv);
   }),
 );
@@ -157,18 +397,96 @@ router.patch(
     const tenantId = req.tenantId!;
     await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
 
-    const status = (req.body ?? {}).status;
-    if (status !== 'new' && status !== 'archived') {
+    const body = (req.body ?? {}) as { status?: unknown; readinessOverride?: unknown };
+    const hasStatus = body.status !== undefined;
+    const hasOverride = body.readinessOverride !== undefined;
+    if (!hasStatus && !hasOverride) {
+      throw new BadRequestError('Provide status and/or readinessOverride');
+    }
+    if (hasStatus && body.status !== 'new' && body.status !== 'archived') {
       throw new BadRequestError("status must be 'new' or 'archived'");
+    }
+    // `null` clears the override and returns the lead to the computed score — the way
+    // back from a human judgement, without which an override would be permanent.
+    let override: number | null | undefined;
+    if (hasOverride) {
+      if (body.readinessOverride === null) {
+        override = null;
+      } else if (
+        typeof body.readinessOverride === 'number' &&
+        Number.isInteger(body.readinessOverride) &&
+        body.readinessOverride >= 0 &&
+        body.readinessOverride <= 100
+      ) {
+        override = body.readinessOverride;
+      } else {
+        throw new BadRequestError('readinessOverride must be an integer 0-100, or null to clear');
+      }
     }
 
     const repo = AppDataSource.getRepository(Lead);
     const lead = await repo.findOne({ where: { id: req.params.id, tenantId } });
+    // The `deletedAt` guard is also what makes `erased` terminal: erasure sets
+    // deleted_at, so an erased lead 404s here and can never be moved back to
+    // 'new'/'archived' — a resurrection this endpoint must not be able to perform.
     if (!lead || lead.deletedAt) throw new NotFoundError('Lead not found');
-    lead.status = status;
+    if (hasStatus) lead.status = body.status as 'new' | 'archived';
+    if (override !== undefined) {
+      lead.readinessOverride = override;
+      // Who and when: this is a human judgement overriding a machine one about a
+      // person, so it has to be answerable later.
+      lead.readinessOverrideBy = override === null ? null : req.userId!;
+      lead.readinessOverrideAt = override === null ? null : new Date();
+    }
     await repo.save(lead);
 
-    sendSuccess(res, { id: lead.id, status: lead.status });
+    sendSuccess(res, {
+      id: lead.id,
+      status: lead.status,
+      readinessOverride: lead.readinessOverride ?? null,
+    });
+  }),
+);
+
+/**
+ * Erase a lead's personal data (GDPR Art 17).
+ *
+ * `DELETE` rather than a status change because the effect is irreversible, and the
+ * work is delegated to `eraseLead` because it spans four stores plus a downstream
+ * notification — see that service for why a plain row delete is not enough.
+ *
+ * Admin/supervisor only: this is destructive and unrecoverable, so it carries the
+ * same seat restriction as bulk export rather than being available to every seat.
+ * Audited unconditionally — an erasure request is exactly the event a regulator
+ * asks you to evidence, and `scrubbed` records how much derived data went with it.
+ *
+ * Idempotent: erasing an already-erased or unknown lead is a 404, and never emits a
+ * second `lead.deleted`.
+ */
+router.delete(
+  '/:id',
+  requireRole('admin', 'supervisor'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const result = await eraseLead(AppDataSource, tenantId, req.params.id);
+    if (!result) throw new NotFoundError('Lead not found');
+
+    await logAudit(req.userId!, 'leads.erased', 'lead', result.leadId, tenantId, {
+      scrubbed: result.scrubbed,
+      transcriptRetained: result.transcriptRetained,
+      impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
+    });
+
+    sendSuccess(res, {
+      id: result.leadId,
+      erased: true,
+      scrubbed: result.scrubbed,
+      // Surfaced, not hidden: the caller should know the chat transcript is a
+      // separate deletion scope rather than assume this removed everything.
+      transcriptRetained: result.transcriptRetained,
+    });
   }),
 );
 

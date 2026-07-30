@@ -120,8 +120,15 @@ export const queryKeys = {
   },
   leads: {
     all: () => ['leads'] as const,
-    list: (cursor?: string | null) =>
-      [...queryKeys.leads.all(), 'list', cursor ?? null] as const,
+    /**
+     * Keyed on the FILTERS, not a cursor: the infinite query owns its own page
+     * cursors, and the thing that must produce a distinct cache entry is the filter
+     * set. Keying on cursor instead let a filtered and an unfiltered list share one
+     * entry, so changing a filter showed the previous result set.
+     */
+    // `object` rather than an index-signature Record so a plain interface (LeadFilters)
+    // is assignable — a query key only has to be structurally serializable.
+    list: (filters?: object) => [...queryKeys.leads.all(), 'list', filters ?? {}] as const,
   },
   copilot: {
     all: () => ['copilot'] as const,

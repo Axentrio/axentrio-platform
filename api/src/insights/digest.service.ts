@@ -151,10 +151,21 @@ export async function generateDigest(tenantId: string, now: Date): Promise<void>
 
   const metrics = await computeMetrics(tenantId, weekStart);
 
-  const topExp = await AppDataSource.getRepository(InsightExperiment).findOne({
+  // Severity is a varchar ('red'|'orange'|'green'), so ORDER BY severity ASC sorts
+  // ALPHABETICALLY — green, orange, red — i.e. least-severe first. The digest was
+  // therefore headlining the LEAST severe experiment as its top finding.
+  //
+  // Ranked in TS rather than SQL: the active set is small, and it keeps this on the
+  // plain repository API the callers' tests mock.
+  const actives = await AppDataSource.getRepository(InsightExperiment).find({
     where: { tenantId, state: 'active' },
-    order: { severity: 'ASC', lastSeenAt: 'DESC' },
+    order: { lastSeenAt: 'DESC' },
   });
+  const SEVERITY_RANK: Record<string, number> = { red: 0, orange: 1, green: 2 };
+  const topExp =
+    [...actives].sort(
+      (a, b) => (SEVERITY_RANK[a.severity] ?? 3) - (SEVERITY_RANK[b.severity] ?? 3),
+    )[0] ?? null;
   const summaryMd = await narrate(metrics, topExp?.title ?? null);
 
   const tenant = await AppDataSource.getRepository(Tenant).findOne({

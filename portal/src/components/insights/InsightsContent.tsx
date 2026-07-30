@@ -24,9 +24,11 @@ import {
   useResolveGap,
   useArchiveGap,
   useExperiments,
+  useLeadDemand,
   useDismissExperiment,
   useDigest,
   useSetDigestEmail,
+  type DemandSlice,
   GapRow,
   ExperimentDto,
   DigestMetrics,
@@ -228,6 +230,99 @@ function ExperimentsSection() {
   );
 }
 
+
+/**
+ * Enterprise-only. What customers actually asked for.
+ *
+ * Presented as a DESCRIPTIVE count, never as a finding: the denominator is printed next
+ * to the figures, and below the server's floor the panel says "not enough data yet"
+ * rather than showing a share. An SMB with four leads must not be told "75% of your
+ * customers want X".
+ *
+ * Services come from the tenant's own booking + service catalogue (facts, available
+ * without any AI). Extracted tags are shown separately and labelled as AI-derived,
+ * because they are inferred and usually sparse.
+ */
+function LeadDemandSection() {
+  const { t } = useTranslation();
+  const enabled = useHasFeature('aiBusinessInsights');
+  const { data, isLoading } = useLeadDemand(enabled);
+  if (!enabled) return null;
+
+  const pct = (n: number) => `${Math.round(n * 100)}%`;
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div className="flex items-center gap-2">
+        <TrendingUp className="h-4 w-4 text-primary-400" />
+        <h3 className="text-sm font-semibold text-text-primary">
+          {t('insights.demand.title', { defaultValue: 'What customers are asking for' })}
+        </h3>
+      </div>
+
+      {isLoading ? (
+        <Skeleton className="h-20 w-full rounded-xl" />
+      ) : !data ? null : data.suppressed ? (
+        <p className="text-xs text-zinc-500">{data.suppressionReason}</p>
+      ) : (
+        <div className="space-y-4">
+          {data.topServices.length > 0 && (
+            <div className="space-y-1.5">
+              {data.topServices.map((s: DemandSlice) => (
+                <div key={s.label} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-text-secondary">{s.label}</span>
+                  <span className="shrink-0 tabular-nums text-text-primary">
+                    {s.leads} <span className="text-xs text-zinc-500">({pct(s.share)})</span>
+                  </span>
+                </div>
+              ))}
+              {/* The denominator, always. A share without it overstates our confidence. */}
+              <p className="pt-1 text-xs text-zinc-500">
+                {t('insights.demand.denominator', {
+                  defaultValue:
+                    'Of the {{classified}} of {{total}} leads we could match to a service, over the last {{days}} days.',
+                  classified: data.classifiedLeads,
+                  total: data.totalLeads,
+                  days: data.window.days,
+                })}
+              </p>
+            </div>
+          )}
+
+          {data.topServices.length === 0 && (
+            <p className="text-xs text-zinc-500">
+              {t('insights.demand.noServices', {
+                defaultValue:
+                  'No service could be matched to a lead yet — this fills in as customers book.',
+              })}
+            </p>
+          )}
+
+          {data.topTags.length > 0 && (
+            <div className="space-y-1.5 border-t border-edge pt-3">
+              <p className="text-xs font-medium text-zinc-400">
+                {t('insights.demand.tagsTitle', { defaultValue: 'Topics mentioned (AI-derived)' })}
+              </p>
+              {data.topTags.map((tg: DemandSlice) => (
+                <div key={tg.label} className="flex items-center justify-between gap-3 text-sm">
+                  <span className="truncate text-text-secondary">{tg.label}</span>
+                  <span className="shrink-0 tabular-nums text-text-primary">{tg.leads}</span>
+                </div>
+              ))}
+              <p className="pt-1 text-xs text-zinc-500">
+                {t('insights.demand.tagsDenominator', {
+                  defaultValue: 'From the {{tagged}} conversations we were able to analyse.',
+                  tagged: data.taggedLeads,
+                })}
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** A single metric with a vs-prior-week delta chip. */
 function DigestMetric({ label, current, previous }: { label: string; current: number; previous: number }) {
   const delta = previous === 0 ? null : Math.round(((current - previous) / previous) * 100);
@@ -405,6 +500,7 @@ export function InsightsContent() {
         </TabsContent>
       </Tabs>
 
+      <LeadDemandSection />
       <ExperimentsSection />
     </div>
   );

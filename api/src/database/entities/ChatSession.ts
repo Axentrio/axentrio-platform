@@ -90,6 +90,21 @@ export class ChatSession {
   @Column({ type: 'int', default: 0, name: 'message_count' })
   messageCount!: number;
 
+  /**
+   * Monotonic counter bumped by a DB TRIGGER on every messages INSERT/UPDATE/DELETE
+   * for this session (see migration 1787600000000 + database/sql/transcript-revision.sql).
+   *
+   * Lead enrichment reads a transcript, calls a model, then commits with a
+   * compare-and-swap on this value: if a message arrived, was edited or was deleted
+   * mid-extraction, the swap fails and the work is requeued instead of persisting a
+   * reading of a conversation that no longer exists. A `(created_at, id)` high-water
+   * mark cannot do that — it is blind to edits and deletes.
+   *
+   * Never written from application code; the trigger owns it.
+   */
+  @Column({ type: 'int', default: 0, name: 'transcript_revision' })
+  transcriptRevision!: number;
+
   @Column({ type: 'int', default: 0, name: 'unread_count' })
   unreadCount!: number;
 

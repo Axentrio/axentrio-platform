@@ -46,6 +46,15 @@ export class Booking {
   @Column({ type: 'varchar', length: 16, name: 'booking_mode', nullable: true })
   bookingMode?: BookingMode | null;
 
+  /**
+   * The Lead this booking belongs to. Set by the booking hook so the Leads page can
+   * DERIVE address / service / preferred date / status / list price by join rather
+   * than copying them onto the lead — a cached status would go stale the moment the
+   * booking is rescheduled or cancelled, and neither path notifies the lead row.
+   */
+  @Column({ type: 'uuid', name: 'lead_id', nullable: true })
+  leadId?: string | null;
+
   @Column({ type: 'uuid', name: 'session_id', nullable: true })
   sessionId?: string | null;
 

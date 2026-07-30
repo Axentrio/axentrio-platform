@@ -15,12 +15,26 @@ vi.mock('../../utils/logger', () => ({
 
 import { entitlementsFor } from '../../billing/entitlements';
 import { PLANS } from '../../billing/plans';
+import { OPT_IN_FEATURES } from '../../billing/feature-toggles';
 import type { FeatureOverride } from '../../database/entities/Tenant';
 
 const NO_LIMITS = { maxSessions: null, dailyLlmCallLimit: null };
 
 function override(value: boolean): FeatureOverride {
   return { value, reason: 'test', setBy: 'admin@test', setAt: '2026-06-10T00:00:00Z' };
+}
+
+/**
+ * A plan's catalog entry is the entitlement CEILING. For opt-in features (see
+ * OPT_IN_FEATURES) the EFFECTIVE value is false until the tenant explicitly turns
+ * it on, so `features` deliberately differs from the catalog for those keys.
+ * Derived from OPT_IN_FEATURES rather than hardcoded, so adding another opt-in
+ * feature can't quietly invalidate these assertions.
+ */
+function effectiveDefaults(tier: keyof typeof PLANS) {
+  const expected = { ...PLANS[tier].features };
+  for (const key of OPT_IN_FEATURES) expected[key] = false;
+  return expected;
 }
 
 describe('entitlementsFor — per-tenant feature overrides', () => {
@@ -43,11 +57,52 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
     expect(e.features.calendarSync).toBe(false); // not implied
   });
 
-  it('no overrides → exact plan defaults per tier', () => {
+  it('no overrides → exact plan defaults per tier (ceiling), opt-in features off', () => {
     for (const tier of ['free', 'essential', 'pro', 'enterprise'] as const) {
       const e = entitlementsFor(tier, NO_LIMITS, { status: 'active', featureOverrides: {} });
-      expect(e.features).toEqual(PLANS[tier].features);
+      // The ceiling IS the catalog…
+      expect(e.entitledFeatures).toEqual(PLANS[tier].features);
+      // …but an opt-in feature is not live until the tenant switches it on.
+      expect(e.features).toEqual(effectiveDefaults(tier));
     }
+  });
+
+  it('opt-in features are OFF when entitled but unset, and ON only when explicitly true', () => {
+    // Guards the GDPR-motivated inversion: being entitled to solicit extra personal
+    // data must never be the same as having chosen to. Regressing this would make
+    // every Pro bot start asking for phone numbers on deploy, silently.
+    for (const key of OPT_IN_FEATURES) {
+      const unset = entitlementsFor('pro', NO_LIMITS, { status: 'active', featureOverrides: {} });
+      expect(unset.entitledFeatures[key]).toBe(true); // in the plan
+      expect(unset.features[key]).toBe(false); // but not switched on
+
+      const on = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { [key]: true },
+      });
+      expect(on.features[key]).toBe(true);
+
+      const off = entitlementsFor('pro', NO_LIMITS, {
+        status: 'active',
+        featureOverrides: {},
+        featureToggles: { [key]: false },
+      });
+      expect(off.features[key]).toBe(false);
+    }
+  });
+
+  it('an opt-in feature explicitly enabled still cascades off with its parent', () => {
+    // proactiveLeadCapture requires leadCapture; an explicit `true` must not
+    // survive the parent being switched off, or the bot would solicit contact
+    // details for a lead surface the tenant has disabled.
+    const e = entitlementsFor('pro', NO_LIMITS, {
+      status: 'active',
+      featureOverrides: {},
+      featureToggles: { leadCapture: false, proactiveLeadCapture: true },
+    });
+    expect(e.features.leadCapture).toBe(false);
+    expect(e.features.proactiveLeadCapture).toBe(false);
   });
 
   describe('D2 — absolute deny', () => {
@@ -83,7 +138,7 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
         status: 'active',
         featureOverrides: { notAFeature: override(false) } as never,
       });
-      expect(e.features).toEqual(PLANS.pro.features);
+      expect(e.features).toEqual(effectiveDefaults('pro'));
     });
 
     it('ignores entries whose value is not a boolean', () => {
@@ -264,10 +319,17 @@ describe('entitlementsFor — per-tenant feature overrides', () => {
       expect(e.featureToggles).toEqual({}); // all rejected
     });
 
-    it('no toggles → effective equals ceiling', () => {
+    it('no toggles → effective equals ceiling, except opt-in features', () => {
       const e = entitlementsFor('pro', NO_LIMITS, { status: 'active', featureOverrides: {} });
-      expect(e.features).toEqual(e.entitledFeatures);
+      expect(e.features).toEqual(effectiveDefaults('pro'));
       expect(e.featureToggles).toEqual({});
+      // Everything that is NOT opt-in must still match the ceiling exactly — the
+      // inversion is scoped, not a general loosening of the toggle contract.
+      for (const [key, value] of Object.entries(e.entitledFeatures)) {
+        if (!(OPT_IN_FEATURES as readonly string[]).includes(key)) {
+          expect(e.features[key as keyof typeof e.features]).toBe(value);
+        }
+      }
     });
   });
 

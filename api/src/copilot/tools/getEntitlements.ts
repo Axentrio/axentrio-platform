@@ -33,26 +33,38 @@ export interface EntitlementsResult {
   features: PlanFeatures;
   /** Entitlement CEILING — what the plan grants, before the tenant's toggle. */
   entitledFeatures: PlanFeatures;
-  /** Entitled-but-toggled-off features — fixable in Settings → Features, not via upgrade. */
+  /** Entitled features the tenant EXPLICITLY switched off — fixable in Settings → Features. */
   disabledByTenant: string[];
+  /**
+   * Entitled features that are opt-IN and have never been enabled. Same fix
+   * (Settings → Features), but the assistant must NOT say "you turned this off"
+   * — the tenant never had it on. Today this is `proactiveLeadCapture`.
+   */
+  availableNotEnabled: string[];
 }
 
 export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsResult> = {
   name: 'getEntitlements',
   description:
-    "Return the current tenant's feature flags in two layers. `features` is the EFFECTIVE map (what is live right now): bookings, calendarSync, hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox, channelWhatsapp/channelMessenger/channelInstagram/channelTelegram (the website chat widget is always on and has no flag). `entitledFeatures` is the plan CEILING before the tenant's own on/off toggle. When a feature is in `entitledFeatures` (or listed in `disabledByTenant`) but false in `features`, the tenant's admin TURNED IT OFF in Settings → Features — tell them to re-enable it there, do NOT tell them to upgrade. When a feature is false in BOTH, it needs a plan upgrade.",
+    "Return the current tenant's feature flags in two layers. `features` is the EFFECTIVE map (what is live right now): bookings, calendarSync, hideWidgetAttribution, customWidgetAppearance, leadCapture, platformAssistant, crm, handoff, fileUpload, unifiedInbox, channelWhatsapp/channelMessenger/channelInstagram/channelTelegram (the website chat widget is always on and has no flag). `entitledFeatures` is the plan CEILING before the tenant's own on/off toggle. When a feature is in `entitledFeatures` but false in `features`, it is included in the plan but not live, and the fix is Settings → Features rather than an upgrade — but check WHICH list it is in: `disabledByTenant` means an admin explicitly switched it off (say so), while `availableNotEnabled` means it is opt-in and was never turned on (do NOT claim they turned it off). When a feature is false in BOTH `features` and `entitledFeatures`, it needs a plan upgrade.",
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<EntitlementsResult> {
     const e = await resolveEntitlements(ctx.tenantId);
-    const disabledByTenant = TENANT_TOGGLEABLE_FEATURES.filter(
+    // Split "switched off" from "never switched on". Both are fixed in Settings →
+    // Features, but only the first is something the tenant actually did — and the
+    // assistant states it as fact to the owner.
+    const offAtCeiling = TENANT_TOGGLEABLE_FEATURES.filter(
       (key) => e.entitledFeatures[key] && !e.features[key],
     );
+    const disabledByTenant = offAtCeiling.filter((key) => e.featureToggles[key] === false);
+    const availableNotEnabled = offAtCeiling.filter((key) => e.featureToggles[key] === undefined);
 
     return {
       features: e.features,
       entitledFeatures: e.entitledFeatures,
       disabledByTenant,
+      availableNotEnabled,
     };
   },
 };

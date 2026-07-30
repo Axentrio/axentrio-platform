@@ -32,6 +32,7 @@ import {
   useUpdateFeatureToggles,
   type ToggleableFeatureKey,
   type TenantFeatureToggles,
+  type PlanFeatures,
 } from '@/queries/useEntitlementsQueries';
 
 interface FeatureMeta {
@@ -48,6 +49,12 @@ const FEATURE_META: Record<ToggleableFeatureKey, FeatureMeta> = {
   channelInstagram: { label: 'Instagram DMs', description: 'Reply to Instagram direct messages.', icon: Camera },
   channelTelegram: { label: 'Telegram', description: 'Reply to Telegram messages.', icon: Send },
   leadCapture: { label: 'Leads', description: 'Capture and store leads from conversations.', icon: UserPlus },
+  proactiveLeadCapture: {
+    label: 'Ask for missing details',
+    description:
+      'Let your bot politely ask for a phone number or email when it does not have one. Off by default — your bot always saves details a customer offers on their own.',
+    icon: UserPlus,
+  },
   bookings: { label: 'Bookings', description: 'Let your bot schedule appointments.', icon: CalendarCheck },
   gapInsights: { label: 'Success Meter', description: 'AI insights into conversation gaps and outcomes.', icon: Gauge },
 };
@@ -67,14 +74,33 @@ interface FeatureGroup {
 
 const GROUPS: FeatureGroup[] = [
   { id: 'channels', title: 'Social channels', keys: CHANNEL_KEYS },
-  { id: 'leads', title: 'Leads', keys: ['leadCapture'] },
+  // NOTE: GROUPS is NOT tsc-enforced (FEATURE_META is). A key present in META but
+  // missing here renders no switch while still being written on every save — so
+  // any addition to META must be added here too.
+  { id: 'leads', title: 'Leads', keys: ['leadCapture', 'proactiveLeadCapture'] },
   { id: 'bookings', title: 'Bookings', keys: ['bookings'] },
   { id: 'insights', title: 'Success Meter', keys: ['gapInsights'] },
 ];
 
-/** enabled = preference, defaulting ON when entitled (absent key = on). */
-function isEnabled(toggles: TenantFeatureToggles, key: ToggleableFeatureKey): boolean {
-  return toggles[key] ?? true;
+/**
+ * Enabled = the tenant's stored preference; when absent, fall back to the EFFECTIVE
+ * value the server computed (`features`).
+ *
+ * It used to default to `true` unconditionally, which is right for the features a
+ * tenant bought but wrong for opt-in ones: `proactiveLeadCapture` is entitled on
+ * Pro/Enterprise yet must stay OFF until switched on, so a hardcoded `?? true`
+ * would have shown every Pro tenant a switch that read "on" while the bot was not
+ * actually soliciting — and worse, the save path would then have persisted `true`.
+ *
+ * Deferring to `features` keeps the single source of truth server-side, so the
+ * opt-in list does not have to be duplicated in the portal and cannot drift from it.
+ */
+function isEnabled(
+  toggles: TenantFeatureToggles,
+  features: PlanFeatures,
+  key: ToggleableFeatureKey,
+): boolean {
+  return toggles[key] ?? features[key] === true;
 }
 
 const FeaturesSettings: React.FC = () => {
@@ -89,6 +115,10 @@ const FeaturesSettings: React.FC = () => {
 
   const entitled = data.current.entitledFeatures;
   const toggles = data.current.featureToggles;
+  // Effective values: what is actually live right now, after the opt-in default and
+  // the parent-child cascade. Drives the switch state so the UI can't disagree
+  // with the server about whether a feature is on.
+  const effective = data.current.features;
   const disabled = !isAdmin || updateToggles.isPending;
 
   // Build the FULL desired toggle map (PUT replaces the whole map) from the
@@ -97,13 +127,13 @@ const FeaturesSettings: React.FC = () => {
     const next: TenantFeatureToggles = {};
     (Object.keys(FEATURE_META) as ToggleableFeatureKey[]).forEach((key) => {
       if (!entitled[key]) return; // never write a non-entitled key (API would 422 on `true`)
-      next[key] = key in changes ? (changes[key] as boolean) : isEnabled(toggles, key);
+      next[key] = key in changes ? (changes[key] as boolean) : isEnabled(toggles, effective, key);
     });
     updateToggles.mutate(next);
   };
 
   const entitledChannels = CHANNEL_KEYS.filter((k) => entitled[k]);
-  const allChannelsOn = entitledChannels.length > 0 && entitledChannels.every((k) => isEnabled(toggles, k));
+  const allChannelsOn = entitledChannels.length > 0 && entitledChannels.every((k) => isEnabled(toggles, effective, k));
 
   const renderRow = (key: ToggleableFeatureKey) => {
     const meta = FEATURE_META[key];
@@ -131,7 +161,7 @@ const FeaturesSettings: React.FC = () => {
           </Button>
         ) : (
           <Switch
-            checked={isEnabled(toggles, key)}
+            checked={isEnabled(toggles, effective, key)}
             onCheckedChange={(v) => writeWith({ [key]: v })}
             disabled={disabled}
           />

@@ -52,6 +52,7 @@ import widgetAppearanceRoutes from './widget/widget-appearance.routes';
 import { widgetVersionHash, widgetPath as widgetJsPath } from './widget/widget-version';
 import integrationsRoutes from './knowledge/integrations.routes';
 import featureTogglesRoutes from './routes/feature-toggles.routes';
+import eventWebhooksRoutes from './routes/event-webhooks.routes';
 import cannedResponseRoutes from './routes/canned-responses.routes';
 import botsRoutes from './routes/bots.routes';
 import skillReadinessRoutes from './routes/skill-readiness.routes';
@@ -230,6 +231,13 @@ app.use(cors((req, callback) => {
     credentials: decision.credentials,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Tenant-ID', 'X-Session-ID', 'X-Tenant-Context'],
+    // Response headers the PORTAL is allowed to read. The portal is a different
+    // origin from the api, so without this a browser can only see the 7 CORS-
+    // safelisted headers — `Content-Disposition` and our export signals would
+    // read as `undefined` in the client while looking correct in same-process
+    // supertest assertions. Download filenames and the truncation warning both
+    // depend on these being exposed.
+    exposedHeaders: ['Content-Disposition', 'X-Export-Truncated', 'X-Export-Row-Limit'],
   });
 }));
 
@@ -325,6 +333,9 @@ apiRouter.use('/tenants/me', aiSettingsRoutes);
 apiRouter.use('/tenants/me', widgetAppearanceRoutes);
 apiRouter.use('/tenants/me', integrationsRoutes);
 apiRouter.use('/tenants/me', featureTogglesRoutes);
+// The WRITER for tenant.settings.eventWebhooks, which the emitter has always read
+// but which nothing could populate until now.
+apiRouter.use('/tenants/me/event-webhooks', eventWebhooksRoutes);
 apiRouter.use('/tenants', skillsRoutes);
 apiRouter.use('/tenants', automationsRoutes);
 
@@ -597,6 +608,24 @@ async function startServer(): Promise<void> {
       }
     };
     setInterval(autoCloseStaleSessions, 5 * 60 * 1000); // Run every 5 minutes
+
+    // Lead-enrichment sweep (Story 3 Release B). DEFAULT OFF: it spends the shared
+    // platform LLM budget, and a background pass on this budget previously caused
+    // customer-facing 429s on live replies. Enable per-environment only after the
+    // abstain-rate metrics are being watched. Mirrors TURN_COALESCER_ENABLED.
+    if (process.env.LEAD_ENRICHMENT_ENABLED === 'true') {
+      const { runLeadEnrichmentSweep } = await import('./leads/enrichment/enrich-lead.job');
+      // 5-minute tick; the job is internally sequential and re-entrancy-guarded, so a
+      // slow sweep can never overlap itself.
+      setInterval(() => {
+        void runLeadEnrichmentSweep().catch((err) => {
+          logger.error('[lead-enrich] sweep failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }, 5 * 60 * 1000);
+      logger.info('[lead-enrich] sweep enabled (5m tick)');
+    }
 
     // Cleanup old agent traces (30-day retention)
     const cleanupAgentTraces = async () => {

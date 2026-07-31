@@ -263,6 +263,21 @@ describe('POST /leads/import — preview then commit', () => {
     expect(JSON.stringify(res.body)).toMatch(/email or phone column/i);
   });
 
+  it('caps the file and SAYS it was capped, rather than silently dropping rows', async () => {
+    // The cap is sized against the request budget: commit does one sequential upsert per
+    // row with no enclosing transaction, so an over-long file could time out mid-write
+    // and leave a partially-imported list with no record of where it stopped.
+    const { MAX_IMPORT_ROWS } = await import('../../leads/lead-import.service');
+    await seed();
+    const rows = Array.from({ length: MAX_IMPORT_ROWS + 10 }, (_, i) => [
+      `P${i}`, `p${i}@example.com`, '', '',
+    ]);
+    const preview = await request(app).post('/api/v1/leads/import/preview').send({ csv: csv(rows) });
+
+    expect(preview.body.data.truncated).toBe(true);
+    expect(preview.body.data.totalRows).toBe(MAX_IMPORT_ROWS);
+  });
+
   it('403s an agent seat — bulk import is not a front-line action', async () => {
     await seed('agent');
     try {

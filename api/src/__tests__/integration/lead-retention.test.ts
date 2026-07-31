@@ -224,6 +224,39 @@ describe('sweepLeadRetention — carve-outs: age alone is not enough reason', ()
   });
 });
 
+describe('sweepLeadRetention — cannot be starved by skippable leads', () => {
+  it('erases leads BEHIND a full batch of skippable ones', async () => {
+    // Regression guard for a real bug: the carve-outs were applied app-side AFTER the
+    // LIMIT, so a tenant whose oldest N leads were all skippable made zero progress —
+    // permanently, since the next run selected the same N. Anything behind them was
+    // unreachable.
+    //
+    // `batchLimit` is lowered to 2 so the boundary is exercised without seeding 200+
+    // rows. That is the whole point: with the bug, the batch is FILLED by skippable
+    // rows and the erasable one is never seen.
+    const tenant = await tenantWithRetention(90);
+
+    // Two older, both skippable — these sort first by created_at and would fill a
+    // batch of 2 on their own.
+    const skippable = [await seedLead(tenant.id, 401), await seedLead(tenant.id, 400)];
+    await AppDataSource.query(
+      `UPDATE chatbot_leads SET readiness_override = 50 WHERE id = ANY($1::uuid[])`,
+      [skippable.map((l) => l.id)],
+    );
+
+    // One newer and erasable, behind them in the ordering.
+    const erasable = await seedLead(tenant.id, 200);
+
+    const res = await sweepLeadRetention({ batchLimit: 2 });
+
+    expect(res.erased).toBe(1);
+    expect(await isErased(erasable.id)).toBe(true);
+    // …and the skipped ones are still counted, so the operator learns why they stayed.
+    expect(res.skippedManuallyScored).toBe(2);
+    for (const l of skippable) expect(await isErased(l.id)).toBe(false);
+  });
+});
+
 describe('sweepLeadRetention — scoping', () => {
   it('does not touch another tenant, even one with an ancient lead', async () => {
     const configured = await tenantWithRetention(90);

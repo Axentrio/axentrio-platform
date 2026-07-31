@@ -35,8 +35,13 @@ import { logger } from '../utils/logger';
 export const MIN_RETENTION_DAYS = 30;
 export const MAX_RETENTION_DAYS = 3650; // 10 years
 
-/** Per-tenant cap per run, so one large backlog cannot monopolise the sweep. */
-const MAX_ERASURES_PER_TENANT_PER_RUN = 200;
+/**
+ * Per-tenant cap per run, so one large backlog cannot monopolise the sweep.
+ *
+ * Exported and overridable ONLY so the starvation regression test can exercise the
+ * LIMIT boundary without seeding 200+ rows. Production never passes an override.
+ */
+export const MAX_ERASURES_PER_TENANT_PER_RUN = 200;
 
 let running = false;
 
@@ -64,7 +69,10 @@ export function readRetentionDays(settings: unknown): number | null {
  * Sequential and capped: each erasure is a multi-statement transaction plus an outbound
  * event, so this is deliberately not parallelised.
  */
-export async function sweepLeadRetention(): Promise<RetentionSweepResult> {
+export async function sweepLeadRetention(
+  opts: { batchLimit?: number } = {},
+): Promise<RetentionSweepResult> {
+  const batchLimit = opts.batchLimit ?? MAX_ERASURES_PER_TENANT_PER_RUN;
   const result: RetentionSweepResult = {
     tenantsConsidered: 0,
     erased: 0,
@@ -91,38 +99,56 @@ export async function sweepLeadRetention(): Promise<RetentionSweepResult> {
       }
       result.tenantsConsidered += 1;
 
-      // Candidates: older than the cutoff, not already erased, no live booking, and
-      // not manually scored. Selected in one query so the carve-outs are visible in
-      // one place rather than scattered through a loop.
-      const candidates: Array<{ id: string; has_live_booking: boolean; manually_scored: boolean }> =
+      // The carve-outs live in the WHERE clause, NOT in the loop below.
+      //
+      // They used to be SELECT columns filtered app-side, which meant the LIMIT applied
+      // BEFORE them: if the oldest N leads were all skippable, the run erased nothing and
+      // the next run selected the same N again. Anything behind them was never reached —
+      // silent starvation that only appears once a tenant accumulates skippable leads.
+      const candidates: Array<{ id: string }> = await AppDataSource.query(
+        `SELECT l.id
+           FROM chatbot_leads l
+          WHERE l.tenant_id = $1
+            AND l.deleted_at IS NULL
+            AND l.created_at < now() - ($2 || ' days')::interval
+            -- a live future appointment: the business still has to serve it
+            AND NOT EXISTS (
+              SELECT 1 FROM chatbot_bookings b
+               WHERE b.lead_id = l.id AND b.tenant_id = l.tenant_id
+                 AND b.status NOT IN ('cancelled', 'failed')
+                 AND b.start_utc >= now()
+            )
+            -- a human scored it, so the automatic policy defers
+            AND l.readiness_override IS NULL
+          ORDER BY l.created_at ASC
+          LIMIT $3`,
+        [tenant.id, String(days), batchLimit],
+      );
+
+      // Counted separately so the operator still learns WHY leads were kept — the
+      // numbers are the point of the notification, and folding them into the erasure
+      // query is what caused the starvation in the first place.
+      const [skips]: Array<{ live_booking: number; manually_scored: number }> =
         await AppDataSource.query(
-          `SELECT l.id,
-                  EXISTS (
-                    SELECT 1 FROM chatbot_bookings b
-                     WHERE b.lead_id = l.id AND b.tenant_id = l.tenant_id
-                       AND b.status NOT IN ('cancelled', 'failed')
-                       AND b.start_utc >= now()
-                  ) AS has_live_booking,
-                  (l.readiness_override IS NOT NULL) AS manually_scored
-             FROM chatbot_leads l
-            WHERE l.tenant_id = $1
-              AND l.deleted_at IS NULL
-              AND l.created_at < now() - ($2 || ' days')::interval
-            ORDER BY l.created_at ASC
-            LIMIT $3`,
-          [tenant.id, String(days), MAX_ERASURES_PER_TENANT_PER_RUN],
+          `SELECT
+             count(*) FILTER (WHERE EXISTS (
+               SELECT 1 FROM chatbot_bookings b
+                WHERE b.lead_id = l.id AND b.tenant_id = l.tenant_id
+                  AND b.status NOT IN ('cancelled', 'failed')
+                  AND b.start_utc >= now()
+             ))::int AS live_booking,
+             count(*) FILTER (WHERE l.readiness_override IS NOT NULL)::int AS manually_scored
+           FROM chatbot_leads l
+          WHERE l.tenant_id = $1
+            AND l.deleted_at IS NULL
+            AND l.created_at < now() - ($2 || ' days')::interval`,
+          [tenant.id, String(days)],
         );
+      result.skippedLiveBooking += skips?.live_booking ?? 0;
+      result.skippedManuallyScored += skips?.manually_scored ?? 0;
 
       let erasedForTenant = 0;
       for (const row of candidates) {
-        if (row.has_live_booking) {
-          result.skippedLiveBooking += 1;
-          continue;
-        }
-        if (row.manually_scored) {
-          result.skippedManuallyScored += 1;
-          continue;
-        }
         try {
           const erased = await eraseLead(AppDataSource, tenant.id, row.id);
           if (erased) {
@@ -157,7 +183,7 @@ export async function sweepLeadRetention(): Promise<RetentionSweepResult> {
         await logAudit('system', 'leads.retention_applied', 'tenant', tenant.id, tenant.id, {
           erased: erasedForTenant,
           retentionDays: days,
-          cappedAtBatchLimit: candidates.length >= MAX_ERASURES_PER_TENANT_PER_RUN,
+          cappedAtBatchLimit: candidates.length >= batchLimit,
         }).catch(() => {});
       }
     }

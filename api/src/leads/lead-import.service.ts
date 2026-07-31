@@ -18,8 +18,20 @@ import type { DataSource } from 'typeorm';
 import { fromCsv } from '../analytics/exporters';
 import { isErasedDedupeKey } from './lead-tombstone';
 
-/** Enough for a pasted SMB list; refuses a file that would tie up the request. */
-export const MAX_IMPORT_ROWS = 2000;
+/**
+ * Rows accepted per import.
+ *
+ * Sized against the REQUEST BUDGET, not against what feels generous. Commit performs one
+ * sequential `upsertLead` per row (an INSERT…ON CONFLICT, an association insert and an
+ * entitlement lookup each), and `/leads` runs on the default 30s timeout. At 2000 rows a
+ * slow database could exhaust that mid-write — and because there is no enclosing
+ * transaction, the operator would get a 503 over a partially-imported file with no
+ * indication of where it stopped.
+ *
+ * 500 leaves comfortable headroom. A tenant with more than that can import in batches,
+ * which is tedious but honest; a half-applied import is neither.
+ */
+export const MAX_IMPORT_ROWS = 500;
 
 export type ImportOutcome = 'create' | 'merge' | 'reject';
 

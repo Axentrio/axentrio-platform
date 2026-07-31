@@ -109,6 +109,31 @@ describe('GET /leads/:id/sync — disambiguates "no endpoint" from "not delivere
   });
 });
 
+describe('GET /leads/:id/sync — tolerates malformed settings', () => {
+  it('does not 500 when eventWebhooks is not an array', async () => {
+    // `jsonb_array_length` ERRORS on a non-array and COALESCE cannot rescue it, so a
+    // hand-edited or legacy settings blob turned this lookup into a 500.
+    const { lead } = await seed(false);
+    await AppDataSource.query(
+      `UPDATE tenants SET settings = COALESCE(settings,'{}'::jsonb) || '{"eventWebhooks":{"oops":true}}'::jsonb WHERE id = $1`,
+      [auth.tenantId],
+    );
+
+    const res = await request(app).get(`/api/v1/leads/${lead.id}/sync`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.configured).toBe(false);
+  });
+
+  it('does not 500 when eventWebhooks is a string', async () => {
+    const { lead } = await seed(false);
+    await AppDataSource.query(
+      `UPDATE tenants SET settings = COALESCE(settings,'{}'::jsonb) || '{"eventWebhooks":"nope"}'::jsonb WHERE id = $1`,
+      [auth.tenantId],
+    );
+    expect((await request(app).get(`/api/v1/leads/${lead.id}/sync`)).status).toBe(200);
+  });
+});
+
 describe('GET /leads/:id/sync — delivery history', () => {
   it('surfaces the latest status and the attempt list', async () => {
     const { tenant, lead } = await seed(true);

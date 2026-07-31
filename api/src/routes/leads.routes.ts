@@ -17,6 +17,7 @@ import { Lead } from '../database/entities/Lead';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
+import { timeoutMiddleware } from '../middleware/timeout.middleware';
 import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
@@ -493,6 +494,10 @@ router.post(
 router.post(
   '/import/commit',
   requireRole('admin', 'supervisor'),
+  // Explicit, longer budget than the 30s default: this is the one leads route that does
+  // bounded-but-real bulk work. Paired with MAX_IMPORT_ROWS, which is what actually keeps
+  // it inside the budget — the timeout is headroom, not the control.
+  timeoutMiddleware(60_000),
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.tenantId!;
     await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
@@ -726,8 +731,17 @@ router.get(
     // `configured` distinguishes "nothing was sent because you have no endpoint" from
     // "nothing was sent and something is wrong" — without it, an empty list is
     // ambiguous and reads as a failure.
+    // `jsonb_array_length` ERRORS on a non-array — COALESCE cannot save it, because the
+    // error fires before COALESCE sees anything. The event-webhooks route already
+    // tolerates hand-edited/legacy jsonb drift here; this one did not, so a malformed
+    // blob turned a status lookup into a 500.
     const [{ configured }]: Array<{ configured: boolean }> = await AppDataSource.query(
-      `SELECT COALESCE(jsonb_array_length(settings -> 'eventWebhooks'), 0) > 0 AS configured
+      `SELECT COALESCE(
+                jsonb_array_length(
+                  CASE WHEN jsonb_typeof(settings -> 'eventWebhooks') = 'array'
+                       THEN settings -> 'eventWebhooks'
+                       ELSE '[]'::jsonb END
+                ), 0) > 0 AS configured
          FROM tenants WHERE id = $1`,
       [tenantId],
     );

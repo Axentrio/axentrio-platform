@@ -173,6 +173,19 @@
       "erase": "Erase personal data",
       "archive": "Mark handled",
       "reopen": "Reopen"
+    },
+    "retention": {
+      "title": "How long to keep leads",
+      "body": "Leads older than this have their name, contact details and request permanently erased, and any connected system is told to delete its copy. This cannot be undone. Leads with an upcoming appointment, or that you have scored yourself, are never removed.",
+      "keep": "Keep everything",
+      "6m": "6 months",
+      "1y": "1 year",
+      "2y": "2 years",
+      "confirm": "Erase leads older than {{days}} days, starting tonight? This runs every day from now on and cannot be undone.",
+      "confirmYes": "Yes, erase old leads",
+      "saved": "Retention updated",
+      "error": "Could not update retention",
+      "adminOnly": "Only workspace admins can change this."
     }
   },
   "socialMedia": {

@@ -171,6 +171,19 @@
       "erase": "Effacer les données personnelles",
       "archive": "Marquer comme traité",
       "reopen": "Réouvrir"
+    },
+    "retention": {
+      "title": "Durée de conservation des leads",
+      "body": "Pour les leads plus anciens, le nom, les coordonnées et la demande sont effacés définitivement, et tout système connecté reçoit l’instruction de supprimer sa copie. Action irréversible. Les leads avec un rendez-vous à venir, ou que vous avez notés vous-même, ne sont jamais supprimés.",
+      "keep": "Tout conserver",
+      "6m": "6 mois",
+      "1y": "1 an",
+      "2y": "2 ans",
+      "confirm": "Effacer les leads de plus de {{days}} jours, dès ce soir ? Cela s’exécutera chaque jour et est irréversible.",
+      "confirmYes": "Oui, effacer les anciens leads",
+      "saved": "Conservation mise à jour",
+      "error": "Impossible de mettre à jour la conservation",
+      "adminOnly": "Seuls les administrateurs peuvent modifier ce réglage."
     }
   },
   "socialMedia": {

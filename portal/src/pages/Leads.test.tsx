@@ -44,6 +44,12 @@ vi.mock('../services/apiClient', () => ({
   },
 }));
 
+// The retention card reads the caller's role. Mocked as admin so the control renders;
+// the card's own admin-gating is covered where it lives.
+vi.mock('@auth/useAppAuth', () => ({
+  useAppAuth: () => ({ isRole: () => true }),
+}));
+
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
@@ -81,6 +87,9 @@ const PRO_LEAD = {
 
 function renderUI(leads: Array<Record<string, unknown>>) {
   apiGet.mockImplementation(async (url: string) => {
+    // Retention is checked FIRST: it also lives under /leads, so a naive prefix match
+    // would hand the card a page of leads instead of its own payload.
+    if (url.startsWith('/leads/retention')) return { retentionDays: null, minDays: 30, maxDays: 3650 };
     if (url.startsWith('/leads')) return { leads, nextCursor: null };
     return {};
   });

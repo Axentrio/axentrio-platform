@@ -57,6 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { LeadRetentionCard } from '../components/leads/LeadRetentionCard';
 import { api } from '../services/apiClient';
 
 function formatRelative(iso: string): string {
@@ -494,6 +495,10 @@ export default function Leads() {
           )}
         </>
       )}
+
+      {/* Retention: the expiry policy for everything above it. Placed here rather than
+          in Settings so it sits next to the data it governs. */}
+      <LeadRetentionCard />
 
       {/* Erasure is irreversible and spans several stores, so it gets an explicit
           confirmation that says what will and will NOT be removed. */}

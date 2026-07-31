@@ -641,6 +641,22 @@ async function startServer(): Promise<void> {
     };
     setInterval(cleanupAgentTraces, 24 * 60 * 60 * 1000); // Daily
 
+    // Lead retention. Runs unconditionally — unlike the enrichment sweep there is no
+    // env flag, because it is a NO-OP for every tenant that has not chosen a period,
+    // and a data-protection control should not depend on remembering to enable it.
+    // Erasure is per-tenant opt-in via `settings.leadRetentionDays`; unset = keep.
+    const sweepRetention = async () => {
+      try {
+        const { sweepLeadRetention } = await import('./leads/lead-retention.service');
+        await sweepLeadRetention();
+      } catch (err) {
+        logger.error('[lead-retention] sweep failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
+
     // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
     const { reconcilePendingBookingSyncs } = await import('./scheduler/sync-reconciler');
     setInterval(() => {

@@ -171,6 +171,19 @@
       "erase": "Persoonsgegevens verwijderen",
       "archive": "Markeer als afgehandeld",
       "reopen": "Heropenen"
+    },
+    "retention": {
+      "title": "Hoe lang leads bewaren",
+      "body": "Bij leads ouder dan dit worden naam, contactgegevens en aanvraag definitief gewist, en gekoppelde systemen krijgen het verzoek hun kopie te verwijderen. Dit kan niet ongedaan worden gemaakt. Leads met een komende afspraak, of die je zelf een score gaf, worden nooit verwijderd.",
+      "keep": "Alles bewaren",
+      "6m": "6 maanden",
+      "1y": "1 jaar",
+      "2y": "2 jaar",
+      "confirm": "Leads ouder dan {{days}} dagen wissen, vanaf vanavond? Dit gebeurt voortaan dagelijks en kan niet ongedaan worden gemaakt.",
+      "confirmYes": "Ja, oude leads wissen",
+      "saved": "Bewaartermijn bijgewerkt",
+      "error": "Kon bewaartermijn niet bijwerken",
+      "adminOnly": "Alleen beheerders kunnen dit wijzigen."
     }
   },
   "socialMedia": {

@@ -24,6 +24,11 @@ import { getEntitlements } from '../billing/entitlements';
 import { getExporter, toCsv, EXCEL_CSV } from '../analytics/exporters';
 import { eraseLead } from '../leads/lead-erasure.service';
 import { computeLeadReadiness } from '../leads/readiness';
+import {
+  readRetentionDays,
+  MIN_RETENTION_DAYS,
+  MAX_RETENTION_DAYS,
+} from '../leads/lead-retention.service';
 import { logAudit } from '../utils/audit';
 
 const router = Router();
@@ -384,6 +389,73 @@ router.get(
       res.setHeader('X-Export-Row-Limit', String(EXPORT_MAX_ROWS));
     }
     res.status(200).send(csv);
+  }),
+);
+
+/**
+ * Lead retention policy.
+ *
+ * GET is readable by any seat that can see leads; PUT is admin-only, because setting it
+ * schedules irreversible erasure of customer records.
+ *
+ * `null` means KEEP FOREVER and is the default for every existing tenant — nothing
+ * expires unless someone chooses a period. Defaulting to a number would have silently
+ * deleted historical customer data on deploy.
+ */
+router.get(
+  '/retention',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const [row] = await AppDataSource.query(`SELECT settings FROM tenants WHERE id = $1`, [tenantId]);
+    sendSuccess(res, {
+      retentionDays: readRetentionDays(row?.settings),
+      minDays: MIN_RETENTION_DAYS,
+      maxDays: MAX_RETENTION_DAYS,
+    });
+  }),
+);
+
+router.put(
+  '/retention',
+  requireRole('admin'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const raw = (req.body ?? {}).retentionDays;
+    let value: number | null;
+    if (raw === null) {
+      value = null; // explicit "keep forever"
+    } else if (
+      typeof raw === 'number' &&
+      Number.isInteger(raw) &&
+      raw >= MIN_RETENTION_DAYS &&
+      raw <= MAX_RETENTION_DAYS
+    ) {
+      value = raw;
+    } else {
+      throw new BadRequestError(
+        `retentionDays must be null, or an integer between ${MIN_RETENTION_DAYS} and ${MAX_RETENTION_DAYS}`,
+      );
+    }
+
+    // Targeted jsonb write so a concurrent settings writer is not clobbered. `null`
+    // REMOVES the key entirely, which is what the sweep treats as "keep forever".
+    await AppDataSource.query(
+      value === null
+        ? `UPDATE tenants SET settings = COALESCE(settings, '{}'::jsonb) - 'leadRetentionDays', updated_at = now() WHERE id = $1`
+        : `UPDATE tenants SET settings = COALESCE(settings, '{}'::jsonb) || jsonb_build_object('leadRetentionDays', $2::int), updated_at = now() WHERE id = $1`,
+      value === null ? [tenantId] : [tenantId, value],
+    );
+
+    // Audited: this schedules irreversible deletion of customer personal data.
+    await logAudit(req.userId!, 'leads.retention_updated', 'tenant', tenantId, tenantId, {
+      retentionDays: value,
+    });
+
+    sendSuccess(res, { retentionDays: value });
   }),
 );
 

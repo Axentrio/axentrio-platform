@@ -207,6 +207,12 @@
       "done": "{{created}} ajoutés, {{merged}} fusionnés avec des leads existants.",
       "truncated": "Seules les premières lignes de ce fichier seront importées.",
       "error": "Impossible de lire ce fichier"
+    },
+    "sync": {
+      "sent": "Envoyé à votre CRM {{when}}",
+      "failed": "Impossible d’envoyer à votre CRM — dernière tentative {{when}}",
+      "neverSent": "Pas encore envoyé à votre CRM",
+      "retrying": "Envoi vers votre CRM toujours en cours"
     }
   },
   "socialMedia": {

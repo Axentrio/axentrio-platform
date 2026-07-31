@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../services/apiClient';
 import { queryKeys } from './queryKeys';
 
@@ -114,5 +114,41 @@ export function useEraseLead() {
   return useMutation({
     mutationFn: (id: string) => api.delete<LeadErasureResult>(`/leads/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.leads.all() }),
+  });
+}
+
+export interface LeadSyncAttempt {
+  event: string;
+  status: string;
+  httpStatus: number | null;
+  attempt: number;
+  /** Host only — the full URL can carry a secret token in its path. */
+  host: string;
+  error: string | null;
+  at: string;
+}
+
+export interface LeadSyncStatus {
+  /** Whether the tenant has any outbound endpoint at all. */
+  configured: boolean;
+  /** 'not_configured' | 'never_sent' | the latest delivery status. */
+  status: string;
+  lastAttemptAt: string | null;
+  attempts: LeadSyncAttempt[];
+}
+
+/**
+ * Per-lead CRM delivery status, fetched ON DEMAND when a row is expanded.
+ *
+ * Deliberately not part of the list payload: most tenants have no webhooks, and joining
+ * delivery history into every page would make all of them pay for a question only some
+ * of them ask.
+ */
+export function useLeadSyncStatus(leadId: string | null) {
+  return useQuery({
+    queryKey: [...queryKeys.leads.all(), 'sync', leadId] as const,
+    queryFn: () => api.get<LeadSyncStatus>(`/leads/${leadId}/sync`),
+    enabled: !!leadId,
+    staleTime: 30_000,
   });
 }

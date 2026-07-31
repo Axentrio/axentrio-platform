@@ -58,6 +58,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { AddLeadControls } from '../components/leads/AddLeadControls';
+import { LeadSyncRow } from '../components/leads/LeadSyncRow';
 import { LeadRetentionCard } from '../components/leads/LeadRetentionCard';
 import { api } from '../services/apiClient';
 
@@ -475,6 +476,8 @@ export default function Leads() {
                               <span className="font-medium">{t('leads.detail.createdAt')}:</span>{' '}
                               {new Date(lead.createdAt).toLocaleString()}
                             </div>
+                            {/* Fetched only now, on expand — see useLeadSyncStatus. */}
+                            <LeadSyncRow leadId={lead.id} />
                           </div>
                         </TableCell>
                       </TableRow>

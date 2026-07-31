@@ -207,6 +207,12 @@
       "done": "{{created}} toegevoegd, {{merged}} samengevoegd met bestaande leads.",
       "truncated": "Alleen de eerste rijen van dit bestand worden geïmporteerd.",
       "error": "Kon dat bestand niet lezen"
+    },
+    "sync": {
+      "sent": "Naar je CRM gestuurd {{when}}",
+      "failed": "Kon niet naar je CRM worden gestuurd — laatste poging {{when}}",
+      "neverSent": "Nog niet naar je CRM gestuurd",
+      "retrying": "Nog bezig met verzenden naar je CRM"
     }
   },
   "socialMedia": {

@@ -58,6 +58,16 @@ const ALLOWED_SOURCES: ReadonlySet<string> = new Set([
   'webhook',
 ]);
 
+/** Webhook URLs frequently embed a token in the path (Zapier, Make). Show the host
+ *  only, so a delivery view never leaks the endpoint's secret to a viewer. */
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'unknown';
+  }
+}
+
 /** node-pg returns `numeric` as a string; keep it a number or null on the wire. */
 function num(v: unknown): number | null {
   if (v === null || v === undefined) return null;
@@ -661,6 +671,83 @@ router.patch(
       id: lead.id,
       status: lead.status,
       readinessOverride: lead.readinessOverride ?? null,
+    });
+  }),
+);
+
+/**
+ * Per-lead CRM sync status — "did this lead actually reach my CRM?"
+ *
+ * DERIVED from `webhook_delivery_logs`, with no new table and no outbox. The delivery
+ * machinery (retry, circuit breaker, dead-letter, signing) already exists and already
+ * records every attempt; the only thing missing was the ability to ask about it for ONE
+ * lead. A per-lead sync-status column would have to be kept in step with that machinery
+ * and could go stale; reading the log cannot.
+ *
+ * Deliberately its own endpoint rather than a column on the list. Most tenants have no
+ * webhooks at all, and joining delivery history into every page would make all of them
+ * pay for a question only some of them ask. This is fetched when a row is expanded.
+ *
+ * When a real CRM connector ships, THAT is when an outbox earns its place — it needs
+ * per-record retry and reconciliation, which a one-way webhook does not.
+ */
+router.get(
+  '/:id/sync',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    // Tenant-scope the LEAD first: without this, any id could be probed for delivery
+    // history belonging to another workspace.
+    const lead = await AppDataSource.getRepository(Lead).findOne({
+      where: { id: req.params.id, tenantId },
+      select: ['id'],
+    });
+    if (!lead) throw new NotFoundError('Lead not found');
+
+    const rows: Array<{
+      event: string;
+      status: string;
+      http_status: number | null;
+      attempt: number;
+      url: string;
+      error: string | null;
+      created_at: Date;
+    }> = await AppDataSource.query(
+      `SELECT event, status, http_status, attempt, url, error, created_at
+         FROM webhook_delivery_logs
+        WHERE tenant_id = $1
+          AND request_body -> 'lead' ->> 'leadId' = $2
+        ORDER BY created_at DESC
+        LIMIT 20`,
+      [tenantId, req.params.id],
+    );
+
+    // `configured` distinguishes "nothing was sent because you have no endpoint" from
+    // "nothing was sent and something is wrong" — without it, an empty list is
+    // ambiguous and reads as a failure.
+    const [{ configured }]: Array<{ configured: boolean }> = await AppDataSource.query(
+      `SELECT COALESCE(jsonb_array_length(settings -> 'eventWebhooks'), 0) > 0 AS configured
+         FROM tenants WHERE id = $1`,
+      [tenantId],
+    );
+
+    const latest = rows[0] ?? null;
+    sendSuccess(res, {
+      configured,
+      // 'never_sent' is not an error when no endpoint exists.
+      status: latest ? latest.status : configured ? 'never_sent' : 'not_configured',
+      lastAttemptAt: latest ? new Date(latest.created_at).toISOString() : null,
+      attempts: rows.map((r) => ({
+        event: r.event,
+        status: r.status,
+        httpStatus: r.http_status,
+        attempt: r.attempt,
+        // The URL can carry a secret path segment, so only the host is surfaced.
+        host: safeHost(r.url),
+        error: r.error,
+        at: new Date(r.created_at).toISOString(),
+      })),
     });
   }),
 );

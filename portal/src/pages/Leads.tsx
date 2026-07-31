@@ -57,6 +57,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { AddLeadControls } from '../components/leads/AddLeadControls';
 import { LeadRetentionCard } from '../components/leads/LeadRetentionCard';
 import { api } from '../services/apiClient';
 
@@ -209,6 +210,8 @@ export default function Leads() {
           <h1 className="text-2xl font-semibold text-text-primary">{t('leads.title')}</h1>
           <p className="text-sm text-text-secondary mt-1">{t('leads.intro')}</p>
         </div>
+        <div className="flex shrink-0 items-center gap-1.5">
+        <AddLeadControls />
         {allLeads.length > 0 && (
           <Button variant="outline" size="sm" onClick={exportCsv} disabled={exporting}>
             {exporting ? (
@@ -222,6 +225,7 @@ export default function Leads() {
             {t('leads.export.label', { defaultValue: 'Export for Excel' })}
           </Button>
         )}
+        </div>
       </div>
 
       {/* Server-side filter, so the result reflects the whole dataset rather than

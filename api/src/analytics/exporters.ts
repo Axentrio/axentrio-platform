@@ -142,3 +142,96 @@ export function toCsv(headers: string[], rows: string[][], opts: CsvOptions = {}
   // BOM must be the very first bytes of the file, ahead of the sep= hint.
   return `${opts.bom ? '﻿' : ''}${opts.sepLine ? `sep=${delimiter}\r\n` : ''}${body}`;
 }
+
+export interface ParsedCsv {
+  headers: string[];
+  rows: string[][];
+}
+
+/**
+ * Minimal RFC 4180 reader — the symmetric partner of `toCsv`, deliberately not a
+ * dependency. It has to survive its own output first: our export emits a UTF-8 BOM, a
+ * `sep=;` hint line, semicolons, and a `'` prefix on formula-injection candidates. An
+ * importer that cannot read the file this platform produces would be indefensible, so
+ * all four are handled explicitly.
+ *
+ * Delimiter detection order: the `sep=` line if present, otherwise whichever of `;` or
+ * `,` appears more often in the header line. Sniffing the HEADER only — a data row can
+ * legitimately contain either character inside quotes.
+ */
+export function fromCsv(input: string): ParsedCsv {
+  let text = input.replace(/^﻿/, ''); // our own BOM
+
+  let delimiter: string | null = null;
+  const sep = /^sep=(.)\r?\n/i.exec(text);
+  if (sep) {
+    delimiter = sep[1];
+    text = text.slice(sep[0].length);
+  }
+  if (!delimiter) {
+    const headerLine = text.split(/\r?\n/, 1)[0] ?? '';
+    const semis = (headerLine.match(/;/g) ?? []).length;
+    const commas = (headerLine.match(/,/g) ?? []).length;
+    delimiter = semis > commas ? ';' : ',';
+  }
+
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = '';
+  let inQuotes = false;
+
+  const endField = () => {
+    row.push(unguard(field));
+    field = '';
+  };
+  const endRow = () => {
+    endField();
+    // Skip blank trailing lines rather than emitting a phantom one-empty-field row.
+    if (!(row.length === 1 && row[0] === '')) rows.push(row);
+    row = [];
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += ch;
+      }
+      continue;
+    }
+    if (ch === '"' && field === '') {
+      inQuotes = true;
+    } else if (ch === delimiter) {
+      endField();
+    } else if (ch === '\r') {
+      // swallow; the \n handles the row break
+    } else if (ch === '\n') {
+      endRow();
+    } else {
+      field += ch;
+    }
+  }
+  if (field !== '' || row.length > 0) endRow();
+
+  const headers = (rows.shift() ?? []).map((h) => h.trim().toLowerCase());
+  return { headers, rows };
+}
+
+/**
+ * Undo `toCsv`'s formula-injection guard, and ONLY that.
+ *
+ * The guard prefixes a `'` to fields starting with = + - @ tab or CR. Stripping every
+ * leading apostrophe would corrupt legitimate values (a name like `'t Hooft`, common in
+ * Dutch), so this strips one only when what follows is a character the guard actually
+ * targets.
+ */
+function unguard(value: string): string {
+  return /^'[=+\-@\t\r]/.test(value) ? value.slice(1) : value;
+}

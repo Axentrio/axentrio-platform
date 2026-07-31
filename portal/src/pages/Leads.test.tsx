@@ -16,9 +16,10 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const { hasFeatureMock, apiGet, apiDownload } = vi.hoisted(() => ({
+const { hasFeatureMock, apiGet, apiPost, apiDownload } = vi.hoisted(() => ({
   hasFeatureMock: vi.fn<(_key: string) => boolean>(),
   apiGet: vi.fn(),
+  apiPost: vi.fn(),
   apiDownload: vi.fn(),
 }));
 
@@ -36,7 +37,7 @@ vi.mock('../queries/useEntitlementsQueries', async () => {
 vi.mock('../services/apiClient', () => ({
   api: {
     get: apiGet,
-    post: vi.fn(),
+    post: apiPost,
     put: vi.fn(),
     patch: vi.fn(),
     delete: vi.fn(),
@@ -208,5 +209,38 @@ describe('Leads page — filtering', () => {
       const urls = apiGet.mock.calls.map((c) => String(c[0]));
       expect(urls.some((u) => u.includes('status=archived'))).toBe(true);
     });
+  });
+});
+
+describe('Leads page — manual entry discloses a merge', () => {
+  it('tells the user when their new lead MERGED into an existing contact', async () => {
+    // The count will not match what they typed. Saying so is the difference between
+    // "it worked" and "did it lose my data?".
+    const { toast } = await import('sonner');
+    apiPost.mockResolvedValue({ id: 'lead-1', created: false });
+    renderUI([BASIC_LEAD]);
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /add lead/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /add lead/i }));
+
+    const email = await screen.findByPlaceholderText(/email/i);
+    await userEvent.type(email, 'dup@example.com');
+    await userEvent.click(screen.getByRole('button', { name: /^add lead$/i }));
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith(expect.stringMatching(/already had this contact/i));
+    });
+  });
+
+  it('disables save until an email or phone is given', async () => {
+    renderUI([BASIC_LEAD]);
+    await waitFor(() => expect(screen.getByRole('button', { name: /add lead/i })).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /add lead/i }));
+
+    const save = await screen.findByRole('button', { name: /^add lead$/i });
+    // A lead with neither is unreachable and violates the identity constraint.
+    expect(save).toBeDisabled();
+    await userEvent.type(screen.getByPlaceholderText(/phone/i), '32475464421');
+    expect(save).toBeEnabled();
   });
 });

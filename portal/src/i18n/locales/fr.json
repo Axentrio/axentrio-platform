@@ -184,6 +184,29 @@
       "saved": "Conservation mise à jour",
       "error": "Impossible de mettre à jour la conservation",
       "adminOnly": "Seuls les administrateurs peuvent modifier ce réglage."
+    },
+    "add": {
+      "button": "Ajouter un lead",
+      "title": "Ajouter un lead",
+      "body": "Pour un client qui a appelé ou est passé. Un e-mail ou un numéro de téléphone est requis — c’est ainsi que nous le reconnaissons s’il vous recontacte.",
+      "name": "Nom",
+      "email": "E-mail",
+      "phone": "Téléphone",
+      "notes": "De quoi ont-ils besoin ?",
+      "save": "Ajouter le lead",
+      "created": "Lead ajouté",
+      "merged": "Nous avions déjà ce contact — vos notes lui ont été ajoutées.",
+      "error": "Impossible d’ajouter le lead"
+    },
+    "import": {
+      "button": "Importer un CSV",
+      "title": "Importer des leads",
+      "summary": "{{total}} lignes : {{create}} nouveaux, {{merge}} seront ajoutés à des contacts existants, {{reject}} ignorés.",
+      "rejectedRow": "Ligne {{line}} ignorée — {{reason}}",
+      "confirm": "Importer",
+      "done": "{{created}} ajoutés, {{merged}} fusionnés avec des leads existants.",
+      "truncated": "Seules les premières lignes de ce fichier seront importées.",
+      "error": "Impossible de lire ce fichier"
     }
   },
   "socialMedia": {

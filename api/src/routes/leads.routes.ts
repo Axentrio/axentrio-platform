@@ -24,6 +24,9 @@ import { getEntitlements } from '../billing/entitlements';
 import { getExporter, toCsv, EXCEL_CSV } from '../analytics/exporters';
 import { eraseLead } from '../leads/lead-erasure.service';
 import { computeLeadReadiness } from '../leads/readiness';
+import { upsertLead } from '../leads/lead-capture.service';
+import { isErasedDedupeKey } from '../leads/lead-tombstone';
+import { previewLeadImport } from '../leads/lead-import.service';
 import {
   readRetentionDays,
   MIN_RETENTION_DAYS,
@@ -389,6 +392,148 @@ router.get(
       res.setHeader('X-Export-Row-Limit', String(EXPORT_MAX_ROWS));
     }
     res.status(200).send(csv);
+  }),
+);
+
+/**
+ * Create a lead by hand — the "customer just phoned" path.
+ *
+ * Open to every seat that can see leads, deliberately: the agent who took the call is
+ * the person who needs to record it, and creating a lead is additive, unlike export or
+ * erasure. Goes through `upsertLead`, so a manual entry for someone already in the list
+ * MERGES rather than duplicating — and the response says which happened, because a
+ * silent merge looks like the save failed.
+ */
+router.post(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+    const email = str(body.email);
+    const phone = str(body.phone);
+
+    if (!email && !phone) {
+      throw new BadRequestError('Provide an email or a phone number');
+    }
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new BadRequestError('Invalid email');
+    }
+    // Erasure and retention both remove people on request; a manual entry must not be
+    // able to walk that back by reusing the reserved namespace.
+    if (isErasedDedupeKey(email) || isErasedDedupeKey(phone)) {
+      throw new BadRequestError('Reserved identifier');
+    }
+
+    const result = await upsertLead({
+      dataSource: AppDataSource,
+      tenantId,
+      source: 'manual',
+      channel: 'widget',
+      name: str(body.name),
+      email,
+      phone,
+      notes: str(body.notes),
+    });
+    if (!result) throw new BadRequestError('Could not create the lead');
+
+    await logAudit(req.userId!, 'leads.created_manually', 'lead', result.leadId, tenantId, {
+      merged: !result.inserted,
+    });
+
+    sendSuccess(res, {
+      id: result.leadId,
+      // `false` means it merged onto an existing contact — the UI must say so.
+      created: result.inserted,
+    });
+  }),
+);
+
+/**
+ * CSV import — PREVIEW. Writes nothing.
+ *
+ * The number that matters is `merge`: how many rows land on a contact you already have.
+ * A blind import that silently merges looks like data loss and one that silently
+ * duplicates looks like a bug, so the operator sees both counts before committing.
+ *
+ * The client posts the CSV text on both calls rather than the server caching it between
+ * them — statelessness is worth more than the re-upload at SMB file sizes.
+ */
+router.post(
+  '/import/preview',
+  requireRole('admin', 'supervisor'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const csv = (req.body ?? {}).csv;
+    if (typeof csv !== 'string' || !csv.trim()) throw new BadRequestError('Provide CSV text');
+
+    try {
+      sendSuccess(res, await previewLeadImport(AppDataSource, tenantId, csv));
+    } catch (error) {
+      throw new BadRequestError(error instanceof Error ? error.message : 'Could not read the file');
+    }
+  }),
+);
+
+/** CSV import — COMMIT. Only rows the preview classified as create/merge are written. */
+router.post(
+  '/import/commit',
+  requireRole('admin', 'supervisor'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.tenantId!;
+    await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
+
+    const csv = (req.body ?? {}).csv;
+    if (typeof csv !== 'string' || !csv.trim()) throw new BadRequestError('Provide CSV text');
+
+    let preview;
+    try {
+      // Re-classified server-side rather than trusting a client-supplied row list: the
+      // rejection rules (reserved identifiers above all) must not be bypassable by
+      // posting a hand-edited payload straight to commit.
+      preview = await previewLeadImport(AppDataSource, tenantId, csv);
+    } catch (error) {
+      throw new BadRequestError(error instanceof Error ? error.message : 'Could not read the file');
+    }
+
+    let created = 0;
+    let merged = 0;
+    const failed: number[] = [];
+    for (const row of preview.rows) {
+      if (row.outcome === 'reject') continue;
+      try {
+        const result = await upsertLead({
+          dataSource: AppDataSource,
+          tenantId,
+          source: 'import',
+          channel: 'widget',
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          notes: row.notes,
+        });
+        if (!result) failed.push(row.line);
+        else if (result.inserted) created += 1;
+        else merged += 1;
+      } catch {
+        // One bad row must not abandon the rest of the file half-imported.
+        failed.push(row.line);
+      }
+    }
+
+    await logAudit(req.userId!, 'leads.imported', 'lead', tenantId, tenantId, {
+      created,
+      merged,
+      rejected: preview.reject,
+      failed: failed.length,
+      truncated: preview.truncated,
+    });
+
+    sendSuccess(res, { created, merged, rejected: preview.reject, failedLines: failed });
   }),
 );
 

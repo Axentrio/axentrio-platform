@@ -186,6 +186,29 @@
       "saved": "Retention updated",
       "error": "Could not update retention",
       "adminOnly": "Only workspace admins can change this."
+    },
+    "add": {
+      "button": "Add lead",
+      "title": "Add a lead",
+      "body": "For a customer who called or walked in. An email or phone number is required — it is how we recognise them if they contact you again.",
+      "name": "Name",
+      "email": "Email",
+      "phone": "Phone",
+      "notes": "What do they need?",
+      "save": "Add lead",
+      "created": "Lead added",
+      "merged": "We already had this contact — your notes were added to them.",
+      "error": "Could not add the lead"
+    },
+    "import": {
+      "button": "Import CSV",
+      "title": "Import leads",
+      "summary": "{{total}} rows: {{create}} new, {{merge}} will be added to contacts you already have, {{reject}} skipped.",
+      "rejectedRow": "Line {{line}} skipped — {{reason}}",
+      "confirm": "Import",
+      "done": "{{created}} added, {{merged}} merged into existing leads.",
+      "truncated": "Only the first rows of this file will be imported.",
+      "error": "Could not read that file"
     }
   },
   "socialMedia": {

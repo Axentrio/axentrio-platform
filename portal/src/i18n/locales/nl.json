@@ -184,6 +184,29 @@
       "saved": "Bewaartermijn bijgewerkt",
       "error": "Kon bewaartermijn niet bijwerken",
       "adminOnly": "Alleen beheerders kunnen dit wijzigen."
+    },
+    "add": {
+      "button": "Lead toevoegen",
+      "title": "Lead toevoegen",
+      "body": "Voor een klant die belde of langskwam. Een e-mailadres of telefoonnummer is verplicht — daarmee herkennen we hen als ze opnieuw contact opnemen.",
+      "name": "Naam",
+      "email": "E-mailadres",
+      "phone": "Telefoon",
+      "notes": "Wat hebben ze nodig?",
+      "save": "Lead toevoegen",
+      "created": "Lead toegevoegd",
+      "merged": "We hadden dit contact al — je notities zijn eraan toegevoegd.",
+      "error": "Kon de lead niet toevoegen"
+    },
+    "import": {
+      "button": "CSV importeren",
+      "title": "Leads importeren",
+      "summary": "{{total}} rijen: {{create}} nieuw, {{merge}} worden toegevoegd aan bestaande contacten, {{reject}} overgeslagen.",
+      "rejectedRow": "Regel {{line}} overgeslagen — {{reason}}",
+      "confirm": "Importeren",
+      "done": "{{created}} toegevoegd, {{merged}} samengevoegd met bestaande leads.",
+      "truncated": "Alleen de eerste rijen van dit bestand worden geïmporteerd.",
+      "error": "Kon dat bestand niet lezen"
     }
   },
   "socialMedia": {

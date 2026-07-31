@@ -12,6 +12,7 @@ if (!process.env.TEST_DATABASE_URL) {
 
 import { DataSource } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
+import { INSTALL_TRANSCRIPT_REVISION_TRIGGER } from '../database/sql/transcript-revision.sql';
 import { beforeAll, afterEach } from 'vitest';
 
 // Worker DB name derived the same way env-setup.ts did.
@@ -48,6 +49,14 @@ beforeAll(async () => {
   }
   // Idempotent: creates only missing tables/columns. afterEach keeps rows clean.
   await AppDataSource.synchronize();
+
+  // Triggers are NOT part of entity metadata, so synchronize() cannot create them.
+  // Installed from the same shared DDL the migration uses, so the test schema behaves
+  // like prod: without this the transcript revision would never bump under test and
+  // every enrichment compare-and-swap assertion would pass while proving nothing.
+  for (const stmt of INSTALL_TRANSCRIPT_REVISION_TRIGGER) {
+    await AppDataSource.query(stmt);
+  }
 });
 
 afterEach(async () => {

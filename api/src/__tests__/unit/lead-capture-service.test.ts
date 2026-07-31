@@ -186,6 +186,22 @@ describe('upsertLead — fan-out (D10)', () => {
     expect(emitWebhookEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('lead.created carries leadId + dedupeKey so a consumer can patch/delete, not only insert', async () => {
+    // The original payload had neither, which is why the outbound webhook could
+    // never support real CRM sync or propagate an erasure.
+    const ds = fakeDs({ id: 'lead-1', inserted: true });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, botId: 'bot-7', source: 'tool',
+      channel: 'widget', email: 'A@B.com', name: 'Achraf',
+    });
+    await new Promise((r) => setImmediate(r));
+    const event = emitWebhookEvent.mock.calls[0][0];
+    expect(event.type).toBe('lead.created');
+    expect(event.lead.leadId).toBe('lead-1');
+    expect(event.lead.dedupeKey).toBe('email:a@b.com'); // normalized, matches the DB anchor
+    expect(event.lead.botId).toBe('bot-7');
+  });
+
   it('threads the request summary (notes) into the lead.created webhook AND the operator notification', async () => {
     const ds = fakeDs({ id: 'lead-1', inserted: true });
     await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com', notes: 'Leak under the sink, Kerkstraat 12' });
@@ -206,7 +222,7 @@ describe('upsertLead — fan-out (D10)', () => {
     expect(emitWebhookEvent).not.toHaveBeenCalled();
   });
 
-  it('re-notifies the operator (notification only) when the request first lands on an existing channel lead', async () => {
+  it('re-notifies the operator AND emits lead.updated when the request first lands on an existing channel lead', async () => {
     // Hook 1 made the lead earlier (no notes); now capture_lead adds the summary → UPDATE.
     const ds = fakeDs({ id: 'lead-9', inserted: false, old_notes: null });
     await upsertLead({
@@ -214,14 +230,26 @@ describe('upsertLead — fan-out (D10)', () => {
       externalUserId: '32475464421', phone: '32475464421', notes: 'Burst pipe in the basement',
     });
     await new Promise((r) => setImmediate(r));
-    // NO duplicate webhook/email (that already fired at first contact).
-    expect(emitWebhookEvent).not.toHaveBeenCalled();
+
     // ONE operator notification carrying the request, with a distinct dedupe key.
     expect(createForTenant).toHaveBeenCalledTimes(1);
     const notif = createForTenant.mock.calls[0][0];
     expect(notif.message).toContain('Burst pipe in the basement');
     expect(notif.dedupeBase).toBe('lead:lead-9:request');
     expect(notif.data.notes).toBe('Burst pipe in the basement');
+
+    // Exactly ONE webhook, and it is `lead.updated` — NOT a second `lead.created`.
+    // On a channel the contact arrives before the request, so first contact fires
+    // lead.created with a bare phone number; without lead.updated a downstream CRM
+    // would never learn what the customer actually wanted.
+    expect(emitWebhookEvent).toHaveBeenCalledTimes(1);
+    const event = emitWebhookEvent.mock.calls[0][0];
+    expect(event.type).toBe('lead.updated');
+    expect(event.changed).toEqual(['notes']);
+    expect(event.lead.notes).toBe('Burst pipe in the basement');
+    // leadId + dedupeKey are what make the payload patchable downstream.
+    expect(event.lead.leadId).toBe('lead-9');
+    expect(event.lead.dedupeKey).toBe('whatsapp:32475464421');
   });
 
   it('does NOT re-notify when notes were already present (true re-touch, not a first landing)', async () => {

@@ -41,7 +41,13 @@ import { ChatSession } from './ChatSession';
 import { Bot } from './Bot';
 
 export type LeadSource = 'channel' | 'tool' | 'booking' | 'manual' | 'import' | 'webhook';
-export type LeadStatus = 'new' | 'archived';
+/**
+ * Worklist state. `new` ↔ `archived` are the operator's two states; `erased` is
+ * TERMINAL — set only by `eraseLead`, never reachable via the worklist PATCH, and
+ * never transitioned out of. An erased row is a husk kept for audit: `deleted_at`
+ * is set so it leaves every list, export and aggregate.
+ */
+export type LeadStatus = 'new' | 'archived' | 'erased';
 
 @Entity('chatbot_leads')
 @Index(['tenantId', 'createdAt'])
@@ -101,6 +107,22 @@ export class Lead {
 
   @Column({ type: 'jsonb', default: {} })
   metadata!: Record<string, unknown>;
+
+  /**
+   * Operator override for the readiness score (0-100). NULL = use the computed value.
+   *
+   * Only the override is stored; the score itself is computed on read from facts already
+   * on the row, so it cannot go stale when a booking is cancelled. A human override is
+   * terminal — it always wins over the computed value.
+   */
+  @Column({ type: 'smallint', name: 'readiness_override', nullable: true })
+  readinessOverride?: number | null;
+
+  @Column({ type: 'uuid', name: 'readiness_override_by', nullable: true })
+  readinessOverrideBy?: string | null;
+
+  @Column({ type: 'timestamptz', name: 'readiness_override_at', nullable: true })
+  readinessOverrideAt?: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

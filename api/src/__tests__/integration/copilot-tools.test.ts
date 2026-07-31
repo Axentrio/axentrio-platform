@@ -337,6 +337,11 @@ describe('getEntitlements', () => {
     expect(result.features.platformAssistant).toBe(true);
     expect(result.features.calendarSync).toBe(true);
     expect(result.features.crm).toBe(false); // Pro doesn't include CRM
+    expect(result.features.leadEnrichment).toBe(true); // Pro DOES include structured leads
+    // Entitled on Pro but opt-in, so it reads false until the tenant enables it.
+    // The copilot must report the EFFECTIVE value or it will tell an owner a
+    // feature is live when the assistant is not actually doing it.
+    expect(result.features.proactiveLeadCapture).toBe(false);
     expect(Object.keys(result.features).sort()).toEqual(
       [
         'aiBusinessInsights',
@@ -354,14 +359,21 @@ describe('getEntitlements', () => {
         'handoff',
         'hideWidgetAttribution',
         'leadCapture',
+        'leadEnrichment',
         'platformAssistant',
+        'proactiveLeadCapture',
         'unifiedInbox',
       ].sort(),
     );
     // Two-layer contract: ceiling mirrors features here (no tenant toggles),
     // and nothing is tenant-disabled.
-    expect(result.entitledFeatures).toEqual(result.features);
+    // Ceiling and effective now differ ONLY by opt-in keys: proactiveLeadCapture is
+    // in the Pro plan but off until the tenant asks for it.
+    expect(result.entitledFeatures).toEqual({ ...result.features, proactiveLeadCapture: true });
+    // Never enabled != switched off. The assistant must not tell the owner they
+    // turned something off that they never turned on.
     expect(result.disabledByTenant).toEqual([]);
+    expect(result.availableNotEnabled).toEqual(['proactiveLeadCapture']);
   });
 
   it('returns Essential features when the tenant is on Essential', async () => {

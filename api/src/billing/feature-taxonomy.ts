@@ -44,6 +44,16 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
   channelInstagram: { label: 'Instagram DMs', group: 'channels' },
   channelTelegram: { label: 'Telegram', group: 'channels' },
   leadCapture: { label: 'Lead capture', group: 'leads' },
+  leadEnrichment: {
+    label: 'Structured lead data',
+    group: 'leads',
+    requires: 'leadCapture',
+  },
+  proactiveLeadCapture: {
+    label: 'Ask for missing contact details',
+    group: 'leads',
+    requires: 'leadCapture',
+  },
   crm: { label: 'CRM', group: 'leads', requires: 'leadCapture' },
   unifiedInbox: { label: 'Unified inbox', group: 'inbox' },
   handoff: { label: 'Human handoff', group: 'inbox' },

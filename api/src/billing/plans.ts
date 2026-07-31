@@ -29,6 +29,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       bookings: false,
       calendarSync: false,
       leadCapture: false,
+      leadEnrichment: false,
+      proactiveLeadCapture: false,
       platformAssistant: false,
       crm: false,
       hideWidgetAttribution: false,
@@ -58,6 +60,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       bookings: false,
       calendarSync: false,
       leadCapture: true, // basic — module-level access
+      leadEnrichment: false, // Essential = passive contact capture only
+      proactiveLeadCapture: false,
       platformAssistant: false,
       crm: false,
       hideWidgetAttribution: false, // "Powered by Axentrio" visible
@@ -90,7 +94,13 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       unifiedInbox: true,
       bookings: true,
       calendarSync: true, // Cal.com only in v1 per D23
-      leadCapture: true, // advanced semantics — custom fields, routing, export — gated at PR/M6 layer
+      leadCapture: true,
+      // Pro's real lead differentiation lives in THIS flag, not in a comment:
+      // structured fields (address, service, preferred date, booking status,
+      // list price). Note /leads/export is gated on leadCapture, so export is
+      // NOT a Pro differentiator — Essential exports too.
+      leadEnrichment: true,
+      proactiveLeadCapture: true, // ceiling only; tenant toggle defaults OFF
       platformAssistant: true,
       crm: false,
       hideWidgetAttribution: true, // watermark removed
@@ -122,6 +132,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       bookings: true,
       calendarSync: true,
       leadCapture: true,
+      leadEnrichment: true,
+      proactiveLeadCapture: true, // ceiling only; tenant toggle defaults OFF
       platformAssistant: true,
       crm: true, // entitlement gate true; UI shows Coming Soon per D25
       hideWidgetAttribution: true,

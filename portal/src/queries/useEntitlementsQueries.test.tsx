@@ -45,6 +45,8 @@ const ESSENTIAL_FEATURES = {
   bookings: false,
   calendarSync: false,
   leadCapture: true,
+  leadEnrichment: false,
+  proactiveLeadCapture: false,
   platformAssistant: false,
   crm: false,
   hideWidgetAttribution: false,

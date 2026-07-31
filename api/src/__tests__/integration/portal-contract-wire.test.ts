@@ -77,6 +77,8 @@ import { Gap } from '../../database/entities/Gap';
 import { InsightExperiment } from '../../database/entities/InsightExperiment';
 import { InsightDigest } from '../../database/entities/InsightDigest';
 import { Lead } from '../../database/entities/Lead';
+import { logAudit } from '../../utils/audit';
+import { getConfiguredOrigins } from '../../security/cors';
 import { createTestTenant, createTestUser } from '../helpers/factories';
 
 function setAuth(opts: { tenantId: string; userId: string }) {
@@ -135,7 +137,9 @@ describe('wire contract — /entitlements', () => {
       'handoff',
       'hideWidgetAttribution',
       'leadCapture',
+      'leadEnrichment',
       'platformAssistant',
+      'proactiveLeadCapture',
       'unifiedInbox',
     ]);
     expect(keysOf(data.plans[0])).toEqual([
@@ -362,7 +366,68 @@ describe('leads routes — export + status', () => {
     const res = await request(app).get('/api/v1/leads/export');
     expect(res.status).toBe(200); // Pro is 403 on /analytics/export?dataset=leads but 200 here
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status,notes');
+    // Excel-safe framing: UTF-8 BOM first (so é/ë/ç in NL/FR names survive), then
+    // Excel's `sep=` hint (honoured in EVERY locale, which is what makes one file
+    // open correctly in both a Belgian `;` Excel and a US `,` one).
+    expect(res.text.startsWith('﻿sep=;\r\n')).toBe(true);
+    const lines = res.text.replace(/^﻿/, '').split('\r\n');
+    expect(lines[0]).toBe('sep=;');
+    expect(lines[1]).toBe('created_at;name;email;phone;channel;source;status;notes');
+  });
+
+  it('403s the leads export for an `agent` seat but allows a supervisor (bulk PII egress)', async () => {
+    const tenant = await seedProTenant(); // leaves auth.role = 'admin'
+    try {
+      const agent = await createTestUser(tenant.id, { role: 'agent' });
+      setAuth({ tenantId: tenant.id, userId: agent.id });
+      auth.role = 'agent'; // `agent` is the DEFAULT auto-provision role
+      expect((await request(app).get('/api/v1/leads/export')).status).toBe(403);
+
+      const supervisor = await createTestUser(tenant.id, { role: 'supervisor' });
+      setAuth({ tenantId: tenant.id, userId: supervisor.id });
+      auth.role = 'supervisor';
+      expect((await request(app).get('/api/v1/leads/export')).status).toBe(200);
+    } finally {
+      auth.role = 'admin'; // hoisted + shared across tests — must not leak
+    }
+  });
+
+  it('exposes the export headers to the portal via CORS (portal is a different origin)', async () => {
+    await seedProTenant();
+    // Use an origin this deployment actually allows, so the test asserts the
+    // expose-headers POLICY rather than whether one hardcoded hostname is in the
+    // allowlist (an unmatched origin gets no CORS headers at all, which would
+    // make this pass/fail for the wrong reason).
+    const allowedOrigin = getConfiguredOrigins().find((o) => o !== '*');
+    const req0 = request(app).get('/api/v1/leads/export');
+    const res = await (allowedOrigin ? req0.set('Origin', allowedOrigin) : req0);
+    expect(res.status).toBe(200);
+
+    // Without Access-Control-Expose-Headers the browser hides everything except
+    // the 7 CORS-safelisted headers, so the download filename silently falls back
+    // and a truncated export is never surfaced — while same-process supertest
+    // assertions on res.headers still pass. Assert the EXPOSURE, not the header.
+    const exposed = String(res.headers['access-control-expose-headers'] ?? '').toLowerCase();
+    expect(exposed).toContain('content-disposition');
+    expect(exposed).toContain('x-export-truncated');
+  });
+
+  it('audits the leads export with the row count that actually left', async () => {
+    await seedProTenant();
+    vi.mocked(logAudit).mockClear();
+
+    const res = await request(app).get('/api/v1/leads/export');
+    expect(res.status).toBe(200);
+
+    // logAudit is module-mocked in this suite, so assert the call, not a DB row.
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.any(String),
+      'leads.exported',
+      'lead',
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ format: 'csv', truncated: false, rowCount: expect.any(Number) }),
+    );
   });
 
   it('marks a lead handled (PATCH status=archived); validates value + scopes to tenant', async () => {

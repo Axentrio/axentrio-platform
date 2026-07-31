@@ -28,6 +28,11 @@ export type ToggleableFeatureKey =
   | 'channelInstagram'
   | 'channelTelegram'
   | 'leadCapture'
+  // Deliberately toggleable even though it has a `requires` parent. Proactively
+  // soliciting a phone number or address from an EU consumer changes WHAT personal
+  // data the bot asks for — that is the controller's instruction to give, not a
+  // side-effect of which plan they bought. Defaults OFF at every tier.
+  | 'proactiveLeadCapture'
   | 'bookings'
   | 'gapInsights';
 
@@ -40,6 +45,21 @@ export interface PlanFeatures {
   bookings: boolean;
   calendarSync: boolean;
   leadCapture: boolean;
+  /**
+   * Structured lead data: the wide Pro column set (address, requested service,
+   * preferred date, booking status, list price, tags) plus, once Release B ships,
+   * conversation enrichment. Gates EXPOSURE of those columns — distinct from
+   * whether the background extractor is eligible to run for a tenant, which is a
+   * separate concern so Essential can still get a proper request summary.
+   */
+  leadEnrichment: boolean;
+  /**
+   * Whether the bot may ASK for missing contact details. Ceiling only — the
+   * tenant's own toggle defaults OFF, so an entitled tenant still opts in.
+   * Passive capture (the measured `## CONTACT DETAILS` behaviour) is unaffected
+   * and stays on at every paid tier.
+   */
+  proactiveLeadCapture: boolean;
   platformAssistant: boolean;
   crm: boolean;
   hideWidgetAttribution: boolean;

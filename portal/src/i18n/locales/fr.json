@@ -105,18 +105,29 @@
     "loadMore": "Charger plus",
     "empty": {
       "title": "Aucun lead pour l'instant",
-      "body": "Dès qu'un visiteur partage un e-mail ou un téléphone — ou vous contacte sur un canal connecté — il apparaîtra ici."
+      "body": "Dès qu'un visiteur partage un e-mail ou un téléphone — ou vous contacte sur un canal connecté — il apparaîtra ici.",
+      "filtered": "Aucun lead ne correspond à ce filtre"
     },
     "table": {
       "name": "Nom",
       "contact": "Contact",
       "source": "Source",
-      "capturedAt": "Capturé"
+      "capturedAt": "Capturé",
+      "request": "Demande",
+      "status": "Statut",
+      "service": "Service",
+      "appointment": "Rendez-vous",
+      "address": "Adresse",
+      "preferredAt": "Souhaité",
+      "booking": "Réservation",
+      "noName": "Sans nom",
+      "reachVia": "Répondre via {{channel}}"
     },
     "detail": {
       "fromSession": "Depuis la session",
       "notes": "Notes",
-      "createdAt": "Créé le"
+      "createdAt": "Créé le",
+      "conversations": "({{count}} conversations)"
     },
     "locked": {
       "title": "Capture de leads",
@@ -126,6 +137,82 @@
         "2": "Champs personnalisés et règles d'attribution pour que la bonne personne reçoive le bon lead.",
         "3": "Exportez les leads vers CSV ou votre CRM via webhook."
       }
+    },
+    "export": {
+      "label": "Exporter vers Excel",
+      "error": "Échec de l'exportation",
+      "forbidden": "Seuls les administrateurs et les superviseurs peuvent exporter les leads.",
+      "truncated": "Seuls les {{limit}} leads les plus récents ont été exportés. Réduisez la plage de dates pour exporter le reste."
+    },
+    "filter": {
+      "all": "Tous",
+      "new": "Ouverts",
+      "archived": "Traités",
+      "searchPlaceholder": "Nom, e-mail, téléphone ou demande",
+      "searchLabel": "Rechercher des leads",
+      "apply": "Rechercher",
+      "clear": "Effacer",
+      "label": "Filtrer les leads par statut"
+    },
+    "status": {
+      "new": "Ouvert",
+      "archived": "Traité"
+    },
+    "erase": {
+      "confirm": "Effacer",
+      "thisLead": "ce lead",
+      "done": "Données personnelles effacées. La conversation a été conservée.",
+      "forbidden": "Seuls les administrateurs et les superviseurs peuvent effacer un lead.",
+      "error": "Impossible d’effacer ce lead",
+      "title": "Effacer les données personnelles de ce lead ?",
+      "body": "Cela supprime définitivement le nom, les coordonnées et la demande de ce lead, des alertes le concernant et de tout ce qui a déjà été envoyé à un système connecté. Cette action est irréversible. La conversation elle-même est conservée."
+    },
+    "actions": {
+      "erase": "Effacer les données personnelles",
+      "archive": "Marquer comme traité",
+      "reopen": "Réouvrir"
+    },
+    "retention": {
+      "title": "Durée de conservation des leads",
+      "body": "Pour les leads plus anciens, le nom, les coordonnées et la demande sont effacés définitivement, et tout système connecté reçoit l’instruction de supprimer sa copie. Action irréversible. Les leads avec un rendez-vous à venir, ou que vous avez notés vous-même, ne sont jamais supprimés.",
+      "keep": "Tout conserver",
+      "6m": "6 mois",
+      "1y": "1 an",
+      "2y": "2 ans",
+      "confirm": "Effacer les leads de plus de {{days}} jours, dès ce soir ? Cela s’exécutera chaque jour et est irréversible.",
+      "confirmYes": "Oui, effacer les anciens leads",
+      "saved": "Conservation mise à jour",
+      "error": "Impossible de mettre à jour la conservation",
+      "adminOnly": "Seuls les administrateurs peuvent modifier ce réglage."
+    },
+    "add": {
+      "button": "Ajouter un lead",
+      "title": "Ajouter un lead",
+      "body": "Pour un client qui a appelé ou est passé. Un e-mail ou un numéro de téléphone est requis — c’est ainsi que nous le reconnaissons s’il vous recontacte.",
+      "name": "Nom",
+      "email": "E-mail",
+      "phone": "Téléphone",
+      "notes": "De quoi ont-ils besoin ?",
+      "save": "Ajouter le lead",
+      "created": "Lead ajouté",
+      "merged": "Nous avions déjà ce contact — vos notes lui ont été ajoutées.",
+      "error": "Impossible d’ajouter le lead"
+    },
+    "import": {
+      "button": "Importer un CSV",
+      "title": "Importer des leads",
+      "summary": "{{total}} lignes : {{create}} nouveaux, {{merge}} seront ajoutés à des contacts existants, {{reject}} ignorés.",
+      "rejectedRow": "Ligne {{line}} ignorée — {{reason}}",
+      "confirm": "Importer",
+      "done": "{{created}} ajoutés, {{merged}} fusionnés avec des leads existants.",
+      "truncated": "Seules les premières lignes de ce fichier seront importées.",
+      "error": "Impossible de lire ce fichier"
+    },
+    "sync": {
+      "sent": "Envoyé à votre CRM {{when}}",
+      "failed": "Impossible d’envoyer à votre CRM — dernière tentative {{when}}",
+      "neverSent": "Pas encore envoyé à votre CRM",
+      "retrying": "Envoi vers votre CRM toujours en cours"
     }
   },
   "socialMedia": {
@@ -597,6 +684,18 @@
       "loadError": "Impossible de charger l'état de la facturation : {{error}}",
       "unknownError": "erreur inconnue",
       "subscribedJustNow": "Abonnement reçu — en attente de confirmation Stripe. Cette page se mettra à jour automatiquement."
+    },
+    "webhooks": {
+      "title": "Envoyer les leads vers votre CRM",
+      "subtitle": "Envoyez les leads nouveaux et mis à jour vers une URL — connectez HubSpot, Salesforce, Odoo, Zoho ou Pipedrive via Zapier, Make ou n8n. Il s’agit d’un envoi unidirectionnel, pas d’une synchronisation bidirectionnelle.",
+      "empty": "Aucun endpoint pour le moment.",
+      "add": "Ajouter un endpoint",
+      "remove": "Supprimer l’endpoint",
+      "saved": "Webhooks enregistrés",
+      "error": "Impossible d’enregistrer les webhooks",
+      "deletedWarning": "Sans lead.deleted, votre CRM conserve sa copie lorsqu’un client demande l’effacement — vous devriez la supprimer manuellement.",
+      "secretSet": "Clé de signature définie — saisissez pour la remplacer",
+      "secretNew": "Clé de signature (générée si laissée vide)"
     }
   },
   "ai": {
@@ -2130,6 +2229,13 @@
         "gaps": "Lacunes",
         "leads": "Prospects"
       }
+    },
+    "demand": {
+      "title": "Ce que demandent les clients",
+      "denominator": "Sur les {{classified}} des {{total}} leads que nous avons pu associer à un service, ces {{days}} derniers jours.",
+      "noServices": "Aucun service associé à un lead pour l’instant — cela se remplit au fur et à mesure des réservations.",
+      "tagsTitle": "Sujets mentionnés (déduits par l’IA)",
+      "tagsDenominator": "Sur les {{tagged}} conversations que nous avons pu analyser."
     }
   },
   "analytics": {
@@ -2483,6 +2589,14 @@
       "gapInsights": {
         "label": "Indicateur de réussite",
         "description": "Analyses IA des lacunes et des résultats des conversations."
+      },
+      "proactiveLeadCapture": {
+        "label": "Demander les informations manquantes",
+        "description": "Laissez votre bot demander poliment un numéro de téléphone ou un e-mail lorsqu'il n'en a pas. Désactivé par défaut — votre bot enregistre toujours les informations qu'un client donne de lui-même."
+      },
+      "leadEnrichment": {
+        "label": "Données de leads structurées",
+        "description": "Adresse, service demandé, date souhaitée et statut de réservation sur chaque lead."
       }
     },
     "allChannels": "Tous les canaux",

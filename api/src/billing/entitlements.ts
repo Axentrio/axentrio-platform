@@ -12,7 +12,7 @@ import { cached, invalidate } from '../utils/cache';
 import { logger } from '../utils/logger';
 import { PLANS } from './plans';
 import { enforceFeatureDependencies } from './feature-taxonomy';
-import { TENANT_TOGGLEABLE_FEATURES } from './feature-toggles';
+import { TENANT_TOGGLEABLE_FEATURES, isOptInFeature } from './feature-toggles';
 import type { TenantFeatureToggles } from '../contracts/entitlements';
 import type { Entitlements, FeatureKey, InternalPlanId } from './types';
 
@@ -172,6 +172,10 @@ export function entitlementsFor(
   if (billable) {
     for (const key of TENANT_TOGGLEABLE_FEATURES) {
       if (featureToggles[key] === false) features[key] = false;
+      // Opt-in features invert the default: absent preference means OFF, so being
+      // entitled is not the same as having switched it on. Used for toggles that
+      // change what the bot asks a consumer for (see OPT_IN_FEATURES).
+      else if (featureToggles[key] !== true && isOptInFeature(key)) features[key] = false;
     }
     // Cascade a toggled-off parent to its children (e.g. bookings off ⇒
     // calendarSync off; gapInsights off ⇒ gapEvidence/aiBusinessInsights off).

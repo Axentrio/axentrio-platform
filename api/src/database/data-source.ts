@@ -40,6 +40,7 @@ import { FaqSection } from './entities/FaqSection';
 import { FaqItem } from './entities/FaqItem';
 import { DemandSignal } from './entities/DemandSignal';
 import { Lead } from './entities/Lead';
+import { LeadConversation } from './entities/LeadConversation';
 import { CopilotDoc } from './entities/CopilotDoc';
 import { CopilotConversation } from './entities/CopilotConversation';
 import { CopilotMessage } from './entities/CopilotMessage';
@@ -112,6 +113,7 @@ export const AppDataSource = new DataSource({
     FaqItem,
     DemandSignal,
     Lead,
+    LeadConversation,
     CopilotDoc,
     CopilotConversation,
     CopilotMessage,

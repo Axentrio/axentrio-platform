@@ -23,12 +23,16 @@ export interface LeadStatsResult {
   bySource: Record<LeadSource, number>;
 }
 
-const KNOWN_SOURCES: readonly LeadSource[] = ['tool', 'manual', 'import', 'webhook'];
+// MUST list every LeadSource the entity defines. 'channel' (inbound messaging
+// hook) and 'booking' (booking hook) were missing, so the two sources that
+// produce most real leads were silently absent from the bySource breakdown —
+// the assistant would report 0 leads by source for a WhatsApp-only tenant.
+const KNOWN_SOURCES: readonly LeadSource[] = ['channel', 'tool', 'booking', 'manual', 'import', 'webhook'];
 
 export const getLeadStats: CopilotTool<Record<string, never>, LeadStatsResult> = {
   name: 'getLeadStats',
   description:
-    'Return aggregate lead counts for the current tenant: totalCount, last7Days, last30Days, and bySource breakdown (tool/manual/import/webhook). No names, emails, phones, or other PII — counts only.',
+    'Return aggregate lead counts for the current tenant: totalCount, last7Days, last30Days, and bySource breakdown (channel/tool/booking/manual/import/webhook). No names, emails, phones, or other PII — counts only.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<LeadStatsResult> {

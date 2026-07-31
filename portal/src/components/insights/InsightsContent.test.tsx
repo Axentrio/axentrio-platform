@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-const { insightsRef, experimentsRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
+const { insightsRef, experimentsRef, demandRef, digestRef, hasFeatureRef, resolveMutate, archiveMutate, dismissMutate, setEmailMutate } = vi.hoisted(() => ({
   insightsRef: { current: null as Record<string, unknown> | null },
   experimentsRef: { current: { experiments: [] } as Record<string, unknown> },
+  demandRef: { current: undefined as Record<string, unknown> | undefined },
   digestRef: { current: { digest: null, emailEnabled: true } as Record<string, unknown> },
   hasFeatureRef: { current: {} as Record<string, boolean> },
   resolveMutate: vi.fn(),
@@ -19,6 +20,7 @@ vi.mock('../../queries/useInsightsQueries', () => ({
   useResolveGap: () => ({ mutate: resolveMutate, isPending: false }),
   useArchiveGap: () => ({ mutate: archiveMutate, isPending: false }),
   useExperiments: () => ({ data: experimentsRef.current, isLoading: false }),
+  useLeadDemand: () => ({ data: demandRef.current, isLoading: false }),
   useDismissExperiment: () => ({ mutate: dismissMutate, isPending: false }),
   useDigest: () => ({ data: digestRef.current, isLoading: false }),
   useSetDigestEmail: () => ({ mutate: setEmailMutate, isPending: false }),
@@ -210,5 +212,65 @@ describe('InsightsContent — weekly digest (Enterprise, P3)', () => {
     render(<InsightsContent />);
     await user.click(screen.getByRole('switch'));
     expect(setEmailMutate).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('LeadDemandSection — descriptive, never a finding', () => {
+  const demand = {
+    window: { from: '', to: '', days: 30 },
+    totalLeads: 40,
+    classifiedLeads: 24,
+    topServices: [{ label: 'Drain unblocking', leads: 18, share: 0.75 }],
+    topTags: [],
+    taggedLeads: 0,
+    byUrgency: { emergency: 0, urgent: 0, routine: 0, unknown: 40 },
+    suppressed: false,
+    suppressionReason: null,
+  };
+
+  beforeEach(() => {
+    insightsRef.current = data([]);
+  });
+
+  it('is hidden without aiBusinessInsights', () => {
+    hasFeatureRef.current = { aiBusinessInsights: false };
+    demandRef.current = demand;
+    render(<InsightsContent />);
+    expect(screen.queryByText(/what customers are asking for/i)).not.toBeInTheDocument();
+  });
+
+  it('always prints the denominator next to a share', () => {
+    // "75%" alone overstates confidence; "of the 24 of 40 we could match" does not.
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    demandRef.current = demand;
+    render(<InsightsContent />);
+    expect(screen.getByText('Drain unblocking')).toBeInTheDocument();
+    expect(screen.getByText(/24 of 40/)).toBeInTheDocument();
+  });
+
+  it('says "not enough data" instead of showing a share when suppressed', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    demandRef.current = {
+      ...demand,
+      suppressed: true,
+      suppressionReason: 'Not enough leads yet (3 in the last 30 days; need 5).',
+      topServices: [],
+    };
+    render(<InsightsContent />);
+    expect(screen.getByText(/not enough leads yet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/%/)).not.toBeInTheDocument();
+  });
+
+  it('labels extracted tags as AI-derived and keeps them separate from services', () => {
+    hasFeatureRef.current = { aiBusinessInsights: true };
+    demandRef.current = {
+      ...demand,
+      topTags: [{ label: 'blocked drain', leads: 6, share: 1 }],
+      taggedLeads: 6,
+    };
+    render(<InsightsContent />);
+    expect(screen.getByText(/AI-derived/i)).toBeInTheDocument();
+    // Its own denominator, not blended into the factual service figures.
+    expect(screen.getByText(/6 conversations we were able to analyse/i)).toBeInTheDocument();
   });
 });

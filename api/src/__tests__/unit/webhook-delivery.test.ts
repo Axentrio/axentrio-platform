@@ -90,7 +90,7 @@ function makeEvent(): LeadCreatedEvent {
       startedAt: '2026-04-03T00:00:00.000Z',
       messageCount: 5,
     },
-    lead: { name: 'Alice', email: 'alice@example.com', source: 'chat' },
+    lead: { leadId: '11111111-1111-4111-8111-111111111111', name: 'Alice', email: 'alice@example.com', source: 'chat' },
   };
 }
 

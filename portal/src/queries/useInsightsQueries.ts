@@ -77,6 +77,36 @@ export function useExperiments(enabled = true) {
   return useQuery({ ...insightsOptions.experiments(), enabled });
 }
 
+/** Lead demand — what customers actually asked for. Enterprise (aiBusinessInsights). */
+export interface DemandSlice {
+  label: string;
+  leads: number;
+  /** Share of the CLASSIFIED subset, not of all leads. See `classifiedLeads`. */
+  share: number;
+}
+
+export interface LeadDemandResponse {
+  window: { from: string; to: string; days: number };
+  totalLeads: number;
+  /** The denominator `topServices` shares are computed against. */
+  classifiedLeads: number;
+  topServices: DemandSlice[];
+  /** Inferred (needs enrichment), reported separately from the factual services. */
+  topTags: DemandSlice[];
+  taggedLeads: number;
+  byUrgency: { emergency: number; urgent: number; routine: number; unknown: number };
+  suppressed: boolean;
+  suppressionReason: string | null;
+}
+
+export function useLeadDemand(enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.insights.all(), 'lead-demand'] as const,
+    queryFn: () => api.get<LeadDemandResponse>('/insights/lead-demand'),
+    enabled,
+  });
+}
+
 export function useDismissExperiment(successMessage: string) {
   const queryClient = useQueryClient();
   return useMutation({

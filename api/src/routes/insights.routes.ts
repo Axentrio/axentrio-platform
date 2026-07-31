@@ -7,6 +7,8 @@
  */
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
+import { aggregateLeadDemand } from '../insights/lead-demand.service';
+import { enrichmentAbstainStats } from '../leads/enrichment/enrich-lead.job';
 import { Gap } from '../database/entities/Gap';
 import { Judgment } from '../database/entities/Judgment';
 import { CanonicalTopic } from '../database/entities/CanonicalTopic';
@@ -229,10 +231,18 @@ router.get(
     const authReq = req as ProvisionedRequest;
     const tenantId = authReq.user?.tenantId as string;
 
-    const rows = await AppDataSource.getRepository(InsightExperiment).find({
-      where: { tenantId, state: 'active' },
-      order: { severity: 'ASC', lastSeenAt: 'DESC' },
-    });
+    // Severity is a varchar ('red'|'orange'|'green'), so ORDER BY severity ASC sorts
+    // ALPHABETICALLY — green, orange, red — i.e. LEAST severe first. Order explicitly.
+    const rows = await AppDataSource.getRepository(InsightExperiment)
+      .createQueryBuilder('e')
+      .where('e.tenant_id = :tenantId', { tenantId })
+      .andWhere("e.state = 'active'")
+      .orderBy(
+        `CASE e.severity WHEN 'red' THEN 0 WHEN 'orange' THEN 1 WHEN 'green' THEN 2 ELSE 3 END`,
+        'ASC',
+      )
+      .addOrderBy('e.last_seen_at', 'DESC')
+      .getMany();
 
     const payload: ExperimentsResponse = {
       experiments: rows.map((e): ExperimentDto => ({
@@ -283,6 +293,79 @@ router.post(
  * the first Monday run. `emailEnabled` reflects the tenant's opt-out pref so
  * the surface can render the toggle (ADR-0014 D6/D8).
  */
+/**
+ * GET /insights/lead-demand — Story 3's Enterprise "AI Lead Intelligence".
+ *
+ * A DESCRIPTIVE frequency, not an experiment: it reports what customers asked for and
+ * always publishes the denominator it is a share OF. Deliberately not a
+ * `chatbot_insight_experiments` kind — that table is for hypotheses that cleared a
+ * significance bar, and a count is not a finding.
+ *
+ * Primary figures come from the tenant's own booking + service catalogue, so this works
+ * whether or not LLM enrichment is switched on; extracted tags are reported separately
+ * as the inferred, sparser view.
+ */
+router.get(
+  '/lead-demand',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+    const entitlements = await getEntitlements(tenantId);
+    const windowDays = retentionDays(entitlements.features);
+
+    // Cap the window: "demand" means recent demand. A year of history would blend a
+    // seasonal trade's winter and summer into one meaningless average.
+    const requested = parseInt(String(req.query.days ?? 30), 10);
+    const days = Math.min(
+      Number.isFinite(requested) && requested > 0 ? requested : 30,
+      Math.min(windowDays, 90),
+    );
+
+    sendSuccess(res, await aggregateLeadDemand(tenantId, days));
+  }),
+);
+
+/**
+ * GET /insights/lead-enrichment-health — is extraction still working?
+ *
+ * Exists because the operational advice for Release B is "watch the abstain rate", and
+ * that was previously unfollowable: the stats function was written and exported but had
+ * no caller, no endpoint and no surface. Guidance you cannot act on is worse than none.
+ *
+ * The signal to watch is counter-intuitive: a sharp DROP in abstentions after a model
+ * change is the alarm, not good news. Fail-closed extraction is SUPPOSED to abstain
+ * often; a sudden fall means the grounding checks stopped biting and values are being
+ * accepted that previously were not.
+ */
+router.get(
+  '/lead-enrichment-health',
+  requireInsightsFeature('aiBusinessInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const authReq = req as ProvisionedRequest;
+    const tenantId = authReq.user?.tenantId as string;
+    const days = Math.min(Math.max(parseInt(String(req.query.days ?? 7), 10) || 7, 1), 90);
+    const stats = await enrichmentAbstainStats(tenantId, days);
+
+    const total = Number(stats.total ?? 0);
+    const abstained = Number(stats.abstained ?? 0);
+    sendSuccess(res, {
+      windowDays: days,
+      analyzed: total,
+      abstained,
+      // Null rather than 0 when nothing ran: "0% abstention" reads as a healthy system,
+      // whereas the truth is that we have no data.
+      abstainRate: total > 0 ? Math.round((abstained / total) * 1000) / 1000 : null,
+      perField: {
+        request: Number(stats.no_request ?? 0),
+        address: Number(stats.no_address ?? 0),
+        urgency: Number(stats.no_urgency ?? 0),
+        intent: Number(stats.no_intent ?? 0),
+      },
+    });
+  }),
+);
+
 router.get(
   '/digest',
   requireInsightsFeature('aiBusinessInsights'),

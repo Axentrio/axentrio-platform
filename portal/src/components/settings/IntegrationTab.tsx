@@ -28,6 +28,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/components/ui/alert-dialog';
+import { EventWebhooksCard } from './EventWebhooksCard';
 
 function maskSecret(value: string | undefined): string {
   if (!value) return '---';
@@ -139,6 +140,8 @@ export const IntegrationTab: React.FC = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      {/* Enterprise: outbound lead events. Renders nothing when not entitled. */}
+      <EventWebhooksCard />
     </div>
   );
 };

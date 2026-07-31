@@ -23,6 +23,10 @@ export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'failed' | '
 export type BookingMode = 'auto' | 'request';
 
 @Index(['tenantId', 'botId', 'status'])
+// Declared here AND in migration 1787800000000 so the synchronize-built test schema and
+// the migration-built prod schema agree — an index that exists only in prod means its
+// query plan is never exercised by any test.
+@Index('ix_bookings_lead', ['leadId'], { where: '"lead_id" IS NOT NULL' })
 @Entity('chatbot_bookings')
 export class Booking {
   @PrimaryGeneratedColumn('uuid')
@@ -45,6 +49,15 @@ export class Booking {
   /** auto = confirmed appointment; request = captured as a request/lead. */
   @Column({ type: 'varchar', length: 16, name: 'booking_mode', nullable: true })
   bookingMode?: BookingMode | null;
+
+  /**
+   * The Lead this booking belongs to. Set by the booking hook so the Leads page can
+   * DERIVE address / service / preferred date / status / list price by join rather
+   * than copying them onto the lead — a cached status would go stale the moment the
+   * booking is rescheduled or cancelled, and neither path notifies the lead row.
+   */
+  @Column({ type: 'uuid', name: 'lead_id', nullable: true })
+  leadId?: string | null;
 
   @Column({ type: 'uuid', name: 'session_id', nullable: true })
   sessionId?: string | null;

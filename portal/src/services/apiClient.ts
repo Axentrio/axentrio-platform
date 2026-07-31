@@ -76,11 +76,31 @@ const PLAN_LIMIT_NO_TOAST: ReadonlySet<string> = new Set([
   'plan_limit_lead_capture',
 ]);
 
-function handlePlanLimit(error: AxiosError): void {
+type PlanLimitBody =
+  | { error?: { code?: string; message?: string; details?: { limit?: number; reason?: string } } }
+  | undefined;
+
+/**
+ * On a `responseType: 'blob'` request (the CSV/XLS exports) axios hands the ERROR
+ * body back as a Blob too, so reading `data.error.code` yields undefined and the
+ * suppression list below silently misses — the user got a generic "plan limit"
+ * toast instead of the right copy, or none at all. Decode the blob before parsing.
+ */
+async function readErrorBody(error: AxiosError): Promise<PlanLimitBody> {
+  const raw = error.response?.data;
+  if (raw instanceof Blob) {
+    try {
+      return JSON.parse(await raw.text()) as PlanLimitBody;
+    } catch {
+      return undefined; // a genuinely non-JSON error body
+    }
+  }
+  return raw as PlanLimitBody;
+}
+
+async function handlePlanLimit(error: AxiosError): Promise<void> {
   if (error.response?.status !== 402) return;
-  const body = error.response.data as
-    | { error?: { code?: string; message?: string; details?: { limit?: number; reason?: string } } }
-    | undefined;
+  const body = await readErrorBody(error);
   const code = body?.error?.code ?? '';
   if (PLAN_LIMIT_NO_TOAST.has(code)) return;
 
@@ -132,7 +152,7 @@ apiClient.interceptors.response.use(
     return response;
   },
   async (error: AxiosError) => {
-    handlePlanLimit(error);
+    await handlePlanLimit(error);
     return Promise.reject(error);
   }
 );
@@ -153,7 +173,64 @@ export const api = {
 
   delete: <T>(url: string, config?: AxiosRequestConfig) =>
     apiClient.delete<T>(url, config).then((res) => res.data),
+
+  /**
+   * Fetch a file export and trigger the browser download, using the server's
+   * `Content-Disposition` filename. Callers used to hardcode the name, which
+   * threw away the date range the server had already encoded into it (and would
+   * have mislabelled a `.xlsx` as `.csv` the moment a second format shipped).
+   * `fallbackFilename` covers a proxy that strips the header.
+   */
+  download: async (
+    url: string,
+    fallbackFilename: string,
+    config?: AxiosRequestConfig,
+  ): Promise<{ truncated: boolean; rowLimit: number | null }> => {
+    const res = await apiClient.get<Blob>(url, { ...config, responseType: 'blob' });
+    const objectUrl = URL.createObjectURL(res.data);
+    try {
+      const a = document.createElement('a');
+      a.href = objectUrl;
+      a.download = filenameFromDisposition(res.headers['content-disposition']) ?? fallbackFilename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      URL.revokeObjectURL(objectUrl);
+    }
+    // Returned, not swallowed: a row-capped export is incomplete data and the
+    // caller has to be able to tell the user that.
+    const limit = Number(res.headers['x-export-row-limit']);
+    return {
+      truncated: res.headers['x-export-truncated'] === 'true',
+      rowLimit: Number.isFinite(limit) && limit > 0 ? limit : null,
+    };
+  },
 };
+
+/**
+ * Pull the filename out of a Content-Disposition header. Prefers RFC 5987
+ * `filename*=UTF-8''…` (percent-encoded, what a non-ASCII name needs) over the
+ * plain `filename="…"`. Any path separator is stripped so a hostile header can
+ * never steer the download outside the browser's download directory.
+ */
+function filenameFromDisposition(header: unknown): string | null {
+  if (typeof header !== 'string') return null;
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  const plain = /filename="?([^";]+)"?/i.exec(header);
+  const raw = extended ? safeDecode(extended[1]) : plain?.[1];
+  if (!raw) return null;
+  const base = raw.trim().replace(/^.*[\\/]/, '');
+  return base && base !== '.' && base !== '..' ? base : null;
+}
+
+function safeDecode(v: string): string | undefined {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return undefined;
+  }
+}
 
 // Strictly extracts the server-side error string from an Axios response body. Returns
 // undefined for:

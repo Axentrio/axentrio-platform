@@ -25,6 +25,27 @@ export interface Exporter {
 const day = (d: Date) => d.toISOString().slice(0, 10);
 const str = (v: unknown): string => (v == null ? '' : String(v));
 
+/**
+ * Timestamp for a spreadsheet cell: `YYYY-MM-DD HH:MM:SS`, UTC.
+ *
+ * `String(someDate)` — what this used to emit — produces
+ * "Tue Jun 30 2026 10:15:32 GMT+0000 (Coordinated Universal Time)", which Excel
+ * imports as TEXT. The operator cannot sort or filter by it, which defeats most of
+ * the reason to open leads in a spreadsheet at all.
+ *
+ * Space-separated rather than ISO's `T`/`Z` because Excel parses this form as a real
+ * datetime in every locale we serve, while `2026-06-30T10:15:32Z` stays text. The
+ * column is named `created_at_utc` so the dropped zone is stated rather than implied —
+ * showing a Belgian operator an unlabelled 10:15 for a 12:15 event is exactly the kind
+ * of quietly-wrong data this codebase avoids elsewhere.
+ */
+const ts = (v: unknown): string => {
+  if (v == null) return '';
+  const d = v instanceof Date ? v : new Date(String(v));
+  if (Number.isNaN(d.getTime())) return str(v); // never lose a value to a parse failure
+  return d.toISOString().replace('T', ' ').slice(0, 19);
+};
+
 const exporters: Record<ExportDataset, Exporter> = {
   'outcomes-timeseries': {
     filename: (r) => `outcomes-timeseries_${day(r.from)}_${day(r.to)}.csv`,
@@ -74,14 +95,14 @@ const exporters: Record<ExportDataset, Exporter> = {
          ORDER BY g.last_seen_at DESC`, [tenantId, from, to]);
       return rows.map((r: Record<string, unknown>) => [
         str(r.topic), str(r.status), str(r.severity), str(r.occurrences), str(r.dv),
-        str(r.fda), str(r.lsa), str(r.ra),
+        ts(r.fda), ts(r.lsa), ts(r.ra),
       ]);
     },
   },
 
   leads: {
     filename: (r) => `leads_${day(r.from)}_${day(r.to)}.csv`,
-    headers: ['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes'],
+    headers: ['created_at_utc', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes'],
     rows: async (tenantId, { from, to, limit }) => {
       // LIMIT is pushed into SQL, not applied after the fact: this route is bulk
       // PII egress on a table with no per-tenant size bound, so the cap has to
@@ -95,7 +116,7 @@ const exporters: Record<ExportDataset, Exporter> = {
          ${limit ? 'LIMIT $4' : ''}`,
         limit ? [tenantId, from, to, limit] : [tenantId, from, to]);
       return rows.map((r: Record<string, unknown>) => [
-        str(r.ca), str(r.name), str(r.email), str(r.phone), str(r.channel), str(r.source), str(r.status), str(r.notes),
+        ts(r.ca), str(r.name), str(r.email), str(r.phone), str(r.channel), str(r.source), str(r.status), str(r.notes),
       ]);
     },
   },

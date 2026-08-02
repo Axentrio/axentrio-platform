@@ -339,7 +339,7 @@ describe('analytics export — /analytics/export', () => {
     expect(res.headers['content-type']).toMatch(/text\/csv/);
     expect(res.headers['content-disposition']).toMatch(/attachment; filename="leads_.*\.csv"/);
     // Header row is always present even with no leads in range.
-    expect(res.text.split('\r\n')[0]).toBe('created_at,name,email,phone,channel,source,status,notes');
+    expect(res.text.split('\r\n')[0]).toBe('created_at_utc,name,email,phone,channel,source,status,notes');
   });
 
   it('400s an unknown dataset', async () => {
@@ -372,7 +372,7 @@ describe('leads routes — export + status', () => {
     expect(res.text.startsWith('﻿sep=;\r\n')).toBe(true);
     const lines = res.text.replace(/^﻿/, '').split('\r\n');
     expect(lines[0]).toBe('sep=;');
-    expect(lines[1]).toBe('created_at;name;email;phone;channel;source;status;notes');
+    expect(lines[1]).toBe('created_at_utc;name;email;phone;channel;source;status;notes');
   });
 
   it('403s the leads export for an `agent` seat but allows a supervisor (bulk PII egress)', async () => {

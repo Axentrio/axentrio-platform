@@ -45,10 +45,39 @@ const TOGGLEABLE_SET: ReadonlySet<string> = new Set(TENANT_TOGGLEABLE_FEATURES);
  * `proactiveLeadCapture` makes the bot solicit a phone number or address, so being
  * entitled to it must not be the same as having switched it on. Enabling it is an
  * explicit, audited act.
+ *
+ * `proactiveLeadCapture` currently has NO consumer. Its chip-offer implementation was
+ * removed because it could not fire in any configuration: on a messaging channel the
+ * offer was suppressed by design, and on the widget it needed a successful
+ * `capture_lead`, which requires an email or phone — the moment either exists, the
+ * "we already have a way to reach them" check suppressed the offer too. Both halves
+ * were confirmed against production with the toggle switched ON. The key is kept
+ * because entitlement + opt-in semantics are exactly what a prompt-level replacement
+ * needs, and re-churning the taxonomy (plans, wire contract, tenant overrides) twice
+ * costs more than an unused flag.
  */
 export const OPT_IN_FEATURES = ['proactiveLeadCapture'] as const satisfies readonly ToggleableFeatureKey[];
 
 const OPT_IN_SET: ReadonlySet<string> = new Set(OPT_IN_FEATURES);
+
+/**
+ * Toggleable keys with no tenant-facing control and nothing reading them.
+ *
+ * The API still accepts a write for these (the column is a free-form map and rejecting
+ * one would be a breaking change for a stored preference), but no surface should tell a
+ * tenant to go and change one. That matters most for the platform assistant: it reads
+ * the entitlement split and, before this list existed, confidently told every Pro and
+ * Enterprise tenant to enable `proactiveLeadCapture` in Settings → Features — a switch
+ * that no longer exists, for a feature with no implementation behind it.
+ */
+export const UNSURFACED_FEATURES = ['proactiveLeadCapture'] as const satisfies readonly ToggleableFeatureKey[];
+
+const UNSURFACED_SET: ReadonlySet<string> = new Set(UNSURFACED_FEATURES);
+
+/** Is `key` a toggle the tenant has no way to act on? See UNSURFACED_FEATURES. */
+export function isUnsurfacedFeature(key: string): boolean {
+  return UNSURFACED_SET.has(key);
+}
 
 /** Type guard: is `key` a tenant-toggleable feature? */
 export function isToggleableFeature(key: string): key is ToggleableFeatureKey {

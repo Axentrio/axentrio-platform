@@ -373,7 +373,12 @@ describe('getEntitlements', () => {
     // Never enabled != switched off. The assistant must not tell the owner they
     // turned something off that they never turned on.
     expect(result.disabledByTenant).toEqual([]);
-    expect(result.availableNotEnabled).toEqual(['proactiveLeadCapture']);
+    // `proactiveLeadCapture` is entitled-but-off, yet must NOT be listed: it is an
+    // UNSURFACED feature with no Settings row and no implementation behind it, so
+    // naming it sent every Pro/Enterprise owner to a switch that does not exist.
+    // Reporting it in `features`/`entitledFeatures` is still correct — that is a
+    // statement of fact; `availableNotEnabled` is a statement of what to go and do.
+    expect(result.availableNotEnabled).toEqual([]);
   });
 
   it('returns Essential features when the tenant is on Essential', async () => {

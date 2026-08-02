@@ -28,7 +28,58 @@ export interface LeadStructuredFields {
   intakeAnswers: Record<string, unknown> | null;
   /** >1 means the booking shown is not the only one for this contact. */
   bookingCount: number;
+  /**
+   * Conversations on THIS record. Deliberately NOT a repeat signal: a customer who
+   * arrived on WhatsApp and came back through the widget owns two records with one
+   * conversation each. Use `isRepeatCustomer` for anything that says "returning".
+   */
   conversationCount: number;
+
+  // ── Repeat-customer detection (server-side nightly sweep) ──────────────────
+  /** Conversations by this PERSON, across every record we hold for them. */
+  personConversationCount: number;
+  /** Live records we hold for the same person — >1 is the merge suggestion. */
+  personLeadCount: number;
+  personFirstSeenAt: string | null;
+  personLastSeenAt: string | null;
+  /** The one server-side definition of "returning", so the UI cannot invent another. */
+  isRepeatCustomer: boolean;
+}
+
+/**
+ * The Enterprise recommended follow-up action (`aiBusinessInsights`).
+ *
+ * Derived server-side from the lead's own facts — no model call, so it cannot invent an
+ * obligation and a visitor cannot steer it by typing. Every recommendation carries the
+ * reasons that fired it.
+ *
+ * Advisory only: there is no worklist, so nothing here can be actioned, dismissed or
+ * marked done, and the portal must not pretend otherwise.
+ */
+export type FollowUpAction =
+  | 'confirm_request'
+  | 'win_back_cancelled'
+  | 'check_in_after_visit'
+  | 'offer_a_time'
+  | 'ask_what_they_need';
+
+export type FollowUpVia = 'phone' | 'channel' | 'email';
+export type FollowUpPriority = 'now' | 'soon';
+
+export interface FollowUpReason {
+  key: string;
+  /** English text from the server, used as the i18n `defaultValue` for `key`. */
+  label: string;
+  /** Set only on quantified reasons (`waiting`). */
+  days?: number;
+}
+
+export interface FollowUpRecommendation {
+  action: FollowUpAction;
+  via: FollowUpVia;
+  priority: FollowUpPriority;
+  reasons: FollowUpReason[];
+  version: number;
 }
 
 export interface Lead extends Partial<LeadStructuredFields> {
@@ -47,6 +98,12 @@ export interface Lead extends Partial<LeadStructuredFields> {
   status: LeadStatus;
   notes: string | null;
   createdAt: string;
+  /**
+   * Absent when the tenant is not entitled to `aiBusinessInsights` — which is what
+   * keeps the panel off an unentitled tenant's screen without a second gate here.
+   * `null` when entitled and there is nothing worth suggesting.
+   */
+  followUp?: FollowUpRecommendation | null;
 }
 
 export interface LeadsPage {

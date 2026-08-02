@@ -26,6 +26,7 @@ import {
   RotateCcw,
   MapPin,
   Trash2,
+  Repeat,
 } from 'lucide-react';
 import { useHasFeature, useIsEntitled } from '../queries/useEntitlementsQueries';
 import {
@@ -59,6 +60,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { AddLeadControls } from '../components/leads/AddLeadControls';
 import { LeadSyncRow } from '../components/leads/LeadSyncRow';
+import { LeadFollowUp } from '../components/leads/LeadFollowUp';
 import { LeadRetentionCard } from '../components/leads/LeadRetentionCard';
 import { api } from '../services/apiClient';
 
@@ -470,6 +472,32 @@ export default function Leads() {
                       <TableRow key={`${lead.id}-detail`} className="bg-surface-2/30 hover:bg-surface-2/30">
                         <TableCell colSpan={colCount} className="text-xs text-text-muted">
                           <div className="space-y-1">
+                            {/* First in the drawer: it is the one thing here that says
+                                what to DO. Absent unless the tenant is entitled and the
+                                facts support a suggestion — see LeadFollowUp. */}
+                            <LeadFollowUp followUp={lead.followUp} />
+                            {/* Repeat detection groups a person across their lead ROWS,
+                                so this is the only place the two-records-one-human case
+                                is visible; `conversationCount` below counts THIS record
+                                and structurally cannot see it. */}
+                            {lead.isRepeatCustomer && (
+                              <div className="flex items-center gap-1.5 text-text-secondary">
+                                <Repeat className="h-3.5 w-3.5" />
+                                <span>
+                                  {t('leads.detail.returning', {
+                                    defaultValue: 'Returning customer',
+                                  })}
+                                </span>
+                                {lead.personFirstSeenAt && (
+                                  <span className="text-text-muted">
+                                    {t('leads.detail.returningSince', {
+                                      defaultValue: '· first seen {{date}}',
+                                      date: new Date(lead.personFirstSeenAt).toLocaleDateString(),
+                                    })}
+                                  </span>
+                                )}
+                              </div>
+                            )}
                             {lead.sessionId && (
                               <div className="flex items-center gap-1.5">
                                 <MessageSquare className="h-3.5 w-3.5" />

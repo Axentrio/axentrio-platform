@@ -47,7 +47,17 @@ export interface ReadinessInput {
   address?: string | null;
   bookingId?: string | null;
   bookingStatus?: string | null;
-  conversationCount?: number | null;
+  /**
+   * Conversations this PERSON has had, not this lead ROW.
+   *
+   * The distinction is the whole of repeat detection: leads are one row per identity,
+   * so a returning customer who arrived on WhatsApp and came back through the widget
+   * owns two rows with one conversation each, and a per-row count calls neither of
+   * them returning. The caller passes the repeat sweep's `person_conversation_count`,
+   * falling back to the row's own count until the sweep has run — the row count is a
+   * strict floor (a person's rows include this one), never a competing answer.
+   */
+  personConversationCount?: number | null;
   /** Operator-set override; when present it IS the score. */
   override?: number | null;
 }
@@ -101,7 +111,7 @@ export function computeLeadReadiness(lead: ReadinessInput): LeadReadiness {
 
   if (lead.address && lead.address.trim()) add('address', WEIGHTS.address, 'Address known');
   if (lead.name && lead.name.trim()) add('named', WEIGHTS.named, 'Gave their name');
-  if ((lead.conversationCount ?? 0) > 1) add('returning', WEIGHTS.returning, 'Returning contact');
+  if ((lead.personConversationCount ?? 0) > 1) add('returning', WEIGHTS.returning, 'Returning contact');
 
   const score = Math.min(100, components.reduce((n, c) => n + c.points, 0));
   return { score, version: READINESS_VERSION, source: 'computed', components };

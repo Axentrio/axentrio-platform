@@ -657,6 +657,31 @@ async function startServer(): Promise<void> {
     };
     setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
 
+    // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
+    // leads are one row per IDENTITY, so the same human on WhatsApp and in the widget
+    // owns two rows and no per-row counter can see the repeat.
+    //
+    // No env flag, unlike the enrichment sweep: this spends no LLM budget (it is two
+    // indexed statements per tenant), it is entitlement-gated per tenant inside the
+    // service, and a feature that only works if someone remembers to set a variable is
+    // a feature that does not work.
+    const sweepRepeats = async () => {
+      try {
+        const { sweepRepeatCustomers } = await import('./leads/repeat-detection.service');
+        await sweepRepeatCustomers();
+      } catch (err) {
+        logger.error('[lead-repeat] sweep failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    // One run shortly after boot as well as daily: the columns start empty, and a
+    // fresh deploy should not leave the leads inbox showing nobody as returning for a
+    // day. The pass only writes rows whose values changed, so the extra run costs a
+    // no-op UPDATE per tenant. 60s of headroom so it starts behind the boot traffic.
+    setTimeout(sweepRepeats, 60_000);
+    setInterval(sweepRepeats, 24 * 60 * 60 * 1000); // Daily
+
     // Reconcile bookings whose Google-calendar mirror failed (best-effort retry).
     const { reconcilePendingBookingSyncs } = await import('./scheduler/sync-reconciler');
     setInterval(() => {

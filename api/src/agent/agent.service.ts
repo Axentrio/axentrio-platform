@@ -11,6 +11,10 @@ import { effectiveSelectedSpecialties, resolveSpecialties, specialtyRetrievalTer
 import { DEFAULT_PROVIDER, DEFAULT_MODEL } from '../llm/defaults';
 import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
+import { getEntitlements } from '../billing/entitlements';
+import { shouldAskForContact } from '../leads/proactive/should-ask';
+import type { ToolAdapter } from './tool-adapter';
+import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { ServiceType } from '../database/entities/ServiceType';
@@ -365,7 +369,8 @@ export class AgentService {
       if (process.env.SKILL_STATE_ENABLED === 'true') {
         tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
       }
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours });
+      const proactiveAsk = await this.mayAskForContact(session, tools);
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours }, { proactiveAsk });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
@@ -602,6 +607,70 @@ export class AgentService {
         error: error instanceof Error ? error.message : 'Unknown error',
         fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
       };
+    }
+  }
+
+  /**
+   * May this turn carry ONE polite request for a contact route we don't have?
+   * (Story 3, Pro — "proactive lead capture".)
+   *
+   * FAILS CLOSED: any error means the bot stays passive. Soliciting personal data from
+   * an EU consumer because an entitlement lookup threw is not a failure mode worth
+   * having, and the passive behaviour is what every tier had before this existed.
+   *
+   * Marks the session as ASKED at decision time rather than after observing the model
+   * ask. We cannot reliably tell whether it complied, and the two errors are not
+   * symmetric: marking early can cost us one missed opportunity, marking late can ask
+   * the same person twice. `shouldAskForContact` therefore returns true at most once
+   * per conversation, which makes "never pushy" structural rather than a prompt rule.
+   */
+  private async mayAskForContact(session: ChatSession, tools: ToolAdapter[]): Promise<boolean> {
+    // No capture tool ⇒ nowhere to put an answer, so asking would be pure friction.
+    if (!tools.some((t) => t.name === 'capture_lead')) return false;
+    try {
+      const { features } = await getEntitlements(session.tenantId);
+      const state = readAskState(session);
+
+      // Any identified lead on this conversation means we already have a way to reach
+      // them. Mirrors the old chip gate's query so the two never disagreed about
+      // "do we have contact"; the tombstone guard keeps an erased lead from counting.
+      const rows: Array<{ n: number }> = await AppDataSource.query(
+        `SELECT count(*)::int AS n
+           FROM chatbot_leads
+          WHERE tenant_id = $1 AND session_id = $2 AND deleted_at IS NULL
+            AND (email IS NOT NULL OR phone IS NOT NULL)`,
+        [session.tenantId, session.id],
+      );
+
+      const ask = shouldAskForContact({
+        enabled: features.proactiveLeadCapture === true,
+        isChannel: !!session.channel && session.channel !== 'widget',
+        hasContact: (rows[0]?.n ?? 0) > 0,
+        customerTurns: session.messageCount ?? 0,
+        state,
+      });
+      if (!ask) return false;
+
+      // Persist BEFORE the model sees the instruction, so a crash mid-turn cannot
+      // leave the conversation eligible to be asked again.
+      //
+      // Written as an atomic jsonb MERGE rather than a read-modify-write of the whole
+      // blob: the turn coalescer writes its watermark to this same column, and a
+      // last-writer-wins update from here would silently drop it.
+      const askedAt = new Date().toISOString();
+      await AppDataSource.query(
+        `UPDATE chat_sessions SET metadata = coalesce(metadata, '{}'::jsonb) || $2::jsonb WHERE id = $1`,
+        [session.id, JSON.stringify({ [ASK_STATE_KEY]: { askedAt } })],
+      );
+      // Keep the in-memory session consistent for the rest of this turn.
+      session.metadata = withAskState(
+        session.metadata as Record<string, unknown> | null,
+        { askedAt },
+      ) as ChatSession['metadata'];
+      return true;
+    } catch (error) {
+      logger.warn('[proactive-ask] decision failed — staying passive', { sessionId: session.id, error });
+      return false;
     }
   }
 }

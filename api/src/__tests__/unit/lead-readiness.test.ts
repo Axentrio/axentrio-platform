@@ -26,7 +26,7 @@ describe('computeLeadReadiness — every point is explainable', () => {
       address: 'Kerkstraat 12',
       bookingId: 'bk-1',
       bookingStatus: 'confirmed',
-      conversationCount: 2,
+      personConversationCount: 2,
     });
     // The score is exactly the sum of its stated reasons — no hidden term.
     expect(r.components.reduce((n, c) => n + c.points, 0)).toBeGreaterThanOrEqual(r.score);

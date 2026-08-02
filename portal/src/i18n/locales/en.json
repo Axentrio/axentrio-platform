@@ -129,7 +129,37 @@
       "fromSession": "From session",
       "notes": "Notes",
       "createdAt": "Created at",
-      "conversations": "({{count}} conversations)"
+      "conversations": "({{count}} conversations)",
+      "returning": "Returning customer",
+      "returningSince": "· first seen {{date}}"
+    },
+    "followUp": {
+      "becauseLabel": "Because",
+      "advisory": "Worked out from this lead’s own details. Nothing has been sent — this is a suggestion only.",
+      "priority": {
+        "now": "Today",
+        "soon": "This week"
+      },
+      "actions": {
+        "confirm_request": "Confirm or decline the slot they asked for",
+        "win_back_cancelled": "Offer them a new time — their booking was cancelled",
+        "check_in_after_visit": "Check they were happy with the visit",
+        "offer_a_time": "Get back to them with a time",
+        "ask_what_they_need": "Ask what they need"
+      },
+      "reasons": {
+        "booking_unconfirmed": "They asked for a slot that is still unconfirmed",
+        "booking_cancelled": "Their booking was cancelled",
+        "visit_passed": "Their appointment time has passed",
+        "request_known": "They told us what they need",
+        "no_request": "Nothing recorded about what they need",
+        "no_address": "No address on the booking",
+        "reach_phone": "Phone number on file",
+        "reach_channel": "Reachable in the thread they wrote from",
+        "reach_email": "Email address on file",
+        "returning": "Returning customer",
+        "waiting": "Open for {{days}} days"
+      }
     },
     "locked": {
       "title": "Lead Capture",

@@ -32,6 +32,7 @@ import {
 } from '../analytics/exporters';
 import { eraseLead } from '../leads/lead-erasure.service';
 import { computeLeadReadiness } from '../leads/readiness';
+import { recommendFollowUp } from '../leads/followup';
 import { upsertLead } from '../leads/lead-capture.service';
 import { isErasedDedupeKey } from '../leads/lead-tombstone';
 import { previewLeadImport } from '../leads/lead-import.service';
@@ -84,6 +85,63 @@ function num(v: unknown): number | null {
 }
 
 /**
+ * Repeat detection, read from the two cached columns the nightly sweep maintains.
+ *
+ * Extracted so the wire flag, the readiness score and the follow-up recommendation all
+ * ask the same question of the same columns — three copies of `> 1` in this file would
+ * be three definitions of "returning" waiting to drift apart.
+ *
+ * The row's own `conversation_count` is the floor used until the sweep has seen the row:
+ * a person's conversations always include their own, so the fallback can only ever
+ * under-report, never invent a repeat.
+ */
+function personRepeat(l: Record<string, unknown>) {
+  const rowConversations = (l.conversation_count as number | null) ?? 0;
+  const personConversationCount = (l.person_conversation_count as number | null) ?? rowConversations;
+  const personLeadCount = (l.person_lead_count as number | null) ?? 1;
+  return {
+    rowConversations,
+    personConversationCount,
+    personLeadCount,
+    // More than one conversation, or more than one identity row (the WhatsApp-then-widget
+    // case, and the only signal an imported contact with no conversation rows can produce).
+    isRepeatCustomer: personConversationCount > 1 || personLeadCount > 1,
+  };
+}
+
+/**
+ * Enterprise's recommended follow-up action.
+ *
+ * Gated on `aiBusinessInsights` SEPARATELY from the Pro structured fields below, even
+ * though every plan that has one has the other today: they are different promises, and
+ * folding this into the `leadEnrichment` projection would silently ship an Enterprise
+ * feature the day a plan gains enrichment alone.
+ *
+ * Deterministic — see followup.ts for why this is not an LLM call, and for the fact that
+ * it is advisory only until a worklist exists to give it an outcome.
+ */
+function projectFollowUp(l: Record<string, unknown>) {
+  return recommendFollowUp({
+    status: l.status as string | null,
+    phone: l.phone as string | null,
+    email: l.email as string | null,
+    channel: l.channel as string | null,
+    notes: l.notes as string | null,
+    serviceRequested: (l.service_name as string | null) ?? (l.extracted_service as string | null),
+    address: (l.customer_address as string | null) ?? (l.extracted_address as string | null),
+    bookingId: l.booking_id as string | null,
+    bookingStatus: l.booking_status as string | null,
+    bookingStartAt: l.start_utc as string | null,
+    bookingEndAt: l.end_utc as string | null,
+    personHasUpcomingBooking: l.person_has_upcoming_booking === true,
+    isRepeatCustomer: personRepeat(l).isRepeatCustomer,
+    createdAt: l.created_at as string | null,
+    // Silence, not record age — see followup.ts.
+    lastContactAt: (l.person_last_seen_at as string | null) ?? (l.updated_at as string | null),
+  });
+}
+
+/**
  * Derive the Pro structured fields from the joined booking.
  *
  * `servicePrice` is the tenant's OWN list price for the requested service, not an
@@ -117,6 +175,14 @@ function projectBookingFields(l: Record<string, unknown>) {
   const intakeAnswers =
     intake && typeof intake === 'object' && !Array.isArray(intake) ? (intake as Record<string, unknown>) : null;
 
+  // Repeat detection. `person_*` is the nightly sweep's grouping answer across the
+  // lead ROWS one human owns (repeat-detection.service.ts). There is deliberately ONE
+  // notion of "repeat" here: `personConversationCount`. `conversationCount` below stays
+  // exactly what its name says — conversations on THIS record — and is no longer a
+  // repeat signal. See `personRepeat` for the fallback and why it under-reports.
+  const { rowConversations, personConversationCount, personLeadCount, isRepeatCustomer } =
+    personRepeat(l);
+
   const readiness = computeLeadReadiness({
     phone: l.phone as string | null,
     email: l.email as string | null,
@@ -125,7 +191,7 @@ function projectBookingFields(l: Record<string, unknown>) {
     address: (l.customer_address as string | null) ?? (l.extracted_address as string | null),
     bookingId: l.booking_id as string | null,
     bookingStatus: l.booking_status as string | null,
-    conversationCount: l.conversation_count as number | null,
+    personConversationCount,
     override: (l.readiness_override as number | null) ?? null,
   });
 
@@ -144,7 +210,25 @@ function projectBookingFields(l: Record<string, unknown>) {
     priceBasis,
     intakeAnswers,
     bookingCount: (l.booking_count as number | null) ?? 0,
-    conversationCount: (l.conversation_count as number | null) ?? 0,
+    /** Conversations on THIS record. Not a repeat signal — see `personConversationCount`. */
+    conversationCount: rowConversations,
+    // ── Repeat-customer detection ───────────────────────────────────────────
+    // The person KEY is deliberately not on the wire. It is a normalised phone or
+    // email in plaintext, so shipping it would put a second copy of the identifier in
+    // every list response and in whatever caches it — for a value the UI never renders.
+    // The counts and dates are the whole of what the portal needs to say "returning
+    // customer, 3 conversations since March".
+    personConversationCount,
+    personLeadCount,
+    personFirstSeenAt: l.person_first_seen_at
+      ? new Date(l.person_first_seen_at as string).toISOString()
+      : null,
+    personLastSeenAt: l.person_last_seen_at
+      ? new Date(l.person_last_seen_at as string).toISOString()
+      : null,
+    // Stated once, server-side, so the portal, the readiness score and the follow-up
+    // recommendation cannot drift into three different definitions of "returning".
+    isRepeatCustomer,
     // Inferred, never facts — the UI must present these as AI-derived and never act
     // on them. `null` whenever the extractor abstained, which is the common case.
     urgency: (l.urgency as string | null) ?? null,
@@ -201,6 +285,12 @@ router.get(
     // tenant cannot read Pro fields by calling the API directly.
     const { features } = await getEntitlements(tenantId);
     const wide = features.leadEnrichment === true;
+    // Enterprise's recommended follow-up action rides the same read rather than its own
+    // endpoint — it is one branch over columns this query already selects, so a second
+    // round trip per expanded row would buy nothing. Gated on the SAME flag the
+    // lead-demand panel uses (insights.routes.ts), and gated on the PROJECTION so an
+    // unentitled tenant cannot read it by calling the API directly.
+    const advisory = features.aiBusinessInsights === true;
 
     // Server-side filters. Validated against closed sets — never interpolated —
     // because these land in SQL. An unknown value is a 400, not a silent full scan:
@@ -257,13 +347,35 @@ router.get(
     const rows: Array<Record<string, unknown>> = await AppDataSource.query(
       `SELECT l.id, l.session_id, l.bot_id, l.name, l.email, l.phone, l.channel,
               l.source, l.status, l.notes, l.created_at, l.updated_at,
-              bk.booking_id, bk.booking_status, bk.start_utc, bk.customer_address,
+              bk.booking_id, bk.booking_status, bk.start_utc, bk.end_utc, bk.customer_address,
               bk.service_name, bk.price_display_type, bk.fixed_price, bk.min_price, bk.max_price,
               bk.intake_answers,
               (SELECT count(*)::int FROM chatbot_bookings cb
                 WHERE cb.lead_id = l.id AND cb.tenant_id = l.tenant_id) AS booking_count,
+              -- Does ANY row belonging to this person hold a confirmed appointment
+              -- still ahead of them? Repeat detection exists precisely because one
+              -- human spans rows (a WhatsApp row and a widget row sharing a phone), so
+              -- a recommendation derived from one row alone will tell an operator to
+              -- chase someone who already booked — and tag them "Returning customer"
+              -- while doing it. NULL person_key ⇒ no group ⇒ this is just the row.
+              (SELECT EXISTS (
+                 SELECT 1 FROM chatbot_bookings pb
+                   JOIN chatbot_leads pl ON pl.id = pb.lead_id AND pl.tenant_id = pb.tenant_id
+                  WHERE pb.tenant_id = l.tenant_id
+                    AND pb.status = 'confirmed'
+                    AND pb.start_utc > now()
+                    AND pl.deleted_at IS NULL
+                    AND (pl.id = l.id
+                         OR (l.person_key IS NOT NULL AND pl.person_key = l.person_key))
+               )) AS person_has_upcoming_booking,
               (SELECT count(*)::int FROM chatbot_lead_conversations lc
                 WHERE lc.lead_id = l.id AND lc.tenant_id = l.tenant_id) AS conversation_count,
+              -- Repeat detection reads four cached columns rather than re-grouping the
+              -- tenant's lead table per row: the person spans lead ROWS, so computing it
+              -- here would mean a correlated self-join on every row of every page. The
+              -- nightly sweep pays that cost once (repeat-detection.service.ts).
+              l.person_lead_count, l.person_conversation_count,
+              l.person_first_seen_at, l.person_last_seen_at,
               l.readiness_override,
               ec.urgency, ec.intent, ec.tags, ec.enrich_state,
               ec.request AS extracted_request,
@@ -272,7 +384,7 @@ router.get(
               ec.preferred_at_text
          FROM chatbot_leads l
          LEFT JOIN LATERAL (
-           SELECT b.id AS booking_id, b.status AS booking_status, b.start_utc,
+           SELECT b.id AS booking_id, b.status AS booking_status, b.start_utc, b.end_utc,
                   b.customer_address, b.intake_answers,
                   st.name AS service_name, st.price_display_type,
                   st.fixed_price, st.min_price, st.max_price
@@ -323,6 +435,9 @@ router.get(
         notes: l.notes ?? null,
         createdAt: new Date(l.created_at as string).toISOString(),
         ...(wide ? projectBookingFields(l) : {}),
+        // Absent (not null) when unentitled, matching the structured fields above, so
+        // `'followUp' in lead` distinguishes "not entitled" from "nothing to suggest".
+        ...(advisory ? { followUp: projectFollowUp(l) } : {}),
       })),
       nextCursor,
     });

@@ -158,7 +158,7 @@
         "reach_channel": "Reachable in the thread they wrote from",
         "reach_email": "Email address on file",
         "returning": "Returning customer",
-        "waiting": "Open for {{days}} days"
+        "waiting": "No contact for {{days}} days"
       }
     },
     "locked": {

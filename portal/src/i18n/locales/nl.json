@@ -156,7 +156,7 @@
         "reach_channel": "Bereikbaar in het gesprek waarin ze schreven",
         "reach_email": "E-mailadres bekend",
         "returning": "Terugkerende klant",
-        "waiting": "{{days}} dagen open"
+        "waiting": "Al {{days}} dagen geen contact"
       }
     },
     "locked": {

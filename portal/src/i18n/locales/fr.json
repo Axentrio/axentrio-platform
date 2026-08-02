@@ -156,7 +156,7 @@
         "reach_channel": "Joignable dans la conversation d’origine",
         "reach_email": "Adresse e-mail connue",
         "returning": "Client fidèle",
-        "waiting": "Ouvert depuis {{days}} jours"
+        "waiting": "Sans contact depuis {{days}} jours"
       }
     },
     "locked": {

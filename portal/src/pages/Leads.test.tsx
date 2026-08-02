@@ -235,7 +235,7 @@ describe('Leads page — the recommended follow-up action', () => {
     expect(await screen.findByText(/Offer them a new time/i)).toBeInTheDocument();
     expect(screen.getByText('Today')).toBeInTheDocument();
     // Interpolated, not printed raw — a visible `{{days}}` is the failure this catches.
-    expect(screen.getByText(/Open for 9 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/No contact for 9 days/i)).toBeInTheDocument();
   });
 
   it('renders nothing when the tenant is entitled but there is nothing to suggest', async () => {

@@ -38,11 +38,28 @@ function retentionDays(features: { gapEvidence: boolean; aiBusinessInsights: boo
   return 30;
 }
 
+/**
+ * The tenant this request is about.
+ *
+ * `resolveTenantContext` is mounted on this router and sets `req.tenantId` from the
+ * super-admin `X-Tenant-Context` header, falling back to the caller's own tenant. Every
+ * route here read `user.tenantId` directly instead, so the header was ignored and the
+ * middleware was decorative: a super admin who switched tenants was shown their OWN
+ * insights while the switcher said otherwise, and the Enterprise-only panels 403'd on a
+ * tenant that was in fact entitled (observed on production against an enterprise tenant).
+ *
+ * Reading `req.tenantId` first is safe by construction — the header is honoured only for
+ * role `super_admin`, and only for a tenant that exists and is not suspended
+ * (super-admin.middleware.ts) — and matches how every other router resolves tenancy.
+ */
+function insightsTenantId(req: Request): string | undefined {
+  return req.tenantId ?? (req as ProvisionedRequest).user?.tenantId;
+}
+
 /** Feature gate factory — 403 with a stable code so the portal can render the locked state. */
 function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence' | 'aiBusinessInsights') {
   return asyncHandler(async (req: Request, _res: Response, next: NextFunction) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId;
+    const tenantId = insightsTenantId(req);
     if (!tenantId) throw new BadRequestError('Tenant context required');
     const entitlements = await getEntitlements(tenantId);
     if (!entitlements.features[flag]) {
@@ -65,8 +82,7 @@ router.get(
   '/',
   requireInsightsFeature('gapInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const entitlements = await getEntitlements(tenantId);
 
     const windowDays = retentionDays(entitlements.features);
@@ -126,8 +142,7 @@ router.get(
   '/:gapId/evidence',
   requireInsightsFeature('gapEvidence'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const { gapId } = req.params;
 
     const gap = await AppDataSource.getRepository(Gap).findOne({ where: { id: gapId, tenantId } });
@@ -199,8 +214,7 @@ router.post(
   '/:gapId/resolve',
   requireInsightsFeature('gapInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const gap = await transitionGap(authReq.user?.tenantId as string, req.params.gapId, 'resolved_manual');
+    const gap = await transitionGap(insightsTenantId(req) as string, req.params.gapId, 'resolved_manual');
     sendSuccess(res, { id: gap.id, status: gap.status });
   }),
 );
@@ -209,8 +223,7 @@ router.post(
   '/:gapId/archive',
   requireInsightsFeature('gapInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const gap = await transitionGap(authReq.user?.tenantId as string, req.params.gapId, 'archived');
+    const gap = await transitionGap(insightsTenantId(req) as string, req.params.gapId, 'archived');
     sendSuccess(res, { id: gap.id, status: gap.status });
   }),
 );
@@ -228,8 +241,7 @@ router.get(
   '/experiments',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
 
     // Severity is a varchar ('red'|'orange'|'green'), so ORDER BY severity ASC sorts
     // ALPHABETICALLY — green, orange, red — i.e. LEAST severe first. Order explicitly.
@@ -269,8 +281,7 @@ router.post(
   '/experiments/:id/dismiss',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const repo = AppDataSource.getRepository(InsightExperiment);
     const exp = await repo.findOne({ where: { id: req.params.id, tenantId } });
     if (!exp) throw new NotFoundError('Experiment not found');
@@ -309,8 +320,7 @@ router.get(
   '/lead-demand',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const entitlements = await getEntitlements(tenantId);
     const windowDays = retentionDays(entitlements.features);
 
@@ -342,8 +352,7 @@ router.get(
   '/lead-enrichment-health',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const days = Math.min(Math.max(parseInt(String(req.query.days ?? 7), 10) || 7, 1), 90);
     const stats = await enrichmentAbstainStats(tenantId, days);
 
@@ -370,8 +379,7 @@ router.get(
   '/digest',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
 
     const [digest, tenant] = await Promise.all([
       AppDataSource.getRepository(InsightDigest).findOne({
@@ -407,8 +415,7 @@ router.put(
   '/digest/email',
   requireInsightsFeature('aiBusinessInsights'),
   asyncHandler(async (req: Request, res: Response) => {
-    const authReq = req as ProvisionedRequest;
-    const tenantId = authReq.user?.tenantId as string;
+    const tenantId = insightsTenantId(req) as string;
     const enabled = (req.body as { enabled?: unknown })?.enabled;
     if (typeof enabled !== 'boolean') throw new BadRequestError('`enabled` must be a boolean');
 

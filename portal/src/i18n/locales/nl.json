@@ -139,7 +139,11 @@
       }
     },
     "export": {
-      "label": "Exporteren naar Excel",
+      "label": "Leads exporteren",
+      "formats": {
+        "xlsx": "Excel (.xlsx)",
+        "csv": "CSV"
+      },
       "error": "Exporteren mislukt",
       "forbidden": "Alleen beheerders en supervisors kunnen leads exporteren.",
       "truncated": "Alleen de {{limit}} meest recente leads zijn geëxporteerd. Beperk het datumbereik om de rest te exporteren."
@@ -2598,6 +2602,9 @@
       "leadEnrichment": {
         "label": "Gestructureerde leadgegevens",
         "description": "Adres, gevraagde dienst, voorkeursdatum en boekingsstatus bij elke lead."
+      },
+      "handoff": {
+        "label": "Overdracht naar een medewerker"
       }
     },
     "allChannels": "Alle kanalen",

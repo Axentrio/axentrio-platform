@@ -22,7 +22,14 @@ import { asyncHandler, BadRequestError, NotFoundError } from '../middleware/erro
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
-import { getExporter, toCsv, EXCEL_CSV } from '../analytics/exporters';
+import {
+  getExporter,
+  toCsv,
+  toXlsx,
+  INTERCHANGE_CSV,
+  XLSX_CONTENT_TYPE,
+  type ExportFormat,
+} from '../analytics/exporters';
 import { eraseLead } from '../leads/lead-erasure.service';
 import { computeLeadReadiness } from '../leads/readiness';
 import { upsertLead } from '../leads/lead-capture.service';
@@ -323,7 +330,7 @@ router.get(
 );
 
 /**
- * CSV export of the tenant's leads. Gated by `leadCapture` (NOT the
+ * Lead export, CSV or .xlsx. Gated by `leadCapture` (NOT the
  * Enterprise `aiBusinessInsights` gate the /analytics/export uses) so the
  * Essential/Pro tiers that actually own the Leads page can take their leads
  * — including the captured request `notes` — offline into a CRM.
@@ -345,9 +352,16 @@ router.get(
  * The default window is the last 365 days, not epoch: an unbounded default meant
  * the cheapest request was also the largest possible PII extraction.
  *
- * Output is Excel-safe (`EXCEL_CSV`: UTF-8 BOM + `sep=;` + `;`). Our SMBs are
- * BE/NL/FR and a comma CSV with no BOM opens in their Excel as a single mojibake
- * column — the previous behaviour.
+ * `?format=` picks the serialisation and NOTHING else — same role gate, same row cap,
+ * same headers, same audit row, same `Exporter.rows` output — so the two files can only
+ * ever differ in encoding:
+ *   - `csv` (default) is interchange CSV (`INTERCHANGE_CSV`: RFC 4180, comma, UTF-8 BOM
+ *     for accents, no `sep=` hint) — what a CRM importer, pandas or our own `fromCsv`
+ *     reader expects. It used to be semicolon+`sep=` Excel-flavoured, which was correct
+ *     only while CSV was the ONLY format: a button labelled "CSV" that emitted a stray
+ *     `sep=;` first row and `'`-prefixed cells was lying to whoever fed it downstream.
+ *   - `xlsx` is a real spreadsheet and is now the Excel path, so no locale ever has to
+ *     guess at a delimiter again.
  *
  * NOT rate-limited, deliberately and visibly: `rateLimitByTenant` / `rateLimit()`
  * both key on `req.tenant?.id`, which is only ever set by `tenant.middleware.ts`.
@@ -360,6 +374,15 @@ router.get(
 const EXPORT_MAX_ROWS = 10_000;
 const EXPORT_DEFAULT_WINDOW_DAYS = 365;
 
+/** Closed set, like the list filters above. An unrecognised `format` is a 400 rather
+ *  than a silent fallback to CSV: a client that asked for a spreadsheet and got a CSV
+ *  named `.csv` fails at whatever opens it next, far from the typo that caused it. */
+function parseExportFormat(v: unknown): ExportFormat {
+  if (v === undefined || v === '') return 'csv';
+  if (v !== 'csv' && v !== 'xlsx') throw new BadRequestError("format must be 'csv' or 'xlsx'");
+  return v;
+}
+
 router.get(
   '/export',
   requireRole('admin', 'supervisor'),
@@ -368,6 +391,7 @@ router.get(
     await requireFeature(tenantId, 'leadCapture', 'plan_limit_lead_capture');
 
     const exporter = getExporter('leads')!; // always present
+    const format = parseExportFormat(req.query.format);
     const parse = (v: unknown, fallback: Date): Date => {
       if (typeof v !== 'string' || !v) return fallback;
       const d = new Date(v);
@@ -381,7 +405,12 @@ router.get(
 
     const rows = await exporter.rows(tenantId, { from, to, limit: EXPORT_MAX_ROWS });
     const truncated = rows.length >= EXPORT_MAX_ROWS;
-    const csv = toCsv(exporter.headers, rows, EXCEL_CSV);
+    // Serialised from the one `rows` array, before the audit row is written: a
+    // serialisation failure must not leave an audit trail for an export nobody received.
+    const body =
+      format === 'xlsx'
+        ? await toXlsx(exporter.headers, rows, 'Leads')
+        : toCsv(exporter.headers, rows, INTERCHANGE_CSV);
 
     // Audited before send: a truncated export must still be recorded, and the
     // row count is what tells an auditor how much data actually left.
@@ -390,19 +419,19 @@ router.get(
       truncated,
       from: from.toISOString(),
       to: to.toISOString(),
-      format: 'csv',
+      format,
       impersonated: req.user?.role === 'super_admin' && !!req.headers['x-tenant-context'],
     });
 
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to })}"`);
+    res.setHeader('Content-Type', format === 'xlsx' ? XLSX_CONTENT_TYPE : 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${exporter.filename({ from, to }, format)}"`);
     // A capped export is incomplete data. Say so on the wire so the client can warn
     // the user, instead of letting a short file pass as the whole history.
     if (truncated) {
       res.setHeader('X-Export-Truncated', 'true');
       res.setHeader('X-Export-Row-Limit', String(EXPORT_MAX_ROWS));
     }
-    res.status(200).send(csv);
+    res.status(200).send(body);
   }),
 );
 

@@ -366,13 +366,15 @@ describe('leads routes — export + status', () => {
     const res = await request(app).get('/api/v1/leads/export');
     expect(res.status).toBe(200); // Pro is 403 on /analytics/export?dataset=leads but 200 here
     expect(res.headers['content-type']).toMatch(/text\/csv/);
-    // Excel-safe framing: UTF-8 BOM first (so é/ë/ç in NL/FR names survive), then
-    // Excel's `sep=` hint (honoured in EVERY locale, which is what makes one file
-    // open correctly in both a Belgian `;` Excel and a US `,` one).
-    expect(res.text.startsWith('﻿sep=;\r\n')).toBe(true);
+    // Interchange framing, NOT Excel framing. `format=csv` is comma-delimited RFC 4180
+    // with a UTF-8 BOM (so é/ë/ç in NL/FR names survive) and NO `sep=` hint line — a
+    // strict parser reads that hint as a stray first data row. The semicolon+`sep=`
+    // variant was correct only while CSV was the sole export format; `?format=xlsx`
+    // is now the Excel path, so a file offered as "CSV" is allowed to be one.
+    expect(res.text.startsWith('﻿')).toBe(true);
+    expect(res.text).not.toContain('sep=');
     const lines = res.text.replace(/^﻿/, '').split('\r\n');
-    expect(lines[0]).toBe('sep=;');
-    expect(lines[1]).toBe('created_at_utc;name;email;phone;channel;source;status;notes');
+    expect(lines[0]).toBe('created_at_utc,name,email,phone,channel,source,status,notes');
   });
 
   it('403s the leads export for an `agent` seat but allows a supervisor (bulk PII egress)', async () => {

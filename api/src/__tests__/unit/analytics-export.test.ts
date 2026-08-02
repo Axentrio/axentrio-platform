@@ -6,11 +6,30 @@ vi.mock('../../database/data-source', () => ({
   AppDataSource: { query: async () => q.queue.shift() ?? [] },
 }));
 
-import { toCsv, getExporter, EXPORT_DATASETS, EXCEL_CSV } from '../../analytics/exporters';
+import ExcelJS from 'exceljs';
+import { toCsv, toXlsx, fromCsv, getExporter, EXPORT_DATASETS, EXCEL_CSV } from '../../analytics/exporters';
 
 const RANGE = { from: new Date('2026-06-01T00:00:00Z'), to: new Date('2026-06-08T00:00:00Z') };
 
 beforeEach(() => { q.queue = []; });
+
+/**
+ * Read a generated workbook back the way a spreadsheet app would, rather than trusting
+ * the in-memory model we just built — the bytes are the product here.
+ */
+async function readXlsx(buffer: Buffer) {
+  const workbook = new ExcelJS.Workbook();
+  // exceljs declares load() over its own ArrayBuffer-shaped `Buffer`; it accepts a
+  // Node Buffer at runtime, which is what toXlsx returns.
+  await workbook.xlsx.load(buffer as unknown as ExcelJS.Buffer);
+  const sheet = workbook.worksheets[0];
+  const table: string[][] = [];
+  sheet.eachRow({ includeEmpty: true }, (row) => {
+    // `row.values` is 1-based with a leading hole; slice it back to a plain array.
+    table.push((row.values as unknown[]).slice(1).map((v) => (v == null ? '' : String(v))));
+  });
+  return { sheet, sheetName: sheet.name, headers: table[0] ?? [], rows: table.slice(1) };
+}
 
 describe('analytics · CSV serialization (P3 D7)', () => {
   it('joins headers + rows with CRLF', () => {
@@ -69,6 +88,76 @@ describe('analytics · Excel-safe CSV (BE/NL/FR locale)', () => {
   });
 });
 
+describe('analytics · real .xlsx export', () => {
+  const HEADERS = ['created_at_utc', 'name', 'email', 'phone', 'notes'];
+  const ROWS = [
+    ['2026-06-03 10:00:00', 'Jérôme Peeters', 'j@x.io', '+32 475 46 44 21', 'Leak; then flood'],
+    ['2026-06-04 09:30:00', 'Anaïs Vandenbërghe', '', '0475464421', 'Says "urgent", 2 days\nwaiting'],
+  ];
+
+  it('carries the SAME logical rows as the CSV of the same input', async () => {
+    // The two formats share one `Exporter.rows` array, and this is the assertion that
+    // keeps them honest: an operator must never get a different dataset by clicking a
+    // different button. Compared against the CSV read back through our own reader, so
+    // the delimiter/quoting/BOM framing is unwound the way Excel would unwind it.
+    const csv = fromCsv(toCsv(HEADERS, ROWS, EXCEL_CSV));
+    const xlsx = await readXlsx(await toXlsx(HEADERS, ROWS));
+
+    expect(xlsx.headers.map((h) => h.toLowerCase())).toEqual(csv.headers);
+    expect(xlsx.rows).toEqual(csv.rows);
+    expect(xlsx.rows).toEqual(ROWS); // …and both still equal what the exporter produced
+  });
+
+  it('writes a leading = + - @ as an inert TEXT cell, with no apostrophe added', async () => {
+    // The CSV guard prefixes `'` because Excel strips it while IMPORTING. An xlsx is
+    // never imported, so the same prefix would survive into the operator's data — the
+    // guard here is the cell TYPE instead.
+    const hostile = [
+      ['=HYPERLINK("http://evil","click")'],
+      ['+1+2'],
+      ['-2+3'],
+      ['@SUM(A1)'],
+    ];
+    const { sheet, rows } = await readXlsx(await toXlsx(['x'], hostile));
+
+    expect(rows).toEqual(hostile); // verbatim — no `'`, nothing evaluated
+    for (let i = 0; i < hostile.length; i++) {
+      const cell = sheet.getRow(i + 2).getCell(1);
+      expect(cell.type).toBe(ExcelJS.ValueType.String);
+      expect(cell.formula).toBeUndefined();
+    }
+  });
+
+  it('round-trips é / ë / ï — the whole reason this format exists', async () => {
+    // The CSV needs a BOM + Excel's own import guesswork to keep these; the xlsx
+    // stores UTF-8 outright, so a mojibake here would mean we broke the encoding.
+    const { rows } = await readXlsx(await toXlsx(['name'], [['Jérôme'], ['Vandenbërghe'], ['naïef']]));
+    expect(rows).toEqual([['Jérôme'], ['Vandenbërghe'], ['naïef']]);
+  });
+
+  it('keeps every cell as text, so a phone number is not silently renumbered', async () => {
+    // `+32 475 …` coerced to a number becomes 32475…, and `0475` loses its leading zero.
+    // Excel shows no sign either happened — the operator just dials the wrong number.
+    const { sheet, rows } = await readXlsx(await toXlsx(['phone'], [['0475464421'], ['+32 475 46 44 21']]));
+    expect(rows).toEqual([['0475464421'], ['+32 475 46 44 21']]);
+    expect(sheet.getRow(2).getCell(1).type).toBe(ExcelJS.ValueType.String);
+  });
+
+  it('puts the headers in row 1 of a named sheet, frozen so they survive scrolling', async () => {
+    const { sheet, sheetName, headers } = await readXlsx(await toXlsx(HEADERS, ROWS, 'Leads'));
+    expect(sheetName).toBe('Leads');
+    expect(headers).toEqual(HEADERS);
+    expect(sheet.views[0]).toMatchObject({ state: 'frozen', ySplit: 1 });
+  });
+
+  it('emits a header-only workbook when the range holds no rows', async () => {
+    // A zero-lead export must still open as a valid spreadsheet, not a corrupt file.
+    const { headers, rows } = await readXlsx(await toXlsx(HEADERS, []));
+    expect(headers).toEqual(HEADERS);
+    expect(rows).toEqual([]);
+  });
+});
+
 describe('analytics · exporter registry (P3 D7)', () => {
   it('exposes exactly the three P3 datasets', () => {
     expect([...EXPORT_DATASETS].sort()).toEqual(['gaps', 'leads', 'outcomes-timeseries']);
@@ -92,6 +181,17 @@ describe('analytics · exporter registry (P3 D7)', () => {
       '2026-06-03 10:00:00', 'Ada', 'ada@x.io', '', 'whatsapp', 'tool', 'new', 'Leak under the sink',
     ]);
     expect(ex.filename(RANGE)).toBe('leads_2026-06-01_2026-06-08.csv');
+  });
+
+  it('names the file for the requested format, defaulting to csv', () => {
+    // The extension is derived, not spelled at the call site: `.csv` bytes named
+    // `.xlsx` (or the reverse) is a file the operator cannot open at all.
+    for (const dataset of EXPORT_DATASETS) {
+      const ex = getExporter(dataset)!;
+      expect(ex.filename(RANGE)).toBe(ex.filename(RANGE, 'csv'));
+      expect(ex.filename(RANGE, 'csv').endsWith('.csv')).toBe(true);
+      expect(ex.filename(RANGE, 'xlsx')).toBe(ex.filename(RANGE, 'csv').replace(/\.csv$/, '.xlsx'));
+    }
   });
 
   it('outcomes-timeseries merges the three sparse series by date, ascending', async () => {

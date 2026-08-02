@@ -141,7 +141,11 @@
       }
     },
     "export": {
-      "label": "Export for Excel",
+      "label": "Export leads",
+      "formats": {
+        "xlsx": "Excel (.xlsx)",
+        "csv": "CSV"
+      },
       "error": "Export failed",
       "forbidden": "Only admins and supervisors can export leads.",
       "truncated": "Only the {{limit}} most recent leads were exported. Narrow the date range to export the rest."
@@ -2636,6 +2640,9 @@
       "leadEnrichment": {
         "label": "Structured lead data",
         "description": "Address, requested service, preferred date and booking status on every lead."
+      },
+      "handoff": {
+        "label": "Human handoff"
       }
     },
     "allChannels": "All channels",

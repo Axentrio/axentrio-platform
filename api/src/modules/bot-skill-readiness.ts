@@ -28,7 +28,7 @@ import {
   BOOKING_SKILL_ID,
 } from '../llm/skill-readiness';
 import { isBookingConfigured } from '../scheduler/booking-readiness';
-import { resolveBoundTemplates, selectSkillIds } from '../templates/template-resolver';
+import { resolveBoundTemplates, selectedSkillIdsOf } from '../templates/template-resolver';
 import { logger } from '../utils/logger';
 import type { SkillReadinessDto } from '../contracts/skill-readiness';
 
@@ -41,11 +41,7 @@ export async function computeBotSkillReadiness(bot: Bot, tenantId: string): Prom
 
   // Selected skills = the UNION of every bound template's skills (H6) — identical to
   // the agent's own selection, so the readiness display and runtime never disagree.
-  const selectedSkillIds = [...new Set(
-    resolvedTemplates.flatMap((rt) =>
-      selectSkillIds({ selectedSkillIds: rt.selectedSkillIds ?? null, expectedModules: rt.expectedModules ?? [] }),
-    ),
-  )];
+  const selectedSkillIds = selectedSkillIdsOf(resolvedTemplates);
 
   // Booking readiness — only when booking is ACTIVE (resolveSkillStates refines
   // active skills only). Same predicate + same gate set the agent uses. No

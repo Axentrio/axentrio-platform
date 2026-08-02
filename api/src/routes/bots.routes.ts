@@ -41,6 +41,7 @@ import { enforceCountLimit } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { getAnchorBotConfig, getOwnedBot, BotNotFoundConfigError } from '../services/bot-config.service';
 import { getCapabilities, type ReadinessBotCtx, type ReadinessResult } from '../readiness';
+import { computeUnselectedEntitledSkills } from '../modules/skill-coverage';
 
 const router = Router();
 const botRepository = AppDataSource.getRepository(Bot);
@@ -180,6 +181,10 @@ router.post(
  * be mid-setup), resolves entitlements ONCE, then runs `appliesTo` + `check` for
  * every registered capability and flat-maps the arrays into `capabilities`.
  *
+ * Also returns `unselectedEntitledSkills` — features the tenant is entitled to and
+ * has switched ON whose delivering skill no bound template selects, so the agent's
+ * template tool-gate silently strips them (see modules/skill-coverage.ts).
+ *
  * FAIL-CLOSED: any error — bot lookup, entitlement resolution, a thrown
  * `appliesTo`, or a thrown `check` — fails the WHOLE endpoint with a 5xx. Never a
  * partial `capabilities[]`, never an omitted capability standing in for a
@@ -220,6 +225,13 @@ router.get(
       capabilities.push(...results);
     }
 
+    // Entitled-but-undelivered skills (advisory, additive). Orthogonal to the
+    // capability registry: a capability answers "is this set up?", this answers
+    // "does any bound template even hand this bot the skill?" — the gap that let a
+    // paid-for `leadCapture` sit dead behind a template that selected only booking.
+    // Reads the entitlements already resolved above; never re-resolves.
+    const unselectedEntitledSkills = await computeUnselectedEntitledSkills(bot, entitlements);
+
     const applicableCount = capabilities.length;
     const liveCount = capabilities.filter((c) => c.state === 'live').length;
     const overall = {
@@ -232,7 +244,7 @@ router.get(
       aiEnabled: bot.settings?.ai?.enabled === true,
     };
 
-    sendSuccess(res, { botId: bot.id, capabilities, overall });
+    sendSuccess(res, { botId: bot.id, capabilities, unselectedEntitledSkills, overall });
   })
 );
 

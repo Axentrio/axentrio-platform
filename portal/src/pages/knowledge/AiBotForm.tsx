@@ -41,6 +41,8 @@ import {
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { SkillStateCard } from '@/components/SkillStateCard';
+import { SkillCoverageWarning } from '@/components/SkillCoverageWarning';
+import { useBotReadiness } from '@/queries/useReadinessQueries';
 import { COMPOSABLE_TEMPLATES_ENABLED } from '@/config/featureFlags';
 import TagInput from './TagInput';
 
@@ -165,6 +167,11 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const { data: skillReadiness } = useSkillReadiness(botId, {
     enabled: isAdminOrSupervisor && COMPOSABLE_TEMPLATES_ENABLED,
   });
+  // Entitled-but-undelivered skills — a feature they PAY for that no bound template
+  // hands this bot. Deliberately NOT behind COMPOSABLE_TEMPLATES_ENABLED: the API
+  // already stays silent unless its own composable gate is on, and a flag mismatch
+  // must never be the reason a tenant doesn't hear that Leads is dead.
+  const { data: botReadiness } = useBotReadiness(botId, { enabled: isAdminOrSupervisor });
 
   // Business hours (operational, tenant-owned). Its own resource (bot settings),
   // saved explicitly with its own button — separate from the auto-saved AI form.
@@ -654,6 +661,10 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
               <p className="text-[10px] text-text-muted">{templateMode === 'or' ? t('ai.bot.template.modeOrHelp') : t('ai.bot.template.modeAndHelp')}</p>
             </div>
           )}
+
+          {/* Entitled but undelivered: the plan includes a feature no bound speciality
+              hands this bot, so the runtime tool-gate silently strips it. */}
+          <SkillCoverageWarning skills={botReadiness?.unselectedEntitledSkills} />
 
           {/* Legacy advisory — only when the composable per-skill states aren't shown. */}
           {!COMPOSABLE_TEMPLATES_ENABLED && missingModules.length > 0 && (

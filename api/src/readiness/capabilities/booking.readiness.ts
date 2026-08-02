@@ -17,10 +17,9 @@ import {
   type WeeklyHours,
   type TimeWindow,
 } from '../../database/entities/AvailabilityRule';
-import { BotTemplateVersion } from '../../database/entities/BotTemplateVersion';
 import { loadActiveCredential } from '../../scheduler/calendar-provider';
 import { isBookingConfigured } from '../../scheduler/booking-readiness';
-import { resolveBoundTemplates } from '../../templates/template-resolver';
+import { resolveBoundTemplates, selectedSkillIdsOf } from '../../templates/template-resolver';
 import {
   registerCapability,
   type CapabilityReadiness,
@@ -95,27 +94,22 @@ const CTA_CONNECT_CAL = { route: '/bookings/setup', label: 'Connect a calendar' 
 const CTA_RECONNECT_CAL = { route: '/bookings/setup', label: 'Reconnect your calendar' };
 
 /**
- * Does any resolved bound template expect the booking module? Computed from the
+ * Does any resolved bound template give this bot the booking skill? Computed from the
  * RESOLVED bound version(s) (`resolveBoundTemplates` → the pinned/latest version
  * each binding actually uses), NOT a union across all published versions — an
  * older published version expecting booking while the resolved one does not must
  * NOT falsely mark the nudge active.
+ *
+ * Goes through `selectedSkillIdsOf` — the same helper the skill-coverage diagnostic
+ * and the agent's own tool gate use. This previously read `expectedModules` directly,
+ * which disagreed with the runtime for any version where the two columns differ (the
+ * admin API validates them independently, so that is reachable): a version selecting
+ * `lead_capture` while expecting `booking` reported booking as active here while the
+ * bot was in fact denied the booking tools.
  */
 async function resolvedBookingTemplateActive(bot: ReadinessBotCtx['bot']): Promise<boolean> {
   const resolved = await resolveBoundTemplates(bot);
-  const pairs = resolved
-    .filter((r) => r.templateId != null && r.resolvedVersion != null)
-    .map((r) => ({ templateId: r.templateId as string, resolvedVersion: r.resolvedVersion as number }));
-  if (pairs.length === 0) return false;
-  const repo = AppDataSource.getRepository(BotTemplateVersion);
-  for (const { templateId, resolvedVersion } of pairs) {
-    const row = await repo.findOne({
-      where: { templateId, version: resolvedVersion },
-      select: { expectedModules: true },
-    });
-    if ((row?.expectedModules ?? []).includes('booking')) return true;
-  }
-  return false;
+  return selectedSkillIdsOf(resolved).includes('booking');
 }
 
 export const bookingReadiness: CapabilityReadiness = {

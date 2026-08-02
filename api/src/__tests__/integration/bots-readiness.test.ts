@@ -28,6 +28,8 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
+import { BotTemplate } from '../../database/entities/BotTemplate';
+import { BotTemplateVersion } from '../../database/entities/BotTemplateVersion';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { CalendarCredential } from '../../database/entities/CalendarCredential';
@@ -293,6 +295,80 @@ describe('GET /bots/readiness (real DB) — serving-state overall flags', () => 
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
     expect(res.body.data.overall.aiEnabled).toBe(false);
+  });
+});
+
+/**
+ * The production incident this endpoint now catches: a Pro tenant's bot bound a
+ * template whose `selected_skill_ids` was `["booking"]`. The agent's template
+ * tool-gate drops the tools of every ACTIVE skill a template did not select, so
+ * `capture_lead` was stripped — the tenant paid for Leads, `leadCapture` said
+ * true, and their bot never captured one. Nothing surfaced it.
+ *
+ * Real rows here: BotTemplate + a published BotTemplateVersion with the exact
+ * selection, bound to the bot, against the real Pro entitlement map.
+ */
+describe('GET /bots/readiness (real DB) — entitled but undelivered skills', () => {
+  let keyN = 0;
+
+  /** Seed a globally-available template whose published v1 selects `skills`, and bind it. */
+  async function bindTemplateSelecting(botId: string, skills: string[]): Promise<void> {
+    const tpl = await AppDataSource.getRepository(BotTemplate).save({
+      key: `coverage-tmpl-${++keyN}-${Math.random().toString(36).slice(2, 8)}`,
+      displayName: 'Coverage',
+      availableToAllTenants: true,
+      status: 'active',
+    });
+    await AppDataSource.getRepository(BotTemplateVersion).save({
+      templateId: tpl.id,
+      version: 1,
+      body: 'body',
+      status: 'published',
+      expectedModules: [],
+      selectedSkillIds: skills,
+    });
+    await AppDataSource.getRepository(Bot).update(
+      { id: botId },
+      { templateId: tpl.id, templateVersion: 'latest', templateBindings: [{ templateId: tpl.id, version: 'latest' }] },
+    );
+  }
+
+  beforeEach(() => {
+    // The tool-gate this mirrors only runs behind the composable flag.
+    process.env.COMPOSABLE_TEMPLATES_ENABLED = 'true';
+  });
+  afterEach(() => {
+    delete process.env.COMPOSABLE_TEMPLATES_ENABLED;
+  });
+
+  it('pro bot bound to a booking-only template ⇒ the paid-for lead_capture skill is reported', async () => {
+    const { botId } = await provision({ tier: 'pro' });
+    await bindTemplateSelecting(botId, ['booking']);
+    const res = await request(app).get(READINESS_URL);
+    expect(res.status).toBe(200);
+    expect(res.body.data.unselectedEntitledSkills).toContainEqual({
+      feature: 'leadCapture',
+      skillId: 'lead_capture',
+      skillName: 'Lead capture',
+    });
+  });
+
+  it('a template that selects lead_capture ⇒ not reported', async () => {
+    const { botId } = await provision({ tier: 'pro' });
+    await bindTemplateSelecting(botId, ['booking', 'lead_capture', 'handoff']);
+    const res = await request(app).get(READINESS_URL);
+    expect(res.status).toBe(200);
+    expect(res.body.data.unselectedEntitledSkills).toEqual([]);
+  });
+
+  it('essential tenant (no bookings entitlement) ⇒ booking is NOT reported', async () => {
+    // Omitting a skill the plan never included is not a misconfiguration. Essential
+    // has leadCapture + handoff but not bookings.
+    const { botId } = await provision({ tier: 'essential' });
+    await bindTemplateSelecting(botId, ['lead_capture', 'handoff']);
+    const res = await request(app).get(READINESS_URL);
+    expect(res.status).toBe(200);
+    expect(res.body.data.unselectedEntitledSkills).toEqual([]);
   });
 });
 

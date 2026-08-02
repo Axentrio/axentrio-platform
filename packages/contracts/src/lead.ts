@@ -48,8 +48,71 @@ export interface LeadStructuredFields {
   intakeAnswers: Record<string, unknown> | null;
   /** Total bookings for this lead — >1 means the shown one is not the only one. */
   bookingCount: number;
-  /** Distinct conversations this contact has had. */
+  /**
+   * Conversations on THIS record. Deliberately not a repeat signal: leads are one
+   * row per identity, so a customer who arrived on WhatsApp and came back through
+   * the widget has two records with one conversation each. Use
+   * `personConversationCount` for anything that says "returning".
+   */
   conversationCount: number;
+
+  /**
+   * Repeat-customer detection. Computed by a nightly pass that groups a tenant's
+   * live leads on an exact normalised phone (E.164) or email match — never on a
+   * name, and never transitively. Until that pass has seen a record, the person
+   * fields fall back to this record alone, so they under-report rather than
+   * inventing a repeat.
+   *
+   * The grouping key itself is NOT on the wire: it is a plaintext phone or email,
+   * and the UI needs the counts, not the identifier.
+   */
+  personConversationCount: number;
+  /** Live records this platform holds for the same person — the merge suggestion. */
+  personLeadCount: number;
+  /** ISO-8601. First time this PERSON appeared, across all their records. */
+  personFirstSeenAt: string | null;
+  /** ISO-8601. Most recent conversation by this person, across all their records. */
+  personLastSeenAt: string | null;
+  /** The one server-side definition of "returning", so clients cannot invent another. */
+  isRepeatCustomer: boolean;
+}
+
+/**
+ * The recommended follow-up action, returned ONLY to tenants entitled to
+ * `aiBusinessInsights` (Enterprise) — the same gate the lead-demand panel uses.
+ *
+ * Derived deterministically from the lead's own facts, never model-generated: see
+ * api/src/leads/followup.ts for the rules and for why `urgency`/`intent`/`tags` are
+ * excluded from them. Advisory only — there is no worklist, so it cannot be actioned,
+ * dismissed or marked done, and nothing about it is stored.
+ */
+export type FollowUpAction =
+  | 'confirm_request'
+  | 'win_back_cancelled'
+  | 'check_in_after_visit'
+  | 'offer_a_time'
+  | 'ask_what_they_need';
+
+/** The route to use: phone, the channel thread they wrote from, or email. */
+export type FollowUpVia = 'phone' | 'channel' | 'email';
+
+export type FollowUpPriority = 'now' | 'soon';
+
+/** Why the recommendation fired. Every recommendation carries at least one. */
+export interface FollowUpReason {
+  key: string;
+  /** English text; clients use it as the i18n fallback for `key`. */
+  label: string;
+  /** Set only on quantified reasons (`waiting`). */
+  days?: number;
+}
+
+export interface FollowUpRecommendation {
+  action: FollowUpAction;
+  via: FollowUpVia;
+  priority: FollowUpPriority;
+  reasons: FollowUpReason[];
+  version: number;
 }
 
 /** Item in GET /api/v1/leads */
@@ -68,6 +131,12 @@ export interface Lead extends Partial<LeadStructuredFields> {
   /** The captured request / conversation summary. */
   notes: string | null;
   createdAt: string;
+  /**
+   * Absent when the tenant is not entitled to `aiBusinessInsights`; `null` when they
+   * are and there is nothing worth suggesting (no way to reach them, already handled,
+   * or an appointment still ahead of them).
+   */
+  followUp?: FollowUpRecommendation | null;
 }
 
 /** GET /api/v1/leads (cursor-paginated). */

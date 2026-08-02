@@ -15,7 +15,10 @@
  *    so leaving the old key in place means the customer's next WhatsApp message
  *    UPDATEs the erased row back into a live lead with their name and number. The
  *    key is rewritten to the tombstone too, and `isErasedDedupeKey` lets the
- *    capture path refuse to re-create an erased identity.
+ *    capture path refuse to re-create an erased identity. `person_key` — the
+ *    repeat-detection grouping key, which is a normalised copy of the phone or email
+ *    — is cleared for the same reason: it is personal data, and a husk that keeps it
+ *    stays linked to the subject's other rows.
  *
  * 3. **PII outlives the lead row.** The same values were copied into operator
  *    notifications (message body + `data.notes`), outbound webhook request bodies, and
@@ -91,6 +94,24 @@ export async function eraseLead(
     // 1. The lead row itself. `deleted_at` is set so it drops out of every list,
     //    export and aggregate; the husk is kept for audit (who erased what, when).
     //    `status='erased'` is TERMINAL — the worklist PATCH must never move it back.
+    //
+    //    `person_key` is DERIVED FROM the phone and email being nulled two lines up —
+    //    an E.164 number or an address in a `varchar`, which is personal data whether
+    //    or not it is called an identifier. Leaving it on the husk would keep the
+    //    subject linkable, and would leave them grouped with their own other rows.
+    //    The cached counts go with it so the husk cannot report a person it is no
+    //    longer part of. The repeat sweep re-derives the SURVIVING rows' counts on its
+    //    next run, which is what makes the erased conversation stop being counted.
+    // Capture the group BEFORE the husk loses its key: the surviving rows for the same
+    // human cache counts that were derived partly FROM this record, and
+    // `person_first_seen_at` can be a timestamp belonging exclusively to it. Leaving
+    // them until the next nightly sweep means the erased person keeps being reported,
+    // on the wire and on screen, for up to a day after they asked to be forgotten.
+    const [groupRow]: Array<{ person_key: string | null }> = await manager.query(
+      `SELECT person_key FROM chatbot_leads WHERE id = $1 AND tenant_id = $2`,
+      [leadId, tenantId],
+    );
+
     await manager.query(
       `UPDATE chatbot_leads
           SET name = NULL,
@@ -100,12 +121,34 @@ export async function eraseLead(
               metadata = '{}'::jsonb,
               external_user_id = $3,
               dedupe_key = $3,
+              person_key = NULL,
+              person_lead_count = NULL,
+              person_conversation_count = NULL,
+              person_first_seen_at = NULL,
+              person_last_seen_at = NULL,
               status = 'erased',
               deleted_at = COALESCE(deleted_at, now()),
               updated_at = now()
         WHERE id = $1 AND tenant_id = $2`,
       [leadId, tenantId, tombstone],
     );
+
+    // Invalidate the rest of the group. Nulled rather than recomputed: recomputing here
+    // would be a second implementation of the aggregate, and a wrong count is worse
+    // than an absent one. The next sweep re-derives them from what is left, and the
+    // read path already falls back to the row's own conversation count meanwhile —
+    // a strict floor, so it can under-report a repeat but never invent one.
+    if (groupRow?.person_key) {
+      await manager.query(
+        `UPDATE chatbot_leads
+            SET person_lead_count = NULL,
+                person_conversation_count = NULL,
+                person_first_seen_at = NULL,
+                person_last_seen_at = NULL
+          WHERE tenant_id = $1 AND person_key = $2 AND deleted_at IS NULL`,
+        [tenantId, groupRow.person_key],
+      );
+    }
 
     // 2. Per-conversation rows: every extracted field is personal data (address,
     //    verbatim request, evidence quotes). `enrich_state='erased'` is terminal so

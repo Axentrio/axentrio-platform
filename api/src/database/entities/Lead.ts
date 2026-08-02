@@ -60,6 +60,13 @@ export type LeadStatus = 'new' | 'archived' | 'erased';
   unique: true,
   where: '"deleted_at" IS NULL',
 })
+// The repeat-customer sweep's grouping read. Declared here as well as in the migration
+// so the synchronize-built test schema and the migration-built prod schema agree — an
+// index that exists only in prod means no test ever exercises the sweep's plan.
+// NOT unique: several rows sharing a key is the entire point.
+@Index('ix_chatbot_leads_person', ['tenantId', 'personKey'], {
+  where: '"person_key" IS NOT NULL AND "deleted_at" IS NULL',
+})
 // Every Lead must carry at least one contact identifier.
 @Check('chk_chatbot_leads_identity', '"email" IS NOT NULL OR "phone" IS NOT NULL OR "external_user_id" IS NOT NULL')
 export class Lead {
@@ -123,6 +130,44 @@ export class Lead {
 
   @Column({ type: 'timestamptz', name: 'readiness_override_at', nullable: true })
   readinessOverrideAt?: Date | null;
+
+  /**
+   * Repeat-customer detection (Story 3). All five columns are DERIVED state with a
+   * single writer — `sweepRepeatCustomers` in `repeat-detection.service.ts`. Neither
+   * the capture path nor any route may write them.
+   *
+   * Why stored and not computed on read: the key spans lead ROWS, so answering
+   * "how many conversations has this person had" on read means a correlated
+   * subquery that re-groups the tenant's whole lead table for every row of every
+   * page. The nightly pass turns that into four column reads. Storing it is also
+   * what makes the group inspectable — a computed-on-read grouping leaves no trace
+   * to audit when an operator asks why two rows were treated as one person.
+   *
+   * They are a CACHE, never a source of truth: `person_key` is a pure function of
+   * `phone`/`email` (see `computePersonKey`) and the counts are a pure function of
+   * the live rows carrying that key, so the whole set is recomputable from scratch
+   * on any run. NULL simply means "not computed yet", which every row is until the
+   * first sweep — the read path falls back to this row's own conversation count.
+   *
+   * `person_key` is derived from personal data and is therefore personal data
+   * itself: `eraseLead` clears it along with the phone and email it came from.
+   */
+  @Column({ type: 'varchar', length: 400, name: 'person_key', nullable: true })
+  personKey?: string | null;
+
+  /** Live lead rows sharing this person key — the merge-suggestion number. */
+  @Column({ type: 'int', name: 'person_lead_count', nullable: true })
+  personLeadCount?: number | null;
+
+  /** Distinct conversations across all of this person's live lead rows. */
+  @Column({ type: 'int', name: 'person_conversation_count', nullable: true })
+  personConversationCount?: number | null;
+
+  @Column({ type: 'timestamptz', name: 'person_first_seen_at', nullable: true })
+  personFirstSeenAt?: Date | null;
+
+  @Column({ type: 'timestamptz', name: 'person_last_seen_at', nullable: true })
+  personLastSeenAt?: Date | null;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

@@ -86,8 +86,8 @@ describe('ask-state persistence', () => {
   it('reads an absent, malformed or array metadata blob as "never asked"', () => {
     // Fails toward asking rather than toward silence ONLY here, where the alternative
     // is a corrupt blob permanently suppressing a feature the tenant paid for.
-    expect(readAskState({ metadata: null } as ChatSession)).toEqual({});
-    expect(readAskState({ metadata: {} } as ChatSession)).toEqual({});
+    expect(readAskState({ metadata: null } as unknown as ChatSession)).toEqual({});
+    expect(readAskState({ metadata: {} } as unknown as ChatSession)).toEqual({});
     expect(readAskState({ metadata: { leadAsk: 'nonsense' } } as unknown as ChatSession)).toEqual({});
     expect(readAskState({ metadata: { leadAsk: [] } } as unknown as ChatSession)).toEqual({});
   });

@@ -99,6 +99,12 @@ export interface Lead extends Partial<LeadStructuredFields> {
   notes: string | null;
   createdAt: string;
   /**
+   * When anyone last had contact — the server's own definition (`person_last_seen_at`
+   * falling back to the record's `updated_at`), not when the row was created. Drives
+   * the "waiting" column, and is the same number the follow-up recommendation cites.
+   */
+  lastActivityAt: string | null;
+  /**
    * Absent when the tenant is not entitled to `aiBusinessInsights` — which is what
    * keeps the panel off an unentitled tenant's screen without a second gate here.
    * `null` when entitled and there is nothing worth suggesting.

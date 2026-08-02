@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
@@ -86,6 +86,17 @@ const PRO_LEAD = {
   conversationCount: 1,
 };
 
+/**
+ * Service, address, preferred time and price moved off the row and into the expanded
+ * drawer: they were empty on most leads and pushed the columns an operator acts on off
+ * the right-hand edge. Tests that assert on them therefore have to open the row first.
+ */
+async function openFirstRow() {
+  const row = await screen.findByText(/Aquafin|Jan|Marieke|No name/i).catch(() => null);
+  const target = row ?? screen.getAllByRole('row')[1];
+  await userEvent.click(target as HTMLElement);
+}
+
 function renderUI(leads: Array<Record<string, unknown>>) {
   apiGet.mockImplementation(async (url: string) => {
     // Retention is checked FIRST: it also lives under /leads, so a naive prefix match
@@ -135,15 +146,17 @@ describe('Leads page — gating', () => {
 
   it('renders the derived booking fields when entitled', async () => {
     renderUI([PRO_LEAD]);
-    await waitFor(() => expect(screen.getByText('Drain unblocking')).toBeInTheDocument());
+    expect(await screen.findByText('confirmed')).toBeInTheDocument(); // stays on the row
+    await openFirstRow();
+    expect(await screen.findByText('Drain unblocking')).toBeInTheDocument();
     expect(screen.getByText(/Kerkstraat 12/)).toBeInTheDocument();
-    expect(screen.getByText('confirmed')).toBeInTheDocument();
   });
 });
 
 describe('Leads page — honest presentation', () => {
   it('labels a "from" price as a floor, never as a flat amount', async () => {
     renderUI([{ ...PRO_LEAD, servicePrice: 80, priceBasis: 'from' }]);
+    await openFirstRow();
     // Currency formatting is locale-dependent (€80.00 vs 80,00 €), so assert the
     // SEMANTICS — the word "from" sits with the amount — not an exact string.
     await waitFor(() => expect(screen.getByText('Drain unblocking')).toBeInTheDocument());
@@ -153,11 +166,13 @@ describe('Leads page — honest presentation', () => {
 
   it('shows a range price as approximate', async () => {
     renderUI([{ ...PRO_LEAD, servicePrice: 100, priceBasis: 'range_mid' }]);
+    await openFirstRow();
     await waitFor(() => expect(screen.getByText(/~/)).toBeInTheDocument());
   });
 
   it('shows no figure at all when the service is priced on request', async () => {
     renderUI([{ ...PRO_LEAD, servicePrice: null, priceBasis: 'none' }]);
+    await openFirstRow();
     await waitFor(() => expect(screen.getByText('Drain unblocking')).toBeInTheDocument());
     expect(screen.queryByText(/€/)).not.toBeInTheDocument();
   });
@@ -235,7 +250,7 @@ describe('Leads page — the recommended follow-up action', () => {
     expect(await screen.findByText(/Offer them a new time/i)).toBeInTheDocument();
     expect(screen.getByText('Today')).toBeInTheDocument();
     // Interpolated, not printed raw — a visible `{{days}}` is the failure this catches.
-    expect(screen.getByText(/Open for 9 days/i)).toBeInTheDocument();
+    expect(screen.getByText(/No contact for 9 days/i)).toBeInTheDocument();
   });
 
   it('renders nothing when the tenant is entitled but there is nothing to suggest', async () => {
@@ -408,5 +423,75 @@ describe('Leads page — manual entry discloses a merge', () => {
     expect(save).toBeDisabled();
     await userEvent.type(screen.getByPlaceholderText(/phone/i), '32475464421');
     expect(save).toBeEnabled();
+  });
+});
+
+/**
+ * The UX pass: the page has to answer "who do I call next, and why" before it answers
+ * "what is in the database". Each test below pins one of those moves, and each fails
+ * against the previous layout.
+ */
+describe('Leads page — triage', () => {
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+  it('counts waiting from the last contact, not from when the record was created', async () => {
+    // The whole point of lastActivityAt: a lead first seen a year ago but answered
+    // two days ago has waited two days. Reading createdAt would say 400.
+    renderUI([
+      { ...PRO_LEAD, createdAt: daysAgo(400), lastActivityAt: daysAgo(2), followUp: null },
+    ]);
+    expect(await screen.findByText('2')).toBeInTheDocument();
+    expect(screen.queryByText('400')).not.toBeInTheDocument();
+  });
+
+  it('puts the recommendation on the row, not only inside the drawer', async () => {
+    renderUI([
+      {
+        ...PRO_LEAD,
+        lastActivityAt: daysAgo(5),
+        followUp: {
+          action: 'confirm_request',
+          via: 'phone',
+          priority: 'now',
+          reasons: [{ key: 'booking_unconfirmed', label: 'Slot never confirmed' }],
+          version: 1,
+        },
+      },
+    ]);
+    // Visible WITHOUT expanding anything.
+    expect(await screen.findByText(/Confirm the slot/i)).toBeInTheDocument();
+  });
+
+  it('says plainly when an entitled tenant has nothing to chase', async () => {
+    // `null` is a real answer — the person already has an appointment — and must not
+    // render as an empty cell that looks like missing data.
+    renderUI([{ ...PRO_LEAD, lastActivityAt: daysAgo(1), followUp: null }]);
+    expect(await screen.findByText(/Nothing to chase/i)).toBeInTheDocument();
+  });
+
+  it('flags how many have gone unanswered, and admits it only counted what it loaded', async () => {
+    renderUI([
+      { ...PRO_LEAD, id: 'a', lastActivityAt: daysAgo(45), followUp: null },
+      { ...PRO_LEAD, id: 'b', lastActivityAt: daysAgo(60), followUp: null },
+      { ...PRO_LEAD, id: 'c', lastActivityAt: daysAgo(1), followUp: null },
+    ]);
+    // Two are over the 30-day line, not three.
+    expect(await screen.findByText(/2/)).toBeInTheDocument();
+    // The endpoint returns no totals, so the scope of the count is stated rather than
+    // implied to be the whole dataset.
+    expect(screen.getByText(/loaded so far/i)).toBeInTheDocument();
+  });
+
+  it('offers a way to actually make contact, and none when there is no address to open', async () => {
+    renderUI([{ ...PRO_LEAD, phone: '0470112233', email: null, lastActivityAt: daysAgo(3) }]);
+    const call = await screen.findByTitle(/Call/i);
+    expect(call).toHaveAttribute('href', 'tel:0470112233');
+
+    cleanup();
+    renderUI([
+      { ...PRO_LEAD, id: 'chan', phone: null, email: null, channel: 'whatsapp', lastActivityAt: daysAgo(3) },
+    ]);
+    await screen.findAllByRole('row');
+    expect(screen.queryByTitle(/Call|Email/i)).not.toBeInTheDocument();
   });
 });

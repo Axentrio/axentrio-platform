@@ -12,7 +12,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { useTranslation } from 'react-i18next';
+import { Trans, useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import {
   Mail,
@@ -60,7 +60,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { AddLeadControls } from '../components/leads/AddLeadControls';
 import { LeadSyncRow } from '../components/leads/LeadSyncRow';
-import { LeadFollowUp } from '../components/leads/LeadFollowUp';
+import { LeadFollowUp, LeadNextStep } from '../components/leads/LeadFollowUp';
 import { LeadRetentionCard } from '../components/leads/LeadRetentionCard';
 import { api } from '../services/apiClient';
 
@@ -99,6 +99,37 @@ function priceLabel(lead: Lead): string {
   if (lead.priceBasis === 'from') return `from ${amount}`;
   if (lead.priceBasis === 'range_mid') return `~${amount}`;
   return amount;
+}
+
+/**
+ * Whole days since anyone last had contact. Reads `lastActivityAt`, which the server
+ * derives once (person_last_seen_at ?? updated_at) and also feeds to the follow-up
+ * rule — so this column and the recommendation's own "no contact for N days" reason
+ * are the same number rather than two client-side guesses that drift.
+ */
+function daysWaiting(lead: Lead): number | null {
+  const since = lead.lastActivityAt ?? lead.createdAt;
+  if (!since) return null;
+  const ms = Date.now() - new Date(since).getTime();
+  return ms < 0 ? 0 : Math.floor(ms / 86_400_000);
+}
+
+/**
+ * Severity as FORM, not only as a number: a 3px stripe so the rows that need
+ * something doing are found before a single word is read. Ordered by what costs the
+ * tenant most — an unconfirmed slot outranks a long silence, which outranks a job
+ * already in the diary.
+ */
+const OVERDUE_DAYS = 30;
+
+function severityClass(lead: Lead, days: number | null): string {
+  if (lead.status === 'archived') return '';
+  if (lead.followUp?.priority === 'now') return 'shadow-[inset_3px_0_0] shadow-destructive';
+  if (days != null && days >= OVERDUE_DAYS) return 'shadow-[inset_3px_0_0] shadow-status-away';
+  if (lead.followUp === null || lead.bookingStatus === 'confirmed') {
+    return 'shadow-[inset_3px_0_0] shadow-status-online';
+  }
+  return '';
 }
 
 type StatusFilter = 'all' | 'new' | 'archived';
@@ -209,6 +240,21 @@ export default function Leads() {
   }
 
   const allLeads = data?.pages.flatMap((p) => p.leads) ?? [];
+
+  // Counted over the LOADED rows, and labelled as such next to the number. The list
+  // endpoint returns a cursor and no totals, so anything presented as a whole-dataset
+  // figure here would be a guess dressed as a fact.
+  const attention = useMemo(() => {
+    let overdue = 0;
+    let unconfirmed = 0;
+    for (const lead of allLeads) {
+      if (lead.status === 'archived') continue;
+      const days = daysWaiting(lead);
+      if (days != null && days >= OVERDUE_DAYS) overdue += 1;
+      if (lead.followUp?.action === 'confirm_request') unconfirmed += 1;
+    }
+    return { overdue, unconfirmed };
+  }, [allLeads]);
   const colCount = hasEnrichment ? 9 : 5;
 
   return (
@@ -257,6 +303,39 @@ export default function Leads() {
         </div>
       </div>
 
+      {/* Orientation before detail: the page used to open with eighteen equal-looking
+          rows and leave the operator to work out where to start. Counts are computed
+          from the rows actually LOADED and say so — the list endpoint returns no totals,
+          and a number that silently meant "of the first page" would be worse than none. */}
+      {attention.overdue + attention.unconfirmed > 0 && (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-edge bg-surface-2 px-4 py-3">
+          <p className="text-sm text-text-secondary">
+            {attention.overdue > 0 && (
+              <Trans
+                i18nKey="leads.attention.overdue"
+                values={{ count: attention.overdue, days: OVERDUE_DAYS }}
+                defaults="<b>{{count}}</b> have heard nothing for over {{days}} days."
+                components={{ b: <span className="font-semibold text-text-primary" /> }}
+              />
+            )}{' '}
+            {attention.unconfirmed > 0 && (
+              <Trans
+                i18nKey="leads.attention.unconfirmed"
+                values={{ count: attention.unconfirmed }}
+                defaults="<b>{{count}}</b> asked for a time you haven't confirmed."
+                components={{ b: <span className="font-semibold text-text-primary" /> }}
+              />
+            )}
+          </p>
+          <span className="text-xs text-text-muted">
+            {t('leads.attention.scope', {
+              defaultValue: 'From the {{loaded}} leads loaded so far',
+              loaded: allLeads.length,
+            })}
+          </span>
+        </div>
+      )}
+
       {/* Server-side filter, so the result reflects the whole dataset rather than
           just the pages already fetched. */}
       <div
@@ -301,65 +380,66 @@ export default function Leads() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t('leads.table.name')}</TableHead>
-                  <TableHead>{t('leads.table.contact')}</TableHead>
-                  <TableHead>{t('leads.table.request', { defaultValue: 'Request' })}</TableHead>
+                  {/* Person merges the old Name + Contact columns: an operator reads
+                      "who is this and how do I reach them" as one thought, and splitting
+                      it cost a column that was mostly repeating the same person. Service,
+                      address, preferred time and price moved into the expanded row — they
+                      were empty on most rows and pushed the actionable columns off-screen. */}
+                  <TableHead>{t('leads.table.person', { defaultValue: 'Person' })}</TableHead>
+                  <TableHead>{t('leads.table.request', { defaultValue: 'What they need' })}</TableHead>
+                  <TableHead>{t('leads.table.waiting', { defaultValue: 'Waiting' })}</TableHead>
                   {hasEnrichment && (
                     <>
-                      <TableHead>{t('leads.table.service', { defaultValue: 'Service' })}</TableHead>
-                      <TableHead>{t('leads.table.address', { defaultValue: 'Address' })}</TableHead>
-                      <TableHead>{t('leads.table.preferredAt', { defaultValue: 'Preferred' })}</TableHead>
+                      <TableHead>{t('leads.table.nextStep', { defaultValue: 'Next step' })}</TableHead>
                       <TableHead>{t('leads.table.booking', { defaultValue: 'Booking' })}</TableHead>
                     </>
                   )}
                   <TableHead>{t('leads.table.status', { defaultValue: 'Status' })}</TableHead>
-                  <TableHead className="w-24" aria-label="Actions" />
+                  <TableHead className="w-32" aria-label="Actions" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {allLeads.map((lead) => {
                   const isOpen = expanded[lead.id];
+                  const days = daysWaiting(lead);
+                  const stripe = severityClass(lead, days);
                   return [
                     <TableRow
                       key={lead.id}
-                      className={`cursor-pointer ${lead.status === 'archived' ? 'opacity-50' : ''}`}
+                      className={`cursor-pointer ${stripe} ${lead.status === 'archived' ? 'opacity-50' : ''}`}
                       onClick={() => setExpanded((s) => ({ ...s, [lead.id]: !s[lead.id] }))}
                     >
-                      <TableCell className="font-medium text-text-primary">
-                        <span className="flex items-center gap-2">
-                          {lead.name || (
-                            <span className="text-text-muted italic">
-                              {t('leads.table.noName', { defaultValue: 'No name' })}
-                            </span>
-                          )}
-                          {lead.channel && lead.channel !== 'widget' && (
-                            <Badge variant="secondary" className="uppercase text-[10px]">
-                              {lead.channel}
-                            </Badge>
-                          )}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-text-secondary">
-                        {lead.email && (
-                          <div className="flex items-center gap-1.5">
-                            <Mail className="h-3.5 w-3.5 text-text-muted" />
-                            <span className="truncate">{lead.email}</span>
-                          </div>
-                        )}
-                        {lead.phone && (
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <Phone className="h-3.5 w-3.5 text-text-muted" />
-                            <span>{lead.phone}</span>
-                          </div>
-                        )}
-                        {!lead.email && !lead.phone && (
-                          <span className="text-text-muted">
-                            {t('leads.table.reachVia', {
-                              defaultValue: 'Reply via {{channel}}',
-                              channel: lead.channel ?? 'chat',
-                            })}
+                      <TableCell>
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium text-text-primary">
+                            {lead.name || (
+                              <span className="text-text-muted italic">
+                                {t('leads.table.noName', { defaultValue: 'No name' })}
+                              </span>
+                            )}
                           </span>
-                        )}
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                            {lead.channel && (
+                              <span className="capitalize">{lead.channel}</span>
+                            )}
+                            {(lead.email || lead.phone) && <span className="text-text-muted">·</span>}
+                            {lead.phone && <span>{lead.phone}</span>}
+                            {!lead.phone && lead.email && <span className="truncate">{lead.email}</span>}
+                            {!lead.email && !lead.phone && (
+                              <span className="text-text-muted">
+                                {t('leads.table.reachVia', {
+                                  defaultValue: 'Reply via {{channel}}',
+                                  channel: lead.channel ?? 'chat',
+                                })}
+                              </span>
+                            )}
+                            {lead.isRepeatCustomer && (
+                              <Badge variant="outline" className="text-[10px] font-normal">
+                                {t('leads.table.returning', { defaultValue: 'Been here before' })}
+                              </Badge>
+                            )}
+                          </span>
+                        </div>
                       </TableCell>
                       {/* Model-authored free text: rendered as text only, never as markup. */}
                       <TableCell className="text-text-secondary">
@@ -367,32 +447,36 @@ export default function Leads() {
                           {lead.notes || <span className="text-text-muted">—</span>}
                         </span>
                       </TableCell>
+                      {/* Days, not a timestamp: the question is "how long have they been
+                          waiting", and a date makes the reader do that subtraction. */}
+                      <TableCell className="whitespace-nowrap tabular-nums">
+                        {days == null ? (
+                          <span className="text-text-muted">—</span>
+                        ) : (
+                          <>
+                            <span
+                              className={`text-[15px] font-semibold ${
+                                lead.followUp?.priority === 'now'
+                                  ? 'text-destructive'
+                                  : days >= OVERDUE_DAYS
+                                    ? 'text-status-away'
+                                    : 'text-text-primary'
+                              }`}
+                            >
+                              {days}
+                            </span>
+                            <span className="block text-[11px] text-text-muted">
+                              {t('leads.table.days', { defaultValue: 'days', count: days })}
+                            </span>
+                          </>
+                        )}
+                      </TableCell>
                       {hasEnrichment && (
                         <>
-                          <TableCell className="text-text-secondary">
-                            {lead.serviceRequested || <span className="text-text-muted">—</span>}
-                            {lead.servicePrice != null && (
-                              <span className="block text-xs text-text-muted">{priceLabel(lead)}</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-text-secondary">
-                            {lead.address ? (
-                              <span className="flex items-center gap-1.5">
-                                <MapPin className="h-3.5 w-3.5 text-text-muted shrink-0" />
-                                <span className="max-w-[14rem] truncate" title={lead.address}>
-                                  {lead.address}
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="text-text-muted">—</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-text-secondary whitespace-nowrap">
-                            {lead.preferredAt ? (
-                              new Date(lead.preferredAt).toLocaleString()
-                            ) : (
-                              <span className="text-text-muted">—</span>
-                            )}
+                          {/* The recommendation, on the row. It was the most actionable
+                              thing on the page and it was hidden behind an expand. */}
+                          <TableCell className="text-sm">
+                            <LeadNextStep followUp={lead.followUp} />
                           </TableCell>
                           <TableCell>
                             {lead.bookingStatus ? (
@@ -427,6 +511,28 @@ export default function Leads() {
                       </TableCell>
                       <TableCell className="text-text-muted">
                         <div className="flex items-center justify-end gap-1">
+                          {/* The point of the page is to get in touch, so getting in
+                              touch is a control rather than a phone number the operator
+                              has to select and copy. Absent for a channel-only lead,
+                              where there is no address to open. */}
+                          {(lead.phone || lead.email) && (
+                            <a
+                              href={lead.phone ? `tel:${lead.phone}` : `mailto:${lead.email}`}
+                              onClick={(e) => e.stopPropagation()}
+                              title={
+                                lead.phone
+                                  ? t('leads.actions.call', { defaultValue: 'Call {{who}}', who: lead.phone })
+                                  : t('leads.actions.email', { defaultValue: 'Email {{who}}', who: lead.email })
+                              }
+                              className="rounded p-1 hover:bg-surface-3 hover:text-primary-400 focus-visible:text-primary-400"
+                            >
+                              {lead.phone ? (
+                                <Phone className="h-3.5 w-3.5" />
+                              ) : (
+                                <Mail className="h-3.5 w-3.5" />
+                              )}
+                            </a>
+                          )}
                           <button
                             type="button"
                             title={
@@ -476,6 +582,62 @@ export default function Leads() {
                                 what to DO. Absent unless the tenant is entitled and the
                                 facts support a suggestion — see LeadFollowUp. */}
                             <LeadFollowUp followUp={lead.followUp} />
+                            {/* Moved off the row: service, address, preferred time and
+                                price were blank on most leads and pushed the columns an
+                                operator acts on off the right-hand edge. Here they have
+                                room, and an empty one reads as "not given" rather than
+                                as a column of dashes. */}
+                            {hasEnrichment && (
+                              <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+                                {[
+                                  {
+                                    k: 'service',
+                                    label: t('leads.table.service', { defaultValue: 'Requested service' }),
+                                    value: lead.serviceRequested,
+                                    extra: lead.servicePrice != null ? priceLabel(lead) : null,
+                                  },
+                                  {
+                                    k: 'address',
+                                    label: t('leads.table.address', { defaultValue: 'Address' }),
+                                    value: lead.address,
+                                    icon: MapPin,
+                                  },
+                                  {
+                                    k: 'preferredAt',
+                                    label: t('leads.table.preferredAt', { defaultValue: 'Preferred time' }),
+                                    value: lead.preferredAt
+                                      ? new Date(lead.preferredAt).toLocaleString()
+                                      : null,
+                                  },
+                                  {
+                                    k: 'firstSeen',
+                                    label: t('leads.detail.firstSeen', { defaultValue: 'First seen' }),
+                                    value: new Date(lead.createdAt).toLocaleDateString(),
+                                  },
+                                ].map((f) => (
+                                  <div key={f.k} className="min-w-0">
+                                    <dt className="text-[11px] font-semibold uppercase tracking-wide text-text-muted">
+                                      {f.label}
+                                    </dt>
+                                    <dd className="mt-0.5 flex items-center gap-1.5 text-text-primary">
+                                      {f.icon && f.value && (
+                                        <f.icon className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+                                      )}
+                                      <span className="truncate" title={f.value ?? undefined}>
+                                        {f.value || (
+                                          <span className="text-text-muted">
+                                            {t('leads.detail.notGiven', { defaultValue: 'Not given' })}
+                                          </span>
+                                        )}
+                                      </span>
+                                      {f.extra && (
+                                        <span className="shrink-0 text-text-secondary">· {f.extra}</span>
+                                      )}
+                                    </dd>
+                                  </div>
+                                ))}
+                              </dl>
+                            )}
                             {/* Repeat detection groups a person across their lead ROWS,
                                 so this is the only place the two-records-one-human case
                                 is visible; `conversationCount` below counts THIS record

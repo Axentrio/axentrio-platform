@@ -121,14 +121,19 @@ export default function Leads() {
   const [pendingErase, setPendingErase] = useState<Lead | null>(null);
   const updateStatus = useUpdateLeadStatus();
   const eraseLead = useEraseLead();
-  const [exporting, setExporting] = useState(false);
+  // Holds the format in flight rather than a boolean, so only the button the user
+  // pressed spins — two controls sharing one flag would look like both are working.
+  const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null);
 
-  const exportCsv = async () => {
-    setExporting(true);
+  const exportLeads = async (format: 'csv' | 'xlsx') => {
+    setExporting(format);
     try {
-      // Server names the file (it encodes the exported date range); the helper
-      // honours Content-Disposition so a future .xlsx isn't mislabelled .csv.
-      const { truncated, rowLimit } = await api.download('/leads/export', 'leads.csv');
+      // Server names the file (it encodes the exported date range AND the extension);
+      // the helper honours Content-Disposition so the .xlsx isn't mislabelled .csv.
+      const { truncated, rowLimit } = await api.download(
+        `/leads/export?format=${format}`,
+        `leads.${format}`,
+      );
       if (truncated) {
         // Never let a row-capped file pass as the full history.
         toast.warning(
@@ -151,7 +156,7 @@ export default function Leads() {
           : t('leads.export.error', { defaultValue: 'Export failed' }),
       );
     } finally {
-      setExporting(false);
+      setExporting(null);
     }
   };
 
@@ -214,17 +219,38 @@ export default function Leads() {
         <div className="flex shrink-0 items-center gap-1.5">
         <AddLeadControls />
         {allLeads.length > 0 && (
-          <Button variant="outline" size="sm" onClick={exportCsv} disabled={exporting}>
-            {exporting ? (
-              <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-            ) : (
-              <Download className="h-3.5 w-3.5 mr-1.5" />
-            )}
-            {/* "for Excel" is load-bearing, not marketing: the file carries a
-                `sep=;` hint that Excel honours in every locale but that a strict
-                CSV parser sees as a stray first row. */}
-            {t('leads.export.label', { defaultValue: 'Export for Excel' })}
-          </Button>
+          // Grouped and labelled: on their own, "Excel (.xlsx)" and "CSV" name a file
+          // type but never say what the button does.
+          <div
+            className="flex items-center gap-1.5"
+            role="group"
+            aria-label={t('leads.export.label', { defaultValue: 'Export leads' })}
+          >
+            {/* Named by extension rather than intent because that is the only choice
+                the user has to make, and both labels are now literally true: .xlsx is a
+                real spreadsheet for Excel, and CSV is RFC 4180 for a CRM importer. That
+                second claim is only safe because the server stopped emitting the
+                Excel-flavoured `sep=;` variant under the CSV name — see the `?format=`
+                block in leads.routes.ts. */}
+            {(['xlsx', 'csv'] as const).map((format) => (
+              <Button
+                key={format}
+                variant="outline"
+                size="sm"
+                onClick={() => exportLeads(format)}
+                disabled={exporting !== null}
+              >
+                {exporting === format ? (
+                  <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Download className="h-3.5 w-3.5 mr-1.5" />
+                )}
+                {t(`leads.export.formats.${format}`, {
+                  defaultValue: format === 'xlsx' ? 'Excel (.xlsx)' : 'CSV',
+                })}
+              </Button>
+            ))}
+          </div>
         )}
         </div>
       </div>

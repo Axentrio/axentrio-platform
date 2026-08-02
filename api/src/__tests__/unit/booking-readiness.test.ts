@@ -16,7 +16,15 @@ const { state } = vi.hoisted(() => ({
     ruleRow: null as any,
     templateVersionRow: null as any, // { expectedModules: string[] } | null
     activeCredential: null as any, // { provider, reauthRequired } | null
-    resolvedTemplates: [] as Array<{ templateId: string | null; resolvedVersion: number | null }>,
+    // Carries the skill columns too: booking readiness now reads a bot's skills through
+    // the same `selectedSkillIdsOf` helper the agent runtime uses, which prefers
+    // `selectedSkillIds` and falls back to `expectedModules` for legacy versions.
+    resolvedTemplates: [] as Array<{
+      templateId: string | null;
+      resolvedVersion: number | null;
+      selectedSkillIds?: string[] | null;
+      expectedModules?: string[];
+    }>,
   },
 }));
 
@@ -36,7 +44,12 @@ vi.mock('../../scheduler/calendar-provider', () => ({
   loadActiveCredential: async () => state.activeCredential,
 }));
 
-vi.mock('../../templates/template-resolver', () => ({
+vi.mock('../../templates/template-resolver', async (importOriginal) => ({
+  // Only the DB-backed resolution is stubbed. `selectedSkillIdsOf` is a pure function
+  // and is deliberately the REAL one: booking readiness reads a bot's skills through
+  // it, so stubbing it here would let this suite pass while the portal and the agent
+  // runtime disagreed about whether a bot has booking.
+  ...(await importOriginal<typeof import('../../templates/template-resolver')>()),
   resolveBoundTemplates: async () => state.resolvedTemplates,
 }));
 
@@ -369,17 +382,38 @@ describe('bookingReadiness.check — detail.bookingTemplateActive from RESOLVED 
     state.ruleRow = null;
   });
 
-  it('booking expected on the resolved version ⇒ true', async () => {
-    state.resolvedTemplates = [{ templateId: 'tmpl-1', resolvedVersion: 3 }];
-    state.templateVersionRow = { expectedModules: ['booking'] };
+  it('booking SELECTED on the resolved version ⇒ true', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 3, selectedSkillIds: ['booking'], expectedModules: ['booking'] },
+    ];
     const r = await runCheck();
     expect(r.detail?.bookingTemplateActive).toBe(true);
   });
 
-  it('booking expected only on an OLDER (non-resolved) version ⇒ false (no published-version union)', async () => {
-    state.resolvedTemplates = [{ templateId: 'tmpl-1', resolvedVersion: 5 }];
-    // The findOne is scoped to the resolved (templateId, version=5); that row does NOT expect booking.
-    state.templateVersionRow = { expectedModules: ['answering'] };
+  it('a legacy version with only expectedModules still counts (selection falls back to it)', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 3, selectedSkillIds: null, expectedModules: ['booking'] },
+    ];
+    const r = await runCheck();
+    expect(r.detail?.bookingTemplateActive).toBe(true);
+  });
+
+  it('a version that SELECTS other skills while still EXPECTING booking ⇒ false', async () => {
+    // The two columns are validated independently by the admin API, so they can
+    // disagree. The runtime gates tools on the selection, so readiness must too —
+    // reading expectedModules here used to report booking as active on a bot the
+    // agent was in fact denying the booking tools to.
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 5, selectedSkillIds: ['lead_capture'], expectedModules: ['booking'] },
+    ];
+    const r = await runCheck();
+    expect(r.detail?.bookingTemplateActive).toBe(false);
+  });
+
+  it('booking on a NON-resolved version does not leak in (no published-version union)', async () => {
+    state.resolvedTemplates = [
+      { templateId: 'tmpl-1', resolvedVersion: 5, selectedSkillIds: ['answering'], expectedModules: ['answering'] },
+    ];
     const r = await runCheck();
     expect(r.detail?.bookingTemplateActive).toBe(false);
   });

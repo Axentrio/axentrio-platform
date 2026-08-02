@@ -48,6 +48,21 @@ export interface ReadinessResult {
   detail?: Record<string, unknown>;
 }
 
+/**
+ * A feature the tenant is entitled to AND has switched on, whose delivering skill
+ * no template bound to this bot selects — so the agent's template tool-gate strips
+ * it and the feature is silently dead for this bot.
+ * Mirrors UnselectedEntitledSkill in api/src/modules/skill-coverage.ts.
+ */
+export interface UnselectedEntitledSkill {
+  /** Entitlement key, e.g. 'leadCapture' — keys the `features.keys.*` labels. */
+  feature: string;
+  /** Skill id, e.g. 'lead_capture'. */
+  skillId: string;
+  /** Human skill label, e.g. 'Lead capture'. */
+  skillName: string;
+}
+
 export interface ReadinessOverall {
   applicableCount: number;
   liveCount: number;
@@ -61,6 +76,9 @@ export interface BotReadinessResponse {
   /** The resolved bot id (the anchor when the request omitted `botId`). */
   botId: string;
   capabilities: ReadinessResult[];
+  /** Entitled-but-undelivered features (see UnselectedEntitledSkill). Optional so
+   *  a portal build newer than the API still renders the rest of the response. */
+  unselectedEntitledSkills?: UnselectedEntitledSkill[];
   overall: ReadinessOverall;
 }
 

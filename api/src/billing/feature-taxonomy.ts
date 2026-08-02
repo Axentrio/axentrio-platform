@@ -49,8 +49,13 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
     group: 'leads',
     requires: 'leadCapture',
   },
+  // Label says "not implemented" on purpose: this is the super-admin override grid, and
+  // granting this key today changes nothing at all. Its chip-offer implementation was
+  // removed as unreachable (see OPT_IN_FEATURES in feature-toggles.ts) and the
+  // prompt-level replacement is not built, so a super admin toggling it for a tenant
+  // would otherwise be promising a behaviour the product cannot deliver.
   proactiveLeadCapture: {
-    label: 'Ask for missing contact details',
+    label: 'Ask for missing contact details (not implemented)',
     group: 'leads',
     requires: 'leadCapture',
   },

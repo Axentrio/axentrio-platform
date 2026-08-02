@@ -41,25 +41,30 @@ interface FeatureMeta {
   icon: LucideIcon;
 }
 
+/**
+ * The toggleable keys this page actually shows.
+ *
+ * `proactiveLeadCapture` is excluded: nothing on the server reads it today (the
+ * chip-offer implementation was removed; the prompt-level one isn't built), so a
+ * switch for it would promise behaviour that cannot happen. Excluding it by name
+ * rather than widening the map to `Partial` keeps every OTHER key tsc-enforced —
+ * a new toggleable feature still fails the build until it has display strings.
+ */
+type SurfacedFeatureKey = Exclude<ToggleableFeatureKey, 'proactiveLeadCapture'>;
+
 // Local label/description metadata (the API taxonomy lives server-side; the
-// portal only needs display strings for the 7 toggleable keys).
-const FEATURE_META: Record<ToggleableFeatureKey, FeatureMeta> = {
+// portal only needs display strings for the keys it surfaces).
+const FEATURE_META: Record<SurfacedFeatureKey, FeatureMeta> = {
   channelWhatsapp: { label: 'WhatsApp', description: 'Reply to WhatsApp messages with your AI bot.', icon: MessageCircle },
   channelMessenger: { label: 'Facebook Messenger', description: 'Reply to Messenger conversations.', icon: MessageSquare },
   channelInstagram: { label: 'Instagram DMs', description: 'Reply to Instagram direct messages.', icon: Camera },
   channelTelegram: { label: 'Telegram', description: 'Reply to Telegram messages.', icon: Send },
   leadCapture: { label: 'Leads', description: 'Capture and store leads from conversations.', icon: UserPlus },
-  proactiveLeadCapture: {
-    label: 'Ask for missing details',
-    description:
-      'Let your bot politely ask for a phone number or email when it does not have one. Off by default — your bot always saves details a customer offers on their own.',
-    icon: UserPlus,
-  },
   bookings: { label: 'Bookings', description: 'Let your bot schedule appointments.', icon: CalendarCheck },
   gapInsights: { label: 'Success Meter', description: 'AI insights into conversation gaps and outcomes.', icon: Gauge },
 };
 
-const CHANNEL_KEYS: ToggleableFeatureKey[] = [
+const CHANNEL_KEYS: SurfacedFeatureKey[] = [
   'channelWhatsapp',
   'channelMessenger',
   'channelInstagram',
@@ -69,7 +74,7 @@ const CHANNEL_KEYS: ToggleableFeatureKey[] = [
 interface FeatureGroup {
   id: string;
   title: string;
-  keys: ToggleableFeatureKey[];
+  keys: SurfacedFeatureKey[];
 }
 
 const GROUPS: FeatureGroup[] = [
@@ -77,7 +82,7 @@ const GROUPS: FeatureGroup[] = [
   // NOTE: GROUPS is NOT tsc-enforced (FEATURE_META is). A key present in META but
   // missing here renders no switch while still being written on every save — so
   // any addition to META must be added here too.
-  { id: 'leads', title: 'Leads', keys: ['leadCapture', 'proactiveLeadCapture'] },
+  { id: 'leads', title: 'Leads', keys: ['leadCapture'] },
   { id: 'bookings', title: 'Bookings', keys: ['bookings'] },
   { id: 'insights', title: 'Success Meter', keys: ['gapInsights'] },
 ];
@@ -87,10 +92,11 @@ const GROUPS: FeatureGroup[] = [
  * value the server computed (`features`).
  *
  * It used to default to `true` unconditionally, which is right for the features a
- * tenant bought but wrong for opt-in ones: `proactiveLeadCapture` is entitled on
- * Pro/Enterprise yet must stay OFF until switched on, so a hardcoded `?? true`
- * would have shown every Pro tenant a switch that read "on" while the bot was not
- * actually soliciting — and worse, the save path would then have persisted `true`.
+ * tenant bought but wrong for the server's OPT-IN keys (`OPT_IN_FEATURES`), which
+ * stay off until explicitly switched on: a hardcoded `?? true` would show a switch
+ * reading "on" while the feature was inert — and worse, the save path would then
+ * persist `true`. No surfaced key is opt-in right now, but the mechanism must not
+ * be re-hardcoded the next time one is.
  *
  * Deferring to `features` keeps the single source of truth server-side, so the
  * opt-in list does not have to be duplicated in the portal and cannot drift from it.
@@ -98,7 +104,7 @@ const GROUPS: FeatureGroup[] = [
 function isEnabled(
   toggles: TenantFeatureToggles,
   features: PlanFeatures,
-  key: ToggleableFeatureKey,
+  key: SurfacedFeatureKey,
 ): boolean {
   return toggles[key] ?? features[key] === true;
 }
@@ -122,10 +128,13 @@ const FeaturesSettings: React.FC = () => {
   const disabled = !isAdmin || updateToggles.isPending;
 
   // Build the FULL desired toggle map (PUT replaces the whole map) from the
-  // current enabled state of every ENTITLED toggleable key, applying `changes`.
-  const writeWith = (changes: Partial<Record<ToggleableFeatureKey, boolean>>) => {
+  // current enabled state of every ENTITLED surfaced key, applying `changes`.
+  // A key we don't surface is therefore dropped from the stored map on the next
+  // save — correct for `proactiveLeadCapture`, which is opt-in (absent = off) and
+  // has no consumer, so the drop lands it exactly where it already effectively is.
+  const writeWith = (changes: Partial<Record<SurfacedFeatureKey, boolean>>) => {
     const next: TenantFeatureToggles = {};
-    (Object.keys(FEATURE_META) as ToggleableFeatureKey[]).forEach((key) => {
+    (Object.keys(FEATURE_META) as SurfacedFeatureKey[]).forEach((key) => {
       if (!entitled[key]) return; // never write a non-entitled key (API would 422 on `true`)
       next[key] = key in changes ? (changes[key] as boolean) : isEnabled(toggles, effective, key);
     });
@@ -135,7 +144,7 @@ const FeaturesSettings: React.FC = () => {
   const entitledChannels = CHANNEL_KEYS.filter((k) => entitled[k]);
   const allChannelsOn = entitledChannels.length > 0 && entitledChannels.every((k) => isEnabled(toggles, effective, k));
 
-  const renderRow = (key: ToggleableFeatureKey) => {
+  const renderRow = (key: SurfacedFeatureKey) => {
     const meta = FEATURE_META[key];
     const Icon = meta.icon;
     const locked = !entitled[key];

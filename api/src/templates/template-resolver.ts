@@ -447,6 +447,25 @@ export function selectSkillIds(
 }
 
 /**
+ * The skills a bot's RESOLVED bindings compose — the UNION across every bound
+ * template (H6), not just the primary, so a secondary template's skills count.
+ * Mirrors the selection the agent runtime feeds `gatedToolNames`, so the advisory
+ * surfaces that read it can never disagree with what the bot actually gets. Pure.
+ */
+export function selectedSkillIdsOf(resolved: ResolvedTemplate[]): string[] {
+  return [
+    ...new Set(
+      resolved.flatMap((rt) =>
+        selectSkillIds({
+          selectedSkillIds: rt.selectedSkillIds ?? null,
+          expectedModules: rt.expectedModules ?? [],
+        }),
+      ),
+    ),
+  ];
+}
+
+/**
  * Effective guardrails for a (possibly multi-) binding: taken from the PRIMARY
  * template ([0]), with topics-to-avoid UNIONED across all bound templates
  * (additive safety). Tone is bot-owned and intentionally NOT set here — see

@@ -202,17 +202,13 @@ describe('upsertLead — fan-out (D10)', () => {
     expect(event.lead.botId).toBe('bot-7');
   });
 
-  it('threads the request summary (notes) into the lead.created webhook AND the operator notification', async () => {
+  it('threads the request summary (notes) into the lead.created webhook — the tenant\'s own endpoint', async () => {
     const ds = fakeDs({ id: 'lead-1', inserted: true });
     await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'tool', channel: 'widget', email: 'a@b.com', notes: 'Leak under the sink, Kerkstraat 12' });
     await new Promise((r) => setImmediate(r));
     // webhook payload carries the request so n8n/automations can route on it
     const event = emitWebhookEvent.mock.calls[0][0];
     expect(event.lead.notes).toBe('Leak under the sink, Kerkstraat 12');
-    // operator notification surfaces the request in the body + data, not just the contact
-    const notif = createForTenant.mock.calls[0][0];
-    expect(notif.message).toContain('Leak under the sink');
-    expect(notif.data.notes).toBe('Leak under the sink, Kerkstraat 12');
   });
 
   it('does NOT emit on an update (re-touch of an existing lead)', async () => {
@@ -231,12 +227,13 @@ describe('upsertLead — fan-out (D10)', () => {
     });
     await new Promise((r) => setImmediate(r));
 
-    // ONE operator notification carrying the request, with a distinct dedupe key.
+    // ONE operator notification saying a request arrived, with a distinct dedupe key
+    // — and it does NOT restate the request (see the push-payload block below).
     expect(createForTenant).toHaveBeenCalledTimes(1);
     const notif = createForTenant.mock.calls[0][0];
-    expect(notif.message).toContain('Burst pipe in the basement');
+    expect(notif.message).toBe('32475464421 — request details added');
     expect(notif.dedupeBase).toBe('lead:lead-9:request');
-    expect(notif.data.notes).toBe('Burst pipe in the basement');
+    expect(notif.data.leadId).toBe('lead-9');
 
     // Exactly ONE webhook, and it is `lead.updated` — NOT a second `lead.created`.
     // On a channel the contact arrives before the request, so first contact fires
@@ -267,5 +264,63 @@ describe('upsertLead — fan-out (D10)', () => {
     const ds = { query: vi.fn().mockRejectedValue(new Error('boom')), getRepository: () => ({ findOne: vi.fn() }) } as never;
     const res = await upsertLead({ dataSource: ds, tenantId: TENANT, source: 'channel', channel: 'whatsapp', externalUserId: '32475464421' });
     expect(res).toBeNull();
+  });
+});
+
+/**
+ * The operator notification is not just an in-app row: notification.worker.ts sends
+ * `body: notif.message` and `data: { ...notif.data }` verbatim to Expo Push. Anything
+ * these tests let through is transmitted to a third-party service, so they assert on
+ * the WHOLE payload, not on the fields we happen to remember to check.
+ */
+describe('lead notification — the customer\'s free text never reaches the push payload', () => {
+  beforeEach(() => { ent.leadCapture = true; ent.fail = false; vi.clearAllMocks(); });
+
+  // Distinct fragments so a partial leak (the old code sliced to 140/500 chars) still fails.
+  const NOTES = 'Burst pipe under the sink at Kerkstraat 12, my mother is on dialysis and cannot be moved';
+
+  it('new lead: neither message nor data carries the request', async () => {
+    const ds = fakeDs({ id: 'lead-1', inserted: true });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, sessionId: 'sess-1', source: 'tool',
+      channel: 'widget', email: 'a@b.com', name: 'Achraf', notes: NOTES,
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const notif = createForTenant.mock.calls[0][0];
+    expect(notif.message).toBe('Achraf');
+    expect(notif.data).not.toHaveProperty('notes');
+    expect(JSON.stringify(notif)).not.toContain('Kerkstraat');
+    expect(JSON.stringify(notif)).not.toContain('dialysis');
+  });
+
+  it('request-landed re-notify: same guarantee on the second alert', async () => {
+    const ds = fakeDs({ id: 'lead-9', inserted: false, old_notes: null });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, sessionId: 'sess-9', source: 'tool',
+      channel: 'whatsapp', externalUserId: '32475464421', notes: NOTES,
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const notif = createForTenant.mock.calls[0][0];
+    expect(notif.data).not.toHaveProperty('notes');
+    expect(JSON.stringify(notif)).not.toContain('Kerkstraat');
+    expect(JSON.stringify(notif)).not.toContain('dialysis');
+  });
+
+  it('keeps title, contact and the ids the app deep-links with', async () => {
+    // Stripping the free text must not strip the alert's usefulness: the operator
+    // still sees who, and can open the lead/conversation to read the request.
+    const ds = fakeDs({ id: 'lead-1', inserted: true });
+    await upsertLead({
+      dataSource: ds, tenantId: TENANT, sessionId: 'sess-1', source: 'tool',
+      channel: 'widget', email: 'a@b.com', notes: NOTES,
+    });
+    await new Promise((r) => setImmediate(r));
+
+    const notif = createForTenant.mock.calls[0][0];
+    expect(notif.title).toBe('New lead captured');
+    expect(notif.message).toBe('a@b.com'); // falls back through name → email → phone
+    expect(notif.data).toEqual({ leadId: 'lead-1', sessionId: 'sess-1' });
   });
 });

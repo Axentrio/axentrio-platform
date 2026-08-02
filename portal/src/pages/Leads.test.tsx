@@ -212,6 +212,67 @@ describe('Leads page — filtering', () => {
   });
 });
 
+describe('Leads page — export', () => {
+  /** The two download controls, scoped to their own group. */
+  const exportButtons = () =>
+    within(screen.getByRole('group', { name: /export leads/i })).getAllByRole('button');
+
+  beforeEach(() => {
+    apiDownload.mockResolvedValue({ truncated: false, rowLimit: null });
+  });
+
+  it('offers BOTH formats, named so they are distinguishable', async () => {
+    // One button labelled "Export for Excel" could not say which of two files it
+    // produced once the .xlsx shipped.
+    renderUI([BASIC_LEAD]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+    expect(exportButtons().map((b) => b.textContent?.trim())).toEqual(['Excel (.xlsx)', 'CSV']);
+  });
+
+  it('asks the server for the format the user clicked, and names the file to match', async () => {
+    // The fallback filename only applies when a proxy strips Content-Disposition —
+    // but a .xlsx handed over as "leads.csv" is a file the operator cannot open.
+    renderUI([BASIC_LEAD]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /excel/i }));
+    await waitFor(() =>
+      expect(apiDownload).toHaveBeenCalledWith('/leads/export?format=xlsx', 'leads.xlsx'),
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: /^csv$/i }));
+    await waitFor(() =>
+      expect(apiDownload).toHaveBeenCalledWith('/leads/export?format=csv', 'leads.csv'),
+    );
+  });
+
+  it('warns on a row-capped .xlsx — a short file must never pass as the full history', async () => {
+    const { toast } = await import('sonner');
+    apiDownload.mockResolvedValue({ truncated: true, rowLimit: 10000 });
+    renderUI([BASIC_LEAD]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /excel/i }));
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(expect.stringMatching(/10000 most recent/i)),
+    );
+  });
+
+  it('still tells an agent seat WHY the xlsx download was refused', async () => {
+    const { toast } = await import('sonner');
+    apiDownload.mockRejectedValue({ response: { status: 403 } });
+    renderUI([BASIC_LEAD]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+
+    await userEvent.click(screen.getByRole('button', { name: /excel/i }));
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/admins and supervisors/i)),
+    );
+    // …and the buttons come back, rather than staying stuck in the spinner state.
+    await waitFor(() => expect(exportButtons().every((b) => !b.hasAttribute('disabled'))).toBe(true));
+  });
+});
+
 describe('Leads page — manual entry discloses a merge', () => {
   it('tells the user when their new lead MERGED into an existing contact', async () => {
     // The count will not match what they typed. Saying so is the difference between

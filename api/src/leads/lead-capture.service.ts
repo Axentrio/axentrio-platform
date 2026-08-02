@@ -277,7 +277,7 @@ export async function upsertLead(input: UpsertLeadInput): Promise<UpsertLeadResu
       // the conversation had said what the customer actually wanted, so a CRM
       // received a bare phone number and never learned the request.
       logger.debug('[leads] request landed on existing lead', { tenantId: input.tenantId, leadId: row.id, source: input.source });
-      void createLeadNotification(input, { leadId: row.id, name, email, phone, notes }, { dedupeSuffix: 'request' }).catch(() => {});
+      void createLeadNotification(input, { leadId: row.id, name, email, phone }, { dedupeSuffix: 'request' }).catch(() => {});
       void emitLeadUpdated(input, { leadId: row.id, dedupeKey, name, email, phone, notes }, ['notes']).catch(() => {});
     } else {
       logger.debug('[leads] updated', { tenantId: input.tenantId, leadId: row.id, source: input.source });
@@ -437,14 +437,24 @@ export function emitLeadDeleted(args: {
 }
 
 /**
- * In-app + push notification for a captured lead. Puts the request in the body
- * (the at-a-glance surface) so the operator knows WHY to reach out, not just who.
+ * In-app + push notification for a captured lead. Carries the contact and the ids
+ * to deep-link with — deliberately NOT the customer's request text.
+ *
+ * `message` and `data` are handed VERBATIM to Expo Push (notification.worker.ts
+ * sends `body: notif.message, data: { ...notif.data }`), so anything put here
+ * leaves our infrastructure for a third-party push service. The request is free
+ * text the customer typed: health details, addresses, whatever they chose to say.
+ * The alert says who got in touch; the operator taps through to the portal — where
+ * the data already lives, behind auth — to read what they asked for. This is also
+ * why the erasure sweep can only ever find identifiers here, not personal data.
+ * `notes` is not a parameter of this function on purpose.
+ *
  * `dedupeSuffix` lets a later "request landed on an existing channel lead" alert
  * through past the first-contact notification, which deduped on `lead:<id>`.
  */
 async function createLeadNotification(
   input: UpsertLeadInput,
-  lead: { leadId: string; name: string | null; email: string | null; phone: string | null; notes: string | null },
+  lead: { leadId: string; name: string | null; email: string | null; phone: string | null },
   opts: { dedupeSuffix?: string },
 ): Promise<void> {
   const contact = lead.name || lead.email || lead.phone || 'New contact';
@@ -453,8 +463,10 @@ async function createLeadNotification(
       tenantId: input.tenantId,
       type: 'lead_created',
       title: 'New lead captured',
-      message: lead.notes ? `${contact} — ${lead.notes.slice(0, 140)}` : contact,
-      data: { leadId: lead.leadId, sessionId: input.sessionId ?? null, notes: lead.notes ? lead.notes.slice(0, 500) : null },
+      // Without the suffix the re-notify would be byte-identical to the first-contact
+      // alert and read as a duplicate. Say that a request arrived, not what it said.
+      message: opts.dedupeSuffix === 'request' ? `${contact} — request details added` : contact,
+      data: { leadId: lead.leadId, sessionId: input.sessionId ?? null },
       dedupeBase: opts.dedupeSuffix ? `lead:${lead.leadId}:${opts.dedupeSuffix}` : `lead:${lead.leadId}`,
     })
     .catch(() => {});

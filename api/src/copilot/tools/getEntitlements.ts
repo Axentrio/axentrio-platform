@@ -24,7 +24,7 @@
  * operator metrics, not admin-facing facts.
  */
 import { getEntitlements as resolveEntitlements } from '../../billing/entitlements';
-import { TENANT_TOGGLEABLE_FEATURES } from '../../billing/feature-toggles';
+import { TENANT_TOGGLEABLE_FEATURES, isUnsurfacedFeature } from '../../billing/feature-toggles';
 import type { PlanFeatures } from '../../contracts/entitlements';
 import type { CopilotTool, CopilotToolContext } from './types';
 
@@ -38,7 +38,11 @@ export interface EntitlementsResult {
   /**
    * Entitled features that are opt-IN and have never been enabled. Same fix
    * (Settings → Features), but the assistant must NOT say "you turned this off"
-   * — the tenant never had it on. Today this is `proactiveLeadCapture`.
+   * — the tenant never had it on.
+   *
+   * Excludes UNSURFACED_FEATURES. A key with no switch and no implementation is not
+   * an action the tenant can take, and listing it made the assistant send every
+   * Pro/Enterprise owner to a Settings row that does not exist.
    */
   availableNotEnabled: string[];
 }
@@ -55,7 +59,7 @@ export const getEntitlements: CopilotTool<Record<string, never>, EntitlementsRes
     // Features, but only the first is something the tenant actually did — and the
     // assistant states it as fact to the owner.
     const offAtCeiling = TENANT_TOGGLEABLE_FEATURES.filter(
-      (key) => e.entitledFeatures[key] && !e.features[key],
+      (key) => e.entitledFeatures[key] && !e.features[key] && !isUnsurfacedFeature(key),
     );
     const disabledByTenant = offAtCeiling.filter((key) => e.featureToggles[key] === false);
     const availableNotEnabled = offAtCeiling.filter((key) => e.featureToggles[key] === undefined);

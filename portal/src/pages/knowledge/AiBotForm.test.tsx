@@ -4,7 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import AiBotForm from './AiBotForm';
 
-const { mockMutate, mockBind } = vi.hoisted(() => ({ mockMutate: vi.fn(), mockBind: vi.fn() }));
+const { mockMutate, mockBind, readinessState } = vi.hoisted(() => ({
+  mockMutate: vi.fn(),
+  mockBind: vi.fn(),
+  // Entitled-but-undelivered skills returned by GET /bots/readiness — set per test.
+  readinessState: { unselectedEntitledSkills: [] as { feature: string; skillId: string; skillName: string }[] },
+}));
 
 vi.mock('@/auth/useAppAuth', () => ({
   useAppAuth: () => ({
@@ -57,6 +62,10 @@ vi.mock('@/queries/useBotsQueries', () => ({
   useUpdateBot: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
+vi.mock('@/queries/useReadinessQueries', () => ({
+  useBotReadiness: () => ({ data: { botId: 'test-bot', capabilities: [], overall: {}, ...readinessState } }),
+}));
+
 const renderForm = (onGoToKnowledgeBase = vi.fn()) => {
   const user = userEvent.setup();
   // Some children use React Query hooks, so wrap in a client.
@@ -79,6 +88,25 @@ describe('AiBotForm', () => {
   beforeEach(() => {
     mockMutate.mockReset();
     mockBind.mockReset();
+    readinessState.unselectedEntitledSkills = [];
+  });
+
+  // Regression: a Pro tenant's bot bound a template selecting only `booking`, so
+  // the runtime tool-gate stripped capture_lead and their paid-for Leads feature
+  // was silently dead. The speciality section must say so.
+  it('warns on the speciality section when an entitled feature has no bound skill', async () => {
+    readinessState.unselectedEntitledSkills = [
+      { feature: 'leadCapture', skillId: 'lead_capture', skillName: 'Lead capture' },
+    ];
+    renderForm();
+    const warning = await screen.findByTestId('skill-coverage-warning');
+    expect(warning).toHaveTextContent(/Your plan includes Leads/i);
+    expect(warning).toHaveTextContent(/Lead capture skill/i);
+  });
+
+  it('shows no coverage warning when every entitled skill is bound', () => {
+    renderForm();
+    expect(screen.queryByTestId('skill-coverage-warning')).not.toBeInTheDocument();
   });
 
   it('adds a template via the Select (separate from the auto-saved form)', async () => {

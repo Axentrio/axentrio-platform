@@ -21,6 +21,8 @@ const { state, BotNotFoundConfigError } = vi.hoisted(() => ({
     entitlements: { features: { bookings: true } } as any,
     // capabilities (the readiness registry) — overridden per test
     capabilities: [] as any[],
+    // resolved template bindings, for the entitled-but-undelivered diagnostic
+    resolvedTemplates: [] as any[],
   },
 }));
 
@@ -76,6 +78,13 @@ vi.mock('../../readiness', () => ({
   getCapabilities: () => state.capabilities,
 }));
 
+// The entitled-but-undelivered diagnostic resolves the bot's bindings; stub the
+// resolution so the route test needs no template rows or bundle cache.
+vi.mock('../../templates/template-resolver', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../templates/template-resolver')>();
+  return { ...actual, resolveBoundTemplates: async () => state.resolvedTemplates };
+});
+
 vi.mock('../../utils/logger', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -104,6 +113,7 @@ import express from 'express';
 import request from 'supertest';
 import botsRoutes from '../../routes/bots.routes';
 import { errorHandler } from '../../middleware/error-handler';
+import { registerModule, clearCatalogForTests } from '../../modules/module-catalog';
 
 function createApp() {
   const app = express();
@@ -133,6 +143,9 @@ beforeEach(() => {
   state.entitlementsThrows = false;
   state.entitlements = { features: { bookings: true } };
   state.capabilities = [];
+  state.resolvedTemplates = [];
+  delete process.env.COMPOSABLE_TEMPLATES_ENABLED;
+  clearCatalogForTests();
 });
 
 describe('GET /bots/readiness — route ordering', () => {
@@ -259,6 +272,44 @@ describe('GET /bots/readiness — fail-closed (whole-endpoint 5xx, never partial
     state.capabilities = [cap('booking')];
     const res = await request(createApp()).get('/bots/readiness');
     expect(res.status).toBeGreaterThanOrEqual(500);
+  });
+});
+
+describe('GET /bots/readiness — unselectedEntitledSkills (entitled but undelivered)', () => {
+  /** The shipped feature-gated skills, registered via the catalog test seam. */
+  function registerShippedSkills() {
+    registerModule({ id: 'booking', displayName: 'Bookings', gate: { kind: 'feature', feature: 'bookings' }, tools: [] });
+    registerModule({ id: 'lead_capture', displayName: 'Lead capture', gate: { kind: 'feature', feature: 'leadCapture' }, tools: [] });
+  }
+
+  it('a template selecting only booking ⇒ the entitled lead_capture skill is reported', async () => {
+    process.env.COMPOSABLE_TEMPLATES_ENABLED = 'true';
+    registerShippedSkills();
+    state.entitlements = { features: { bookings: true, leadCapture: true } };
+    state.resolvedTemplates = [{ selectedSkillIds: ['booking'], expectedModules: [] }];
+    const res = await request(createApp()).get('/bots/readiness');
+    expect(res.status).toBe(200);
+    expect(res.body.data.unselectedEntitledSkills).toEqual([
+      { feature: 'leadCapture', skillId: 'lead_capture', skillName: 'Lead capture' },
+    ]);
+  });
+
+  it('a template that selects the skill ⇒ empty', async () => {
+    process.env.COMPOSABLE_TEMPLATES_ENABLED = 'true';
+    registerShippedSkills();
+    state.entitlements = { features: { bookings: true, leadCapture: true } };
+    state.resolvedTemplates = [{ selectedSkillIds: ['booking', 'lead_capture'], expectedModules: [] }];
+    const res = await request(createApp()).get('/bots/readiness');
+    expect(res.body.data.unselectedEntitledSkills).toEqual([]);
+  });
+
+  it('not entitled to the feature ⇒ empty (omitting an unbought skill is not a misconfiguration)', async () => {
+    process.env.COMPOSABLE_TEMPLATES_ENABLED = 'true';
+    registerShippedSkills();
+    state.entitlements = { features: { bookings: true, leadCapture: false } };
+    state.resolvedTemplates = [{ selectedSkillIds: ['booking'], expectedModules: [] }];
+    const res = await request(createApp()).get('/bots/readiness');
+    expect(res.body.data.unselectedEntitledSkills).toEqual([]);
   });
 });
 

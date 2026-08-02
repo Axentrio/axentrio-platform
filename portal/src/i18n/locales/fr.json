@@ -127,7 +127,37 @@
       "fromSession": "Depuis la session",
       "notes": "Notes",
       "createdAt": "Créé le",
-      "conversations": "({{count}} conversations)"
+      "conversations": "({{count}} conversations)",
+      "returning": "Client fidèle",
+      "returningSince": "· vu pour la première fois le {{date}}"
+    },
+    "followUp": {
+      "becauseLabel": "Parce que",
+      "advisory": "Déduit des informations de ce lead. Rien n’a été envoyé — il s’agit uniquement d’une suggestion.",
+      "priority": {
+        "now": "Aujourd’hui",
+        "soon": "Cette semaine"
+      },
+      "actions": {
+        "confirm_request": "Confirmez ou refusez le créneau demandé",
+        "win_back_cancelled": "Proposez-lui un nouveau créneau — son rendez-vous a été annulé",
+        "check_in_after_visit": "Vérifiez que la visite s’est bien passée",
+        "offer_a_time": "Recontactez-le avec un créneau",
+        "ask_what_they_need": "Demandez-lui ce dont il a besoin"
+      },
+      "reasons": {
+        "booking_unconfirmed": "Il a demandé un créneau encore non confirmé",
+        "booking_cancelled": "Son rendez-vous a été annulé",
+        "visit_passed": "L’heure de son rendez-vous est passée",
+        "request_known": "Il nous a dit ce dont il a besoin",
+        "no_request": "Rien n’a été enregistré sur son besoin",
+        "no_address": "Aucune adresse sur le rendez-vous",
+        "reach_phone": "Numéro de téléphone connu",
+        "reach_channel": "Joignable dans la conversation d’origine",
+        "reach_email": "Adresse e-mail connue",
+        "returning": "Client fidèle",
+        "waiting": "Ouvert depuis {{days}} jours"
+      }
     },
     "locked": {
       "title": "Capture de leads",

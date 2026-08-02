@@ -168,6 +168,111 @@ describe('Leads page — honest presentation', () => {
   });
 });
 
+describe('Leads page — the recommended follow-up action', () => {
+  /** What the server sends an Enterprise tenant. Absent entirely below Enterprise. */
+  const FOLLOW_UP = {
+    action: 'offer_a_time',
+    via: 'phone',
+    priority: 'soon',
+    version: 1,
+    reasons: [
+      { key: 'request_known', label: 'They told us what they need' },
+      { key: 'reach_phone', label: 'Phone number on file' },
+    ],
+  };
+
+  /** The panel lives in the expanded row, so every assertion opens it first. */
+  const openDrawer = async () => {
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Achraf Peeters'));
+  };
+
+  it('is absent for a tenant without aiBusinessInsights', async () => {
+    // The server omits `followUp` entirely below Enterprise, which is what keeps the
+    // panel off their screen — there is no second client-side gate to forget.
+    hasFeatureMock.mockImplementation((k) => k !== 'aiBusinessInsights');
+    renderUI([PRO_LEAD]);
+    await openDrawer();
+    expect(screen.queryByText(/Get back to them with a time/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/this is a suggestion only/i)).not.toBeInTheDocument();
+  });
+
+  it('renders the action together with the reasons that fired it', async () => {
+    // A suggested action with no stated cause is exactly the unexplainable AI verdict
+    // this feature was designed not to be.
+    renderUI([{ ...PRO_LEAD, followUp: FOLLOW_UP }]);
+    await openDrawer();
+    expect(await screen.findByText(/Get back to them with a time/i)).toBeInTheDocument();
+    expect(screen.getByText(/They told us what they need/i)).toBeInTheDocument();
+    expect(screen.getByText(/Phone number on file/i)).toBeInTheDocument();
+  });
+
+  it('says plainly that nothing has been sent', async () => {
+    // There is no worklist behind this: it is advisory, and the copy must not let
+    // anyone assume the platform already chased the customer.
+    renderUI([{ ...PRO_LEAD, followUp: FOLLOW_UP }]);
+    await openDrawer();
+    expect(await screen.findByText(/nothing has been sent/i)).toBeInTheDocument();
+  });
+
+  it('marks an urgent recommendation as due today', async () => {
+    renderUI([
+      {
+        ...PRO_LEAD,
+        followUp: {
+          ...FOLLOW_UP,
+          action: 'win_back_cancelled',
+          priority: 'now',
+          reasons: [
+            { key: 'booking_cancelled', label: 'Their booking was cancelled' },
+            // Quantified reason: the server sends the number, the locale renders it.
+            { key: 'waiting', label: 'Open for {{days}} days', days: 9 },
+          ],
+        },
+      },
+    ]);
+    await openDrawer();
+    expect(await screen.findByText(/Offer them a new time/i)).toBeInTheDocument();
+    expect(screen.getByText('Today')).toBeInTheDocument();
+    // Interpolated, not printed raw — a visible `{{days}}` is the failure this catches.
+    expect(screen.getByText(/Open for 9 days/i)).toBeInTheDocument();
+  });
+
+  it('renders nothing when the tenant is entitled but there is nothing to suggest', async () => {
+    // `null` (entitled, no recommendation) must look like silence, not like an error.
+    renderUI([{ ...PRO_LEAD, followUp: null }]);
+    await openDrawer();
+    expect(screen.queryByText(/this is a suggestion only/i)).not.toBeInTheDocument();
+  });
+});
+
+describe('Leads page — repeat customers', () => {
+  it('shows a returning-customer indicator when the server says so', async () => {
+    // The signal groups a person across their lead ROWS; `conversationCount` counts
+    // THIS record and structurally cannot see the WhatsApp-then-widget case, so the
+    // indicator has to come from `isRepeatCustomer`.
+    renderUI([
+      {
+        ...PRO_LEAD,
+        isRepeatCustomer: true,
+        personConversationCount: 3,
+        personLeadCount: 2,
+        personFirstSeenAt: '2026-03-02T09:00:00.000Z',
+      },
+    ]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Achraf Peeters'));
+    expect(await screen.findByText(/returning customer/i)).toBeInTheDocument();
+  });
+
+  it('says nothing about repeats for a first-time contact', async () => {
+    renderUI([{ ...PRO_LEAD, isRepeatCustomer: false, personConversationCount: 1 }]);
+    await waitFor(() => expect(screen.getByText('Achraf Peeters')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Achraf Peeters'));
+    expect(screen.queryByText(/returning customer/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('Leads page — untrusted text', () => {
   it('renders visitor/model free text as TEXT, not markup', async () => {
     // `notes` is model-authored from visitor input and flows to the portal, CSV and

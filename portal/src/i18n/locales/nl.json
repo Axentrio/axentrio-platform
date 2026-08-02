@@ -127,7 +127,37 @@
       "fromSession": "Uit sessie",
       "notes": "Notities",
       "createdAt": "Aangemaakt op",
-      "conversations": "({{count}} gesprekken)"
+      "conversations": "({{count}} gesprekken)",
+      "returning": "Terugkerende klant",
+      "returningSince": "· voor het eerst gezien op {{date}}"
+    },
+    "followUp": {
+      "becauseLabel": "Omdat",
+      "advisory": "Afgeleid uit de gegevens van deze lead. Er is niets verstuurd — dit is alleen een suggestie.",
+      "priority": {
+        "now": "Vandaag",
+        "soon": "Deze week"
+      },
+      "actions": {
+        "confirm_request": "Bevestig of weiger het gevraagde tijdslot",
+        "win_back_cancelled": "Bied een nieuw tijdstip aan — hun afspraak is geannuleerd",
+        "check_in_after_visit": "Vraag na of ze tevreden waren over het bezoek",
+        "offer_a_time": "Kom bij hen terug met een tijdstip",
+        "ask_what_they_need": "Vraag wat ze nodig hebben"
+      },
+      "reasons": {
+        "booking_unconfirmed": "Ze vroegen een tijdslot dat nog niet bevestigd is",
+        "booking_cancelled": "Hun afspraak is geannuleerd",
+        "visit_passed": "Het tijdstip van hun afspraak is voorbij",
+        "request_known": "Ze vertelden ons wat ze nodig hebben",
+        "no_request": "Niets vastgelegd over wat ze nodig hebben",
+        "no_address": "Geen adres bij de afspraak",
+        "reach_phone": "Telefoonnummer bekend",
+        "reach_channel": "Bereikbaar in het gesprek waarin ze schreven",
+        "reach_email": "E-mailadres bekend",
+        "returning": "Terugkerende klant",
+        "waiting": "{{days}} dagen open"
+      }
     },
     "locked": {
       "title": "Leads vastleggen",

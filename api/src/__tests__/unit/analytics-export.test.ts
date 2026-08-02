@@ -81,11 +81,16 @@ describe('analytics · exporter registry (P3 D7)', () => {
   it('leads exporter shapes rows in header order, nulls → empty string', async () => {
     const ex = getExporter('leads')!;
     q.queue = [[
-      { ca: '2026-06-03T10:00:00Z', name: 'Ada', email: 'ada@x.io', phone: null, channel: 'whatsapp', source: 'tool', status: 'new', notes: 'Leak under the sink' },
+      { ca: '2026-06-03T10:00:00Z', name: 'Ada', email: 'ada@x.io', phone: null,
+        channel: 'whatsapp', source: 'tool', status: 'new', notes: 'Leak under the sink' },
     ]];
     const rows = await ex.rows('t1', RANGE);
-    expect(ex.headers).toEqual(['created_at', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes']);
-    expect(rows[0]).toEqual(['2026-06-03T10:00:00Z', 'Ada', 'ada@x.io', '', 'whatsapp', 'tool', 'new', 'Leak under the sink']);
+    expect(ex.headers).toEqual(['created_at_utc', 'name', 'email', 'phone', 'channel', 'source', 'status', 'notes']);
+    // The timestamp is NORMALIZED on the way out — ISO in, Excel-parseable datetime
+    // out. It used to pass through verbatim, which Excel imported as unsortable text.
+    expect(rows[0]).toEqual([
+      '2026-06-03 10:00:00', 'Ada', 'ada@x.io', '', 'whatsapp', 'tool', 'new', 'Leak under the sink',
+    ]);
     expect(ex.filename(RANGE)).toBe('leads_2026-06-01_2026-06-08.csv');
   });
 
@@ -101,5 +106,32 @@ describe('analytics · exporter registry (P3 D7)', () => {
       ['2026-06-01', '3', '0', '1'],
       ['2026-06-02', '5', '2', '0'],
     ]);
+  });
+});
+
+describe('analytics · timestamps are spreadsheet-usable', () => {
+  it('emits YYYY-MM-DD HH:MM:SS, not a verbose JS date string', async () => {
+    // `String(new Date())` gives "Tue Jun 30 2026 10:15:32 GMT+0000 (Coordinated
+    // Universal Time)", which Excel imports as TEXT — unsortable, unfilterable, which
+    // defeats most of the reason to open leads in a spreadsheet. Found on production.
+    q.queue = [[{ ca: new Date('2026-06-30T10:15:32.000Z'), name: 'Ann', email: 'a@b.c',
+                  phone: null, channel: 'widget', source: 'tool', status: 'new', notes: null }]];
+    const rows = await getExporter('leads')!.rows('t', RANGE);
+    expect(rows[0][0]).toBe('2026-06-30 10:15:32');
+    expect(rows[0][0]).not.toMatch(/GMT|Coordinated/);
+  });
+
+  it('names the column created_at_utc, so the dropped zone is stated not implied', () => {
+    // Space-separated (not ISO T/Z) because Excel parses THIS form as a real datetime
+    // in every locale we serve. That drops the offset, so the header has to say UTC —
+    // showing a Belgian operator an unlabelled 10:15 for a 12:15 event is quietly wrong.
+    expect(getExporter('leads')!.headers[0]).toBe('created_at_utc');
+  });
+
+  it('never loses a value when a timestamp cannot be parsed', async () => {
+    q.queue = [[{ ca: 'not-a-date', name: 'Ann', email: null, phone: null,
+                  channel: null, source: 'tool', status: 'new', notes: null }]];
+    const rows = await getExporter('leads')!.rows('t', RANGE);
+    expect(rows[0][0]).toBe('not-a-date'); // degrades to the raw value, never to ''
   });
 });

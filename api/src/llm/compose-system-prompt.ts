@@ -25,6 +25,7 @@ import type { Tenant } from '../database/entities/Tenant';
 import type { ToolAdapter } from '../agent/tool-adapter';
 import { PLATFORM_RULES_HEADING, platformSafetyPreambleLines } from './platform-rules';
 import { createBlockLedger, PROMPT_BLOCK_KEYS as K, type BlockLedger } from './block-ledger';
+import { PROACTIVE_ASK_RULE } from '../leads/proactive/should-ask';
 import type { ResolvedSpecialty } from './specialty-catalog';
 import { buildVariableMap, type PromptExtras } from './placeholder-registry';
 
@@ -168,6 +169,14 @@ interface AgentCtx {
   /** Business timezone (IANA, e.g. the booking calendar's zone) used to anchor the
    *  "Today is …" date context. Absent ⇒ server/local tz (legacy behavior). */
   timezone?: string;
+  /**
+   * Runtime signal: the caller decided this turn may carry ONE polite request for a
+   * contact route we don't have (Story 3, Pro). Decided by
+   * `leads/proactive/should-ask.ts`, which owns the restraints — the composer is not
+   * given the session state needed to second-guess it. Absent ⇒ the bot stays passive,
+   * which is the behaviour every tier had before and the safe default.
+   */
+  proactiveAsk?: boolean;
   /** Runtime signal: false ⇒ booking tools are loaded but booking is not actually
    *  configured (no availability rule / no bookable service), so the bot must not
    *  offer it. Absent/true ⇒ trust the loaded tools (back-compat for direct callers/tests). */
@@ -455,9 +464,22 @@ Be clean, concise, and professional — courteous and efficient, not gushing, ov
     if (proactive) ledger.include(K.CHANNEL_LEAD_CAPTURE);
     else if (!isChannelSession) ledger.exclude(K.CHANNEL_LEAD_CAPTURE, 'channel');
     else ledger.exclude(K.CHANNEL_LEAD_CAPTURE, 'tier');
+
+    // The widget counterpart: ASK for a contact route we don't have. Gated on the
+    // caller's decision (`shouldAskForContact`) rather than recomputed here — the
+    // restraints need session state (turn count, whether we already asked) that the
+    // composer has no business loading. Absent flag ⇒ excluded, so every existing
+    // caller and test keeps the passive behaviour.
+    if (ctx.proactiveAsk) {
+      sections.push(PROACTIVE_ASK_RULE);
+      ledger.include(K.PROACTIVE_CONTACT_ASK);
+    } else {
+      ledger.exclude(K.PROACTIVE_CONTACT_ASK, 'tier');
+    }
   } else {
     ledger.exclude(K.CONTACT_DETAILS, 'toolAbsent');
     ledger.exclude(K.CHANNEL_LEAD_CAPTURE, 'toolAbsent');
+    ledger.exclude(K.PROACTIVE_CONTACT_ASK, 'toolAbsent');
   }
 
   // Escalation

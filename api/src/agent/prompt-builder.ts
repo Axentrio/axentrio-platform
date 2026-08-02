@@ -31,7 +31,9 @@ export class PromptBuilder {
     skillProse?: { id: string; prose: string }[],
     /** Live values for the {services} / {openingHours} placeholders. `services` is
      *  only substituted when the bot can actually book; `openingHours` always is. */
-    liveFields?: { services?: string; openingHours?: string }
+    liveFields?: { services?: string; openingHours?: string },
+    /** Per-turn runtime decisions the composer must not make for itself. */
+    runtime?: { proactiveAsk?: boolean }
   ): { prompt: string; ledger: BlockLedger } {
     return composeSystemPrompt({
       mode: 'agent',
@@ -51,6 +53,7 @@ export class PromptBuilder {
       bookingServices: liveFields?.services,
       openingHours: liveFields?.openingHours,
       channel,
+      proactiveAsk: runtime?.proactiveAsk,
     });
   }
 }

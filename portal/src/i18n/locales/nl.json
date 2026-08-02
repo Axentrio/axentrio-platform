@@ -113,7 +113,7 @@
       "contact": "Contact",
       "source": "Bron",
       "capturedAt": "Vastgelegd",
-      "request": "Aanvraag",
+      "request": "Wat ze nodig hebben",
       "status": "Status",
       "service": "Dienst",
       "appointment": "Afspraak",
@@ -121,7 +121,12 @@
       "preferredAt": "Voorkeur",
       "booking": "Boeking",
       "noName": "Geen naam",
-      "reachVia": "Antwoord via {{channel}}"
+      "reachVia": "Antwoord via {{channel}}",
+      "person": "Persoon",
+      "waiting": "Wacht al",
+      "days": "dagen",
+      "nextStep": "Volgende stap",
+      "returning": "Eerder geweest"
     },
     "detail": {
       "fromSession": "Uit sessie",
@@ -129,7 +134,9 @@
       "createdAt": "Aangemaakt op",
       "conversations": "({{count}} gesprekken)",
       "returning": "Terugkerende klant",
-      "returningSince": "· voor het eerst gezien op {{date}}"
+      "returningSince": "· voor het eerst gezien op {{date}}",
+      "firstSeen": "Eerste contact",
+      "notGiven": "Niet opgegeven"
     },
     "followUp": {
       "becauseLabel": "Omdat",
@@ -157,6 +164,14 @@
         "reach_email": "E-mailadres bekend",
         "returning": "Terugkerende klant",
         "waiting": "Al {{days}} dagen geen contact"
+      },
+      "none": "Niets op te volgen",
+      "short": {
+        "confirm_request": "Bevestig het tijdstip",
+        "win_back_cancelled": "Bied een nieuw tijdstip aan",
+        "check_in_after_visit": "Vraag hoe het ging",
+        "offer_a_time": "Stel een tijdstip voor",
+        "ask_what_they_need": "Vraag wat ze nodig hebben"
       }
     },
     "locked": {
@@ -204,7 +219,9 @@
     "actions": {
       "erase": "Persoonsgegevens verwijderen",
       "archive": "Markeer als afgehandeld",
-      "reopen": "Heropenen"
+      "reopen": "Heropenen",
+      "call": "Bel {{who}}",
+      "email": "Mail {{who}}"
     },
     "retention": {
       "title": "Hoe lang leads bewaren",
@@ -247,6 +264,11 @@
       "failed": "Kon niet naar je CRM worden gestuurd — laatste poging {{when}}",
       "neverSent": "Nog niet naar je CRM gestuurd",
       "retrying": "Nog bezig met verzenden naar je CRM"
+    },
+    "attention": {
+      "overdue": "<b>{{count}}</b> hoorden al meer dan {{days}} dagen niets.",
+      "unconfirmed": "<b>{{count}}</b> vroegen een tijdstip dat nog niet bevestigd is.",
+      "scope": "Van de {{loaded}} geladen leads"
     }
   },
   "socialMedia": {

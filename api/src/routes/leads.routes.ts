@@ -120,6 +120,16 @@ function personRepeat(l: Record<string, unknown>) {
  * Deterministic — see followup.ts for why this is not an LLM call, and for the fact that
  * it is advisory only until a worklist exists to give it an outcome.
  */
+/**
+ * When anyone last had contact with this person — NOT when the record was created.
+ * A lead answered yesterday but first seen a year ago has waited a day, not a year.
+ * Shared by the follow-up rule and the list DTO so the "waiting" figure on screen and
+ * the reason inside the recommendation are the same number by construction.
+ */
+function lastContactOf(l: Record<string, unknown>): string | null {
+  return (l.person_last_seen_at as string | null) ?? (l.updated_at as string | null);
+}
+
 function projectFollowUp(l: Record<string, unknown>) {
   return recommendFollowUp({
     status: l.status as string | null,
@@ -136,8 +146,7 @@ function projectFollowUp(l: Record<string, unknown>) {
     personHasUpcomingBooking: l.person_has_upcoming_booking === true,
     isRepeatCustomer: personRepeat(l).isRepeatCustomer,
     createdAt: l.created_at as string | null,
-    // Silence, not record age — see followup.ts.
-    lastContactAt: (l.person_last_seen_at as string | null) ?? (l.updated_at as string | null),
+    lastContactAt: lastContactOf(l),
   });
 }
 
@@ -434,6 +443,7 @@ router.get(
         status: l.status,
         notes: l.notes ?? null,
         createdAt: new Date(l.created_at as string).toISOString(),
+        lastActivityAt: lastContactOf(l),
         ...(wide ? projectBookingFields(l) : {}),
         // Absent (not null) when unentitled, matching the structured fields above, so
         // `'followUp' in lead` distinguishes "not entitled" from "nothing to suggest".

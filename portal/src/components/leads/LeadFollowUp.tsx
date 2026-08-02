@@ -86,3 +86,51 @@ export const LeadFollowUp: React.FC<{ followUp: FollowUpRecommendation | null | 
     </div>
   );
 };
+
+/**
+ * The same recommendation, compressed to one line for the leads table.
+ *
+ * Short labels, not the sentences above: a column has to be scannable down its length,
+ * and "Confirm or decline the slot they asked for" cannot be read twenty times in a
+ * column without becoming noise. The reasons stay in the expanded row — this says WHAT,
+ * the panel says WHY.
+ *
+ * `undefined` renders nothing (tenant not entitled, so the column is absent for them);
+ * `null` renders the quiet "nothing to chase" state, which is a real answer and not the
+ * same as having no opinion.
+ */
+const SHORT_ACTION: Record<FollowUpRecommendation['action'], string> = {
+  confirm_request: 'Confirm the slot',
+  win_back_cancelled: 'Offer a new time',
+  check_in_after_visit: 'Check how it went',
+  offer_a_time: 'Send them a time',
+  ask_what_they_need: 'Ask what they need',
+};
+
+export const LeadNextStep: React.FC<{
+  followUp: FollowUpRecommendation | null | undefined;
+}> = ({ followUp }) => {
+  const { t } = useTranslation();
+  if (followUp === undefined) return null;
+
+  if (followUp === null) {
+    return (
+      <span className="inline-flex items-center gap-2 whitespace-nowrap text-text-muted">
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full ring-1 ring-current" aria-hidden="true" />
+        {t('leads.followUp.none', { defaultValue: 'Nothing to chase' })}
+      </span>
+    );
+  }
+
+  const tone =
+    followUp.priority === 'now' ? 'text-destructive' : 'text-status-away';
+
+  return (
+    <span className={`inline-flex items-center gap-2 whitespace-nowrap font-medium ${tone}`}>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
+      {t(`leads.followUp.short.${followUp.action}`, {
+        defaultValue: SHORT_ACTION[followUp.action],
+      })}
+    </span>
+  );
+};

@@ -113,7 +113,7 @@
       "contact": "Contact",
       "source": "Source",
       "capturedAt": "Capturé",
-      "request": "Demande",
+      "request": "Ce dont ils ont besoin",
       "status": "Statut",
       "service": "Service",
       "appointment": "Rendez-vous",
@@ -121,7 +121,12 @@
       "preferredAt": "Souhaité",
       "booking": "Réservation",
       "noName": "Sans nom",
-      "reachVia": "Répondre via {{channel}}"
+      "reachVia": "Répondre via {{channel}}",
+      "person": "Personne",
+      "waiting": "En attente",
+      "days": "jours",
+      "nextStep": "Prochaine étape",
+      "returning": "Déjà venu"
     },
     "detail": {
       "fromSession": "Depuis la session",
@@ -129,7 +134,9 @@
       "createdAt": "Créé le",
       "conversations": "({{count}} conversations)",
       "returning": "Client fidèle",
-      "returningSince": "· vu pour la première fois le {{date}}"
+      "returningSince": "· vu pour la première fois le {{date}}",
+      "firstSeen": "Premier contact",
+      "notGiven": "Non renseigné"
     },
     "followUp": {
       "becauseLabel": "Parce que",
@@ -157,6 +164,14 @@
         "reach_email": "Adresse e-mail connue",
         "returning": "Client fidèle",
         "waiting": "Sans contact depuis {{days}} jours"
+      },
+      "none": "Rien à relancer",
+      "short": {
+        "confirm_request": "Confirmer le créneau",
+        "win_back_cancelled": "Proposer un nouveau créneau",
+        "check_in_after_visit": "Vérifier que tout s'est bien passé",
+        "offer_a_time": "Proposer un créneau",
+        "ask_what_they_need": "Demander ce dont ils ont besoin"
       }
     },
     "locked": {
@@ -204,7 +219,9 @@
     "actions": {
       "erase": "Effacer les données personnelles",
       "archive": "Marquer comme traité",
-      "reopen": "Réouvrir"
+      "reopen": "Réouvrir",
+      "call": "Appeler {{who}}",
+      "email": "Envoyer un e-mail à {{who}}"
     },
     "retention": {
       "title": "Durée de conservation des leads",
@@ -247,6 +264,11 @@
       "failed": "Impossible d’envoyer à votre CRM — dernière tentative {{when}}",
       "neverSent": "Pas encore envoyé à votre CRM",
       "retrying": "Envoi vers votre CRM toujours en cours"
+    },
+    "attention": {
+      "overdue": "<b>{{count}}</b> sans nouvelles depuis plus de {{days}} jours.",
+      "unconfirmed": "<b>{{count}}</b> ont demandé un créneau non confirmé.",
+      "scope": "Sur les {{loaded}} contacts chargés"
     }
   },
   "socialMedia": {

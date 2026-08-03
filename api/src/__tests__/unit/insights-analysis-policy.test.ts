@@ -61,8 +61,12 @@ describe('analysisPolicyFor — the tiers differ in HOW analysis runs', () => {
 });
 
 describe('checkEligibility', () => {
-  const run = (f: PlanFeatures, newChats: number, lastManualRunAt: Date | null = null) =>
-    checkEligibility({ policy: analysisPolicyFor(f), newChats, lastManualRunAt, now: NOW });
+  const run = (
+    f: PlanFeatures,
+    newChats: number,
+    lastManualRunAt: Date | null = null,
+    running = false,
+  ) => checkEligibility({ policy: analysisPolicyFor(f), newChats, lastManualRunAt, running, now: NOW });
 
   it('allows a first run once the minimum is met', () => {
     expect(run(ESSENTIAL, 15)).toMatchObject({ eligible: true, reason: null });
@@ -105,5 +109,21 @@ describe('checkEligibility', () => {
 
   it('refuses a tenant without insights at all, before any counting', () => {
     expect(run(FREE, 9999)).toMatchObject({ eligible: false, reason: 'not_entitled' });
+  });
+
+  it('reports a run already in flight ahead of the data and time limits', () => {
+    // Both of those numbers are mid-change while a pass is running, so naming either
+    // as the reason would explain the wrong thing.
+    const r = run(ESSENTIAL, 3, hoursAgo(1), true);
+    expect(r).toMatchObject({ eligible: false, reason: 'running', running: true });
+  });
+
+  it('never puts Infinity on the wire — JSON turns it into null', () => {
+    // `minNewChats: Infinity` serialised as null and the UI rendered "12 of null".
+    for (const f of [FREE, ESSENTIAL, PRO, ENTERPRISE]) {
+      const parsed = JSON.parse(JSON.stringify(analysisPolicyFor(f)));
+      expect(parsed.minNewChats).not.toBeNull();
+      expect(parsed.cooldownHours).not.toBeNull();
+    }
   });
 });

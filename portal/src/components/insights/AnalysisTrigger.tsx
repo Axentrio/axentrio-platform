@@ -36,6 +36,10 @@ function useReasonText(status: AnalysisStatus | undefined): string | null {
   if (!status || status.eligible) return null;
 
   switch (status.reason) {
+    case 'running':
+      return t('insights.analysis.inFlight', {
+        defaultValue: 'Analysing your conversations. This can take a few minutes.',
+      });
     case 'automatic':
       return t('insights.analysis.automatic', {
         defaultValue: 'Your plan analyses conversations continuously — nothing to run by hand.',
@@ -74,8 +78,12 @@ export const AnalysisTrigger: React.FC = () => {
   const onRun = async () => {
     try {
       await run.mutateAsync();
+      // "Started", not "finished": the server returned 202 and the work is still going.
+      // Claiming completion here is the lie the synchronous version would have told.
       toast.success(
-        t('insights.analysis.done', { defaultValue: 'Analysis finished. Insights updated.' }),
+        t('insights.analysis.started', {
+          defaultValue: 'Analysis started. It will appear here when it finishes.',
+        }),
       );
     } catch (err) {
       toast.error(
@@ -88,13 +96,18 @@ export const AnalysisTrigger: React.FC = () => {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {!status.policy.automatic && (
-        <Button size="sm" variant="outline" onClick={onRun} disabled={!status.eligible || run.isPending}>
-          {run.isPending ? (
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={onRun}
+          disabled={!status.eligible || run.isPending || status.running}
+        >
+          {run.isPending || status.running ? (
             <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
           ) : (
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
           )}
-          {run.isPending
+          {run.isPending || status.running
             ? t('insights.analysis.running', { defaultValue: 'Analysing…' })
             : t('insights.analysis.run', { defaultValue: 'Analyse now' })}
         </Button>

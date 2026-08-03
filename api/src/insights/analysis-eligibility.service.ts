@@ -11,6 +11,7 @@
  * ordering into a counter that wants neither) but it is a coupling worth knowing about.
  */
 import { AppDataSource } from '../database/data-source';
+import { returningRows } from '../utils/raw-sql';
 import { InsightsRefreshState } from '../database/entities/InsightsRefreshState';
 import { getEntitlements } from '../billing/entitlements';
 import {
@@ -56,6 +57,10 @@ export async function getAnalysisStatus(tenantId: string, now = new Date()): Pro
   });
   const lastRefreshedAt = state?.lastRefreshedAt ?? null;
   const lastManualRunAt = state?.lastManualRunAt ?? null;
+  // An expired claim is not a running analysis — see RUN_LEASE_MINUTES.
+  const runningSince = state?.analysisRunningSince ?? null;
+  const running =
+    runningSince != null && runningSince.getTime() > now.getTime() - RUN_LEASE_MINUTES * 60_000;
 
   // Skip the count entirely for tenants who could not act on it — an unentitled tenant
   // and an Enterprise one both have no button, and this runs on every page load.
@@ -63,10 +68,48 @@ export async function getAnalysisStatus(tenantId: string, now = new Date()): Pro
   const newChats = needsCount ? await countNewAnalysableChats(tenantId, lastRefreshedAt) : 0;
 
   return {
-    ...checkEligibility({ policy, newChats, lastManualRunAt, now }),
+    ...checkEligibility({ policy, newChats, lastManualRunAt, running, now }),
     policy,
     lastRefreshedAt,
   };
+}
+
+/**
+ * How long a claim survives without being cleared. A run that outlives this is assumed
+ * dead (process restart, deploy mid-run) and the tenant can start another — otherwise a
+ * single crash would strand them on "analysing" until someone edited the database.
+ * Comfortably longer than a full backfill of 500 conversations.
+ */
+export const RUN_LEASE_MINUTES = 30;
+
+/**
+ * Claim the right to run, atomically.
+ *
+ * The UPDATE is the lock: only one caller can move `analysis_running_since` from
+ * null-or-expired to now(), so two clicks in the same second cannot both start an LLM
+ * pass. Returns false when someone already holds it.
+ */
+export async function claimAnalysisRun(tenantId: string, now = new Date()): Promise<boolean> {
+  const rows = await AppDataSource.query(
+    `INSERT INTO chatbot_insights_refresh_state (tenant_id, analysis_running_since, last_manual_run_at)
+     VALUES ($1, $2, $2)
+     ON CONFLICT (tenant_id) DO UPDATE
+        SET analysis_running_since = EXCLUDED.analysis_running_since,
+            last_manual_run_at = EXCLUDED.last_manual_run_at
+      WHERE chatbot_insights_refresh_state.analysis_running_since IS NULL
+         OR chatbot_insights_refresh_state.analysis_running_since < $3
+     RETURNING tenant_id`,
+    [tenantId, now.toISOString(), new Date(now.getTime() - RUN_LEASE_MINUTES * 60_000).toISOString()],
+  );
+  return returningRows<{ tenant_id: string }>(rows).length > 0;
+}
+
+/** Release the claim. Called on success AND on failure — a dead lease helps nobody. */
+export async function releaseAnalysisRun(tenantId: string): Promise<void> {
+  await AppDataSource.query(
+    `UPDATE chatbot_insights_refresh_state SET analysis_running_since = NULL WHERE tenant_id = $1`,
+    [tenantId],
+  );
 }
 
 /**

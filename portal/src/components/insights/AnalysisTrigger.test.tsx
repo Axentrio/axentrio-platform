@@ -22,6 +22,7 @@ import { AnalysisTrigger } from './AnalysisTrigger';
 const base = {
   eligible: false,
   reason: null,
+  running: false,
   newChats: 0,
   minNewChats: 15,
   nextAllowedAt: null,
@@ -69,6 +70,15 @@ describe('AnalysisTrigger', () => {
     render(<AnalysisTrigger />);
     expect(screen.queryByRole('button', { name: /analyse now/i })).not.toBeInTheDocument();
     expect(screen.getByText(/continuously/i)).toBeInTheDocument();
+  });
+
+  it('shows the run as in flight, and will not let it be started twice', () => {
+    // The POST returns 202 and the work continues in the background, so the control has
+    // to represent "still going" — otherwise the operator clicks again.
+    status.value = { ...base, reason: 'running', running: true, newChats: 40 };
+    render(<AnalysisTrigger />);
+    expect(screen.getByRole('button', { name: /analysing/i })).toBeDisabled();
+    expect(screen.getByText(/take a few minutes/i)).toBeInTheDocument();
   });
 
   it('renders nothing at all for a tenant without insights', () => {

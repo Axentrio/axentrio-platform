@@ -46,7 +46,9 @@ const insightsOptions = {
 /** Mirrors the server's analysis-policy shape; see api/src/insights/analysis-policy.ts. */
 export interface AnalysisStatus {
   eligible: boolean;
-  reason: 'not_entitled' | 'automatic' | 'not_enough_chats' | 'cooling_down' | null;
+  reason: 'not_entitled' | 'automatic' | 'not_enough_chats' | 'cooling_down' | 'running' | null;
+  /** True while an analysis is still running; the status query polls until it clears. */
+  running: boolean;
   newChats: number;
   minNewChats: number;
   nextAllowedAt: string | null;
@@ -59,6 +61,10 @@ export function useAnalysisStatus(enabled = true) {
     queryKey: [...queryKeys.insights.all(), 'analysis-status'],
     queryFn: () => api.get<AnalysisStatus>('/insights/analysis-status'),
     enabled,
+    // The run happens in the background — the POST returns 202 and this is how the
+    // portal finds out it finished. Polls only while something is actually in flight,
+    // so an idle Success Meter makes no repeat requests.
+    refetchInterval: (query) => (query.state.data?.running ? 3_000 : false),
   });
 }
 
@@ -72,6 +78,8 @@ export function useRunAnalysis() {
   return useMutation({
     mutationFn: () => api.post<AnalysisStatus>('/insights/analyse'),
     onSuccess: () => {
+      // The run has only STARTED (202). Invalidate the status so polling picks up
+      // `running: true`; the gaps beneath refresh when it clears.
       void qc.invalidateQueries({ queryKey: queryKeys.insights.all() });
     },
   });

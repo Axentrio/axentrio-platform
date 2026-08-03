@@ -8,7 +8,11 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { aggregateLeadDemand } from '../insights/lead-demand.service';
-import { getAnalysisStatus, markManualRun } from '../insights/analysis-eligibility.service';
+import {
+  getAnalysisStatus,
+  claimAnalysisRun,
+  releaseAnalysisRun,
+} from '../insights/analysis-eligibility.service';
 import { refreshTenantInsights } from '../insights/refresh-insights.job';
 import { enrichmentAbstainStats } from '../leads/enrichment/enrich-lead.job';
 import { Gap } from '../database/entities/Gap';
@@ -19,6 +23,7 @@ import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middlewa
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
+import { logger } from '../utils/logger';
 import { getEntitlements } from '../billing/entitlements';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
 import { InsightDigest } from '../database/entities/InsightDigest';
@@ -92,16 +97,18 @@ router.get(
 
 /**
  * POST /insights/analyse
- * Run analysis on demand (Essential and Pro).
+ * Start an on-demand analysis (Essential and Pro). Returns 202 — this does NOT wait.
  *
- * Re-checks eligibility server-side rather than trusting the button: the client's view
- * can be seconds stale, and the cooldown is the cost control. 409 with the same shape
- * the status endpoint returns, so the portal can render the refusal with the real
- * numbers rather than a generic failure.
+ * Waiting was the first design and it was wrong. The pass is one LLM call per
+ * conversation, and Essential cannot even unlock the button below fifteen of them, so
+ * the smallest permitted run already approaches the portal's 30-second HTTP timeout and
+ * a first run over a backlog takes minutes. The operator would have seen "analysis
+ * failed" while the server quietly succeeded — and, because the cooldown is stamped up
+ * front, they would have spent 72 hours on a run they were told had failed.
  *
- * Runs INLINE and awaited. A fire-and-forget would return 202 and leave the operator
- * watching a page that may never change, and the analysis is bounded by the same
- * per-run cap the nightly pass uses.
+ * So the work runs in the background behind a claim lease and the portal polls
+ * `analysis-status`. Eligibility is still re-checked here rather than trusted from the
+ * button: that view is seconds stale by definition, and the cooldown is the cost control.
  */
 router.post(
   '/analyse',
@@ -110,7 +117,10 @@ router.post(
     const tenantId = insightsTenantId(req) as string;
     const status = await getAnalysisStatus(tenantId);
     if (!status.eligible) {
-      throw new ApiError('Analysis is not available yet', 409, 'CONFLICT', {
+      // 403 for "your tier has no such button", 409 for "not right now" — an Enterprise
+      // tenant is not in conflict with anything, they simply do not have this control.
+      const httpStatus = status.reason === 'automatic' || status.reason === 'not_entitled' ? 403 : 409;
+      throw new ApiError('Analysis is not available yet', httpStatus, 'FORBIDDEN', {
         reason: status.reason,
         newChats: status.newChats,
         minNewChats: status.minNewChats,
@@ -118,11 +128,26 @@ router.post(
       });
     }
 
-    // Stamped before the work — see markManualRun for why a crashed run must still
-    // consume the cooldown.
-    await markManualRun(tenantId);
-    await refreshTenantInsights(tenantId);
+    // The claim IS the cooldown stamp — one atomic write, so two clicks in the same
+    // second cannot both start a pass.
+    if (!(await claimAnalysisRun(tenantId))) {
+      throw new ApiError('Analysis is already running', 409, 'CONFLICT', { reason: 'running' });
+    }
 
+    // Deliberately not awaited. Failures are logged and the lease is always released,
+    // so a crash frees the tenant to try again rather than stranding them on "analysing".
+    void refreshTenantInsights(tenantId)
+      .catch((err) => {
+        logger.error('[insights] on-demand analysis failed', {
+          tenantId,
+          error: err instanceof Error ? err.message : 'unknown',
+        });
+      })
+      .finally(() => {
+        void releaseAnalysisRun(tenantId).catch(() => {});
+      });
+
+    res.status(202);
     sendSuccess(res, await getAnalysisStatus(tenantId));
   }),
 );

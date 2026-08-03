@@ -34,10 +34,17 @@ vi.mock('../../websocket/socket.handler', () => ({
 }));
 
 /** The analysis itself is an LLM pass; this suite is about the gate around it. */
-const refreshed = vi.hoisted(() => ({ calls: [] as string[] }));
+const refreshed = vi.hoisted(() => ({
+  calls: [] as string[],
+  /** Held open so a test can observe the run while it is still in flight. */
+  gate: null as null | (() => void),
+  shouldThrow: false,
+}));
 vi.mock('../../insights/refresh-insights.job', () => ({
   refreshTenantInsights: async (tenantId: string) => {
     refreshed.calls.push(tenantId);
+    if (refreshed.gate) await new Promise<void>((r) => { refreshed.gate = r; });
+    if (refreshed.shouldThrow) throw new Error('judge exploded');
   },
   registerInsightsRefreshJob: () => {},
   runRefreshInsightsOnce: async () => {},
@@ -90,7 +97,12 @@ async function seedSessions(n: number, over: Partial<ChatSession> = {}) {
 
 beforeEach(() => {
   refreshed.calls = [];
+  refreshed.gate = null;
+  refreshed.shouldThrow = false;
 });
+
+/** The route returns before the work finishes; let the microtask queue drain. */
+const settle = () => new Promise((r) => setTimeout(r, 20));
 
 describe('GET /insights/analysis-status', () => {
   it('counts only the conversations the judge would actually consume', async () => {
@@ -117,12 +129,16 @@ describe('GET /insights/analysis-status', () => {
 });
 
 describe('POST /insights/analyse', () => {
-  it('runs when the tier bar is met, and stamps the cooldown', async () => {
+  it('accepts the run without waiting for it, and stamps the cooldown', async () => {
+    // 202, not 200: the pass is one LLM call per conversation and Essential cannot
+    // unlock the button below fifteen of them, so awaiting it would blow the portal's
+    // 30s timeout at the smallest run the gate even permits.
     await seedTenant('pro');
     await seedSessions(8);
 
     const res = await request(app).post('/api/v1/insights/analyse');
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202);
+    await settle();
     expect(refreshed.calls).toEqual([tenantId]);
 
     const state = await AppDataSource.getRepository(InsightsRefreshState).findOne({
@@ -135,6 +151,7 @@ describe('POST /insights/analyse', () => {
     await seedTenant('pro');
     await seedSessions(40);
     await request(app).post('/api/v1/insights/analyse');
+    await settle();
     refreshed.calls = [];
 
     const res = await request(app).post('/api/v1/insights/analyse');
@@ -161,8 +178,60 @@ describe('POST /insights/analyse', () => {
     await seedTenant('enterprise');
     await seedSessions(50);
     const res = await request(app).post('/api/v1/insights/analyse');
-    expect(res.status).toBe(409);
+    // 403, not 409: they are not in conflict with anything, they have no such control.
+    expect(res.status).toBe(403);
     expect(res.body.error.details.reason).toBe('automatic');
     expect(refreshed.calls).toEqual([]);
+  });
+
+  it('reports the run as in flight while it is still going', async () => {
+    await seedTenant('pro');
+    await seedSessions(20);
+    refreshed.gate = () => {}; // hold the analysis open
+
+    await request(app).post('/api/v1/insights/analyse');
+    await settle();
+
+    const status = await request(app).get('/api/v1/insights/analysis-status');
+    expect(status.body.data.running).toBe(true);
+    expect(status.body.data.reason).toBe('running');
+
+    refreshed.gate?.(); // let it finish
+    await settle();
+    const after = await request(app).get('/api/v1/insights/analysis-status');
+    expect(after.body.data.running).toBe(false);
+  });
+
+  it('releases the claim when the analysis throws, so the tenant is not stranded', async () => {
+    // A dead lease helps nobody: without this the tenant sits on "analysing" until
+    // someone edits the database.
+    await seedTenant('pro');
+    await seedSessions(20);
+    refreshed.shouldThrow = true;
+
+    await request(app).post('/api/v1/insights/analyse');
+    await settle();
+
+    const status = await request(app).get('/api/v1/insights/analysis-status');
+    expect(status.body.data.running).toBe(false);
+    // The cooldown still stands — the LLM calls were spent either way.
+    expect(status.body.data.reason).toBe('cooling_down');
+  });
+
+  it('refuses a second start while one is in flight', async () => {
+    await seedTenant('pro');
+    await seedSessions(20);
+    refreshed.gate = () => {};
+
+    await request(app).post('/api/v1/insights/analyse');
+    await settle();
+    refreshed.calls = [];
+
+    const second = await request(app).post('/api/v1/insights/analyse');
+    expect(second.status).toBe(409);
+    expect(refreshed.calls).toEqual([]);
+
+    refreshed.gate?.();
+    await settle();
   });
 });

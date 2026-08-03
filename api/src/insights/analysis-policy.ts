@@ -38,7 +38,9 @@ export interface AnalysisPolicy {
 }
 
 const POLICIES: Record<InsightsTier, AnalysisPolicy> = {
-  none: { tier: 'none', automatic: false, minNewChats: Infinity, cooldownHours: Infinity },
+  // NOT Infinity: these cross the wire, and JSON.stringify turns Infinity into null,
+  // which renders as "12 of null". -1 reads as "not applicable" and survives the trip.
+  none: { tier: 'none', automatic: false, minNewChats: -1, cooldownHours: -1 },
   essential: { tier: 'essential', automatic: false, minNewChats: 15, cooldownHours: 72 },
   // The spec says "8 to 10"; 8 is the lower bound, chosen because the cost ceiling is
   // the cooldown rather than the threshold, and a higher bar only means a Pro tenant
@@ -64,14 +66,23 @@ export interface EligibilityInput {
   newChats: number;
   /** When a manual run last happened; null if never. */
   lastManualRunAt: Date | null;
+  /** True while an on-demand analysis is still in flight for this tenant. */
+  running: boolean;
   now: Date;
 }
 
-export type IneligibleReason = 'not_entitled' | 'automatic' | 'not_enough_chats' | 'cooling_down';
+export type IneligibleReason =
+  | 'not_entitled'
+  | 'automatic'
+  | 'not_enough_chats'
+  | 'cooling_down'
+  | 'running';
 
 export interface Eligibility {
   eligible: boolean;
   reason: IneligibleReason | null;
+  /** In flight right now — the portal polls while this is true. */
+  running: boolean;
   newChats: number;
   minNewChats: number;
   /** When the cooldown expires. Null when not cooling down. */
@@ -85,21 +96,27 @@ export interface Eligibility {
  * button exists at all, then data, then time.
  */
 export function checkEligibility(input: EligibilityInput): Eligibility {
-  const { policy, newChats, lastManualRunAt, now } = input;
+  const { policy, newChats, lastManualRunAt, running, now } = input;
 
   const nextAllowedAt =
-    lastManualRunAt && policy.cooldownHours > 0 && Number.isFinite(policy.cooldownHours)
+    lastManualRunAt && policy.cooldownHours > 0
       ? new Date(lastManualRunAt.getTime() + policy.cooldownHours * 3_600_000)
       : null;
   const coolingDown = nextAllowedAt != null && nextAllowedAt > now;
 
-  const base = { newChats, minNewChats: policy.minNewChats, nextAllowedAt };
+  const base = { newChats, minNewChats: policy.minNewChats, nextAllowedAt, running };
 
   if (policy.tier === 'none') return { ...base, eligible: false, reason: 'not_entitled' };
+  // Ahead of the data and time checks: a run already in flight is about to move the
+  // watermark, so both of those numbers are mid-change and reporting them as the reason
+  // would explain the wrong thing.
+  if (running) return { ...base, eligible: false, reason: 'running' };
   // Enterprise has no button: analysis is already continuous, so a manual run would
   // only duplicate work that is about to happen anyway.
   if (policy.automatic) return { ...base, eligible: false, reason: 'automatic' };
-  if (newChats < policy.minNewChats) return { ...base, eligible: false, reason: 'not_enough_chats' };
+  if (policy.minNewChats < 0 || newChats < policy.minNewChats) {
+    return { ...base, eligible: false, reason: 'not_enough_chats' };
+  }
   if (coolingDown) return { ...base, eligible: false, reason: 'cooling_down' };
 
   return { ...base, eligible: true, reason: null };

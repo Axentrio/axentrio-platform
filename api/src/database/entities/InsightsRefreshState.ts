@@ -31,6 +31,14 @@ export class InsightsRefreshState {
   @Column({ type: 'timestamptz', name: 'last_manual_run_at', nullable: true })
   lastManualRunAt?: Date | null;
 
+  /**
+   * Claim lease for an in-flight on-demand analysis — a timestamp, not a boolean, so a
+   * process that dies mid-run expires instead of stranding the tenant on "analysing"
+   * forever. Cleared when the run finishes, successfully or not.
+   */
+  @Column({ type: 'timestamptz', name: 'analysis_running_since', nullable: true })
+  analysisRunningSince?: Date | null;
+
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 }

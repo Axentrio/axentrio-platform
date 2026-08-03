@@ -34,6 +34,7 @@ import { widgetRouter as widgetRoutes } from './routes/widget';
 import fileRoutes from './routes/files.routes';
 import analyticsRoutes from './routes/analytics.routes';
 import insightsRoutes from './routes/insights.routes';
+import onboardingRoutes from './routes/onboarding.routes';
 import notificationRoutes from './routes/notifications.routes';
 import mobileDevicesRoutes from './routes/mobile-devices.routes';
 import userRoutes from './routes/users.routes';
@@ -298,6 +299,7 @@ app.use(clerkMiddleware());
 const apiRouter = express.Router();
 apiRouter.use('/analytics', timeoutMiddleware(60000), analyticsRoutes);
 apiRouter.use('/insights', insightsRoutes);
+apiRouter.use('/onboarding', onboardingRoutes);
 // Copilot SSE stream can run up to 60s (agent loop hard timeout) plus a
 // few hundred ms for the final UPDATE + trace INSERT + clean SSE close.
 // 90s leaves headroom without letting a runaway loop hang the connection.

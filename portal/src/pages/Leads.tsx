@@ -77,6 +77,19 @@ function formatRelative(iso: string): string {
   return date.toLocaleDateString();
 }
 
+/**
+ * Booking status in the operator's words, not the database's. `request_created` is a
+ * column value, and printing it put developer vocabulary on a customer-facing screen —
+ * visible the moment this reached real data.
+ */
+const BOOKING_LABEL: Record<string, string> = {
+  confirmed: 'Confirmed',
+  pending: 'Awaiting confirmation',
+  request_created: 'Requested',
+  cancelled: 'Cancelled',
+  failed: 'Did not go through',
+};
+
 /** Live bookings read as success; cancelled/failed must not. */
 function bookingVariant(status: string): 'success' | 'warning' | 'secondary' {
   if (status === 'cancelled' || status === 'failed') return 'warning';
@@ -482,7 +495,9 @@ export default function Leads() {
                             {lead.bookingStatus ? (
                               <span className="flex items-center gap-1.5">
                                 <Badge variant={bookingVariant(lead.bookingStatus)}>
-                                  {lead.bookingStatus}
+                                  {t(`leads.booking.${lead.bookingStatus}`, {
+                                    defaultValue: BOOKING_LABEL[lead.bookingStatus] ?? lead.bookingStatus,
+                                  })}
                                 </Badge>
                                 {(lead.bookingCount ?? 0) > 1 && (
                                   <span className="text-xs text-text-muted">

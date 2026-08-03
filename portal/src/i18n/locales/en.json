@@ -271,6 +271,13 @@
       "overdue": "<b>{{count}}</b> have heard nothing for over {{days}} days.",
       "unconfirmed": "<b>{{count}}</b> asked for a time you haven't confirmed.",
       "scope": "From the {{loaded}} leads loaded so far"
+    },
+    "booking": {
+      "confirmed": "Confirmed",
+      "pending": "Awaiting confirmation",
+      "request_created": "Requested",
+      "cancelled": "Cancelled",
+      "failed": "Did not go through"
     }
   },
   "socialMedia": {

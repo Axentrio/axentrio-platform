@@ -269,6 +269,13 @@
       "overdue": "<b>{{count}}</b> hoorden al meer dan {{days}} dagen niets.",
       "unconfirmed": "<b>{{count}}</b> vroegen een tijdstip dat nog niet bevestigd is.",
       "scope": "Van de {{loaded}} geladen leads"
+    },
+    "booking": {
+      "confirmed": "Bevestigd",
+      "pending": "Wacht op bevestiging",
+      "request_created": "Aangevraagd",
+      "cancelled": "Geannuleerd",
+      "failed": "Niet doorgegaan"
     }
   },
   "socialMedia": {

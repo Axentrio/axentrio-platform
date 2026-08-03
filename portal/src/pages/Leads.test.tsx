@@ -146,7 +146,9 @@ describe('Leads page — gating', () => {
 
   it('renders the derived booking fields when entitled', async () => {
     renderUI([PRO_LEAD]);
-    expect(await screen.findByText('confirmed')).toBeInTheDocument(); // stays on the row
+    // Humanised, not the column value: `request_created` on screen is developer
+    // vocabulary, and it reached production before this was caught.
+    expect(await screen.findByText('Confirmed')).toBeInTheDocument(); // stays on the row
     await openFirstRow();
     expect(await screen.findByText('Drain unblocking')).toBeInTheDocument();
     expect(screen.getByText(/Kerkstraat 12/)).toBeInTheDocument();

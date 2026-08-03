@@ -269,6 +269,13 @@
       "overdue": "<b>{{count}}</b> sans nouvelles depuis plus de {{days}} jours.",
       "unconfirmed": "<b>{{count}}</b> ont demandé un créneau non confirmé.",
       "scope": "Sur les {{loaded}} contacts chargés"
+    },
+    "booking": {
+      "confirmed": "Confirmé",
+      "pending": "En attente de confirmation",
+      "request_created": "Demandé",
+      "cancelled": "Annulé",
+      "failed": "N'a pas abouti"
     }
   },
   "socialMedia": {

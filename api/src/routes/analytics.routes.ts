@@ -424,7 +424,12 @@ router.get(
     const [convRows, bookingRows, leadRows] = await Promise.all([
       sessionRepository
         .createQueryBuilder('s')
-        .select('DATE(s.created_at)', 'date')
+        // TO_CHAR, not a bare DATE(): node-pg parses a `date` column into a JS
+        // Date, which broke the string sort below (and put an ISO timestamp on
+        // the wire where the contract promises YYYY-MM-DD). Formatting in SQL
+        // keeps `OutcomeSeriesPoint.date` honestly a string end-to-end. Grouping
+        // still uses DATE(), so the day boundaries are unchanged.
+        .select("TO_CHAR(DATE(s.created_at), 'YYYY-MM-DD')", 'date')
         .addSelect('COUNT(*)', 'count')
         .where('s.tenant_id = :tenantId', { tenantId })
         .andWhere('s.created_at >= :from', { from })
@@ -435,7 +440,7 @@ router.get(
         .getRawMany(),
       bookingRepository
         .createQueryBuilder('b')
-        .select('DATE(b.created_at)', 'date')
+        .select("TO_CHAR(DATE(b.created_at), 'YYYY-MM-DD')", 'date')
         .addSelect('COUNT(*)', 'count')
         .where('b.tenant_id = :tenantId', { tenantId })
         .andWhere("b.status NOT IN ('cancelled', 'failed')")
@@ -447,7 +452,7 @@ router.get(
         .getRawMany(),
       leadRepository
         .createQueryBuilder('l')
-        .select('DATE(l.created_at)', 'date')
+        .select("TO_CHAR(DATE(l.created_at), 'YYYY-MM-DD')", 'date')
         .addSelect('COUNT(*)', 'count')
         .where('l.tenant_id = :tenantId', { tenantId })
         .andWhere('l.deleted_at IS NULL')

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { CheckCircle, Circle, X } from 'lucide-react';
 import { useAppAuth } from '../../auth/useAppAuth';
-import { useOnboardingStatus } from '@/queries/useOnboardingQueries';
+import { useOnboardingChecklist } from '@/queries/useOnboardingQueries';
 import { useTenantSettings } from '@/queries/useTenantQueries';
 
 const DISMISSED_KEY = 'onboarding_banner_dismissed';
@@ -35,7 +35,7 @@ const CHECKLIST_ITEMS: ChecklistItem[] = [
 export const OnboardingBanner: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAppAuth();
-  const { data: status, isLoading } = useOnboardingStatus();
+  const { data: status, isLoading } = useOnboardingChecklist();
   const { data: tenant } = useTenantSettings();
   const apiKey = (tenant as { apiKey?: string } | undefined)?.apiKey;
   const [dismissed, setDismissed] = useState(

@@ -2515,6 +2515,18 @@
         "Voyez les statistiques en direct — \"combien de leads cette semaine ?\""
       ],
       "historyNote": "Vos conversations précédentes sont conservées et seront à nouveau disponibles dès que vous passerez à un plan supérieur."
+    },
+    "suggestions": {
+      "title": "À configurer",
+      "go": "Configurer"
+    },
+    "escalate": {
+      "open": "Parler à quelqu'un",
+      "prompt": "Dites-nous ce qui vous bloque. Nous joignons cette conversation pour que vous n'ayez pas à tout réexpliquer.",
+      "placeholder": "Qu'est-ce qui ne va pas ?",
+      "send": "Envoyer au support",
+      "sent": "Envoyé à {{inbox}}. Nous répondrons à votre adresse e-mail.",
+      "failed": "L'envoi a échoué. Réessayez dans un instant."
     }
   },
   "bots": {
@@ -2683,5 +2695,141 @@
       "body": "Votre offre inclut cette fonctionnalité, mais elle a été désactivée pour votre espace de travail.",
       "cta": "Gérer les fonctionnalités"
     }
+  },
+  "setup": {
+    "progress": "Étape {{current}} sur {{total}}",
+    "continue": "Continuer",
+    "skip": "Pas maintenant",
+    "backToCurrent": "Revenir où j'en étais",
+    "answeredCount_one": "{{count}} étape complétée",
+    "answeredCount_other": "{{count}} étapes complétées",
+    "blocked": {
+      "title": "La configuration n'est pas terminée",
+      "body": "Un administrateur de cet espace doit terminer la configuration avant que quiconque puisse l'utiliser."
+    },
+    "finish": {
+      "title": "C'est tout",
+      "body": "Votre espace est prêt. Vous pouvez modifier tout ceci plus tard dans les Paramètres.",
+      "action": "Ouvrir mon espace"
+    },
+    "steps": {
+      "language": {
+        "title": "Choisissez votre langue",
+        "body": "C'est la langue de la plateforme. Votre assistant répond toujours aux clients dans la langue qu'ils utilisent."
+      },
+      "company": {
+        "title": "Votre entreprise",
+        "body": "Indiquez votre numéro de TVA et nous remplissons le reste depuis le registre officiel.",
+        "vatLabel": "Numéro de TVA",
+        "lookup": "Rechercher",
+        "lookingUp": "Consultation du registre — cela peut prendre quelques secondes.",
+        "lookupStatus": {
+          "found": "Trouvé dans le registre officiel.",
+          "not_found": "Ce numéro n'est pas enregistré. Vérifiez-le, ou saisissez les données vous-même.",
+          "invalid_format": "Cela ne ressemble pas à un numéro de TVA belge. Exemple : BE 0400.378.485",
+          "unavailable": "Le registre ne répond pas pour l'instant. Saisissez les données vous-même et continuez — la vérification pourra se faire plus tard."
+        },
+        "nameLabel": "Nom de l'entreprise",
+        "legalFormLabel": "Forme juridique",
+        "streetLabel": "Rue et numéro",
+        "postalCodeLabel": "Code postal",
+        "cityLabel": "Commune",
+        "verifiedNote": "Confirmé par le registre officiel.",
+        "unverifiedNote": "Non vérifié auprès du registre."
+      },
+      "logo": {
+        "title": "Ajoutez votre logo",
+        "body": "Il apparaît sur votre fenêtre de chat et dans les e-mails à vos clients.",
+        "choose": "Choisir un fichier",
+        "hint": "PNG, JPG, SVG ou WebP. Une image carrée fonctionne le mieux.",
+        "uploadFailed": "Ce fichier n'a pas pu être envoyé. Essayez-en un autre.",
+        "skipConsequence": "L'initiale de votre entreprise sera utilisée à la place."
+      },
+      "chatbot": {
+        "title": "Nommez votre assistant",
+        "body": "C'est le nom que voient les clients quand il répond. Vous pourrez le changer, ainsi que tout le reste, plus tard.",
+        "nameLabel": "Nom de l'assistant",
+        "namePlaceholder": "p. ex. Sofie",
+        "toneLabel": "Quel ton doit-il avoir ?",
+        "skipConsequence": "Votre assistant garde son nom et son ton par défaut.",
+        "supportEmailLabel": "Où envoyer ceux qu'il ne peut pas aider ?",
+        "supportEmailHint": "Votre assistant transmet à cette adresse lorsqu'une question le dépasse.",
+        "hoursLabel": "Quand êtes-vous ouvert ?",
+        "hoursHint": "Sert à indiquer aux clients quand vous revenez. Des horaires différents par jour se règlent plus tard, dans IA & Contenu.",
+        "opensAt": "Ouvre à",
+        "closesAt": "Ferme à",
+        "to": "à",
+        "days": {
+          "monday": "lun",
+          "tuesday": "mar",
+          "wednesday": "mer",
+          "thursday": "jeu",
+          "friday": "ven",
+          "saturday": "sam",
+          "sunday": "dim"
+        }
+      },
+      "documents": {
+        "title": "Que doit-il savoir ?",
+        "body": "Ajoutez au moins un document. Votre assistant répond à partir de ce que vous lui donnez ici — sans rien à lire, il ne peut pas répondre aux questions sur votre activité.",
+        "add": "Ajoutez votre premier document",
+        "addAnother": "En ajouter un autre",
+        "examples": "Vos services, tarifs, heures d'ouverture, ou une liste de questions fréquentes",
+        "status": {
+          "pending": "En attente",
+          "processing": "Lecture en cours",
+          "indexed": "Prêt",
+          "failed": "Échec"
+        }
+      },
+      "social": {
+        "title": "Canaux de messagerie",
+        "body": "Répondez à WhatsApp, Messenger, Instagram et Telegram depuis la même boîte de réception que votre chat web.",
+        "points": [
+          "Une seule boîte pour tous les canaux",
+          "Votre assistant y répond aussi",
+          "Vous reprenez la main quand vous voulez"
+        ],
+        "yes": "Oui, je veux les canaux de messagerie",
+        "afterwards": "Vous connecterez vos comptes depuis Canaux une fois la configuration terminée.",
+        "skipConsequence": "Les canaux de messagerie restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités."
+      },
+      "bookings": {
+        "title": "Rendez-vous",
+        "body": "Laissez votre assistant réserver des rendez-vous directement dans votre agenda.",
+        "skipConsequence": "Les rendez-vous restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités.",
+        "calendarLabel": "Votre agenda",
+        "connectCalendar": "Connecter Google Agenda",
+        "calendarHint": "Nous vous envoyons chez Google et vous ramenons directement ici.",
+        "calendarConnected": "Connecté à {{account}}",
+        "availabilityLabel": "Quand peut-on réserver ?",
+        "slotLabel": "Quelle est la durée d'un rendez-vous ?",
+        "slotMinutes": "{{minutes}} minutes",
+        "servicesHint": "Vous pourrez ajouter des services, des tarifs et des exceptions plus tard, dans Rendez-vous."
+      },
+      "leads": {
+        "title": "Capture de prospects",
+        "body": "Conservez les coordonnées de ceux qui demandent un devis ou un rappel, pour que personne ne se perde.",
+        "points": [
+          "Nom, coordonnées et ce qu'ils ont demandé",
+          "Notification dès qu'un prospect arrive",
+          "Export vers Excel quand vous le souhaitez"
+        ],
+        "yes": "Oui, capturez les prospects pour moi",
+        "afterwards": "Les prospects apparaissent sous Prospects dès que votre assistant en recueille un.",
+        "skipConsequence": "La capture de prospects reste désactivée. Vous pourrez l'activer dans Paramètres → Fonctionnalités."
+      },
+      "plan": {
+        "title": "Choisissez votre formule",
+        "body": "Vous êtes en essai Pro. Choisissez une formule maintenant, ou restez en essai et décidez plus tard.",
+        "choose": "Choisir cette formule",
+        "trialNote": "Pas encore décidé ? Votre essai vous donne tout ce que contient Pro.",
+        "keepTrial": "Continuer avec l'essai",
+        "recommended": "Recommandé",
+        "trialLength": "Comprend 14 jours d'essai gratuit"
+      }
+    },
+    "progressLabel": "Progression de la configuration",
+    "saveFailed": "L'enregistrement a échoué. Réessayez dans un instant."
   }
 }

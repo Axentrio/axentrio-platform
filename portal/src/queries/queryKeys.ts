@@ -95,7 +95,10 @@ export const queryKeys = {
   },
   onboarding: {
     all: () => ['onboarding'] as const,
-    status: () => [...queryKeys.onboarding.all(), 'status'] as const,
+    /** The derived "how set up are you" checklist behind the dashboard banner. */
+    checklist: () => [...queryKeys.onboarding.all(), 'checklist'] as const,
+    /** The first-run wizard's recorded state — the thing that gates the app. */
+    setup: () => [...queryKeys.onboarding.all(), 'setup'] as const,
   },
   billing: {
     all: () => ['billing'] as const,

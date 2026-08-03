@@ -189,3 +189,26 @@ export function useSendCopilotMessageHandler() {
 // Re-export the event type so consumers don't need to import from
 // the sse-client module directly.
 export type { CopilotSseEvent };
+
+// ---------------------------------------------------------------------------
+// Escalation
+// ---------------------------------------------------------------------------
+
+export interface EscalationResult {
+  delivered: boolean;
+  inbox: string;
+  priority: boolean;
+}
+
+/**
+ * Hand the conversation to a person.
+ *
+ * The transcript is NOT sent from here — the server reads the real conversation. What
+ * support receives has to be what actually happened, not what a client chose to attach.
+ */
+export function useEscalateToSupport() {
+  return useMutation({
+    mutationFn: (message: string) =>
+      api.post<EscalationResult>('/copilot/escalate', { message }),
+  });
+}

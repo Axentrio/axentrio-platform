@@ -13,6 +13,7 @@ import {
   Index,
 } from 'typeorm';
 import { ChatSession } from './ChatSession';
+import type { OnboardingState } from '../../onboarding/onboarding-state';
 import { User } from './User';
 import { Agent } from './Agent';
 import type { TenantFeatureToggles } from '../../contracts/entitlements';
@@ -168,6 +169,13 @@ export class Tenant {
     guardrails?: {
       enforce?: boolean;
     };
+    /**
+     * First-run setup state. Absent means a workspace that has never started —
+     * which is why every tenant predating the wizard is stamped by the
+     * GrandfatherOnboarding migration rather than left to be re-onboarded.
+     * Shape and rules: onboarding/onboarding-state.ts.
+     */
+    onboarding?: OnboardingState;
   };
 
   /**

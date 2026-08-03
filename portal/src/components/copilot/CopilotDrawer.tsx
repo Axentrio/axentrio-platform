@@ -47,6 +47,9 @@ import { Textarea } from '@components/ui/textarea';
 import { cn } from '@/lib/utils';
 import { useCopilotDrawer, type CopilotInflightTurn } from './CopilotDrawerProvider';
 import { CopilotLockedPreview } from './CopilotLockedPreview';
+import { AssistantText } from './AssistantText';
+import { CopilotSuggestions } from './CopilotSuggestions';
+import { EscalateToHuman } from './EscalateToHuman';
 
 const MOBILE_BREAKPOINT_QUERY = '(max-width: 640px)';
 
@@ -195,7 +198,7 @@ export function CopilotDrawer() {
                 {!transcript.isLoading &&
                   (transcript.data?.messages.length ?? 0) === 0 &&
                   !inflight && (
-                    <CopilotWelcome />
+                    <CopilotWelcome onAsk={setComposerValue} />
                   )}
                 {transcript.data?.messages.map((m) => <PersistedMessage key={m.id} msg={m} />)}
                 {inflight && <InflightAssistant inflight={inflight} />}
@@ -237,6 +240,8 @@ export function CopilotDrawer() {
                   )}
                 </Button>
               </form>
+
+              <EscalateToHuman />
             </>
           )}
         </div>
@@ -249,17 +254,14 @@ export function CopilotDrawer() {
 // Subcomponents
 // ---------------------------------------------------------------
 
-function CopilotWelcome() {
+function CopilotWelcome({ onAsk }: { onAsk: (question: string) => void }) {
   const { t } = useTranslation();
   return (
     <div className="rounded-lg border border-edge bg-surface-1 p-4 text-sm text-text-secondary">
       <p className="font-medium text-text-primary">{t('copilot.drawer.welcome.title')}</p>
       <p className="mt-1">{t('copilot.drawer.welcome.body')}</p>
-      <ul className="mt-3 list-disc pl-5 space-y-1 text-text-tertiary">
-        {(t('copilot.drawer.welcome.examples', { returnObjects: true }) as string[]).map((s) => (
-          <li key={s}>{s}</li>
-        ))}
-      </ul>
+      {/* Real, state-derived suggestions where there are any — see CopilotSuggestions. */}
+      <CopilotSuggestions onAsk={onAsk} />
     </div>
   );
 }
@@ -300,7 +302,7 @@ function AssistantBubble({ msg }: { msg: CopilotAssistantMessage }) {
   return (
     <div className="flex flex-col items-start gap-1">
       <div className="max-w-[90%] rounded-2xl rounded-bl-sm bg-surface-1 px-3 py-2 text-sm text-text-primary whitespace-pre-wrap">
-        {msg.content || t('copilot.drawer.outcome.empty')}
+        {msg.content ? <AssistantText text={msg.content} /> : t('copilot.drawer.outcome.empty')}
         {outcomeSuffix && (
           <span className="ml-2 text-xs italic text-text-tertiary">{outcomeSuffix}</span>
         )}
@@ -327,7 +329,9 @@ function InflightAssistant({ inflight }: { inflight: CopilotInflightTurn }) {
       </div>
       <div className="flex flex-col items-start gap-1">
         <div className="max-w-[90%] rounded-2xl rounded-bl-sm bg-surface-1 px-3 py-2 text-sm text-text-primary whitespace-pre-wrap">
-          {inflight.assistant.content || (
+          {inflight.assistant.content ? (
+            <AssistantText text={inflight.assistant.content} />
+          ) : (
             <span className="text-text-tertiary">{t('copilot.drawer.thinking')}</span>
           )}
           {inflight.assistant.outcome && inflight.assistant.outcome !== 'success' && (

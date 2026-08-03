@@ -32,6 +32,18 @@ vi.mock('../../websocket/socket.handler', () => ({
   emitToAgent: vi.fn(),
 }));
 
+// Escalation sends real mail. Stubbed so the suite exercises WHAT gets sent without
+// sending it — the payload is the thing under test.
+type SentMail = { to: string; subject: string; body: string; replyTo?: string };
+const sendEmail = vi.hoisted(() =>
+  vi.fn(async (_options: { to: string; subject: string; body: string; replyTo?: string }) => ({
+    success: true as boolean,
+    messageId: 'm1',
+    error: undefined as string | undefined,
+  })),
+);
+vi.mock('../../automations', () => ({ getEmailService: () => ({ send: sendEmail }) }));
+
 import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
@@ -359,5 +371,86 @@ describe('cross-tenant header spoof', () => {
       where: { tenantId: otherTenant.id },
     });
     expect(otherRows).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------
+// POST /escalate — handing the conversation to a person
+// ---------------------------------------------------------------
+describe('POST /escalate', () => {
+  beforeEach(() => {
+    sendEmail.mockClear().mockResolvedValue({ success: true, messageId: 'm1', error: undefined });
+  });
+
+  const escalate = (message = 'My WhatsApp messages are not arriving.') =>
+    request(app).post('/api/v1/copilot/escalate').send({ message });
+
+  it('is Pro+ like every other Copilot route', async () => {
+    await AppDataSource.getRepository(Tenant).update(tenantId, { tier: 'essential' });
+    const res = await escalate();
+    expect(res.status).toBe(402);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('400s on an empty message rather than mailing support an empty ticket', async () => {
+    const res = await request(app).post('/api/v1/copilot/escalate').send({ message: '   ' });
+    expect(res.status).toBe(400);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it('sends the context the customer cannot be expected to type', async () => {
+    // The point of the button over a mailto: link — which workspace, which plan, and
+    // what they had been asking. Without those, support opens with three questions.
+    const res = await escalate();
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ delivered: true, priority: false });
+
+    const mail = sendEmail.mock.calls[0][0] as SentMail;
+    expect(mail.to).toBe('support@axentrio.com');
+    expect(mail.body).toContain('My WhatsApp messages are not arriving.');
+    expect(mail.body).toMatch(/Plan: pro/);
+  });
+
+  it('replies to the customer, not to the platform', async () => {
+    await escalate();
+    expect((sendEmail.mock.calls[0][0] as SentMail).replyTo).toMatch(/@/);
+  });
+
+  it('attaches the real conversation, not one supplied by the caller', async () => {
+    await request(app).post('/api/v1/copilot/messages').send({ message: 'how do I add a bot' });
+    await escalate();
+    expect((sendEmail.mock.calls[0][0] as SentMail).body).toContain('how do I add a bot');
+  });
+
+  it('attaches the MOST RECENT turns of a long conversation', async () => {
+    // Regression: the query took the first 40 turns ascending and the renderer then
+    // trimmed to the last 10 OF THOSE — so a long conversation sent support its
+    // opening, which is the reverse of why the transcript is attached at all.
+    // Must exceed the old 40-ROW window (each turn persists a user + an assistant
+    // row), or the broken version returns everything and the test proves nothing.
+    for (let i = 0; i < 25; i++) {
+      await request(app).post('/api/v1/copilot/messages').send({ message: `question ${i}` });
+    }
+    await escalate();
+
+    const body = (sendEmail.mock.calls[0][0] as SentMail).body;
+    expect(body).toContain('question 24');
+    expect(body).not.toContain('question 0');
+  });
+
+  it('flags an Enterprise request as priority, since their contract says so', async () => {
+    await AppDataSource.getRepository(Tenant).update(tenantId, { tier: 'enterprise' });
+    const res = await escalate();
+    expect(res.body.data.priority).toBe(true);
+    expect((sendEmail.mock.calls[0][0] as SentMail).subject).toContain('[PRIORITY]');
+  });
+
+  it('never claims a request reached a human when the send failed', async () => {
+    // Telling someone help is coming when it is not is worse than not offering
+    // the button at all.
+    sendEmail.mockResolvedValue({ success: false, messageId: 'm1', error: 'resend down' });
+    const res = await escalate();
+    expect(res.status).toBe(502);
+    expect(res.body.error?.details?.inbox).toBe('support@axentrio.com');
   });
 });

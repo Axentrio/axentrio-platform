@@ -71,20 +71,26 @@ export function BookingsStep({ submit }: StepProps) {
 
   const save = async () => {
     const weeklyHours: WeeklyHours = {};
+
     for (const day of WEEK_DAYS) {
       weeklyHours[day] = openDays.includes(day) ? [{ start: opensAt, end: closesAt }] : [];
     }
-    await updateScheduler.mutateAsync({
-      provider: 'internal',
-      availability: {
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
-        availabilityMode: 'business_hours',
-        weeklyHours,
-        dateOverrides: [],
-        slotGranularityMin: slotMinutes,
-      },
-    });
-    submit.mutate({ step: 'bookings' });
+    try {
+      await updateScheduler.mutateAsync({
+        provider: 'internal',
+        availability: {
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+          availabilityMode: 'business_hours',
+          weeklyHours,
+          dateOverrides: [],
+          slotGranularityMin: slotMinutes,
+        },
+      });
+      submit.mutate({ step: 'bookings' });
+    } catch {
+      // The hook raises its own toast. Swallowing the rejection here keeps a failed
+      // save from becoming an unhandled rejection, and stops the step advancing on one.
+    }
   };
 
   const connected = calendar?.connected === true;

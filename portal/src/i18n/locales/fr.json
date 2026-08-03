@@ -2829,6 +2829,7 @@
         "trialLength": "Comprend 14 jours d'essai gratuit"
       }
     },
-    "progressLabel": "Progression de la configuration"
+    "progressLabel": "Progression de la configuration",
+    "saveFailed": "L'enregistrement a échoué. Réessayez dans un instant."
   }
 }

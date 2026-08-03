@@ -60,11 +60,21 @@ export default function SetupWizard() {
   const [revisiting, setRevisiting] = React.useState<SetupStep | null>(null);
   const active = revisiting ?? status?.nextStep ?? null;
 
+  /**
+   * Answering ANY step hands control back to the server's ordering, so finishing a
+   * revisit continues forward instead of sticking on that screen.
+   *
+   * Keyed off a completed submission, NOT off "this step has an outcome". The rail only
+   * offers steps that are already answered, so the outcome test was true the instant
+   * they clicked — it cleared `revisiting` before the screen could render and back
+   * navigation did nothing at all.
+   */
+  const handledSubmission = React.useRef<unknown>(null);
   React.useEffect(() => {
-    // Answering the step being revisited hands control back to the server's ordering,
-    // so finishing a revisit continues forward instead of sticking on that screen.
-    if (revisiting && status?.state.steps[revisiting]) setRevisiting(null);
-  }, [revisiting, status]);
+    if (!submitStep.data || submitStep.data === handledSubmission.current) return;
+    handledSubmission.current = submitStep.data;
+    setRevisiting(null);
+  }, [submitStep.data]);
 
   // SetupGate decides whether this screen is shown at all, so there is no
   // "already finished" branch here — one owner for that question, not two.

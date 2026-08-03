@@ -2868,6 +2868,7 @@
         "trialLength": "Includes a 14-day free trial"
       }
     },
-    "progressLabel": "Setup progress"
+    "progressLabel": "Setup progress",
+    "saveFailed": "That did not save. Try again in a moment."
   }
 }

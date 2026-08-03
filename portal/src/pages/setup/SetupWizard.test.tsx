@@ -9,7 +9,7 @@
  *
  *   a required step cannot be satisfied by a click alone.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -30,6 +30,7 @@ vi.mock('@/services/apiClient', async (importOriginal) => ({
 vi.mock('@clerk/clerk-react', () => ({ useOrganization: () => ({ organization: null }) }));
 vi.mock('@/pages/knowledge/AddDocumentModal', () => ({ default: () => null }));
 
+import i18n from '@/i18n';
 import SetupWizard from './SetupWizard';
 import type { SetupStep } from '@/queries/useOnboardingQueries';
 
@@ -126,6 +127,69 @@ describe('a refused submission', () => {
 
     await userEvent.click(await screen.findByRole('button', { name: /not now/i }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/upload at least one document/i);
+  });
+});
+
+describe('going back', () => {
+  // The language step changes the app's language for real — correct in the product,
+  // leaky in a suite. Put it back so later tests still read English headings.
+  afterEach(() => {
+    if (i18n.language !== 'en') i18n.changeLanguage('en');
+  });
+
+  it('lands on an answered step when its rail marker is clicked', async () => {
+    // Regression: the rail only offers steps that are ALREADY answered, and the
+    // "revisit finished" check was "this step has an outcome" — true the instant they
+    // clicked. Back navigation cleared itself before the screen could render.
+    apiGet.mockResolvedValue({
+      state: {
+        version: 1,
+        language: 'nl',
+        company: { vatNumber: 'BE0400378485', name: 'X' },
+        steps: { language: 'done', company: 'done' },
+      },
+      nextStep: 'logo',
+      complete: false,
+    });
+    renderWizard();
+    await screen.findByRole('heading', { name: /add your logo/i });
+
+    const rail = screen
+      .getAllByRole('button')
+      .find((b) => /choose your language/i.test(b.textContent ?? ''));
+    await userEvent.click(rail!);
+
+    expect(
+      await screen.findByRole('heading', { name: /choose your language/i }),
+    ).toBeInTheDocument();
+  });
+
+  it('returns to the flow once they answer again', async () => {
+    apiGet.mockResolvedValue({
+      state: { version: 1, language: 'nl', company: null, steps: { language: 'done' } },
+      nextStep: 'company',
+      complete: false,
+    });
+    apiPut.mockResolvedValue({
+      state: { version: 1, language: 'en', company: null, steps: { language: 'done' } },
+      nextStep: 'company',
+      complete: false,
+    });
+    renderWizard();
+    await screen.findByRole('heading', { name: /your company/i });
+
+    const rail = screen
+      .getAllByRole('button')
+      .find((b) => /choose your language/i.test(b.textContent ?? ''));
+    await userEvent.click(rail!);
+    await screen.findByRole('heading', { name: /choose your language/i });
+
+    // English, so the assertion below is not reading a French heading — the point
+    // here is that ANSWERING returns to the flow, not which language was picked.
+    await userEvent.click(screen.getByRole('button', { name: /english/i }));
+
+    // Answering hands control back to the server's ordering.
+    expect(await screen.findByRole('heading', { name: /your company/i })).toBeInTheDocument();
   });
 });
 

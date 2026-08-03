@@ -22,7 +22,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { api } from '@/services/apiClient';
+import { toast } from 'sonner';
+import { api, extractApiErrorMessage } from '@/services/apiClient';
 import { useGetAiSettings, useUpdateAiSettings } from '@/queries/useKnowledgeQueries';
 import type { StepProps } from './types';
 
@@ -94,6 +95,11 @@ export function ChatbotStep({ submit }: StepProps) {
         },
       });
       submit.mutate({ step: 'chatbot' });
+    } catch (err) {
+      // Without this the customer clicks Continue, the spinner stops, and nothing
+      // happens — the same dead end the wizard shell exists to prevent. The
+      // ai-settings hook toasts its own failures; the hours write had nothing.
+      toast.error(extractApiErrorMessage(err) ?? t('setup.saveFailed'));
     } finally {
       setSaving(false);
     }

@@ -2830,6 +2830,7 @@
         "trialLength": "Inclusief 14 dagen gratis proberen"
       }
     },
-    "progressLabel": "Voortgang installatie"
+    "progressLabel": "Voortgang installatie",
+    "saveFailed": "Dat is niet opgeslagen. Probeer het zo meteen opnieuw."
   }
 }

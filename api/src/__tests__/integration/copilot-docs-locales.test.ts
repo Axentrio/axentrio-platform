@@ -13,29 +13,26 @@
  * something nobody types, or drops the product noun a customer would search for, is
  * invisible — present in the corpus, absent from every answer.
  *
- * So this loads the REAL bundle and asks it real questions in each language.
+ * So this loads the real corpus and asks it real questions in each language.
+ *
+ * It reads the SOURCE markdown, not `dist/copilot/docs-bundle.json`. Reading the build
+ * artifact passed locally, where a build had been run by hand, and failed in CI, where
+ * `api-test` runs npm ci, tsc and vitest and never builds — which took main red and
+ * skipped the deploy.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { AppDataSource } from '../../database/data-source';
 import { LexicalCopilotKnowledgeSource } from '../../copilot/knowledge/lexical';
+import { loadDocsFromSource, type DocEntry } from '../../copilot/docs-source';
 
-interface BundleEntry {
-  slug: string;
-  locale: 'en' | 'nl' | 'fr';
-  title: string;
-  body: string;
-  tags: string[];
-  contentHash: string;
-}
+let docs: DocEntry[];
 
-const bundle: { entries: BundleEntry[] } = JSON.parse(
-  readFileSync(join(__dirname, '../../../dist/copilot/docs-bundle.json'), 'utf8'),
-);
+beforeAll(async () => {
+  docs = await loadDocsFromSource();
+});
 
 const slugsFor = (locale: string) =>
-  new Set(bundle.entries.filter((e) => e.locale === locale).map((e) => e.slug));
+  new Set(docs.filter((e) => e.locale === locale).map((e) => e.slug));
 
 describe('corpus parity', () => {
   it('has a Dutch and French doc for every English one', () => {
@@ -49,7 +46,7 @@ describe('corpus parity', () => {
 
   it('translates the title rather than shipping the English one', () => {
     // A doc whose title never changed is a doc that was never translated.
-    const byKey = new Map(bundle.entries.map((e) => [`${e.slug}|${e.locale}`, e]));
+    const byKey = new Map(docs.map((e) => [`${e.slug}|${e.locale}`, e]));
     const untranslated: string[] = [];
     for (const slug of slugsFor('en')) {
       const en = byKey.get(`${slug}|en`)!;
@@ -63,7 +60,7 @@ describe('corpus parity', () => {
   it('keeps the tag vocabulary identical across locales', () => {
     // Tags are metadata, not prose — translating them would fragment the vocabulary
     // for no gain, since search never reads them.
-    const byKey = new Map(bundle.entries.map((e) => [`${e.slug}|${e.locale}`, e]));
+    const byKey = new Map(docs.map((e) => [`${e.slug}|${e.locale}`, e]));
     for (const slug of slugsFor('en')) {
       const en = byKey.get(`${slug}|en`)!;
       for (const loc of ['nl', 'fr']) {
@@ -81,7 +78,7 @@ describe('retrieval in each language', () => {
   // assertion below vacuously "nothing found" rather than a real result.
   beforeEach(async () => {
     await AppDataSource.query('DELETE FROM chatbot_copilot_docs');
-    for (const e of bundle.entries) {
+    for (const e of docs) {
       await AppDataSource.query(
         `INSERT INTO chatbot_copilot_docs (slug, locale, title, body, tags, content_hash)
          VALUES ($1, $2, $3, $4, $5, $6)`,

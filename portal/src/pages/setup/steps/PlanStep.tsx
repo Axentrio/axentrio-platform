@@ -24,6 +24,9 @@ import type { StepProps } from './types';
 /** Mirrors SELF_SERVE_PLANS in Settings → Billing, in upgrade-rank order. */
 const PLANS: CheckoutablePlan[] = ['essential', 'pro', 'enterprise'];
 
+/** The plan a new workspace is already trialling, so it is the one called out. */
+const RECOMMENDED: CheckoutablePlan = 'pro';
+
 /**
  * The bullet keys each plan actually has under settings.billing.plans.*.features.
  * Naming one that does not exist would render a blank bullet, so the list is the real
@@ -73,10 +76,15 @@ export function PlanStep({ submit }: StepProps) {
           <div
             key={planId}
             className={cn(
-              'flex flex-col gap-3 rounded-xl border bg-surface-2 p-4',
-              planId === 'pro' ? 'border-primary-500' : 'border-edge',
+              'relative flex flex-col gap-3 rounded-xl border bg-surface-2 p-4',
+              planId === RECOMMENDED ? 'border-primary-500' : 'border-edge',
             )}
           >
+            {planId === RECOMMENDED && (
+              <span className="absolute -top-2.5 left-4 rounded-full bg-primary-500 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+                {t('setup.steps.plan.recommended')}
+              </span>
+            )}
             <div>
               <p className="font-semibold text-text-primary">
                 {t(`settings.billing.plans.${planId}.name`)}
@@ -96,8 +104,13 @@ export function PlanStep({ submit }: StepProps) {
                 </li>
               ))}
             </ul>
+            {planId === RECOMMENDED && (
+              <p className="text-xs font-medium text-primary-400">
+                {t('setup.steps.plan.trialLength')}
+              </p>
+            )}
             <Button
-              variant={planId === 'pro' ? 'default' : 'outline'}
+              variant={planId === RECOMMENDED ? 'default' : 'outline'}
               disabled={busy}
               onClick={() => buy(planId)}
             >

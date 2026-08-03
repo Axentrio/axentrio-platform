@@ -38,6 +38,20 @@ function statusAt(step: SetupStep, steps: Record<string, string> = {}) {
   return { state: { version: 1, steps, language: null, company: null }, nextStep: step, complete: false };
 }
 
+/**
+ * The bookings step reads the calendar connection and the scheduler config, so its
+ * tests need a router rather than one blanket resolve.
+ */
+function bookingsStep({ connected = false } = {}) {
+  return (url: string) => {
+    if (url.startsWith('/integrations/google/status')) {
+      return Promise.resolve({ connected, accountEmail: connected ? 'a@b.com' : null });
+    }
+    if (url.startsWith('/scheduler/config')) return Promise.resolve({ availability: null });
+    return Promise.resolve(statusAt('bookings'));
+  };
+}
+
 function renderWizard() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -58,7 +72,7 @@ beforeEach(() => {
 
 describe('skipping', () => {
   it('states what a skip costs, before the click', async () => {
-    apiGet.mockResolvedValue(statusAt('bookings'));
+    apiGet.mockImplementation(bookingsStep());
     renderWizard();
     // Not "you can change this later" — the specific thing that gets switched off.
     expect(await screen.findByText(/appointments stay off/i)).toBeInTheDocument();
@@ -66,13 +80,13 @@ describe('skipping', () => {
 
   it('renders the reasons to say yes as a list, not a stringified object', async () => {
     // `returnObjects` is easy to get subtly wrong and fails as visible garbage.
-    apiGet.mockResolvedValue(statusAt('bookings'));
+    apiGet.mockResolvedValue(statusAt('social'));
     renderWizard();
-    expect(await screen.findByText(/works with google calendar and outlook/i)).toBeInTheDocument();
+    expect(await screen.findByText(/one inbox for every channel/i)).toBeInTheDocument();
   });
 
   it('sends a real skip, not a silent continue', async () => {
-    apiGet.mockResolvedValue(statusAt('bookings'));
+    apiGet.mockImplementation(bookingsStep());
     renderWizard();
 
     await userEvent.click(await screen.findByRole('button', { name: /not now/i }));
@@ -100,7 +114,7 @@ describe('a refused submission', () => {
   it('tells the customer why, instead of doing nothing', async () => {
     // Only 402s get a global toast. Without this the customer clicks Continue and
     // watches nothing happen, on the one screen they cannot navigate away from.
-    apiGet.mockResolvedValue(statusAt('bookings'));
+    apiGet.mockImplementation(bookingsStep());
     apiPut.mockRejectedValue({
       isAxiosError: true,
       response: {
@@ -235,5 +249,34 @@ describe('the plan step', () => {
     await waitFor(() => expect(apiPost).toHaveBeenCalled());
     expect(apiPut).toHaveBeenCalledWith('/onboarding/step', { step: 'plan', outcome: 'done' });
     expect(apiPut.mock.invocationCallOrder[0]).toBeLessThan(apiPost.mock.invocationCallOrder[0]);
+  });
+});
+
+describe('the bookings step', () => {
+  it('will not finish until a calendar is connected', async () => {
+    // A booking assistant with nowhere to write will confidently offer a slot it
+    // cannot honour — a wrong answer, which is worse than a missing feature.
+    apiGet.mockImplementation(bookingsStep({ connected: false }));
+    renderWizard();
+
+    expect(await screen.findByRole('button', { name: /connect google calendar/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^continue$/i })).toBeDisabled();
+  });
+
+  it('saves the hours and slot length once it is', async () => {
+    apiGet.mockImplementation(bookingsStep({ connected: true }));
+    apiPut.mockResolvedValue(statusAt('leads'));
+    renderWizard();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /^continue$/i })).toBeEnabled(),
+    );
+    await userEvent.click(screen.getByRole('button', { name: /^continue$/i }));
+
+    await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/scheduler/config', expect.anything()));
+    const payload = apiPut.mock.calls.find((c) => c[0] === '/scheduler/config')![1];
+    expect(payload.availability.slotGranularityMin).toBe(30);
+    expect(payload.availability.weeklyHours.monday).toEqual([{ start: '09:00', end: '17:00' }]);
+    expect(payload.availability.weeklyHours.sunday).toEqual([]);
   });
 });

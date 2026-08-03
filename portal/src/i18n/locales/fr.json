@@ -2739,7 +2739,23 @@
         "nameLabel": "Nom de l'assistant",
         "namePlaceholder": "p. ex. Sofie",
         "toneLabel": "Quel ton doit-il avoir ?",
-        "skipConsequence": "Votre assistant garde son nom et son ton par défaut."
+        "skipConsequence": "Votre assistant garde son nom et son ton par défaut.",
+        "supportEmailLabel": "Où envoyer ceux qu'il ne peut pas aider ?",
+        "supportEmailHint": "Votre assistant transmet à cette adresse lorsqu'une question le dépasse.",
+        "hoursLabel": "Quand êtes-vous ouvert ?",
+        "hoursHint": "Sert à indiquer aux clients quand vous revenez. Des horaires différents par jour se règlent plus tard, dans IA & Contenu.",
+        "opensAt": "Ouvre à",
+        "closesAt": "Ferme à",
+        "to": "à",
+        "days": {
+          "monday": "lun",
+          "tuesday": "mar",
+          "wednesday": "mer",
+          "thursday": "jeu",
+          "friday": "ven",
+          "saturday": "sam",
+          "sunday": "dim"
+        }
       },
       "documents": {
         "title": "Que doit-il savoir ?",
@@ -2769,14 +2785,15 @@
       "bookings": {
         "title": "Rendez-vous",
         "body": "Laissez votre assistant réserver des rendez-vous directement dans votre agenda.",
-        "points": [
-          "Les clients choisissent un créneau dans la conversation",
-          "Compatible avec Google Agenda et Outlook",
-          "Vous décidez des heures réservables"
-        ],
-        "yes": "Oui, je travaille sur rendez-vous",
-        "afterwards": "Vous connecterez votre agenda depuis Rendez-vous une fois la configuration terminée.",
-        "skipConsequence": "Les rendez-vous restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités."
+        "skipConsequence": "Les rendez-vous restent désactivés. Vous pourrez les activer dans Paramètres → Fonctionnalités.",
+        "calendarLabel": "Votre agenda",
+        "connectCalendar": "Connecter Google Agenda",
+        "calendarHint": "Nous vous envoyons chez Google et vous ramenons directement ici.",
+        "calendarConnected": "Connecté à {{account}}",
+        "availabilityLabel": "Quand peut-on réserver ?",
+        "slotLabel": "Quelle est la durée d'un rendez-vous ?",
+        "slotMinutes": "{{minutes}} minutes",
+        "servicesHint": "Vous pourrez ajouter des services, des tarifs et des exceptions plus tard, dans Rendez-vous."
       },
       "leads": {
         "title": "Capture de prospects",
@@ -2795,7 +2812,9 @@
         "body": "Vous êtes en essai Pro. Choisissez une formule maintenant, ou restez en essai et décidez plus tard.",
         "choose": "Choisir cette formule",
         "trialNote": "Pas encore décidé ? Votre essai vous donne tout ce que contient Pro.",
-        "keepTrial": "Continuer avec l'essai"
+        "keepTrial": "Continuer avec l'essai",
+        "recommended": "Recommandé",
+        "trialLength": "Comprend 14 jours d'essai gratuit"
       }
     },
     "progressLabel": "Progression de la configuration"

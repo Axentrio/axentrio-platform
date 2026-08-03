@@ -2740,7 +2740,23 @@
         "nameLabel": "Naam assistent",
         "namePlaceholder": "bv. Sofie",
         "toneLabel": "Hoe moet hij klinken?",
-        "skipConsequence": "Je assistent houdt zijn standaardnaam en -toon."
+        "skipConsequence": "Je assistent houdt zijn standaardnaam en -toon.",
+        "supportEmailLabel": "Waarheen stuurt hij wie hij niet kan helpen?",
+        "supportEmailHint": "Je assistent geeft door aan dit adres wanneer een vraag te ver gaat.",
+        "hoursLabel": "Wanneer ben je open?",
+        "hoursHint": "Wordt gebruikt om klanten te zeggen wanneer je terug bent. Per dag verschillende uren instellen kan later, bij AI & Content.",
+        "opensAt": "Opent om",
+        "closesAt": "Sluit om",
+        "to": "tot",
+        "days": {
+          "monday": "ma",
+          "tuesday": "di",
+          "wednesday": "wo",
+          "thursday": "do",
+          "friday": "vr",
+          "saturday": "za",
+          "sunday": "zo"
+        }
       },
       "documents": {
         "title": "Wat moet hij weten?",
@@ -2770,14 +2786,15 @@
       "bookings": {
         "title": "Afspraken",
         "body": "Laat je assistent afspraken rechtstreeks in je agenda boeken.",
-        "points": [
-          "Klanten kiezen een moment in het gesprek zelf",
-          "Werkt met Google Agenda en Outlook",
-          "Jij bepaalt welke uren boekbaar zijn"
-        ],
-        "yes": "Ja, ik werk op afspraak",
-        "afterwards": "Je koppelt je agenda via Afspraken zodra de installatie klaar is.",
-        "skipConsequence": "Afspraken blijven uit. Je kunt ze aanzetten in Instellingen → Functies."
+        "skipConsequence": "Afspraken blijven uit. Je kunt ze aanzetten in Instellingen → Functies.",
+        "calendarLabel": "Je agenda",
+        "connectCalendar": "Google Agenda koppelen",
+        "calendarHint": "We sturen je naar Google en brengen je meteen terug hier.",
+        "calendarConnected": "Gekoppeld aan {{account}}",
+        "availabilityLabel": "Wanneer kan men boeken?",
+        "slotLabel": "Hoe lang duurt een afspraak?",
+        "slotMinutes": "{{minutes}} minuten",
+        "servicesHint": "Individuele diensten, prijzen en uitzonderingsdagen kun je later toevoegen bij Afspraken."
       },
       "leads": {
         "title": "Leads vastleggen",
@@ -2796,7 +2813,9 @@
         "body": "Je zit in een Pro-proefperiode. Kies nu een abonnement, of blijf op de proefperiode en beslis later.",
         "choose": "Kies dit abonnement",
         "trialNote": "Nog niet beslist? Je proefperiode geeft je alles uit Pro.",
-        "keepTrial": "Verder met de proefperiode"
+        "keepTrial": "Verder met de proefperiode",
+        "recommended": "Aanbevolen",
+        "trialLength": "Inclusief 14 dagen gratis proberen"
       }
     },
     "progressLabel": "Voortgang installatie"

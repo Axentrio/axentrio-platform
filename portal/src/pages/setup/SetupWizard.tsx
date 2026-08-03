@@ -39,6 +39,7 @@ import { DocumentsStep } from './steps/DocumentsStep';
 import { PlanStep } from './steps/PlanStep';
 import { ChatbotStep } from './steps/ChatbotStep';
 import { ChoiceStep } from './steps/ChoiceStep';
+import { BookingsStep } from './steps/BookingsStep';
 
 /**
  * Steps with no way past them. Mirrors REQUIRED_STEPS on the server, which is the
@@ -99,8 +100,9 @@ export default function SetupWizard() {
         return <PlanStep submit={submitStep} />;
       case 'chatbot':
         return <ChatbotStep submit={submitStep} />;
-      case 'social':
       case 'bookings':
+        return <BookingsStep submit={submitStep} />;
+      case 'social':
       case 'leads':
         return <ChoiceStep step={active} submit={submitStep} />;
       default:

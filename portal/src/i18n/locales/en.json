@@ -2778,7 +2778,23 @@
         "nameLabel": "Assistant name",
         "namePlaceholder": "e.g. Sofie",
         "toneLabel": "How should it sound?",
-        "skipConsequence": "Your assistant keeps its default name and tone."
+        "skipConsequence": "Your assistant keeps its default name and tone.",
+        "supportEmailLabel": "Where should it send people it can't help?",
+        "supportEmailHint": "Your assistant hands over to this address when a question is beyond it.",
+        "hoursLabel": "When are you open?",
+        "hoursHint": "Used to tell customers when you'll be back. You can set different hours per day later, under AI & Content.",
+        "opensAt": "Opens at",
+        "closesAt": "Closes at",
+        "to": "to",
+        "days": {
+          "monday": "Mon",
+          "tuesday": "Tue",
+          "wednesday": "Wed",
+          "thursday": "Thu",
+          "friday": "Fri",
+          "saturday": "Sat",
+          "sunday": "Sun"
+        }
       },
       "documents": {
         "title": "What should it know?",
@@ -2808,14 +2824,15 @@
       "bookings": {
         "title": "Appointments",
         "body": "Let your assistant book appointments straight into your calendar.",
-        "points": [
-          "Customers pick a slot inside the conversation",
-          "Works with Google Calendar and Outlook",
-          "You set which hours are bookable"
-        ],
-        "yes": "Yes, I take appointments",
-        "afterwards": "You'll connect your calendar from Bookings once setup is done.",
-        "skipConsequence": "Appointments stay off. You can switch them on in Settings → Features."
+        "skipConsequence": "Appointments stay off. You can switch them on in Settings → Features.",
+        "calendarLabel": "Your calendar",
+        "connectCalendar": "Connect Google Calendar",
+        "calendarHint": "We'll send you to Google and bring you straight back here.",
+        "calendarConnected": "Connected to {{account}}",
+        "availabilityLabel": "When can people book?",
+        "slotLabel": "How long is an appointment slot?",
+        "slotMinutes": "{{minutes}} minutes",
+        "servicesHint": "You can add individual services, prices and date exceptions later, under Bookings."
       },
       "leads": {
         "title": "Lead capture",
@@ -2834,7 +2851,9 @@
         "body": "You're on a Pro trial. Pick a plan now, or stay on the trial and decide later.",
         "choose": "Choose this plan",
         "trialNote": "Not ready to decide? Your trial gives you everything in Pro.",
-        "keepTrial": "Continue on the trial"
+        "keepTrial": "Continue on the trial",
+        "recommended": "Recommended",
+        "trialLength": "Includes a 14-day free trial"
       }
     },
     "progressLabel": "Setup progress"

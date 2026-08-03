@@ -53,9 +53,10 @@ export const REQUIRED_STEPS: readonly OnboardingStep[] = ['language', 'company',
  * toggle that does not exist would write a key nothing reads: a skip that silently did
  * nothing, which is worse than not offering the choice.
  *
- * `chatbot` is deliberately absent. There is no toggleable feature for it — the website
- * assistant is `settings.ai.enabled` on the tenant, not an entitlement — so skipping it
- * is handled by the route rather than pretended to be a toggle here.
+ * `chatbot` is deliberately absent, but NOT because skipping it does nothing. The
+ * website assistant is `ai.enabled` on the tenant's anchor bot, not an entitlement, so
+ * it cannot be expressed as a toggle key — the route turns it off directly. Listing a
+ * fake key here would have been worse than the special case.
  */
 export const SKIP_DISABLES: Partial<Record<OnboardingStep, readonly string[]>> = {
   social: ['channelWhatsapp', 'channelMessenger', 'channelInstagram', 'channelTelegram'],

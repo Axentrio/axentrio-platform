@@ -24,6 +24,7 @@ import { lookupCompanyByVat } from '../integrations/company-lookup/company-looku
 import { AppDataSource } from '../database/data-source';
 import { Tenant } from '../database/entities/Tenant';
 import { KnowledgeDocument } from '../database/entities/KnowledgeDocument';
+import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { invalidateEntitlementsAndModules } from '../modules';
 import { logAudit } from '../utils/audit';
 import {
@@ -130,6 +131,19 @@ async function saveState(tenantId: string, state: OnboardingState): Promise<void
  * their plan, which the toggles route explicitly rejects.
  */
 async function applySkipEffects(tenantId: string, step: OnboardingStep): Promise<void> {
+  // The website assistant is not an entitlement — it is `ai.enabled` on the tenant's
+  // anchor bot — so declining it cannot go through the toggle map. It still has to
+  // turn something off: a customer who said "not now" to a chatbot must not have one
+  // answering their visitors.
+  if (step === 'chatbot') {
+    const { settings } = await getAnchorBotConfig(tenantId);
+    await replaceAnchorBotSettingsSection(tenantId, 'ai', {
+      ...(settings.ai ?? {}),
+      enabled: false,
+    } as NonNullable<typeof settings.ai>);
+    return;
+  }
+
   const keys = SKIP_DISABLES[step];
   if (!keys?.length) return;
 

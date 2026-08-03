@@ -68,6 +68,7 @@ import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Tenant } from '../../database/entities/Tenant';
 import { createTestTenant, createTestUser } from '../helpers/factories';
+import { Bot } from '../../database/entities/Bot';
 import { KnowledgeBase } from '../../database/entities/KnowledgeBase';
 import { KnowledgeDocument } from '../../database/entities/KnowledgeDocument';
 import { ONBOARDING_STEPS, type OnboardingState } from '../../onboarding/onboarding-state';
@@ -295,6 +296,27 @@ describe('PUT /onboarding/step — skipping switches the feature off', () => {
       channelInstagram: false,
       channelTelegram: false,
     });
+  });
+
+  it('switches the website assistant off when the chatbot step is skipped', async () => {
+    // The one skip that is not a feature toggle: `ai.enabled` on the anchor bot. A
+    // customer who said "not now" to a chatbot must not have one answering visitors.
+    const tenant = await signedInTenant();
+    const botRepo = AppDataSource.getRepository(Bot);
+    await botRepo.save(
+      botRepo.create({
+        tenantId: tenant.id,
+        name: 'Anchor',
+        publicKey: tenant.apiKey,
+        isDefault: true,
+        settings: { ai: { enabled: true } } as never,
+      }),
+    );
+
+    await request(app).put('/api/v1/onboarding/step').send({ step: 'chatbot', outcome: 'skipped' });
+
+    const bot = await botRepo.findOneOrFail({ where: { tenantId: tenant.id, isDefault: true } });
+    expect((bot.settings as { ai?: { enabled?: boolean } }).ai?.enabled).toBe(false);
   });
 
   it('leaves toggles alone when the step is answered rather than skipped', async () => {

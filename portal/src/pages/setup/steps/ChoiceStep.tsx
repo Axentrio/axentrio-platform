@@ -1,29 +1,28 @@
 /**
- * Steps 6–8 — social channels, bookings, leads.
+ * Steps 6 and 8 — social channels and leads.
  *
- * Three screens with the same shape: do you want this capability, yes or not now.
+ * Two screens with the same shape: do you want this capability, yes or not now.
  *
- * They deliberately do NOT configure anything. The wizard is a gate — every other route
- * bounces back here until it is finished — so a "Connect WhatsApp" link would either
- * bounce the customer straight back or need a hole cut in the gate. Both are worse than
- * asking the question here and connecting afterwards, which is what the product's own
- * setup prompts already guide people through.
+ * They deliberately do NOT configure anything, unlike the bookings step next door.
+ * Connecting a Meta or WhatsApp account is an OAuth round trip through an external
+ * console with account choices to make; asking someone to do that mid-signup is how you
+ * lose them. Bookings earns its exception because a booking assistant with no calendar
+ * will confidently offer a slot it cannot honour — a wrong answer, not a missing one.
  *
  * The answer is not cosmetic. "Not now" switches the feature off, so the customer walks
  * into a workspace showing the things they said yes to and nothing they didn't.
  */
 import { useTranslation } from 'react-i18next';
-import { CalendarCheck, Loader2, Share2, UserPlus, type LucideIcon } from 'lucide-react';
+import { Loader2, Share2, UserPlus, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import type { SetupStep } from '@/queries/useOnboardingQueries';
 import type { StepProps } from './types';
 
-export const CHOICE_STEPS = ['social', 'bookings', 'leads'] as const;
+export const CHOICE_STEPS = ['social', 'leads'] as const;
 export type ChoiceStepKey = (typeof CHOICE_STEPS)[number];
 
 const ICONS: Record<ChoiceStepKey, LucideIcon> = {
   social: Share2,
-  bookings: CalendarCheck,
   leads: UserPlus,
 };
 

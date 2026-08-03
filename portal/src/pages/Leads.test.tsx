@@ -497,3 +497,38 @@ describe('Leads page — triage', () => {
     expect(screen.queryByTitle(/Call|Email/i)).not.toBeInTheDocument();
   });
 });
+
+describe('Leads page — urgency has to mean something', () => {
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000).toISOString();
+
+  it('does not mark a long-silent lead urgent just for being old', async () => {
+    // Striping on age as well as priority encoded the same fact twice, and on any
+    // account with a backlog it painted every row. Production returned 17 of 18 as
+    // urgent. The day count still carries the wait; the stripe no longer does.
+    renderUI([{ ...PRO_LEAD, id: 'old', lastActivityAt: daysAgo(120), followUp: null }]);
+    const row = (await screen.findAllByRole('row')).find((r) =>
+      r.className.includes('shadow-destructive'),
+    );
+    expect(row).toBeUndefined();
+  });
+
+  it('still marks the case where the customer is waiting on a decision', async () => {
+    renderUI([
+      {
+        ...PRO_LEAD,
+        id: 'urgent',
+        lastActivityAt: daysAgo(2),
+        followUp: {
+          action: 'confirm_request',
+          via: 'phone',
+          priority: 'now',
+          reasons: [{ key: 'booking_unconfirmed', label: 'Slot never confirmed' }],
+          version: 1,
+        },
+      },
+    ]);
+    await screen.findByText(/Confirm the slot/i);
+    const urgent = screen.getAllByRole('row').filter((r) => r.className.includes('shadow-destructive'));
+    expect(urgent).toHaveLength(1);
+  });
+});

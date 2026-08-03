@@ -135,10 +135,13 @@ function daysWaiting(lead: Lead): number | null {
  */
 const OVERDUE_DAYS = 30;
 
-function severityClass(lead: Lead, days: number | null): string {
+function severityClass(lead: Lead): string {
   if (lead.status === 'archived') return '';
+  // ONLY the customer-is-waiting-on-you case. Striping long-silent rows as well meant
+  // the same fact was encoded twice — once as the stripe, once as the day count — and
+  // on any account with a backlog that painted the whole page. A stripe every row
+  // carries ranks nothing.
   if (lead.followUp?.priority === 'now') return 'shadow-[inset_3px_0_0] shadow-destructive';
-  if (days != null && days >= OVERDUE_DAYS) return 'shadow-[inset_3px_0_0] shadow-status-away';
   if (lead.followUp === null || lead.bookingStatus === 'confirmed') {
     return 'shadow-[inset_3px_0_0] shadow-status-online';
   }
@@ -415,7 +418,7 @@ export default function Leads() {
                 {allLeads.map((lead) => {
                   const isOpen = expanded[lead.id];
                   const days = daysWaiting(lead);
-                  const stripe = severityClass(lead, days);
+                  const stripe = severityClass(lead);
                   return [
                     <TableRow
                       key={lead.id}

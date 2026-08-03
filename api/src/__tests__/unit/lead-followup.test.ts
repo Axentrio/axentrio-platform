@@ -216,12 +216,29 @@ describe('recommendFollowUp — a visitor cannot steer it', () => {
     expect(shouty?.priority).toBe('soon');
   });
 
-  it('escalates only on the platform clock — an old open lead is late by itself', () => {
-    const fresh = recommendFollowUp({ ...base, notes: 'Blocked drain', createdAt: daysFromNow(-1) });
-    const stale = recommendFollowUp({ ...base, notes: 'Blocked drain', createdAt: daysFromNow(-9) });
+  it('reports a long silence without calling it urgent', () => {
+    // Silence used to promote to 'now' at three days, which made every lead on any
+    // account with a backlog urgent — 17 of 18 rows on production came back 'now', and
+    // a page where everything is urgent ranks nothing. The wait is still stated as a
+    // reason and still drives the day count on screen; it just no longer shouts.
+    const fresh = recommendFollowUp({ ...base, notes: 'Blocked drain', lastContactAt: daysFromNow(-1) });
+    const stale = recommendFollowUp({ ...base, notes: 'Blocked drain', lastContactAt: daysFromNow(-9) });
     expect(fresh?.priority).toBe('soon');
-    expect(stale?.priority).toBe('now');
+    expect(stale?.priority).toBe('soon');
     expect(stale?.reasons.find((r) => r.key === 'waiting')?.days).toBe(9);
+  });
+
+  it('keeps urgency for the cases where the customer is waiting on a decision', () => {
+    // The two that survive: they asked for a slot nobody confirmed, and their booking
+    // fell through. Both already refuse to fire on ancient history.
+    const unconfirmed = recommendFollowUp({
+      ...base, bookingId: 'bk-1', bookingStatus: 'pending', bookingStartAt: daysFromNow(-2),
+    });
+    const cancelled = recommendFollowUp({
+      ...base, bookingId: 'bk-2', bookingStatus: 'cancelled', bookingStartAt: daysFromNow(-2),
+    });
+    expect(unconfirmed?.priority).toBe('now');
+    expect(cancelled?.priority).toBe('now');
   });
 });
 

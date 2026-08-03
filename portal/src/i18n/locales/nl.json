@@ -2300,6 +2300,16 @@
       "noServices": "Nog geen dienst aan een lead gekoppeld — dit vult zich aan naarmate klanten boeken.",
       "tagsTitle": "Genoemde onderwerpen (door AI afgeleid)",
       "tagsDenominator": "Uit de {{tagged}} gesprekken die we konden analyseren."
+    },
+    "analysis": {
+      "run": "Nu analyseren",
+      "running": "Bezig met analyseren…",
+      "failed": "De analyse kon niet worden voltooid",
+      "automatic": "Uw abonnement analyseert gesprekken doorlopend — u hoeft niets handmatig te starten.",
+      "notEnoughChats": "{{count}} van {{min}} nieuwe gesprekken. Er zijn er genoeg nodig om een patroon te zien in plaats van toeval.",
+      "coolingDown": "Onlangs al geanalyseerd. Over {{hours}} uur kunt u opnieuw analyseren.",
+      "started": "Analyse gestart. Het resultaat verschijnt hier zodra het klaar is.",
+      "inFlight": "Uw gesprekken worden geanalyseerd. Dit kan enkele minuten duren."
     }
   },
   "analytics": {

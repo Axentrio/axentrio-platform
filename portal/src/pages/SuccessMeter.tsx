@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Analytics from './Analytics';
 import { InsightsContent } from '@/components/insights/InsightsContent';
 import { ExportMenu } from '@/components/insights/ExportMenu';
+import { AnalysisTrigger } from '@/components/insights/AnalysisTrigger';
 import { LockedPreview } from '@/components/billing/LockedPreview';
 import { FeatureDisabledNotice } from '@/components/billing/FeatureDisabledNotice';
 import { useHasFeature, useIsEntitled } from '@/queries/useEntitlementsQueries';
@@ -31,8 +32,14 @@ export default function SuccessMeter() {
               {t('insights.surface.insightsTab', { defaultValue: 'AI Insights' })}
             </TabsTrigger>
           </TabsList>
-          {/* Enterprise CSV export (P3 D7) — renders nothing for other tiers. */}
-          <ExportMenu />
+          <div className="flex flex-wrap items-center gap-3">
+            {/* On-demand analysis for Essential/Pro; a one-line statement for
+                Enterprise, whose analysis is continuous. Renders nothing without
+                insights at all. */}
+            <AnalysisTrigger />
+            {/* Enterprise CSV export (P3 D7) — renders nothing for other tiers. */}
+            <ExportMenu />
+          </div>
         </div>
 
         <TabsContent value="outcomes">

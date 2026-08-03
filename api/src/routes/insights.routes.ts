@@ -8,6 +8,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { aggregateLeadDemand } from '../insights/lead-demand.service';
+import {
+  getAnalysisStatus,
+  claimAnalysisRun,
+  releaseAnalysisRun,
+} from '../insights/analysis-eligibility.service';
+import { refreshTenantInsights } from '../insights/refresh-insights.job';
 import { enrichmentAbstainStats } from '../leads/enrichment/enrich-lead.job';
 import { Gap } from '../database/entities/Gap';
 import { Judgment } from '../database/entities/Judgment';
@@ -17,6 +23,7 @@ import { requireClerkAuth, autoProvision, ProvisionedRequest } from '../middlewa
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { asyncHandler, ApiError, BadRequestError, NotFoundError } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
+import { logger } from '../utils/logger';
 import { getEntitlements } from '../billing/entitlements';
 import { InsightExperiment } from '../database/entities/InsightExperiment';
 import { InsightDigest } from '../database/entities/InsightDigest';
@@ -71,6 +78,79 @@ function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence' | 'aiBusines
     next();
   });
 }
+
+/**
+ * GET /insights/analysis-status
+ * Whether analysis can be run right now, and what is standing in the way.
+ *
+ * Gated on `gapInsights` only — every tier that HAS insights needs to know why the
+ * button is disabled, including Enterprise, whose answer is "it runs by itself".
+ */
+router.get(
+  '/analysis-status',
+  requireInsightsFeature('gapInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const status = await getAnalysisStatus(insightsTenantId(req) as string);
+    sendSuccess(res, status);
+  }),
+);
+
+/**
+ * POST /insights/analyse
+ * Start an on-demand analysis (Essential and Pro). Returns 202 — this does NOT wait.
+ *
+ * Waiting was the first design and it was wrong. The pass is one LLM call per
+ * conversation, and Essential cannot even unlock the button below fifteen of them, so
+ * the smallest permitted run already approaches the portal's 30-second HTTP timeout and
+ * a first run over a backlog takes minutes. The operator would have seen "analysis
+ * failed" while the server quietly succeeded — and, because the cooldown is stamped up
+ * front, they would have spent 72 hours on a run they were told had failed.
+ *
+ * So the work runs in the background behind a claim lease and the portal polls
+ * `analysis-status`. Eligibility is still re-checked here rather than trusted from the
+ * button: that view is seconds stale by definition, and the cooldown is the cost control.
+ */
+router.post(
+  '/analyse',
+  requireInsightsFeature('gapInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = insightsTenantId(req) as string;
+    const status = await getAnalysisStatus(tenantId);
+    if (!status.eligible) {
+      // 403 for "your tier has no such button", 409 for "not right now" — an Enterprise
+      // tenant is not in conflict with anything, they simply do not have this control.
+      const httpStatus = status.reason === 'automatic' || status.reason === 'not_entitled' ? 403 : 409;
+      throw new ApiError('Analysis is not available yet', httpStatus, 'FORBIDDEN', {
+        reason: status.reason,
+        newChats: status.newChats,
+        minNewChats: status.minNewChats,
+        nextAllowedAt: status.nextAllowedAt,
+      });
+    }
+
+    // The claim IS the cooldown stamp — one atomic write, so two clicks in the same
+    // second cannot both start a pass.
+    if (!(await claimAnalysisRun(tenantId))) {
+      throw new ApiError('Analysis is already running', 409, 'CONFLICT', { reason: 'running' });
+    }
+
+    // Deliberately not awaited. Failures are logged and the lease is always released,
+    // so a crash frees the tenant to try again rather than stranding them on "analysing".
+    void refreshTenantInsights(tenantId)
+      .catch((err) => {
+        logger.error('[insights] on-demand analysis failed', {
+          tenantId,
+          error: err instanceof Error ? err.message : 'unknown',
+        });
+      })
+      .finally(() => {
+        void releaseAnalysisRun(tenantId).catch(() => {});
+      });
+
+    res.status(202);
+    sendSuccess(res, await getAnalysisStatus(tenantId));
+  }),
+);
 
 /**
  * GET /insights

@@ -27,8 +27,12 @@ import { logger } from '../utils/logger';
 
 export const SUPPORT_INBOX = process.env.SUPPORT_EMAIL?.trim() || 'support@axentrio.com';
 
-/** How much of the conversation goes in the ticket. Enough to see the thread, not a dump. */
-const TRANSCRIPT_TURNS = 10;
+/**
+ * How much of the conversation goes in the ticket. Enough to see the thread, not a dump.
+ * Exported so the route can select exactly this many MOST-RECENT turns rather than
+ * fetching a window and trimming it to the wrong end.
+ */
+export const ESCALATION_TRANSCRIPT_TURNS = 10;
 
 /** Guards against a pasted essay becoming an unreadable email. */
 const MAX_MESSAGE_CHARS = 4000;
@@ -56,7 +60,7 @@ export interface EscalationResult {
 function renderTranscript(turns: EscalationTurn[]): string {
   if (turns.length === 0) return '(The customer had not asked the assistant anything yet.)';
   return turns
-    .slice(-TRANSCRIPT_TURNS)
+    .slice(-ESCALATION_TRANSCRIPT_TURNS)
     .map((t) => `${t.role === 'user' ? 'Customer' : 'Assistant'}: ${t.content}`)
     .join('\n\n');
 }
@@ -85,7 +89,7 @@ export async function escalateToSupport(input: EscalationInput): Promise<Escalat
     'What they need help with:',
     input.message.slice(0, MAX_MESSAGE_CHARS),
     '',
-    `Their conversation with the assistant (last ${TRANSCRIPT_TURNS} turns):`,
+    `Their conversation with the assistant (last ${ESCALATION_TRANSCRIPT_TURNS} turns):`,
     renderTranscript(input.transcript),
   ].join('\n');
 

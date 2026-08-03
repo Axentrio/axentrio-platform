@@ -422,6 +422,22 @@ describe('POST /escalate', () => {
     expect((sendEmail.mock.calls[0][0] as SentMail).body).toContain('how do I add a bot');
   });
 
+  it('attaches the MOST RECENT turns of a long conversation', async () => {
+    // Regression: the query took the first 40 turns ascending and the renderer then
+    // trimmed to the last 10 OF THOSE — so a long conversation sent support its
+    // opening, which is the reverse of why the transcript is attached at all.
+    // Must exceed the old 40-ROW window (each turn persists a user + an assistant
+    // row), or the broken version returns everything and the test proves nothing.
+    for (let i = 0; i < 25; i++) {
+      await request(app).post('/api/v1/copilot/messages').send({ message: `question ${i}` });
+    }
+    await escalate();
+
+    const body = (sendEmail.mock.calls[0][0] as SentMail).body;
+    expect(body).toContain('question 24');
+    expect(body).not.toContain('question 0');
+  });
+
   it('flags an Enterprise request as priority, since their contract says so', async () => {
     await AppDataSource.getRepository(Tenant).update(tenantId, { tier: 'enterprise' });
     const res = await escalate();

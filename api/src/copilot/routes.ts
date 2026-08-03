@@ -37,7 +37,7 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { ApiError, asyncHandler } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
-import { escalateToSupport } from './support-escalation';
+import { escalateToSupport, ESCALATION_TRANSCRIPT_TURNS } from './support-escalation';
 import { logAudit } from '../utils/audit';
 import { getRedisClient } from '../config/redis';
 import {
@@ -381,21 +381,25 @@ router.post(
     // The customer's own conversation with the assistant — the context that makes the
     // ticket actionable. Read here rather than accepted from the client so it is the
     // real thread, not whatever a caller chose to attach.
+    // Ordered DESC so a long conversation yields the MOST RECENT turns. Taking the
+    // first N ascending would send support the opening of a conversation whose
+    // interesting part is at the other end — the reverse of why it is attached.
     const rows = (await AppDataSource.query(
       `SELECT m.role, m.content
          FROM chatbot_copilot_messages m
          JOIN chatbot_copilot_conversations c ON c.id = m.conversation_id
         WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.archived_at IS NULL
-        ORDER BY m.turn ASC, m.created_at ASC
-        LIMIT 40`,
-      [tenantId, userId],
+        ORDER BY m.turn DESC, m.created_at DESC
+        LIMIT $3`,
+      [tenantId, userId, ESCALATION_TRANSCRIPT_TURNS],
     )) as Array<{ role: 'user' | 'assistant'; content: string }>;
 
     const result = await escalateToSupport({
       tenantId,
       userId,
       message: parsed.data.message,
-      transcript: rows.map((r) => ({ role: r.role, content: r.content })),
+      // Back into reading order for the email.
+      transcript: rows.reverse().map((r) => ({ role: r.role, content: r.content })),
     });
 
     if (!result.delivered) {

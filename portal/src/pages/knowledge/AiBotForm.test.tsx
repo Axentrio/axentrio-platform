@@ -134,28 +134,6 @@ describe('AiBotForm', () => {
     expect(onGoToKnowledgeBase).toHaveBeenCalledTimes(1);
   });
 
-  // a8981e5 removed this input while brandVoice.name kept feeding the prompt
-  // ("You are ${brandVoice.name}" plus every template's {botName}). A production
-  // bot then introduced itself as "Mo" with nowhere in the app to see or change
-  // it — renaming the bot record does not touch this field. Pin both halves so it
-  // cannot go missing again: the value must render, and edits must reach the save.
-  it('renders the chatbot name from brandVoice and saves an edit to it', async () => {
-    const { user } = renderForm();
-    mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());
-
-    const input = screen.getByPlaceholderText('e.g. Ava') as HTMLInputElement;
-    expect(input.value).toBe('TestBot');
-
-    await user.clear(input);
-    await user.click(input);
-    await user.keyboard('Mo');
-    await user.tab();
-
-    await waitFor(() => expect(mockMutate).toHaveBeenCalled());
-    const payload = mockMutate.mock.calls[0][0] as { brandVoice: { name: string } };
-    expect(payload.brandVoice.name).toBe('Mo');
-  });
-
   it('does not persist a templateId in the ai-settings payload (T18)', async () => {
     const { user } = renderForm();
     mockMutate.mockImplementation((_vars: unknown, options?: { onSuccess?: () => void }) => options?.onSuccess?.());

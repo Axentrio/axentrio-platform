@@ -22,17 +22,37 @@ interface RenameBotDialogProps {
 export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }) => {
   const { t } = useTranslation();
   const [name, setName] = useState('');
+  // What the bot calls itself to customers. It has fed the prompt all along
+  // ("You are <name>", every template's {botName}) with nowhere to edit it, so a
+  // bot could greet people by a name its owner could not change — renaming the
+  // bot record does NOT touch it. Editable here rather than in the bot editor so
+  // both names live in the one place people already go to name a bot.
+  const [assistantName, setAssistantName] = useState('');
   const updateBot = useUpdateBot();
 
   useEffect(() => {
-    if (bot) setName(bot.name);
+    if (bot) {
+      setName(bot.name);
+      setAssistantName(bot.assistantName ?? '');
+    }
   }, [bot]);
+
+  const trimmedName = name.trim();
+  const trimmedAssistant = assistantName.trim();
+  const nameChanged = trimmedName !== bot?.name;
+  const assistantChanged = trimmedAssistant !== (bot?.assistantName ?? '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!bot) return;
     try {
-      await updateBot.mutateAsync({ id: bot.id, name: name.trim() });
+      // Send only what changed: the PATCH rejects an empty body, and an unchanged
+      // field has no business being rewritten.
+      await updateBot.mutateAsync({
+        id: bot.id,
+        ...(nameChanged ? { name: trimmedName } : {}),
+        ...(assistantChanged ? { assistantName: trimmedAssistant } : {}),
+      });
       toast.success(t('bots.toast.renamed'));
       onClose();
     } catch (err) {
@@ -41,7 +61,13 @@ export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }
     }
   };
 
-  const submitDisabled = !name.trim() || name.trim() === bot?.name || updateBot.isPending;
+  // assistantName may be blank (the composer then falls back to the tenant name),
+  // but must not be blanked to empty once set — the API requires min(1).
+  const submitDisabled =
+    !trimmedName ||
+    (assistantChanged && !trimmedAssistant) ||
+    (!nameChanged && !assistantChanged) ||
+    updateBot.isPending;
 
   return (
     <Dialog open={!!bot} onOpenChange={(o) => !o && onClose()}>
@@ -61,6 +87,27 @@ export const RenameBotDialog: React.FC<RenameBotDialogProps> = ({ bot, onClose }
                 autoFocus
                 disabled={updateBot.isPending}
               />
+              <p className="text-[10px] text-text-muted">
+                {t('bots.rename.nameHelper', { defaultValue: 'Only you see this — it labels the bot in this list.' })}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="rename-assistant-name">
+                {t('bots.rename.assistantNameLabel', { defaultValue: 'What customers call it' })}
+              </Label>
+              <Input
+                id="rename-assistant-name"
+                value={assistantName}
+                onChange={(e) => setAssistantName(e.target.value)}
+                maxLength={255}
+                disabled={updateBot.isPending}
+                placeholder={t('bots.rename.assistantNamePlaceholder', { defaultValue: 'e.g. Ava' })}
+              />
+              <p className="text-[10px] text-text-muted">
+                {t('bots.rename.assistantNameHelper', {
+                  defaultValue: 'The name the bot introduces itself with in every conversation.',
+                })}
+              </p>
             </div>
           </div>
           <DialogFooter>

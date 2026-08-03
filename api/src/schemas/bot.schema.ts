@@ -28,9 +28,26 @@ export const businessHoursSchema = z.object({
 export const updateBotSchema = z
   .object({
     name: z.string().min(1).max(255).optional(),
+    /**
+     * The name the bot introduces itself by — `settings.ai.brandVoice.name`,
+     * which feeds "You are <name>" and every template's {botName}. Distinct from
+     * `name` above: that one is operator-facing (the bots list), this one is what
+     * customers hear. A bot legitimately called "test account" internally still
+     * needs to greet people as "Luc".
+     *
+     * Patched here rather than through PUT /ai-settings because that endpoint
+     * full-replaces the ai slice — a rename dialog sending only a name would
+     * silently drop tone, guardrails and channel overrides.
+     */
+    assistantName: z.string().min(1).max(255).optional(),
     status: z.enum(['active', 'paused']).optional(),
     businessHours: businessHoursSchema.optional(),
   })
-  .refine((v) => v.name !== undefined || v.status !== undefined || v.businessHours !== undefined, {
-    message: 'Provide at least one of: name, status, businessHours',
-  });
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.assistantName !== undefined ||
+      v.status !== undefined ||
+      v.businessHours !== undefined,
+    { message: 'Provide at least one of: name, assistantName, status, businessHours' },
+  );

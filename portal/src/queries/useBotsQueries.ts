@@ -29,6 +29,10 @@ export interface BotListItem {
   publicKey: string;
   /** The bot's AI-enabled state (for the onboarding checklist on the list). */
   aiEnabled: boolean;
+  /** What the bot calls ITSELF to customers (settings.ai.brandVoice.name) — the
+   *  source of "You are <name>" and every template's {botName}. Distinct from
+   *  `name`, which is the operator-facing label in this list. */
+  assistantName: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -125,7 +129,7 @@ export function useCreateBot() {
 export function useUpdateBot() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...patch }: { id: string; name?: string; status?: BotStatus; businessHours?: BusinessHours }) =>
+    mutationFn: ({ id, ...patch }: { id: string; name?: string; assistantName?: string; status?: BotStatus; businessHours?: BusinessHours }) =>
       api.patch<BotListItem>(`/bots/${id}`, patch),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.bots.list() });

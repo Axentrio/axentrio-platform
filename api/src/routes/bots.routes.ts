@@ -79,6 +79,10 @@ function toListItem(bot: Bot) {
     // Surfaced so the (relocated) onboarding checklist can read the default
     // bot's AI-enabled state without a second per-bot ai-settings fetch.
     aiEnabled: bot.settings?.ai?.enabled ?? false,
+    // The customer-facing persona name, so the rename dialog can show what the
+    // bot actually calls itself without a second per-bot ai-settings fetch.
+    // Empty when unset — the composer falls back to the tenant name at runtime.
+    assistantName: bot.settings?.ai?.brandVoice?.name ?? '',
     createdAt: bot.createdAt,
     updatedAt: bot.updatedAt,
   };
@@ -294,8 +298,9 @@ router.patch(
     const authReq = req as ProvisionedRequest;
     requireMutateRole(authReq.userRole);
     const tenantId = authReq.tenantId!;
-    const { name, status, businessHours } = req.body as {
+    const { name, assistantName, status, businessHours } = req.body as {
       name?: string;
+      assistantName?: string;
       status?: 'active' | 'paused';
       businessHours?: NonNullable<Bot['settings']>['businessHours'];
     };
@@ -337,6 +342,16 @@ router.patch(
 
       if (name !== undefined) bot.name = name;
       if (status !== undefined) bot.status = status;
+      // Merge into brandVoice rather than replacing it — tone, businessName and
+      // customInstructions live alongside and must survive a rename.
+      if (assistantName !== undefined) {
+        const settings = (bot.settings ?? {}) as NonNullable<Bot['settings']>;
+        const ai = (settings.ai ?? {}) as NonNullable<NonNullable<Bot['settings']>['ai']>;
+        bot.settings = {
+          ...settings,
+          ai: { ...ai, brandVoice: { ...(ai.brandVoice ?? {}), name: assistantName } },
+        } as Bot['settings'];
+      }
       // Operational, tenant-owned business hours live on the bot's settings blob.
       if (businessHours !== undefined) {
         bot.settings = { ...(bot.settings ?? {}), businessHours };

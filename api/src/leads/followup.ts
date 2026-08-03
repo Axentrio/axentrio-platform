@@ -247,11 +247,16 @@ export function recommendFollowUp(lead: FollowUpInput): FollowUpRecommendation |
   return {
     action,
     via,
-    // An unconfirmed slot and a cancellation are both "the customer is waiting on you
-    // right now"; so is a lead nobody has touched in days. Nothing else is urgent, and
-    // nothing a visitor types can reach this line.
-    priority:
-      action === 'confirm_request' || action === 'win_back_cancelled' || waiting ? 'now' : 'soon',
+    // Urgent means the CUSTOMER is waiting on a decision from you: they asked for a
+    // slot nobody confirmed, or their booking fell through. Both are staleness-capped
+    // above, so neither can fire on ancient history.
+    //
+    // Silence deliberately does NOT promote to 'now'. It used to, at three days, which
+    // made every lead on any account with a backlog urgent — and a page where
+    // everything is urgent ranks nothing. Observed on production: 17 of 18 rows came
+    // back 'now'. The wait is still reported as a reason, and the day count still
+    // carries it on screen; it just no longer shouts.
+    priority: action === 'confirm_request' || action === 'win_back_cancelled' ? 'now' : 'soon',
     reasons,
     version: FOLLOWUP_VERSION,
   };

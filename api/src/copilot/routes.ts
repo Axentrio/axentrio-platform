@@ -360,10 +360,13 @@ router.post(
     if (redis) {
       try {
         const key = `copilot:escalate:${userId}`;
-        const [[, count]] = (await redis.multi().incr(key).expire(key, 3600).exec()) as Array<
-          [Error | null, number]
-        >;
-        if (Number(count) > ESCALATIONS_PER_HOUR) {
+        const count = Number(await redis.incr(key));
+        // Expire only on the FIRST hit, so this is a fixed window. Re-setting the TTL
+        // on every attempt makes it a sliding one: a customer who cannot reach support
+        // and keeps trying extends their own lockout indefinitely, which is precisely
+        // backwards for the path that exists to unblock them.
+        if (count === 1) await redis.expire(key, 3600);
+        if (count > ESCALATIONS_PER_HOUR) {
           throw new ApiError(
             'You have sent several support requests in the last hour. Support has them — reply to the email we sent if you need to add anything.',
             429,

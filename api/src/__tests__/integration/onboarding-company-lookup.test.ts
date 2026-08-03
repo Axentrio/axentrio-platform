@@ -86,8 +86,10 @@ describe('GET /onboarding/company-lookup', () => {
     // Repeats are free (the service caches, including negatives), so this only bites on
     // a loop over invented numbers — which is exactly the case worth stopping.
     let n = 0;
+    const expires: number[] = [];
     redis.client = {
-      multi: () => ({ incr: () => ({ expire: () => ({ exec: async () => [[null, ++n]]}) }) }),
+      incr: async () => ++n,
+      expire: async (_k: string, ttl: number) => { expires.push(ttl); return 1; },
     };
     lookup.mockResolvedValue({ status: 'not_found', company: null, cached: false });
 
@@ -97,10 +99,15 @@ describe('GET /onboarding/company-lookup', () => {
     }
     const blocked = await request(app).get('/api/v1/onboarding/company-lookup?vat=0400378485');
     expect(blocked.status).toBe(429);
+
+    // Fixed window: the expiry is set once, at the first request. Re-setting it on
+    // every call would mean a customer retrying a mistyped number never gets their
+    // allowance back.
+    expect(expires).toEqual([3600]);
   });
 
   it('keeps working when Redis is down rather than blocking signup', async () => {
-    redis.client = { multi: () => { throw new Error('redis down'); } };
+    redis.client = { incr: async () => { throw new Error('redis down'); } };
     lookup.mockResolvedValue({ status: 'found', company: { name: 'X' }, cached: false });
     const res = await request(app).get('/api/v1/onboarding/company-lookup?vat=0400378485');
     expect(res.status).toBe(200);

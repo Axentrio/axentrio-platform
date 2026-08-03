@@ -63,10 +63,12 @@ async function withinLookupBudget(userId: string): Promise<boolean> {
   if (!redis) return true;
   try {
     const key = `onboarding:lookup:${userId}`;
-    const [[, count]] = (await redis.multi().incr(key).expire(key, WINDOW_SECONDS).exec()) as Array<
-      [Error | null, number]
-    >;
-    return Number(count) <= LOOKUPS_PER_HOUR;
+    const count = Number(await redis.incr(key));
+    // First hit only — see the escalation limiter. An unconditional expire would make
+    // this a sliding window, so someone retrying a mistyped number would never get
+    // their allowance back.
+    if (count === 1) await redis.expire(key, WINDOW_SECONDS);
+    return count <= LOOKUPS_PER_HOUR;
   } catch (err) {
     logger.warn('[onboarding] lookup budget check failed, allowing', {
       error: err instanceof Error ? err.message : 'unknown',

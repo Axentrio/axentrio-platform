@@ -25,6 +25,7 @@ import { InsightsRefreshState } from '../database/entities/InsightsRefreshState'
 import { getEntitlements } from '../billing/entitlements';
 import { analysisPolicyFor } from './analysis-policy';
 import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service';
+import { prefilterTranscript, emptyPrefilterTally } from './prefilter';
 import { canonicalizeTopic } from './topics.service';
 import { canonicalizeSentimentTheme } from './sentiment-themes.service';
 import { aggregateSentiment } from './sentiment-aggregation.service';
@@ -121,6 +122,7 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
   let judged = 0;
   let failed = 0;
   const tally: UsageTally = { promptTokens: 0, completionTokens: 0, calls: 0 };
+  const layer1 = emptyPrefilterTally();
 
   for (const session of sessions) {
     // Unique(session_id) makes re-judging a no-op risk; skip cheaply instead.
@@ -132,6 +134,35 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
 
     try {
       const transcript = await loadTranscript(session.id);
+
+      // Layer 1 (cheap, no model): when a conversation cannot possibly yield a topic,
+      // the verdict is knowable without paying for one. The judgment is still WRITTEN —
+      // completeness is judged/eligible, so dropping these would make the UI announce
+      // "Insights incomplete" for conversations that were correctly found empty.
+      const gate = prefilterTranscript(transcript);
+      if (!gate.judge) {
+        layer1.skipped += 1;
+        layer1.byReason[gate.reason] += 1;
+        await judgmentRepo.save(
+          judgmentRepo.create({
+            tenantId,
+            sessionId: session.id,
+            visitorId: session.visitorId,
+            sessionStartedAt: session.startedAt,
+            hadQuestion: false,
+            // Deliberately null, not false: `satisfied` answers "was their question
+            // answered", and there was no question. False would read as a failure.
+            satisfied: null,
+            evidenceMessageIds: [],
+            reasoning: gate.note,
+          }),
+        );
+        judged += 1;
+        if (!watermarkFrozen) watermark = session.effectiveEndedAt;
+        continue;
+      }
+      layer1.judged += 1;
+
       const verdict = await judgeTranscript(transcript, session.status === 'handoff', tally, {
         withSentiment,
       });
@@ -241,6 +272,16 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
     failed,
     completeness: Number(completeness.toFixed(3)),
     llm: tally, // per-tenant token telemetry (ADR-0006 cost monitoring)
+    // Layer 1's actual effect, per run. Logged rather than asserted: the share of
+    // conversations that cannot yield a topic is a property of a tenant's traffic, not
+    // something to estimate once and quote forever.
+    layer1: {
+      ...layer1,
+      savedShare:
+        layer1.judged + layer1.skipped > 0
+          ? Number((layer1.skipped / (layer1.judged + layer1.skipped)).toFixed(3))
+          : 0,
+    },
   });
 }
 

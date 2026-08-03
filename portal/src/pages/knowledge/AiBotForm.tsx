@@ -471,6 +471,21 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         <Section icon={Fingerprint} title={t('ai.bot.identity.title')} description={t('ai.bot.identity.description')}>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
+              {/* The name the bot introduces itself by, and what {botName} resolves
+                  to in every template body. Its editor was removed in a8981e5 while
+                  the value kept feeding the prompt, so a bot could introduce itself
+                  as a name nobody could find or change — renaming the bot record
+                  does NOT touch this field. */}
+              <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.botName.label')}</Label>
+              <Input
+                value={botName}
+                onChange={(e) => setBotName(e.target.value)}
+                placeholder={t('ai.bot.identity.botName.placeholder')}
+                disabled={readOnly}
+              />
+              <p className="text-[10px] text-text-muted mt-1">{t('ai.bot.identity.botName.helper')}</p>
+            </div>
+            <div>
               <Label className="mb-1 text-text-secondary">{t('ai.bot.identity.businessName.label')}</Label>
               <Input
                 value={businessName}

@@ -2299,6 +2299,15 @@
       "noServices": "Aucun service associé à un lead pour l’instant — cela se remplit au fur et à mesure des réservations.",
       "tagsTitle": "Sujets mentionnés (déduits par l’IA)",
       "tagsDenominator": "Sur les {{tagged}} conversations que nous avons pu analyser."
+    },
+    "analysis": {
+      "run": "Analyser maintenant",
+      "running": "Analyse en cours…",
+      "done": "Analyse terminée. Insights mis à jour.",
+      "failed": "L'analyse n'a pas pu être effectuée",
+      "automatic": "Votre formule analyse les conversations en continu — rien à lancer manuellement.",
+      "notEnoughChats": "{{count}} conversations sur {{min}}. Il en faut assez pour dégager une tendance et non une coïncidence.",
+      "coolingDown": "Analyse déjà effectuée récemment. Vous pourrez relancer dans {{hours}} heures."
     }
   },
   "analytics": {

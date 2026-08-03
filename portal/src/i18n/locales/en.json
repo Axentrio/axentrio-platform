@@ -2338,6 +2338,15 @@
       "noServices": "No service could be matched to a lead yet — this fills in as customers book.",
       "tagsTitle": "Topics mentioned (AI-derived)",
       "tagsDenominator": "From the {{tagged}} conversations we were able to analyse."
+    },
+    "analysis": {
+      "run": "Analyse now",
+      "running": "Analysing…",
+      "done": "Analysis finished. Insights updated.",
+      "failed": "Analysis could not be completed",
+      "automatic": "Your plan analyses conversations continuously — nothing to run by hand.",
+      "notEnoughChats": "{{count}} of {{min}} new conversations. Analysis needs enough of them to find a pattern rather than a coincidence.",
+      "coolingDown": "Already analysed recently. You can run it again in {{hours}} hours."
     }
   },
   "analytics": {

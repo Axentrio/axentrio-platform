@@ -43,6 +43,40 @@ const insightsOptions = {
   }),
 };
 
+/** Mirrors the server's analysis-policy shape; see api/src/insights/analysis-policy.ts. */
+export interface AnalysisStatus {
+  eligible: boolean;
+  reason: 'not_entitled' | 'automatic' | 'not_enough_chats' | 'cooling_down' | null;
+  newChats: number;
+  minNewChats: number;
+  nextAllowedAt: string | null;
+  lastRefreshedAt: string | null;
+  policy: { tier: 'none' | 'essential' | 'pro' | 'enterprise'; automatic: boolean; minNewChats: number; cooldownHours: number };
+}
+
+export function useAnalysisStatus(enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.insights.all(), 'analysis-status'],
+    queryFn: () => api.get<AnalysisStatus>('/insights/analysis-status'),
+    enabled,
+  });
+}
+
+/**
+ * Run analysis on demand. On success every insights view is invalidated, not just the
+ * status — the whole point of the run is that the gaps, digest and experiments beneath
+ * it have changed.
+ */
+export function useRunAnalysis() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AnalysisStatus>('/insights/analyse'),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.insights.all() });
+    },
+  });
+}
+
 export function useInsights(enabled = true) {
   return useQuery({ ...insightsOptions.list(), enabled });
 }

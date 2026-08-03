@@ -2684,5 +2684,121 @@
       "body": "Je abonnement bevat deze functie, maar deze is uitgeschakeld voor je werkruimte.",
       "cta": "Functies beheren"
     }
+  },
+  "setup": {
+    "progress": "Stap {{current}} van {{total}}",
+    "continue": "Doorgaan",
+    "skip": "Nu niet",
+    "backToCurrent": "Terug naar waar ik was",
+    "answeredCount_one": "{{count}} stap beantwoord",
+    "answeredCount_other": "{{count}} stappen beantwoord",
+    "blocked": {
+      "title": "De installatie is nog niet klaar",
+      "body": "Een beheerder van deze werkruimte moet de installatie afronden voordat iemand ermee aan de slag kan."
+    },
+    "finish": {
+      "title": "Dat was alles",
+      "body": "Je werkruimte is klaar. Je kunt dit later allemaal aanpassen in Instellingen.",
+      "action": "Open mijn werkruimte"
+    },
+    "steps": {
+      "language": {
+        "title": "Kies je taal",
+        "body": "Dit is de taal die je in het platform ziet. Je assistent antwoordt klanten nog steeds in de taal waarin zij schrijven."
+      },
+      "company": {
+        "title": "Je bedrijf",
+        "body": "Vul je btw-nummer in, dan halen we de rest uit het officiële register.",
+        "vatLabel": "Btw-nummer",
+        "lookup": "Opzoeken",
+        "lookingUp": "We raadplegen het register — dit kan enkele seconden duren.",
+        "lookupStatus": {
+          "found": "Gevonden in het officiële register.",
+          "not_found": "Dat nummer is niet geregistreerd. Controleer het, of vul de gegevens zelf in.",
+          "invalid_format": "Dit lijkt geen Belgisch btw-nummer. Voorbeeld: BE 0400.378.485",
+          "unavailable": "Het register reageert momenteel niet. Vul de gegevens zelf in en ga verder — verifiëren kan later."
+        },
+        "nameLabel": "Bedrijfsnaam",
+        "legalFormLabel": "Rechtsvorm",
+        "streetLabel": "Straat en nummer",
+        "postalCodeLabel": "Postcode",
+        "cityLabel": "Gemeente",
+        "verifiedNote": "Bevestigd door het officiële register.",
+        "unverifiedNote": "Niet geverifieerd bij het register."
+      },
+      "logo": {
+        "title": "Voeg je logo toe",
+        "body": "Het verschijnt op je chatvenster en in e-mails aan je klanten.",
+        "choose": "Kies een bestand",
+        "hint": "PNG, JPG, SVG of WebP. Een vierkante afbeelding werkt het best.",
+        "uploadFailed": "Dat bestand kon niet worden geüpload. Probeer een ander.",
+        "skipConsequence": "We gebruiken de eerste letter van je bedrijfsnaam."
+      },
+      "chatbot": {
+        "title": "Geef je assistent een naam",
+        "body": "Dit is de naam die klanten zien bij een antwoord. Je kunt die en al de rest later aanpassen.",
+        "nameLabel": "Naam assistent",
+        "namePlaceholder": "bv. Sofie",
+        "toneLabel": "Hoe moet hij klinken?",
+        "skipConsequence": "Je assistent houdt zijn standaardnaam en -toon."
+      },
+      "documents": {
+        "title": "Wat moet hij weten?",
+        "body": "Voeg minstens één document toe. Je assistent antwoordt op basis van wat je hier geeft — zonder iets om te lezen kan hij geen vragen over je zaak beantwoorden.",
+        "add": "Voeg je eerste document toe",
+        "addAnother": "Nog een toevoegen",
+        "examples": "Je diensten, prijzen, openingsuren of een lijst met veelgestelde vragen",
+        "status": {
+          "pending": "In wachtrij",
+          "processing": "Wordt gelezen",
+          "indexed": "Klaar",
+          "failed": "Mislukt"
+        }
+      },
+      "social": {
+        "title": "Berichtenkanalen",
+        "body": "Beantwoord WhatsApp, Messenger, Instagram en Telegram vanuit dezelfde inbox als je websitechat.",
+        "points": [
+          "Eén inbox voor elk kanaal",
+          "Je assistent antwoordt daar ook",
+          "Je neemt over wanneer je wilt"
+        ],
+        "yes": "Ja, ik wil berichtenkanalen",
+        "afterwards": "Je koppelt je accounts via Kanalen zodra de installatie klaar is.",
+        "skipConsequence": "Berichtenkanalen blijven uit. Je kunt ze aanzetten in Instellingen → Functies."
+      },
+      "bookings": {
+        "title": "Afspraken",
+        "body": "Laat je assistent afspraken rechtstreeks in je agenda boeken.",
+        "points": [
+          "Klanten kiezen een moment in het gesprek zelf",
+          "Werkt met Google Agenda en Outlook",
+          "Jij bepaalt welke uren boekbaar zijn"
+        ],
+        "yes": "Ja, ik werk op afspraak",
+        "afterwards": "Je koppelt je agenda via Afspraken zodra de installatie klaar is.",
+        "skipConsequence": "Afspraken blijven uit. Je kunt ze aanzetten in Instellingen → Functies."
+      },
+      "leads": {
+        "title": "Leads vastleggen",
+        "body": "Bewaar de gegevens van wie een offerte of terugbelverzoek vraagt, zodat niemand verloren gaat.",
+        "points": [
+          "Naam, contactgegevens en wat ze vroegen",
+          "Meteen een melding bij een nieuwe lead",
+          "Exporteer naar Excel wanneer je wilt"
+        ],
+        "yes": "Ja, leg leads voor mij vast",
+        "afterwards": "Leads verschijnen onder Leads zodra je assistent er een verzamelt.",
+        "skipConsequence": "Leads vastleggen blijft uit. Je kunt het aanzetten in Instellingen → Functies."
+      },
+      "plan": {
+        "title": "Kies je abonnement",
+        "body": "Je zit in een Pro-proefperiode. Kies nu een abonnement, of blijf op de proefperiode en beslis later.",
+        "choose": "Kies dit abonnement",
+        "trialNote": "Nog niet beslist? Je proefperiode geeft je alles uit Pro.",
+        "keepTrial": "Verder met de proefperiode"
+      }
+    },
+    "progressLabel": "Voortgang installatie"
   }
 }

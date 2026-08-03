@@ -1,0 +1,239 @@
+/**
+ * The setup wizard.
+ *
+ * What is worth asserting here is not that the screens render — it is that the two
+ * promises the wizard makes to the customer hold:
+ *
+ *   a skip is an informed choice (the consequence is on screen before the click, and
+ *   only optional steps offer one), and
+ *
+ *   a required step cannot be satisfied by a click alone.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const { apiGet, apiPut, apiPost, apiPatch } = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+  apiPut: vi.fn(),
+  apiPost: vi.fn(),
+  apiPatch: vi.fn(),
+}));
+// Only `api` is stubbed — extractApiErrorMessage stays real, because how a server
+// refusal turns into words the customer reads is part of what is under test.
+vi.mock('@/services/apiClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/apiClient')>()),
+  api: { get: apiGet, post: apiPost, put: apiPut, patch: apiPatch, delete: vi.fn() },
+}));
+
+vi.mock('@clerk/clerk-react', () => ({ useOrganization: () => ({ organization: null }) }));
+vi.mock('@/pages/knowledge/AddDocumentModal', () => ({ default: () => null }));
+
+import SetupWizard from './SetupWizard';
+import type { SetupStep } from '@/queries/useOnboardingQueries';
+
+/** Status for a workspace sitting on `step`, with everything before it answered. */
+function statusAt(step: SetupStep, steps: Record<string, string> = {}) {
+  return { state: { version: 1, steps, language: null, company: null }, nextStep: step, complete: false };
+}
+
+function renderWizard() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <SetupWizard />
+    </QueryClientProvider>,
+  );
+}
+
+beforeEach(() => {
+  apiGet.mockReset();
+  apiPut.mockReset().mockResolvedValue(statusAt('company'));
+  apiPost.mockReset();
+  apiPatch.mockReset().mockResolvedValue({});
+});
+
+describe('skipping', () => {
+  it('states what a skip costs, before the click', async () => {
+    apiGet.mockResolvedValue(statusAt('bookings'));
+    renderWizard();
+    // Not "you can change this later" — the specific thing that gets switched off.
+    expect(await screen.findByText(/appointments stay off/i)).toBeInTheDocument();
+  });
+
+  it('renders the reasons to say yes as a list, not a stringified object', async () => {
+    // `returnObjects` is easy to get subtly wrong and fails as visible garbage.
+    apiGet.mockResolvedValue(statusAt('bookings'));
+    renderWizard();
+    expect(await screen.findByText(/works with google calendar and outlook/i)).toBeInTheDocument();
+  });
+
+  it('sends a real skip, not a silent continue', async () => {
+    apiGet.mockResolvedValue(statusAt('bookings'));
+    renderWizard();
+
+    await userEvent.click(await screen.findByRole('button', { name: /not now/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith('/onboarding/step', {
+        step: 'bookings',
+        outcome: 'skipped',
+      }),
+    );
+  });
+
+  it('offers no way past a required step', async () => {
+    // documents is required because a workspace with nothing to read has an assistant
+    // that cannot answer anything.
+    apiGet.mockResolvedValue(statusAt('documents'));
+    renderWizard();
+
+    await screen.findByRole('heading', { name: /what should it know/i });
+    expect(screen.queryByRole('button', { name: /not now/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('a refused submission', () => {
+  it('tells the customer why, instead of doing nothing', async () => {
+    // Only 402s get a global toast. Without this the customer clicks Continue and
+    // watches nothing happen, on the one screen they cannot navigate away from.
+    apiGet.mockResolvedValue(statusAt('bookings'));
+    apiPut.mockRejectedValue({
+      isAxiosError: true,
+      response: {
+        status: 409,
+        data: { error: { message: 'Upload at least one document so your assistant has something to answer from' } },
+      },
+    });
+    renderWizard();
+
+    await userEvent.click(await screen.findByRole('button', { name: /not now/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/upload at least one document/i);
+  });
+});
+
+describe('the documents step', () => {
+  it('will not continue until a document actually exists', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith('/knowledge/documents')
+        ? Promise.resolve([])
+        : Promise.resolve(statusAt('documents')),
+    );
+    renderWizard();
+
+    const continueButton = await screen.findByRole('button', { name: /continue/i });
+    expect(continueButton).toBeDisabled();
+  });
+
+  it('continues once one does', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith('/knowledge/documents')
+        ? Promise.resolve([{ id: 'd1', title: 'Opening hours', status: 'indexed' }])
+        : Promise.resolve(statusAt('documents')),
+    );
+    renderWizard();
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /continue/i })).toBeEnabled(),
+    );
+  });
+});
+
+describe('the company step', () => {
+  it('fills the form from the register so the customer confirms rather than types', async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith('/onboarding/company-lookup')
+        ? Promise.resolve({
+            status: 'found',
+            cached: false,
+            company: {
+              vatNumber: 'BE0400378485',
+              name: 'Colruyt Group',
+              legalForm: 'NV',
+              street: 'Edingensesteenweg 196',
+              postalCode: '1500',
+              city: 'Halle',
+            },
+          })
+        : Promise.resolve(statusAt('company')),
+    );
+    renderWizard();
+
+    await userEvent.type(await screen.findByLabelText(/vat number/i), 'BE0400378485');
+    await userEvent.click(screen.getByRole('button', { name: /look up/i }));
+
+    expect(await screen.findByDisplayValue('Colruyt Group')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Halle')).toBeInTheDocument();
+  });
+
+  it('lets the customer continue when the register is down', async () => {
+    // The explicit product rule: losing a signup to someone else's downtime is far
+    // worse than an unverified company record.
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith('/onboarding/company-lookup')
+        ? Promise.resolve({ status: 'unavailable', company: null, cached: false })
+        : Promise.resolve(statusAt('company')),
+    );
+    renderWizard();
+
+    await userEvent.type(await screen.findByLabelText(/vat number/i), 'BE0400378485');
+    await userEvent.click(screen.getByRole('button', { name: /look up/i }));
+    await screen.findByText(/register isn't responding/i);
+
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Typed By Hand BV');
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => expect(apiPut).toHaveBeenCalled());
+    expect(apiPut.mock.calls[0][1].company).toMatchObject({ name: 'Typed By Hand BV' });
+  });
+
+  it('never claims the register verified something it did not', async () => {
+    // `verified` is the server's word, taken from the lookup. The client must not be
+    // able to assert it, so it is not in the payload at all.
+    apiGet.mockImplementation((url: string) =>
+      url.startsWith('/onboarding/company-lookup')
+        ? Promise.resolve({ status: 'not_found', company: null, cached: false })
+        : Promise.resolve(statusAt('company')),
+    );
+    renderWizard();
+
+    await userEvent.type(await screen.findByLabelText(/vat number/i), 'BE0999999999');
+    await userEvent.type(screen.getByLabelText(/company name/i), 'Definitely Real BV');
+    await userEvent.click(screen.getByRole('button', { name: /continue/i }));
+
+    await waitFor(() => expect(apiPut).toHaveBeenCalled());
+    expect(apiPut.mock.calls[0][1].company).not.toHaveProperty('verified');
+  });
+});
+
+describe('the plan step', () => {
+  it('finishes setup on the trial without a payment', async () => {
+    apiGet.mockResolvedValue(statusAt('plan'));
+    renderWizard();
+
+    await userEvent.click(await screen.findByRole('button', { name: /continue on the trial/i }));
+
+    await waitFor(() =>
+      expect(apiPut).toHaveBeenCalledWith('/onboarding/step', { step: 'plan', outcome: 'done' }),
+    );
+    expect(apiPost).not.toHaveBeenCalled();
+  });
+
+  it('records the answer BEFORE leaving for Stripe', async () => {
+    // Leaving for checkout with the final step unanswered would strand anyone who
+    // abandons payment in a wizard they cannot get out of.
+    apiGet.mockResolvedValue(statusAt('plan'));
+    apiPost.mockResolvedValue({ url: 'https://checkout.stripe.test/session' });
+    renderWizard();
+
+    const buttons = await screen.findAllByRole('button', { name: /choose this plan/i });
+    await userEvent.click(buttons[1]); // Pro
+
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    expect(apiPut).toHaveBeenCalledWith('/onboarding/step', { step: 'plan', outcome: 'done' });
+    expect(apiPut.mock.invocationCallOrder[0]).toBeLessThan(apiPost.mock.invocationCallOrder[0]);
+  });
+});

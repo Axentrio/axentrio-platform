@@ -42,6 +42,8 @@ import Leads from '@pages/Leads';
 import SocialMedia from '@pages/SocialMedia';
 import SuccessMeter from '@pages/SuccessMeter';
 import SettingsLayout from '@pages/settings/SettingsLayout';
+import { SetupGate } from '@pages/setup/SetupGate';
+import { useSetupStatus } from '@/queries/useOnboardingQueries';
 import ProfileSettings from '@pages/settings/ProfileSettings';
 import NotificationSettings from '@pages/settings/NotificationSettings';
 import AppearanceSettings from '@pages/settings/AppearanceSettings';
@@ -132,6 +134,8 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
   const { openTenantPalette } = useUiStore();
   const { user } = useAppAuth();
   const isSuperAdmin = user?.role === 'super_admin';
+  const { data: setupStatus } = useSetupStatus();
+  const inSetup = !isSuperAdmin && setupStatus != null && !setupStatus.complete;
 
   // Global keyboard shortcut: Cmd+K / Ctrl+K
   React.useEffect(() => {
@@ -159,9 +163,14 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <div className="h-screen flex overflow-hidden bg-surface-1">
-      <div className="hidden md:flex w-64 flex-shrink-0">
-        <Sidebar />
-      </div>
+      {/* During first-run setup the nav is hidden: every destination in it bounces
+          back to the wizard, and offering doors that do not open is worse than
+          offering none. Same cached query the gate reads, so no extra request. */}
+      {!inSetup && (
+        <div className="hidden md:flex w-64 flex-shrink-0">
+          <Sidebar />
+        </div>
+      )}
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="bg-surface-0 border-b border-edge px-4 py-2 flex items-center justify-between md:hidden">
           <div className="flex items-center gap-2">
@@ -191,9 +200,14 @@ const AuthenticatedLayout: React.FC<{ children: React.ReactNode }> = ({ children
         </main>
       </div>
       {isSuperAdmin && <TenantCommandPalette />}
-      {/* Copilot — single render site so the drawer persists across route navigation. */}
-      <CopilotLauncher />
-      <CopilotDrawer />
+      {/* Copilot — single render site so the drawer persists across route navigation.
+          Withheld during setup: it advises on a workspace that does not exist yet. */}
+      {!inSetup && (
+        <>
+          <CopilotLauncher />
+          <CopilotDrawer />
+        </>
+      )}
     </div>
   );
 };
@@ -412,7 +426,9 @@ const App: React.FC = () => {
               <CopilotDrawerProvider>
               <AuthenticatedLayout>
                 <OrganizationRequired>
-                  <AppRoutes />
+                  <SetupGate>
+                    <AppRoutes />
+                  </SetupGate>
                 </OrganizationRequired>
               </AuthenticatedLayout>
               </CopilotDrawerProvider>

@@ -96,7 +96,7 @@ const storedState = async (id: string) =>
 /** The `documents` step is only accepted once the workspace really has one. */
 async function giveTenantADocument(tenantId: string) {
   const kbRepo = AppDataSource.getRepository(KnowledgeBase);
-  const kb = await kbRepo.save(kbRepo.create({ tenantId, name: 'Primary', botId: null }));
+  const kb = await kbRepo.save(kbRepo.create({ tenantId, botId: null }));
   const docRepo = AppDataSource.getRepository(KnowledgeDocument);
   await docRepo.save(
     docRepo.create({

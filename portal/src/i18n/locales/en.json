@@ -2722,5 +2722,121 @@
       "body": "Your plan includes this feature, but it has been switched off for your workspace.",
       "cta": "Manage features"
     }
+  },
+  "setup": {
+    "progress": "Step {{current}} of {{total}}",
+    "continue": "Continue",
+    "skip": "Not now",
+    "backToCurrent": "Back to where I was",
+    "answeredCount_one": "{{count}} step answered",
+    "answeredCount_other": "{{count}} steps answered",
+    "blocked": {
+      "title": "Setup isn't finished yet",
+      "body": "An administrator of this workspace needs to complete setup before anyone can start using it."
+    },
+    "finish": {
+      "title": "That's everything",
+      "body": "Your workspace is ready. You can change any of these later in Settings.",
+      "action": "Open my workspace"
+    },
+    "steps": {
+      "language": {
+        "title": "Choose your language",
+        "body": "This is the language you'll see across the platform. Your assistant still replies to customers in whatever language they write in."
+      },
+      "company": {
+        "title": "Your company",
+        "body": "Enter your VAT number and we'll fill in the rest from the official register.",
+        "vatLabel": "VAT number",
+        "lookup": "Look up",
+        "lookingUp": "Checking the register — this can take a few seconds.",
+        "lookupStatus": {
+          "found": "Found in the official register.",
+          "not_found": "That number isn't registered. Check it, or fill the details in yourself.",
+          "invalid_format": "That doesn't look like a Belgian VAT number. Example: BE 0400.378.485",
+          "unavailable": "The register isn't responding right now. Fill the details in yourself and carry on — you can verify later."
+        },
+        "nameLabel": "Company name",
+        "legalFormLabel": "Legal form",
+        "streetLabel": "Street and number",
+        "postalCodeLabel": "Postal code",
+        "cityLabel": "City",
+        "verifiedNote": "Confirmed by the official register.",
+        "unverifiedNote": "Not verified against the register."
+      },
+      "logo": {
+        "title": "Add your logo",
+        "body": "It appears on your chat widget and in emails to your customers.",
+        "choose": "Choose a file",
+        "hint": "PNG, JPG, SVG or WebP. A square image works best.",
+        "uploadFailed": "That file couldn't be uploaded. Try another one.",
+        "skipConsequence": "Your company initial is used instead."
+      },
+      "chatbot": {
+        "title": "Name your assistant",
+        "body": "This is the name customers see when it replies. You can change it and everything else about it later.",
+        "nameLabel": "Assistant name",
+        "namePlaceholder": "e.g. Sofie",
+        "toneLabel": "How should it sound?",
+        "skipConsequence": "Your assistant keeps its default name and tone."
+      },
+      "documents": {
+        "title": "What should it know?",
+        "body": "Add at least one document. Your assistant answers from what you give it here — without anything to read, it can't answer questions about your business.",
+        "add": "Add your first document",
+        "addAnother": "Add another",
+        "examples": "Your services, prices, opening hours, or a list of common questions",
+        "status": {
+          "pending": "Queued",
+          "processing": "Reading",
+          "indexed": "Ready",
+          "failed": "Failed"
+        }
+      },
+      "social": {
+        "title": "Messaging channels",
+        "body": "Reply to WhatsApp, Messenger, Instagram and Telegram from the same inbox as your website chat.",
+        "points": [
+          "One inbox for every channel",
+          "Your assistant answers there too",
+          "Take over from it whenever you want"
+        ],
+        "yes": "Yes, I want messaging channels",
+        "afterwards": "You'll connect your accounts from Channels once setup is done.",
+        "skipConsequence": "Messaging channels stay off. You can switch them on in Settings → Features."
+      },
+      "bookings": {
+        "title": "Appointments",
+        "body": "Let your assistant book appointments straight into your calendar.",
+        "points": [
+          "Customers pick a slot inside the conversation",
+          "Works with Google Calendar and Outlook",
+          "You set which hours are bookable"
+        ],
+        "yes": "Yes, I take appointments",
+        "afterwards": "You'll connect your calendar from Bookings once setup is done.",
+        "skipConsequence": "Appointments stay off. You can switch them on in Settings → Features."
+      },
+      "leads": {
+        "title": "Lead capture",
+        "body": "Save the details of people who ask for a quote or a callback, so nobody gets lost.",
+        "points": [
+          "Name, contact details and what they asked for",
+          "Notified as soon as one comes in",
+          "Export to Excel whenever you want"
+        ],
+        "yes": "Yes, capture leads for me",
+        "afterwards": "Leads show up under Leads as soon as your assistant collects one.",
+        "skipConsequence": "Lead capture stays off. You can switch it on in Settings → Features."
+      },
+      "plan": {
+        "title": "Choose your plan",
+        "body": "You're on a Pro trial. Pick a plan now, or stay on the trial and decide later.",
+        "choose": "Choose this plan",
+        "trialNote": "Not ready to decide? Your trial gives you everything in Pro.",
+        "keepTrial": "Continue on the trial"
+      }
+    },
+    "progressLabel": "Setup progress"
   }
 }

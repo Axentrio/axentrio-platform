@@ -50,7 +50,7 @@ import CreateBotDialog from './CreateBotDialog';
 import RenameBotDialog from './RenameBotDialog';
 import EmbedSnippetDialog from './EmbedSnippetDialog';
 import { OnboardingChecklist } from '@/components/ai/OnboardingChecklist';
-import { useOnboardingStatus } from '@/queries/useOnboardingQueries';
+import { useOnboardingChecklist } from '@/queries/useOnboardingQueries';
 import { useTenantSettings } from '@/queries/useTenantQueries';
 
 function formatDate(iso: string): string {
@@ -70,7 +70,7 @@ export const BotsList: React.FC = () => {
 
   // Onboarding completion comes from the canonical onboarding-status API (the same
   // source the dashboard banner uses), so this checklist can't diverge from it.
-  const { data: onboarding } = useOnboardingStatus();
+  const { data: onboarding } = useOnboardingChecklist();
   const { data: tenant } = useTenantSettings();
   const apiKey = (tenant as { apiKey?: string } | undefined)?.apiKey;
 

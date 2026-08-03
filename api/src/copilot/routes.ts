@@ -346,6 +346,22 @@ router.post(
   asyncHandler(async (req: Request, res: Response): Promise<void> => {
     const parsed = escalateSchema.safeParse(req.body);
     if (!parsed.success) {
+      // The 400 envelope carries `issues`, but the error handler logs only
+      // err.message — so in production a rejected escalation is indistinguishable
+      // from any other bad body, and someone who cannot reach support is exactly
+      // who we cannot afford to be unable to diagnose. Log the SHAPE of the
+      // failure (path + code) and never the value: this body is free text a
+      // customer typed, so it must not reach the logs.
+      logger.warn('[copilot] escalation body rejected', {
+        userId: req.userId,
+        tenantId: req.tenantId,
+        issues: parsed.error.issues.map((i) => ({
+          path: i.path.join('.') || '(root)',
+          code: i.code,
+        })),
+        bodyKeys: Object.keys((req.body ?? {}) as Record<string, unknown>),
+        messageType: typeof (req.body as { message?: unknown } | undefined)?.message,
+      });
       throw new ApiError('Invalid escalation request body', 400, 'invalid_request_body', {
         issues: parsed.error.issues,
       });

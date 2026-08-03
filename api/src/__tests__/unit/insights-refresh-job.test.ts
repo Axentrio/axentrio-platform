@@ -28,6 +28,8 @@ const st = vi.hoisted(() => ({
   // Tenants for the once-runner
   tenants: [] as Array<{ id: string }>,
   entitled: {} as Record<string, boolean>,
+  /** tenantId → insights band; drives analysisPolicyFor in the job. */
+  band: {} as Record<string, 'essential' | 'pro' | 'enterprise'>,
   refreshedTenants: [] as string[],
 }));
 
@@ -66,7 +68,11 @@ vi.mock('../../insights/digest.service', () => ({ generateDigest: vi.fn(async ()
 
 vi.mock('../../billing/entitlements', () => ({
   getEntitlements: async (tenantId: string) => ({
-    features: { gapInsights: st.entitled[tenantId] ?? false },
+    features: {
+      gapInsights: st.entitled[tenantId] ?? false,
+      gapEvidence: ['pro', 'enterprise'].includes(st.band[tenantId] ?? ''),
+      aiBusinessInsights: (st.band[tenantId] ?? '') === 'enterprise',
+    },
   }),
 }));
 
@@ -259,15 +265,25 @@ describe('refreshTenantInsights — transcript decryption', () => {
   });
 });
 
-describe('runRefreshInsightsOnce — flag gating (ADR-0013: flags, never tiers)', () => {
-  it('refreshes only tenants whose gapInsights flag is on', async () => {
-    st.tenants = [{ id: 'entitled-1' }, { id: 'free-1' }, { id: 'entitled-2' }];
-    st.entitled = { 'entitled-1': true, 'free-1': false, 'entitled-2': true };
+describe('runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, never tiers)', () => {
+  it('refreshes Enterprise and leaves Essential and Pro to their own button', async () => {
+    // Essential and Pro analyse on demand behind a minimum-conversations gate and a
+    // cooldown. Refreshing them here would spend their LLM budget on a schedule they
+    // never asked for AND move the watermark their own button counts against, so the
+    // button would report zero new conversations every morning.
+    st.tenants = [{ id: 'ent-1' }, { id: 'ess-1' }, { id: 'pro-1' }, { id: 'free-1' }, { id: 'ent-2' }];
+    st.entitled = { 'ent-1': true, 'ess-1': true, 'pro-1': true, 'free-1': false, 'ent-2': true };
+    st.band = { 'ent-1': 'enterprise', 'ess-1': 'essential', 'pro-1': 'pro', 'ent-2': 'enterprise' };
+
     await runRefreshInsightsOnce(NOW);
-    // refreshTenantInsights persists a state row per refreshed tenant; the
-    // unentitled tenant must not produce one. We observe via savedState
-    // writes: 2 tenants → state saved twice (last one retained in st).
-    // Cheaper assertion: aggregateGaps called once per entitled tenant only.
-    expect(aggregateMock.mock.calls.map((c) => c[0])).toEqual(['entitled-1', 'entitled-2']);
+
+    expect(aggregateMock.mock.calls.map((c) => c[0])).toEqual(['ent-1', 'ent-2']);
+  });
+
+  it('still refreshes nobody when no tenant has insights at all', async () => {
+    st.tenants = [{ id: 'free-1' }, { id: 'free-2' }];
+    st.entitled = { 'free-1': false, 'free-2': false };
+    await runRefreshInsightsOnce(NOW);
+    expect(aggregateMock.mock.calls).toHaveLength(0);
   });
 });

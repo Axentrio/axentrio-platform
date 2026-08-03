@@ -22,6 +22,15 @@ export class InsightsRefreshState {
   @Column({ type: 'text', name: 'last_run_error', nullable: true })
   lastRunError?: string | null;
 
+  /**
+   * When the tenant last triggered analysis themselves. Separate from
+   * `lastRefreshedAt`, which is the judge watermark and moves with consumed sessions
+   * — a run that judged nothing would otherwise reset the cooldown, and a run frozen
+   * at a failed session would block the retry it exists to allow.
+   */
+  @Column({ type: 'timestamptz', name: 'last_manual_run_at', nullable: true })
+  lastManualRunAt?: Date | null;
+
   @UpdateDateColumn({ name: 'updated_at' })
   updatedAt!: Date;
 }

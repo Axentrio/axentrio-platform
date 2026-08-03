@@ -23,6 +23,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Judgment } from '../database/entities/Judgment';
 import { InsightsRefreshState } from '../database/entities/InsightsRefreshState';
 import { getEntitlements } from '../billing/entitlements';
+import { analysisPolicyFor } from './analysis-policy';
 import { judgeTranscript, TranscriptMessage, UsageTally } from './judge.service';
 import { canonicalizeTopic } from './topics.service';
 import { canonicalizeSentimentTheme } from './sentiment-themes.service';
@@ -254,7 +255,13 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
   for (const { id } of tenants) {
     try {
       const entitlements = await getEntitlements(id);
-      if (!entitlements.features.gapInsights) continue; // flag, never tier (ADR-0013)
+      // Only tiers whose analysis is AUTOMATIC. Essential and Pro analyse on demand
+      // (`POST /insights/analyse`) behind a minimum-conversations gate and a cooldown,
+      // so including them here would spend their LLM budget on a schedule they did not
+      // ask for and reset the watermark their own button reads. Read from the policy,
+      // never a tier name, so an override moves a tenant between the two models with
+      // one source of truth (ADR-0013).
+      if (!analysisPolicyFor(entitlements.features).automatic) continue;
       await refreshTenantInsights(id, now);
     } catch (err) {
       logger.error('[insights-refresh] tenant pass failed', {
@@ -264,8 +271,10 @@ export async function runRefreshInsightsOnce(now = new Date()): Promise<void> {
     }
   }
 
-  // Drain the digest outbox once per pass — retries failed sends with backoff
-  // and delivers digests generated this run (P3 / ADR-0014 D6).
+  // Drain the digest outbox once per pass — retries failed sends with backoff and
+  // delivers digests generated this run (P3 / ADR-0014 D6). Deliberately OUTSIDE the
+  // automatic-tier filter above: this is delivery of already-generated digests, so a
+  // tenant who analysed manually still gets theirs sent.
   try {
     await sendDueDigests(now);
   } catch (err) {

@@ -8,6 +8,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { aggregateLeadDemand } from '../insights/lead-demand.service';
+import { getAnalysisStatus, markManualRun } from '../insights/analysis-eligibility.service';
+import { refreshTenantInsights } from '../insights/refresh-insights.job';
 import { enrichmentAbstainStats } from '../leads/enrichment/enrich-lead.job';
 import { Gap } from '../database/entities/Gap';
 import { Judgment } from '../database/entities/Judgment';
@@ -71,6 +73,59 @@ function requireInsightsFeature(flag: 'gapInsights' | 'gapEvidence' | 'aiBusines
     next();
   });
 }
+
+/**
+ * GET /insights/analysis-status
+ * Whether analysis can be run right now, and what is standing in the way.
+ *
+ * Gated on `gapInsights` only — every tier that HAS insights needs to know why the
+ * button is disabled, including Enterprise, whose answer is "it runs by itself".
+ */
+router.get(
+  '/analysis-status',
+  requireInsightsFeature('gapInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const status = await getAnalysisStatus(insightsTenantId(req) as string);
+    sendSuccess(res, status);
+  }),
+);
+
+/**
+ * POST /insights/analyse
+ * Run analysis on demand (Essential and Pro).
+ *
+ * Re-checks eligibility server-side rather than trusting the button: the client's view
+ * can be seconds stale, and the cooldown is the cost control. 409 with the same shape
+ * the status endpoint returns, so the portal can render the refusal with the real
+ * numbers rather than a generic failure.
+ *
+ * Runs INLINE and awaited. A fire-and-forget would return 202 and leave the operator
+ * watching a page that may never change, and the analysis is bounded by the same
+ * per-run cap the nightly pass uses.
+ */
+router.post(
+  '/analyse',
+  requireInsightsFeature('gapInsights'),
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = insightsTenantId(req) as string;
+    const status = await getAnalysisStatus(tenantId);
+    if (!status.eligible) {
+      throw new ApiError('Analysis is not available yet', 409, 'CONFLICT', {
+        reason: status.reason,
+        newChats: status.newChats,
+        minNewChats: status.minNewChats,
+        nextAllowedAt: status.nextAllowedAt,
+      });
+    }
+
+    // Stamped before the work — see markManualRun for why a crashed run must still
+    // consume the cooldown.
+    await markManualRun(tenantId);
+    await refreshTenantInsights(tenantId);
+
+    sendSuccess(res, await getAnalysisStatus(tenantId));
+  }),
+);
 
 /**
  * GET /insights

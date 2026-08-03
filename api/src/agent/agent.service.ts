@@ -30,6 +30,8 @@ import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, 
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
+import { searchKnowledge } from '../llm/rag.service';
+import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 
 /** A tappable suggestion rendered by the widget (e.g. an appointment slot). */
 export interface QuickReply {
@@ -370,7 +372,10 @@ export class AgentService {
         tools = dropUnreadySkillTools(tools, skillStates, (id) => getModule(id)?.tools.map((t) => t.name) ?? []);
       }
       const proactiveAsk = await this.mayAskForContact(session, tools);
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, undefined, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours }, { proactiveAsk });
+      const kbContext = await this.prefetchKbContext({
+        message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
+      });
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours }, { proactiveAsk });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.
@@ -607,6 +612,71 @@ export class AgentService {
         error: error instanceof Error ? error.message : 'Unknown error',
         fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
       };
+    }
+  }
+
+  /**
+   * Seed the OPENING turn with knowledge-base context instead of hoping the model
+   * calls `kb_search`.
+   *
+   * The composer has always accepted a `kbContext` block, but the agent path passed
+   * `undefined`, so retrieval depended entirely on the model volunteering the tool.
+   * It doesn't reliably: the KNOWLEDGE block already says "you MUST call kb_search
+   * BEFORE answering" and the tool description says "Call this FIRST", and a live
+   * turn still answered "Valyro biedt diensten aan op het gebied van [specifieke
+   * diensten niet vermeld]" — one LLM call, zero tool calls — with the business's
+   * own website indexed and attached. Prompt wording is out of road; make the first
+   * turn deterministic instead.
+   *
+   * FIRST TURN ONLY, which is what keeps this cheap and is not arbitrary:
+   *   - it's the turn that decides whether the bot can say what the business does,
+   *     and the one with no prior context for the model to lean on;
+   *   - `searchKnowledge` → `rewriteQuery` short-circuits on empty history, so this
+   *     costs ONE embedding + one vector search and no extra LLM call;
+   *   - later turns still have `kb_search`, now with a worked example in context.
+   *
+   * Gated on the tool actually being present, so a bot whose plan or skill selection
+   * withheld kb_search cannot be handed KB content through the back door.
+   *
+   * FAILS OPEN: retrieval problems must never cost the customer a reply — the turn
+   * proceeds with no pre-fetched context and the model can still call the tool.
+   */
+  private async prefetchKbContext(args: {
+    message: string;
+    session: ChatSession;
+    tenantId: string;
+    tools: ToolAdapter[];
+    conversationHistory: ChatMessage[];
+    specialtyTerms: string[];
+  }): Promise<string | undefined> {
+    const { message, session, tenantId, tools, conversationHistory, specialtyTerms } = args;
+    if (!tools.some((t) => t.name === 'kb_search')) return undefined;
+    if (conversationHistory.length > 0) return undefined;
+    if (!message.trim()) return undefined;
+
+    try {
+      // Same scoping the tool uses: the session bot's attached KBs. A null botId
+      // (legacy/unattributed session) means tenant-wide, matching kb-search.tool.
+      const botKbIds = session.botId
+        ? await getBotKnowledgeBaseIds(AppDataSource, session.botId)
+        : undefined;
+      const { chunks } = await searchKnowledge(
+        AppDataSource,
+        tenantId,
+        message,
+        [], // first turn by construction — also what keeps rewriteQuery LLM-free
+        undefined,
+        botKbIds,
+        specialtyTerms.length ? specialtyTerms : undefined,
+      );
+      if (!chunks.length) return undefined;
+      return chunks.map((c) => `### ${c.title}\n${c.content}`).join('\n\n');
+    } catch (err) {
+      logger.warn('[agent] KB pre-fetch failed; falling back to the kb_search tool', {
+        sessionId: session.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return undefined;
     }
   }
 

@@ -2515,6 +2515,18 @@
         "Voyez les statistiques en direct — \"combien de leads cette semaine ?\""
       ],
       "historyNote": "Vos conversations précédentes sont conservées et seront à nouveau disponibles dès que vous passerez à un plan supérieur."
+    },
+    "suggestions": {
+      "title": "À configurer",
+      "go": "Configurer"
+    },
+    "escalate": {
+      "open": "Parler à quelqu'un",
+      "prompt": "Dites-nous ce qui vous bloque. Nous joignons cette conversation pour que vous n'ayez pas à tout réexpliquer.",
+      "placeholder": "Qu'est-ce qui ne va pas ?",
+      "send": "Envoyer au support",
+      "sent": "Envoyé à {{inbox}}. Nous répondrons à votre adresse e-mail.",
+      "failed": "L'envoi a échoué. Réessayez dans un instant."
     }
   },
   "bots": {

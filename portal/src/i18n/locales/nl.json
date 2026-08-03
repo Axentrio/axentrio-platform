@@ -2516,6 +2516,18 @@
         "Bekijk live statistieken — \"hoeveel leads deze week?\""
       ],
       "historyNote": "Je eerdere gesprekken blijven bewaard en zijn weer beschikbaar zodra je upgradet."
+    },
+    "suggestions": {
+      "title": "De moeite waard",
+      "go": "Instellen"
+    },
+    "escalate": {
+      "open": "Praat met een mens",
+      "prompt": "Vertel waar je hulp bij nodig hebt. We sturen dit gesprek mee, zodat je het niet twee keer hoeft uit te leggen.",
+      "placeholder": "Wat loopt er mis?",
+      "send": "Naar support sturen",
+      "sent": "Verstuurd naar {{inbox}}. We antwoorden op je e-mailadres.",
+      "failed": "Dat is niet verstuurd. Probeer het zo meteen opnieuw."
     }
   },
   "bots": {

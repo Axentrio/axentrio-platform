@@ -1,5 +1,5 @@
 /**
- * Integration: 7 Copilot tools — shape + zero-fills + cross-tenant
+ * Integration: 8 Copilot tools — shape + zero-fills + cross-tenant
  * regression per tool (security invariant #10).
  *
  * The pattern (one `describe` per tool):
@@ -36,6 +36,7 @@ import {
 } from '../../copilot/manager/read-only-manager';
 import {
   getTenantSummary,
+  getSetupProgress,
   getBotReadinessStatus,
   getIntegrationsStatus,
   getEntitlements,
@@ -658,3 +659,85 @@ describe('Belt-and-suspenders: every tool response is JSON-serialisable', () => 
 // Silence linter — TENANT_B_VALUES is part of the public surface but
 // this file uses the structured `assertNoForeignSentinels` helper.
 void TENANT_B_VALUES;
+
+describe('getSetupProgress', () => {
+  let a: SeededTenant;
+  beforeEach(async () => {
+    a = await seedTenantWithSentinels(TENANT_A_SENTINELS);
+    await seedTenantWithSentinels(TENANT_B_SENTINELS);
+  });
+
+  const call = () =>
+    getSetupProgress.execute({}, { tenantId: a.tenantId, userId: a.userId, manager: a.manager });
+
+  const setOnboarding = (onboarding: unknown) =>
+    AppDataSource.query(
+      `UPDATE tenants SET settings = COALESCE(settings,'{}'::jsonb) || jsonb_build_object('onboarding', $2::jsonb) WHERE id = $1`,
+      [a.tenantId, JSON.stringify(onboarding)],
+    );
+
+  it('puts a workspace that never started at the first step', async () => {
+    const result = await call();
+    expect(result).toMatchObject({ complete: false, nextStep: 'language', answered: [] });
+    expect(result.notYetReached).toContain('plan');
+  });
+
+  it('separates what they answered from what they declined', async () => {
+    // The distinction is the whole point: a skipped step is a decision to respect,
+    // not an omission to nag about, and a live config check could not tell them apart.
+    await setOnboarding({
+      version: 1,
+      startedAt: '2026-07-01T00:00:00.000Z',
+      completedAt: null,
+      language: 'nl',
+      company: { vatNumber: 'BE0400378485', name: 'Colruyt Group', verified: true },
+      steps: { language: 'done', company: 'done', logo: 'skipped', bookings: 'skipped' },
+    });
+
+    const result = await call();
+    expect(result.answered).toEqual(['language', 'company']);
+    expect(result.skipped).toEqual(['logo', 'bookings']);
+    expect(result.nextStep).toBe('chatbot');
+  });
+
+  it('reports a grandfathered workspace as finished, with nothing outstanding', async () => {
+    await setOnboarding({
+      version: 1,
+      grandfathered: true,
+      completedAt: '2026-01-01T00:00:00.000Z',
+      steps: {},
+    });
+
+    expect(await call()).toMatchObject({
+      complete: true,
+      grandfathered: true,
+      nextStep: null,
+    });
+  });
+
+  it('never returns the company details it reads past', async () => {
+    // The record holds a VAT number, a legal name and an address. The shape of setup
+    // is the model's business; none of that is.
+    await setOnboarding({
+      version: 1,
+      completedAt: null,
+      language: 'nl',
+      company: {
+        vatNumber: 'BE0999888777',
+        name: 'Secret Holdings BV',
+        street: 'Geheimstraat 1',
+        verified: true,
+      },
+      steps: { language: 'done', company: 'done' },
+    });
+
+    const json = JSON.stringify(await call());
+    expect(json).not.toContain('BE0999888777');
+    expect(json).not.toContain('Secret Holdings');
+    expect(json).not.toContain('Geheimstraat');
+  });
+
+  it('never leaks tenant B sentinels in the response JSON', async () => {
+    assertNoForeignSentinels(await call(), TENANT_B_SENTINELS);
+  });
+});

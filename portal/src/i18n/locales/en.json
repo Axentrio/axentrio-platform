@@ -2554,6 +2554,18 @@
         "See live stats — \"how many leads this week?\""
       ],
       "historyNote": "Your previous chats are preserved and will be available again as soon as you upgrade."
+    },
+    "suggestions": {
+      "title": "Worth setting up",
+      "go": "Set up"
+    },
+    "escalate": {
+      "open": "Talk to a person",
+      "prompt": "Tell us what you need help with. We'll send this conversation along so you don't have to explain it twice.",
+      "placeholder": "What's going wrong?",
+      "send": "Send to support",
+      "sent": "Sent to {{inbox}}. We'll reply to your email address.",
+      "failed": "That didn't send. Try again in a moment."
     }
   },
   "bots": {

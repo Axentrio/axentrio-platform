@@ -37,6 +37,8 @@ import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { ApiError, asyncHandler } from '../middleware/error-handler';
 import { sendSuccess } from '../utils/response';
 import { requireFeature } from '../billing/enforce';
+import { escalateToSupport } from './support-escalation';
+import { logAudit } from '../utils/audit';
 import { getRedisClient } from '../config/redis';
 import {
   checkAndConsumeCopilotCost,
@@ -315,6 +317,102 @@ router.post(
       [tenantId, userId],
     );
     sendSuccess(res, { cleared: true });
+  }),
+);
+
+// ---------------------------------------------------------------
+// POST /escalate — hand the conversation to a person
+// ---------------------------------------------------------------
+const escalateSchema = z.object({
+  message: z
+    .string()
+    .trim()
+    .min(1, 'message cannot be empty')
+    .max(4000, 'message exceeds 4000-character limit'),
+});
+
+/**
+ * Rate limit per user per hour.
+ *
+ * This sends mail to a human inbox, so it needs a ceiling — but a low one would be
+ * cruel: someone escalating twice usually means the first attempt did not land, and the
+ * one thing worse than a duplicate ticket is a customer who cannot reach anyone. Five is
+ * far more than a real problem needs and far less than a useful way to flood support.
+ */
+const ESCALATIONS_PER_HOUR = 5;
+
+router.post(
+  '/escalate',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const parsed = escalateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      throw new ApiError('Invalid escalation request body', 400, 'invalid_request_body', {
+        issues: parsed.error.issues,
+      });
+    }
+
+    const tenantId = req.tenantId!;
+    const userId = req.userId!;
+
+    // Fails OPEN on Redis, matching the house pattern: losing the cache must not
+    // stand between a customer and support.
+    const redis = getRedisClient();
+    if (redis) {
+      try {
+        const key = `copilot:escalate:${userId}`;
+        const [[, count]] = (await redis.multi().incr(key).expire(key, 3600).exec()) as Array<
+          [Error | null, number]
+        >;
+        if (Number(count) > ESCALATIONS_PER_HOUR) {
+          throw new ApiError(
+            'You have sent several support requests in the last hour. Support has them — reply to the email we sent if you need to add anything.',
+            429,
+            'RATE_LIMITED',
+          );
+        }
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        logger.warn('[copilot] escalation rate check failed, allowing', {
+          error: err instanceof Error ? err.message : 'unknown',
+        });
+      }
+    }
+
+    // The customer's own conversation with the assistant — the context that makes the
+    // ticket actionable. Read here rather than accepted from the client so it is the
+    // real thread, not whatever a caller chose to attach.
+    const rows = (await AppDataSource.query(
+      `SELECT m.role, m.content
+         FROM chatbot_copilot_messages m
+         JOIN chatbot_copilot_conversations c ON c.id = m.conversation_id
+        WHERE c.tenant_id = $1 AND c.user_id = $2 AND c.archived_at IS NULL
+        ORDER BY m.turn ASC, m.created_at ASC
+        LIMIT 40`,
+      [tenantId, userId],
+    )) as Array<{ role: 'user' | 'assistant'; content: string }>;
+
+    const result = await escalateToSupport({
+      tenantId,
+      userId,
+      message: parsed.data.message,
+      transcript: rows.map((r) => ({ role: r.role, content: r.content })),
+    });
+
+    if (!result.delivered) {
+      // Never claim a request reached a human when it did not.
+      throw new ApiError(
+        `We could not send that just now. Please email ${result.inbox} directly.`,
+        502,
+        'ESCALATION_FAILED',
+        { inbox: result.inbox },
+      );
+    }
+
+    await logAudit(userId, 'copilot.support_escalated', 'tenant', tenantId, tenantId, {
+      priority: result.priority,
+    });
+
+    sendSuccess(res, result);
   }),
 );
 

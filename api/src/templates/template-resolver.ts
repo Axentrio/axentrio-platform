@@ -329,6 +329,19 @@ export interface EffectiveGuardrails {
 export interface EffectiveBotConfig {
   tone: string;
   guardrails: EffectiveGuardrails;
+  /**
+   * ONLY the guardrail keys the bound template actually set — no platform
+   * defaults filled in.
+   *
+   * `guardrails` above is defaults-filled and stays that way: callers like the
+   * handoff path read it directly and rely on every key being present. But
+   * overlaying THAT onto a bot blanks anything the template happens not to
+   * define, because the platform defaults for the three message fields are ''.
+   * The template editor writes those keys only when non-empty
+   * (AdminBotTemplateDetail.tsx), so "absent" means "not set" — never
+   * "deliberately empty" — and must leave the tenant's own value alone.
+   */
+  providedGuardrails: Partial<EffectiveGuardrails>;
   /** 'template' when the bound template supplied config; 'fallback' = platform defaults. */
   source: 'template' | 'fallback';
   templateId: string | null;
@@ -356,8 +369,19 @@ export function effectiveConfigFrom(resolved: ResolvedTemplate): EffectiveBotCon
   const g = c.guardrails ?? {};
   const D = PLATFORM_DEFAULT_CONFIG;
   const fromTemplate = !!resolved.templateId && !resolved.templateUnavailable && (c.tone !== undefined || c.guardrails !== undefined);
+  // Provenance: which keys did the template genuinely supply? Built by picking
+  // off `g` rather than by comparing against the defaults — a template that
+  // legitimately sets maxResponseLength to 500 must still count as "provided".
+  const provided: Partial<EffectiveGuardrails> = {};
+  if (g.topicsToAvoid !== undefined) provided.topicsToAvoid = g.topicsToAvoid;
+  if (g.greetingMessage !== undefined) provided.greetingMessage = g.greetingMessage;
+  if (g.fallbackMessage !== undefined) provided.fallbackMessage = g.fallbackMessage;
+  if (g.offHoursMessage !== undefined) provided.offHoursMessage = g.offHoursMessage;
+  if (g.confidenceThreshold !== undefined) provided.confidenceThreshold = g.confidenceThreshold;
+  if (g.maxResponseLength !== undefined) provided.maxResponseLength = g.maxResponseLength;
   return {
     tone: c.tone ?? D.tone,
+    providedGuardrails: provided,
     guardrails: {
       topicsToAvoid: g.topicsToAvoid ?? D.guardrails.topicsToAvoid,
       greetingMessage: g.greetingMessage ?? D.guardrails.greetingMessage,
@@ -477,6 +501,7 @@ export function effectiveConfigFromList(resolved: ResolvedTemplate[]): Effective
     return {
       tone: PLATFORM_DEFAULT_CONFIG.tone,
       guardrails: { ...PLATFORM_DEFAULT_CONFIG.guardrails },
+      providedGuardrails: {},
       source: 'fallback',
       templateId: null,
       resolvedVersion: null,
@@ -486,10 +511,17 @@ export function effectiveConfigFromList(resolved: ResolvedTemplate[]): Effective
   }
   const eff = effectiveConfigFrom(primary);
   const topics = new Set<string>(eff.guardrails.topicsToAvoid);
+  let anyTopicsProvided = eff.providedGuardrails.topicsToAvoid !== undefined;
   for (const r of resolved.slice(1)) {
-    for (const t of r.config?.guardrails?.topicsToAvoid ?? []) topics.add(t);
+    const t2 = r.config?.guardrails?.topicsToAvoid;
+    if (t2 !== undefined) anyTopicsProvided = true;
+    for (const t of t2 ?? []) topics.add(t);
   }
   eff.guardrails = { ...eff.guardrails, topicsToAvoid: [...topics] };
+  // Mirror the union into the provenance view, but only when at least one bound
+  // template actually declared topics — otherwise this would reintroduce the very
+  // bug being fixed, overlaying an empty list over the tenant's own topics.
+  if (anyTopicsProvided) eff.providedGuardrails = { ...eff.providedGuardrails, topicsToAvoid: [...topics] };
   return eff;
 }
 
@@ -507,9 +539,13 @@ export function withEffectiveConfig<A extends { brandVoice?: Record<string, unkn
   // (source === 'fallback'), leave the bot's own stored values untouched —
   // overlaying empty platform defaults would wipe legacy tenant config.
   if (eff.source !== 'template') return ai;
+  // Overlay only what the template ACTUALLY set, not the defaults-filled view.
+  // A template that sets just maxResponseLength used to drag ''-valued greeting,
+  // fallback and offHours along with it, silently replacing a tenant's messages
+  // and leaving customers with the hardcoded English strings at the call sites.
   return {
     ...ai,
-    guardrails: { ...(ai.guardrails ?? {}), ...eff.guardrails },
+    guardrails: { ...(ai.guardrails ?? {}), ...eff.providedGuardrails },
   } as A;
 }
 

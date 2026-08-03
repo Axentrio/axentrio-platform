@@ -53,15 +53,6 @@ jobs:
         working-directory: api
         run: npx tsc --noEmit
 
-      # dist/copilot/docs-bundle.json is a BUILD artifact: hydrate.ts loads it at
-      # runtime and copilot-docs-locales.test.ts asserts on it. `npx vitest run`
-      # below never triggers it (and skips npm lifecycle hooks), so without this
-      # the suite fails on a fresh checkout with ENOENT while passing locally,
-      # where a previous `npm run build` left dist/ behind.
-      - name: Build Copilot docs bundle
-        working-directory: api
-        run: npm run build:copilot-docs
-
       - name: Run API tests
         working-directory: api
         run: npx vitest run

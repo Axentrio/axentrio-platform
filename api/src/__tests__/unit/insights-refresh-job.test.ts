@@ -178,10 +178,13 @@ describe('refreshTenantInsights — watermark semantics', () => {
       if (transcript[0]?.id === 'm-fail') throw new Error('LLM exploded');
       return { hadQuestion: false, satisfied: null, topicPhrase: null, evidenceMessageIds: [], reasoning: null };
     });
+    // Real customer content, not "hi": Layer 1 now skips greeting-only conversations
+    // before the judge sees them, so a fixture testing JUDGE failure has to give it
+    // something worth judging.
     st.transcripts = {
-      ok1: [{ id: 'm-ok1', content: 'hi', contentEncrypted: false, sender: 'user' }],
-      fail: [{ id: 'm-fail', content: 'hi', contentEncrypted: false, sender: 'user' }],
-      ok2: [{ id: 'm-ok2', content: 'hi', contentEncrypted: false, sender: 'user' }],
+      ok1: [{ id: 'm-ok1', content: 'my boiler is broken', contentEncrypted: false, sender: 'user' }],
+      fail: [{ id: 'm-fail', content: 'my radiator leaks', contentEncrypted: false, sender: 'user' }],
+      ok2: [{ id: 'm-ok2', content: 'my tap is dripping', contentEncrypted: false, sender: 'user' }],
     };
     await refreshTenantInsights(T, NOW);
     // ok2 was still judged (throughput), but the watermark stayed at ok1's
@@ -285,5 +288,75 @@ describe('runRefreshInsightsOnce — only the AUTOMATIC tier (ADR-0013: flags, n
     st.entitled = { 'free-1': false, 'free-2': false };
     await runRefreshInsightsOnce(NOW);
     expect(aggregateMock.mock.calls).toHaveLength(0);
+  });
+});
+
+/**
+ * Layer 1 in the job.
+ *
+ * Two properties, and the second is the one that makes the first safe: the model is not
+ * called for a conversation that cannot yield a topic, AND a judgment is still written
+ * for it. Completeness is judged/eligible, so skipping without writing would have driven
+ * it toward 0.45 on production data and made the UI announce "Insights incomplete" about
+ * conversations that were correctly found empty.
+ */
+describe('refreshTenantInsights — Layer 1 gates the model', () => {
+  it('writes a judgment WITHOUT calling the model when nobody wrote anything', async () => {
+    st.eligibleSessions = [session('silent', '2026-06-11T10:00:00Z')];
+    st.transcripts = {
+      silent: [{ id: 'm1', content: 'Welcome! How can I help?', contentEncrypted: false, sender: 'bot' }],
+    };
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).not.toHaveBeenCalled();
+    expect(st.savedJudgments).toHaveLength(1);
+    const j = st.savedJudgments[0];
+    expect(j.hadQuestion).toBe(false);
+    // null, not false: `satisfied` answers "was their question answered", and there was
+    // no question. False would read as a failure to help.
+    expect(j.satisfied).toBeNull();
+    expect(j.reasoning).toMatch(/Layer 1/);
+    // The watermark still advances — a skipped session is handled, not pending.
+    expect(st.savedState!.lastRefreshedAt).not.toBeNull();
+  });
+
+  it('still pays for the model when the customer actually asked something', async () => {
+    st.eligibleSessions = [session('real', '2026-06-11T10:00:00Z')];
+    st.transcripts = {
+      real: [{ id: 'm1', content: 'do you replace radiators?', contentEncrypted: false, sender: 'user' }],
+    };
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('always pays for the judge on a handoff, whatever the customer wrote', async () => {
+    // The bot said it could not cope. That conversation is never gated.
+    st.eligibleSessions = [{ ...session('esc', '2026-06-11T10:00:00Z'), status: 'handoff' }];
+    st.transcripts = {
+      esc: [{ id: 'm1', content: 'hi', contentEncrypted: false, sender: 'user' }],
+    };
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('mixes both in one pass without losing either', async () => {
+    st.eligibleSessions = [
+      session('silent', '2026-06-11T10:00:00Z'),
+      session('real', '2026-06-11T11:00:00Z'),
+    ];
+    st.transcripts = {
+      silent: [{ id: 'm1', content: 'Welcome!', contentEncrypted: false, sender: 'bot' }],
+      real: [{ id: 'm2', content: 'my boiler is leaking badly', contentEncrypted: false, sender: 'user' }],
+    };
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).toHaveBeenCalledTimes(1); // only the one with something in it
+    expect(st.savedJudgments).toHaveLength(2); // but both are accounted for
   });
 });

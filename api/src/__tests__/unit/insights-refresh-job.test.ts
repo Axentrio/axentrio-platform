@@ -332,6 +332,18 @@ describe('refreshTenantInsights — Layer 1 gates the model', () => {
     expect(judgeMock).toHaveBeenCalledTimes(1);
   });
 
+  it('always pays for the judge on a handoff, whatever the customer wrote', async () => {
+    // The bot said it could not cope. That conversation is never gated.
+    st.eligibleSessions = [{ ...session('esc', '2026-06-11T10:00:00Z'), status: 'handoff' }];
+    st.transcripts = {
+      esc: [{ id: 'm1', content: 'hi', contentEncrypted: false, sender: 'user' }],
+    };
+
+    await refreshTenantInsights(T, NOW);
+
+    expect(judgeMock).toHaveBeenCalledTimes(1);
+  });
+
   it('mixes both in one pass without losing either', async () => {
     st.eligibleSessions = [
       session('silent', '2026-06-11T10:00:00Z'),

@@ -36,6 +36,19 @@ export type PrefilterDecision =
   | { judge: true }
   | { judge: false; reason: SkipReason; note: string };
 
+export interface PrefilterInput {
+  messages: PrefilterMessage[];
+  /**
+   * True when the conversation ended in a handoff. A handoff is the bot saying it could
+   * not cope, which is a rare, high-signal event and exactly the conversation you would
+   * least want to have guessed about — so it always goes to the judge, whatever the
+   * customer wrote. The analysis says nothing would be lost by skipping one (there is no
+   * topic in "hi" for either layer to extract), but "a wrong keep costs a fraction of a
+   * cent" cuts decisively one way here, and handoffs are a small share of traffic.
+   */
+  isHandoff: boolean;
+}
+
 /**
  * Pure pleasantries in the three languages the platform serves. Deliberately tiny: every
  * entry is a phrase that cannot, on its own, express a need. "thanks" is here; "help" is
@@ -47,7 +60,7 @@ const PLEASANTRIES = new Set([
   'thanks', 'thank you', 'thx', 'ty', 'ok', 'okay', 'k', 'cool', 'great', 'nice',
   'bye', 'goodbye', 'see you', 'cheers', 'test', 'testing', 'yes', 'no', 'yep', 'nope',
   // nl
-  'hoi', 'hallo', 'hey daar', 'goedemorgen', 'goedemiddag', 'goedenavond', 'dag',
+  'hoi', 'hallo', 'hey daar', 'goedendag', 'goedemorgen', 'goedemiddag', 'goedenavond', 'dag',
   'bedankt', 'dank je', 'dank u', 'dankjewel', 'oke', 'oké', 'prima', 'top',
   'doei', 'tot ziens', 'ja', 'nee', 'test bericht',
   // fr
@@ -78,7 +91,12 @@ function looksLikeAQuestion(raw: string): boolean {
   return raw.includes('?') || raw.includes('？');
 }
 
-export function prefilterTranscript(messages: PrefilterMessage[]): PrefilterDecision {
+export function prefilterTranscript(input: PrefilterInput): PrefilterDecision {
+  const { messages, isHandoff } = input;
+
+  // Before anything else: never gate a conversation the bot admitted defeat on.
+  if (isHandoff) return { judge: true };
+
   const customer = messages.filter((m) => m.sender === 'user' && m.content.trim().length > 0);
 
   if (customer.length === 0) {
@@ -97,7 +115,13 @@ export function prefilterTranscript(messages: PrefilterMessage[]): PrefilterDeci
 
   // Every message has to be a pleasantry. One line of substance among three "hi"s is
   // still a conversation with something in it.
-  const allPleasantries = customer.every((m) => PLEASANTRIES.has(normalise(m.content)));
+  //
+  // `customer.length > 0` is restated rather than inherited from the guard above:
+  // `[].every()` is vacuously TRUE, so if these two checks were ever reordered an empty
+  // conversation would silently be labelled `greeting_only`. The correctness should not
+  // depend on which statement comes first.
+  const allPleasantries =
+    customer.length > 0 && customer.every((m) => PLEASANTRIES.has(normalise(m.content)));
   if (!allPleasantries) return { judge: true };
 
   return {

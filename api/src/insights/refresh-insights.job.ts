@@ -139,7 +139,10 @@ export async function refreshTenantInsights(tenantId: string, now = new Date()):
       // the verdict is knowable without paying for one. The judgment is still WRITTEN —
       // completeness is judged/eligible, so dropping these would make the UI announce
       // "Insights incomplete" for conversations that were correctly found empty.
-      const gate = prefilterTranscript(transcript);
+      const gate = prefilterTranscript({
+        messages: transcript,
+        isHandoff: session.status === 'handoff',
+      });
       if (!gate.judge) {
         layer1.skipped += 1;
         layer1.byReason[gate.reason] += 1;

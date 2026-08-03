@@ -35,7 +35,12 @@ const resolved = (config: ResolvedTemplate['config'], id: string | null = 't1'):
   templateUnavailable: false,
 });
 
-/** A tenant that has configured its own Dutch messages, as aquafin/Valyro had. */
+/**
+ * A tenant that has configured its own Dutch messages, as Valyro had. Carries the
+ * full guardrail set a real bot stores — including the numeric policy keys, whose
+ * values are deliberately NOT the platform defaults so an assertion that the
+ * template won cannot pass by coincidence.
+ */
 const dutchBot = () => ({
   brandVoice: { tone: 'vriendelijk en professioneel' },
   guardrails: {
@@ -44,6 +49,8 @@ const dutchBot = () => ({
     offHoursMessage: 'Momenteel buiten kantooruren.',
     escalationKeywords: ['human agent'],
     topicsToAvoid: ['concurrenten'],
+    confidenceThreshold: 0.1,
+    maxResponseLength: 999,
   },
 });
 
@@ -58,7 +65,7 @@ describe('withEffectiveConfig — a silent template must not blank tenant messag
     expect(out.guardrails.greetingMessage).toBe('Welkom, waar kan ik je mee van dienst zijn?');
     expect(out.guardrails.fallbackMessage).toBe('Laat me je verbinden met ons team');
     expect(out.guardrails.offHoursMessage).toBe('Momenteel buiten kantooruren.');
-    // …while the keys it DID set still win.
+    // …while the keys it DID set still win over the bot's 999 / 0.1.
     expect(out.guardrails.maxResponseLength).toBe(500);
     expect(out.guardrails.confidenceThreshold).toBe(0.7);
   });

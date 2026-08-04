@@ -36,6 +36,19 @@ export interface BookingContentInput {
   notes?: string | null;
   /** Arbitrary jsonb - rendered defensively (see renderIntakeValue). */
   intakeAnswers?: unknown;
+  /** Booking id — rendered as a short human reference the owner can quote back. */
+  bookingId?: string | null;
+  /** Effective (frozen) length in minutes. */
+  durationMin?: number | null;
+  /** widget | whatsapp | messenger | instagram | telegram. */
+  sourceChannel?: string | null;
+  /**
+   * How many files the customer attached. Deliberately a COUNT, not links: a calendar
+   * event lives in a third party for weeks, and the only URLs available today either
+   * expire in 300s or are unsigned and permanent. A long-lived signed link to
+   * customer-uploaded content is a security decision, not a formatting one.
+   */
+  uploadedFileCount?: number | null;
 }
 
 export interface ServiceContentInput {
@@ -46,6 +59,8 @@ export interface ServiceContentInput {
    *  human label instead of the raw uuid. Defensively typed; malformed entries are
    *  skipped and unknown/deleted ids fall back to the raw key. */
   intakeQuestions?: ReadonlyArray<{ id?: unknown; label?: unknown }> | null;
+  /** Owner-authored prep notes. Stored since P5 and, until now, read by nothing at all. */
+  preparationInstructions?: string | null;
 }
 
 /**
@@ -145,9 +160,23 @@ function assembleCapped(head: string[], middle: string[], tail: string[]): strin
 }
 
 /**
- * Build the owner calendar event `{ summary, description }`. `summary` stays
- * `service.name` (keeps ICS/email titles stable); all rich content goes in
- * `description`.
+ * A short reference an owner can quote on the phone: `AX-BKG-3F9A2C71`.
+ * Derived from the id rather than stored, so it needs no column and never drifts.
+ */
+export function bookingReference(bookingId?: string | null): string | null {
+  if (typeof bookingId !== 'string') return null;
+  const compact = bookingId.replace(/-/g, '').slice(0, 8).toUpperCase();
+  return compact.length === 8 ? `AX-BKG-${compact}` : null;
+}
+
+/**
+ * Build the owner calendar event `{ summary, description }`.
+ *
+ * The title carries the customer's name because a calendar grid showing three identical
+ * "Haircut" blocks tells the owner nothing about their day. It is normalized like every
+ * other rendered value — it previously used the RAW service name, the one interpolation in
+ * this module that skipped sanitising, which a crafted name could exploit now that the
+ * title is composed rather than copied.
  */
 export function buildBookingEventContent(
   booking: BookingContentInput,
@@ -161,18 +190,35 @@ export function buildBookingEventContent(
   if (customer) head.push(customer);
   if (present(booking.customerPhone)) head.push(`Phone: ${normalizeField(booking.customerPhone)}`);
   if (present(booking.customerAddress)) head.push(`Address: ${normalizeField(booking.customerAddress)}`);
+  if (typeof booking.durationMin === 'number' && booking.durationMin > 0) {
+    head.push(`Duration: ${booking.durationMin} min`);
+  }
+  if (present(booking.sourceChannel)) head.push(`Booked via: ${normalizeField(booking.sourceChannel)}`);
 
   // MIDDLE - droppable (last line first) under the body cap.
   const middle: string[] = [];
   if (present(booking.aiSummary)) middle.push(`Summary: ${normalizeField(booking.aiSummary)}`);
   if (present(booking.notes)) middle.push(`Notes: ${normalizeField(booking.notes)}`);
+  if (present(service.preparationInstructions)) {
+    middle.push(`Preparation: ${normalizeField(service.preparationInstructions)}`);
+  }
+  if (typeof booking.uploadedFileCount === 'number' && booking.uploadedFileCount > 0) {
+    const n = booking.uploadedFileCount;
+    middle.push(`Files: ${n} attached — open the booking in Axentrio to view`);
+  }
   middle.push(...intakeLines(booking.intakeAnswers, service.intakeQuestions));
 
   // TAIL - never dropped.
-  const tail: string[] = [`Manage: ${manageUrl}`];
+  // TAIL - never dropped. The reference goes here precisely because it must survive
+  // truncation: it is what an owner reads out when they call the customer back.
+  const tail: string[] = [];
+  const reference = bookingReference(booking.bookingId);
+  if (reference) tail.push(`Reference: ${reference}`);
+  tail.push(`Manage: ${manageUrl}`);
 
+  const who = present(booking.attendeeName) ? normalizeField(booking.attendeeName) : '';
   return {
-    summary: service.name,
+    summary: who ? `Booking: ${normalizeField(service.name)} - ${who}` : `Booking: ${normalizeField(service.name)}`,
     description: assembleCapped(head, middle, tail),
   };
 }

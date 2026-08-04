@@ -226,9 +226,17 @@ async function loadEventMeta(
     intake_answers: unknown;
     start_utc: string;
     end_utc: string;
+    source_channel: string | null;
+    uploaded_files: unknown;
+    booked_duration_min: number | null;
   }> = await AppDataSource.query(
+    // Every column the content builder reads. This SELECT is the whole reason the module
+    // docstring promises byte-identical parity between a reconciled event and an inline
+    // one — a field added to the builder but not here silently produces two different
+    // bodies for the same booking.
     `SELECT attendee_name, attendee_email, customer_phone, customer_address,
-            ai_summary, notes, intake_answers, start_utc, end_utc
+            ai_summary, notes, intake_answers, start_utc, end_utc,
+            source_channel, uploaded_files, booked_duration_min
        FROM chatbot_bookings WHERE id = $1`,
     [row.id]
   );
@@ -242,8 +250,21 @@ async function loadEventMeta(
       aiSummary: b?.ai_summary,
       notes: b?.notes,
       intakeAnswers: b?.intake_answers,
+      bookingId: row.id,
+      durationMin:
+        b?.booked_duration_min ??
+        (b?.start_utc && b?.end_utc
+          ? Math.round((new Date(b.end_utc).getTime() - new Date(b.start_utc).getTime()) / 60_000)
+          : null),
+      sourceChannel: b?.source_channel,
+      uploadedFileCount: Array.isArray(b?.uploaded_files) ? b.uploaded_files.length : 0,
     },
-    { name: eventType.name, description: eventType.description, intakeQuestions: eventType.intakeQuestions },
+    {
+      name: eventType.name,
+      description: eventType.description,
+      intakeQuestions: eventType.intakeQuestions,
+      preparationInstructions: eventType.preparationInstructions,
+    },
     buildManageUrl(row.id)
   );
   return { content, timezone: rule.timezone, startUtc: b?.start_utc ?? row.start_utc, endUtc: b?.end_utc ?? row.end_utc };

@@ -770,7 +770,9 @@ export class InternalProvider implements BookingProvider {
     // Request-only OR can't auto-confirm (no healthy calendar OR sync disabled) →
     // capture a request, not a confirmed booking. Mirrors readiness willAutoConfirm.
     if (service.bookingMode === 'request' || !canAuto) {
-      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, undefined, intakeAnswers, extras, effectiveDuration);
+      // Carry the model's summary through the downgrade — passing `undefined` here meant a
+      // job captured because the calendar was down reached the owner with no context.
+      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, extras?.aiSummary, intakeAnswers, extras, effectiveDuration);
     }
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
@@ -831,8 +833,9 @@ export class InternalProvider implements BookingProvider {
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
-              customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20)
+              customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
+              ai_summary)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -855,6 +858,7 @@ export class InternalProvider implements BookingProvider {
             effectiveDuration,
             uploadedFiles ? JSON.stringify(uploadedFiles) : null,
             ctx.session?.channel ?? null,
+            extras?.aiSummary ?? null,
           ]
         );
         return rows[0].id;
@@ -901,7 +905,7 @@ export class InternalProvider implements BookingProvider {
     // Mirror to the owner's Google calendar (best-effort). The booking is the
     // source of truth — if the mirror fails the booking still stands and is
     // flagged sync_pending for later reconciliation. The rich event body comes
-    // from the single P6a builder (ai_summary stays null on the auto path — no
+    // from the single P6a builder (ai_summary now flows on the auto path too — no
     // value flows in here yet, the builder simply omits that line).
     const eventContent = buildBookingEventContent(
       {
@@ -909,9 +913,13 @@ export class InternalProvider implements BookingProvider {
         attendeeEmail: attendee.email,
         customerPhone: contact.phone,
         customerAddress: contact.address,
-        aiSummary: null,
+        aiSummary: extras?.aiSummary ?? null,
         notes,
         intakeAnswers: intakeJson,
+        bookingId,
+        durationMin: effectiveDuration,
+        sourceChannel: ctx.session?.channel ?? null,
+        uploadedFileCount: uploadedFiles?.length ?? 0,
       },
       service,
       buildManageUrl(bookingId),
@@ -934,6 +942,8 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: attendee.email,
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       manageUrl: buildManageUrl(bookingId),
+      durationMin: effectiveDuration,
+      preparationInstructions: service.preparationInstructions,
     });
 
     await this.scheduleAndPersistReminders(bookingId, start, 0);
@@ -1399,7 +1409,12 @@ export class InternalProvider implements BookingProvider {
   private async syncCalendarReschedule(
     ctx: BookingContext,
     bookingId: string,
-    summary: string,
+    /**
+     * Full event content, not a bare title. An owner who deletes the event and triggers the
+     * recreate branch below used to get a title with a COMPLETELY EMPTY body — losing the
+     * customer, the phone, the address and the manage link in one step.
+     */
+    content: { summary: string; description: string },
     start: Date,
     end: Date,
     timezone: string
@@ -1422,7 +1437,7 @@ export class InternalProvider implements BookingProvider {
           // Owner deleted it in the calendar → recreate (deterministic id) on its home.
           const ev = await provider.createEvent(
             ctx.bot.id,
-            { ...input, summary },
+            { ...input, summary: content.summary, description: content.description },
             { eventId: this.googleEventId(bookingId), calendarId: ref.externalCalendarId }
           );
           if (ev) {
@@ -1442,7 +1457,7 @@ export class InternalProvider implements BookingProvider {
         if (!provider) return;
         const ev = await provider.createEvent(
           ctx.bot.id,
-          { ...input, summary },
+          { ...input, summary: content.summary, description: content.description },
           { eventId: this.googleEventId(bookingId) }
         );
         if (ev) {
@@ -1581,6 +1596,10 @@ export class InternalProvider implements BookingProvider {
         aiSummary: confirmed.aiSummary,
         notes: confirmed.notes,
         intakeAnswers: confirmed.intakeAnswers,
+        bookingId,
+        durationMin: effectiveDuration,
+        sourceChannel: confirmed.sourceChannel,
+        uploadedFileCount: Array.isArray(confirmed.uploadedFiles) ? confirmed.uploadedFiles.length : 0,
       },
       service,
       buildManageUrl(bookingId)
@@ -1601,6 +1620,8 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: confirmed.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       manageUrl: buildManageUrl(bookingId),
+      durationMin: effectiveDuration,
+      preparationInstructions: service.preparationInstructions,
     });
 
     await this.scheduleAndPersistReminders(bookingId, start, 0);
@@ -1822,6 +1843,8 @@ export class InternalProvider implements BookingProvider {
       attendeeEmail: booking.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
       manageUrl: buildManageUrl(bookingId),
+      durationMin: effectiveDuration,
+      preparationInstructions: service.preparationInstructions,
     });
 
     // Replace reminders: drop the old jobs, schedule fresh ones for the new time.
@@ -1829,7 +1852,24 @@ export class InternalProvider implements BookingProvider {
     await this.scheduleAndPersistReminders(bookingId, start, sequence);
 
     // Move the mirrored Google event (best-effort).
-    await this.syncCalendarReschedule(ctx, bookingId, service.name, start, end, rule.timezone).catch(() => undefined);
+    const rescheduledContent = buildBookingEventContent(
+      {
+        attendeeName: booking.attendeeName,
+        attendeeEmail: booking.attendeeEmail,
+        customerPhone: booking.customerPhone,
+        customerAddress: booking.customerAddress,
+        aiSummary: booking.aiSummary,
+        notes: booking.notes,
+        intakeAnswers: booking.intakeAnswers,
+        bookingId,
+        durationMin: effectiveDuration,
+        sourceChannel: booking.sourceChannel,
+        uploadedFileCount: Array.isArray(booking.uploadedFiles) ? booking.uploadedFiles.length : 0,
+      },
+      service,
+      buildManageUrl(bookingId)
+    );
+    await this.syncCalendarReschedule(ctx, bookingId, rescheduledContent, start, end, rule.timezone).catch(() => undefined);
 
     return {
       success: true,

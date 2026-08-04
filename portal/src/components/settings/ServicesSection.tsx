@@ -51,6 +51,7 @@ interface FormState {
   name: string;
   category: string;
   description: string;
+  preparationInstructions: string;
   bookingMode: 'auto' | 'request';
   durationMode: 'fixed' | 'range' | 'ai';
   durationMin: number;
@@ -78,6 +79,7 @@ const BLANK: FormState = {
   name: '',
   category: '',
   description: '',
+  preparationInstructions: '',
   bookingMode: 'auto',
   durationMode: 'fixed',
   durationMin: 30,
@@ -106,6 +108,7 @@ function formFromService(s: Service): FormState {
     name: s.name,
     category: s.category ?? '',
     description: s.description ?? '',
+    preparationInstructions: s.preparationInstructions ?? '',
     bookingMode: s.bookingMode,
     durationMode: s.durationMode ?? 'fixed',
     durationMin: s.durationMin,
@@ -141,6 +144,7 @@ function toInput(f: FormState): ServiceInput {
     name: f.name.trim(),
     category: f.category.trim() || undefined,
     description: f.description.trim() || undefined,
+    preparationInstructions: f.preparationInstructions.trim() || undefined,
     bookingMode: f.bookingMode,
     durationMode: f.durationMode,
     durationMin: f.durationMin,
@@ -425,6 +429,20 @@ const ServiceEditorDialog: React.FC<{
                 onChange={(e) => set('description', e.target.value)}
                 placeholder="Optional short description"
               />
+            </div>
+
+            {/* Stored since P5 with no editor anywhere and read by nothing — so no owner
+                could set it and no customer could ever receive it. Now on the invite. */}
+            <div>
+              <Label className="text-text-secondary mb-1 block">Preparation instructions</Label>
+              <Input
+                value={form.preparationInstructions}
+                onChange={(e) => set('preparationInstructions', e.target.value)}
+                placeholder="e.g. Please arrive with clean, dry hair"
+              />
+              <p className="mt-1 text-xs text-text-muted">
+                Sent to the customer in their confirmation email and shown on your calendar entry.
+              </p>
             </div>
 
             <div>

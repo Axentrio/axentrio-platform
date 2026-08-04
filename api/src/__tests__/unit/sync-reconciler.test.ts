@@ -104,7 +104,14 @@ describe('reconcilePendingBookingSyncs', () => {
 
     await reconcilePendingBookingSyncs();
 
-    expect(createCalendarEvent).toHaveBeenCalledWith('b1', expect.objectContaining({ summary: 'Intro call', timezone: 'UTC' }), { eventId: EVID });
+    expect(createCalendarEvent).toHaveBeenCalledWith(
+      'b1',
+      expect.objectContaining({ summary: 'Booking: Intro call', timezone: 'UTC' }),
+      { eventId: EVID },
+    );
+    // Parity is the point of this module: a reconciled event must carry the same
+    // owner-facing body an inline create would have written, reference included.
+    expect(createCalendarEvent.mock.calls[0][1].description).toContain('Reference: AX-BKG-');
     expect(refSave).toHaveBeenCalled();
     expect(cleared()).toBe(true);
   });

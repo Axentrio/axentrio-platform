@@ -37,6 +37,14 @@ export interface BookingEmailParams {
   ownerEmail?: string;
   /** Self-service manage link (reschedule/cancel). Omitted on cancellation. */
   manageUrl?: string;
+  /** Effective length, so the customer knows how long to set aside. */
+  durationMin?: number | null;
+  /**
+   * Owner-authored prep notes for this service ("please arrive with clean hair").
+   * Customer-facing by nature — it is the one piece of owner content that belongs in
+   * this email, which both the customer AND the owner receive.
+   */
+  preparationInstructions?: string | null;
 }
 
 function formatWhen(start: Date, timezone: string): string {
@@ -97,13 +105,24 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   const lead = cancelled
     ? 'Your appointment has been cancelled.'
     : 'Your appointment is confirmed.';
+  // Everything interpolated here is escaped. It previously was not — `summary` is
+  // owner-authored and `location`/`description` become customer-influenced as soon as an
+  // address or intake answer reaches them, so the unescaped version was one service rename
+  // away from injecting markup into a real customer's inbox.
+  const duration =
+    typeof params.durationMin === 'number' && params.durationMin > 0
+      ? ` &middot; ${params.durationMin} min`
+      : '';
   const body =
     `<p>${lead}</p>` +
-    `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>` +
-    (params.location ? `<p>Location: ${params.location}</p>` : '') +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}${duration}</p>` +
+    (params.location ? `<p>Location: ${esc(params.location)}</p>` : '') +
+    (!cancelled && params.preparationInstructions?.trim()
+      ? `<p><strong>Before your appointment:</strong><br/>${esc(params.preparationInstructions.trim())}</p>`
+      : '') +
     `<p>A calendar invite is attached.</p>` +
     (!cancelled && params.manageUrl
-      ? `<p><a href="${params.manageUrl}">Reschedule or cancel this appointment</a></p>`
+      ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel this appointment</a></p>`
       : '');
 
   try {

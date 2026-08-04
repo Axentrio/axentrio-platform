@@ -30,6 +30,33 @@ function icsDate(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
 }
 
+/**
+ * RFC 5545 §3.1: no content line may exceed 75 OCTETS, and continuations begin with a
+ * single space.
+ *
+ * Nothing enforced this before, which was survivable only because DESCRIPTION never held
+ * more than "Join the meeting: <url>". A richer description immediately produces over-long
+ * lines, and strict parsers (Outlook desktop, several CalDAV servers) mangle or reject the
+ * event rather than wrapping it themselves. Folding is done on OCTETS, backing off a
+ * multi-byte UTF-8 sequence so a fold never lands mid-character.
+ */
+function fold(line: string): string {
+  const bytes = Buffer.from(line, 'utf8');
+  if (bytes.length <= 75) return line;
+  const parts: string[] = [];
+  let start = 0;
+  // First line gets 75 octets; continuations lose one to the leading space.
+  let limit = 75;
+  while (start < bytes.length) {
+    let end = Math.min(start + limit, bytes.length);
+    while (end > start && end < bytes.length && (bytes[end] & 0xc0) === 0x80) end -= 1;
+    parts.push(bytes.subarray(start, end).toString('utf8'));
+    start = end;
+    limit = 74;
+  }
+  return parts.join('\r\n ');
+}
+
 /** Escape TEXT values per RFC 5545 §3.3.11. */
 function esc(value: string): string {
   return value
@@ -73,5 +100,5 @@ export function buildIcs(input: IcsInput): string {
     'END:VCALENDAR',
   ];
 
-  return lines.join('\r\n');
+  return lines.map(fold).join('\r\n');
 }

@@ -127,6 +127,11 @@ export class CreateBookingTool implements ToolAdapter {
         description:
           'The ids of files the customer uploaded in THIS chat for this service (only if the service accepts files). Omit if none.',
       },
+      aiSummary: {
+        type: 'string',
+        description:
+          'A short one-line summary of the job for the business owner, written from the conversation (e.g. "Regular client, wants the same cut as last time; mentioned he is in a hurry"). This goes on the owner\'s calendar entry — it is never shown to the customer.',
+      },
     },
     required: ['startTime', 'attendeeName'],
   };
@@ -154,6 +159,7 @@ export class CreateBookingTool implements ToolAdapter {
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,
+          aiSummary: args.aiSummary as string | undefined,
         }
       );
 

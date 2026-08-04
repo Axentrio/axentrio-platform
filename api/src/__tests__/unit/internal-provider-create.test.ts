@@ -148,6 +148,51 @@ const RULE = {
 // 2026-06-10 (Wed) 09:00 Brussels CEST = 07:00 UTC — a genuinely offered slot.
 const OFFERED_START = '2026-06-10T07:00:00Z';
 
+/**
+ * Read an INSERT parameter by COLUMN NAME.
+ *
+ * These assertions used to index positionally (`params.at(-3)`), so appending a column to
+ * the statement silently re-pointed them at a different value instead of failing.
+ *
+ * Column index is NOT parameter index: the VALUES list mixes literals ('internal', 'auto')
+ * and expressions (tstzrange($7,$8,'[)')) among the placeholders, so each column is paired
+ * with its VALUES entry and the first $n inside it is the real parameter slot.
+ */
+function insertParam(call: [string, unknown[]], column: string): unknown {
+  const sql = String(call[0]);
+  const cols = sql
+    .slice(sql.indexOf('(') + 1, sql.indexOf(')'))
+    .split(',')
+    .map((c) => c.trim());
+
+  const valuesBody = sql.slice(sql.indexOf('VALUES (') + 'VALUES ('.length);
+  const parts: string[] = [];
+  let depth = 0;
+  let quoted = false;
+  let buf = '';
+  for (const ch of valuesBody) {
+    if (ch === "'") quoted = !quoted;
+    if (!quoted && ch === '(') depth += 1;
+    if (!quoted && ch === ')') {
+      if (depth === 0) break;
+      depth -= 1;
+    }
+    if (!quoted && ch === ',' && depth === 0) {
+      parts.push(buf);
+      buf = '';
+      continue;
+    }
+    buf += ch;
+  }
+  if (buf.trim()) parts.push(buf);
+
+  const idx = cols.indexOf(column);
+  if (idx === -1) throw new Error(`column ${column} not in INSERT: ${cols.join(',')}`);
+  const slot = /\$(\d+)/.exec(parts[idx] ?? '');
+  if (!slot) throw new Error(`column ${column} has no bound parameter (${parts[idx]})`);
+  return (call[1] as unknown[])[Number(slot[1]) - 1];
+}
+
 describe('InternalProvider.createBooking', () => {
   let provider: InternalProvider;
 
@@ -493,7 +538,7 @@ describe('InternalProvider.createBooking', () => {
   it('persists booked_duration_min = service.durationMin for a fixed service', async () => {
     await provider.createBooking(ctx, 'idem-dur-fixed', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-3)).toBe(30); // booked_duration_min (uploaded_files, source_channel after)
+    expect(insertParam(insert as any, 'booked_duration_min')).toBe(30);
   });
 
   it('books a range service at the chosen 60-min duration', async () => {
@@ -505,7 +550,7 @@ describe('InternalProvider.createBooking', () => {
     expect(res.success).toBe(true);
     expect(res.booking.endTime).toBe('2026-06-10T08:00:00.000Z'); // start + 60min
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    expect((insert![1] as any[]).at(-3)).toBe(60); // booked_duration_min (uploaded_files, source_channel after)
+    expect(insertParam(insert as any, 'booked_duration_min')).toBe(60);
   });
 
   it('defaults a range service to minDurationMin when no duration is given', async () => {
@@ -549,7 +594,7 @@ describe('InternalProvider.createBooking', () => {
     getUploadSession.mockResolvedValue(readySession());
     await provider.createBooking(ctx, 'idem-f2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, { fileSessionIds: ['f-1', 'f-1'] });
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const files = JSON.parse((insert![1] as any[]).at(-2)); // uploaded_files (source_channel last)
+    const files = JSON.parse(insertParam(insert as any, 'uploaded_files') as string);
     expect(files).toEqual([{ fileSessionId: 'f-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
 
@@ -577,7 +622,7 @@ describe('InternalProvider.createBooking', () => {
     await provider.createBooking(ctx, 'idem-auto', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }); // no extras
     expect(getReadyFileIds).toHaveBeenCalledWith('sess-1', 'ten-1');
     const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const files = JSON.parse((insert![1] as any[]).at(-2)); // uploaded_files (source_channel last)
+    const files = JSON.parse(insertParam(insert as any, 'uploaded_files') as string);
     expect(files).toEqual([{ fileSessionId: 'auto-1', fileName: 'room.jpg', mimeType: 'image/jpeg', fileSize: 1234, fileKey: 'uploads/ten-1/2026/06/abc.jpg' }]);
   });
 

@@ -24,18 +24,58 @@ function build(
 }
 
 describe('buildBookingEventContent — summary + line order', () => {
-  it('summary is the raw service name; description starts with Service and ends with Manage', () => {
+  it('titles the event with the service AND the customer; body starts with Service, ends with Manage', () => {
     const { summary, description } = build(
       { attendeeName: 'Ada Lovelace', attendeeEmail: 'ada@example.com' },
       { name: 'Haircut', description: 'A tidy trim' },
     );
-    expect(summary).toBe('Haircut');
+    // A calendar grid of three identical "Haircut" blocks tells the owner nothing.
+    expect(summary).toBe('Booking: Haircut - Ada Lovelace');
     expect(description.split('\n')).toEqual([
       'Service: Haircut',
       'A tidy trim',
       'Customer: Ada Lovelace <ada@example.com>',
       `Manage: ${MANAGE}`,
     ]);
+  });
+
+  it('falls back to the bare service in the title when no customer name is known', () => {
+    const { summary } = build({ attendeeEmail: 'ada@example.com' }, { name: 'Haircut' });
+    expect(summary).toBe('Booking: Haircut');
+  });
+
+  it('normalizes the title — it used to interpolate the RAW service name', () => {
+    const { summary } = build({ attendeeName: 'Ada' }, { name: 'Hair\ncut' });
+    expect(summary).toBe('Booking: Hair cut - Ada');
+  });
+
+  it('renders the new owner-facing fields, with the reference in the never-dropped tail', () => {
+    const { description } = build(
+      {
+        attendeeName: 'Ada',
+        bookingId: '3f9a2c71-0000-4000-8000-000000000000',
+        durationMin: 45,
+        sourceChannel: 'whatsapp',
+        uploadedFileCount: 2,
+      },
+      { name: 'Haircut', preparationInstructions: 'Arrive with dry hair' },
+    );
+    const lines = description.split('\n');
+    expect(lines).toContain('Duration: 45 min');
+    expect(lines).toContain('Booked via: whatsapp');
+    expect(lines).toContain('Preparation: Arrive with dry hair');
+    expect(lines).toContain('Files: 2 attached — open the booking in Axentrio to view');
+    // Reference sits in TAIL so truncation can never eat the number the owner quotes.
+    expect(lines[lines.length - 2]).toBe('Reference: AX-BKG-3F9A2C71');
+    expect(lines[lines.length - 1]).toBe(`Manage: ${MANAGE}`);
+  });
+
+  it('omits the new fields entirely when they are absent or zero', () => {
+    const { description } = build({ attendeeName: 'Ada', durationMin: 0, uploadedFileCount: 0 });
+    expect(description).not.toContain('Duration:');
+    expect(description).not.toContain('Files:');
+    expect(description).not.toContain('Booked via:');
+    expect(description).not.toContain('Reference:');
   });
 
   it('renders every field in the fixed order, omitting empty sources', () => {

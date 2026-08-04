@@ -84,9 +84,14 @@ export function createBookingReminderProcessor(): (job: Job) => Promise<void> {
       return;
     }
 
-    const eventType = await AppDataSource.getRepository(ServiceType).findOne({
-      where: { botId: booking.botId, isActive: true },
-    });
+    // Resolve the service the customer ACTUALLY booked. This used to take "any active
+    // service on the bot", so on a multi-service bot the reminder cheerfully named the
+    // wrong one — "Reminder: Beard trim" for a colour appointment. Fall back to the
+    // sole-active lookup only for legacy rows that carry no event_type_id.
+    const serviceRepo = AppDataSource.getRepository(ServiceType);
+    const eventType = booking.eventTypeId
+      ? await serviceRepo.findOne({ where: { id: booking.eventTypeId, botId: booking.botId } })
+      : await serviceRepo.findOne({ where: { botId: booking.botId, isActive: true } });
     const rule = await AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: booking.botId } });
 
     await sendReminderEmail({

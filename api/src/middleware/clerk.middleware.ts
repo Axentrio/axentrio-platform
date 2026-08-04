@@ -155,7 +155,6 @@ export async function autoProvision(req: ProvisionedRequest, _res: Response, nex
                   brandVoice: {
                     name: `${orgName} Assistant`,
                     tone: 'friendly',
-                    customInstructions: '',
                   },
                   guardrails: {
                     topicsToAvoid: [],

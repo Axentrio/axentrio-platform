@@ -19,24 +19,28 @@ const aiNoCustom = {
 } as unknown as AiSettings;
 
 describe('agent mode — template layer', () => {
-  it('inserts the template body after Tone and before custom instructions, substituted', () => {
+  it('inserts the template body after Tone, substituted', () => {
     const { prompt: out } = composeSystemPrompt({
       mode: 'agent', ai, tenantName: 'Acme', tools: [],
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
     const idxTone = out.indexOf('Tone: friendly');
     const idxTemplate = out.indexOf('TEMPLATE_MARKER');
-    const idxCustom = out.indexOf('CUSTOM_MARKER');
     expect(idxTone).toBeGreaterThanOrEqual(0);
     expect(idxTemplate).toBeGreaterThan(idxTone);
-    expect(idxCustom).toBeGreaterThan(idxTemplate);
     expect(out).toContain('TEMPLATE_MARKER serving Acme.');
   });
 
-  it('empty template body contributes nothing (custom still present)', () => {
-    const { prompt: out } = composeSystemPrompt({ mode: 'agent', ai, tenantName: 'Acme', tools: [], templateBody: '' });
-    expect(out).toContain('CUSTOM_MARKER for Acme.');
-    expect(out).not.toContain('TEMPLATE_MARKER');
+  it('IGNORES customInstructions even when a bot still carries one', () => {
+    // `ai` deliberately still has CUSTOM_MARKER set. The field outranked the
+    // template and had no editor, so a live bot spent days introducing itself as
+    // a plumbing service from instructions its owner could not see. A stored
+    // value must now be inert, not merely absent.
+    const { prompt: out } = composeSystemPrompt({
+      mode: 'agent', ai, tenantName: 'Acme', tools: [], templateBody: 'TEMPLATE_MARKER.',
+    });
+    expect(out).toContain('TEMPLATE_MARKER.');
+    expect(out).not.toContain('CUSTOM_MARKER');
   });
 });
 
@@ -65,7 +69,7 @@ describe('{businessName} resolution — per-bot override vs tenant default', () 
   // Bot with an explicit commercial name set on brandVoice.businessName.
   const aiWithBusiness = {
     ...ai,
-    brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'CUSTOM_MARKER for {businessName}.', businessName: 'GlowSpa' },
+    brandVoice: { name: 'Ava', tone: 'friendly', businessName: 'GlowSpa' },
   } as unknown as AiSettings;
 
   it('uses the per-bot businessName when set, ignoring the tenant name', () => {
@@ -74,7 +78,6 @@ describe('{businessName} resolution — per-bot override vs tenant default', () 
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
     expect(out).toContain('TEMPLATE_MARKER serving GlowSpa.');
-    expect(out).toContain('CUSTOM_MARKER for GlowSpa.');
     expect(out).not.toContain('Acme Holdings');
   });
 
@@ -84,20 +87,19 @@ describe('{businessName} resolution — per-bot override vs tenant default', () 
       templateBody: 'TEMPLATE_MARKER serving {businessName}.',
     });
     expect(out).toContain('TEMPLATE_MARKER serving Acme Holdings.');
-    expect(out).toContain('CUSTOM_MARKER for Acme Holdings.');
   });
 });
 
 describe('base mode — template layer', () => {
-  it('combines template then custom under TENANT INSTRUCTIONS', () => {
+  it('puts the template under TENANT INSTRUCTIONS, and drops customInstructions', () => {
     const out = composeSystemPrompt({ mode: 'base', ai, businessName: 'Acme', templateBody: 'TEMPLATE_MARKER.' });
     const idxHeading = out.indexOf('## TENANT INSTRUCTIONS');
     const idxTemplate = out.indexOf('TEMPLATE_MARKER.');
-    const idxCustom = out.indexOf('CUSTOM_MARKER');
     const idxRules = out.indexOf('## PLATFORM RULES');
     expect(idxTemplate).toBeGreaterThan(idxHeading);
-    expect(idxCustom).toBeGreaterThan(idxTemplate);
-    expect(idxRules).toBeGreaterThan(idxCustom);
+    expect(idxRules).toBeGreaterThan(idxTemplate);
+    // The RAG/base path shared the same join, so retiring it there matters too.
+    expect(out).not.toContain('CUSTOM_MARKER');
   });
 
   it('template-only (no custom) shows the template, not the default block', () => {
@@ -124,9 +126,9 @@ describe('rag mode — template layer', () => {
 });
 
 describe('n8n mode — template layer', () => {
-  it('joins template + custom (substituted), no platform rules', () => {
+  it('passes the template through, without customInstructions, no platform rules', () => {
     const out = composeSystemPrompt({ mode: 'n8n', ai, businessName: 'Acme', templateBody: 'TEMPLATE_MARKER.' });
-    expect(out).toBe('TEMPLATE_MARKER.\n\nCUSTOM_MARKER for Acme.');
+    expect(out).toBe('TEMPLATE_MARKER.');
     expect(out).not.toContain('## PLATFORM RULES');
   });
 

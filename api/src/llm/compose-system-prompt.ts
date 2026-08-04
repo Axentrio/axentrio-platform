@@ -267,11 +267,10 @@ function joinInstructionLayers(
   extras: { businessName?: string } | undefined,
   templateBody?: string,
 ): string {
-  const tmpl = templateBody?.trim() ? substituteVariables(templateBody, ai, extras) : '';
-  const custom = ai.brandVoice?.customInstructions?.trim()
-    ? substituteVariables(ai.brandVoice.customInstructions, ai, extras)
-    : '';
-  return [tmpl, custom].filter(Boolean).join('\n\n');
+  // customInstructions is RETIRED (see the agent path above) and deliberately not
+  // joined here either — leaving it on the RAG/n8n paths would keep the same
+  // invisible override alive for exactly the tenants least likely to notice.
+  return templateBody?.trim() ? substituteVariables(templateBody, ai, extras) : '';
 }
 
 // ── Agent flow ────────────────────────────────────────────────────────────
@@ -353,13 +352,19 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
   } else {
     ledger.exclude(K.TEMPLATE_BODY, 'empty');
   }
-  // ── Custom-instructions layer (layer 4): tenant's own additions.
-  if (ai && brandVoice?.customInstructions) {
-    sections.push(substituteVariables(brandVoice.customInstructions, ai, varExtras));
-    ledger.include(K.CUSTOM_INSTRUCTIONS);
-  } else {
-    ledger.exclude(K.CUSTOM_INSTRUCTIONS, 'empty');
-  }
+  // ── Custom-instructions layer (layer 4): RETIRED. ──────────────────────────
+  // `brandVoice.customInstructions` used to be composed HERE, after the template
+  // body and therefore outranking it. It had no editor (removed in a8981e5 while
+  // the value kept feeding the prompt), so a bot could carry instructions nobody
+  // could see or change: a live bot spent days telling customers it was a
+  // plumbing service, from 1211 stale characters, while its template said
+  // otherwise and its owner could find nothing wrong.
+  //
+  // The template is the authoring surface now, and `extraInfo` below is the
+  // supported way to add tenant context — fenced as reference data that cannot
+  // override anything. The field is still ACCEPTED by the API (so an
+  // already-loaded portal tab can save) but is never persisted and never
+  // composed. Ledger key retired with it; nothing can report it as included.
 
   // ── {extra_info} (§11b): supplementary tenant context, fenced as the LOWEST-
   //    authority block (below template + custom instructions). Reference data

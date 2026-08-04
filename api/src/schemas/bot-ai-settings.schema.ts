@@ -31,7 +31,10 @@ export const putBotAiSettingsSchema = z
       .object({
         name: z.string().min(1).max(100),
         tone: z.string().min(1).max(50),
-        customInstructions: z.string().max(10000),
+        /** RETIRED. Accepted so an already-loaded portal tab can still save,
+         *  then dropped — never persisted, never composed. The template is the
+         *  authoring surface now. */
+        customInstructions: z.string().max(10000).optional(),
         // Optional per-bot commercial name. Empty/absent → inherits the tenant
         // business name at prompt-composition time (not persisted as a copy).
         businessName: z.string().max(100).optional(),

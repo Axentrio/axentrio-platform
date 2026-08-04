@@ -237,7 +237,7 @@ const stateToRemedy = (s: SkillState): SkillRemedy =>
 // conversation, or tenant-level config, so they can NEVER appear in a template
 // preview. Hidden entirely (they're not gaps, and not actionable here).
 const PREVIEW_HIDDEN_BLOCKS = new Set([
-  'CUSTOM_INSTRUCTIONS', 'EXTRA_INFO', 'CUSTOMER_NAME', 'AVAILABLE_SKILLS', 'KB_CONTEXT',
+  'EXTRA_INFO', 'CUSTOMER_NAME', 'AVAILABLE_SKILLS', 'KB_CONTEXT',
 ]);
 
 // Actionable note for an excluded block the author CAN fix from the template here.
@@ -254,7 +254,6 @@ const BLOCK_INFO: Record<string, string> = {
   CHANNEL_LEAD_CAPTURE: 'On messaging channels, the bot proactively confirms the customer’s contact details.',
   SOCIAL_SHORT_REPLY: 'On messaging channels, keeps replies short and chat-style.',
   CUSTOMER_NAME: 'The customer’s name, taken from their messaging profile.',
-  CUSTOM_INSTRUCTIONS: 'Extra instructions set per-bot by the tenant.',
   EXTRA_INFO: 'Extra background the tenant adds on the bot (reference only).',
   AVAILABLE_SKILLS: 'The skills the bound bot has enabled.',
   ESCALATION: 'Lets the bot hand the conversation off to a human.',

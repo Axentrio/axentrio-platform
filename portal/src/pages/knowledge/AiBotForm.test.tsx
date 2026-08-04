@@ -28,7 +28,7 @@ vi.mock('@/queries/useBotsQueries', () => ({
   useBotAiSettings: () => ({
     data: {
       enabled: true,
-      brandVoice: { name: 'TestBot', tone: 'friendly', customInstructions: '' },
+      brandVoice: { name: 'TestBot', tone: 'friendly' },
       guardrails: {
         topicsToAvoid: [],
         escalationKeywords: [],

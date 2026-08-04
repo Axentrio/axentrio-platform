@@ -111,7 +111,9 @@ export class Tenant {
       brandVoice: {
         name: string;
         tone: string;
-        customInstructions: string;
+        /** RETIRED (see compose-system-prompt). Optional so existing rows that
+         *  still carry the key type-check; never written, never composed. */
+        customInstructions?: string;
         /** Commercial/trading name used as the {businessName} placeholder value
          *  and the per-bot business-name default. Distinct from tenant.name only
          *  if set here; today the org name (tenant.name) is the source. */

@@ -49,7 +49,6 @@ export interface ExcludedBlock {
 //                          and these three families coexist with no key reuse.
 export const PROMPT_BLOCK_KEYS = {
   TEMPLATE_BODY: 'TEMPLATE_BODY',
-  CUSTOM_INSTRUCTIONS: 'CUSTOM_INSTRUCTIONS',
   EXTRA_INFO: 'EXTRA_INFO',
   CUSTOMER_NAME: 'CUSTOMER_NAME',
   KNOWLEDGE: 'KNOWLEDGE',

@@ -116,7 +116,6 @@ export async function updateBotAiSettings(req: Request, res: Response) {
     brandVoice: {
       name: data.brandVoice.name,
       tone: data.brandVoice.tone,
-      customInstructions: data.brandVoice.customInstructions,
       // Persist a per-bot override only when non-empty; blank means "inherit the
       // tenant business name", resolved at prompt-composition time.
       ...(data.brandVoice.businessName?.trim()

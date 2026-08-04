@@ -91,7 +91,6 @@ type FormSnapshot = {
   businessName: string;
   supportEmail: string;
   effectiveTone: string;
-  systemPrompt: string;
   greetingMessage: string;
   fallbackMessage: string;
   offHoursMessage: string;
@@ -185,7 +184,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
   const [supportEmail, setSupportEmail] = useState('');
   const [tone, setTone] = useState('friendly');
   const [customTone, setCustomTone] = useState('');
-  const [systemPrompt, setSystemPrompt] = useState('');
   const [greetingMessage, setGreetingMessage] = useState('');
   const [fallbackMessage, setFallbackMessage] = useState('');
   const [offHoursMessage, setOffHoursMessage] = useState('');
@@ -228,7 +226,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     const isPreset = TONE_PRESETS.some((p) => p.value === serverTone);
     const hTone = serverTone;
     const hCustomTone = isPreset ? '' : serverTone;
-    const hSystemPrompt = aiSettings.brandVoice?.customInstructions ?? '';
     const hGreeting = aiSettings.guardrails?.greetingMessage ?? '';
     const hFallback = aiSettings.guardrails?.fallbackMessage ?? '';
     const hOffHours = aiSettings.guardrails?.offHoursMessage ?? '';
@@ -246,7 +243,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     setSupportEmail(hSupportEmail);
     setTone(hTone);
     setCustomTone(hCustomTone);
-    setSystemPrompt(hSystemPrompt);
     setGreetingMessage(hGreeting);
     setFallbackMessage(hFallback);
     setOffHoursMessage(hOffHours);
@@ -264,7 +260,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
       businessName: hBusinessName,
       supportEmail: hSupportEmail,
       effectiveTone: computeEffectiveTone(hTone, hCustomTone),
-      systemPrompt: hSystemPrompt,
       greetingMessage: hGreeting,
       fallbackMessage: hFallback,
       offHoursMessage: hOffHours,
@@ -310,7 +305,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
     businessName,
     supportEmail,
     effectiveTone,
-    systemPrompt,
     greetingMessage,
     fallbackMessage,
     offHoursMessage,
@@ -351,7 +345,6 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
           brandVoice: {
             name: botName || 'AI Assistant',
             tone: effectiveTone,
-            customInstructions: systemPrompt,
             // Trimmed; blank means "inherit the business name" (backend omits it).
             businessName: businessName.trim(),
           },
@@ -371,7 +364,7 @@ const AiBotForm: React.FC<AiBotFormProps> = ({ botId, onGoToKnowledgeBase }) => 
         { onSuccess, onError },
       );
     },
-    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, systemPrompt, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues, socialOverride],
+    [updateSettings, enabled, supportEmail, botName, businessName, effectiveTone, greetingMessage, fallbackMessage, offHoursMessage, confidenceThreshold, maxResponseLength, escalationKeywords, topicsToAvoid, selectedSpecialties, templateVarValues, socialOverride],
   );
 
   const { status, isDirty, flush, retry } = useAutoSave({

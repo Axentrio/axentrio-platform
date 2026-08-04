@@ -17,7 +17,7 @@ export function defaultBotAi(name: string): NonNullable<BotSettings['ai']> {
     enabled: true,
     provider: 'openai',
     model: 'gpt-4o-mini',
-    brandVoice: { name: `${name} Assistant`, tone: 'friendly', customInstructions: '', templateId: null },
+    brandVoice: { name: `${name} Assistant`, tone: 'friendly', templateId: null },
     guardrails: {
       topicsToAvoid: [],
       escalationKeywords: ['speak to someone', 'human agent', 'talk to a person'],

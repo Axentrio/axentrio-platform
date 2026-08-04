@@ -16,7 +16,8 @@ interface TenantAiSettings {
   brandVoice: {
     name: string;
     tone: string;
-    customInstructions: string;
+    /** RETIRED — never composed; optional so legacy rows still type-check. */
+    customInstructions?: string;
   };
   guardrails: {
     topicsToAvoid: string[];

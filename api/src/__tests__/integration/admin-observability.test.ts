@@ -205,7 +205,7 @@ describe('admin observability — agent traces', () => {
         totalLatencyMs: 900,
         trace: {
           prompt: {
-            includedBlocks: ['TEMPLATE_BODY', 'CUSTOM_INSTRUCTIONS'],
+            includedBlocks: ['TEMPLATE_BODY', 'KNOWLEDGE'],
             excludedBlocks: [{ key: 'KB_CONTEXT', reason: 'empty' }],
           },
           iterations: [
@@ -257,12 +257,12 @@ describe('admin observability — agent traces', () => {
     expect(res.body.data.traces[0].finishReason).toBe('error');
   });
 
-  it('returns the prompt ledger — the thing that exposed a live bot running a previous business’s instructions', async () => {
+  it('returns the prompt ledger — how a misbehaving prompt gets diagnosed', async () => {
     const t = await seedTrace();
     const res = await request(app).get(`${LIST}/${t.id}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.data.trace.prompt.includedBlocks).toContain('CUSTOM_INSTRUCTIONS');
+    expect(res.body.data.trace.prompt.includedBlocks).toContain('KNOWLEDGE');
     expect(res.body.data.trace.prompt.excludedBlocks[0]).toMatchObject({ key: 'KB_CONTEXT', reason: 'empty' });
   });
 

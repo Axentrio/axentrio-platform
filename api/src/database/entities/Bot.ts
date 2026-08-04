@@ -92,7 +92,9 @@ export interface BotSettings {
     brandVoice: {
       name: string;
       tone: string;
-      customInstructions: string;
+      /** RETIRED (see compose-system-prompt). Optional so existing rows that
+       *  still carry the key type-check; never written, never composed. */
+      customInstructions?: string;
       /** Commercial/trading name used in this bot's prompt ({businessName}).
        *  Empty/absent → inherits the tenant's business name (tenant.name). */
       businessName?: string;

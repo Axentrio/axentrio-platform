@@ -707,6 +707,25 @@ async function startServer(): Promise<void> {
       setInterval(runChannelSweep, 15 * 60 * 1000); // every 15 minutes
     }
 
+    // Platform LLM health probe. The platform key is a single point of failure —
+    // no tenant supplies its own — and when it ran out of credit on 2026-08-03
+    // every bot failed silently until a customer complained over Telegram. One
+    // 1-token completion every 5 minutes is the cheapest way for that to announce
+    // itself. Alerts only on a state CHANGE, so a standing outage sends one email,
+    // not one per tick. Opt-out rather than opt-in: the failure it catches is
+    // total, so the safe default is on.
+    if (process.env.PROVIDER_HEALTH_PROBE_ENABLED !== 'false') {
+      const { runProviderHealthCheck } = await import('./llm/provider-health');
+      const runProbe = () =>
+        runProviderHealthCheck().catch((error) =>
+          // runProviderHealthCheck never throws by design; this is belt-and-braces
+          // so a probe bug can never take down the boot sequence.
+          logger.error('Provider health probe failed', { error }),
+        );
+      setTimeout(runProbe, 60 * 1000); // first run 1 min after boot, once warm
+      setInterval(runProbe, 5 * 60 * 1000);
+    }
+
     // Handoff / guardrail-pause SLA sweep — re-alerts staff about conversations
     // unacknowledged past the SLA so enforce-driven pauses/handoffs aren't silently
     // abandoned. Ships DARK: opt-in via SLA_SWEEP_ENABLED (enable once B1 desktop

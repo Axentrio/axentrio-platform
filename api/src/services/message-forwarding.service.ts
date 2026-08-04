@@ -1261,7 +1261,15 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     case 'error':
       logger.error(`[coalescer] agent error for session ${session.id}`, { error: result.error });
       content = result.fallbackMessage;
-      handoffReason = 'bot_error';
+      // An UPSTREAM failure (out of credit, throttled, provider down) is not this
+      // bot going wrong — it hits every conversation at once. Handing those to a
+      // human would park the whole inbox in handoff, and handoff SILENCES the bot
+      // until the 60-minute sweep, which every new customer message pushes further
+      // out. So the customer gets the fallback and the session stays with the bot,
+      // ready to answer the moment the provider recovers. The operator is told by
+      // the health probe (llm/provider-health), which is where a platform-wide
+      // outage belongs. A genuine bot fault still escalates as before.
+      handoffReason = result.infraFailure ? null : 'bot_error';
       break;
     case 'budget_exceeded':
       logger.warn(`[coalescer] agent budget exceeded for tenant ${tenant.id}`);

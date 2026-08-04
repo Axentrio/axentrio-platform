@@ -30,6 +30,7 @@ import { resolveBoundTemplates, composeTemplateBodies, effectiveConfigFromList, 
 import { isBookingConfigured } from '../scheduler/booking-readiness';
 import { formatServicesForPlaceholder, formatHoursForPlaceholder } from '../modules/booking.module';
 import { formatBusinessHoursForPlaceholder } from '../utils/format-business-hours';
+import { isUpstreamQuotaExhausted, isUpstreamRateLimit } from '../llm/upstream-error';
 import { searchKnowledge } from '../llm/rag.service';
 import { getBotKnowledgeBaseIds } from '../knowledge/bot-knowledge-bases';
 
@@ -44,7 +45,20 @@ export type AgentResult =
   | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string }
   | { type: 'max_iterations'; fallbackMessage: string }
   | { type: 'budget_exceeded'; fallbackMessage: string }
-  | { type: 'error'; error: string; fallbackMessage: string };
+  | {
+      type: 'error';
+      error: string;
+      fallbackMessage: string;
+      /**
+       * The provider failed (out of credit, throttled, unreachable) rather than
+       * the bot. Callers must NOT hand these to a human: an infra outage hits
+       * every conversation at once, so it would park the entire inbox in handoff
+       * — and a handoff silences the bot until the 60-minute sweep, which each
+       * new customer message pushes further out. The operator alert for this is
+       * the health probe (llm/provider-health), not a per-conversation handoff.
+       */
+      infraFailure?: boolean;
+    };
 
 const MAX_ITERATIONS = 10;
 
@@ -607,10 +621,20 @@ export class AgentService {
       trace.finishReason = 'error';
       void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
       logger.error('Agent loop error', { sessionId: session.id, error });
+      const infraFailure = isUpstreamQuotaExhausted(error) || isUpstreamRateLimit(error);
+      if (infraFailure) {
+        // Log distinctly: an out-of-credit platform key is an operational
+        // emergency across every tenant, not one conversation going wrong.
+        logger.error('[agent] upstream provider failure — NOT a bot fault', {
+          sessionId: session.id,
+          quotaExhausted: isUpstreamQuotaExhausted(error),
+        });
+      }
       return {
         type: 'error',
         error: error instanceof Error ? error.message : 'Unknown error',
         fallbackMessage: aiSettings?.guardrails?.fallbackMessage || 'Something went wrong. Let me connect you with a human agent.',
+        infraFailure,
       };
     }
   }

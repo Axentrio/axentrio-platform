@@ -1,6 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
+import type { ServiceAreaEntry } from '@contracts/service-area';
+
+export type { ServiceAreaEntry };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -87,12 +90,16 @@ export interface SchedulerConfig {
   eventType: SchedulerEventType | null;
   services?: Service[];
   availability: SchedulerAvailability | null;
+  /** Places the business travels to. Always an array — [] means none configured. */
+  serviceArea?: ServiceAreaEntry[];
 }
 
 export interface UpdateSchedulerPayload {
   provider?: 'calcom' | 'internal';
   eventType?: Omit<SchedulerEventType, 'id'>;
   availability?: Omit<SchedulerAvailability, 'id'>;
+  /** [] is a real value here — it clears the area — so never drop an empty array. */
+  serviceArea?: ServiceAreaEntry[];
 }
 
 const schedulerKey = ['scheduler', 'config'] as const;

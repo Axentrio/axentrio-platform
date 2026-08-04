@@ -28,6 +28,8 @@ export type PromptExtras = {
    *  services it cannot book (see assembleAgent). */
   services?: string;
   openingHours?: string;
+  /** Rendered service area for {serviceArea}; '' when the bot has none. */
+  serviceArea?: string;
 };
 
 export type PlaceholderContext = { ai: AiSettings; extras?: PromptExtras };
@@ -47,6 +49,7 @@ export const RESOLVERS: Record<PlaceholderKey, (c: PlaceholderContext) => string
   topicsToAvoid: ({ ai }) => (ai.guardrails?.topicsToAvoid ?? []).join(', ') || 'N/A',
   services: ({ extras }) => extras?.services || '',
   openingHours: ({ extras }) => extras?.openingHours || '',
+  serviceArea: ({ extras }) => extras?.serviceArea || '',
 };
 
 /**

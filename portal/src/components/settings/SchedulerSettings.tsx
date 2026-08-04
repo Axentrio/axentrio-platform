@@ -20,6 +20,7 @@ import {
   useUpdateSchedulerConfig,
   useBookingAvailability,
   type WeeklyHours,
+  type ServiceAreaEntry,
   type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
 import {
@@ -33,6 +34,7 @@ import {
   useDisconnectOutlookCalendar,
 } from '../../queries/useOutlookCalendarQueries';
 import { ServicesSection } from './ServicesSection';
+import { ServiceAreaField } from './ServiceAreaField';
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'mon', label: 'Monday' },
@@ -146,6 +148,7 @@ export const SchedulerSettings: React.FC = () => {
   const [slotGranularityMin, setSlotGranularityMin] = useState(30);
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
+  const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
   const [showPreview, setShowPreview] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -158,6 +161,8 @@ export const SchedulerSettings: React.FC = () => {
       setDays(rowsFromWeeklyHours(data.availability.weeklyHours));
       setOverrides(overridesFromConfig(data.availability.dateOverrides));
     }
+    // Outside the availability branch: a bot can have a service area before it has hours.
+    setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
     setHydrated(true);
   }, [data, hydrated]);
 
@@ -195,6 +200,8 @@ export const SchedulerSettings: React.FC = () => {
     update.mutate({
       provider: 'internal',
       availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
+      // Always sent, including when empty — [] is how the owner clears their area.
+      serviceArea,
     });
   };
 
@@ -409,6 +416,9 @@ export const SchedulerSettings: React.FC = () => {
                     </p>
                   )}
                 </div>
+
+                {/* Service area — where the business will travel */}
+                <ServiceAreaField value={serviceArea} onChange={setServiceArea} />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
                 <div className="space-y-3 border-t border-edge pt-4">

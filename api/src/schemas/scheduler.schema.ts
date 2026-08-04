@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_SERVICE_AREA_ENTRIES } from '../contracts/service-area';
 
 const hhmm = z.string().regex(/^([01]?\d|2[0-4]):[0-5]\d$/, 'Expected HH:MM');
 
@@ -13,6 +14,20 @@ export const dateOverride = z.object({
   closed: z.boolean().optional(),
   windows: z.array(timeWindow).optional(),
 });
+
+/**
+ * A place the business serves. `id` is validated for shape only — an unknown province or
+ * municipality id is not rejected here, because `matchServiceArea` already treats one it
+ * cannot resolve as "cannot be sure" rather than "outside", and rejecting the write would
+ * break an owner's saved area the day the geo table is regenerated.
+ */
+export const serviceAreaEntry = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('province'), id: z.string().min(1).max(16), label: z.string().min(1).max(120) }),
+  z.object({ kind: z.literal('municipality'), id: z.string().min(1).max(16), label: z.string().min(1).max(120) }),
+  z.object({ kind: z.literal('manual'), label: z.string().min(1).max(200) }),
+]);
+
+export const serviceAreaSchema = z.array(serviceAreaEntry).max(MAX_SERVICE_AREA_ENTRIES);
 
 export const eventTypeInputSchema = z.object({
   name: z.string().min(1).max(255),
@@ -137,9 +152,12 @@ export const updateSchedulerSchema = z
     provider: z.enum(['calcom', 'internal']).optional(),
     eventType: eventTypeInputSchema.optional(),
     availability: availabilityInputSchema.optional(),
+    // Sent by the same Save as availability; an empty array is a real value (clear the area),
+    // which is why presence is tested with `!== undefined` rather than truthiness.
+    serviceArea: serviceAreaSchema.optional(),
   })
-  .refine((d) => d.provider || d.eventType || d.availability, {
-    message: 'At least one of provider, eventType, availability is required',
+  .refine((d) => d.provider || d.eventType || d.availability || d.serviceArea !== undefined, {
+    message: 'At least one of provider, eventType, availability, serviceArea is required',
   });
 
 export type UpdateSchedulerInput = z.infer<typeof updateSchedulerSchema>;

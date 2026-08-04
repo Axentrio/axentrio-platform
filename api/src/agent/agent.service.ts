@@ -17,6 +17,8 @@ import type { ToolAdapter } from './tool-adapter';
 import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { BookingSettings } from '../database/entities/BookingSettings';
+import { describeServiceArea } from '../contracts/service-area';
 import { ServiceType } from '../database/entities/ServiceType';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
@@ -332,6 +334,21 @@ export class AgentService {
       // off-hours gate and never reached the prompt. Exactly ONE hours source per bot,
       // so the booking rule and businessHours can never contradict each other.
       if (!openingHours) openingHours = formatBusinessHoursForPlaceholder(effBotSettings.businessHours);
+      // Where the business travels, for {serviceArea}. Loaded for EVERY bot, not just
+      // booking ones: like opening hours this is a business fact a template author may
+      // want to state, and it is one indexed lookup that returns nothing for the bots
+      // (the overwhelming majority) with no area configured. Fails open to ''.
+      let serviceArea = '';
+      try {
+        const bookingSettings = await AppDataSource.getRepository(BookingSettings).findOne({
+          where: { botId: bot.id },
+        });
+        serviceArea = describeServiceArea(
+          Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
+        );
+      } catch (error) {
+        logger.warn('service area lookup failed — {serviceArea} left empty', { tenantId: tenant.id, error });
+      }
       // Template body (layer 2) + effective tone/guardrails both come from the
       // one resolve above (effBotSettings carries the effective AI slice).
       // SpecialtyCatalog (S2/S4): scope to the bound template's vertical (category),
@@ -389,7 +406,7 @@ export class AgentService {
       const kbContext = await this.prefetchKbContext({
         message, session, tenantId: tenant.id, tools, conversationHistory, specialtyTerms,
       });
-      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours }, { proactiveAsk });
+      const { prompt: systemPrompt, ledger } = this.promptBuilder.build(tenant, effBotSettings, tools, kbContext, moduleSections, customerName, templateBody, bookingTimezone, bookingConfigured, session.channel, specialties, skillProse, { services: bookingServices, openingHours, serviceArea }, { proactiveAsk });
       // Merge the composer's block ledger with agent.service's module knowledge
       // (the composer can't name modules) onto the trace — nests in trace.jsonb,
       // no migration. Persisted on every fire-and-forget save below.

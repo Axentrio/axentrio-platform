@@ -130,6 +130,14 @@ export const PLACEHOLDER_CATALOG = [
     safeToExpose: true,
     failClosed: '',
   },
+  {
+    key: 'serviceArea',
+    label: 'Service area',
+    description: 'The provinces, cities and places this business travels to. Empty when none is configured.',
+    category: 'booking',
+    safeToExpose: true,
+    failClosed: '',
+  },
 ] as const satisfies readonly PlaceholderCatalogEntry[];
 
 /** Every `{key}` an author may write. Consumed by the linter + the editor. */

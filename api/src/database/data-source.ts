@@ -47,6 +47,7 @@ import { CopilotMessage } from './entities/CopilotMessage';
 import { CopilotTrace } from './entities/CopilotTrace';
 import { ServiceType } from './entities/ServiceType';
 import { AvailabilityRule } from './entities/AvailabilityRule';
+import { BookingSettings } from './entities/BookingSettings';
 import { Booking } from './entities/Booking';
 import { TenantModule } from './entities/TenantModule';
 import { CalendarCredential } from './entities/CalendarCredential';
@@ -120,6 +121,7 @@ export const AppDataSource = new DataSource({
     CopilotTrace,
     ServiceType,
     AvailabilityRule,
+    BookingSettings,
     Booking,
     TenantModule,
     CalendarCredential,

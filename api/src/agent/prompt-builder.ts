@@ -29,9 +29,10 @@ export class PromptBuilder {
     channel?: string,
     specialties?: ResolvedSpecialty[],
     skillProse?: { id: string; prose: string }[],
-    /** Live values for the {services} / {openingHours} placeholders. `services` is
-     *  only substituted when the bot can actually book; `openingHours` always is. */
-    liveFields?: { services?: string; openingHours?: string },
+    /** Live values for the {services} / {openingHours} / {serviceArea} placeholders.
+     *  `services` is only substituted when the bot can actually book; the other two are
+     *  business facts and always are. */
+    liveFields?: { services?: string; openingHours?: string; serviceArea?: string },
     /** Per-turn runtime decisions the composer must not make for itself. */
     runtime?: { proactiveAsk?: boolean }
   ): { prompt: string; ledger: BlockLedger } {
@@ -52,6 +53,7 @@ export class PromptBuilder {
       bookingConfigured,
       bookingServices: liveFields?.services,
       openingHours: liveFields?.openingHours,
+      serviceArea: liveFields?.serviceArea,
       channel,
       proactiveAsk: runtime?.proactiveAsk,
     });

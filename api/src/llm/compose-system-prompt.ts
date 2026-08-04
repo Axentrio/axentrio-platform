@@ -188,6 +188,9 @@ interface AgentCtx {
    *  when one exists, else the operational businessHours. A business FACT, not a
    *  capability, so every bot may state it (unlike {services}). */
   openingHours?: string;
+  /** The places this business travels to, for {serviceArea}. Like {openingHours} this is
+   *  a business FACT rather than a booking capability, so every bot may state it. */
+  serviceArea?: string;
   /** Session channel (widget/whatsapp/messenger/instagram/telegram). On a
    *  non-widget channel the customer's contact is already known (the channel
    *  handle), so the lead-capture guidance is adapted to capture the request
@@ -344,6 +347,8 @@ function assembleAgent(ctx: AgentCtx): { prompt: string; ledger: BlockLedger } {
     // Opening hours are a business FACT, not a capability — every bot may state
     // them (booking availability when set, else the operational business hours).
     openingHours: ctx.openingHours ?? '',
+    // Where the business works — a fact, like opening hours, not a capability.
+    serviceArea: ctx.serviceArea ?? '',
   };
   if (ai) {
     const coreBody = ctx.templateBody?.trim() ? ctx.templateBody : GENERIC_SERVICE_CORE;

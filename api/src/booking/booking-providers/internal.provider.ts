@@ -13,6 +13,8 @@ import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
+import { BookingSettings } from '../../database/entities/BookingSettings';
+import { describeServiceArea, matchServiceArea } from '../../contracts/service-area';
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
 import { logger } from '../../utils/logger';
@@ -199,6 +201,29 @@ function assertRequiredIntake(service: ServiceType, normalized: Record<string, s
       400
     );
   }
+}
+
+/**
+ * P6 — refuse to AUTO-CONFIRM a job the business has said it will not travel to.
+ *
+ * Only `outside` blocks. No area configured, no address, an address we cannot place, or an
+ * area entry we cannot reason about all resolve to `unknown` and pass straight through —
+ * see `contracts/service-area.ts` for why the bias runs that way. Recoverable (400): the
+ * agent is told to capture the job with `request_appointment` so the owner can decide
+ * whether to make the trip, rather than the customer being turned away outright.
+ */
+async function assertInServiceArea(ctx: BookingContext, address: string | null): Promise<void> {
+  const row = await AppDataSource.getRepository(BookingSettings).findOne({
+    where: { botId: ctx.bot.id },
+  });
+  const entries = Array.isArray(row?.serviceArea) ? row.serviceArea : [];
+  if (!entries.length) return;
+  if (matchServiceArea(address, entries) !== 'outside') return;
+  throw new BookingError(
+    `That address is outside the area this business serves (${describeServiceArea(entries)}).`,
+    'OUT_OF_SERVICE_AREA',
+    400
+  );
 }
 
 /**
@@ -579,6 +604,11 @@ export class InternalProvider implements BookingProvider {
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
     const contact = resolveContactFields(service, extras, ctx.session);
+    // P6: a job outside the business's service area must not be auto-confirmed. Recoverable
+    // (the agent captures it with request_appointment instead) and deliberately AUTO-ONLY —
+    // a request is exactly the right outcome for an out-of-area job, so createRequest never
+    // runs this gate.
+    await assertInServiceArea(ctx, contact.address);
     // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);

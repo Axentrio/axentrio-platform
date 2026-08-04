@@ -10,6 +10,7 @@ import { Request, Response } from 'express';
 import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
+import { BookingSettings } from '../database/entities/BookingSettings';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
 import {
@@ -104,10 +105,11 @@ function reconcileIntakeQuestions(
 async function readConfig(tenantId: string) {
   const { bot } = await getAnchorBotConfig(tenantId);
   const repo = AppDataSource.getRepository(ServiceType);
-  const [eventType, services, availability] = await Promise.all([
+  const [eventType, services, availability, bookingSettings] = await Promise.all([
     repo.findOne({ where: { botId: bot.id, isActive: true }, order: { sortOrder: 'ASC' } }),
     repo.find({ where: { botId: bot.id }, order: { sortOrder: 'ASC', createdAt: 'ASC' } }),
     AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: bot.id } }),
+    AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: bot.id } }),
   ]);
   return {
     // Cal.com is shelved — the internal scheduler is the only provider, so we
@@ -118,6 +120,9 @@ async function readConfig(tenantId: string) {
     eventType: eventType ?? null,
     services,
     availability: availability ?? null,
+    // No settings row (or a hand-edited non-array) reads as "no area configured", which
+    // never blocks a booking.
+    serviceArea: Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
   };
 }
 
@@ -159,6 +164,15 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     if (!rule) rule = repo.create({ tenantId, botId: bot.id });
     Object.assign(rule, data.availability);
     await repo.save(rule);
+  }
+
+  // `!== undefined`, not truthiness: [] is how the owner clears their service area.
+  if (data.serviceArea !== undefined) {
+    const repo = AppDataSource.getRepository(BookingSettings);
+    let row = await repo.findOne({ where: { botId: bot.id } });
+    if (!row) row = repo.create({ tenantId, botId: bot.id });
+    row.serviceArea = data.serviceArea;
+    await repo.save(row);
   }
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });

@@ -17,10 +17,13 @@ const etFind = vi.fn(async () => []);
 const ruleFindOne = vi.fn();
 const ruleSave = vi.fn((x) => x);
 const managerQuery = vi.fn(async (..._a: any[]) => [] as any[]);
+const bsFindOne = vi.fn(async () => null as any);
+const bsSave = vi.fn((x) => x);
 function repoFor(entity: any) {
   const name = entity?.name || entity;
   if (name === 'ServiceType') return { findOne: etFindOne, find: etFind, count: etCount, create: (d: any) => d, save: etSave };
   if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
+  if (name === 'BookingSettings') return { findOne: bsFindOne, create: (d: any) => d, save: bsSave };
   return {};
 }
 vi.mock('../../database/data-source', () => ({

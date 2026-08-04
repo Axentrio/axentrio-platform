@@ -24,6 +24,8 @@ import {
   RescheduleBookingTool,
   CancelBookingTool,
 } from '../agent/tools/booking.tool';
+import { BookingSettings } from '../database/entities/BookingSettings';
+import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
@@ -140,6 +142,25 @@ export function formatHoursForPlaceholder(rule: AvailabilityRule | null): string
   }).join(', ');
 }
 
+/**
+ * The SERVICE AREA prompt block — where this business is willing to travel.
+ *
+ * Two jobs. It lets the bot answer "do you come to X?" from configured fact instead of
+ * guessing, and it tells the bot what to DO with `OUT_OF_SERVICE_AREA`: capture the job as
+ * a request rather than either confirming it or turning the customer away. The owner may
+ * still want a job just outside their usual area — that is their call, not the bot's.
+ *
+ * Null when no area is configured, so a bot without one gains no prompt text at all.
+ */
+export function buildServiceAreaSection(entries: ServiceAreaEntry[]): string | null {
+  const area = describeServiceArea(Array.isArray(entries) ? entries : []);
+  if (!area) return null;
+  return `\n## SERVICE AREA
+This business travels to: ${sanitizeForLine(area)}.
+State this when a customer asks whether you cover where they are, and never widen it — somewhere not listed is not covered.
+If create_booking returns OUT_OF_SERVICE_AREA, that address is outside the area. Do NOT retry create_booking, and do NOT tell the customer it is impossible: capture the job with request_appointment and say plainly that it is a request the business owner will review, since they may still be willing to travel. Never present it as a confirmed appointment.`;
+}
+
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
 export function buildServicesSection(services: ServiceType[]): string | null {
   if (!services.length) return null;
@@ -245,16 +266,22 @@ export const bookingModule: ModuleDefinition = {
     new CancelBookingTool(),
   ],
   async buildPromptSection(ctx: ModulePromptContext): Promise<string | null> {
-    const [services, rule] = await Promise.all([
+    const [services, rule, bookingSettings] = await Promise.all([
       AppDataSource.getRepository(ServiceType).find({
         where: { botId: ctx.botId, isActive: true },
         order: { sortOrder: 'ASC' },
       }),
       AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),
+      AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: ctx.botId } }),
     ]);
+    const areaSection = buildServiceAreaSection(
+      Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
+    );
     const servicesSection = buildServicesSection(services);
-    if (!servicesSection) return null;
+    // No bookable catalog → the services and hours blocks stay suppressed exactly as
+    // before, but a configured service area is still worth stating on its own.
+    if (!servicesSection) return areaSection;
     const hoursSection = buildHoursSection(rule);
-    return hoursSection ? `${servicesSection}${hoursSection}` : servicesSection;
+    return [servicesSection, hoursSection, areaSection].filter(Boolean).join('');
   },
 };

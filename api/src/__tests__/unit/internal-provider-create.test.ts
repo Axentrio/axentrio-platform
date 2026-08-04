@@ -10,6 +10,8 @@ const logCreate = vi.fn((d: any) => d);
 const logSave = vi.fn();
 const refSave = vi.fn((d: any) => d);
 const managerQuery = vi.fn();
+// No settings row = no service area, which is every pre-existing test's world.
+const bookingSettingsFindOne = vi.fn(async () => null as any);
 const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
 
 vi.mock('../../database/data-source', () => ({
@@ -21,6 +23,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'Booking') return { findOne: bookingFindOne, query: bookingQuery };
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
       if (name === 'BookingReference') return { create: (d: any) => d, save: refSave, findOne: vi.fn() };
+      if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -150,6 +153,9 @@ describe('InternalProvider.createBooking', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations, so re-pin "no service area" or a
+    // mockResolvedValue from one test would silently gate the next one.
+    bookingSettingsFindOne.mockResolvedValue(null as any);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -588,6 +594,9 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations, so re-pin "no service area" or a
+    // mockResolvedValue from one test would silently gate the next one.
+    bookingSettingsFindOne.mockResolvedValue(null as any);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -732,6 +741,64 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(emitWebhookEvent).toHaveBeenCalledOnce();
   });
 
+  // ── Service area (P6) ──────────────────────────────────────────────────────
+
+  /** Oost-Vlaanderen, matching the design mock. */
+  const OOST_VLAANDEREN = [{ kind: 'province', id: '40000', label: 'Oost-Vlaanderen' }];
+
+  it('refuses to AUTO-CONFIRM an address outside the configured service area', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    await expect(
+      provider.createBooking(
+        ctx, 'idem-area-out', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+        { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }
+      )
+    ).rejects.toMatchObject({ code: 'OUT_OF_SERVICE_AREA' });
+    // Nothing is written — the agent re-routes to request_appointment instead.
+    expect(bookingQuery).not.toHaveBeenCalled();
+  });
+
+  it('books normally when the address falls inside the area', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    const res = await provider.createBooking(
+      ctx, 'idem-area-in', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Grote Baan 220, 9310 Herdersem' }
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it('books when the area cannot place the address — the gate fails OPEN', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    const res = await provider.createBooking(
+      ctx, 'idem-area-unknown', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'the house behind the church' }
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it('ignores the gate entirely when no service area is configured', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: [] } as any);
+    const res = await provider.createBooking(
+      ctx, 'idem-area-none', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it('still CAPTURES an out-of-area job as a request — the gate is auto-only', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    const res = await provider.requestAppointment(
+      ctx, 'idem-area-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined,
+      { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }
+    );
+    expect(res.success).toBe(true);
+  });
+
   // ── Address / phone capture (P5a) ──────────────────────────────────────────
 
   it('throws ADDRESS_REQUIRED when the service requires an address and none is given', async () => {
@@ -767,6 +834,9 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations, so re-pin "no service area" or a
+    // mockResolvedValue from one test would silently gate the next one.
+    bookingSettingsFindOne.mockResolvedValue(null as any);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();

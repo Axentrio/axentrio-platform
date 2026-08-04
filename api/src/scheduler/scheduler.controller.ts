@@ -123,6 +123,14 @@ async function readConfig(tenantId: string) {
     // No settings row (or a hand-edited non-array) reads as "no area configured", which
     // never blocks a booking.
     serviceArea: Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
+    // Must be returned explicitly: readConfig cherry-picks, so a field added to the entity
+    // but not here reads as undefined, the portal hydrates it blank, and the owner's next
+    // Save writes that blank back over a real value.
+    bookingRules: {
+      maxBookingsPerDay: bookingSettings?.maxBookingsPerDay ?? null,
+      maxBookedMinutesPerDay: bookingSettings?.maxBookedMinutesPerDay ?? null,
+      minGapMin: bookingSettings?.minGapMin ?? null,
+    },
   };
 }
 
@@ -166,13 +174,37 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     await repo.save(rule);
   }
 
-  // `!== undefined`, not truthiness: [] is how the owner clears their service area.
-  if (data.serviceArea !== undefined) {
-    const repo = AppDataSource.getRepository(BookingSettings);
-    let row = await repo.findOne({ where: { botId: bot.id } });
-    if (!row) row = repo.create({ tenantId, botId: bot.id });
-    row.serviceArea = data.serviceArea;
-    await repo.save(row);
+  // `!== undefined`, not truthiness: [] is how the owner clears their service area, and
+  // null is how they clear a capacity rule.
+  if (data.serviceArea !== undefined || data.bookingRules) {
+    const br = data.bookingRules ?? {};
+    // A real upsert rather than findOne-then-save: the unique index on bot_id means two
+    // concurrent first-writes for the same bot raced to a 23505. Each field carries a
+    // "was it provided" flag so an untouched rule keeps its stored value while an
+    // explicit null clears it.
+    await AppDataSource.query(
+      `INSERT INTO chatbot_booking_settings
+         (tenant_id, bot_id, service_area, max_bookings_per_day, max_booked_minutes_per_day, min_gap_min)
+       VALUES ($1, $2, COALESCE($3::jsonb, '[]'::jsonb), $5, $7, $9)
+       ON CONFLICT (bot_id) DO UPDATE SET
+         service_area = CASE WHEN $4 THEN COALESCE($3::jsonb, '[]'::jsonb) ELSE chatbot_booking_settings.service_area END,
+         max_bookings_per_day = CASE WHEN $6 THEN $5 ELSE chatbot_booking_settings.max_bookings_per_day END,
+         max_booked_minutes_per_day = CASE WHEN $8 THEN $7 ELSE chatbot_booking_settings.max_booked_minutes_per_day END,
+         min_gap_min = CASE WHEN $10 THEN $9 ELSE chatbot_booking_settings.min_gap_min END,
+         updated_at = now()`,
+      [
+        tenantId,
+        bot.id,
+        data.serviceArea === undefined ? null : JSON.stringify(data.serviceArea),
+        data.serviceArea !== undefined,
+        br.maxBookingsPerDay ?? null,
+        br.maxBookingsPerDay !== undefined,
+        br.maxBookedMinutesPerDay ?? null,
+        br.maxBookedMinutesPerDay !== undefined,
+        br.minGapMin ?? null,
+        br.minGapMin !== undefined,
+      ]
+    );
   }
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });

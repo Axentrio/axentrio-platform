@@ -42,6 +42,23 @@ export interface SlotEngineInput {
   now: Date;
   /** Busy intervals (UTC) to subtract. Empty until bookings exist. */
   busy?: BusyInterval[];
+  /**
+   * Business-level ceilings. Applied ON TOP of the per-service values above — the stricter
+   * of the two binds. Null/0 on any field means unlimited.
+   */
+  business?: {
+    maxBookingsPerDay?: number | null;
+    maxBookedMinutesPerDay?: number | null;
+  };
+  /**
+   * This bot's HELD bookings in range, at their raw start/end — deliberately NOT `busy`.
+   *
+   * `busy` merges our bookings with the owner's personal calendar events and carries
+   * buffer-expanded bounds, so counting it would refuse slots because someone has a dentist
+   * appointment, and would bill their buffers as sold time. Day totals have to come from a
+   * ledger of what the business actually booked.
+   */
+  dayLedger?: BusyInterval[];
 }
 
 const WEEKDAY_KEYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
@@ -101,6 +118,10 @@ function overlapsBusy(startMs: number, endMs: number, busy: BusyInterval[]): boo
   return false;
 }
 
+/** Local calendar day key for an instant, e.g. "2026-08-04". */
+const dayKeyOf = (ms: number, zone: string): string =>
+  DateTime.fromMillis(ms, { zone }).toFormat('yyyy-MM-dd');
+
 export function computeSlots(input: SlotEngineInput): BookingSlot[] {
   const { rule, eventType, now } = input;
   const zone = rule.timezone || 'UTC';
@@ -131,12 +152,32 @@ export function computeSlots(input: SlotEngineInput): BookingSlot[] {
     .setZone(zone)
     .startOf('day');
 
+  // Per-day usage from the ledger, so a day already at its business cap offers nothing
+  // rather than offering a slot the create path will then refuse.
+  const maxPerDay = input.business?.maxBookingsPerDay ?? 0;
+  const maxMinutesPerDay = input.business?.maxBookedMinutesPerDay ?? 0;
+  const usage = new Map<string, { count: number; minutes: number }>();
+  if ((maxPerDay > 0 || maxMinutesPerDay > 0) && input.dayLedger?.length) {
+    for (const b of input.dayLedger) {
+      const key = dayKeyOf(b.start.getTime(), zone);
+      const cur = usage.get(key) ?? { count: 0, minutes: 0 };
+      cur.count += 1;
+      cur.minutes += Math.max(0, (b.end.getTime() - b.start.getTime()) / 60_000);
+      usage.set(key, cur);
+    }
+  }
+
   const slots: BookingSlot[] = [];
   const seen = new Set<number>();
 
   // Hard cap on day iteration as a runaway guard (horizon already bounds it).
   let guard = 0;
   for (let day = firstDay; day <= lastDay && guard < 400; day = day.plus({ days: 1 }), guard++) {
+    const used = usage.get(day.toFormat('yyyy-MM-dd')) ?? { count: 0, minutes: 0 };
+    // Whole-day skips: no point walking the windows of a day that is already full.
+    if (maxPerDay > 0 && used.count >= maxPerDay) continue;
+    if (maxMinutesPerDay > 0 && used.minutes + duration > maxMinutesPerDay) continue;
+
     for (const window of windowsForDay(rule, day)) {
       const ws = parseHHMM(window.start);
       const we = parseHHMM(window.end);

@@ -45,6 +45,35 @@ export class BookingSettings {
   @Column({ type: 'jsonb', name: 'service_area', default: () => `'[]'::jsonb` })
   serviceArea!: ServiceAreaEntry[];
 
+  /**
+   * Capacity protection for a solo owner. All three are CEILINGS, not defaults: they apply
+   * on top of whatever each service specifies, and the stricter of the two binds. Making
+   * them inherit instead was not possible without a nullability migration — every other
+   * per-service timing field is NOT NULL with a DB default, so "unset" is indistinguishable
+   * from zero, and only `ServiceType.maxBookingsPerDay` has a real absent state.
+   *
+   * `null` or `0` means unlimited on all three, matching how the per-service cap already
+   * degrades: a malformed value must read as "no limit", never as "no bookings".
+   */
+
+  /** Across every service, not per service — five services capped at 2 still allowed 10. */
+  @Column({ type: 'int', name: 'max_bookings_per_day', nullable: true })
+  maxBookingsPerDay?: number | null;
+
+  /** Total booked minutes in a local day. Five 4-hour jobs used to fit an 8-hour day. */
+  @Column({ type: 'int', name: 'max_booked_minutes_per_day', nullable: true })
+  maxBookedMinutesPerDay?: number | null;
+
+  /**
+   * Free minutes left around every existing appointment, IN ADDITION to per-service
+   * buffers. Additive rather than a floor on the total, because that is the version an
+   * owner can predict: buffers are the service's own prep/cleanup, this is their travel
+   * and breathing room. Doubles as the epic's "travel buffer" — a distance-derived one
+   * needs geocoding this platform deliberately does not have.
+   */
+  @Column({ type: 'int', name: 'min_gap_min', nullable: true })
+  minGapMin?: number | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

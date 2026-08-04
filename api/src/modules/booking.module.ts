@@ -165,7 +165,7 @@ If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job 
 }
 
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
-export function buildServicesSection(services: ServiceType[]): string | null {
+export function buildServicesSection(services: ServiceType[], businessCapacity = false): string | null {
   if (!services.length) return null;
   const lines = services
     .map((s) => {
@@ -201,7 +201,11 @@ export function buildServicesSection(services: ServiceType[]): string | null {
   // (a service whose questions are all malformed produces no lines → no dangling rule).
   const hasIntake = services.some((s) => intakeLines(s) !== '');
   const hasContact = services.some((s) => s.customerAddressRequired || s.customerLocationRequired);
-  const hasCapacity = services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
+  // Business-level ceilings raise CAPACITY_REACHED too, so the recovery rule has to be
+  // emitted for them as well — keyed on per-service caps alone, a bot with only a business
+  // cap got the error with no instruction and would tell the customer it was fully booked.
+  const hasCapacity =
+    businessCapacity || services.some((s) => typeof s.maxBookingsPerDay === 'number' && s.maxBookingsPerDay > 0);
   const hasDuration = services.some((s) => s.durationMode === 'range' || s.durationMode === 'ai');
   const hasOnRequestPrice = services.some((s) => s.priceDisplayType === 'on_request');
   const hasFileUpload = services.some((s) => s.fileUploadAllowed);
@@ -228,7 +232,7 @@ Then follow these rules IN ORDER:
   }${
     hasCapacity
       ? `
-6. If create_booking returns CAPACITY_REACHED, that service is fully booked for that day — offer the customer the next available day instead; do not retry the same day.`
+6. If create_booking returns CAPACITY_REACHED, that time cannot be taken — the day is full, the business has no working time left that day, or the slot sits too close to another appointment. Read the message, offer a different time or the next available day, and do NOT retry the same one. Never tell the customer the business is closed.`
       : ''
   }${
     hasDuration
@@ -280,7 +284,12 @@ export const bookingModule: ModuleDefinition = {
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );
-    const servicesSection = buildServicesSection(services);
+    const businessCapacity = !!(
+      bookingSettings?.maxBookingsPerDay ||
+      bookingSettings?.maxBookedMinutesPerDay ||
+      bookingSettings?.minGapMin
+    );
+    const servicesSection = buildServicesSection(services, businessCapacity);
     // No bookable catalog → the services and hours blocks stay suppressed exactly as
     // before, but a configured service area is still worth stating on its own.
     if (!servicesSection) return areaSection;

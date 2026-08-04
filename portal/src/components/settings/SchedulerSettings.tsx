@@ -23,6 +23,7 @@ import {
   type Weekday,
   type TimeWindow,
   type ServiceAreaEntry,
+  type BookingRules,
   type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
 import {
@@ -206,6 +207,11 @@ export const SchedulerSettings: React.FC = () => {
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
+  const [rules, setRules] = useState<BookingRules>({
+    maxBookingsPerDay: null,
+    maxBookedMinutesPerDay: null,
+    minGapMin: null,
+  });
   const [showPreview, setShowPreview] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
@@ -220,6 +226,11 @@ export const SchedulerSettings: React.FC = () => {
     }
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
+    setRules({
+      maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
+      maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
+      minGapMin: data.bookingRules?.minGapMin ?? null,
+    });
     setHydrated(true);
   }, [data, hydrated]);
 
@@ -260,6 +271,9 @@ export const SchedulerSettings: React.FC = () => {
       availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
       // Always sent, including when empty — [] is how the owner clears their area.
       serviceArea,
+      // Whole object every time: a null clears one rule, an omitted key would leave the
+      // stored value untouched, and this editor shows all three.
+      bookingRules: rules,
     });
   };
 
@@ -487,6 +501,44 @@ export const SchedulerSettings: React.FC = () => {
                   )}
                 </div>
 
+                {/* Booking rules — business-wide ceilings over every service */}
+                <div className="space-y-3 border-t border-edge pt-4">
+                  <h3 className="text-sm font-medium text-text-primary">Booking rules</h3>
+                  <p className="text-xs text-text-muted">
+                    Limits for this bot as a whole, on top of each service's own settings — whichever is stricter wins.
+                    Leave a field empty for no limit.
+                  </p>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <OptionalNumberField
+                      label="Max appointments per day"
+                      hint="Across all services"
+                      value={rules.maxBookingsPerDay}
+                      min={1}
+                      max={100}
+                      onChange={(v) => setRules((r) => ({ ...r, maxBookingsPerDay: v }))}
+                    />
+                    <OptionalNumberField
+                      label="Max booked hours per day"
+                      hint="Total time, not slots"
+                      value={rules.maxBookedMinutesPerDay === null ? null : rules.maxBookedMinutesPerDay / 60}
+                      min={0.25}
+                      max={24}
+                      step={0.25}
+                      onChange={(v) =>
+                        setRules((r) => ({ ...r, maxBookedMinutesPerDay: v === null ? null : Math.round(v * 60) }))
+                      }
+                    />
+                    <OptionalNumberField
+                      label="Minimum gap (min)"
+                      hint="Free time around each appointment"
+                      value={rules.minGapMin}
+                      min={0}
+                      max={480}
+                      onChange={(v) => setRules((r) => ({ ...r, minGapMin: v }))}
+                    />
+                  </div>
+                </div>
+
                 {/* Service area — where the business will travel */}
                 <ServiceAreaField
                   value={serviceArea}
@@ -698,6 +750,50 @@ const SlotPreviewDay: React.FC<{ day: string; times: string[] }> = ({ day, times
           </button>
         )}
       </div>
+    </div>
+  );
+};
+
+/**
+ * A number input that may be EMPTY, meaning "no limit".
+ *
+ * Holds the raw string so clearing the box doesn't snap back to a value mid-edit, and only
+ * ever emits a finite number or null — the plain NumberField below does
+ * `parseInt(e.target.value, 10)` unguarded, so clearing it yields NaN, which JSON.stringify
+ * writes as null and the schema then rejects with what looks to the owner like a server error.
+ */
+const OptionalNumberField: React.FC<{
+  label: string;
+  hint?: string;
+  value: number | null;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange: (v: number | null) => void;
+}> = ({ label, hint, value, min, max, step, onChange }) => {
+  const [draft, setDraft] = useState<string>(value === null ? '' : String(value));
+  // Re-sync when the parent value changes from outside (hydration, preset apply).
+  useEffect(() => setDraft(value === null ? '' : String(value)), [value]);
+  return (
+    <div>
+      <Label className="text-text-secondary mb-1 block">{label}</Label>
+      <Input
+        type="number"
+        inputMode="decimal"
+        value={draft}
+        min={min}
+        max={max}
+        step={step}
+        placeholder="No limit"
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraft(next);
+          if (next.trim() === '') return onChange(null);
+          const n = Number(next);
+          if (Number.isFinite(n)) onChange(n);
+        }}
+      />
+      {hint && <p className="mt-1 text-xs text-text-muted">{hint}</p>}
     </div>
   );
 };

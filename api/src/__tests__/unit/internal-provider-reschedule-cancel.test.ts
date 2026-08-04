@@ -10,6 +10,8 @@ const logSave = vi.fn();
 const managerQuery = vi.fn();
 const bookingRefFind = vi.fn();
 const chatSessionFindOne = vi.fn();
+/** No settings row = no business rules, which is every pre-existing test's world. */
+const bookingSettingsFindOne = vi.fn(async () => null as any);
 const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
 
 vi.mock('../../database/data-source', () => ({
@@ -22,6 +24,7 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'BookingLog') return { create: logCreate, save: logSave };
       if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
       if (name === 'ChatSession') return { findOne: chatSessionFindOne };
+      if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
       return {};
     }),
     transaction: (cb: any) => transaction(cb),
@@ -123,6 +126,9 @@ describe('InternalProvider reschedule / cancel / list', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks keeps implementations; re-pin "no business rules" so one test's
+    // mockResolvedValue cannot silently gate the next.
+    bookingSettingsFindOne.mockResolvedValue(null as any);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();

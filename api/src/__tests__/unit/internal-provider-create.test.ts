@@ -832,6 +832,78 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
   });
 
+  // ── Business-level capacity (P7) ────────────────────────────────────────────
+
+  /** Route the gate's own SQL; everything else keeps the default behaviour. */
+  const businessSql = (rows: { n?: number; mins?: number } | 'gap-clash' | null) =>
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('count(*)') && sql.includes('bot_id = $1')) {
+        return rows && rows !== 'gap-clash' ? [{ n: rows.n ?? 0, mins: rows.mins ?? 0 }] : [{ n: 0, mins: 0 }];
+      }
+      if (sql.includes('blocked_range &&') && sql.includes('bot_id = $1')) {
+        return rows === 'gap-clash' ? [{ '?column?': 1 }] : [];
+      }
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'bk-1' }];
+      return [];
+    });
+
+  const book = (idem: string) =>
+    provider.createBooking(ctx, idem, OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+
+  it('refuses when the BUSINESS daily cap is reached, even with no per-service cap', () => {
+    // The whole point: five services capped at 2/day still allowed ten jobs.
+    expect(EVENT_TYPE).not.toHaveProperty('maxBookingsPerDay');
+    bookingSettingsFindOne.mockResolvedValue({ maxBookingsPerDay: 4 } as any);
+    businessSql({ n: 4 });
+    return expect(book('idem-biz-cap')).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+  });
+
+  it('allows the booking while under the business cap', async () => {
+    bookingSettingsFindOne.mockResolvedValue({ maxBookingsPerDay: 4 } as any);
+    businessSql({ n: 3 });
+    expect((await book('idem-biz-under')).success).toBe(true);
+  });
+
+  it('refuses when the day has no working TIME left, though the count is fine', () => {
+    // 400 of 420 minutes used and this service needs 30 more.
+    bookingSettingsFindOne.mockResolvedValue({ maxBookedMinutesPerDay: 420 } as any);
+    businessSql({ n: 1, mins: 400 });
+    return expect(book('idem-biz-mins')).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+  });
+
+  it('refuses a slot that sits too close to another appointment', () => {
+    bookingSettingsFindOne.mockResolvedValue({ minGapMin: 30 } as any);
+    businessSql('gap-clash');
+    return expect(book('idem-biz-gap')).rejects.toMatchObject({ code: 'CAPACITY_REACHED' });
+  });
+
+  it('never counts captured REQUESTS toward capacity', async () => {
+    bookingSettingsFindOne.mockResolvedValue({ maxBookingsPerDay: 1 } as any);
+    businessSql({ n: 0 });
+    await book('idem-biz-requests');
+    const capacitySql = managerQuery.mock.calls.map((c: any[]) => String(c[0])).find((q) => q.includes('count(*)') && q.includes('bot_id = $1'));
+    // A request that has not been accepted must not consume a solo owner's day —
+    // otherwise out-of-hours lead capture starts failing exactly when it matters.
+    expect(capacitySql).toContain("status IN ('pending','confirmed')");
+    expect(capacitySql).not.toContain('request_created');
+  });
+
+  it('measures minutes from the stored span, not the nullable booked_duration_min', async () => {
+    bookingSettingsFindOne.mockResolvedValue({ maxBookedMinutesPerDay: 480 } as any);
+    businessSql({ n: 0, mins: 0 });
+    await book('idem-biz-span');
+    const capacitySql = managerQuery.mock.calls.map((c: any[]) => String(c[0])).find((q) => q.includes('count(*)') && q.includes('bot_id = $1'));
+    expect(capacitySql).toContain('end_utc - start_utc');
+    expect(capacitySql).not.toContain('booked_duration_min');
+  });
+
+  it('does nothing at all when no business rule is configured', async () => {
+    bookingSettingsFindOne.mockResolvedValue({} as any);
+    businessSql({ n: 99, mins: 9999 });
+    expect((await book('idem-biz-none')).success).toBe(true);
+  });
+
   // ── Address / phone capture (P5a) ──────────────────────────────────────────
 
   it('throws ADDRESS_REQUIRED when the service requires an address and none is given', async () => {

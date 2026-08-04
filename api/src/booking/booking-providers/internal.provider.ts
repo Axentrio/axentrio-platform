@@ -290,6 +290,101 @@ async function enforceServiceDayCapacity(
   }
 }
 
+/** Business-level ceilings, normalised so null/negative/0 all read as "unlimited". */
+export interface BusinessRules {
+  maxBookingsPerDay: number;
+  maxBookedMinutesPerDay: number;
+  minGapMin: number;
+}
+
+export async function loadBusinessRules(botId: string): Promise<BusinessRules> {
+  const row = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
+  const n = (v: number | null | undefined): number => (typeof v === 'number' && v > 0 ? v : 0);
+  return {
+    maxBookingsPerDay: n(row?.maxBookingsPerDay),
+    maxBookedMinutesPerDay: n(row?.maxBookedMinutesPerDay),
+    minGapMin: n(row?.minGapMin),
+  };
+}
+
+/**
+ * Business-level capacity, enforced across EVERY service rather than per service.
+ *
+ * Mirrors `enforceServiceDayCapacity` deliberately — same `manager` (so count-then-write is
+ * atomic inside the caller's advisory lock), same half-open local-day window, same
+ * `status IN ('pending','confirmed')` so a captured request never consumes capacity, same
+ * `excludeBookingId` for reschedule/accept. It differs in scoping to `bot_id` rather than
+ * one service, which is the entire point: five services capped at 2/day still allowed ten
+ * jobs in a day.
+ *
+ * The gap check is the race-safe twin of the busy-inflation the slot engine sees. It has to
+ * exist separately because the `EXCLUDE USING gist` constraint only understands overlap of
+ * `blocked_range` — it cannot see a required gap, so two concurrent bookers would otherwise
+ * both pass the pre-lock re-validation and land back to back.
+ */
+async function enforceBusinessCapacity(
+  manager: EntityManager,
+  botId: string,
+  rules: BusinessRules,
+  window: { start: Date; end: Date; blockedStart: Date; blockedEnd: Date },
+  timezone: string,
+  excludeBookingId?: string
+): Promise<void> {
+  const { maxBookingsPerDay, maxBookedMinutesPerDay, minGapMin } = rules;
+  if (!maxBookingsPerDay && !maxBookedMinutesPerDay && !minGapMin) return;
+
+  if (maxBookingsPerDay || maxBookedMinutesPerDay) {
+    const local = DateTime.fromJSDate(window.start).setZone(timezone);
+    const dayStart = local.startOf('day').toUTC().toISO();
+    const nextDay = local.startOf('day').plus({ days: 1 }).toUTC().toISO();
+    const params: unknown[] = [botId, dayStart, nextDay];
+    // Minutes come from the stored span, not booked_duration_min — that column is null for
+    // legacy rows and for requests, and a null would silently bill the job as zero minutes.
+    let sql = `SELECT count(*)::int AS n,
+                      COALESCE(SUM(EXTRACT(EPOCH FROM (end_utc - start_utc)) / 60), 0)::int AS mins
+                 FROM chatbot_bookings
+                WHERE bot_id = $1 AND status IN ('pending','confirmed')
+                  AND start_utc >= $2 AND start_utc < $3`;
+    if (excludeBookingId) {
+      sql += ` AND id <> $4`;
+      params.push(excludeBookingId);
+    }
+    const rows: Array<{ n: number; mins: number }> = await manager.query(sql, params);
+    const used = rows[0] ?? { n: 0, mins: 0 };
+
+    if (maxBookingsPerDay && (used.n ?? 0) >= maxBookingsPerDay) {
+      throw new BookingError('This business is fully booked that day', 'CAPACITY_REACHED', 409);
+    }
+    if (maxBookedMinutesPerDay) {
+      const newMins = Math.max(0, (window.end.getTime() - window.start.getTime()) / 60_000);
+      if ((used.mins ?? 0) + newMins > maxBookedMinutesPerDay) {
+        throw new BookingError('This business has no working time left that day', 'CAPACITY_REACHED', 409);
+      }
+    }
+  }
+
+  if (minGapMin) {
+    const gapMs = minGapMin * 60_000;
+    const params: unknown[] = [
+      botId,
+      new Date(window.blockedStart.getTime() - gapMs).toISOString(),
+      new Date(window.blockedEnd.getTime() + gapMs).toISOString(),
+    ];
+    let sql = `SELECT 1 FROM chatbot_bookings
+                WHERE bot_id = $1 AND status IN ('pending','confirmed')
+                  AND blocked_range && tstzrange($2, $3, '[)')`;
+    if (excludeBookingId) {
+      sql += ` AND id <> $4`;
+      params.push(excludeBookingId);
+    }
+    sql += ' LIMIT 1';
+    const clash: unknown[] = await manager.query(sql, params);
+    if (clash.length) {
+      throw new BookingError('That time is too close to another appointment', 'CAPACITY_REACHED', 409);
+    }
+  }
+}
+
 /** True only when the service is configured for a variable duration with a valid range. */
 function hasValidRange(service: ServiceType): boolean {
   if (service.durationMode !== 'range' && service.durationMode !== 'ai') return false;
@@ -472,6 +567,14 @@ export class InternalProvider implements BookingProvider {
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
     const availDuration = effectiveDurationForAvailability(service, durationMin);
+    // Day-level ceilings are applied HERE, not only at create: the per-service cap has
+    // always been create-time-only, which is why the prompt has to coach the model through
+    // CAPACITY_REACHED. Offering a slot and then refusing it is the behaviour to avoid.
+    const business = await loadBusinessRules(ctx.bot.id);
+    const dayLedger =
+      business.maxBookingsPerDay || business.maxBookedMinutesPerDay
+        ? await this.loadDayLedger(ctx.bot.id, rangeStart, rangeEnd)
+        : undefined;
     const slots = computeSlots({
       rule,
       eventType: { ...service, durationMin: availDuration },
@@ -479,6 +582,8 @@ export class InternalProvider implements BookingProvider {
       rangeEnd,
       now: new Date(),
       busy,
+      business,
+      dayLedger,
     });
     return { slots, timezone: rule.timezone, serviceId: service.id, serviceName: service.name };
   }
@@ -506,6 +611,30 @@ export class InternalProvider implements BookingProvider {
   }
 
   /**
+   * This bot's HELD bookings at their RAW start/end, for business day totals.
+   *
+   * Deliberately not derived from `loadAllBusy`: that merges the owner's external calendar
+   * events and returns buffer-expanded bounds, so counting it would refuse slots because of
+   * a personal appointment and would bill buffers as sold working time.
+   */
+  private async loadDayLedger(
+    botId: string,
+    rangeStartIso: string,
+    rangeEndIso: string,
+    excludeId?: string
+  ): Promise<BusyInterval[]> {
+    const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
+      `SELECT start_utc AS s, end_utc AS e
+         FROM chatbot_bookings
+        WHERE bot_id = $1 AND status IN ('pending','confirmed')
+          AND start_utc >= $2 AND start_utc < $3
+          AND ($4::uuid IS NULL OR id <> $4::uuid)`,
+      [botId, rangeStartIso, rangeEndIso, excludeId ?? null]
+    );
+    return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
+  }
+
+  /**
    * Internal booking busy + (if the bot has Google connected) the owner's
    * Google calendar busy. Fails closed if Google can't be reached, so we never
    * offer a slot that might collide with a real event.
@@ -519,7 +648,19 @@ export class InternalProvider implements BookingProvider {
     excludeId?: string,
     excludeExternalInterval?: { start: Date; end: Date }
   ): Promise<BusyInterval[]> {
-    const internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
+    let internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
+    // Business minimum gap: pad OUR bookings only. Padding the owner's personal calendar
+    // events too would quietly refuse slots around their dentist appointment, which is not
+    // what "minimum time between bookings" asks for. Applied on this side ONLY — the engine
+    // already expands the candidate by its own buffers, and doing both would double it.
+    const { minGapMin } = await loadBusinessRules(ctx.bot.id);
+    if (minGapMin > 0) {
+      const gapMs = minGapMin * 60_000;
+      internal = internal.map((iv) => ({
+        start: new Date(iv.start.getTime() - gapMs),
+        end: new Date(iv.end.getTime() + gapMs),
+      }));
+    }
     let external: BusyInterval[] | null = null;
     try {
       const provider = await resolveCalendarProvider(ctx.bot.id);
@@ -678,6 +819,13 @@ export class InternalProvider implements BookingProvider {
         // P5b: capacity gate — count held bookings for this service on the slot's local
         // day, inside the same lock so the count-then-insert is atomic.
         await enforceServiceDayCapacity(manager, service, start, rule.timezone);
+        await enforceBusinessCapacity(
+          manager,
+          ctx.bot.id,
+          await loadBusinessRules(ctx.bot.id),
+          { start, end, blockedStart, blockedEnd },
+          rule.timezone
+        );
         const rows: Array<{ id: string }> = await manager.query(
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
@@ -1392,6 +1540,16 @@ export class InternalProvider implements BookingProvider {
       updatedRows = returningRows<{ id: string }>(await AppDataSource.transaction(async (manager) => {
         await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
         await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
+        // A request consumes no capacity while it sits as a request — accepting it is the
+        // moment it does, so this is the gate that matters for a captured lead.
+        await enforceBusinessCapacity(
+          manager,
+          ctx.bot.id,
+          await loadBusinessRules(ctx.bot.id),
+          { start, end, blockedStart, blockedEnd },
+          rule.timezone,
+          bookingId
+        );
         return manager.query(
           `UPDATE chatbot_bookings
               SET status='confirmed', calendar_key=$2, blocked_range=tstzrange($3,$4,'[)'), updated_at=now()
@@ -1609,6 +1767,17 @@ export class InternalProvider implements BookingProvider {
         if (oldDay !== newDay) {
           await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
         }
+        // UNCONDITIONALLY, unlike the count above: the same-day shortcut is sound for a
+        // count (moving within a day cannot change it) but wrong for a gap or a minutes
+        // total, both of which a same-day move can violate.
+        await enforceBusinessCapacity(
+          manager,
+          ctx.bot.id,
+          await loadBusinessRules(ctx.bot.id),
+          { start, end, blockedStart, blockedEnd },
+          rule.timezone,
+          bookingId
+        );
         const rows = returningRows<{ sequence: number }>(await manager.query(
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),

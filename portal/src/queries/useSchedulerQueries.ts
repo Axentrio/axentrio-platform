@@ -92,6 +92,17 @@ export interface Service {
 /** Create/update payload — required name+duration, everything else optional (server defaults). */
 export type ServiceInput = Partial<Omit<Service, 'id' | 'sortOrder'>> & { name: string; durationMin: number };
 
+/**
+ * Business-level ceilings. `null` means unlimited on every field — and on the write path
+ * `null` CLEARS a rule while omitting the key leaves it untouched, so always send the whole
+ * object from an editor that shows all three.
+ */
+export interface BookingRules {
+  maxBookingsPerDay: number | null;
+  maxBookedMinutesPerDay: number | null;
+  minGapMin: number | null;
+}
+
 export interface SchedulerConfig {
   provider: 'calcom' | 'internal';
   eventType: SchedulerEventType | null;
@@ -99,6 +110,7 @@ export interface SchedulerConfig {
   availability: SchedulerAvailability | null;
   /** Places the business travels to. Always an array — [] means none configured. */
   serviceArea?: ServiceAreaEntry[];
+  bookingRules?: BookingRules;
 }
 
 export interface UpdateSchedulerPayload {
@@ -107,6 +119,7 @@ export interface UpdateSchedulerPayload {
   availability?: Omit<SchedulerAvailability, 'id'>;
   /** [] is a real value here — it clears the area — so never drop an empty array. */
   serviceArea?: ServiceAreaEntry[];
+  bookingRules?: Partial<BookingRules>;
 }
 
 const schedulerKey = ['scheduler', 'config'] as const;

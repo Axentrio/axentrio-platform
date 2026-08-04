@@ -29,6 +29,18 @@ export const serviceAreaEntry = z.discriminatedUnion('kind', [
 
 export const serviceAreaSchema = z.array(serviceAreaEntry).max(MAX_SERVICE_AREA_ENTRIES);
 
+/**
+ * Business-level capacity ceilings. Every field is optional AND nullable, and the two mean
+ * different things on the write path: `undefined` leaves the stored value alone, `null`
+ * clears it back to unlimited. No `.default()` anywhere — a default here would let a client
+ * that sends the object at all silently reset rules it never mentioned.
+ */
+export const bookingRulesSchema = z.object({
+  maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
+  maxBookedMinutesPerDay: z.number().int().min(15).max(1440).nullable().optional(),
+  minGapMin: z.number().int().min(0).max(480).nullable().optional(),
+});
+
 export const eventTypeInputSchema = z.object({
   name: z.string().min(1).max(255),
   durationMin: z.number().int().min(5).max(1440),
@@ -174,10 +186,12 @@ export const updateSchedulerSchema = z
     // Sent by the same Save as availability; an empty array is a real value (clear the area),
     // which is why presence is tested with `!== undefined` rather than truthiness.
     serviceArea: serviceAreaSchema.optional(),
+    bookingRules: bookingRulesSchema.optional(),
   })
-  .refine((d) => d.provider || d.eventType || d.availability || d.serviceArea !== undefined, {
-    message: 'At least one of provider, eventType, availability, serviceArea is required',
-  });
+  .refine(
+    (d) => d.provider || d.eventType || d.availability || d.serviceArea !== undefined || d.bookingRules,
+    { message: 'At least one of provider, eventType, availability, serviceArea, bookingRules is required' }
+  );
 
 export type UpdateSchedulerInput = z.infer<typeof updateSchedulerSchema>;
 

@@ -56,3 +56,8 @@ skills-lock.json
 # App env files
 api/.env
 portal/.env
+
+# Review packets / handoffs kept locally — contain reviewer test credentials
+docs/Axentrio-App-Review-Submission-Packet.pdf
+docs/meta-google-review-packet.md
+docs/handoff-composable-templates-enablement.md

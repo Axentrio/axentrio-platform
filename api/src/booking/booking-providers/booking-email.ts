@@ -35,6 +35,14 @@ export interface BookingEmailParams {
   attendeeEmail?: string;
   /** Additional recipient (Phase 0: owner gets the invite too). */
   ownerEmail?: string;
+  /**
+   * The FROZEN ICS organizer for this booking (Booking.organizer_email). Null on rows
+   * predating that column, which fall back to the old ownerEmail-then-platform resolution
+   * so their already-sent invite keeps matching.
+   */
+  organizerEmail?: string | null;
+  /** Display name for the organizer — the business, not the platform. */
+  organizerName?: string | null;
   /** Self-service manage link (reschedule/cancel). Omitted on cancellation. */
   manageUrl?: string;
   /** Effective length, so the customer knows how long to set aside. */
@@ -73,17 +81,53 @@ export function parseAddress(addr: string): { email: string; name?: string } {
   return { email: addr.trim() };
 }
 
+/** Stable across retries of the SAME invite; a reconciler re-claim must not double-send. */
+const inviteIdempotencyKey = (p: BookingEmailParams, audience: string): string =>
+  `booking:${p.uid}:${p.sequence}:${p.method}:${audience}`;
+
+/**
+ * Tell the owner about a booking that has no customer to invite. Plain email, no ICS —
+ * an invite with no ATTENDEE is not a meaningful invite, and the owner already has the
+ * appointment on their calendar via the mirror.
+ */
+async function notifyOwnerWithoutInvite(params: BookingEmailParams): Promise<void> {
+  const cancelled = params.method === 'CANCEL';
+  const who = params.attendeeName?.trim() ? esc(params.attendeeName.trim()) : 'A customer';
+  const subject = `${cancelled ? 'Cancelled' : 'New booking'}: ${params.summary}`;
+  const body =
+    `<p>${who} ${cancelled ? 'cancelled their appointment' : 'booked an appointment'}.</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
+    `<p>They booked through a messaging channel and gave no email address, so no invite was sent to them.</p>`;
+  try {
+    await getEmailService().send({
+      to: [params.ownerEmail as string],
+      subject,
+      body,
+      idempotencyKey: inviteIdempotencyKey(params, 'owner-only'),
+    });
+  } catch (err) {
+    logger.warn('[Booking] owner notification failed (non-fatal)', {
+      uid: params.uid,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
-  // No customer email (e.g. WhatsApp/Messenger booking) → skip the invite email.
-  // The customer is confirmed in-channel and the owner sees it on their calendar.
+  // No customer email (WhatsApp/Messenger/Instagram bookings). There is nobody to invite,
+  // but the OWNER still needs telling — this used to return here and send nothing at all,
+  // so a channel booking that was later cancelled reached them only as an event quietly
+  // vanishing from their calendar.
   if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
+    if (params.ownerEmail?.trim()) await notifyOwnerWithoutInvite(params);
     return;
   }
   // The organizer source may be a full RFC5322 "Name <email>" string (e.g.
   // EMAIL_FROM_ADDRESS). The ICS ORGANIZER must be a BARE email in the mailto:
   // (the display name goes in CN) — otherwise the mailto is malformed and Gmail
   // shows "Unable to load event" for the invite.
-  const organizer = parseAddress(params.ownerEmail ?? config.email.fromAddress);
+  // Frozen first; the old resolution only for rows that predate the column.
+  const organizer = parseAddress(params.organizerEmail || params.ownerEmail || config.email.fromAddress);
   const ics = buildIcs({
     uid: params.uid,
     sequence: params.sequence,
@@ -94,7 +138,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     description: params.description,
     location: params.location,
     organizerEmail: organizer.email,
-    organizerName: organizer.name,
+    organizerName: params.organizerName || organizer.name,
     attendeeEmail: params.attendeeEmail,
     attendeeName: params.attendeeName,
   });
@@ -130,6 +174,14 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
       to,
       subject,
       body,
+      // Replies reach the business rather than the platform's unattended from-address.
+      // The ORGANIZER is the platform (it must match the envelope sender or Gmail and
+      // Outlook refuse to make the invite actionable), so reply-to is what carries the
+      // business's own address.
+      ...(params.ownerEmail ? { replyTo: params.ownerEmail } : {}),
+      // The reconciler re-claims rows after a crash; without a key a retry re-sends the
+      // whole invite to the customer.
+      idempotencyKey: inviteIdempotencyKey(params, 'invite'),
       attachments: [
         {
           filename: cancelled ? 'cancel.ics' : 'invite.ics',

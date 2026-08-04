@@ -738,9 +738,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { 'q-1': '  Birthday  ', 'q-2': 7, 'q-unknown': 'dropped', 'q-3-empty': '   ' }
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const params = insert![1] as any[];
-    // createRequest column tail: …, intake_answers, customer_address, customer_phone
-    const intakeParam = params[params.length - 5];
+    const intakeParam = insertParam(insert as any, 'intake_answers') as string;
     const parsed = JSON.parse(intakeParam);
     expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
   });
@@ -752,8 +750,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { 'whatever': 'x' }
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const params = insert![1] as any[];
-    expect(params[params.length - 5]).toBeNull(); // intake_answers (before address, phone)
+    expect(insertParam(insert as any, 'intake_answers')).toBeNull();
   });
 
   // ── Owner notification email (P2b) ─────────────────────────────────────────
@@ -1002,9 +999,8 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { customerAddress: '  221B Baker Street  ', customerPhone: '+44 20 7946 0000' }
     );
     const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
-    const params = insert![1] as any[];
-    expect(params[params.length - 4]).toBe('221B Baker Street'); // customer_address
-    expect(params[params.length - 3]).toBe('+44 20 7946 0000'); // customer_phone
+    expect(insertParam(insert as any, 'customer_address')).toBe('221B Baker Street');
+    expect(insertParam(insert as any, 'customer_phone')).toBe('+44 20 7946 0000');
   });
 });
 

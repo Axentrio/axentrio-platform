@@ -132,6 +132,21 @@ export class Booking {
   @Column({ type: 'varchar', length: 255, name: 'ics_uid' })
   icsUid!: string;
 
+  /**
+   * The ICS ORGANIZER, frozen at creation — and it MUST stay frozen.
+   *
+   * It used to be resolved fresh from `ai.supportEmail` on every send, so a tenant editing
+   * or clearing that setting silently changed the organizer of every in-flight booking.
+   * Outlook and Exchange treat an update from a different organizer as coming from a
+   * stranger: the reschedule duplicates instead of moving, and — the part that actually
+   * hurts — the CANCEL never removes the customer's event.
+   *
+   * Null on rows created before this column existed; those fall back to the old
+   * resolution so their update/cancel chain keeps matching the invite already sent.
+   */
+  @Column({ type: 'varchar', length: 320, name: 'organizer_email', nullable: true })
+  organizerEmail?: string | null;
+
   @Column({ type: 'int', default: 0 })
   sequence!: number;
 

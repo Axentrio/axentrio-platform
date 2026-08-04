@@ -18,6 +18,7 @@ import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../..
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
 import { logger } from '../../utils/logger';
+import { config } from '../../config/environment';
 import {
   BookingError,
   BookingContext,
@@ -384,6 +385,16 @@ async function enforceBusinessCapacity(
     }
   }
 }
+
+/**
+ * The ICS organizer stamped on every NEW booking.
+ *
+ * The platform address, not the tenant's — deliberately. Resend only sends from verified
+ * domains, so the envelope sender is always this address; an ORGANIZER that disagreed with
+ * it made Gmail and Outlook refuse to render RSVP controls. The business's identity rides
+ * along as the organizer's display name, and its real address as the reply-to.
+ */
+const FROZEN_ORGANIZER = config.email.fromAddress;
 
 /** True only when the service is configured for a variable duration with a valid range. */
 function hasValidRange(service: ServiceType): boolean {
@@ -834,8 +845,8 @@ export class InternalProvider implements BookingProvider {
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
-              ai_summary)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21)
+              ai_summary, organizer_email)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -859,6 +870,7 @@ export class InternalProvider implements BookingProvider {
             uploadedFiles ? JSON.stringify(uploadedFiles) : null,
             ctx.session?.channel ?? null,
             extras?.aiSummary ?? null,
+            FROZEN_ORGANIZER,
           ]
         );
         return rows[0].id;
@@ -941,6 +953,8 @@ export class InternalProvider implements BookingProvider {
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: FROZEN_ORGANIZER,
+      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
@@ -1000,8 +1014,9 @@ export class InternalProvider implements BookingProvider {
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
-            source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb)
+            source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files,
+            organizer_email)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -1023,6 +1038,7 @@ export class InternalProvider implements BookingProvider {
           contact.phone,
           bookedDurationMin ?? null,
           uploadedFiles ? JSON.stringify(uploadedFiles) : null,
+          FROZEN_ORGANIZER,
         ]
       );
       bookingId = rows[0].id;
@@ -1619,6 +1635,8 @@ export class InternalProvider implements BookingProvider {
       attendeeName: confirmed.attendeeName ?? '',
       attendeeEmail: confirmed.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: confirmed.organizerEmail,
+      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
@@ -1842,6 +1860,8 @@ export class InternalProvider implements BookingProvider {
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: booking.organizerEmail,
+      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
       preparationInstructions: service.preparationInstructions,
@@ -1921,6 +1941,8 @@ export class InternalProvider implements BookingProvider {
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
+      organizerEmail: booking.organizerEmail,
+      organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
     });
 
     // Drop pending reminders (they'd no-op via sequence/status anyway).

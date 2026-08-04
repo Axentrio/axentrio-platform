@@ -103,6 +103,37 @@ describe('placesFromAddress', () => {
     const out = placesFromAddress('Gentstraat 4');
     expect(out.municipalities.map(municipalityLabel)).not.toContain('Gent');
   });
+
+  it('does not read a 4-digit HOUSE NUMBER as a postcode', () => {
+    // "Chaussée de Waterloo 1200" is an Uccle address; 1200 is also the postcode of
+    // Woluwe. Trusting the digits produced a confident, WRONG answer — the one way this
+    // parser could manufacture a false "outside" from a perfectly good address.
+    expect(placesFromAddress('Chaussée de Waterloo 1200, Uccle').via).toBeNull();
+    expect(placesFromAddress('appartement 1000, Molenstraat 4, Deinze').via).toBeNull();
+  });
+
+  it('uses the town name to resolve a postcode shared by several municipalities', () => {
+    // 1000 covers Brussel, Elsene and Sint-Joost-ten-Node; the name settles it.
+    const out = placesFromAddress('Grasmarkt 10, 1000 Brussel');
+    expect(out.via).toBe('postcode');
+    expect(out.municipalities.map(municipalityLabel)).toEqual(['Brussel / Bruxelles']);
+  });
+
+  it('refuses a lone name signal that points at more than one municipality', () => {
+    // A street named after another town: "Chaussée de Bruxelles, Waterloo".
+    expect(placesFromAddress('Chaussée de Bruxelles 340, Waterloo').via).toBeNull();
+  });
+
+  it('never reads a FOREIGN address as a Belgian place', () => {
+    // NL/FR/DE postcodes share the 1000-9999 band, so "1012 Amsterdam" looked like
+    // Brussels and "Lille, France" like the Antwerp-province municipality of Lille —
+    // letting through exactly the cross-border customers this feature exists to catch.
+    expect(placesFromAddress('Kalverstraat 1, 1012 Amsterdam, Nederland').via).toBeNull();
+    expect(placesFromAddress('rue Nationale 12, Lille, France').via).toBeNull();
+    expect(placesFromAddress('Bergen op Zoom, Netherlands').via).toBeNull();
+    // …while Belgium's own name is not mistaken for a foreign one.
+    expect(placesFromAddress('Grote Baan 220, 9310 Herdersem, België').via).toBe('postcode');
+  });
 });
 
 describe('matchServiceArea', () => {
@@ -123,6 +154,8 @@ describe('matchServiceArea', () => {
   it('is unknown when no area is configured — the pre-feature behaviour', () => {
     expect(matchServiceArea('Rue des Guillemins 12, 4000 Liège', [])).toBe('unknown');
     expect(matchServiceArea('Rue des Guillemins 12, 4000 Liège', null)).toBe('unknown');
+    // Typed-only is "nothing to compare against", not a configured area.
+    expect(matchServiceArea('Rue des Guillemins 12, 4000 Liège', [manual('overal in Vlaanderen')])).toBe('unknown');
   });
 
   it('is unknown when there is no address, or one it cannot place', () => {
@@ -131,31 +164,19 @@ describe('matchServiceArea', () => {
     expect(matchServiceArea('the house behind the church', [province(OOST)])).toBe('unknown');
   });
 
-  it('reads a manual entry the parser understands as a real rule', () => {
-    expect(matchServiceArea('9100 Sint-Niklaas', [manual('Sint-Niklaas')])).toBe('inside');
-    expect(matchServiceArea('4000 Liège', [manual('Sint-Niklaas')])).toBe('outside');
+  it('IGNORES typed entries — they are notes for the assistant, not rules', () => {
+    // Reading them was wrong in BOTH directions: "30 km rond Aalst" names a town, so
+    // resolving it produced the rule "Aalst, exactly" (narrower than the owner asked),
+    // while an entry nobody could parse switched enforcement off for every chip beside it.
+    expect(matchServiceArea('9100 Sint-Niklaas', [manual('Sint-Niklaas')])).toBe('unknown');
+    expect(matchServiceArea('4000 Liege', [manual('30 km rond Aalst')])).toBe('unknown');
+    expect(matchServiceArea('9300 Aalst', [manual('near Aalst')])).toBe('unknown');
   });
 
-  it('treats a pasted street address as coverage of the place it names', () => {
-    // The third chip in the design mock. It should ADD Aalst, not blur the whole area.
-    const area = [municipality(nisOf('Sint-Niklaas'), 'Sint-Niklaas'), manual('Grote Baan 220, 9310 Herdersem')];
+  it('a typed entry never disables the picked places beside it', () => {
+    const area = [province(OOST), manual('30 km rond Aalst'), manual('n/a')];
     expect(matchServiceArea('9310 Herdersem', area)).toBe('inside');
-    expect(matchServiceArea('4000 Liège', area)).toBe('outside');
-  });
-
-  it('never NARROWS a radius entry to the town it names', () => {
-    // "30 km rond Aalst" contains "Aalst", but reducing it to Aalst-only would refuse
-    // the neighbouring customers the owner explicitly said yes to.
-    expect(matchServiceArea('9300 Aalst', [manual('30 km rond Aalst')])).toBe('unknown');
-    expect(matchServiceArea('9100 Sint-Niklaas', [manual('30 km rond Aalst')])).toBe('unknown');
-    expect(matchServiceArea('4000 Liège', [manual('within 25 km of Ghent')])).toBe('unknown');
-  });
-
-  it('FAILS OPEN when any listed entry cannot be understood', () => {
-    // "30 km around Aalst" is a note, not a rule — so a non-match must not become a refusal.
-    expect(matchServiceArea('4000 Liège', [province(OOST), manual('30 km rond Aalst')])).toBe('unknown');
-    // …but a genuine match still wins outright.
-    expect(matchServiceArea('9310 Herdersem', [province(OOST), manual('30 km rond Aalst')])).toBe('inside');
+    expect(matchServiceArea('4000 Liege', area)).toBe('outside');
   });
 
   it('fails open on an id the geo table no longer knows', () => {

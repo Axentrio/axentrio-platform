@@ -418,7 +418,14 @@ export const SchedulerSettings: React.FC = () => {
                 </div>
 
                 {/* Service area — where the business will travel */}
-                <ServiceAreaField value={serviceArea} onChange={setServiceArea} />
+                <ServiceAreaField
+                  value={serviceArea}
+                  onChange={setServiceArea}
+                  // The area is only enforceable against services that collect an address.
+                  hasAddressService={(data?.services ?? []).some(
+                    (svc) => svc.isActive && svc.customerAddressRequired,
+                  )}
+                />
 
                 {/* Date overrides — holidays / closures / one-off hours */}
                 <div className="space-y-3 border-t border-edge pt-4">

@@ -143,12 +143,14 @@ export function formatHoursForPlaceholder(rule: AvailabilityRule | null): string
 }
 
 /**
- * The SERVICE AREA prompt block — where this business is willing to travel.
+ * The SERVICE AREA prompt block — where this business works.
  *
- * Two jobs. It lets the bot answer "do you come to X?" from configured fact instead of
- * guessing, and it tells the bot what to DO with `OUT_OF_SERVICE_AREA`: capture the job as
- * a request rather than either confirming it or turning the customer away. The owner may
- * still want a job just outside their usual area — that is their call, not the bot's.
+ * The tool-error rule alone is not enough, and an earlier draft proved it: telling the bot
+ * only that "somewhere not listed is not covered" meant a customer who ASKED ("do you come
+ * to Bruges?") got a polite no and left. The conversation ended before any tool ran, so the
+ * capture path — the whole point — was unreachable in exactly the exchange it was written
+ * for. Capturing the lead is therefore stated as the primary behaviour, and the tool error
+ * is just the second route to the same place.
  *
  * Null when no area is configured, so a bot without one gains no prompt text at all.
  */
@@ -156,9 +158,10 @@ export function buildServiceAreaSection(entries: ServiceAreaEntry[]): string | n
   const area = describeServiceArea(Array.isArray(entries) ? entries : []);
   if (!area) return null;
   return `\n## SERVICE AREA
-This business travels to: ${sanitizeForLine(area)}.
-State this when a customer asks whether you cover where they are, and never widen it — somewhere not listed is not covered.
-If create_booking returns OUT_OF_SERVICE_AREA, that address is outside the area. Do NOT retry create_booking, and do NOT tell the customer it is impossible: capture the job with request_appointment and say plainly that it is a request the business owner will review, since they may still be willing to travel. Never present it as a confirmed appointment.`;
+This business serves: ${sanitizeForLine(area)}.
+Answer questions about where you work from that list, and never widen it.
+If a customer is somewhere else, do NOT just turn them away and do NOT promise them a visit. Tell them it is outside the usual area, then still take their details and capture the job with request_appointment, saying plainly that it is a request the business owner will review and come back on. Ending the conversation at "no" is the one outcome to avoid — whether a job further out is worth doing is the owner's decision, not yours.
+If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job with request_appointment exactly as above, and never present it as a confirmed appointment.`;
 }
 
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */

@@ -78,7 +78,8 @@ export function provinceLabel(p: GeoProvince): string {
 const provinceByCodeIndex = new Map(PROVINCES.map((p) => [p.code, p]));
 const municipalityByNisIndex = new Map(MUNICIPALITIES.map((m) => [m.nis, m]));
 
-/** postcode → municipalities. Four postcodes span more than one (1000, 1040, 1050, 1804). */
+/** postcode → municipalities. Four span more than one: 1000 (three — Brussel, Elsene,
+ *  Sint-Joost-ten-Node), 1040, 1050 and 1348. */
 const byPostcode = new Map<string, GeoMunicipality[]>();
 for (const m of MUNICIPALITIES) {
   for (const pc of m.pc) {
@@ -194,15 +195,46 @@ export interface AddressPlaces {
 }
 
 /**
+ * Countries whose addresses must never be read as Belgian ones.
+ *
+ * The Netherlands, France and Germany all use four-digit or four-digit-prefixed postcodes in
+ * the same 1000–9999 band, so "1012 Amsterdam" reads as Brussels and "Lille, France" as the
+ * Antwerp-province municipality of Lille. Cross-border customers are exactly who a service
+ * area exists to exclude, so naming a foreign country makes the address unplaceable rather
+ * than confidently wrong. Belgium's own names are listed so they are never mistaken for one.
+ */
+const BELGIUM_NAMES = new Set(['belgie', 'belgium', 'belgique', 'belgien']);
+const FOREIGN_COUNTRY = new Set([
+  'nederland', 'netherlands', 'holland', 'nl',
+  'france', 'frankrijk', 'frankreich', 'fr',
+  'deutschland', 'germany', 'duitsland', 'allemagne',
+  'luxembourg', 'luxemburg', 'letzebuerg',
+  'uk', 'england', 'scotland', 'wales', 'ireland', 'ierland',
+  'spain', 'spanje', 'espagne', 'italy', 'italie', 'italia',
+  'portugal', 'poland', 'polen', 'pologne', 'switzerland', 'zwitserland', 'suisse',
+  'austria', 'oostenrijk', 'autriche', 'denmark', 'denemarken',
+]);
+
+/**
  * Resolve a free-text address to Belgian municipalities.
  *
- * Postcode first: a four-digit token is the one reliable landmark in a Belgian address, and
- * it is what the mocked suggestions carry. Only if none is present do we fall back to
- * reading town names out of the word sequence. Nothing found → `via: null`, which callers
- * must treat as "unknown", never as "outside".
+ * Both signals are read and then CROSS-CHECKED, because neither is trustworthy alone:
+ *
+ *  - A four-digit token is usually the postcode, but "Chaussée de Waterloo 1200" is a house
+ *    number that happens to be a valid postcode (Woluwe) — trusting it blind produced a
+ *    confident, WRONG answer for an Uccle address.
+ *  - A town name can appear inside a street name: "Chaussée de Bruxelles, Waterloo" names
+ *    two municipalities and only one of them is where the customer lives.
+ *
+ * So: when the two signals disagree, or when the name signal alone points at more than one
+ * municipality, the address is AMBIGUOUS and resolves to `via: null`. Callers must treat
+ * that as "unknown" — never as "outside". Saying nothing beats saying the wrong thing.
  */
 export function placesFromAddress(address: string): AddressPlaces {
   const words = normalizeWords(address);
+  if (words.some((w) => FOREIGN_COUNTRY.has(w) && !BELGIUM_NAMES.has(w))) {
+    return { municipalities: [], via: null };
+  }
 
   const byPc: GeoMunicipality[] = [];
   for (const w of words) {
@@ -210,7 +242,6 @@ export function placesFromAddress(address: string): AddressPlaces {
     if (!/^\d{4}$/.test(w)) continue;
     for (const m of municipalitiesByPostcode(w)) if (!byPc.includes(m)) byPc.push(m);
   }
-  if (byPc.length) return { municipalities: byPc, via: 'postcode' };
 
   const byNameHits: GeoMunicipality[] = [];
   for (let size = Math.min(maxNameWords, words.length); size >= 1; size--) {
@@ -222,7 +253,17 @@ export function placesFromAddress(address: string): AddressPlaces {
     // Longest match wins: once "sint niklaas" matched, don't also read a stray "niklaas".
     if (byNameHits.length) break;
   }
-  if (byNameHits.length) return { municipalities: byNameHits, via: 'name' };
+
+  if (byPc.length && byNameHits.length) {
+    // Agreement narrows the answer (a shared postcode like 1000 is resolved by the town
+    // name); disagreement means one of the two is a house number or a street name.
+    const agreed = byPc.filter((m) => byNameHits.includes(m));
+    return agreed.length ? { municipalities: agreed, via: 'postcode' } : { municipalities: [], via: null };
+  }
+  if (byPc.length) return { municipalities: byPc, via: 'postcode' };
+  // A lone name signal pointing at several different municipalities is a street name
+  // colliding with a town, not a location.
+  if (byNameHits.length === 1) return { municipalities: byNameHits, via: 'name' };
 
   return { municipalities: [], via: null };
 }

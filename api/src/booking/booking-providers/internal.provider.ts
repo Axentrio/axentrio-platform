@@ -14,7 +14,7 @@ import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
-import { describeServiceArea, matchServiceArea } from '../../contracts/service-area';
+import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
 import { logger } from '../../utils/logger';
@@ -204,23 +204,53 @@ function assertRequiredIntake(service: ServiceType, normalized: Record<string, s
 }
 
 /**
- * P6 — refuse to AUTO-CONFIRM a job the business has said it will not travel to.
+ * P6 — don't AUTO-CONFIRM a job the business may not be willing to travel to.
  *
- * Only `outside` blocks. No area configured, no address, an address we cannot place, or an
- * area entry we cannot reason about all resolve to `unknown` and pass straight through —
- * see `contracts/service-area.ts` for why the bias runs that way. Recoverable (400): the
- * agent is told to capture the job with `request_appointment` so the owner can decide
- * whether to make the trip, rather than the customer being turned away outright.
+ * Scope is two explicit owner decisions, both required: an area is configured, AND the
+ * service asks for the customer's address (which is what makes it a travel job at all — an
+ * online consultation is never gated).
+ *
+ * Within that scope this is deliberately NOT fail-open. The tempting rule is "only block a
+ * confident `outside`", but the two errors are nowhere near equal: a wrong `outside` costs
+ * the owner one glance at a request they can accept with a click, while a wrong `inside`
+ * costs them a confirmed row, a calendar event, an invite the customer is now holding,
+ * reminders — and then either a drive or a cancellation on someone who has a confirmation
+ * email. So an address we cannot place is captured as a request too. Nobody is turned away
+ * either way; the only question is whether the owner gets to decide.
+ *
+ * Recoverable (400): the agent captures the job with `request_appointment`.
  */
-async function assertInServiceArea(ctx: BookingContext, address: string | null): Promise<void> {
+async function assertInServiceArea(
+  ctx: BookingContext,
+  service: ServiceType,
+  address: string | null
+): Promise<void> {
+  if (!service.customerAddressRequired) return;
   const row = await AppDataSource.getRepository(BookingSettings).findOne({
     where: { botId: ctx.bot.id },
   });
   const entries = Array.isArray(row?.serviceArea) ? row.serviceArea : [];
-  if (!entries.length) return;
-  if (matchServiceArea(address, entries) !== 'outside') return;
+  // Typed notes are shown to the assistant but are not rules, so an area made only of them
+  // has nothing to enforce. Without this check it would hold back EVERY booking — the same
+  // footgun as before, wearing a different hat.
+  if (!entries.some(isEnforceableEntry)) return;
+
+  const verdict = matchServiceArea(address, entries);
+  if (verdict === 'inside') return;
+
+  // The only place this gate is observable. Without it there is no way to answer
+  // "has it ever fired in production", which is the first thing anyone will ask.
+  logger.info('[Booking] out of service area — capturing as a request', {
+    tenantId: ctx.tenant.id,
+    botId: ctx.bot.id,
+    serviceId: service.id,
+    verdict,
+    hasAddress: !!address,
+  });
   throw new BookingError(
-    `That address is outside the area this business serves (${describeServiceArea(entries)}).`,
+    verdict === 'outside'
+      ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
+      : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed.`,
     'OUT_OF_SERVICE_AREA',
     400
   );
@@ -608,7 +638,7 @@ export class InternalProvider implements BookingProvider {
     // (the agent captures it with request_appointment instead) and deliberately AUTO-ONLY —
     // a request is exactly the right outcome for an out-of-area job, so createRequest never
     // runs this gate.
-    await assertInServiceArea(ctx, contact.address);
+    await assertInServiceArea(ctx, service, contact.address);
     // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);

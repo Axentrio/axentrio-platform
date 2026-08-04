@@ -748,6 +748,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
 
   it('refuses to AUTO-CONFIRM an address outside the configured service area', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
     await expect(
       provider.createBooking(
@@ -761,6 +762,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
 
   it('books normally when the address falls inside the area', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
     const res = await provider.createBooking(
       ctx, 'idem-area-in', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
@@ -769,22 +771,53 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
   });
 
-  it('books when the area cannot place the address — the gate fails OPEN', async () => {
+  it('CAPTURES rather than auto-confirms when the address cannot be placed', async () => {
+    // Deliberately not fail-open here. A wrong "outside" costs the owner one glance at a
+    // request they can accept; a wrong "inside" costs a confirmed calendar event, an
+    // invite the customer is holding, and either a long drive or a cancellation.
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    await expect(
+      provider.createBooking(
+        ctx, 'idem-area-unknown', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+        { customerAddress: 'the house behind the church' }
+      )
+    ).rejects.toMatchObject({ code: 'OUT_OF_SERVICE_AREA' });
+  });
+
+  it('never gates a service that does not ask for an address', async () => {
+    // An online consultation involves no travel, so the area is irrelevant to it.
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: false });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: false }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
     const res = await provider.createBooking(
-      ctx, 'idem-area-unknown', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
-      { customerAddress: 'the house behind the church' }
+      ctx, 'idem-area-online', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Rue des Guillemins 12, 4000 Liege' }
     );
     expect(res.success).toBe(true);
   });
 
   it('ignores the gate entirely when no service area is configured', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: [] } as any);
     const res = await provider.createBooking(
       ctx, 'idem-area-none', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
-      { customerAddress: 'Rue des Guillemins 12, 4000 Liège' }
+      { customerAddress: 'Rue des Guillemins 12, 4000 Liege' }
+    );
+    expect(res.success).toBe(true);
+  });
+
+  it('ignores an area made only of typed notes', async () => {
+    eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, customerAddressRequired: true });
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    bookingSettingsFindOne.mockResolvedValue({
+      serviceArea: [{ kind: 'manual', label: '30 km rond Aalst' }],
+    } as any);
+    const res = await provider.createBooking(
+      ctx, 'idem-area-manual', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Rue des Guillemins 12, 4000 Liege' }
     );
     expect(res.success).toBe(true);
   });

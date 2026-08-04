@@ -39,6 +39,7 @@ export const V1_COPILOT_TOOL_NAMES = [
   'getRecentChatSessionStats',
   'getKnownGapTopics',
   'getSetupProgress',
+  'listBots',
 ] as const;
 
 export type V1CopilotToolName = (typeof V1_COPILOT_TOOL_NAMES)[number];

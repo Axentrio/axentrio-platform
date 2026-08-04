@@ -18,7 +18,19 @@ import type { CopilotTool, CopilotToolContext } from './types';
 
 export interface BotReadinessStatusResult {
   aiEnabled: boolean;
-  hasWebhook: boolean;
+  /**
+   * TRUE means this tenant is routed down the LEGACY n8n path instead of the
+   * built-in agent — an unusual, opt-in state, not a setup step.
+   *
+   * Was `hasWebhook`, described as "n8n outbound configured". That framing dates
+   * from when replies really did leave through a webhook; n8n is retired and the
+   * agent answers in-process now. The old name read as missing configuration, and
+   * the Copilot told a live tenant "to allow your bot to reply, you will need to
+   * set up a webhook" — advice that would have DIVERTED their working bot to the
+   * dead workflow (turn-coalescer.ts routes custom-webhook tenants away from
+   * runTurn). FALSE is the healthy, normal state.
+   */
+  usesLegacyWebhookRouting: boolean;
   brandVoiceConfigured: boolean;
   embedSnippetReady: boolean;
 }
@@ -29,7 +41,7 @@ export const getBotReadinessStatus: CopilotTool<
 > = {
   name: 'getBotReadinessStatus',
   description:
-    'Return four booleans describing whether the tenant\'s anchor bot is ready: aiEnabled, hasWebhook (n8n outbound configured), brandVoiceConfigured, embedSnippetReady. No free-text fields — booleans only.',
+    "Return four booleans about the tenant's ANCHOR bot only (a tenant may have several bots; this says nothing about the others, and nothing about which bot a channel uses): aiEnabled, usesLegacyWebhookRouting, brandVoiceConfigured, embedSnippetReady. usesLegacyWebhookRouting=false is NORMAL and healthy — it does NOT mean anything is missing, and a webhook is NEVER required for the bot to reply; true means the tenant opted into the retired n8n path instead of the built-in agent. None of these four explain why a bot is not replying: for that, check plan/credits, whether AI is enabled, or hand off to a person. No free-text fields — booleans only.",
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<BotReadinessStatusResult> {
@@ -48,8 +60,8 @@ export const getBotReadinessStatus: CopilotTool<
       throw new Error(`getBotReadinessStatus: tenant ${ctx.tenantId} not found`);
     }
 
-    // hasWebhook is a tenant-level fact, independent of bot anchor state.
-    const hasWebhook =
+    // Tenant-level fact, independent of bot anchor state.
+    const usesLegacyWebhookRouting =
       typeof tenant.webhookUrl === 'string' && tenant.webhookUrl.trim().length > 0;
 
     if (!bot) {
@@ -58,7 +70,7 @@ export const getBotReadinessStatus: CopilotTool<
       // sees their webhook config is fine.
       return {
         aiEnabled: false,
-        hasWebhook,
+        usesLegacyWebhookRouting,
         brandVoiceConfigured: false,
         embedSnippetReady: false,
       };
@@ -69,7 +81,7 @@ export const getBotReadinessStatus: CopilotTool<
 
     return {
       aiEnabled: ai?.enabled === true,
-      hasWebhook,
+      usesLegacyWebhookRouting,
       // Tone is now template-owned (admin-controlled) and always resolves to at
       // least the platform default, so readiness only turns on the tenant-owned
       // chatbot name.

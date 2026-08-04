@@ -43,6 +43,7 @@ import {
   getLeadStats,
   getRecentChatSessionStats,
   getKnownGapTopics,
+  listBots,
 } from '../../copilot/tools';
 import {
   TENANT_A_SENTINELS,
@@ -206,7 +207,7 @@ describe('getBotReadinessStatus', () => {
     });
     expect(result).toEqual({
       aiEnabled: true,
-      hasWebhook: true,
+      usesLegacyWebhookRouting: true,
       brandVoiceConfigured: true,
       embedSnippetReady: true,
     });
@@ -237,7 +238,7 @@ describe('getBotReadinessStatus', () => {
     });
     expect(result).toEqual({
       aiEnabled: false,
-      hasWebhook: true,
+      usesLegacyWebhookRouting: true,
       brandVoiceConfigured: false,
       embedSnippetReady: false,
     });
@@ -735,6 +736,84 @@ describe('getSetupProgress', () => {
     expect(json).not.toContain('BE0999888777');
     expect(json).not.toContain('Secret Holdings');
     expect(json).not.toContain('Geheimstraat');
+  });
+
+  it('never leaks tenant B sentinels in the response JSON', async () => {
+    assertNoForeignSentinels(await call(), TENANT_B_SENTINELS);
+  });
+});
+
+describe('listBots', () => {
+  let a: SeededTenant;
+  beforeEach(async () => {
+    a = await seedTenantWithSentinels(TENANT_A_SENTINELS);
+    await seedTenantWithSentinels(TENANT_B_SENTINELS);
+  });
+
+  const call = () =>
+    listBots.execute({}, { tenantId: a.tenantId, userId: a.userId, manager: a.manager });
+
+  /** A second ACTIVE bot, optionally sharing the anchor's name. */
+  const addBot = async (name: string, personaName?: string) => {
+    const repo = AppDataSource.getRepository(Bot);
+    const bot = await repo.save(
+      repo.create({
+        tenantId: a.tenantId,
+        name,
+        status: 'active',
+        isDefault: false,
+        publicKey: 'bk_' + name.replace(/\W/g, '') + Math.random().toString(36).slice(2, 8),
+        settings: { ai: { enabled: true, brandVoice: { name: personaName ?? name } } } as BotSettings,
+      }),
+    );
+    return bot.id;
+  };
+
+  it('counts EVERY active bot, not just the anchor', async () => {
+    // getBotReadinessStatus sees only the anchor; answering "how many bots do I
+    // have" from it told a tenant with three bots that they had one.
+    await addBot('Second bot');
+    const { bots } = await call();
+    expect(bots).toHaveLength(2);
+  });
+
+  it('flags same-named bots, which is what makes "edit the X bot" ambiguous', async () => {
+    await addBot(TENANT_A_SENTINELS.botName);
+    const result = await call();
+    expect(result.hasDuplicateNames).toBe(true);
+    expect(result.bots.filter((b) => b.isDefault)).toHaveLength(1);
+  });
+
+  it('reports no duplicates when names are distinct', async () => {
+    await addBot('Quite different');
+    expect((await call()).hasDuplicateNames).toBe(false);
+  });
+
+  it('routes a channel with no explicit bot to the DEFAULT bot', async () => {
+    // botId null is not "unrouted" — it follows whichever bot is default, which is
+    // how changing the default silently moves live channels.
+    await addBot('Second bot');
+    await seedChannel(a.tenantId, 'whatsapp', 'active', 'WA', 'wa-1');
+
+    const { bots } = await call();
+    const anchor = bots.find((b) => b.isDefault)!;
+    expect(anchor.channels).toContain('whatsapp');
+    expect(bots.find((b) => !b.isDefault)!.channels).toEqual([]);
+  });
+
+  it('ignores channels that are not active', async () => {
+    await seedChannel(a.tenantId, 'telegram', 'pending_setup', 'TG', 'tg-1');
+    const { bots } = await call();
+    expect(bots.find((b) => b.isDefault)!.channels).toEqual([]);
+  });
+
+  it('surfaces a persona that differs from the bot name, and hides it when identical', async () => {
+    await addBot('test account', 'Luc');
+    const { bots } = await call();
+    expect(bots.find((b) => b.name === 'test account')!.introducesItselfAs).toBe('Luc');
+    // The anchor's persona equals its own brand-voice sentinel, not its record name.
+    const anchor = bots.find((b) => b.isDefault)!;
+    expect(anchor.introducesItselfAs).toBe(TENANT_A_SENTINELS.brandVoiceName);
   });
 
   it('never leaks tenant B sentinels in the response JSON', async () => {

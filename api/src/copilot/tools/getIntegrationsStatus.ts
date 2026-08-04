@@ -18,12 +18,27 @@ import {
   ChannelConnection,
   type ChannelType,
 } from '../../database/entities/ChannelConnection';
+import { CalendarCredential } from '../../database/entities/CalendarCredential';
 import type { CopilotTool, CopilotToolContext } from './types';
 
 export type IntegrationConnectionStatus = 'connected' | 'not_connected';
 
+/**
+ * Google Calendar has a third state the others don't: linked, but the token is
+ * dead (revoked, or expired under OAuth Testing mode). "Reconnect" and "connect"
+ * are different jobs for the owner, and collapsing them sends someone through a
+ * first-time setup they already did.
+ */
+export type CalendarConnectionStatus =
+  | 'connected'
+  | 'not_connected'
+  | 'needs_reconnect';
+
 export interface IntegrationsStatusResult {
   calcom: IntegrationConnectionStatus;
+  /** Booking calendar for the anchor bot. Separate from calcom — a tenant can
+   *  use either, and answering about one when asked about the other is wrong. */
+  googleCalendar: CalendarConnectionStatus;
   channels: {
     facebook: IntegrationConnectionStatus;
     instagram: IntegrationConnectionStatus;
@@ -45,7 +60,7 @@ export const getIntegrationsStatus: CopilotTool<
 > = {
   name: 'getIntegrationsStatus',
   description:
-    'Return connection status for Cal.com and each social channel (facebook, instagram, telegram, whatsapp). Each value is "connected" or "not_connected". No API keys, no webhook secrets, no platform account IDs.',
+    'Return connection status for Cal.com, Google Calendar, and each social channel (facebook, instagram, telegram, whatsapp). Social + Cal.com values are "connected" or "not_connected". googleCalendar is "connected", "not_connected", or "needs_reconnect" (linked but the token died — tell them to RECONNECT, not to set it up from scratch). Cal.com and Google Calendar are DIFFERENT products: never answer about one when asked about the other. This tool knows nothing about Outlook. No API keys, no webhook secrets, no platform account IDs.',
   parameters: { type: 'object', properties: {}, additionalProperties: false },
 
   async execute(_args, ctx: CopilotToolContext): Promise<IntegrationsStatusResult> {
@@ -82,6 +97,22 @@ export const getIntegrationsStatus: CopilotTool<
       }
     }
 
-    return { calcom, channels };
+    // Read the stored credential directly rather than calling getGoogleStatus:
+    // that handler actively probes Google to refresh a stale token, which is the
+    // right thing on a settings screen but not inside a chat turn — a slow or
+    // failing Google would stall the Copilot's reply. `reauthRequired` is already
+    // persisted by the booking/availability path, so a dead link still surfaces.
+    let googleCalendar: CalendarConnectionStatus = 'not_connected';
+    if (bot) {
+      // Mirrors getActiveCredential() — status:'active' matters, since a
+      // disconnected row is retained but must read as not_connected.
+      const cred = await ctx.manager.findOne(CalendarCredential, {
+        where: { botId: bot.id, provider: 'google', status: 'active' },
+        select: ['id', 'reauthRequired'],
+      });
+      if (cred) googleCalendar = cred.reauthRequired ? 'needs_reconnect' : 'connected';
+    }
+
+    return { calcom, googleCalendar, channels };
   },
 };

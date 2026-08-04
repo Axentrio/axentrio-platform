@@ -19,6 +19,7 @@ import { getLeadStats } from './getLeadStats';
 import { getRecentChatSessionStats } from './getRecentChatSessionStats';
 import { getKnownGapTopics } from './getKnownGapTopics';
 import { getSetupProgress } from './getSetupProgress';
+import { listBots } from './listBots';
 
 export function buildV1CopilotToolRegistry(): CopilotToolRegistry {
   const r = new CopilotToolRegistry();
@@ -30,6 +31,7 @@ export function buildV1CopilotToolRegistry(): CopilotToolRegistry {
   r.registerTool(getRecentChatSessionStats);
   r.registerTool(getKnownGapTopics);
   r.registerTool(getSetupProgress);
+  r.registerTool(listBots);
   return r;
 }
 
@@ -42,4 +44,5 @@ export {
   getRecentChatSessionStats,
   getKnownGapTopics,
   getSetupProgress,
+  listBots,
 };

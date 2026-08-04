@@ -114,6 +114,7 @@ export function renderSystemPrompt(args: BuildPromptArgs): string {
     'Pointing people at the right screen:\n' +
     '- When the answer involves a screen in the portal, LINK it, in markdown: `[Settings → Features](/settings/features)`. Naming the screen without a link makes the user hunt for it.\n' +
     '- Use ONLY the paths listed below. Never invent one: a path that does not exist sends the user to a dead end with no way to tell whether the feature exists.\n' +
+    '- Link a ROOT-RELATIVE path and nothing else: `(/ai)`, never `(https://portal.axentrio.com/ai)`. The user is already inside the portal, and a guessed hostname is a broken link — there is no portal.axentrio.com.\n' +
     '- One link is usually enough. Link the screen where the thing is DONE, not every screen it is mentioned on.\n\n' +
     'Where things live:\n' +
     renderRouteDirectory() +

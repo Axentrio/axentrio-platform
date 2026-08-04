@@ -340,7 +340,13 @@ describe('the bookings step', () => {
     await waitFor(() => expect(apiPut).toHaveBeenCalledWith('/scheduler/config', expect.anything()));
     const payload = apiPut.mock.calls.find((c) => c[0] === '/scheduler/config')![1];
     expect(payload.availability.slotGranularityMin).toBe(30);
-    expect(payload.availability.weeklyHours.monday).toEqual([{ start: '09:00', end: '17:00' }]);
-    expect(payload.availability.weeklyHours.sunday).toEqual([]);
+    // SHORT weekday keys — this asserted `monday`/`sunday`, which the scheduler zod enum
+    // (mon|tue|…) rejects, so the step 422'd on every real save while this test passed
+    // against a mocked transport. The keys are the contract; assert the contract.
+    expect(payload.availability.weeklyHours.mon).toEqual([{ start: '09:00', end: '17:00' }]);
+    expect(payload.availability.weeklyHours.sun).toEqual([]);
+    expect(Object.keys(payload.availability.weeklyHours).sort()).toEqual(
+      ['fri', 'mon', 'sat', 'sun', 'thu', 'tue', 'wed'],
+    );
   });
 });

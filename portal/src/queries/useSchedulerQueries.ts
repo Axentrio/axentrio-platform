@@ -13,7 +13,14 @@ export interface TimeWindow {
   end: string;
 }
 
-export type WeeklyHours = Record<string, TimeWindow[]>;
+/**
+ * The API's weekday keys, exactly. This was `Record<string, TimeWindow[]>`, which is why
+ * the compiler happily let the setup wizard send `monday` while the settings page sent
+ * `mon` — the API enum only accepts the short form, so the wizard's save 422'd every time
+ * and the step could never be completed. Keep this narrow.
+ */
+export type Weekday = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+export type WeeklyHours = Partial<Record<Weekday, TimeWindow[]>>;
 
 export interface SchedulerEventType {
   id?: string;
@@ -235,6 +242,10 @@ export interface AdminBooking {
   customerAddress?: string | null;
   customerPhone?: string | null;
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
+  /** Whether the booking actually reached the owner's connected calendar. */
+  calendarSync?: 'synced' | 'pending' | 'failed' | 'none';
+  sourceChannel?: string | null;
+  aiSummary?: string | null;
 }
 
 export interface AvailabilitySlot {

@@ -20,6 +20,8 @@ import {
   useUpdateSchedulerConfig,
   useBookingAvailability,
   type WeeklyHours,
+  type Weekday,
+  type TimeWindow,
   type ServiceAreaEntry,
   type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
@@ -36,7 +38,7 @@ import {
 import { ServicesSection } from './ServicesSection';
 import { ServiceAreaField } from './ServiceAreaField';
 
-const DAYS: { key: string; label: string }[] = [
+const DAYS: { key: Weekday; label: string }[] = [
   { key: 'mon', label: 'Monday' },
   { key: 'tue', label: 'Tuesday' },
   { key: 'wed', label: 'Wednesday' },
@@ -66,45 +68,100 @@ const ALL_TIMEZONES: string[] = (() => {
   }
 })();
 
+const DEFAULT_WINDOW: TimeWindow = { start: '09:00', end: '17:00' };
+
 interface DayRow {
   enabled: boolean;
-  start: string;
-  end: string;
+  /** One or more open windows. A lunch break is simply two of them. */
+  windows: TimeWindow[];
 }
 
-type DayState = Record<string, DayRow>;
+type DayState = Record<Weekday, DayRow>;
 
 /** A single date override row (holiday closure or one-off custom hours). */
 interface OverrideRow {
   date: string;
   closed: boolean;
-  start: string;
-  end: string;
+  windows: TimeWindow[];
 }
 
 function overridesFromConfig(raw: unknown[] | undefined): OverrideRow[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((o) => {
-    const ov = o as { date?: string; closed?: boolean; windows?: { start: string; end: string }[] };
-    return {
-      date: ov.date ?? '',
-      closed: !!ov.closed,
-      start: ov.windows?.[0]?.start ?? '09:00',
-      end: ov.windows?.[0]?.end ?? '17:00',
-    };
+    const ov = o as { date?: string; closed?: boolean; windows?: TimeWindow[] };
+    const windows = Array.isArray(ov.windows) && ov.windows.length ? ov.windows : [{ ...DEFAULT_WINDOW }];
+    return { date: ov.date ?? '', closed: !!ov.closed, windows };
   });
 }
 
 function rowsFromWeeklyHours(weekly: WeeklyHours | undefined): DayState {
-  const out: DayState = {};
+  const out = {} as DayState;
   for (const { key } of DAYS) {
-    const win = weekly?.[key]?.[0];
-    out[key] = win
-      ? { enabled: true, start: win.start, end: win.end }
-      : { enabled: false, start: '09:00', end: '17:00' };
+    const wins = weekly?.[key];
+    out[key] = wins?.length
+      ? { enabled: true, windows: wins.map((w) => ({ ...w })) }
+      : { enabled: false, windows: [{ ...DEFAULT_WINDOW }] };
   }
   return out;
 }
+
+/**
+ * The open windows for one day (or one date override).
+ *
+ * The entity, the API and the slot engine have always stored an ARRAY. This editor used to
+ * render `windows[0]` and write a single-element array back, so a lunch break — or any
+ * second window seeded by a preset or written through the API — was silently destroyed the
+ * next time the owner pressed Save. Editing the whole array is the fix.
+ */
+const WindowList: React.FC<{
+  windows: TimeWindow[];
+  disabled?: boolean;
+  onChange: (next: TimeWindow[]) => void;
+}> = ({ windows, disabled, onChange }) => (
+  <div className="flex flex-col gap-1.5">
+    {windows.map((w, i) => (
+      // react-doctor-disable-next-line react-doctor/no-array-index-as-key -- no-stable-id
+      <div key={i} className="flex items-center gap-2">
+        <TimeSelect
+          value={w.start}
+          disabled={disabled}
+          onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, start: v } : x)))}
+        />
+        <span className="text-text-muted">–</span>
+        <TimeSelect
+          value={w.end}
+          disabled={disabled}
+          onChange={(v) => onChange(windows.map((x, j) => (j === i ? { ...x, end: v } : x)))}
+        />
+        {windows.length > 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={disabled}
+            aria-label="Remove this time range"
+            className="text-red-400 hover:text-red-300"
+            onClick={() => onChange(windows.filter((_, j) => j !== i))}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        )}
+        {i === windows.length - 1 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            type="button"
+            disabled={disabled}
+            aria-label="Add another time range"
+            onClick={() => onChange([...windows, { ...DEFAULT_WINDOW }])}
+          >
+            <Plus className="w-3.5 h-3.5" />
+          </Button>
+        )}
+      </div>
+    ))}
+  </div>
+);
 
 export const SchedulerSettings: React.FC = () => {
   const { data, isLoading, refetch } = useSchedulerConfig();
@@ -166,36 +223,37 @@ export const SchedulerSettings: React.FC = () => {
     setHydrated(true);
   }, [data, hydrated]);
 
-  const setDay = (key: string, patch: Partial<DayRow>) =>
+  const setDay = (key: Weekday, patch: Partial<DayRow>) =>
     setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
   // Inline validation for the availability section (per-service rules live in
   // the service editor). Blocks an invalid availability save.
   const errors = useMemo<string[]>(() => {
     const e: string[] = [];
+    const check = (label: string, windows: TimeWindow[]) => {
+      for (const w of windows) if (w.start >= w.end) e.push(`${label}: end time must be after start time.`);
+      // Split shifts must not overlap — the engine would merge them into nonsense.
+      const sorted = [...windows].sort((a, b) => a.start.localeCompare(b.start));
+      for (let i = 1; i < sorted.length; i++) {
+        if (sorted[i].start < sorted[i - 1].end) e.push(`${label}: time ranges overlap.`);
+      }
+    };
     // Weekly-hours validity only matters when those hours gate bookings.
     if (availabilityMode === 'business_hours') {
-      for (const { key, label } of DAYS) {
-        const r = days[key];
-        if (r.enabled && r.start >= r.end) e.push(`${label}: end time must be after start time.`);
-      }
+      for (const { key, label } of DAYS) if (days[key].enabled) check(label, days[key].windows);
     }
-    for (const o of overrides) {
-      if (o.date && !o.closed && o.start >= o.end) e.push(`Override ${o.date}: end time must be after start time.`);
-    }
-    return e;
+    for (const o of overrides) if (o.date && !o.closed) check(`Override ${o.date}`, o.windows);
+    return [...new Set(e)];
   }, [days, overrides, availabilityMode]);
 
   const handleSave = () => {
     const weeklyHours: WeeklyHours = {};
     for (const { key } of DAYS) {
       const row = days[key];
-      if (row.enabled) weeklyHours[key] = [{ start: row.start, end: row.end }];
+      if (row.enabled && row.windows.length) weeklyHours[key] = row.windows;
     }
     const dateOverrides = overrides.flatMap((o) =>
-      o.date
-        ? [o.closed ? { date: o.date, closed: true } : { date: o.date, windows: [{ start: o.start, end: o.end }] }]
-        : [],
+      o.date ? [o.closed ? { date: o.date, closed: true } : { date: o.date, windows: o.windows }] : [],
     );
     update.mutate({
       provider: 'internal',
@@ -280,7 +338,25 @@ export const SchedulerSettings: React.FC = () => {
                 {/* Outlook Calendar connection (Phase 6b) */}
                 <div className="space-y-2 border-t border-edge pt-4">
                   <h3 className="text-sm font-medium text-text-primary">Outlook Calendar</h3>
-                  {outlookStatus.data?.connected ? (
+                  {outlookStatus.data?.connected && outlookStatus.data?.needsReauth ? (
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-status-busy flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 shrink-0" />
+                        Reconnect needed{outlookStatus.data.accountEmail ? ` · ${outlookStatus.data.accountEmail}` : ''} — the link to Outlook has expired, so the bot can't read your availability and will fall back to capturing requests. Reconnect to restore booking.
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => connectOutlook.mutate()}
+                        disabled={connectOutlook.isPending}
+                      >
+                        {connectOutlook.isPending ? (
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-text-secondary" />
+                        ) : null}
+                        Reconnect
+                      </Button>
+                    </div>
+                  ) : outlookStatus.data?.connected ? (
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-text-secondary flex items-center gap-2">
                         <Check className="w-4 h-4 text-status-online" />
@@ -387,24 +463,18 @@ export const SchedulerSettings: React.FC = () => {
                     <div className="space-y-2">
                       <Label className="text-text-secondary block">Weekly hours</Label>
                       {DAYS.map(({ key, label }) => (
-                        <div key={key} className="flex items-center gap-3">
-                          <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer">
+                        <div key={key} className="flex items-start gap-3">
+                          <label className="flex items-center gap-2 w-32 shrink-0 cursor-pointer pt-2">
                             <Checkbox
                               checked={days[key].enabled}
                               onCheckedChange={(c) => setDay(key, { enabled: c === true })}
                             />
                             <span className="text-sm text-text-primary">{label}</span>
                           </label>
-                          <TimeSelect
-                            value={days[key].start}
+                          <WindowList
+                            windows={days[key].windows}
                             disabled={!days[key].enabled}
-                            onChange={(v) => setDay(key, { start: v })}
-                          />
-                          <span className="text-text-muted">–</span>
-                          <TimeSelect
-                            value={days[key].end}
-                            disabled={!days[key].enabled}
-                            onChange={(v) => setDay(key, { end: v })}
+                            onChange={(windows) => setDay(key, { windows })}
                           />
                         </div>
                       ))}
@@ -436,7 +506,7 @@ export const SchedulerSettings: React.FC = () => {
                       size="sm"
                       type="button"
                       onClick={() =>
-                        setOverrides((prev) => [...prev, { date: '', closed: true, start: '09:00', end: '17:00' }])
+                        setOverrides((prev) => [...prev, { date: '', closed: true, windows: [{ ...DEFAULT_WINDOW }] }])
                       }
                     >
                       <Plus className="w-3.5 h-3.5" /> Add
@@ -469,21 +539,12 @@ export const SchedulerSettings: React.FC = () => {
                             <span className="text-sm text-text-secondary">Closed</span>
                           </label>
                           {!o.closed && (
-                            <>
-                              <TimeSelect
-                                value={o.start}
-                                onChange={(v) =>
-                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, start: v } : x)))
-                                }
-                              />
-                              <span className="text-text-muted">–</span>
-                              <TimeSelect
-                                value={o.end}
-                                onChange={(v) =>
-                                  setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, end: v } : x)))
-                                }
-                              />
-                            </>
+                            <WindowList
+                              windows={o.windows}
+                              onChange={(windows) =>
+                                setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, windows } : x)))
+                              }
+                            />
                           )}
                           <Button
                             variant="ghost"

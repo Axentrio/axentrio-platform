@@ -12,7 +12,7 @@
  *  - seeds omit `isActive`/`sortOrder`/`intakeQuestions` (catalog-state the apply path owns).
  */
 import { z } from 'zod';
-import { serviceInputSchema, timeWindow, dateOverride, weekday } from '../schemas/scheduler.schema';
+import { serviceInputSchema, timeWindow, dateOverride, weekday, isValidTimezone } from '../schemas/scheduler.schema';
 
 // ── Service seed schema ──────────────────────────────────────────────────────
 
@@ -66,19 +66,6 @@ const strictTimeWindow = timeWindow.strict().superRefine((w, ctx) => {
 });
 
 const strictDateOverride = dateOverride.extend({ windows: z.array(strictTimeWindow).optional() }).strict();
-
-/** Environment-robust IANA timezone check (works whether or not Intl.supportedValuesOf exists). */
-function isValidTimezone(tz: string): boolean {
-  if (tz === 'UTC') return true;
-  const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
-  if (typeof supported === 'function') return supported('timeZone').includes(tz);
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone: tz });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export const presetAvailabilitySchema = z
   .object({

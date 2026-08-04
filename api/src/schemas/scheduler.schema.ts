@@ -138,8 +138,27 @@ export const serviceCreateSchema = serviceInputSchema.superRefine(durationRangeR
 /** Partial for PUT — any subset of fields, with the same duration check. */
 export const serviceUpdateSchema = serviceInputSchema.partial().superRefine(durationRangeRefine);
 
+/**
+ * Environment-robust IANA check (works whether or not Intl.supportedValuesOf exists).
+ * Exported so the preset seeds validate through the SAME function as owner input — they
+ * used to have separate copies, and only the preset side actually checked.
+ */
+export function isValidTimezone(tz: string): boolean {
+  if (tz === 'UTC') return true;
+  const supported = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+  if (typeof supported === 'function') return supported('timeZone').includes(tz);
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const availabilityInputSchema = z.object({
-  timezone: z.string().min(1).max(64),
+  // A typo here is silent and total: luxon returns an invalid DateTime and the slot engine
+  // skips every window, so the owner sees zero availability with no error anywhere.
+  timezone: z.string().min(1).max(64).refine(isValidTimezone, 'Not a recognised IANA timezone'),
   // 'always_open' → bookable 24/7 (weekly hours ignored); 'business_hours' → gated by weeklyHours.
   availabilityMode: z.enum(['always_open', 'business_hours']).default('business_hours'),
   weeklyHours: weeklyHours.default({}),

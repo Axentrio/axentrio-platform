@@ -28,11 +28,25 @@ import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
   type WeeklyHours,
+  type Weekday,
 } from '@/queries/useSchedulerQueries';
 import type { StepProps } from './types';
 
-const WEEK_DAYS = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
-const DEFAULT_OPEN_DAYS: string[] = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday'];
+/**
+ * `api` is the key the scheduler API accepts; `i18n` is the translation key. They differ,
+ * and conflating them is what made this step unsavable — it posted `monday` at an enum that
+ * only takes `mon`, so every save 422'd and the wizard could never advance.
+ */
+const WEEK_DAYS: { api: Weekday; i18n: string }[] = [
+  { api: 'mon', i18n: 'monday' },
+  { api: 'tue', i18n: 'tuesday' },
+  { api: 'wed', i18n: 'wednesday' },
+  { api: 'thu', i18n: 'thursday' },
+  { api: 'fri', i18n: 'friday' },
+  { api: 'sat', i18n: 'saturday' },
+  { api: 'sun', i18n: 'sunday' },
+];
+const DEFAULT_OPEN_DAYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 
 /** Slot intervals people actually book in. Minutes. */
 const SLOT_CHOICES = [15, 30, 60] as const;
@@ -44,7 +58,7 @@ export function BookingsStep({ submit }: StepProps) {
   const { data: scheduler } = useSchedulerConfig();
   const updateScheduler = useUpdateSchedulerConfig();
 
-  const [openDays, setOpenDays] = React.useState<string[]>(DEFAULT_OPEN_DAYS);
+  const [openDays, setOpenDays] = React.useState<Weekday[]>(DEFAULT_OPEN_DAYS);
   const [opensAt, setOpensAt] = React.useState('09:00');
   const [closesAt, setClosesAt] = React.useState('17:00');
   const [slotMinutes, setSlotMinutes] = React.useState<number>(30);
@@ -53,10 +67,10 @@ export function BookingsStep({ submit }: StepProps) {
   React.useEffect(() => {
     if (seeded || !scheduler?.availability) return;
     const weekly = scheduler.availability.weeklyHours ?? {};
-    const days = WEEK_DAYS.filter((d) => (weekly[d]?.length ?? 0) > 0);
+    const days = WEEK_DAYS.filter((d) => (weekly[d.api]?.length ?? 0) > 0).map((d) => d.api);
     if (days.length) {
-      setOpenDays([...days]);
-      const first = weekly[days[0]][0];
+      setOpenDays(days);
+      const first = weekly[days[0]]?.[0];
       if (first?.start) setOpensAt(first.start);
       if (first?.end) setClosesAt(first.end);
     }
@@ -66,14 +80,14 @@ export function BookingsStep({ submit }: StepProps) {
     setSeeded(true);
   }, [seeded, scheduler]);
 
-  const toggleDay = (day: string) =>
+  const toggleDay = (day: Weekday) =>
     setOpenDays((days) => (days.includes(day) ? days.filter((d) => d !== day) : [...days, day]));
 
   const save = async () => {
     const weeklyHours: WeeklyHours = {};
 
-    for (const day of WEEK_DAYS) {
-      weeklyHours[day] = openDays.includes(day) ? [{ start: opensAt, end: closesAt }] : [];
+    for (const { api } of WEEK_DAYS) {
+      weeklyHours[api] = openDays.includes(api) ? [{ start: opensAt, end: closesAt }] : [];
     }
     try {
       await updateScheduler.mutateAsync({
@@ -136,20 +150,20 @@ export function BookingsStep({ submit }: StepProps) {
       <div className="space-y-3">
         <Label>{t('setup.steps.bookings.availabilityLabel')}</Label>
         <div className="flex flex-wrap gap-1.5">
-          {WEEK_DAYS.map((day) => (
+          {WEEK_DAYS.map(({ api, i18n }) => (
             <button
-              key={day}
+              key={api}
               type="button"
-              onClick={() => toggleDay(day)}
-              aria-pressed={openDays.includes(day)}
+              onClick={() => toggleDay(api)}
+              aria-pressed={openDays.includes(api)}
               className={cn(
                 'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
-                openDays.includes(day)
+                openDays.includes(api)
                   ? 'border-primary-500 bg-primary-500/10 text-text-primary'
                   : 'border-edge bg-surface-2 text-text-muted hover:border-primary-500/50',
               )}
             >
-              {t(`setup.steps.chatbot.days.${day}`)}
+              {t(`setup.steps.chatbot.days.${i18n}`)}
             </button>
           ))}
         </div>

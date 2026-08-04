@@ -9,6 +9,12 @@ export interface OutlookCalendarStatus {
   connected: boolean;
   accountEmail: string | null;
   calendarId: string | null;
+  /**
+   * The API has always returned this; the type dropped it, so an expired Outlook token
+   * rendered as a healthy green "Connected" while bookings silently degraded to
+   * request-only. Google has had a reconnect banner all along.
+   */
+  needsReauth?: boolean;
 }
 
 const statusKey = ['outlook', 'status'] as const;

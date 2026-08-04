@@ -16,6 +16,7 @@ import {
   XCircle,
   CheckCircle2,
   Paperclip,
+  AlertTriangle,
 } from 'lucide-react';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
@@ -363,12 +364,35 @@ function BookingRow({
           <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${pill.cls}`}>
             {pill.label}
           </span>
+          {/* A confirmed booking whose calendar mirror failed used to look identical to a
+              healthy one: green pill, nothing on the calendar, and for a channel booking no
+              email either — so the owner only found out by noticing the absence. */}
+          {booking.calendarSync === 'failed' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-red-400">
+              <AlertTriangle className="h-3 w-3" /> Not on your calendar
+            </span>
+          )}
+          {booking.calendarSync === 'pending' && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-400">
+              Syncing…
+            </span>
+          )}
         </div>
         <div className="mt-1 text-sm text-text-secondary">
           {booking.attendeeName || 'Guest'}
           {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
           {booking.serviceName ? ` · ${booking.serviceName}` : ''}
+          {booking.sourceChannel ? ` · via ${booking.sourceChannel}` : ''}
         </div>
+        {booking.calendarSync === 'failed' && (
+          <div className="mt-1 text-xs text-red-400">
+            This appointment was confirmed to the customer but could not be written to your connected calendar.
+            Reconnect the calendar in Setup, then add it manually if it is soon.
+          </div>
+        )}
+        {booking.aiSummary && (
+          <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.aiSummary}</div>
+        )}
         {(booking.customerPhone || booking.customerAddress) && (
           <div className="mt-1 text-sm text-text-secondary">
             {[booking.customerPhone, booking.customerAddress].filter(Boolean).join(' · ')}

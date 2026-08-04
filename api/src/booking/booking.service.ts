@@ -358,12 +358,30 @@ export async function adminListBookings(
   const rows = await qb.take(limit).skip(offset).getMany();
 
   const ids = rows.map((r) => r.id);
+  // Every provider, not just Google: filtering to google here meant an Outlook-synced
+  // booking showed no sync evidence at all. The Meet URL is still Google-only.
   const refs = ids.length
-    ? await AppDataSource.getRepository(BookingReference).find({
-        where: { bookingId: In(ids), providerType: 'google' },
-      })
+    ? await AppDataSource.getRepository(BookingReference).find({ where: { bookingId: In(ids) } })
     : [];
-  const meetByBooking = new Map(refs.map((r) => [r.bookingId, r.meetingUrl ?? null]));
+  const meetByBooking = new Map(
+    refs.filter((r) => r.providerType === 'google').map((r) => [r.bookingId, r.meetingUrl ?? null])
+  );
+  const mirroredBookingIds = new Set(refs.map((r) => r.bookingId));
+
+  /**
+   * Whether this booking actually reached the owner's calendar.
+   *
+   * A confirmed row whose mirror failed is the worst state the product can be in: the
+   * customer holds a confirmation, the owner's calendar shows nothing, and until now the
+   * portal rendered it as an ordinary green "Confirmed". The owner could only find out by
+   * noticing the absence. Surfacing it is the whole point of this field.
+   */
+  const calendarSyncOf = (b: Booking): 'synced' | 'pending' | 'failed' | 'none' => {
+    if (b.status !== 'confirmed') return 'none';
+    if (b.syncLastError) return 'failed';
+    if (b.syncPending) return 'pending';
+    return mirroredBookingIds.has(b.id) ? 'synced' : 'none';
+  };
 
   // Service-name lookup for display (requests have no Meet URL but do name the service).
   const serviceIds = [...new Set(rows.map((r) => r.eventTypeId).filter((v): v is string => !!v))];
@@ -389,6 +407,11 @@ export async function adminListBookings(
       attendeeEmail: b.attendeeEmail ?? null,
       notes: b.notes ?? null,
       meetingUrl: meetByBooking.get(b.id) ?? null,
+      calendarSync: calendarSyncOf(b),
+      // Populated in prod and never returned before — the owner could not tell a WhatsApp
+      // booking from a website one (required by the spec's booking-records page).
+      sourceChannel: b.sourceChannel ?? null,
+      aiSummary: b.aiSummary ?? null,
       serviceName: b.eventTypeId ? nameByService.get(b.eventTypeId) ?? null : null,
       serviceId: b.eventTypeId ?? null,
       durationMin: b.bookedDurationMin ?? null,

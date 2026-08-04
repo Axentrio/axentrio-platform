@@ -30,7 +30,19 @@ import { HandoffRequest } from '../../database/entities/HandoffRequest';
 import { MessageDelivery } from '../../database/entities/MessageDelivery';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { Tenant } from '../../database/entities/Tenant';
-import { asyncHandler } from '../../middleware/error-handler';
+import { AgentTrace } from '../../database/entities/AgentTrace';
+import { asyncHandler, NotFoundError } from '../../middleware/error-handler';
+
+/** The parts of the persisted `trace` jsonb this endpoint reads. Deliberately
+ *  narrow: anything not named here (notably toolCalls args/results) is never
+ *  projected onto the response. */
+interface TraceShape {
+  prompt?: Record<string, unknown>;
+  iterations?: Array<{
+    llmCall?: { model?: string; latencyMs?: number; promptTokens?: number; completionTokens?: number };
+    toolCalls?: Array<{ name: string; latencyMs?: number; result?: { success?: boolean } }>;
+  }>;
+}
 import { sendSuccess } from '../../utils/response';
 import { logger } from '../../utils/logger';
 
@@ -275,6 +287,107 @@ router.get(
       [],
     );
     sendSuccess(res, { bots, count: bots.length });
+  }),
+);
+
+/**
+ * GET /admin/observability/traces — recent agent turns, newest first.
+ * GET /admin/observability/traces/:id — one turn in full.
+ *
+ * WHY THIS EXISTS. Diagnosing why a bot said something required querying the
+ * production database by hand. Two real bugs were found that way in minutes and
+ * would have been invisible for days otherwise: a prompt ledger showing
+ * CUSTOM_INSTRUCTIONS included exposed 1211 characters of a previous business's
+ * instructions still steering a live bot, and KB_CONTEXT empty with zero tool
+ * calls exposed an agent that never retrieved anything and confidently answered
+ * "[services not specified]" to a prospect.
+ *
+ * STRUCTURE, NOT CONTENT — deliberately. Neither diagnosis needed a single tool
+ * payload; both needed to know WHICH blocks composed the prompt and WHETHER a
+ * tool ran. So this returns block keys, tool names, outcomes and timings, and
+ * never `toolCalls[].args` or `toolCalls[].result`.
+ *
+ * That is not squeamishness. The stored trace masks only a handful of top-level
+ * arg fields (email/phone in trace-logger); tool RESULTS are stored raw, so a
+ * kb_search or list_bookings result can carry a customer's own content and
+ * contact details. Returning the shape sidesteps that entirely rather than
+ * relying on a scrubber to be exhaustive.
+ */
+router.get(
+  '/observability/traces',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, sessionId, finishReason } = req.query as Record<string, string | undefined>;
+    const limit = Math.min(Number(req.query.limit) || 50, 200);
+
+    const qb = AppDataSource.getRepository(AgentTrace)
+      .createQueryBuilder('t')
+      .orderBy('t.createdAt', 'DESC')
+      .limit(limit);
+    if (tenantId) qb.andWhere('t."tenantId" = :tenantId', { tenantId });
+    if (sessionId) qb.andWhere('t."sessionId" = :sessionId', { sessionId });
+    // The reason to open this page is usually "something went wrong", so make the
+    // failures filterable rather than something to scroll for.
+    if (finishReason) qb.andWhere('t."finishReason" = :finishReason', { finishReason });
+
+    const rows = await qb.getMany();
+    const traces = rows.map((r) => {
+      const t = (r.trace ?? {}) as TraceShape;
+      const iterations = t.iterations ?? [];
+      return {
+        id: r.id,
+        tenantId: r.tenantId,
+        sessionId: r.sessionId ?? null,
+        createdAt: r.createdAt,
+        finishReason: r.finishReason ?? null,
+        totalTokens: r.totalTokens ?? null,
+        totalLatencyMs: r.totalLatencyMs ?? null,
+        iterationCount: iterations.length,
+        // The single most diagnostic number on the list: a turn that answered a
+        // factual question with zero tool calls never consulted the knowledge base.
+        toolCallCount: iterations.reduce((n, it) => n + (it.toolCalls?.length ?? 0), 0),
+        model: iterations[0]?.llmCall?.model ?? null,
+      };
+    });
+
+    sendSuccess(res, { traces, count: traces.length });
+  }),
+);
+
+router.get(
+  '/observability/traces/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const row = await AppDataSource.getRepository(AgentTrace).findOne({ where: { id: req.params.id } });
+    if (!row) throw new NotFoundError('Trace not found');
+
+    const t = (row.trace ?? {}) as TraceShape;
+    sendSuccess(res, {
+      trace: {
+        id: row.id,
+        tenantId: row.tenantId,
+        sessionId: row.sessionId ?? null,
+        messageId: row.messageId ?? null,
+        createdAt: row.createdAt,
+        finishReason: row.finishReason ?? null,
+        totalTokens: row.totalTokens ?? null,
+        totalLatencyMs: row.totalLatencyMs ?? null,
+        // The prompt ledger is the payload here: block keys and the REASON each
+        // was excluded. No prompt text, so nothing tenant-authored leaks.
+        prompt: t.prompt ?? null,
+        iterations: (t.iterations ?? []).map((it, i) => ({
+          index: i,
+          model: it.llmCall?.model ?? null,
+          latencyMs: it.llmCall?.latencyMs ?? null,
+          promptTokens: it.llmCall?.promptTokens ?? null,
+          completionTokens: it.llmCall?.completionTokens ?? null,
+          // Names + outcomes only. Args and results stay server-side.
+          toolCalls: (it.toolCalls ?? []).map((tc) => ({
+            name: tc.name,
+            ok: tc.result?.success !== false,
+            latencyMs: tc.latencyMs ?? null,
+          })),
+        })),
+      },
+    });
   }),
 );
 

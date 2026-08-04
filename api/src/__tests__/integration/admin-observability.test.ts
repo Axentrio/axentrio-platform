@@ -17,6 +17,7 @@ import request from 'supertest';
 import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { SpamScamLog } from '../../database/entities/SpamScamLog';
+import { AgentTrace } from '../../database/entities/AgentTrace';
 import { GuardrailOutputLog } from '../../database/entities/GuardrailOutputLog';
 import { ChannelConnection } from '../../database/entities/ChannelConnection';
 import { MessageDelivery } from '../../database/entities/MessageDelivery';
@@ -177,6 +178,124 @@ describe('admin observability (Rollout Health snapshot)', () => {
   it('rejects non-super-admin', async () => {
     configureMockAuth(auth, { userId: crypto.randomUUID(), tenantId, role: 'admin' });
     const res = await request(app).get(`${BASE}?days=7`);
+    expect(res.status).toBe(403);
+  });
+});
+
+/**
+ * The trace endpoints exist because diagnosing "why did the bot say that" meant
+ * querying production by hand. They return the SHAPE of a turn — which prompt
+ * blocks composed it, whether a tool ran — never tool payloads: the stored trace
+ * masks only a few top-level arg fields, and tool RESULTS are raw, so a kb_search
+ * or list_bookings result can carry a customer's own content.
+ */
+describe('admin observability — agent traces', () => {
+  const LIST = '/api/v1/admin/observability/traces';
+  let tenantId: string;
+
+  /** A turn shaped exactly like production: a prompt ledger, and a tool call
+   *  whose args AND result carry customer data. */
+  const seedTrace = async (over: Partial<AgentTrace> = {}): Promise<AgentTrace> => {
+    const repo = AppDataSource.getRepository(AgentTrace);
+    return repo.save(
+      repo.create({
+        tenantId,
+        finishReason: 'completed',
+        totalTokens: 120,
+        totalLatencyMs: 900,
+        trace: {
+          prompt: {
+            includedBlocks: ['TEMPLATE_BODY', 'CUSTOM_INSTRUCTIONS'],
+            excludedBlocks: [{ key: 'KB_CONTEXT', reason: 'empty' }],
+          },
+          iterations: [
+            {
+              llmCall: { model: 'gpt-4.1-mini', latencyMs: 800, promptTokens: 100, completionTokens: 20 },
+              toolCalls: [
+                {
+                  name: 'capture_lead',
+                  latencyMs: 40,
+                  args: { email: 'CUSTOMER-SECRET@example.com', note: 'ARGS-SHOULD-NOT-LEAK' },
+                  result: { success: true, data: { transcript: 'RESULT-SHOULD-NOT-LEAK' } },
+                },
+              ],
+            },
+          ],
+        },
+        ...over,
+      }),
+    );
+  };
+
+  beforeEach(async () => {
+    const tenant = await createTestTenant({ name: 'Trace Co', tier: 'pro' });
+    tenantId = tenant.id;
+    const admin = await createTestUser(tenantId, { role: 'super_admin' });
+    configureMockAuth(auth, { userId: admin.id, tenantId, role: 'super_admin' });
+  });
+
+  it('lists turns with the counts that make a bad turn obvious', async () => {
+    await seedTrace();
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.traces).toHaveLength(1);
+    expect(res.body.data.traces[0]).toMatchObject({
+      finishReason: 'completed',
+      iterationCount: 1,
+      toolCallCount: 1,
+      model: 'gpt-4.1-mini',
+    });
+  });
+
+  it('filters to failures, which is why anyone opens this', async () => {
+    await seedTrace();
+    await seedTrace({ finishReason: 'error' });
+
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}&finishReason=error`);
+    expect(res.body.data.traces).toHaveLength(1);
+    expect(res.body.data.traces[0].finishReason).toBe('error');
+  });
+
+  it('returns the prompt ledger — the thing that exposed a live bot running a previous business’s instructions', async () => {
+    const t = await seedTrace();
+    const res = await request(app).get(`${LIST}/${t.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.trace.prompt.includedBlocks).toContain('CUSTOM_INSTRUCTIONS');
+    expect(res.body.data.trace.prompt.excludedBlocks[0]).toMatchObject({ key: 'KB_CONTEXT', reason: 'empty' });
+  });
+
+  it('reports tool names and outcomes, so "answered without retrieving" is visible', async () => {
+    const t = await seedTrace();
+    const res = await request(app).get(`${LIST}/${t.id}`);
+
+    expect(res.body.data.trace.iterations[0].toolCalls).toEqual([
+      { name: 'capture_lead', ok: true, latencyMs: 40 },
+    ]);
+  });
+
+  it('NEVER returns tool args or results, even to a super admin', async () => {
+    const t = await seedTrace();
+    const detail = JSON.stringify((await request(app).get(`${LIST}/${t.id}`)).body);
+    const list = JSON.stringify((await request(app).get(`${LIST}?tenantId=${tenantId}`)).body);
+
+    for (const body of [detail, list]) {
+      expect(body).not.toContain('ARGS-SHOULD-NOT-LEAK');
+      expect(body).not.toContain('RESULT-SHOULD-NOT-LEAK');
+      expect(body).not.toContain('CUSTOMER-SECRET@example.com');
+    }
+  });
+
+  it('404s on an unknown trace', async () => {
+    const res = await request(app).get(`${LIST}/11111111-1111-4111-8111-111111111111`);
+    expect(res.status).toBe(404);
+  });
+
+  it('is super-admin only', async () => {
+    await seedTrace();
+    configureMockAuth(auth, { userId: crypto.randomUUID(), tenantId, role: 'admin' });
+    const res = await request(app).get(`${LIST}?tenantId=${tenantId}`);
     expect(res.status).toBe(403);
   });
 });

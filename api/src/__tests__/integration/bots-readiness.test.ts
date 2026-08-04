@@ -138,12 +138,12 @@ async function provision(opts: {
   return { tenantId: tenant.id, botId: bot.id };
 }
 
-/** The single booking result, asserting exactly one capability is surfaced. */
+/** The booking result. Scoped by capability rather than "the only one": answering
+ *  and channel now contribute too, and these assertions are about booking. */
 function bookingOf(body: any) {
-  expect(body.data.capabilities).toHaveLength(1);
-  const cap = body.data.capabilities[0];
-  expect(cap.capability).toBe('booking');
-  return cap;
+  const booking = body.data.capabilities.filter((c: any) => c.capability === 'booking');
+  expect(booking).toHaveLength(1);
+  return booking[0];
 }
 
 beforeEach(() => {
@@ -156,13 +156,13 @@ describe('GET /bots/readiness (real DB) — applies-to / tier gate', () => {
     await provision({ tier: 'free' });
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBe(200);
-    expect(res.body.data.capabilities).toEqual([]);
-    expect(res.body.data.overall).toMatchObject({
-      applicableCount: 0,
-      liveCount: 0,
-      allLive: false,
-      nothingApplicable: true,
-    });
+    // Booking is entitlement-gated and must be absent on free. Answering is not
+    // gated — every bot answers — so it is present here and `nothingApplicable`
+    // is no longer reachable. Nothing renders that field; it stays derived.
+    const caps = res.body.data.capabilities;
+    expect(caps.filter((c: any) => c.capability === 'booking')).toEqual([]);
+    expect(caps.some((c: any) => c.capability === 'answering')).toBe(true);
+    expect(res.body.data.overall).toMatchObject({ allLive: false });
   });
 });
 
@@ -394,5 +394,159 @@ describe('GET /bots/readiness (real DB) — fail-closed', () => {
     const res = await request(app).get(READINESS_URL);
     expect(res.status).toBeGreaterThanOrEqual(500);
     expect(res.body.data).toBeUndefined();
+  });
+});
+
+/**
+ * Answering readiness. Each case is an incident that reached a real customer:
+ * a bot with nothing to answer from told a prospect its services were
+ * "[not specified]", while the portal showed it configured and its document
+ * "Indexed".
+ */
+describe('GET /bots/readiness — answering', () => {
+  const answeringOf = (body: any) =>
+    body.data.capabilities.find((c: any) => c.capability === 'answering');
+
+  const attachKb = async (tenantId: string, botId: string) => {
+    const kb = await AppDataSource.query(
+      `INSERT INTO knowledge_bases ("tenantId", "botId", status) VALUES ($1,$2,'active') RETURNING id`,
+      [tenantId, botId],
+    );
+    await AppDataSource.query(
+      `INSERT INTO chatbot_bot_knowledge_bases (bot_id, knowledge_base_id, tenant_id) VALUES ($1,$2,$3)`,
+      [botId, kb[0].id, tenantId],
+    );
+    return kb[0].id as string;
+  };
+
+  const addDoc = (tenantId: string, kbId: string, status: string, chunkCount: number) =>
+    AppDataSource.query(
+      `INSERT INTO knowledge_documents ("tenantId","knowledgeBaseId",title,"sourceContent",type,status,"chunkCount")
+       VALUES ($1,$2,'Doc','body','text',$3,$4)`,
+      [tenantId, kbId, status, chunkCount],
+    );
+
+  it('is not_ready when the bot has nothing to answer from', async () => {
+    await provision();
+    const res = await request(app).get(READINESS_URL);
+    const a = answeringOf(res.body);
+    expect(a.state).toBe('not_ready');
+    expect(a.missingSteps.map((m: any) => m.id)).toContain('no_knowledge');
+  });
+
+  it('is still not_ready when a document exists but has no chunks yet', async () => {
+    // "Indexed" is the document's status; chunks are what retrieval reads. This
+    // gap is why a doc can look uploaded and be unanswerable.
+    const { tenantId, botId } = await provision();
+    const kb = await attachKb(tenantId, botId);
+    await addDoc(tenantId, kb, 'indexed', 0);
+
+    const a = answeringOf((await request(app).get(READINESS_URL)).body);
+    expect(a.state).toBe('not_ready');
+    expect(a.detail.retrievableDocuments).toBe(0);
+  });
+
+  it('goes live once a document is actually retrievable', async () => {
+    const { tenantId, botId } = await provision();
+    const kb = await attachKb(tenantId, botId);
+    await addDoc(tenantId, kb, 'indexed', 3);
+
+    const a = answeringOf((await request(app).get(READINESS_URL)).body);
+    expect(a.state).toBe('live');
+    expect(a.missingSteps).toEqual([]);
+    expect(a.detail.retrievableDocuments).toBe(1);
+  });
+
+  it('flags a document that failed to index, which will never be answered from', async () => {
+    const { tenantId, botId } = await provision();
+    const kb = await attachKb(tenantId, botId);
+    await addDoc(tenantId, kb, 'indexed', 2);
+    await addDoc(tenantId, kb, 'failed', 0);
+
+    const a = answeringOf((await request(app).get(READINESS_URL)).body);
+    expect(a.state).toBe('live');
+    expect(a.attention.map((x: any) => x.code)).toContain('documents_failed');
+  });
+
+  it('reports AI being switched off as a missing step', async () => {
+    await provision({ aiEnabled: false });
+    const a = answeringOf((await request(app).get(READINESS_URL)).body);
+    expect(a.missingSteps.map((m: any) => m.id)).toContain('ai_disabled');
+  });
+});
+
+/**
+ * Channel readiness answers "which bot replies on WhatsApp, and is it the one I
+ * have been editing?" — unanswerable in the UI when a tenant had two ACTIVE bots
+ * both named "Valyro", and edits went to the wrong one for days.
+ */
+describe('GET /bots/readiness — channel', () => {
+  const channelsOf = (body: any) =>
+    body.data.capabilities.filter((c: any) => c.capability === 'channel');
+
+  const addConnection = (tenantId: string, channel: string, botId: string | null, status = 'active') =>
+    AppDataSource.query(
+      `INSERT INTO channel_connections ("tenantId", channel, status, "botId", label)
+       VALUES ($1,$2,$3,$4,'L') RETURNING id`,
+      [tenantId, channel, status, botId],
+    );
+
+  it('surfaces a channel that follows the default bot, and says so', async () => {
+    // botId null is not "unrouted" — it follows whichever bot is default, so
+    // changing the default silently repoints a live channel.
+    const { tenantId } = await provision();
+    await addConnection(tenantId, 'whatsapp', null);
+
+    const chans = channelsOf((await request(app).get(READINESS_URL)).body);
+    expect(chans).toHaveLength(1);
+    expect(chans[0].detail.routedExplicitly).toBe(false);
+    expect(chans[0].attention.map((a: any) => a.code)).toContain('follows_default_bot');
+  });
+
+  it('is live for an explicitly routed, active channel on an AI-enabled bot', async () => {
+    const { tenantId, botId } = await provision();
+    await addConnection(tenantId, 'whatsapp', botId);
+
+    const chans = channelsOf((await request(app).get(READINESS_URL)).body);
+    expect(chans[0].state).toBe('live');
+    expect(chans[0].detail.routedExplicitly).toBe(true);
+  });
+
+  it('is not_ready when the channel routes to a bot whose AI is off', async () => {
+    const { tenantId, botId } = await provision({ aiEnabled: false });
+    await addConnection(tenantId, 'whatsapp', botId);
+
+    const chans = channelsOf((await request(app).get(READINESS_URL)).body);
+    expect(chans[0].state).toBe('not_ready');
+    expect(chans[0].missingSteps.map((m: any) => m.id)).toContain('target_bot_ai_off');
+  });
+
+  it('is not_ready when the connection itself is inactive', async () => {
+    const { tenantId, botId } = await provision();
+    await addConnection(tenantId, 'whatsapp', botId, 'pending_setup');
+
+    const chans = channelsOf((await request(app).get(READINESS_URL)).body);
+    expect(chans[0].missingSteps.map((m: any) => m.id)).toContain('connection_inactive');
+  });
+
+  it('warns when another active bot shares this bot’s name', async () => {
+    const { tenantId, botId } = await provision();
+    await addConnection(tenantId, 'whatsapp', botId);
+    const me = await AppDataSource.getRepository(Bot).findOneOrFail({ where: { id: botId } });
+    await AppDataSource.getRepository(Bot).save(
+      AppDataSource.getRepository(Bot).create({
+        tenantId, name: me.name, status: 'active', isDefault: false,
+        publicKey: 'bk_twin_' + Math.random().toString(36).slice(2, 10),
+        settings: { ai: { enabled: true } } as Bot['settings'],
+      }),
+    );
+
+    const chans = channelsOf((await request(app).get(READINESS_URL)).body);
+    expect(chans[0].attention.map((a: any) => a.code)).toContain('ambiguous_bot_name');
+  });
+
+  it('emits nothing for a tenant with no channels', async () => {
+    await provision();
+    expect(channelsOf((await request(app).get(READINESS_URL)).body)).toEqual([]);
   });
 });

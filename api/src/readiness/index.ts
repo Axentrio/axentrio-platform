@@ -5,6 +5,8 @@
  * under `capabilities/`, import it here, deploy.
  */
 import './capabilities/booking.readiness';
+import './capabilities/answering.readiness';
+import './capabilities/channel.readiness';
 
 export {
   registerCapability,

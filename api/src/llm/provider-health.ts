@@ -72,9 +72,18 @@ export async function probeProviderHealth(): Promise<ProviderHealth> {
  */
 let lastAlertedState: ProviderHealth['state'] = 'ok';
 
+/**
+ * A healthy probe is deliberately silent — but silence is also what a probe that
+ * never started looks like, and a monitor you cannot tell is running is not a
+ * monitor. Log the FIRST result at boot, whatever it is, so "the watchdog is
+ * alive" is verifiable without waiting for an outage to prove it.
+ */
+let loggedFirstResult = false;
+
 /** Reset between tests. */
 export function __resetProviderHealthAlertState(): void {
   lastAlertedState = 'ok';
+  loggedFirstResult = false;
 }
 
 async function alert(subject: string, body: string): Promise<void> {
@@ -95,6 +104,11 @@ async function alert(subject: string, body: string): Promise<void> {
  */
 export async function runProviderHealthCheck(): Promise<ProviderHealth> {
   const health = await probeProviderHealth();
+
+  if (!loggedFirstResult) {
+    loggedFirstResult = true;
+    logger.info('[provider-health] probe active', { state: health.state, inbox: alertInbox() });
+  }
 
   // Transient throttling is normal under load and is not an outage — never alert
   // on it, and never let it clear a standing quota alert.

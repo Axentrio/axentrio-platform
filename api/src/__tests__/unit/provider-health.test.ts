@@ -148,6 +148,23 @@ describe('alerting', () => {
     await expect(runProviderHealthCheck()).resolves.toMatchObject({ state: 'quota_exhausted' });
   });
 
+  it('announces itself on the first run, so a dead watchdog is distinguishable from a quiet one', async () => {
+    // A healthy probe is silent by design — which is also what a probe that never
+    // started looks like. One boot-time line makes "it is alive" verifiable.
+    const { logger } = await import('../../utils/logger');
+    const info = vi.spyOn(logger, 'info');
+    chat.mockResolvedValue({ content: 'ok', usage: {}, finishReason: 'stop' });
+
+    await runProviderHealthCheck();
+    expect(info).toHaveBeenCalledWith('[provider-health] probe active', expect.objectContaining({ state: 'ok' }));
+
+    info.mockClear();
+    await runProviderHealthCheck();
+    // …and stays quiet thereafter.
+    expect(info).not.toHaveBeenCalledWith('[provider-health] probe active', expect.anything());
+    info.mockRestore();
+  });
+
   it('never throws, whatever the provider does', async () => {
     chat.mockRejectedValue('a bare string, not an Error');
     await expect(runProviderHealthCheck()).resolves.toBeDefined();

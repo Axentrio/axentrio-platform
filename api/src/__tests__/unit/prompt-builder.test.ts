@@ -16,7 +16,7 @@ describe('PromptBuilder', () => {
     settings: {
       ai: {
         enabled: true,
-        brandVoice: { name: 'TestBot', tone: 'friendly', customInstructions: 'Always greet the customer.' },
+        brandVoice: { name: 'TestBot', tone: 'friendly' },
         guardrails: { topicsToAvoid: ['politics'], maxResponseLength: 500, escalationKeywords: [] },
       },
     },
@@ -32,7 +32,11 @@ describe('PromptBuilder', () => {
   ];
 
   it('includes brand voice in system prompt', () => {
-    const { prompt } = builder.build(baseTenant, baseTenant.settings as any, mockTools);
+    // Tenant-authored prose reaches the prompt as the TEMPLATE BODY (layer 2);
+    // brandVoice.customInstructions is retired.
+    const { prompt } = builder.build(
+      baseTenant, baseTenant.settings as any, mockTools, undefined, undefined, undefined, 'Always greet the customer.',
+    );
     expect(prompt).toContain('TestBot');
     expect(prompt).toContain('friendly');
     expect(prompt).toContain('Always greet the customer.');
@@ -151,7 +155,9 @@ describe('PromptBuilder', () => {
         }],
       },
     } as unknown as Tenant;
-    const { prompt } = builder.build(tenantWithSkills, tenantWithSkills.settings as any, mockTools);
+    const { prompt } = builder.build(
+      tenantWithSkills, tenantWithSkills.settings as any, mockTools, undefined, undefined, undefined, 'Always greet the customer.',
+    );
 
     const idxBrand = prompt.indexOf('TestBot');
     const idxCustom = prompt.indexOf('Always greet the customer.');
@@ -231,7 +237,10 @@ describe('buildSystemPrompt (llm)', () => {
   });
 
   it('includes the tenant instructions in a labelled tenant block', () => {
-    const prompt = buildSystemPrompt(baseAi, { businessName: 'Acme' });
+    const prompt = buildSystemPrompt(baseAi, {
+      businessName: 'Acme',
+      templateBody: 'You are {botName} for {businessName}. Always greet warmly.',
+    });
     expect(prompt).toContain('## TENANT INSTRUCTIONS');
     expect(prompt).toContain('Always greet warmly');
   });
@@ -252,14 +261,10 @@ describe('buildSystemPrompt (llm)', () => {
   });
 
   it('preserves unknown placeholders as-is', () => {
-    const ai = {
-      ...baseAi,
-      brandVoice: {
-        ...baseAi.brandVoice,
-        customInstructions: 'Refer them to {missingKey} for help.',
-      },
-    } as unknown as AiSettings;
-    const prompt = buildSystemPrompt(ai, { businessName: 'Acme' });
+    const prompt = buildSystemPrompt(baseAi, {
+      businessName: 'Acme',
+      templateBody: 'Refer them to {missingKey} for help.',
+    });
     expect(prompt).toContain('{missingKey}');
   });
 

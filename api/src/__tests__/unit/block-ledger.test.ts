@@ -77,10 +77,15 @@ describe('block ledger — agent mode', () => {
     expect(excluded({ ai: undefined, tools: [] })).toContainEqual({ key: 'TEMPLATE_BODY', reason: 'empty' });
   });
 
-  it('CUSTOM_INSTRUCTIONS: include when present, exclude(empty) when absent', () => {
+  it('CUSTOM_INSTRUCTIONS: retired — never composed and never ledgered', () => {
+    // This layer used to compose ABOVE the template body with no UI anywhere, which let
+    // a stale value drive a live bot against its template (see the observability-admin
+    // note). Retiring it is the fix; this test is the guard that it stays retired.
     const withCustom = { enabled: true, brandVoice: { customInstructions: 'Be concise.' } } as any;
-    expect(included({ ai: withCustom, tools: [] })).toContain('CUSTOM_INSTRUCTIONS');
-    expect(excluded({ tools: [] })).toContainEqual({ key: 'CUSTOM_INSTRUCTIONS', reason: 'empty' });
+    const out = composeSystemPrompt({ ...base, ai: withCustom, tools: [] });
+    expect(out.prompt).not.toContain('Be concise.');
+    expect(out.ledger.getIncluded()).not.toContain('CUSTOM_INSTRUCTIONS');
+    expect(out.ledger.getExcluded().map((e: { key: string }) => e.key)).not.toContain('CUSTOM_INSTRUCTIONS');
   });
 
   it('EXTRA_INFO: include when present, exclude(empty) when absent', () => {

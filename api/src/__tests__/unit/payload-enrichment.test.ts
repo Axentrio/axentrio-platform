@@ -78,7 +78,6 @@ describe('Payload Enrichment Helpers', () => {
         brandVoice: {
           name: 'TestBot',
           tone: 'friendly',
-          customInstructions: 'Be helpful',
         },
         guardrails: {
           topicsToAvoid: ['politics'],
@@ -91,7 +90,9 @@ describe('Payload Enrichment Helpers', () => {
         },
       };
 
-      const result = buildTenantAiConfig('Test Tenant', ai);
+      // n8n's systemPrompt is composed from the bot's TEMPLATE BODY; the old
+      // brandVoice.customInstructions layer is retired.
+      const result = buildTenantAiConfig('Test Tenant', ai, 'Be helpful');
 
       expect(result).toEqual({
         brandName: 'TestBot',

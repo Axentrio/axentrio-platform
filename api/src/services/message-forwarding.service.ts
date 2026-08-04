@@ -96,11 +96,11 @@ export function buildTenantAiConfig(
   return {
     brandName: ai.brandVoice?.name || tenantName,
     brandTone: ai.brandVoice?.tone || 'professional',
-    // n8n has its own prompt handling — pass the bot's template + custom
-    // instructions through with {placeholders} resolved, but without a legacy
-    // fallback (empty template + empty custom → empty systemPrompt). Composed
-    // via the n8n mode of the single composer (no default block, no platform
-    // rules, no module sections — T14).
+    // n8n has its own prompt handling — pass the bot's template body through with
+    // {placeholders} resolved, but without a legacy fallback (no template → empty
+    // systemPrompt). Composed via the n8n mode of the single composer (no default
+    // block, no platform rules, no module sections — T14). The former
+    // brandVoice.customInstructions layer is retired and no longer contributes.
     systemPrompt: composeSystemPrompt({ mode: 'n8n', ai, businessName: tenantName, templateBody }),
     guardrails: {
       topicsToAvoid: ai.guardrails?.topicsToAvoid || [],

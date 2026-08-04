@@ -5,6 +5,12 @@
 // must still pass unchanged (any diff is a behavior change and must be
 // reviewed). Do NOT blindly run `-u` on these.
 //
+// RE-LOCKED 2026-08-04 when brandVoice.customInstructions was retired. That layer
+// carried the tenant-authored prose these cases feed in; the surviving layer is the
+// TEMPLATE BODY, so each fixture now passes the same text as `templateBody`. The prose
+// therefore composes at layer 2 instead of layer 4 — that ordering shift IS the diff,
+// and it is the intended behaviour change.
+//
 // The agent FORMATTING RULES block embeds today's date (`new Date()`), which is
 // inherently volatile; `stripDateLine` normalizes just that one line so the
 // rest of the prompt is byte-locked.
@@ -40,7 +46,7 @@ describe('characterization: agent PromptBuilder.build', () => {
     settings: {
       ai: {
         enabled: true,
-        brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'Greet warmly. You serve {businessName}.' },
+        brandVoice: { name: 'Ava', tone: 'friendly' },
         guardrails: { topicsToAvoid: ['politics'], maxResponseLength: 500, escalationKeywords: [] },
       },
     },
@@ -55,12 +61,12 @@ describe('characterization: agent PromptBuilder.build', () => {
       'Some pre-fetched KB context.',
       ['\n## SERVICES\nDrain cleaning — 60 min'],
       'Jordan',
+      'Greet warmly. You serve {businessName}.',
     );
     expect(stripDateLine(prompt)).toMatchInlineSnapshot(`
       "LANGUAGE (read first): Write every reply in the SAME language as the customer's most recent message. The opening greeting is in the business's default language — do NOT take your language from it, only from what the customer actually writes. Re-check each turn and never switch languages unless the customer does.
       You are Ava.
       Tone: friendly
-      You help customers of Acme Plumbing. Answer their questions about this service business — its services, opening hours, pricing, location, contact details, and policies. Use the knowledge base for anything factual; if you don't have the information, say so honestly and offer to pass the question to the team. Keep replies clear and practical, focused on what this business actually offers — never invent details, and don't answer unrelated or general-knowledge questions.
       Greet warmly. You serve Acme Plumbing.
 
       ## CONVERSATION STYLE
@@ -118,13 +124,13 @@ describe('characterization: agent PromptBuilder.build', () => {
     `);
   });
 
-  it('minimal: no tools, no custom instructions, no guardrail topics', () => {
+  it('minimal: no tools, no template body, no guardrail topics', () => {
     const bare = {
       name: 'Bare Co',
       settings: {
         ai: {
           enabled: true,
-          brandVoice: { name: 'Bot', tone: 'professional', customInstructions: '' },
+          brandVoice: { name: 'Bot', tone: 'professional' },
           guardrails: { topicsToAvoid: [], escalationKeywords: [] },
         },
       },
@@ -222,13 +228,16 @@ describe('characterization: agent PromptBuilder.build', () => {
 });
 
 describe('characterization: buildSystemPrompt (rag/preview base)', () => {
+  /** The tenant-authored prose these cases exercise, now carried by the template body. */
+  const BASE_TEMPLATE_BODY = 'You are {botName} for {businessName}. Greet warmly.';
+
   const baseAi = {
     enabled: true,
     provider: 'openai',
     model: 'gpt-4o-mini',
     apiKey: 'sk-secret',
     supportEmail: 'help@acme.test',
-    brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'You are {botName} for {businessName}. Greet warmly.' },
+    brandVoice: { name: 'Ava', tone: 'friendly' },
     guardrails: {
       topicsToAvoid: ['politics', 'religion'],
       escalationKeywords: [],
@@ -240,8 +249,8 @@ describe('characterization: buildSystemPrompt (rag/preview base)', () => {
     },
   } as unknown as AiSettings;
 
-  it('with custom instructions', () => {
-    expect(buildSystemPrompt(baseAi, { businessName: 'Acme' })).toMatchInlineSnapshot(`
+  it('with a template body', () => {
+    expect(buildSystemPrompt(baseAi, { businessName: 'Acme', templateBody: BASE_TEMPLATE_BODY })).toMatchInlineSnapshot(`
       "You are Ava for Acme. Help visitors as instructed below while staying within the platform safety rules.
 
       ## TENANT INSTRUCTIONS
@@ -261,9 +270,8 @@ describe('characterization: buildSystemPrompt (rag/preview base)', () => {
     `);
   });
 
-  it('empty custom instructions → default tenant block', () => {
-    const ai = { ...baseAi, brandVoice: { ...baseAi.brandVoice, customInstructions: '' } } as unknown as AiSettings;
-    expect(buildSystemPrompt(ai, { businessName: 'Acme' })).toMatchInlineSnapshot(`
+  it('no template body → default tenant block', () => {
+    expect(buildSystemPrompt(baseAi, { businessName: 'Acme' })).toMatchInlineSnapshot(`
       "You are Ava for Acme. Help visitors as instructed below while staying within the platform safety rules.
 
       ## TENANT INSTRUCTIONS
@@ -288,7 +296,7 @@ describe('characterization: buildSystemPrompt (rag/preview base)', () => {
       ...baseAi,
       guardrails: { ...baseAi.guardrails, topicsToAvoid: [], fallbackMessage: '' },
     } as unknown as AiSettings;
-    expect(buildSystemPrompt(ai)).toMatchInlineSnapshot(`
+    expect(buildSystemPrompt(ai, { templateBody: BASE_TEMPLATE_BODY })).toMatchInlineSnapshot(`
       "You are Ava. Help visitors as instructed below while staying within the platform safety rules.
 
       ## TENANT INSTRUCTIONS
@@ -310,7 +318,7 @@ describe('characterization: buildSystemPrompt (rag/preview base)', () => {
 describe('characterization: RAG mode (base + RAG/JSON suffix + knowledge context)', () => {
   const baseAi = {
     enabled: true,
-    brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'You are {botName}. Greet warmly.' },
+    brandVoice: { name: 'Ava', tone: 'friendly' },
     guardrails: {
       topicsToAvoid: ['politics'],
       escalationKeywords: [],
@@ -326,6 +334,7 @@ describe('characterization: RAG mode (base + RAG/JSON suffix + knowledge context
     const prompt = composeSystemPrompt({
       mode: 'rag',
       ai: baseAi,
+      templateBody: 'You are {botName}. Greet warmly.',
       knowledgeContext: '[Source: Hours] Open 9-5 Mon-Fri.',
     });
     expect(prompt).toMatchInlineSnapshot(`
@@ -367,12 +376,12 @@ describe('characterization: RAG mode (base + RAG/JSON suffix + knowledge context
 describe('characterization: n8n buildTenantAiConfig', () => {
   const ai = {
     enabled: true,
-    brandVoice: { name: 'Ava', tone: 'friendly', customInstructions: 'Help {businessName} customers.' },
+    brandVoice: { name: 'Ava', tone: 'friendly' },
     guardrails: { topicsToAvoid: ['politics'], escalationKeywords: ['lawyer'], confidenceThreshold: 0.7, maxResponseLength: 500 },
   } as any;
 
-  it('passes through substituted custom instructions, no platform rules', () => {
-    expect(buildTenantAiConfig('Acme', ai)).toMatchInlineSnapshot(`
+  it('passes through the substituted template body, no platform rules', () => {
+    expect(buildTenantAiConfig('Acme', ai, 'Help {businessName} customers.')).toMatchInlineSnapshot(`
       {
         "brandName": "Ava",
         "brandTone": "friendly",
@@ -391,9 +400,8 @@ describe('characterization: n8n buildTenantAiConfig', () => {
     `);
   });
 
-  it('empty custom instructions → empty systemPrompt (n8n contract)', () => {
-    const empty = { ...ai, brandVoice: { ...ai.brandVoice, customInstructions: '' } };
-    expect(buildTenantAiConfig('Acme', empty)?.systemPrompt).toMatchInlineSnapshot(`""`);
+  it('no template body → empty systemPrompt (n8n contract)', () => {
+    expect(buildTenantAiConfig('Acme', ai)?.systemPrompt).toMatchInlineSnapshot(`""`);
   });
 
   it('disabled ai → undefined', () => {

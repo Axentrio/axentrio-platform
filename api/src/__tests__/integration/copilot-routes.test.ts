@@ -34,9 +34,9 @@ vi.mock('../../websocket/socket.handler', () => ({
 
 // Escalation sends real mail. Stubbed so the suite exercises WHAT gets sent without
 // sending it — the payload is the thing under test.
-type SentMail = { to: string; subject: string; body: string; replyTo?: string };
+type SentMail = { to: string; cc?: string | string[]; subject: string; body: string; replyTo?: string };
 const sendEmail = vi.hoisted(() =>
-  vi.fn(async (_options: { to: string; subject: string; body: string; replyTo?: string }) => ({
+  vi.fn(async (_options: { to: string; cc?: string | string[]; subject: string; body: string; replyTo?: string }) => ({
     success: true as boolean,
     messageId: 'm1',
     error: undefined as string | undefined,
@@ -414,6 +414,20 @@ describe('POST /escalate', () => {
   it('replies to the customer, not to the platform', async () => {
     await escalate();
     expect((sendEmail.mock.calls[0][0] as SentMail).replyTo).toMatch(/@/);
+  });
+
+  it('copies the platform operator, so a broken support path is noticed', async () => {
+    // A shared inbox is where a request is handled; it is not where anyone
+    // notices requests have STOPPED arriving.
+    vi.stubEnv('PLATFORM_ALERT_EMAIL', 'operator@example.com');
+    vi.resetModules();
+
+    await escalate();
+    const mail = sendEmail.mock.calls[0][0] as SentMail;
+    // cc, not a second `to` — support owns the request, the operator watches.
+    expect(mail.to).toBe('support@axentrio.com');
+    expect(mail.cc ?? '').toContain('operator@example.com');
+    vi.unstubAllEnvs();
   });
 
   it('attaches the real conversation, not one supplied by the caller', async () => {

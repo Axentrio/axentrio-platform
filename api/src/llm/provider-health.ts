@@ -34,7 +34,10 @@ export type ProviderHealth =
   /** Bad key, model gone, provider down — anything else. */
   | { state: 'unreachable'; detail: string };
 
-const PROBE_ALERT_INBOX = process.env.PLATFORM_ALERT_EMAIL?.trim()
+/** Read per alert, not captured at module load, so changing the Railway variable
+ *  takes effect without waiting for a restart to notice it. */
+const alertInbox = (): string =>
+  process.env.PLATFORM_ALERT_EMAIL?.trim()
   || process.env.SUPPORT_EMAIL?.trim()
   || 'support@axentrio.com';
 
@@ -76,7 +79,7 @@ export function __resetProviderHealthAlertState(): void {
 
 async function alert(subject: string, body: string): Promise<void> {
   try {
-    await getEmailService().send({ to: PROBE_ALERT_INBOX, subject, body });
+    await getEmailService().send({ to: alertInbox(), subject, body });
   } catch (err) {
     // An alert that cannot be delivered must still be findable in the logs.
     logger.error('[provider-health] ALERT DELIVERY FAILED', {

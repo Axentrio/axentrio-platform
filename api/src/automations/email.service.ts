@@ -13,6 +13,10 @@ interface SendEmailOptions {
   subject: string;
   body: string;
   from?: string;
+  /** Copied recipients. Visible to `to`, unlike bcc — used where someone needs
+   *  sight of a thread they are not the owner of (e.g. the platform operator on
+   *  support escalations). */
+  cc?: string | string[];
   replyTo?: string;
   attachments?: EmailAttachment[];
   /** Extra SMTP headers (e.g. List-Unsubscribe for one-click opt-out). */
@@ -40,7 +44,7 @@ export class EmailService {
   }
 
   async send(options: SendEmailOptions): Promise<SendEmailResult> {
-    const { to, subject, body, from, replyTo, attachments, headers, idempotencyKey } = options;
+    const { to, subject, body, from, cc, replyTo, attachments, headers, idempotencyKey } = options;
 
     if (!this.resend) {
       logger.warn('[EmailService] send called but no API key configured');
@@ -49,8 +53,11 @@ export class EmailService {
 
     const fromAddress = from ?? this.defaultFrom;
     const recipients = Array.isArray(to) ? to : [to];
+    // Drop anything falsy/blank: an unset env must not become an empty recipient
+    // that makes the provider reject the whole send.
+    const ccList = (Array.isArray(cc) ? cc : cc ? [cc] : []).filter((a) => a.trim().length > 0);
 
-    logger.info('[EmailService] sending email', { to: recipients, subject, from: fromAddress });
+    logger.info('[EmailService] sending email', { to: recipients, cc: ccList, subject, from: fromAddress });
 
     const { data, error } = await this.resend.emails.send(
       {
@@ -58,6 +65,7 @@ export class EmailService {
         to: recipients,
         subject,
         html: body,
+        ...(ccList.length ? { cc: ccList } : {}),
         ...(replyTo ? { replyTo } : {}),
         ...(headers ? { headers } : {}),
         ...(attachments && attachments.length

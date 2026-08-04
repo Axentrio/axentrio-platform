@@ -28,6 +28,22 @@ import { logger } from '../utils/logger';
 export const SUPPORT_INBOX = process.env.SUPPORT_EMAIL?.trim() || 'support@axentrio.com';
 
 /**
+ * The platform operator, copied on every escalation.
+ *
+ * A shared support inbox is where a request goes to be handled; it is not where
+ * anyone notices that requests have stopped arriving. Copying a named human
+ * means a broken escalation path is visible immediately rather than the next
+ * time somebody thinks to check the inbox.
+ *
+ * Reuses PLATFORM_ALERT_EMAIL — the same operator who gets the outage alerts.
+ * Unset means no cc, never an empty recipient.
+ *
+ * Read per send, not captured at module load: a config change should take effect
+ * without waiting for a process restart to notice it.
+ */
+const operatorCc = (): string | undefined => process.env.PLATFORM_ALERT_EMAIL?.trim() || undefined;
+
+/**
  * How much of the conversation goes in the ticket. Enough to see the thread, not a dump.
  * Exported so the route can select exactly this many MOST-RECENT turns rather than
  * fetching a window and trimming it to the wrong end.
@@ -95,6 +111,14 @@ export async function escalateToSupport(input: EscalationInput): Promise<Escalat
 
   const result = await getEmailService().send({
     to: SUPPORT_INBOX,
+    // cc, not a second `to`: support owns the request, the operator is only
+    // watching. Also keeps replyTo pointing the handler at the customer.
+    ...((): { cc?: string } => {
+      const cc = operatorCc();
+      // Never cc the address we are already sending to — a duplicate copy in the
+      // same thread reads as a bug to whoever opens it.
+      return cc && cc !== SUPPORT_INBOX ? { cc } : {};
+    })(),
     subject,
     body,
     // So support hits Reply and reaches the customer, not the platform.

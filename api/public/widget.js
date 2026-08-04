@@ -62,7 +62,16 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     enableVoiceInput: false,
     enableCamera: true,
     maxFileSize: 25 * 1024 * 1024, // 25MB
-    allowedFileTypes: ['image/*', 'video/*', 'application/pdf', '.doc', '.docx'],
+    // Mirrors the server allowlist (DEFAULT_UPLOAD_CONFIG.allowedMimeTypes). The old
+    // wildcard list let svg, webm and legacy .doc through the picker only to be rejected
+    // server-side after the customer had already waited for the upload.
+    allowedFileTypes: [
+      'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+      'video/mp4', 'video/quicktime',
+      'application/pdf',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+    ],
     
     // Privacy & Compliance
     gdprCompliance: true,
@@ -1304,6 +1313,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       this.sessionId = null;
       this.tenantId = null;
       this.visitorId = null;
+      // Owner opt-in for file uploads, answered by /widget/config. Starts FALSE so the
+      // attach button stays hidden until the server says otherwise — the previous default
+      // showed it on every embed and every upload then failed.
+      this.serverFileUploadEnabled = false;
       this.pendingMessages = [];
       this.storageKey = this.getStorageKey();
       this._connected = false;
@@ -1503,6 +1516,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         if (data.attribution && typeof data.attribution === 'object') {
           this.appearance.hideAttribution = data.attribution.hide === true;
         }
+        // The attach button is gated on the SERVER's answer, which defaults to false. The
+        // embed option alone defaulted to true, so every widget on every site rendered an
+        // attach button whose uploads then 404'd. Owner opt-in decides this, not the embed.
+        this.serverFileUploadEnabled = data.features ? data.features.fileUploadEnabled === true : false;
         this._applyAppearance();
       } catch (err) {
         this.log('Appearance config fetch failed:', err && err.message);
@@ -2096,7 +2113,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
                 aria-label="Type your message"
               ></textarea>
               <div class="cb-input-actions">
-                ${this.config.enableFileUpload ? `
+                ${this.config.enableFileUpload && this.serverFileUploadEnabled ? `
                   <button class="cb-btn cb-btn--attach" type="button" aria-label="Attach file" title="Attach file">
                     ${ICONS.attach}
                   </button>
@@ -2517,56 +2534,78 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     
     async uploadFile(file) {
-      const tenantId = this.tenantId || this.config.tenantId;
-      if (!this.sessionId || !tenantId) {
+      // The server derives tenant AND chat session from the widget token, so the token is
+      // the real precondition — it used to send tenantId/chatSessionId as body fields, which
+      // is exactly the client-supplied binding the endpoint refuses.
+      if (!this.sessionId || !this.token) {
         this.showError('Chat is still connecting. Please wait a moment and try again.');
         return;
       }
 
       this.showProgress(0);
-      
+
       try {
-        // Get upload URL from server
-        const response = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/uploads/presigned-url`, {
+        // Widget-scoped upload. The old call went to /api/v1/uploads/presigned-url, which is
+        // not mounted — every upload 404'd. The real endpoint has existed since the booking
+        // file-upload work; the widget was simply never rewired to it.
+        const response = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/files/upload`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-API-Key': this.config.apiKey,
+            'Authorization': 'Bearer ' + this.token,
           },
           body: JSON.stringify({
             fileName: file.name,
             fileSize: file.size,
             mimeType: file.type,
-            chatSessionId: this.sessionId,
-            tenantId,
           }),
         }, 15000);
-        
-        if (!response.ok) throw new Error('Failed to get upload URL');
-        
+
+        if (response.status === 402) {
+          this.hideProgress();
+          this.showError('File uploads are not available on this plan.');
+          return;
+        }
+        if (!response.ok) throw new Error('Failed to get upload URL (' + response.status + ')');
+
         const { data } = await response.json();
-        
-        // Upload to S3
-        await this.uploadToS3(file, data.uploadUrl, (progress) => {
+        const upload = data && data.upload;
+        if (!upload || !upload.uploadUrl || !upload.sessionId) throw new Error('Malformed upload response');
+
+        await this.uploadToS3(file, upload.uploadUrl, (progress) => {
           this.showProgress(progress);
         });
-        
-        // Add message with file
+
+        // WITHOUT THIS the row stays status='pending' forever and every consumer — including
+        // the booking flow, which only reads ready sessions — never sees the file. This call
+        // is the difference between "404s" and "appears to work but silently loses the file".
+        const done = await fetchWithTimeout(
+          `${this.config.apiUrl}/api/v1/widget/files/${encodeURIComponent(upload.sessionId)}/upload-complete`,
+          { method: 'POST', headers: { 'Authorization': 'Bearer ' + this.token } },
+          20000
+        );
+        if (!done.ok) throw new Error('Upload could not be finalised (' + done.status + ')');
+        const completed = (await done.json()).data || {};
+
+        if (completed.status !== 'ready') {
+          // Quarantined or still processing. Never surface scan details to the visitor.
+          this.hideProgress();
+          this.showError("That file couldn't be accepted. Please try a different one.");
+          return;
+        }
+
         this.addMessage({
           id: utils.generateId(),
           text: '',
           sender: 'user',
           timestamp: new Date(),
-          file: {
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            url: data.publicUrl,
-          },
+          // No url: the endpoint deliberately returns no public link, and an uploaded file
+          // must not be linkable before it has cleared scanning.
+          file: { name: file.name, size: file.size, type: file.type },
         });
-        
+
         this.hideProgress();
-        
+
       } catch (error) {
         this.hideProgress();
         this.showError('Failed to upload file. Please try again.');

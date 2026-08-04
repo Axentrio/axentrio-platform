@@ -13,6 +13,7 @@ import { Bot } from '../database/entities/Bot';
 import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
+import { ApiError } from '../middleware/error-handler';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
 import { scheduleTurn } from '../services/turn-coalescer';
@@ -607,6 +608,25 @@ router.post(
 
 const UPLOAD_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Storage isn't configured everywhere; without this the visitor gets a 500. */
+function isS3Configured(): boolean {
+  return !!(process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY && process.env.AWS_S3_BUCKET);
+}
+
+/**
+ * Map the upload service's own error types onto real statuses.
+ *
+ * Both reached the global handler as 500/INTERNAL_ERROR, so "your file is too big" and
+ * "you are over quota" — the two things a visitor can actually act on — arrived as
+ * "something went wrong on our end". The portal path has had this adapter all along.
+ */
+async function asUploadApiError(err: unknown): Promise<never> {
+  const { FileValidationError, QuotaExceededError } = await import('../file-handling/upload.service');
+  if (err instanceof FileValidationError) throw new ApiError(err.message, 400, 'FILE_VALIDATION_FAILED');
+  if (err instanceof QuotaExceededError) throw new ApiError(err.message, 429, 'QUOTA_EXCEEDED');
+  throw err;
+}
+
 router.post(
   '/files/upload',
   widgetRateLimiter,
@@ -615,6 +635,9 @@ router.post(
     const w = req.widget!;
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     await requireFeature(w.tenantId, 'fileUpload', 'plan_limit_file_upload');
+    if (!isS3Configured()) {
+      throw new ApiError('File uploads are not available right now', 503, 'STORAGE_UNAVAILABLE');
+    }
     const { fileName, fileSize, mimeType } = req.body;
     if (!fileName || !fileSize || !mimeType) {
       throw new ValidationError('fileName, fileSize, and mimeType are required');
@@ -622,14 +645,16 @@ router.post(
     const { getUploadService } = await import('../file-handling/upload.service');
     // generateUploadUrl runs the existing size/mime/quota validation; fileKey is
     // server-derived and the presigned PUT pins ContentLength/Content-Type.
-    const session = await getUploadService().generateUploadUrl({
-      fileName,
-      fileSize,
-      mimeType,
-      tenantId: w.tenantId, // server-trusted
-      userId: '',
-      chatSessionId: w.sessionId, // binds the upload to THIS chat
-    });
+    const session = await getUploadService()
+      .generateUploadUrl({
+        fileName,
+        fileSize,
+        mimeType,
+        tenantId: w.tenantId, // server-trusted
+        userId: '',
+        chatSessionId: w.sessionId, // binds the upload to THIS chat
+      })
+      .catch(asUploadApiError);
     sendSuccess(res, {
       upload: { sessionId: session.sessionId, uploadUrl: session.uploadUrl, expiresAt: session.expiresAt },
     });

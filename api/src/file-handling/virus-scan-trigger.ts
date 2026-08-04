@@ -2,19 +2,16 @@
  * Virus-scan trigger — single source of truth for "scan an uploaded file and
  * react to the result".
  *
- * Two consumers:
- *   1. `routes/files.routes.ts` POST /:sessionId/upload-complete — the
- *      client-driven path. Awaits the result and surfaces it to the caller.
- *      The portal calls this AFTER the S3 PUT completes, so the file is
- *      guaranteed to exist by the time we GET it.
- *   2. `file-handling/upload.controller.ts` (currently unmounted) — the
- *      fire-and-forget path that triggers a scan opportunistically right
- *      after `generateUploadUrl`. That path races with the client's PUT
- *      and almost always fails locally; the real scan happens via the
- *      `POST /webhook/scan-complete` external-scanner callback. We keep
- *      the inline trigger for symmetry with the unmounted router so when
- *      that router gets mounted (or its endpoints get folded in), the
- *      semantics are uniform.
+ * Two consumers, both client-driven and both AFTER the S3 PUT completes, so the object is
+ * guaranteed to exist by the time we GET it:
+ *   1. `routes/files.routes.ts` POST /:sessionId/upload-complete — the portal/agent path,
+ *      authenticated with Clerk and scoped to the caller's tenant.
+ *   2. `routes/widget.ts` POST /files/:sessionId/upload-complete — the widget visitor path,
+ *      with tenant and chat session taken from the server-trusted widget token.
+ *
+ * (A third, unmounted `file-handling/upload.controller.ts` used to be listed here as a
+ * fire-and-forget caller. It was dead code and is gone; the real scan for the async case
+ * arrives via the `POST /webhook/scan-complete` external-scanner callback.)
  *
  * Both consumers MUST go through this module so the side effects
  * (status updates, audit logs, thumbnail generation, deletion of infected

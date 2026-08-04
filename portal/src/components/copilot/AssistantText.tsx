@@ -20,8 +20,17 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 
-/** `[label](target)` — label may not contain brackets, target may not contain spaces. */
-const LINK = /\[([^\]]+)\]\(([^\s)]+)\)/g;
+/**
+ * `[label](target)` — label may not contain brackets, target may not contain spaces.
+ *
+ * Padding INSIDE the parentheses is tolerated and stripped. A model writes
+ * `[AI & Content]( /ai)` often enough, and the strict form left that rendering as
+ * literal brackets and a path the customer has to retype — the precise failure
+ * this component exists to prevent. The target itself is still space-free, so
+ * nothing about what counts as a valid destination changes; the safety checks
+ * below see the same trimmed string either way.
+ */
+const LINK = /\[([^\]]+)\]\(\s*([^\s)]+)\s*\)/g;
 
 const isInternal = (target: string) => target.startsWith('/') && !target.startsWith('//');
 const isSafeExternal = (target: string) => /^https?:\/\//i.test(target);

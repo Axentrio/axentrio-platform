@@ -32,6 +32,21 @@ describe('AssistantText', () => {
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
   });
 
+  it('still links when the model pads the parentheses', () => {
+    // Observed in production: the assistant wrote "[AI & Content]( /ai)". Under the
+    // strict pattern that rendered as literal brackets and a path to retype, which
+    // is exactly what this component exists to prevent.
+    show('Go to [AI & Content]( /ai) now');
+    const link = screen.getByRole('link', { name: 'AI & Content' });
+    expect(link).toHaveAttribute('href', '/ai');
+  });
+
+  it('does not let padding smuggle an unsafe target past the checks', () => {
+    // Tolerating whitespace must not widen what counts as a valid destination.
+    show('Click [here]( javascript:alert(1) ) now');
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('refuses to render a script target as a link', () => {
     // Model-authored text is untrusted input. A `javascript:` target is not a link.
     show('Click [here](javascript:alert(1)) now');

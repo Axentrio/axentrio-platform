@@ -407,3 +407,118 @@ describe('authoring validation (T22)', () => {
     expect(res.body.data.warnings.join(' ')).toContain('{bogus}');
   });
 });
+
+describe('duplicate (Bot Studio "copy this template")', () => {
+  /** A template with a PUBLISHED v1 carrying every copyable field, plus a later
+   *  DRAFT v2 that must NOT be what gets copied. */
+  const seedRich = async () => {
+    const id = await createTemplate({ tier: 'pro', category: 'plumbing', description: 'Source desc' });
+    await request(app).post(`${BASE}/${id}/versions`).send({
+      body: 'You are {botName} of {businessName}.',
+      selectedSkillIds: ['lead_capture'],
+      variables: [{ key: 'region', label: 'Region', default: 'BE' }],
+      config: { guardrails: { maxResponseLength: 321 } },
+    });
+    const pub = await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+    expect(pub.status).toBe(200);
+    // Newer DRAFT — unshipped work that a copy must ignore.
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'HALF FINISHED DRAFT' });
+    return id;
+  };
+
+  const dup = (id: string, body: Record<string, unknown> = {}) =>
+    request(app).post(`${BASE}/${id}/duplicate`).send({ key: `copy-${++keyCounter}`, displayName: 'Copy', ...body });
+
+  it('copies the published body and its config into a new draft', async () => {
+    const id = await seedRich();
+    const res = await dup(id);
+    expect(res.status).toBe(201);
+    expect(res.body.data.copiedFromVersion).toBe(1);
+
+    const detail = await request(app).get(`${BASE}/${res.body.data.template.id}`);
+    const versions = detail.body.data.versions;
+    expect(versions).toHaveLength(1);
+    expect(versions[0].body).toBe('You are {botName} of {businessName}.');
+    expect(versions[0].selectedSkillIds).toEqual(['lead_capture']);
+    expect(versions[0].variables[0].key).toBe('region');
+    expect(versions[0].config.guardrails.maxResponseLength).toBe(321);
+  });
+
+  it('copies the PUBLISHED version, never a newer unpublished draft', async () => {
+    const id = await seedRich();
+    const res = await dup(id);
+    const detail = await request(app).get(`${BASE}/${res.body.data.template.id}`);
+    expect(detail.body.data.versions[0].body).not.toContain('HALF FINISHED');
+  });
+
+  it('leaves the copy unpublished, so it cannot reach a tenant picker yet', async () => {
+    const id = await seedRich();
+    const res = await dup(id);
+    const detail = await request(app).get(`${BASE}/${res.body.data.template.id}`);
+    expect(detail.body.data.versions[0].status).toBe('draft');
+  });
+
+  it('never inherits availableToAllTenants — that would publish it to everyone', async () => {
+    const id = await createTemplate({ availableToAllTenants: true });
+    await request(app).post(`${BASE}/${id}/versions`).send({ body: 'x' });
+    await request(app).post(`${BASE}/${id}/versions/1/publish`).send();
+
+    const res = await dup(id);
+    expect(res.body.data.template.availableToAllTenants).toBe(false);
+  });
+
+  it('inherits the source tier by default and honours an override', async () => {
+    const id = await seedRich();                       // tier: pro
+    expect((await dup(id)).body.data.template.tier).toBe('pro');
+    // The per-subscription case: same prompt, different tier.
+    expect((await dup(id, { tier: 'enterprise' })).body.data.template.tier).toBe('enterprise');
+  });
+
+  it('carries category and description across', async () => {
+    const id = await seedRich();
+    const t = (await dup(id)).body.data.template;
+    expect(t.category).toBe('plumbing');
+    expect(t.description).toBe('Source desc');
+  });
+
+  it('rejects a key that is already taken', async () => {
+    const id = await seedRich();
+    const res = await dup(id, { key: 'taken-key' });
+    expect(res.status).toBe(201);
+    const clash = await dup(id, { key: 'taken-key' });
+    expect(clash.status).toBe(409);
+  });
+
+  it('requires a key and a display name', async () => {
+    // 422 is this platform's ValidationError envelope, not 400 — same as every
+    // other admin template endpoint.
+    const id = await seedRich();
+    expect((await request(app).post(`${BASE}/${id}/duplicate`).send({ displayName: 'X' })).status).toBe(422);
+    expect((await request(app).post(`${BASE}/${id}/duplicate`).send({ key: 'k-only' })).status).toBe(422);
+  });
+
+  it('404s on an unknown source', async () => {
+    const res = await request(app)
+      .post(`${BASE}/11111111-1111-4111-8111-111111111111/duplicate`)
+      .send({ key: 'nope', displayName: 'Nope' });
+    expect(res.status).toBe(404);
+  });
+
+  it('copies a metadata-only template as an empty shell rather than failing', async () => {
+    // No published version to carry; the author is about to write the body anyway.
+    const id = await createTemplate();
+    const res = await dup(id);
+    expect(res.status).toBe(201);
+    expect(res.body.data.copiedFromVersion).toBeNull();
+    const detail = await request(app).get(`${BASE}/${res.body.data.template.id}`);
+    expect(detail.body.data.versions).toHaveLength(0);
+  });
+
+  it('leaves the source untouched', async () => {
+    const id = await seedRich();
+    await dup(id);
+    const detail = await request(app).get(`${BASE}/${id}`);
+    expect(detail.body.data.versions).toHaveLength(2);
+    expect(detail.body.data.template.tier).toBe('pro');
+  });
+});

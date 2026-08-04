@@ -5,7 +5,7 @@ import AdminBotTemplates from './AdminBotTemplates';
 
 // Mutable query state so each test drives health (all-clear vs stranded) and the
 // template list (tier grouping) independently.
-const { state, createSpy } = vi.hoisted(() => ({
+const { state, createSpy, duplicateSpy } = vi.hoisted(() => ({
   state: {
     health: { data: { bots: [], count: 0 }, isLoading: false, isError: false } as {
       data: unknown; isLoading: boolean; isError: boolean;
@@ -13,18 +13,21 @@ const { state, createSpy } = vi.hoisted(() => ({
     templates: [] as unknown[],
   },
   createSpy: vi.fn(async () => ({ template: { id: 'new1' } })),
+  duplicateSpy: vi.fn(async () => ({ template: { id: 'copy1' }, copiedFromVersion: 3 })),
 }));
 
 vi.mock('@/queries/useBotTemplatesQueries', () => {
   return {
     useAdminBotTemplates: () => ({ data: state.templates, isLoading: false, isError: false }),
     useCreateBotTemplate: () => ({ mutate: () => {}, mutateAsync: createSpy, isPending: false }),
+    useDuplicateBotTemplate: () => ({ mutate: () => {}, mutateAsync: duplicateSpy, isPending: false }),
     useUnavailableTemplates: () => state.health,
     useAdminSkills: () => ({ data: [{ id: 'booking', displayName: 'Bookings' }] }),
   };
 });
 
 beforeEach(() => {
+  duplicateSpy.mockClear();
   state.templates = [];
   state.health = { data: { bots: [], count: 0 }, isLoading: false, isError: false };
 });
@@ -120,5 +123,60 @@ describe('AdminBotTemplates — create dialog vertical', () => {
     await waitFor(() =>
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ category: 'plumber' })),
     );
+  });
+});
+
+/**
+ * Duplicate exists so an author writes one prompt and reuses it per subscription
+ * tier instead of retyping several thousand characters. The row navigates to the
+ * editor, so the action must not trigger that, and the tier must be carried.
+ */
+describe('AdminBotTemplates — duplicate', () => {
+  const seed = () => {
+    state.templates = [tpl({ id: 't-pro', key: 'valyro', displayName: 'Valyro prompt', tier: 'pro' })];
+  };
+
+  const openDialog = () => {
+    seed();
+    render(<MemoryRouter><AdminBotTemplates /></MemoryRouter>);
+    fireEvent.click(screen.getByRole('button', { name: /duplicate valyro prompt/i }));
+  };
+
+  it('prefills a distinct key, since the original key is taken', () => {
+    openDialog();
+    expect((screen.getByLabelText(/key/i) as HTMLInputElement).value).toBe('valyro-copy');
+  });
+
+  it('sends the source id, the new key and the tier', async () => {
+    openDialog();
+    fireEvent.click(screen.getByRole('button', { name: /^duplicate$/i }));
+
+    await waitFor(() => expect(duplicateSpy).toHaveBeenCalled());
+    expect(duplicateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 't-pro', key: 'valyro-copy', tier: 'pro' }),
+    );
+  });
+
+  it('can retarget the copy at another tier — the per-subscription case', async () => {
+    openDialog();
+    fireEvent.click(screen.getByRole('button', { name: 'Enterprise' }));
+    fireEvent.click(screen.getByRole('button', { name: /^duplicate$/i }));
+
+    await waitFor(() => expect(duplicateSpy).toHaveBeenCalled());
+    expect(duplicateSpy).toHaveBeenCalledWith(expect.objectContaining({ tier: 'enterprise' }));
+  });
+
+  it('does not open the editor when the duplicate button is clicked', () => {
+    // The whole row is a navigation target; without stopPropagation the click
+    // would leave the page before the dialog could open.
+    openDialog();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(duplicateSpy).not.toHaveBeenCalled();
+  });
+
+  it('will not submit without a key', () => {
+    openDialog();
+    fireEvent.change(screen.getByLabelText(/key/i), { target: { value: '  ' } });
+    expect(screen.getByRole('button', { name: /^duplicate$/i })).toBeDisabled();
   });
 });

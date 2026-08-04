@@ -155,6 +155,32 @@ export function useCreateBotTemplate() {
   });
 }
 
+/**
+ * Clone a template so an author builds one prompt and reuses it (typically once
+ * per subscription tier) instead of retyping several thousand characters.
+ *
+ * The copy always lands unpublished and not available to tenants — see the
+ * duplicate route. Nothing goes live until the author publishes it.
+ */
+export function useDuplicateBotTemplate() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string; key: string; displayName: string; tier?: TemplateTier }) =>
+      api.post<{ template: BotTemplate; copiedFromVersion: number | null }>(
+        `/admin/bot-templates/${id}/duplicate`,
+        input,
+      ),
+    onSuccess: (res) => {
+      invalidate();
+      toast.success(
+        res.copiedFromVersion
+          ? `Copied v${res.copiedFromVersion} into a new draft`
+          : 'Template copied (source had no published version)',
+      );
+    },
+  });
+}
+
 export function useUpdateBotTemplate(id: string) {
   const invalidate = useInvalidate();
   return useMutation({

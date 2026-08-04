@@ -180,6 +180,85 @@ router.post(
   }),
 );
 
+/**
+ * POST /admin/bot-templates/:id/duplicate — clone a template so an author can
+ * build one good prompt and reuse it (typically once per subscription tier)
+ * instead of retyping several thousand characters.
+ *
+ * Copies the source's LATEST PUBLISHED version into a single new DRAFT. Draft
+ * history is working noise, and a copy that arrived pre-published would drop an
+ * unreviewed template straight into tenants' pickers.
+ *
+ * `availableToAllTenants` is forced FALSE regardless of the source: inheriting it
+ * would publish the copy to every tenant the moment it exists. Tier defaults to
+ * the source's but is overridable, which is the per-subscription case.
+ *
+ * Chosen over "new templates inherit from a base template": inheritance means
+ * editing the base silently rewrites live behaviour for every tenant already
+ * bound to a child. A copy is inert once made.
+ */
+router.post(
+  '/bot-templates/:id/duplicate',
+  asyncHandler(async (req: Request, res: Response) => {
+    const source = await loadTemplate(req.params.id);
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const key = reqStr(body.key, 'key', { max: 100 })!;
+    const displayName = reqStr(body.displayName, 'displayName', { max: 200 })!;
+    const tier = parseTier(body.tier) ?? source.tier;
+
+    const repo = AppDataSource.getRepository(BotTemplate);
+    if (await repo.findOne({ where: { key } })) {
+      throw new ConflictError(`A template with key "${key}" already exists`);
+    }
+
+    // Latest PUBLISHED version — what tenants actually resolve. Copying the newest
+    // draft instead would hand over half-finished work the author hasn't shipped.
+    const sourceVersion = await AppDataSource.getRepository(BotTemplateVersion).findOne({
+      where: { templateId: source.id, status: 'published' },
+      order: { version: 'DESC' },
+    });
+
+    const copy = await repo.save(
+      repo.create({
+        key,
+        displayName,
+        category: source.category ?? null,
+        description: source.description ?? null,
+        tier,
+        availableToAllTenants: false,
+        status: 'active',
+      }),
+    );
+
+    // No published version to copy (metadata-only source) → the copy starts empty
+    // rather than failing; the author is about to write the body anyway.
+    if (sourceVersion) {
+      await createDraftVersion(copy.id, {
+        body: sourceVersion.body,
+        changelog: `Copied from ${source.key} v${sourceVersion.version}`,
+        expectedModules: sourceVersion.expectedModules,
+        selectedSkillIds: sourceVersion.selectedSkillIds,
+        skillProse: sourceVersion.skillProse,
+        variables: sourceVersion.variables,
+        config: sourceVersion.config,
+      });
+    }
+
+    await logAudit(req.userId!, 'bot_template.duplicated', 'bot_template', copy.id, undefined, {
+      sourceTemplateId: source.id,
+      sourceKey: source.key,
+      sourceVersion: sourceVersion?.version ?? null,
+      key,
+      tier,
+    });
+
+    // No cache invalidation: the copy is not availableToAllTenants and has no
+    // published version, so it cannot appear in any tenant's picker yet.
+    res.status(201);
+    sendSuccess(res, { template: copy, copiedFromVersion: sourceVersion?.version ?? null });
+  }),
+);
+
 // GET /admin/bot-templates/:id — template + all versions (for the editor).
 router.get(
   '/bot-templates/:id',

@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Plus, ChevronRight, FileText, CircleCheck, TriangleAlert, Cpu } from 'lucide-react';
+import { Plus, ChevronRight, FileText, CircleCheck, TriangleAlert, Cpu, Copy } from 'lucide-react';
 import { PageSkeleton } from '@/components/ui/page-skeleton';
 import { InlineError } from '@/components/ui/inline-error';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import { useAdminBotTemplates, useCreateBotTemplate, useUnavailableTemplates, useAdminSkills, type BotTemplateSummary, type TemplateTier } from '../../queries/useBotTemplatesQueries';
+import { useAdminBotTemplates, useCreateBotTemplate, useDuplicateBotTemplate, useUnavailableTemplates, useAdminSkills, type BotTemplateSummary, type TemplateTier } from '../../queries/useBotTemplatesQueries';
 
 /**
  * The tiers are an ascending ladder, so the page climbs it: the left rail
@@ -49,6 +49,34 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
   const openCreate = (tier: TemplateTier) => {
     setForm((f) => ({ ...f, tier }));
     setCreateOpen(true);
+  };
+
+  // Duplicate: build one prompt, reuse it per subscription tier. The copy always
+  // arrives unpublished and not available to tenants (enforced server-side), so
+  // opening this can never change what a customer sees.
+  const [dupSource, setDupSource] = useState<BotTemplateSummary | null>(null);
+  const [dupForm, setDupForm] = useState<{ key: string; displayName: string; tier: TemplateTier }>({
+    key: '', displayName: '', tier: 'essential',
+  });
+  const duplicateMut = useDuplicateBotTemplate();
+
+  const openDuplicate = (tpl: BotTemplateSummary) => {
+    // Key is UNIQUE, so it must differ; prefill the obvious candidate rather than
+    // auto-suffixing server-side, which would silently create "-copy-copy-copy".
+    setDupForm({ key: `${tpl.key}-copy`, displayName: `${tpl.displayName} (copy)`, tier: tpl.tier ?? 'essential' });
+    setDupSource(tpl);
+  };
+
+  const submitDuplicate = async () => {
+    if (!dupSource || !dupForm.key.trim() || !dupForm.displayName.trim()) return;
+    const res = await duplicateMut.mutateAsync({
+      id: dupSource.id,
+      key: dupForm.key.trim(),
+      displayName: dupForm.displayName.trim(),
+      tier: dupForm.tier,
+    });
+    setDupSource(null);
+    navigate(`/admin/bot-templates/${res.template.id}`);
   };
 
   const submit = async () => {
@@ -112,7 +140,21 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
           {tpl.draftCount > 0 && ` · ${t('admin.botTemplates.versionSummary.drafts', { count: tpl.draftCount })}`}
         </span>
       </TableCell>
-      <TableCell><ChevronRight className="h-4 w-4 text-text-muted" /></TableCell>
+      <TableCell>
+        <div className="flex items-center justify-end gap-1">
+          {/* stopPropagation: the whole row navigates to the editor. */}
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-label={t('admin.botTemplates.actions.duplicateAria', { defaultValue: `Duplicate ${tpl.displayName}`, name: tpl.displayName })}
+            title={t('admin.botTemplates.actions.duplicate', { defaultValue: 'Duplicate' })}
+            onClick={(e) => { e.stopPropagation(); openDuplicate(tpl); }}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+          <ChevronRight className="h-4 w-4 text-text-muted" />
+        </div>
+      </TableCell>
     </TableRow>
   );
 
@@ -286,6 +328,62 @@ const AdminBotTemplates: React.FC<{ embedded?: boolean }> = ({ embedded = false 
             <Button variant="outline" onClick={() => setCreateOpen(false)}>{t('common.cancel')}</Button>
             <Button onClick={submit} disabled={!form.key.trim() || !form.displayName.trim() || createMut.isPending}>
               {t('admin.botTemplates.actions.create')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!dupSource} onOpenChange={(o) => !o && setDupSource(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {t('admin.botTemplates.duplicate.title', { defaultValue: 'Duplicate template' })}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-xs text-text-muted">
+              {t('admin.botTemplates.duplicate.explainer', {
+                defaultValue:
+                  'Copies the published prompt, modules and settings of "{{name}}" into a new draft. The copy starts unpublished and hidden from tenants until you publish it.',
+                name: dupSource?.displayName ?? '',
+              })}
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="dup-key">{t('admin.botTemplates.create.key')}</Label>
+              <Input id="dup-key" value={dupForm.key} onChange={(e) => setDupForm((f) => ({ ...f, key: e.target.value }))} />
+              <p className="text-xs text-text-muted">
+                {t('admin.botTemplates.duplicate.keyHint', { defaultValue: 'Must be unique — the copy cannot share the original’s key.' })}
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dup-name">{t('admin.botTemplates.create.displayName')}</Label>
+              <Input id="dup-name" value={dupForm.displayName} onChange={(e) => setDupForm((f) => ({ ...f, displayName: e.target.value }))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Tier</Label>
+              {/* The per-subscription case: same prompt, different tier. */}
+              <div className="grid grid-cols-3 gap-2" role="group" aria-label="Tier">
+                {TIERS.map((tr) => (
+                  <button
+                    key={tr.id}
+                    type="button"
+                    aria-pressed={dupForm.tier === tr.id}
+                    onClick={() => setDupForm((f) => ({ ...f, tier: tr.id }))}
+                    className={`rounded-lg border px-3 py-2 text-sm transition-colors ${dupForm.tier === tr.id ? 'border-primary-400 bg-primary-500/10 text-text-primary' : 'border-edge text-text-secondary hover:border-edge-light'}`}
+                  >
+                    {tr.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDupSource(null)}>{t('common.cancel')}</Button>
+            <Button
+              onClick={submitDuplicate}
+              disabled={!dupForm.key.trim() || !dupForm.displayName.trim() || duplicateMut.isPending}
+            >
+              {t('admin.botTemplates.actions.duplicate', { defaultValue: 'Duplicate' })}
             </Button>
           </DialogFooter>
         </DialogContent>

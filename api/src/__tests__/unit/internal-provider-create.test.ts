@@ -877,6 +877,35 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
   });
 
+  it('persists the model-written aiSummary on the CONFIRMED path', async () => {
+    // The auto path hardcoded null for this; the request path always had it.
+    await provider.createBooking(
+      ctx, 'idem-sum', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { aiSummary: 'Wants the same cut as last time; in a hurry' }
+    );
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'ai_summary')).toBe('Wants the same cut as last time; in a hurry');
+  });
+
+  it('carries the summary through the auto→request downgrade', async () => {
+    // A job captured because the calendar was down used to reach the owner with no context.
+    // createRequest runs OUTSIDE the advisory-lock transaction, so its INSERT goes through
+    // the repository query rather than the transaction manager.
+    hasHealthyCalendarConnection.mockResolvedValue(false);
+    try {
+      await provider.createBooking(
+        ctx, 'idem-sum-down', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+        { aiSummary: 'Leaking pipe under the sink, water is off' }
+      );
+      const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+      expect(insertParam(insert as any, 'ai_summary')).toBe('Leaking pipe under the sink, water is off');
+    } finally {
+      // clearAllMocks keeps implementations — leaving this false would silently downgrade
+      // every later test in this file to the request path.
+      hasHealthyCalendarConnection.mockResolvedValue(true);
+    }
+  });
+
   // ── Business-level capacity (P7) ────────────────────────────────────────────
 
   /** Route the gate's own SQL; everything else keeps the default behaviour. */

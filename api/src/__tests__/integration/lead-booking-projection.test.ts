@@ -159,8 +159,33 @@ describe('A3 — booking-derived Pro fields', () => {
     // label it honestly rather than presenting "from €95" as "€95".
     expect(row.servicePrice).toBe(95);
     expect(row.priceBasis).toBe('fixed');
-    // Owner-authored intake answers ARE Story 3's "reason for contact".
-    expect(row.intakeAnswers).toEqual({ 'q-reason': 'Kitchen sink completely blocked' });
+    // Owner-authored intake answers ARE Story 3's "reason for contact". They now arrive
+    // joined to their question LABELS rather than as a uuid-keyed map — the drawer used to
+    // print the raw key as the field name. This service defines no matching question, so
+    // the answer correctly falls through to the raw-key branch instead of being dropped.
+    expect(row.intakeAnswers).toEqual([
+      { label: 'q-reason', answer: 'Kitchen sink completely blocked' },
+    ]);
+  });
+
+  it('shows the owner’s QUESTION as the label when the service still defines it', async () => {
+    // The case that matters and that the assertion above cannot reach: with a matching
+    // question the owner must see "What is the problem?", not the uuid the answer is keyed
+    // by. This is the whole reason the join moved server-side.
+    const tenant = await proTenant();
+    const bot = await createTestAnchorBot(tenant as Tenant);
+    const lead = await seedLead(tenant.id);
+    const service = await seedService(tenant.id, bot.id, {
+      intakeQuestions: [{ id: 'q-reason', label: 'What is the problem?', type: 'text', required: true }],
+    } as Partial<ServiceType>);
+    await seedBooking(tenant.id, bot.id, lead.id, { eventTypeId: service.id });
+
+    const res = await request(app).get('/api/v1/leads');
+    expect(res.status).toBe(200);
+    const row = res.body.data.leads.find((l: { id: string }) => l.id === lead.id);
+    expect(row.intakeAnswers).toEqual([
+      { label: 'What is the problem?', answer: 'Kitchen sink completely blocked' },
+    ]);
   });
 
   it('derives a range price as the midpoint, and yields NO number for on_request', async () => {

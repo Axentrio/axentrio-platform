@@ -366,7 +366,7 @@ router.get(
               l.source, l.status, l.notes, l.created_at, l.updated_at,
               bk.booking_id, bk.booking_status, bk.start_utc, bk.end_utc, bk.customer_address,
               bk.service_name, bk.price_display_type, bk.fixed_price, bk.min_price, bk.max_price,
-              bk.intake_answers,
+              bk.intake_answers, bk.intake_questions,
               (SELECT count(*)::int FROM chatbot_bookings cb
                 WHERE cb.lead_id = l.id AND cb.tenant_id = l.tenant_id) AS booking_count,
               -- Does ANY row belonging to this person hold a confirmed appointment

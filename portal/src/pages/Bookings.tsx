@@ -398,6 +398,22 @@ function BookingRow({
             {[booking.customerPhone, booking.customerAddress].filter(Boolean).join(' · ')}
           </div>
         )}
+        {/*
+          The service-area verdict. Only ever shown when it is NOT 'inside' — an in-area job
+          is the unremarkable case and labelling it would bury the two that matter. Until now
+          this existed only as a server log line, so an owner could hold back work for months
+          and never learn the area they drew was costing them.
+        */}
+        {booking.serviceAreaMatch === 'outside' && (
+          <div className="mt-1 text-xs text-amber-400">
+            Outside your service area — you have not committed to this one.
+          </div>
+        )}
+        {booking.serviceAreaMatch === 'unknown' && (
+          <div className="mt-1 text-xs text-amber-400">
+            Address could not be matched to your service area — worth checking before you confirm.
+          </div>
+        )}
         {booking.notes && (
           <div className="mt-1 text-sm text-text-secondary whitespace-pre-wrap">{booking.notes}</div>
         )}

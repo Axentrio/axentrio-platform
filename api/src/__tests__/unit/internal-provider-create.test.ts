@@ -877,6 +877,61 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
   });
 
+  it('records the service-area verdict on a CAPTURED request, without refusing it', async () => {
+    // The gate deliberately does not enforce on the request path — refusing a captured job
+    // is the one outcome the prompt forbids. But capturing it SILENTLY is how a business
+    // turns work away for months without ever seeing it. Evaluate, store, never throw.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, bookingMode: 'request' }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-area' }] : []
+    );
+    const res = await provider.createBooking(
+      ctx, 'idem-area-capture', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Rue Neuve 12, 4000 Liège' }
+    );
+    expect(res.success).toBe(true);
+    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'service_area_match')).toBe('outside');
+  });
+
+  it('records nothing for an area made only of typed notes', async () => {
+    // "Typed chips are notes, never rules" is load-bearing: resolving them once made
+    // "30 km around Aalst" mean "Aalst, exactly", and any junk chip silently disabled
+    // enforcement for every real one. An area with no PICKED place has nothing to enforce,
+    // so there is no verdict to record either — recording one would claim a check that the
+    // gate itself refuses to perform.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, bookingMode: 'request' }]);
+    bookingSettingsFindOne.mockResolvedValue({
+      serviceArea: [{ kind: 'manual', label: '30 km rond Aalst' }],
+    } as any);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-notes' }] : []
+    );
+    const res = await provider.createBooking(
+      ctx, 'idem-area-notes', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { customerAddress: 'Rue Neuve 12, 4000 Liège' }
+    );
+    expect(res.success).toBe(true);
+    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'service_area_match')).toBeNull();
+  });
+
+  it('records nothing when the gate did not apply', async () => {
+    // NULL is not a fourth verdict: it means no address was required or no enforceable place
+    // is configured. Writing 'inside' there would claim a check that never ran.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: false, bookingMode: 'request' }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-noarea' }] : []
+    );
+    await provider.createBooking(
+      ctx, 'idem-area-na', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
+    );
+    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    expect(insertParam(insert as any, 'service_area_match')).toBeNull();
+  });
+
   it('CAPTURES rather than auto-confirms when the address cannot be placed', async () => {
     // Deliberately not fail-open here. A wrong "outside" costs the owner one glance at a
     // request they can accept; a wrong "inside" costs a confirmed calendar event, an

@@ -79,6 +79,17 @@ export class Booking {
   @Column({ type: 'uuid', name: 'session_id', nullable: true })
   sessionId?: string | null;
 
+  /**
+   * What the service-area gate saw for this booking: 'inside' | 'outside' | 'unknown'.
+   *
+   * NULL means the gate did not apply — no address required, or no enforceable area — which
+   * is not a fourth verdict and is what every pre-existing row holds. Recorded on the
+   * REQUEST path too, where the gate deliberately does not enforce: capturing an out-of-area
+   * job is correct, silently capturing it is not.
+   */
+  @Column({ type: 'varchar', length: 16, name: 'service_area_match', nullable: true })
+  serviceAreaMatch?: 'inside' | 'outside' | 'unknown' | null;
+
   @Column({ type: 'varchar', length: 24, default: 'pending' })
   status!: BookingStatus;
 

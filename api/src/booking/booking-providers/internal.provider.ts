@@ -18,7 +18,7 @@ import { normalizeVenue } from '../../contracts/venue-address';
 import { resolveEventLocation } from './event-location';
 import { buildCustomerEventDescription } from './booking-content';
 import { organizerAddressForTenant } from './organizer-address';
-import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
+import { describeServiceArea, isEnforceableEntry, matchServiceArea , type ServiceAreaMatch, type ServiceAreaEntry } from '../../contracts/service-area';
 import {
   resolveServiceTiming,
   type BusinessRules,
@@ -240,6 +240,33 @@ function assertRequiredIntake(service: ServiceType, normalized: Record<string, s
  *
  * Recoverable (400): the agent captures the job with `request_appointment`.
  */
+/**
+ * What the service-area gate SAW, without acting on it.
+ *
+ * Split out from the assert so the REQUEST path can record the verdict while continuing not
+ * to enforce it. That distinction is the whole point: refusing a captured job is the one
+ * outcome the prompt forbids, but until now the only trace a job was out of area was a log
+ * line — so an owner could turn work away for months and never know the area they drew was
+ * costing them.
+ *
+ * `null` means the gate did not apply at all: the service asks for no address, or no
+ * enforceable place is configured. That is different from `unknown`, which means we looked
+ * and could not place it.
+ */
+async function evaluateServiceArea(
+  ctx: BookingContext,
+  service: ServiceType,
+  address: string | null
+): Promise<{ match: ServiceAreaMatch | null; entries: ServiceAreaEntry[] }> {
+  if (!service.customerAddressRequired) return { match: null, entries: [] };
+  const row = await AppDataSource.getRepository(BookingSettings).findOne({
+    where: { botId: ctx.bot.id },
+  });
+  const entries = Array.isArray(row?.serviceArea) ? row.serviceArea : [];
+  if (!entries.some(isEnforceableEntry)) return { match: null, entries };
+  return { match: matchServiceArea(address, entries), entries };
+}
+
 async function assertInServiceArea(
   ctx: BookingContext,
   service: ServiceType,
@@ -913,6 +940,10 @@ export class InternalProvider implements BookingProvider {
     // a request is exactly the right outcome for an out-of-area job, so createRequest never
     // runs this gate.
     await assertInServiceArea(ctx, service, contact.address);
+    // Reaching here means the gate passed. Re-evaluate rather than assume 'inside': the gate
+    // is a no-op when the service needs no address or no enforceable place is configured, and
+    // recording 'inside' for those would claim a check that never ran.
+    const { match: areaMatch } = await evaluateServiceArea(ctx, service, contact.address);
     // P5e: validate + snapshot attached files (service-disallow / readiness / ownership).
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
@@ -965,8 +996,8 @@ export class InternalProvider implements BookingProvider {
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
-              ai_summary, organizer_email)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22)
+              ai_summary, organizer_email, service_area_match)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -991,6 +1022,8 @@ export class InternalProvider implements BookingProvider {
             ctx.session?.channel ?? null,
             extras?.aiSummary ?? null,
             frozenOrganizerFor(ctx.tenant.id),
+            // The gate above already passed, so this is 'inside' whenever it applied at all.
+            areaMatch,
           ]
         );
         return rows[0].id;
@@ -1179,8 +1212,8 @@ export class InternalProvider implements BookingProvider {
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
             source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files,
-            organizer_email)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20)
+            organizer_email, service_area_match)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -1203,6 +1236,10 @@ export class InternalProvider implements BookingProvider {
           bookedDurationMin ?? null,
           uploadedFiles ? JSON.stringify(uploadedFiles) : null,
           frozenOrganizerFor(ctx.tenant.id),
+          // EVALUATED, never enforced. Capturing an out-of-area job is correct — refusing
+          // one is the single outcome the prompt forbids — but capturing it silently is how
+          // an owner turns work away for months without ever seeing it.
+          (await evaluateServiceArea(ctx, service, contact.address ?? null)).match,
         ]
       );
       bookingId = rows[0].id;

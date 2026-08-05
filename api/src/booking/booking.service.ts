@@ -373,6 +373,12 @@ export async function adminListBookings(
         b.intakeAnswers
       ),
       customerAddress: b.customerAddress ?? null,
+      /**
+       * What the service-area gate saw. Null = it did not apply. Surfaced so an owner can
+       * SEE the work their area is holding back — it was previously visible only in a
+       * server log, which meant a business could turn jobs away for months without knowing.
+       */
+      serviceAreaMatch: b.serviceAreaMatch ?? null,
       customerPhone: b.customerPhone ?? null,
       uploadedFiles: Array.isArray(b.uploadedFiles)
         ? (b.uploadedFiles as Array<Record<string, unknown>>)

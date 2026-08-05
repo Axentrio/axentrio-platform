@@ -278,6 +278,8 @@ export interface AdminBooking {
   bookingMode?: string | null;
   intakeAnswers?: Array<{ label: string; answer: string }> | null;
   customerAddress?: string | null;
+  /** What the service-area gate saw. Null = it did not apply to this booking. */
+  serviceAreaMatch?: 'inside' | 'outside' | 'unknown' | null;
   customerPhone?: string | null;
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
   /** Whether the booking actually reached the owner's connected calendar. */

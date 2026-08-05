@@ -450,3 +450,116 @@ describe('ServicesSection — clearing an optional field', () => {
     expect(payload.fixedPrice).toBe(80);
   });
 });
+
+/**
+ * "Required" only means anything for a question that is actually asked.
+ *
+ * The two were independent checkboxes, so an owner could mark a paused question required.
+ * That combination used to refuse EVERY booking for the service: the prompt omits paused
+ * questions, so the model never asked and never had an answer, while the server-side gate
+ * demanded one. The server now ignores the requirement for a paused question — this makes
+ * the editor say so rather than leaving the owner to discover it.
+ */
+describe('ServicesSection — required is gated on being asked', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const withQuestion = async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Repair' } });
+    fireEvent.click(screen.getByRole('button', { name: /add question/i }));
+    return screen.getByRole('dialog');
+  };
+
+  it('disables Required once the question is paused', async () => {
+    const dialog = await withQuestion();
+    const required = within(dialog).getByLabelText(/^required$/i);
+    expect(required).toBeEnabled();
+    fireEvent.click(within(dialog).getByLabelText(/ask this/i));
+    expect(within(dialog).getByLabelText(/^required$/i)).toBeDisabled();
+  });
+
+  it('shows Required as unchecked while paused, whatever was stored', async () => {
+    const dialog = await withQuestion();
+    fireEvent.click(within(dialog).getByLabelText(/^required$/i));
+    expect(within(dialog).getByLabelText(/^required$/i)).toBeChecked();
+    fireEvent.click(within(dialog).getByLabelText(/ask this/i));
+    // The server ignores it while paused, so showing it ticked would be a lie.
+    expect(within(dialog).getByLabelText(/^required$/i)).not.toBeChecked();
+  });
+});
+
+/**
+ * Deleting an intake question.
+ *
+ * The answers are NOT lost — they live on each booking row. What is lost is the LABEL they
+ * are displayed under, so every historical answer starts rendering as a raw uuid. That is
+ * irreversible from the portal and invisible until someone opens an old booking, which is
+ * what makes it worth one confirmation. A question that was never saved has no answers by
+ * construction and must delete instantly.
+ */
+describe('ServicesSection — deleting an intake question', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const openWith = async (questions: unknown[]) => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: [{
+              id: 's1', name: 'Repair', bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'none', isActive: true, sortOrder: 0, onlineBookable: true,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom', intakeQuestions: questions,
+            }],
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /edit repair/i }));
+    return screen.getByRole('dialog');
+  };
+
+  const STORED = [{ id: 'q-stored', label: 'Which floor?', type: 'text', required: false }];
+
+  it('confirms before removing a SAVED question, and names what is lost', async () => {
+    const dialog = await openWith(STORED);
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete question 1/i }));
+    expect(await screen.findByText(/delete this question\?/i)).toBeInTheDocument();
+    // Scoped to the alert: "Ask this" is also the checkbox label behind it.
+    const alert = screen.getByRole('alertdialog');
+    // The copy must say what actually happens — "are you sure?" tells an owner nothing.
+    expect(within(alert).getByText(/show under an internal id/i)).toBeInTheDocument();
+    expect(within(alert).getByText(/ask this/i)).toBeInTheDocument();
+    // …and it names the question, so the owner knows which one they are about to lose.
+    expect(within(alert).getByText(/Which floor\?/)).toBeInTheDocument();
+  });
+
+  it('keeps the question when the owner cancels', async () => {
+    const dialog = await openWith(STORED);
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete question 1/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^cancel$/i }));
+    await waitFor(() => expect(screen.queryByText(/delete this question\?/i)).not.toBeInTheDocument());
+    expect(within(screen.getByRole('dialog')).getByDisplayValue('Which floor?')).toBeInTheDocument();
+  });
+
+  it('removes it once confirmed', async () => {
+    const dialog = await openWith(STORED);
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete question 1/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /delete question$/i }));
+    await waitFor(() => expect(screen.queryByDisplayValue('Which floor?')).not.toBeInTheDocument());
+  });
+
+  it('deletes an UNSAVED question with no confirmation at all', async () => {
+    // A row added in this dialog has no server id, so it provably has no answers. Making the
+    // owner confirm that would be noise.
+    const dialog = await openWith([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: /add question/i }));
+    fireEvent.change(within(dialog).getByPlaceholderText(/question \(e\.g/i), { target: { value: 'Temp' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /delete question 1/i }));
+    expect(screen.queryByText(/delete this question\?/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByDisplayValue('Temp')).not.toBeInTheDocument());
+  });
+});

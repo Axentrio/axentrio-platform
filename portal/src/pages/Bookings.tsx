@@ -419,8 +419,12 @@ function BookingRow({
         )}
         {booking.intakeAnswers && booking.intakeAnswers.length > 0 && (
           <dl className="mt-1.5 space-y-0.5">
-            {booking.intakeAnswers.map((qa) => (
-              <div key={qa.label} className="text-sm">
+            {booking.intakeAnswers.map((qa, i) => (
+              // Index, not label: duplicate labels are explicitly permitted (two questions
+              // may legitimately read "Notes"), so keying on the label collides and React
+              // drops one of the rows.
+              // eslint-disable-next-line react/no-array-index-key -- labels are not unique
+              <div key={`${qa.label}-${i}`} className="text-sm">
                 <dt className="inline text-text-muted">{qa.label}: </dt>
                 <dd className="inline text-text-secondary whitespace-pre-wrap">{qa.answer}</dd>
               </div>

@@ -22,7 +22,13 @@ export interface Booking {
   attendeeEmail?: string;
   customerPhone?: string;
   sourceChannel?: string;
-  intakeAnswers?: Record<string, unknown>;
+  /**
+   * Already joined to their question LABELS by the API — NOT the raw uuid-keyed map this
+   * used to declare. Answers are stored keyed by the server-minted question id; every read
+   * surface resolves them through `buildIntakeAnswers`, so the wire shape is a list.
+   * Duplicate labels are permitted by design, so this is a list and not a map.
+   */
+  intakeAnswers?: Array<{ label: string; answer: string }>;
   startUtc: string;
   endUtc: string;
   bookedDurationMin?: number;

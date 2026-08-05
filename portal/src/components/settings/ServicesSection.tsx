@@ -8,6 +8,7 @@ import { Plus, Pencil, Trash2, Loader2, Sparkles, ChevronUp, ChevronDown } from 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -833,6 +834,18 @@ const QuestionsEditor: React.FC<{
     onChange(questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
   const remove = (i: number) => onChange(questions.filter((_, idx) => idx !== i));
   /**
+   * Which STORED question is pending removal.
+   *
+   * Deleting a question does not delete its answers — those live on each booking row — but it
+   * does delete the LABEL they are displayed under, so every historical answer falls back to
+   * showing a raw uuid. That is irreversible from the portal and invisible until someone
+   * opens an old booking, which is exactly the kind of thing worth one confirmation.
+   *
+   * Only STORED questions confirm. A row with no server `id` was added in this dialog and
+   * never saved, so it provably has no answers and must delete instantly.
+   */
+  const [pendingRemove, setPendingRemove] = useState<number | null>(null);
+  /**
    * Reorder by MOVING the array element, not by storing a sort index.
    *
    * Array position already IS the order everywhere downstream — the prompt renders in array
@@ -890,7 +903,8 @@ const QuestionsEditor: React.FC<{
               size="sm"
               type="button"
               className="text-red-400 hover:text-red-300 shrink-0"
-              onClick={() => remove(i)}
+              aria-label={`Delete question ${i + 1}`}
+              onClick={() => (questions[i].id ? setPendingRemove(i) : remove(i))}
             >
               <Trash2 className="w-3.5 h-3.5" />
             </Button>
@@ -912,8 +926,24 @@ const QuestionsEditor: React.FC<{
           </div>
 
           <div className="flex items-center gap-4 flex-wrap">
-            <label htmlFor={`question-required-${i}`} className="flex items-center gap-2 cursor-pointer">
-              <Checkbox id={`question-required-${i}`} checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
+            {/*
+              Disabled while the question is paused. "Required" and "Ask this" were
+              independent, so an owner could mark a question required that the assistant
+              never asks — a combination with no coherent meaning. The server now ignores
+              the requirement for a paused question (it used to refuse every booking for
+              the service), and the control says so rather than leaving the owner to infer it.
+            */}
+            <label
+              htmlFor={`question-required-${i}`}
+              className={cn('flex items-center gap-2', q.active === false ? 'opacity-50' : 'cursor-pointer')}
+              title={q.active === false ? 'Not asked while this question is paused' : undefined}
+            >
+              <Checkbox
+                id={`question-required-${i}`}
+                checked={q.required && q.active !== false}
+                disabled={q.active === false}
+                onCheckedChange={(c) => update(i, { required: c === true })}
+              />
               <span className="text-xs text-text-secondary">Required</span>
             </label>
             {/* Pause rather than delete: deleting orphans every answer already collected. */}
@@ -994,6 +1024,36 @@ const QuestionsEditor: React.FC<{
       ))}
 
       {error && <p className="text-xs text-red-400">{error}</p>}
+
+      {/*
+        Answers are NOT deleted with the question — they live on each booking row. What is
+        lost is the label they are shown under, so every historical answer starts rendering
+        as a raw uuid. The copy says exactly that, because "are you sure?" tells an owner
+        nothing they can weigh.
+      */}
+      <AlertDialog open={pendingRemove !== null} onOpenChange={(o) => !o && setPendingRemove(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this question?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Answers customers already gave are kept on their bookings, but they will show
+              under an internal id instead of “{pendingRemove !== null ? questions[pendingRemove]?.label || 'this question' : ''}”.
+              To stop asking it while keeping past answers readable, untick “Ask this” instead.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingRemove !== null) remove(pendingRemove);
+                setPendingRemove(null);
+              }}
+            >
+              Delete question
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

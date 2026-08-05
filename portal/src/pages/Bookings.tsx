@@ -503,6 +503,9 @@ function RescheduleDialog({
     !!booking,
     booking?.serviceId,
     booking?.durationMin,
+    // Without this the booking being moved counts against its own day cap and its buffers
+    // hide the slots either side, so a legitimate move shows no options at all.
+    booking?.id,
   );
 
   // Group slots by day (in the owner's timezone).

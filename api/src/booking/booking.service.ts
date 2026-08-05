@@ -438,7 +438,9 @@ export async function adminAvailability(
   startDate: string,
   endDate: string,
   serviceId?: string,
-  durationMin?: number
+  durationMin?: number,
+  /** Set by the reschedule flows so a booking is not counted against its own move. */
+  excludeBookingId?: string
 ) {
   // public-manage may reach this (slot lookup inside the token-verified
   // reschedule flow, scoped to the booking's service) — D8.
@@ -456,7 +458,7 @@ export async function adminAvailability(
   // Pass the booking's service + frozen length so the reschedule picker resolves
   // the right service (no SERVICE_REQUIRED when several are active) and shows
   // slots sized to the existing booking.
-  return internalProvider.checkAvailability(ctx, startDate, endDate, serviceId, durationMin);
+  return internalProvider.checkAvailability(ctx, startDate, endDate, serviceId, durationMin, excludeBookingId);
 }
 
 /** Load a tenant-owned internal booking or throw a 404 (no cross-tenant leak). */

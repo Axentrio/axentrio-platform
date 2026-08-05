@@ -12,21 +12,27 @@ const bookingRefFind = vi.fn();
 const chatSessionFindOne = vi.fn();
 /** No settings row = no business rules, which is every pre-existing test's world. */
 const bookingSettingsFindOne = vi.fn(async () => null as any);
-const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery }));
+// The transaction manager is a real EntityManager in production — the provider reads
+// booking settings through it so the read shares the transaction's connection.
+const transaction = vi.fn(async (cb: any) => cb({ query: managerQuery, getRepository: (e: any) => repoFor(e) }));
+
+/** One resolver, shared by AppDataSource, its .manager and the transaction manager. */
+function repoFor(entity: any) {
+  const name = entity?.name || entity;
+  if (name === 'ServiceType') return { findOne: eventTypeFindOne };
+  if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
+  if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
+  if (name === 'BookingLog') return { create: logCreate, save: logSave };
+  if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
+  if (name === 'ChatSession') return { findOne: chatSessionFindOne };
+  if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
+  return {};
+}
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
-    getRepository: vi.fn((entity: any) => {
-      const name = entity?.name || entity;
-      if (name === 'ServiceType') return { findOne: eventTypeFindOne };
-      if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
-      if (name === 'Booking') return { findOne: bookingFindOne, find: bookingFind, query: bookingQuery };
-      if (name === 'BookingLog') return { create: logCreate, save: logSave };
-      if (name === 'BookingReference') return { find: bookingRefFind, save: vi.fn(), create: (x: any) => x };
-      if (name === 'ChatSession') return { findOne: chatSessionFindOne };
-      if (name === 'BookingSettings') return { findOne: bookingSettingsFindOne };
-      return {};
-    }),
+    getRepository: vi.fn((entity: any) => repoFor(entity)),
+    manager: { getRepository: (entity: any) => repoFor(entity) },
     transaction: (cb: any) => transaction(cb),
   },
 }));

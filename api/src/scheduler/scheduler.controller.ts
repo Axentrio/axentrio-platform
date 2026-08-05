@@ -410,9 +410,12 @@ export async function listBookings(req: Request, res: Response): Promise<void> {
 export async function getBookingAvailability(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { startDate, endDate, serviceId, durationMin } = availabilityQuerySchema.parse(req.query);
+  const { startDate, endDate, serviceId, durationMin, excludeBookingId } = availabilityQuerySchema.parse(req.query);
   try {
-    sendSuccess(res, await adminAvailability('scheduler-admin', tenantId, startDate, endDate, serviceId, durationMin));
+    sendSuccess(
+      res,
+      await adminAvailability('scheduler-admin', tenantId, startDate, endDate, serviceId, durationMin, excludeBookingId)
+    );
   } catch (err) {
     asApiError(err);
   }

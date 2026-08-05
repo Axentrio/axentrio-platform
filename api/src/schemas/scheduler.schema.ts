@@ -112,8 +112,11 @@ export const serviceInputSchema = z.object({
   onlineBookable: z.boolean().default(true),
   durationMode: z.enum(['fixed', 'range', 'ai']).default('fixed'),
   durationMin: z.number().int().min(5).max(1440),
-  minDurationMin: z.number().int().min(5).max(1440).optional(),
-  maxDurationMin: z.number().int().min(5).max(1440).optional(),
+  // Nullable, not just optional: switching a service from range back to fixed must be able
+  // to CLEAR the bounds. Omitting the key leaves them stored, so they silently resurrect if
+  // the owner ever flips back to range — bounds they never re-entered.
+  minDurationMin: z.number().int().min(5).max(1440).nullable().optional(),
+  maxDurationMin: z.number().int().min(5).max(1440).nullable().optional(),
   // No .default() — null means INHERIT from the business, and a default here would make
   // "unset" unreachable, which is exactly what blocked business-level defaults before.
   bufferBeforeMin: z.number().int().min(0).max(480).nullable().optional(),
@@ -142,14 +145,26 @@ export const serviceInputSchema = z.object({
  * update it only fires when `durationMode` is in the payload.
  */
 const durationRangeRefine = (
-  s: { durationMode?: string; minDurationMin?: number; maxDurationMin?: number },
+  s: { durationMode?: string; minDurationMin?: number | null; maxDurationMin?: number | null },
   ctx: z.RefinementCtx
 ) => {
-  if (s.durationMode !== 'range' && s.durationMode !== 'ai') return;
-  if (s.minDurationMin == null || s.maxDurationMin == null) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['minDurationMin'], message: 'range/ai duration needs minDurationMin and maxDurationMin' });
-  } else if (s.minDurationMin > s.maxDurationMin) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['minDurationMin'], message: 'minDurationMin must be ≤ maxDurationMin' });
+  const bad = (message: string) =>
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['minDurationMin'], message });
+
+  if (s.durationMode === 'range' || s.durationMode === 'ai') {
+    if (s.minDurationMin == null || s.maxDurationMin == null) {
+      return bad('range/ai duration needs minDurationMin and maxDurationMin');
+    }
+    if (s.minDurationMin > s.maxDurationMin) return bad('minDurationMin must be ≤ maxDurationMin');
+    return;
+  }
+
+  // durationMode absent (a partial PUT that touches only the bounds) still has to hold the
+  // cross-field rule. It used to early-return here, so `PUT { minDurationMin: 300 }` on a
+  // 30–120 service persisted min > max — after which hasValidRange() fails and the service
+  // silently degrades to its fixed duration with nothing but a logger.warn.
+  if (s.durationMode === undefined && s.minDurationMin != null && s.maxDurationMin != null) {
+    if (s.minDurationMin > s.maxDurationMin) bad('minDurationMin must be ≤ maxDurationMin');
   }
 };
 
@@ -219,6 +234,8 @@ export const availabilityQuerySchema = z.object({
   // service is resolved (no SERVICE_REQUIRED with multiple active services).
   serviceId: z.string().uuid().optional(),
   durationMin: z.coerce.number().int().positive().optional(),
+  /** Reschedule picker: the booking being moved, so it isn't counted against itself. */
+  excludeBookingId: z.string().uuid().optional(),
 });
 
 export const cancelBookingBodySchema = z.object({

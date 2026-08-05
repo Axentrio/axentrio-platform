@@ -289,14 +289,17 @@ export function useBookingAvailability(
   enabled: boolean,
   serviceId?: string | null,
   durationMin?: number | null,
+  /** Reschedule picker: the booking being moved, so it isn't counted against itself. */
+  excludeBookingId?: string | null,
 ) {
   return useQuery({
-    queryKey: ['scheduler', 'availability', startDate, endDate, serviceId, durationMin],
+    queryKey: ['scheduler', 'availability', startDate, endDate, serviceId, durationMin, excludeBookingId],
     enabled,
     queryFn: async () => {
       const params = new URLSearchParams({ startDate, endDate });
       if (serviceId) params.set('serviceId', serviceId);
       if (durationMin) params.set('durationMin', String(durationMin));
+      if (excludeBookingId) params.set('excludeBookingId', excludeBookingId);
       return (await api.get<Any>(`/scheduler/availability?${params.toString()}`)) as {
         slots: AvailabilitySlot[];
         timezone: string;

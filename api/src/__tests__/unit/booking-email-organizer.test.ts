@@ -37,7 +37,7 @@ describe('ICS organizer is a valid mailto', () => {
       attendeeEmail: 'sam@example.com',
       dtstamp: new Date('2026-06-09T09:00:00Z'),
     });
-    expect(ics).toContain('ORGANIZER;CN=Axentrio Bookings:mailto:bookings@notifications.axentrio.com');
+    expect(ics).toContain('ORGANIZER;CN="Axentrio Bookings":mailto:bookings@notifications.axentrio.com');
     // The mailto must NOT contain the display name / angle brackets.
     expect(ics).not.toMatch(/mailto:[^\r\n]*[<>]/);
   });

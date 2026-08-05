@@ -281,7 +281,10 @@ async function enforceServiceDayCapacity(
   if (!max || max <= 0) return; // unlimited
   const local = DateTime.fromJSDate(start).setZone(timezone);
   const dayStart = local.startOf('day').toUTC().toISO();
-  const nextDay = local.startOf('day').plus({ days: 1 }).toUTC().toISO();
+  // plus THEN startOf: in a zone whose DST transition lands at midnight, adding 24h to the
+  // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
+  // clipped or double-counted an hour and the gate disagreed with the ledger.
+  const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
   const params: unknown[] = [service.id, dayStart, nextDay];
   let sql = `SELECT count(*)::int AS n FROM chatbot_bookings
              WHERE event_type_id = $1 AND status IN ('pending','confirmed')
@@ -297,8 +300,13 @@ async function enforceServiceDayCapacity(
 }
 
 /** Business-level ceilings, normalised so null/negative/0 all read as "unlimited". */
-export async function loadBusinessRules(botId: string): Promise<BusinessRules> {
-  const row = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
+/**
+ * `manager` matters when this is called from INSIDE a booking transaction: without it the
+ * read takes a SECOND connection from the pool while the first is mid-transaction holding
+ * an advisory lock, which is a pool-exhaustion deadlock waiting for load.
+ */
+export async function loadBusinessRules(botId: string, manager?: EntityManager): Promise<BusinessRules> {
+  const row = await (manager ?? AppDataSource.manager).getRepository(BookingSettings).findOne({ where: { botId } });
   const n = (v: number | null | undefined): number => (typeof v === 'number' && v > 0 ? v : 0);
   // Ceilings normalise 0/negative to "unlimited"; DEFAULTS must keep a real 0 (a business
   // that genuinely wants zero notice is saying something different from "unset").
@@ -343,7 +351,10 @@ async function enforceBusinessCapacity(
   if (maxBookingsPerDay || maxBookedMinutesPerDay) {
     const local = DateTime.fromJSDate(window.start).setZone(timezone);
     const dayStart = local.startOf('day').toUTC().toISO();
-    const nextDay = local.startOf('day').plus({ days: 1 }).toUTC().toISO();
+    // plus THEN startOf: in a zone whose DST transition lands at midnight, adding 24h to the
+  // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
+  // clipped or double-counted an hour and the gate disagreed with the ledger.
+  const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
     const params: unknown[] = [botId, dayStart, nextDay];
     // Minutes come from the stored span, not booked_duration_min — that column is null for
     // legacy rows and for requests, and a null would silently bill the job as zero minutes.
@@ -561,7 +572,17 @@ export class InternalProvider implements BookingProvider {
     startDate: string,
     endDate: string,
     serviceId?: string,
-    durationMin?: number
+    durationMin?: number,
+    /**
+     * The booking being RESCHEDULED, excluded from both busy intervals and the day ledger.
+     *
+     * Without it the picker counts the customer's own appointment against them: a solo
+     * owner capped at one booking a day sees an empty day when trying to move that day's
+     * only booking, and its buffers hide the slots either side — while the write path,
+     * which has always passed this id, would have allowed the move. Silent: no error, just
+     * missing options.
+     */
+    excludeBookingId?: string
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -596,7 +617,14 @@ export class InternalProvider implements BookingProvider {
           );
     }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
-    const busy = await this.loadAllBusy(ctx, await this.calendarKey(ctx), rangeStart, rangeEnd, rule.timezone);
+    const busy = await this.loadAllBusy(
+      ctx,
+      await this.calendarKey(ctx),
+      rangeStart,
+      rangeEnd,
+      rule.timezone,
+      excludeBookingId
+    );
     // P5c: for a range/ai service, fit slots to the chosen length when known, else the
     // shortest (minDurationMin) so no fittable start is hidden. Create re-validates length.
     const availDuration = effectiveDurationForAvailability(service, durationMin);
@@ -606,7 +634,7 @@ export class InternalProvider implements BookingProvider {
     const business = await loadBusinessRules(ctx.bot.id);
     const dayLedger =
       business.maxBookingsPerDay || business.maxBookedMinutesPerDay
-        ? await this.loadDayLedger(ctx.bot.id, rangeStart, rangeEnd)
+        ? await this.loadDayLedger(ctx.bot.id, rangeStart, rangeEnd, excludeBookingId)
         : undefined;
     const slots = computeSlots({
       rule,
@@ -864,7 +892,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          await loadBusinessRules(ctx.bot.id),
+          await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone
         );
@@ -1610,7 +1638,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          await loadBusinessRules(ctx.bot.id),
+          await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,
           bookingId
@@ -1846,7 +1874,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          await loadBusinessRules(ctx.bot.id),
+          await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,
           bookingId

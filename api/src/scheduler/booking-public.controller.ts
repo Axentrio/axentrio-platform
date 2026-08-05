@@ -125,7 +125,11 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
       { kind: 'public-manage', verifiedBookingId: bookingId },
       booking.tenantId,
       start.toISOString(),
-      end.toISOString()
+      end.toISOString(),
+      undefined,
+      undefined,
+      // Don't count this booking against its own reschedule.
+      bookingId
     );
 
     // Group slots by day in the owner's timezone.

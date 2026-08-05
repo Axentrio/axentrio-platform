@@ -23,7 +23,7 @@ const BODY_CAP = 4000;
 /** Strip C0 control chars (incl. tab) + DEL that survive the newline-collapse
  *  step. LF and CR are intentionally excluded: collapse already turned them into
  *  spaces. */
-const CONTROL_CHARS = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F]/g;
+const CONTROL_CHARS = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F\u0080-\u009F]/g;
 
 /** Fields the builder reads off a Booking row (inline call site assembles these;
  *  the reconciler loads the row into the same shape). */
@@ -71,7 +71,10 @@ export interface ServiceContentInput {
  *  stays at FIELD_CAP code-points).
  */
 function normalizeField(raw: string): string {
-  const collapsed = raw.trim().replace(/\s*[\r\n]+\s*/g, ' ');
+  // Every MANDATORY line break, not just CR/LF: U+0085, U+2028 and U+2029 also end a line
+  // in most renderers, so a customer-supplied value could still forge a `Label:` line in
+  // the owner's calendar body.
+  const collapsed = raw.trim().replace(/\s*[\r\n\u0085\u2028\u2029]+\s*/g, ' ');
   const cleaned = collapsed.replace(CONTROL_CHARS, '');
   const cp = Array.from(cleaned);
   return cp.length > FIELD_CAP ? cp.slice(0, FIELD_CAP - 1).join('') + '…' : cleaned;

@@ -63,7 +63,25 @@ function esc(value: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/;/g, '\\;')
     .replace(/,/g, '\\,')
-    .replace(/\r?\n/g, '\\n');
+    // Any run of CR and/or LF collapses to ONE escaped newline. A bare CR survived this
+    // before, and lenient parsers treat it as a line break — enough for a tenant-authored
+    // service name to inject a property line into the event.
+    .replace(/[\r\n]+/g, '\\n');
+}
+
+/**
+ * Escape a PARAMETER value (RFC 5545 §3.2) — a different grammar from a TEXT value.
+ *
+ * `CN=` carries the business name, and TEXT escaping leaves `:` `;` `,` and `"` intact, any
+ * of which terminates or splits the parameter and corrupts the entire ORGANIZER line. A
+ * business legitimately called `Smith & Sons: Plumbing` broke its own invites.
+ */
+function escParam(value: string): string {
+  return value
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/"/g, "'")
+    .replace(/[:;,]/g, ' ')
+    .trim();
 }
 
 export function buildIcs(input: IcsInput): string {
@@ -72,10 +90,10 @@ export function buildIcs(input: IcsInput): string {
   const dtstamp = input.dtstamp ?? new Date();
 
   const organizer = input.organizerName
-    ? `ORGANIZER;CN=${esc(input.organizerName)}:mailto:${input.organizerEmail}`
+    ? `ORGANIZER;CN="${escParam(input.organizerName)}":mailto:${input.organizerEmail}`
     : `ORGANIZER:mailto:${input.organizerEmail}`;
   const attendee =
-    `ATTENDEE;CN=${esc(input.attendeeName ?? input.attendeeEmail)};` +
+    `ATTENDEE;CN="${escParam(input.attendeeName ?? input.attendeeEmail)}";` +
     `ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:${input.attendeeEmail}`;
 
   const lines = [

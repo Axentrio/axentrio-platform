@@ -217,10 +217,13 @@ export async function sendReminderEmail(params: ReminderEmailParams): Promise<vo
   if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
     return;
   }
+  // Escaped, like every sibling template in this file. `summary` is the owner-authored
+  // service name (validated only for length), so unescaped it renders as live HTML in a
+  // customer's inbox — a link the customer has every reason to trust.
   const body =
-    `<p>Reminder: your appointment is ${params.leadLabel}.</p>` +
-    `<p><strong>${params.summary}</strong><br/>${formatWhen(params.start, params.timezone)}</p>` +
-    (params.manageUrl ? `<p><a href="${params.manageUrl}">Reschedule or cancel</a></p>` : '');
+    `<p>Reminder: your appointment is ${esc(params.leadLabel)}.</p>` +
+    `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
+    (params.manageUrl ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel</a></p>` : '');
   try {
     await getEmailService().send({
       to: params.attendeeEmail,
@@ -254,7 +257,7 @@ export interface RequestNotificationParams {
 export async function sendRequestNotificationEmail(params: RequestNotificationParams): Promise<void> {
   const body =
     `<p>You have a new appointment <strong>request</strong> to review.</p>` +
-    `<p><strong>${esc(params.serviceName)}</strong><br/>Preferred time: ${formatWhen(params.start, params.timezone)}</p>` +
+    `<p><strong>${esc(params.serviceName)}</strong><br/>Preferred time: ${esc(formatWhen(params.start, params.timezone))}</p>` +
     `<p>From: ${esc(params.attendeeName)}${params.attendeeEmail ? ` (${esc(params.attendeeEmail)})` : ''}</p>` +
     (params.aiSummary ? `<p>Summary: ${esc(params.aiSummary)}</p>` : '') +
     (params.notes ? `<p>Notes: ${esc(params.notes)}</p>` : '') +

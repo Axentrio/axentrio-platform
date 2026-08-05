@@ -131,7 +131,9 @@ export interface BookingProvider {
     startDate: string,
     endDate: string,
     serviceId?: string,
-    durationMin?: number
+    durationMin?: number,
+    /** Booking being rescheduled — excluded from busy and from day-capacity totals. */
+    excludeBookingId?: string
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

@@ -127,8 +127,9 @@ export const bookingReadiness: CapabilityReadiness = {
     const botId = ctx.bot.id;
 
     // Services mirror the runtime GATE filter EXACTLY (isActive && onlineBookable;
-    // select only bookingMode). The gate-vs-catalog onlineBookable asymmetry is a
-    // known pre-existing item — readiness mirrors the gate, does not fix it.
+    // select only bookingMode). The gate, the prompt CATALOG and `resolveService` now all
+    // agree on `isActive && onlineBookable` — the asymmetry this comment used to describe as
+    // open was closed in booking.module.ts and is pinned by booking-catalog-filter.test.ts.
     const [services, rule] = await Promise.all([
       AppDataSource.getRepository(ServiceType).find({
         where: { botId, isActive: true, onlineBookable: true },

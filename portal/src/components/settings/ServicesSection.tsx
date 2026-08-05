@@ -308,14 +308,28 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
                   <span className={`text-sm font-medium ${s.isActive ? 'text-text-primary' : 'text-text-muted line-through'}`}>
                     {s.name}
                   </span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
-                      s.bookingMode === 'request' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
-                    }`}
-                  >
-                    {s.bookingMode === 'request' ? 'request-only' : 'auto-book'}
-                  </span>
+                  {/*
+                    "auto-book" is untrue for a service the assistant will never book, so the
+                    badge is suppressed rather than contradicting the row beside it.
+                  */}
+                  {s.onlineBookable !== false && (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                        s.bookingMode === 'request' ? 'bg-amber-500/10 text-amber-400' : 'bg-emerald-500/10 text-emerald-400'
+                      }`}
+                    >
+                      {s.bookingMode === 'request' ? 'request-only' : 'auto-book'}
+                    </span>
+                  )}
                   {!s.isActive && <span className="text-[11px] text-text-muted">(inactive)</span>}
+                  {/*
+                    Gated on isActive so an inactive service does not stack two muted markers.
+                    Without this the switch had no visible effect at all: an owner unticks
+                    "customers can book this online", saves, and the row looks identical.
+                  */}
+                  {s.isActive && s.onlineBookable === false && (
+                    <span className="text-[11px] text-text-muted">(not bookable online)</span>
+                  )}
                 </div>
                 <div className="mt-0.5 text-xs text-text-secondary">
                   {s.durationMin} min{priceLabel(s) ? ` · ${priceLabel(s)}` : ''}

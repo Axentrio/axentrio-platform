@@ -161,6 +161,47 @@ describe('ServicesSection — online bookable', () => {
     expect(await submit()).toMatchObject({ onlineBookable: false });
   });
 
+  const listWith = (over: Record<string, unknown>) => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: [{
+              id: 's1', name: 'Quote first', bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'none', isActive: true, sortOrder: 0, onlineBookable: true,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom', ...over,
+            }],
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+  };
+
+  it('marks a service that customers cannot book online', async () => {
+    // Without this the switch had no visible effect at all: an owner unticks it, saves, and
+    // the row looks exactly as it did before.
+    listWith({ onlineBookable: false });
+    expect(await screen.findByText(/not bookable online/i)).toBeInTheDocument();
+  });
+
+  it('drops the auto-book badge for it — "auto-book" would be untrue', async () => {
+    listWith({ onlineBookable: false });
+    await screen.findByText(/not bookable online/i);
+    expect(screen.queryByText('auto-book')).not.toBeInTheDocument();
+  });
+
+  it('leaves a normal service’s badge alone', async () => {
+    listWith({});
+    expect(await screen.findByText('auto-book')).toBeInTheDocument();
+    expect(screen.queryByText(/not bookable online/i)).not.toBeInTheDocument();
+  });
+
+  it('does not stack two muted markers on an inactive service', async () => {
+    listWith({ isActive: false, onlineBookable: false });
+    expect(await screen.findByText(/\(inactive\)/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not bookable online/i)).not.toBeInTheDocument();
+  });
+
   it('hydrates an existing non-bookable service as off', async () => {
     // Editing a service must not silently switch it back on.
     apiGet.mockImplementation((url: string) =>

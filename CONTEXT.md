@@ -72,13 +72,67 @@ _Avoid_: contact, prospect, customer, visitor (use Lead).
 The platform-side AI that answers tenant-admin questions inside the portal — explaining how Axentrio works, surfacing the admin's own tenant state, pointing at the right settings page. Distinct from `Agent`, which serves the Tenant's customers via the chat widget. Pro+ feature (`platformAssistant` entitlement flag). Marketed user-facing as **AI Platform Assistant**; in code, ADRs, API responses, DB columns, and engineering discussion, always use `Copilot`.
 _Avoid_: assistant, bot, helper, AI Platform Assistant (use Copilot — the marketing label is an alias, not a domain term).
 
+**Service**:
+One bookable thing a Tenant offers (e.g. "Boiler repair"), with a duration, a `bookingMode` (`auto` — the Agent may confirm it outright, or `request` — it may only capture the ask), and its own optional timing. A Tenant has a catalog of them. The entity is `ServiceType` and the API still exposes a singular `eventType` for the pre-catalog UI; both are back-compat spellings of this one concept.
+_Avoid_: event type, appointment type, offering, product, treatment.
+
+**Booking**:
+One row in a Tenant's diary. Status is `pending` (held, not yet confirmed), `confirmed` (the customer has a calendar invite), `cancelled`, or `request_created` (a captured Request, see below). Only `pending` and `confirmed` hold time — every capacity rule and the exclusion constraint count exactly those two.
+_Avoid_: appointment, reservation, event (an event is the calendar mirror, not the booking), slot (a Slot is an offer, a Booking is a commitment).
+
+**Request**:
+A booking the Agent captured but did not confirm — stored as a Booking with status `request_created`. Raised whenever the Agent may not decide alone: a `request` Service, no healthy calendar connection, an address outside the Service Area, or a length it could not resolve. A Request consumes no capacity and blocks no time; only the Tenant accepting it does. Accepting is what turns it into a real Booking.
+_Avoid_: enquiry, lead (a Lead is a contact, a Request is a proposed booking), pending booking (that is the `pending` status, a different state), tentative.
+
+**Slot**:
+A start time the engine currently believes is bookable — computed, never stored. Slots are advisory: they are filtered from availability, buffers, capacity and busy time, but a Slot the customer sees can still be refused at write time, because only the database constraint and the capacity gates run under a lock.
+_Avoid_: opening, availability (that's the rule), free time, timeslot.
+
+**Availability Rule**:
+The one row per Agent that answers *when* the Tenant is bookable: a timezone, weekly hours per day, slot granularity, and Date Overrides. Exactly one per Agent.
+_Avoid_: schedule, working hours, opening hours, calendar (a Calendar is the external mirror).
+
+**Date Override**:
+A named exception to the weekly hours on a specific date — either a closure or different hours. Distinct from a Booking: an override changes what is *offered*, a Booking consumes what was offered.
+_Avoid_: holiday, exception, blackout, time off.
+
+**Service Area**:
+The places a Tenant will travel to, as a list of picked Belgian provinces and municipalities plus free-text notes. It only gates Services that require a customer address, and it is fail-safe-to-request: an address outside the area, or one that cannot be placed at all, becomes a Request rather than a refusal. Typed free-text entries are notes for the owner, never rules.
+_Avoid_: coverage, catchment, radius, travel zone, region.
+
+**Capacity Ceiling**:
+A business-wide limit that applies *on top of* whatever a Service says, where the stricter of the two binds: bookings per day, booked minutes per day, and the Minimum Gap. `null` or `0` means unlimited on all three — a malformed limit must read as "no limit", never as "no bookings".
+_Avoid_: quota, cap, limit (ambiguous on its own — say which), max bookings (that is one of three).
+
+**Business Default**:
+A Tenant-level timing value (buffers, minimum notice, maximum horizon) used only where the Service left that field null. Resolution is Service → Business Default → platform fallback, and an explicit `0` anywhere in that chain is a real answer, not an absent one. The opposite of a Capacity Ceiling: a ceiling always applies and the stricter wins; a default applies only in the absence of an opinion.
+_Avoid_: global setting, fallback (that's the platform layer specifically), default value, ceiling (they are opposites).
+
+**Buffer**:
+Padding a Service reserves around its own bookings for prep and cleanup, set per Service. Distinct from the **Minimum Gap**, which is business-wide breathing room and travel time applied around *every* appointment regardless of Service. Both are additive.
+_Avoid_: padding, break, travel time (that is the Minimum Gap's purpose, not its name), gap (say which).
+
+**Blocked Range**:
+The stored, buffer-expanded time span a Booking occupies, held as a `tstzrange` and protected by an exclusion constraint on `(calendar_key, blocked_range)`. It is the only race-proof guarantee that two customers cannot take the same time. It understands overlap and nothing else — day counts, minutes budgets and gaps cannot be expressed in it, which is why those run as their own locked checks.
+_Avoid_: busy time (that is the merged in-memory view including the external calendar), reservation window, lock.
+
+**Calendar Mirror**:
+The event written into the Tenant's connected Google or Outlook calendar for a confirmed Booking. A mirror, not the source of truth: the Booking row is authoritative, and a Booking whose mirror is missing or stale is still a real Booking. Reconciled asynchronously.
+_Avoid_: sync, calendar event (ambiguous with the Tenant's own events), Google event.
+
 ## Relationships
 
 - A **Tenant** owns one or more **Agents** and one or more **KnowledgeBases**
 - An **Agent** participates in many **ChatSessions**
 - An **Insight** is scoped to a **Tenant** (and may reference specific **ChatSessions** as evidence)
+- An **Agent** has one **Availability Rule** and a catalog of **Services**
+- A **Booking** is made against exactly one **Service**, and originates in a **ChatSession** on some **Channel**
+- Accepting a **Request** produces a **Booking**; until then it holds no time
 
 ## Flagged ambiguities
 
 - **"Success Meter" vs "Insight"** — used interchangeably in early discussion. Resolved: **Insight** is the persistent primitive (row with lifecycle); a "meter" or "score" is a derived rollup over Insights, not a stored object. Not building a meter primitive in v1. **Sidebar exception**: `Success Meter` is the user-facing sidebar label for the Insights surface (route stays `/insights`). In code, ADRs, API responses, DB columns, and engineering discussion, always use `Insight` / `Gap`. The label is a marketing alias, not a new domain concept.
 - **Three candidate Insight kinds** (Gap / Correlation / Sentiment) — resolved per [ADR-0001](./docs/adr/0001-insights-v1-gaps-only.md): v1 ships only **Gap**. Correlation and Sentiment return in v2 reframed as experiments.
+- **"Service" vs "event type"** — the entity is `ServiceType` and the scheduler API still returns a singular `eventType` alongside the full `services` catalog, from before a Tenant could have more than one. Both name the same concept. New code and all discussion say **Service**; the `eventType` field is a back-compat alias that should not spread.
+- **Ceiling vs default** — the two business-level timing surfaces read alike and behave oppositely, and conflating them is the most expensive mistake in this domain: a **Capacity Ceiling** always applies and the stricter of (Service, Business) wins, while a **Business Default** applies *only* where the Service is silent and the Service always wins. Every field is one or the other, never both.
+- **"Request" vs "pending"** — a Request is status `request_created` and holds no time; `pending` is a held Booking that does. They are adjacent in the enum and opposite in meaning. A capacity rule that counts `request_created` lets a Tenant fill their own day by receiving enquiries.

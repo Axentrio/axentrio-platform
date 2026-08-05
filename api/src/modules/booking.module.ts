@@ -320,7 +320,11 @@ export const bookingModule: ModuleDefinition = {
   async buildPromptSection(ctx: ModulePromptContext): Promise<string | null> {
     const [services, rule, bookingSettings] = await Promise.all([
       AppDataSource.getRepository(ServiceType).find({
-        where: { botId: ctx.botId, isActive: true },
+        // `onlineBookable` too, NOT just `isActive` — this is the only consumer that used
+        // to omit it. `resolveService` requires both, so an offline service was advertised
+        // to the bot, offered to the customer, and then thrown out as SERVICE_NOT_FOUND at
+        // book time: the catalog the model reads has to be the catalog it can actually book.
+        where: { botId: ctx.botId, isActive: true, onlineBookable: true },
         order: { sortOrder: 'ASC' },
       }),
       AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),

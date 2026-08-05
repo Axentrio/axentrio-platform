@@ -342,3 +342,56 @@ describe('booking email — From is aligned with the frozen ORGANIZER', () => {
     }
   });
 });
+
+// --------------------------------------------------------------------------------------
+
+describe('conferencing belongs to video services only', () => {
+  // The bug this pins is an INTERACTION, not a single wrong line. A Meet/Teams link used to
+  // be minted for every booking; `resolveEventLocation` then correctly ranks a meeting URL
+  // above a venue — so an in-person job silently showed a video link where its address
+  // should have been, and the venue feature appeared to do nothing at all.
+  const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null };
+
+  it('shows the VENUE for an in-person job once no link is minted for it', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'in_person',
+        customerAddressRequired: false,
+        meetUrl: null,
+        venue,
+      }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('would have shown the meeting URL instead — the defect, reproduced', () => {
+    // Exactly what happened before conferencing was gated: same in-person service, but a
+    // link exists because one was minted unconditionally.
+    expect(
+      resolveEventLocation({
+        locationType: 'in_person',
+        customerAddressRequired: false,
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('still puts the link on a genuine video service', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'google_meet',
+        customerAddressRequired: false,
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('never shows a venue for a video service that somehow has no link', () => {
+    // A video call is not at the premises. Falling back to the address would send the
+    // customer across town for a call.
+    expect(
+      resolveEventLocation({ locationType: 'google_meet', customerAddressRequired: false, venue }),
+    ).toBeUndefined();
+  });
+});

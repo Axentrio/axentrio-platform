@@ -274,6 +274,14 @@ the AI or the customer — a service configured "fixed €80 / per hour" is quot
 The preset picker becomes **permanently unreachable** once a single service exists, including one added by
 mistake.
 
+> **CORRECTION (2026-08-05): this claim is wrong.** Service deletion is a HARD delete
+> (`repo.remove`, `scheduler.controller.ts:359`), and the picker's only gate is
+> `services.length === 0` (`ServicesSection.tsx:278`). Delete the mistaken service and both
+> the button and the API's `CATALOG_NOT_EMPTY` guard clear together — there is no
+> soft-delete or "has ever had services" flag keeping it hidden. Applying a preset ONTO a
+> populated catalog is refused on purpose (`scheduler.controller.ts:394`), which is the
+> right call: a preset seeds a catalog, it does not merge into one. Nothing to fix here.
+
 ### 3.8 Date overrides never reach the AI
 
 Only the weekly grid is composed into the prompt. Holidays, vacations and one-off hours are **never

@@ -382,6 +382,24 @@ describe('reconciler content parity', () => {
     expect(createCalendarEvent.mock.calls[0][1].location).toBeUndefined();
   });
 
+  it('does NOT mint a conference for an in-person job', async () => {
+    // A rebuilt mirror must not sprout a Meet link an inline one lacks — and the link would
+    // then outrank the venue for LOCATION, which is how this defect hid.
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'in_person', customerAddressRequired: false });
+    bsFindOne.mockResolvedValue({ venueStreet: 'Grote Markt 1', venuePostalCode: '9300', venueCity: 'Aalst' });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    expect(createCalendarEvent.mock.calls[0][1].conferencing).toBeFalsy();
+  });
+
+  it('DOES mint one for a genuine video service', async () => {
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'google_meet', customerAddressRequired: false });
+    bsFindOne.mockResolvedValue(null);
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
+  });
+
   it('prefers the stored duration over the span when it is set', async () => {
     claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
     (STORED as { booked_duration_min: number | null }).booked_duration_min = 45;

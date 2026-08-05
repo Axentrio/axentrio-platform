@@ -161,7 +161,7 @@ export async function createOutlookEvent(
 
   let resp;
   try {
-    resp = await post(true);
+    resp = await post(input.conferencing === true);
   } catch (err) {
     if (!isOnlineMeetingUnsupported(err)) throw err;
     logger.info('[Outlook] account cannot host Teams; creating event without online meeting', { botId });

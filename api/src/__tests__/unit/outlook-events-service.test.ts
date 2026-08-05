@@ -80,13 +80,29 @@ describe('createOutlookEvent', () => {
     expect(await createOutlookEvent('b1', { startISO: 'x', endISO: 'y', timezone: 'UTC', summary: 's' })).toBeNull();
   });
 
+  it('does NOT request Teams for a service that is not a video call', async () => {
+    // The fixture above used to be a HAIRCUT asserting it got a Teams meeting, which is
+    // precisely the defect: a conference was minted for every booking, and the resulting
+    // join URL then outranked the venue for the event's LOCATION.
+    (axios.post as any).mockResolvedValue({ data: { id: 'ID2' } });
+    const res = await createOutlookEvent(
+      'b1',
+      { startISO: '2026-06-10T07:00:00.000Z', endISO: '2026-06-10T07:30:00.000Z', timezone: 'Europe/Brussels', summary: 'Haircut', description: 'body' },
+      { eventId: 'booking124' }
+    );
+    const [, body] = (axios.post as any).mock.calls[0];
+    expect(body.isOnlineMeeting).toBeUndefined();
+    expect(body.onlineMeetingProvider).toBeUndefined();
+    expect(res!.meetUrl).toBeNull();
+  });
+
   it('creates with Teams, UTC instants + transactionId, returns immutable id + join url', async () => {
     (axios.post as any).mockResolvedValue({
       data: { id: 'IMMUTABLE_ID', onlineMeeting: { joinUrl: 'https://teams.example/join' } },
     });
     const res = await createOutlookEvent(
       'b1',
-      { startISO: '2026-06-10T07:00:00.000Z', endISO: '2026-06-10T07:30:00.000Z', timezone: 'Europe/Brussels', summary: 'Haircut', description: 'body' },
+      { startISO: '2026-06-10T07:00:00.000Z', endISO: '2026-06-10T07:30:00.000Z', timezone: 'Europe/Brussels', summary: 'Video consult', description: 'body', conferencing: true },
       { eventId: 'booking123' }
     );
     expect(res).toEqual({ eventId: 'IMMUTABLE_ID', meetUrl: 'https://teams.example/join', calendarId: 'primary' });

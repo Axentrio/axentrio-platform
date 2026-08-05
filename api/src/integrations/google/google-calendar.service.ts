@@ -430,6 +430,15 @@ export interface CalendarEventInput {
    * placeholder the owner cannot navigate to.
    */
   location?: string;
+  /**
+   * Whether this booking is actually a VIDEO meeting.
+   *
+   * A conference was previously minted for every event unconditionally, so a boiler repair
+   * at the customer's house arrived with a Google Meet link — and, worse, that link then won
+   * the LOCATION field ahead of the address, because a meeting URL legitimately outranks a
+   * venue when there IS one. The venue work was silently defeated by this for every service.
+   */
+  conferencing?: boolean;
 }
 
 export interface CalendarEventResult {
@@ -476,12 +485,17 @@ export async function createCalendarEvent(
           ...(input.location ? { location: input.location } : {}),
           start: { dateTime: input.startISO, timeZone: input.timezone },
           end: { dateTime: input.endISO, timeZone: input.timezone },
-          conferenceData: {
-            createRequest: {
-              requestId: `axentrio-${opts.eventId ?? `${Date.now()}-${input.startISO.length}`}`,
-              conferenceSolutionKey: { type: 'hangoutsMeet' },
-            },
-          },
+          // Only for a service the owner configured as a video call.
+          ...(input.conferencing
+            ? {
+                conferenceData: {
+                  createRequest: {
+                    requestId: `axentrio-${opts.eventId ?? `${Date.now()}-${input.startISO.length}`}`,
+                    conferenceSolutionKey: { type: 'hangoutsMeet' },
+                  },
+                },
+              }
+            : {}),
         },
         {
           params: { conferenceDataVersion: 1 },

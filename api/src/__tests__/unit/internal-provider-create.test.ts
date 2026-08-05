@@ -317,7 +317,28 @@ describe('InternalProvider.createBooking', () => {
     ).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
   });
 
+  it('does NOT request a conference for a service that is not a video call', async () => {
+    // A Meet/Teams link used to be minted for EVERY booking. Besides putting a video link on
+    // a boiler repair, the link then outranked the venue for the event's LOCATION — so the
+    // venue feature appeared to do nothing at all for any in-person service.
+    // resolveService uses find() for the sole-active-service path, not findOne().
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'in_person', customerAddressRequired: false }]);
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-x', meetUrl: null, calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-noconf', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(createCalendarEvent).toHaveBeenCalled();
+    expect(createCalendarEvent.mock.calls[0][1].conferencing).toBeFalsy();
+  });
+
+  it('DOES request one for a video service', async () => {
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'google_meet' }]);
+    createCalendarEvent.mockResolvedValueOnce({ eventId: 'gcal-evt-y', meetUrl: 'https://meet.google.com/x', calendarId: 'primary' });
+    await provider.createBooking(ctx, 'idem-conf', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
+  });
+
   it('mirrors the booking to Google and puts the Meet link in the invite when connected', async () => {
+    // A video service, since a conference is only requested for one now.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'google_meet' }]);
     createCalendarEvent.mockResolvedValueOnce({
       eventId: 'gcal-evt-1',
       meetUrl: 'https://meet.google.com/abc-defg-hij',

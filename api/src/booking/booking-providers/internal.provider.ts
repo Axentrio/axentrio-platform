@@ -1051,7 +1051,10 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       rule.timezone,
-      eventLocation
+      eventLocation,
+      // A conference belongs to a VIDEO service and nothing else. Minting one for an
+      // in-person job also stole the LOCATION field from the venue.
+      service.locationType === 'google_meet'
     );
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
@@ -1517,7 +1520,8 @@ export class InternalProvider implements BookingProvider {
     start: Date,
     end: Date,
     timezone: string,
-    location?: string
+    location?: string,
+    conferencing?: boolean
   ): Promise<string | null> {
     const provider = await resolveCalendarProvider(ctx.bot.id);
     if (!provider) return null; // no calendar connection
@@ -1531,6 +1535,7 @@ export class InternalProvider implements BookingProvider {
           summary: content.summary,
           description: content.description,
           ...(location ? { location } : {}),
+          ...(conferencing ? { conferencing } : {}),
         },
         { eventId: this.googleEventId(bookingId) }
       );
@@ -1774,7 +1779,10 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       rule.timezone,
-      eventLocation
+      eventLocation,
+      // A conference belongs to a VIDEO service and nothing else. Minting one for an
+      // in-person job also stole the LOCATION field from the venue.
+      service.locationType === 'google_meet'
     );
 
     await sendBookingEmail({

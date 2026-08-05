@@ -536,6 +536,36 @@ const ServiceEditorDialog: React.FC<{
             />
 
             <div className="space-y-2 border-t border-edge pt-3">
+              {/*
+                Where this service happens. Stored since the beginning and read by the
+                booking engine, the invite and the calendar mirror — but with no control
+                here every hand-created service was stuck on 'custom', so an online
+                consultation never got a meeting link and an at-premises job never showed
+                the business address on the invite.
+              */}
+              <div className="space-y-1.5 pb-1">
+                <Label htmlFor="svc-location-type">Where does it happen?</Label>
+                <select
+                  id="svc-location-type"
+                  className="w-full rounded-md border border-edge bg-surface px-3 py-2 text-sm text-text-primary"
+                  value={form.locationType}
+                  onChange={(e) => set('locationType', e.target.value)}
+                >
+                  <option value="in_person">In person</option>
+                  <option value="google_meet">Video call (a meeting link is created)</option>
+                  <option value="phone">Phone call</option>
+                  <option value="custom">Something else</option>
+                </select>
+                <p className="text-xs text-text-muted">
+                  {form.locationType === 'google_meet'
+                    ? 'A video link is generated and sent with the invite.'
+                    : form.locationType === 'in_person'
+                      ? form.customerAddressRequired
+                        ? 'You travel to the customer — their address goes on the invite.'
+                        : 'The customer comes to you — your address goes on the invite, once you have set one under Availability.'
+                      : 'No location is put on the invite.'}
+                </p>
+              </div>
               <label htmlFor="svc-addr-req" className="flex items-center gap-2 cursor-pointer">
                 <Checkbox
                   id="svc-addr-req"

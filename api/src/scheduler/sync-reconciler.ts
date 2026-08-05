@@ -208,6 +208,7 @@ async function processOne(row: ClaimedRow): Promise<void> {
     summary: meta.content.summary,
     description: meta.content.description,
     ...(meta.location ? { location: meta.location } : {}),
+    ...(meta.conferencing ? { conferencing: true } : {}),
   };
 
   if (ref) {
@@ -265,6 +266,8 @@ async function loadEventMeta(
   content?: { summary: string; description: string };
   /** Resolved venue for the mirror; absent means the event states no place. */
   location?: string;
+  /** Video service — a rebuilt mirror must not sprout a Meet link an inline one lacks. */
+  conferencing?: boolean;
   timezone?: string;
   startUtc?: string;
   endUtc?: string;
@@ -348,6 +351,7 @@ async function loadEventMeta(
   return {
     content,
     location,
+    conferencing: eventType.locationType === 'google_meet',
     timezone: rule.timezone,
     startUtc: b?.start_utc ?? row.start_utc,
     endUtc: b?.end_utc ?? row.end_utc,

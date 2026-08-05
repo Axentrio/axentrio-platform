@@ -17,7 +17,24 @@ import {
   Index,
 } from 'typeorm';
 
-export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'failed' | 'request_created';
+/**
+ * `'failed'` is deliberately ABSENT.
+ *
+ * The epic specifies a Failed status for "calendar event creation failed, slot became
+ * unavailable, required information missing, calendar connection broken". This design
+ * handles all four differently and therefore never reaches such a state: a lost slot or
+ * missing information throws before any row exists, an unreachable calendar degrades to
+ * `request_created`, and a failed calendar MIRROR leaves a genuinely-held `confirmed`
+ * booking carrying `sync_pending`/`sync_last_error` — surfaced to the owner as
+ * `calendarSync` on the bookings list.
+ *
+ * Marking that last case `failed` would be actively wrong: the slot IS held by the
+ * exclusion constraint, and `failed` is excluded from the analytics and lead-readiness
+ * queries, so a real appointment would be reported as though it had evaporated. The value
+ * sat in this union for months with no code path writing it (prod: zero rows). Those
+ * queries still name it defensively, which is harmless and covers any legacy row.
+ */
+export type BookingStatus = 'pending' | 'confirmed' | 'cancelled' | 'request_created';
 
 /** How the booking was handled: auto-confirmed vs captured as a request/lead. */
 export type BookingMode = 'auto' | 'request';

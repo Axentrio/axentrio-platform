@@ -415,6 +415,20 @@ function hasValidRange(service: ServiceType): boolean {
  * agent-supplied minutes, defaulting to minDurationMin when absent; out of
  * [min,max] → DURATION_OUT_OF_RANGE (recoverable, never silently clamped).
  */
+/**
+ * True when a variable-length service's length was never established.
+ *
+ * The epic's rule is that the assistant must not auto-book a duration it had to guess.
+ * `resolveDuration` falls back to the SHORTEST job when the model supplies nothing, which
+ * is a safe number to hold but a silent guess to confirm: a two-hour repair booked as a
+ * thirty-minute one is a wrong appointment, not a conservative one. The auto path treats
+ * this as a reason to capture a request; the request path doesn't care, because a request
+ * carries a preferred time rather than a committed length.
+ */
+function durationUnresolved(service: ServiceType, requestedDurationMin?: number): boolean {
+  return hasValidRange(service) && typeof requestedDurationMin !== 'number';
+}
+
 function resolveDuration(service: ServiceType, requestedDurationMin?: number): number {
   if (!hasValidRange(service)) {
     if (service.durationMode === 'range' || service.durationMode === 'ai') {
@@ -749,7 +763,9 @@ export class InternalProvider implements BookingProvider {
     const existing = await bookingRepo.findOne({
       where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
     });
-    if (existing && existing.status !== 'failed') {
+    // Any existing row for this idempotency key is a duplicate. (This used to exclude
+    // 'failed', a status nothing ever wrote.)
+    if (existing) {
       return this.toResult(existing, true, rule.timezone, service.name);
     }
 
@@ -775,7 +791,10 @@ export class InternalProvider implements BookingProvider {
       },
       order: { createdAt: 'DESC' },
     });
-    if (recentDup && !['failed', 'cancelled', 'declined'].includes(recentDup.status)) {
+    // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
+    // slot. 'failed' and 'declined' were also listed here; neither is ever written
+    // (declining a request writes 'cancelled').
+    if (recentDup && recentDup.status !== 'cancelled') {
       return this.toResult(recentDup, true, rule.timezone, service.name);
     }
 
@@ -788,7 +807,9 @@ export class InternalProvider implements BookingProvider {
     const canAuto = await this.canAutoConfirm(ctx);
     // Request-only OR can't auto-confirm (no healthy calendar OR sync disabled) →
     // capture a request, not a confirmed booking. Mirrors readiness willAutoConfirm.
-    if (service.bookingMode === 'request' || !canAuto) {
+    // Request-only, no healthy calendar, OR a variable-length job whose length nobody
+    // established — all three mean "do not confirm this, capture it".
+    if (service.bookingMode === 'request' || !canAuto || durationUnresolved(service, extras?.durationMin)) {
       // Carry the model's summary through the downgrade — passing `undefined` here meant a
       // job captured because the calendar was down reached the owner with no context.
       return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, extras?.aiSummary, intakeAnswers, extras, effectiveDuration);
@@ -893,7 +914,7 @@ export class InternalProvider implements BookingProvider {
         const dup = await bookingRepo.findOne({
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
-        if (dup && dup.status !== 'failed') return this.toResult(dup, true, rule.timezone, service.name);
+        if (dup) return this.toResult(dup, true, rule.timezone, service.name);
         throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
@@ -1055,7 +1076,7 @@ export class InternalProvider implements BookingProvider {
         const dup = await bookingRepo.findOne({
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
-        if (dup && dup.status !== 'failed') return this.toResult(dup, true);
+        if (dup) return this.toResult(dup, true);
       }
       throw err;
     }
@@ -1134,7 +1155,9 @@ export class InternalProvider implements BookingProvider {
     const existing = await bookingRepo.findOne({
       where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
     });
-    if (existing && existing.status !== 'failed') {
+    // Any existing row for this idempotency key is a duplicate. (This used to exclude
+    // 'failed', a status nothing ever wrote.)
+    if (existing) {
       return this.toResult(existing, true);
     }
 
@@ -1166,7 +1189,10 @@ export class InternalProvider implements BookingProvider {
       },
       order: { createdAt: 'DESC' },
     });
-    if (recentDup && !['failed', 'cancelled', 'declined'].includes(recentDup.status)) {
+    // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
+    // slot. 'failed' and 'declined' were also listed here; neither is ever written
+    // (declining a request writes 'cancelled').
+    if (recentDup && recentDup.status !== 'cancelled') {
       return this.toResult(recentDup, true);
     }
 

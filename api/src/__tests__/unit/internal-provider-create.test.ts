@@ -553,10 +553,32 @@ describe('InternalProvider.createBooking', () => {
     expect(insertParam(insert as any, 'booked_duration_min')).toBe(60);
   });
 
-  it('defaults a range service to minDurationMin when no duration is given', async () => {
+  it('CAPTURES a range service whose length was never established, instead of guessing short', async () => {
+    // This used to confirm the booking at minDurationMin. A two-hour repair silently
+    // booked as a thirty-minute one is the wrong appointment, not a cautious one — so an
+    // unestablished length now becomes a request for the owner to scope.
     serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    // The downgrade lands in createRequest, whose INSERT goes through the repository query.
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-dur' }] : []
+    );
     const res = await provider.createBooking(ctx, 'idem-dur-def', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
-    expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z'); // start + 30 (min)
+    expect(res.requested).toBe(true);
+  });
+
+  it('still confirms a range service once the length IS given', async () => {
+    serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
+    const res = await provider.createBooking(
+      ctx, 'idem-dur-given', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+      { durationMin: 30 }
+    );
+    expect(res.requested).toBeUndefined();
+    expect(res.booking.endTime).toBe('2026-06-10T07:30:00.000Z');
+  });
+
+  it('leaves FIXED services alone — nothing to establish, so nothing to downgrade', async () => {
+    const res = await provider.createBooking(ctx, 'idem-dur-fixed2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
+    expect(res.requested).toBeUndefined();
   });
 
   it('rejects DURATION_OUT_OF_RANGE for a range service when the chosen length is outside bounds', async () => {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { computeSlots, type BusyInterval } from '../../booking/booking-providers/slot-engine';
-import { bookingRulesSchema, updateSchedulerSchema } from '../../schemas/scheduler.schema';
+import { bookingRulesSchema, updateSchedulerSchema, serviceInputSchema } from '../../schemas/scheduler.schema';
+import { resolveServiceTiming, type BusinessRules } from '../../booking/booking-providers/service-timing';
 
 /** Wed 2026-06-10, 09:00–17:00 Brussels. */
 const RULE = {
@@ -125,5 +126,78 @@ describe('bookingRulesSchema', () => {
 
   it('is a valid standalone scheduler-config write', () => {
     expect(updateSchedulerSchema.safeParse({ bookingRules: { minGapMin: 15 } }).success).toBe(true);
+  });
+});
+
+describe('resolveServiceTiming — service → business → platform', () => {
+  const rules = (over: Partial<BusinessRules> = {}): BusinessRules => ({
+    maxBookingsPerDay: 0,
+    maxBookedMinutesPerDay: 0,
+    minGapMin: 0,
+    defaultBufferBeforeMin: null,
+    defaultBufferAfterMin: null,
+    defaultMinNoticeMin: null,
+    defaultMaxHorizonDays: null,
+    ...over,
+  });
+  const svc = (over: Record<string, unknown> = {}) =>
+    ({ name: 'Cut', durationMin: 30, bufferBeforeMin: null, bufferAfterMin: null, minNoticeMin: null, maxHorizonDays: null, ...over }) as never;
+
+  it('falls back to the platform values when nobody has an opinion', () => {
+    const r = resolveServiceTiming(svc(), rules());
+    expect(r.bufferBeforeMin).toBe(0);
+    expect(r.bufferAfterMin).toBe(0);
+    expect(r.minNoticeMin).toBe(0);
+    expect(r.maxHorizonDays).toBe(60);
+  });
+
+  it('inherits the business default when the service is unset', () => {
+    const r = resolveServiceTiming(svc(), rules({ defaultMinNoticeMin: 120, defaultMaxHorizonDays: 30 }));
+    expect(r.minNoticeMin).toBe(120);
+    expect(r.maxHorizonDays).toBe(30);
+  });
+
+  it('lets the service WIN over the business default — this is a default, not a ceiling', () => {
+    const r = resolveServiceTiming(svc({ minNoticeMin: 15 }), rules({ defaultMinNoticeMin: 120 }));
+    expect(r.minNoticeMin).toBe(15);
+  });
+
+  it('treats an explicit service 0 as a real answer, not as unset', () => {
+    // The exact distinction the nullability migration exists to make: a service that
+    // genuinely wants zero notice must not silently inherit two hours.
+    const r = resolveServiceTiming(svc({ minNoticeMin: 0 }), rules({ defaultMinNoticeMin: 120 }));
+    expect(r.minNoticeMin).toBe(0);
+  });
+
+  it('treats an explicit business 0 as a real answer too', () => {
+    const r = resolveServiceTiming(svc(), rules({ defaultBufferAfterMin: 0 }));
+    expect(r.bufferAfterMin).toBe(0);
+  });
+
+  it('does not mutate the service it was given', () => {
+    const original = svc({ minNoticeMin: null });
+    resolveServiceTiming(original, rules({ defaultMinNoticeMin: 90 }));
+    expect((original as { minNoticeMin: number | null }).minNoticeMin).toBeNull();
+  });
+});
+
+describe('serviceInputSchema — the four are inheritable', () => {
+  const base = { name: 'Cut', durationMin: 30 };
+
+  it('no longer stamps a default, so "unset" survives the write', () => {
+    const r = serviceInputSchema.parse(base);
+    expect(r.minNoticeMin).toBeUndefined();
+    expect(r.maxHorizonDays).toBeUndefined();
+    expect(r.bufferBeforeMin).toBeUndefined();
+    expect(r.bufferAfterMin).toBeUndefined();
+  });
+
+  it('accepts an explicit null — that is how an owner clears one back to inherited', () => {
+    expect(serviceInputSchema.safeParse({ ...base, minNoticeMin: null }).success).toBe(true);
+  });
+
+  it('still enforces the bounds when a value IS given', () => {
+    expect(serviceInputSchema.safeParse({ ...base, maxHorizonDays: 0 }).success).toBe(false);
+    expect(serviceInputSchema.safeParse({ ...base, bufferBeforeMin: 999 }).success).toBe(false);
   });
 });

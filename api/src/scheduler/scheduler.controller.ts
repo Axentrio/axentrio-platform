@@ -130,6 +130,10 @@ async function readConfig(tenantId: string) {
       maxBookingsPerDay: bookingSettings?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: bookingSettings?.maxBookedMinutesPerDay ?? null,
       minGapMin: bookingSettings?.minGapMin ?? null,
+      defaultBufferBeforeMin: bookingSettings?.defaultBufferBeforeMin ?? null,
+      defaultBufferAfterMin: bookingSettings?.defaultBufferAfterMin ?? null,
+      defaultMinNoticeMin: bookingSettings?.defaultMinNoticeMin ?? null,
+      defaultMaxHorizonDays: bookingSettings?.defaultMaxHorizonDays ?? null,
     },
   };
 }
@@ -175,35 +179,52 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   }
 
   // `!== undefined`, not truthiness: [] is how the owner clears their service area, and
-  // null is how they clear a capacity rule.
+  // null is how they clear a capacity rule or a business default.
   if (data.serviceArea !== undefined || data.bookingRules) {
-    const br = data.bookingRules ?? {};
+    const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
+    // Generated rather than hand-written: seven nullable int columns, each needing a value
+    // AND a "was it provided" flag so an untouched rule keeps its stored value while an
+    // explicit null clears it. Hand-maintaining fourteen positional params is how a column
+    // ends up silently bound to the wrong slot.
+    const RULE_COLUMNS: Array<[string, string]> = [
+      ['maxBookingsPerDay', 'max_bookings_per_day'],
+      ['maxBookedMinutesPerDay', 'max_booked_minutes_per_day'],
+      ['minGapMin', 'min_gap_min'],
+      ['defaultBufferBeforeMin', 'default_buffer_before_min'],
+      ['defaultBufferAfterMin', 'default_buffer_after_min'],
+      ['defaultMinNoticeMin', 'default_min_notice_min'],
+      ['defaultMaxHorizonDays', 'default_max_horizon_days'],
+    ];
+
+    const params: unknown[] = [
+      tenantId,
+      bot.id,
+      data.serviceArea === undefined ? null : JSON.stringify(data.serviceArea),
+      data.serviceArea !== undefined,
+    ];
+    const insertCols = ['tenant_id', 'bot_id', 'service_area'];
+    const insertVals = ['$1', '$2', `COALESCE($3::jsonb, '[]'::jsonb)`];
+    const updates = [
+      `service_area = CASE WHEN $4 THEN COALESCE($3::jsonb, '[]'::jsonb) ELSE chatbot_booking_settings.service_area END`,
+    ];
+    for (const [key, column] of RULE_COLUMNS) {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(br[key] ?? null, br[key] !== undefined);
+      insertCols.push(column);
+      insertVals.push(valueParam);
+      updates.push(
+        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+      );
+    }
+
     // A real upsert rather than findOne-then-save: the unique index on bot_id means two
-    // concurrent first-writes for the same bot raced to a 23505. Each field carries a
-    // "was it provided" flag so an untouched rule keeps its stored value while an
-    // explicit null clears it.
+    // concurrent first-writes for the same bot raced to a 23505.
     await AppDataSource.query(
-      `INSERT INTO chatbot_booking_settings
-         (tenant_id, bot_id, service_area, max_bookings_per_day, max_booked_minutes_per_day, min_gap_min)
-       VALUES ($1, $2, COALESCE($3::jsonb, '[]'::jsonb), $5, $7, $9)
-       ON CONFLICT (bot_id) DO UPDATE SET
-         service_area = CASE WHEN $4 THEN COALESCE($3::jsonb, '[]'::jsonb) ELSE chatbot_booking_settings.service_area END,
-         max_bookings_per_day = CASE WHEN $6 THEN $5 ELSE chatbot_booking_settings.max_bookings_per_day END,
-         max_booked_minutes_per_day = CASE WHEN $8 THEN $7 ELSE chatbot_booking_settings.max_booked_minutes_per_day END,
-         min_gap_min = CASE WHEN $10 THEN $9 ELSE chatbot_booking_settings.min_gap_min END,
-         updated_at = now()`,
-      [
-        tenantId,
-        bot.id,
-        data.serviceArea === undefined ? null : JSON.stringify(data.serviceArea),
-        data.serviceArea !== undefined,
-        br.maxBookingsPerDay ?? null,
-        br.maxBookingsPerDay !== undefined,
-        br.maxBookedMinutesPerDay ?? null,
-        br.maxBookedMinutesPerDay !== undefined,
-        br.minGapMin ?? null,
-        br.minGapMin !== undefined,
-      ]
+      `INSERT INTO chatbot_booking_settings (${insertCols.join(', ')})
+       VALUES (${insertVals.join(', ')})
+       ON CONFLICT (bot_id) DO UPDATE SET ${updates.join(', ')}, updated_at = now()`,
+      params
     );
   }
 

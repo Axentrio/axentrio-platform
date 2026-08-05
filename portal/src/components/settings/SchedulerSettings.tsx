@@ -211,6 +211,10 @@ export const SchedulerSettings: React.FC = () => {
     maxBookingsPerDay: null,
     maxBookedMinutesPerDay: null,
     minGapMin: null,
+    defaultBufferBeforeMin: null,
+    defaultBufferAfterMin: null,
+    defaultMinNoticeMin: null,
+    defaultMaxHorizonDays: null,
   });
   const [showPreview, setShowPreview] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -230,6 +234,10 @@ export const SchedulerSettings: React.FC = () => {
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
       minGapMin: data.bookingRules?.minGapMin ?? null,
+      defaultBufferBeforeMin: data.bookingRules?.defaultBufferBeforeMin ?? null,
+      defaultBufferAfterMin: data.bookingRules?.defaultBufferAfterMin ?? null,
+      defaultMinNoticeMin: data.bookingRules?.defaultMinNoticeMin ?? null,
+      defaultMaxHorizonDays: data.bookingRules?.defaultMaxHorizonDays ?? null,
     });
     setHydrated(true);
   }, [data, hydrated]);
@@ -535,6 +543,42 @@ export const SchedulerSettings: React.FC = () => {
                       min={0}
                       max={480}
                       onChange={(v) => setRules((r) => ({ ...r, minGapMin: v }))}
+                    />
+                  </div>
+
+                  <p className="pt-2 text-xs text-text-muted">
+                    Defaults for new services. A service that sets its own value keeps it — these
+                    only fill the fields a service leaves blank, so you can change your notice
+                    period or buffers once instead of on every service.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <OptionalNumberField
+                      label="Min notice (min)"
+                      value={rules.defaultMinNoticeMin}
+                      min={0}
+                      max={43200}
+                      onChange={(v) => setRules((r) => ({ ...r, defaultMinNoticeMin: v }))}
+                    />
+                    <OptionalNumberField
+                      label="Max horizon (days)"
+                      value={rules.defaultMaxHorizonDays}
+                      min={1}
+                      max={365}
+                      onChange={(v) => setRules((r) => ({ ...r, defaultMaxHorizonDays: v }))}
+                    />
+                    <OptionalNumberField
+                      label="Buffer before (min)"
+                      value={rules.defaultBufferBeforeMin}
+                      min={0}
+                      max={480}
+                      onChange={(v) => setRules((r) => ({ ...r, defaultBufferBeforeMin: v }))}
+                    />
+                    <OptionalNumberField
+                      label="Buffer after (min)"
+                      value={rules.defaultBufferAfterMin}
+                      min={0}
+                      max={480}
+                      onChange={(v) => setRules((r) => ({ ...r, defaultBufferAfterMin: v }))}
                     />
                   </div>
                 </div>

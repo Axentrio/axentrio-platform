@@ -86,19 +86,25 @@ export class ServiceType {
   @Column({ type: 'int', name: 'max_duration_min', nullable: true })
   maxDurationMin?: number | null;
 
-  @Column({ type: 'int', name: 'buffer_before_min', default: 0 })
-  bufferBeforeMin!: number;
+  /**
+   * The four timing fields below are NULLABLE, and null means INHERIT from
+   * `BookingSettings` (then from the platform fallback). They were NOT NULL with DB
+   * defaults, which made "unset" indistinguishable from 0 and business-level defaults
+   * impossible to express. Resolve them through `resolveServiceTiming`, never directly.
+   */
+  @Column({ type: 'int', name: 'buffer_before_min', nullable: true })
+  bufferBeforeMin?: number | null;
 
-  @Column({ type: 'int', name: 'buffer_after_min', default: 0 })
-  bufferAfterMin!: number;
+  @Column({ type: 'int', name: 'buffer_after_min', nullable: true })
+  bufferAfterMin?: number | null;
 
   /** Minimum lead time before a slot can be booked, in minutes. */
-  @Column({ type: 'int', name: 'min_notice_min', default: 0 })
-  minNoticeMin!: number;
+  @Column({ type: 'int', name: 'min_notice_min', nullable: true })
+  minNoticeMin?: number | null;
 
   /** How far ahead bookings are allowed, in days. */
-  @Column({ type: 'int', name: 'max_horizon_days', default: 60 })
-  maxHorizonDays!: number;
+  @Column({ type: 'int', name: 'max_horizon_days', nullable: true })
+  maxHorizonDays?: number | null;
 
   @Column({ type: 'int', name: 'max_bookings_per_day', nullable: true })
   maxBookingsPerDay?: number | null;

@@ -57,10 +57,11 @@ interface FormState {
   durationMin: number;
   minDurationMin: string;
   maxDurationMin: string;
-  bufferBeforeMin: number;
-  bufferAfterMin: number;
-  minNoticeMin: number;
-  maxHorizonDays: number;
+  // Strings, like the other optional numerics in this form: '' means INHERIT.
+  bufferBeforeMin: string;
+  bufferAfterMin: string;
+  minNoticeMin: string;
+  maxHorizonDays: string;
   priceDisplayType: 'none' | 'fixed' | 'from' | 'range' | 'on_request';
   fixedPrice: string;
   minPrice: string;
@@ -85,10 +86,12 @@ const BLANK: FormState = {
   durationMin: 30,
   minDurationMin: '',
   maxDurationMin: '',
-  bufferBeforeMin: 0,
-  bufferAfterMin: 0,
-  minNoticeMin: 60,
-  maxHorizonDays: 60,
+  // Blank by default so a new service inherits the business settings rather than
+  // silently restating them — restating is what made them impossible to change in one place.
+  bufferBeforeMin: '',
+  bufferAfterMin: '',
+  minNoticeMin: '',
+  maxHorizonDays: '',
   priceDisplayType: 'none',
   fixedPrice: '',
   minPrice: '',
@@ -116,10 +119,10 @@ function formFromService(s: Service): FormState {
     // form never renders blank/NaN and the owner must enter valid bounds before saving.
     minDurationMin: s.minDurationMin != null ? String(s.minDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
     maxDurationMin: s.maxDurationMin != null ? String(s.maxDurationMin) : (s.durationMode !== 'fixed' ? String(s.durationMin) : ''),
-    bufferBeforeMin: s.bufferBeforeMin,
-    bufferAfterMin: s.bufferAfterMin,
-    minNoticeMin: s.minNoticeMin,
-    maxHorizonDays: s.maxHorizonDays,
+    bufferBeforeMin: s.bufferBeforeMin != null ? String(s.bufferBeforeMin) : '',
+    bufferAfterMin: s.bufferAfterMin != null ? String(s.bufferAfterMin) : '',
+    minNoticeMin: s.minNoticeMin != null ? String(s.minNoticeMin) : '',
+    maxHorizonDays: s.maxHorizonDays != null ? String(s.maxHorizonDays) : '',
     priceDisplayType: s.priceDisplayType,
     fixedPrice: s.fixedPrice != null ? String(s.fixedPrice) : '',
     minPrice: s.minPrice != null ? String(s.minPrice) : '',
@@ -140,6 +143,8 @@ function formFromService(s: Service): FormState {
 
 function toInput(f: FormState): ServiceInput {
   const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
+  // Blank means INHERIT — send null, not undefined, so an update CLEARS a stored value.
+  const inherit = (v: string): number | null => (v.trim() === '' ? null : Number(v));
   return {
     name: f.name.trim(),
     category: f.category.trim() || undefined,
@@ -150,10 +155,10 @@ function toInput(f: FormState): ServiceInput {
     durationMin: f.durationMin,
     minDurationMin: f.durationMode === 'fixed' ? undefined : (f.minDurationMin.trim() === '' ? undefined : Number(f.minDurationMin)),
     maxDurationMin: f.durationMode === 'fixed' ? undefined : (f.maxDurationMin.trim() === '' ? undefined : Number(f.maxDurationMin)),
-    bufferBeforeMin: f.bufferBeforeMin,
-    bufferAfterMin: f.bufferAfterMin,
-    minNoticeMin: f.minNoticeMin,
-    maxHorizonDays: f.maxHorizonDays,
+    bufferBeforeMin: inherit(f.bufferBeforeMin),
+    bufferAfterMin: inherit(f.bufferAfterMin),
+    minNoticeMin: inherit(f.minNoticeMin),
+    maxHorizonDays: inherit(f.maxHorizonDays),
     priceDisplayType: f.priceDisplayType,
     fixedPrice: f.priceDisplayType === 'fixed' || f.priceDisplayType === 'from' ? num(f.fixedPrice) : undefined,
     minPrice: f.priceDisplayType === 'range' ? num(f.minPrice) : undefined,
@@ -473,12 +478,12 @@ const ServiceEditorDialog: React.FC<{
                   </div>
                 </>
               )}
-              <NumberField label="Buffer before" value={form.bufferBeforeMin} onChange={(v) => set('bufferBeforeMin', v)} min={0} />
-              <NumberField label="Buffer after" value={form.bufferAfterMin} onChange={(v) => set('bufferAfterMin', v)} min={0} />
+              <InheritableNumberField label="Buffer before" value={form.bufferBeforeMin} onChange={(v) => set('bufferBeforeMin', v)} min={0} />
+              <InheritableNumberField label="Buffer after" value={form.bufferAfterMin} onChange={(v) => set('bufferAfterMin', v)} min={0} />
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <NumberField label="Min notice (min)" value={form.minNoticeMin} onChange={(v) => set('minNoticeMin', v)} min={0} />
-              <NumberField label="Max horizon (days)" value={form.maxHorizonDays} onChange={(v) => set('maxHorizonDays', v)} min={1} />
+              <InheritableNumberField label="Min notice (min)" value={form.minNoticeMin} onChange={(v) => set('minNoticeMin', v)} min={0} />
+              <InheritableNumberField label="Max horizon (days)" value={form.maxHorizonDays} onChange={(v) => set('maxHorizonDays', v)} min={1} />
             </div>
 
             <div className="space-y-3">
@@ -646,6 +651,19 @@ const PresetDialog: React.FC<{ open: boolean; onClose: () => void; onApplied?: (
     </Dialog>
   );
 };
+
+/** '' → inherit. Empty is a real, savable state here, so no NaN and no snap-back to 0. */
+const InheritableNumberField: React.FC<{
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  min?: number;
+}> = ({ label, value, onChange, min }) => (
+  <div>
+    <Label className="text-text-secondary mb-1 block">{label}</Label>
+    <Input type="number" value={value} min={min} placeholder="Inherited" onChange={(e) => onChange(e.target.value)} />
+  </div>
+);
 
 const NumberField: React.FC<{ label: string; value: number; onChange: (v: number) => void; min?: number }> = ({
   label,

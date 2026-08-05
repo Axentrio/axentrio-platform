@@ -26,10 +26,10 @@ export interface SchedulerEventType {
   id?: string;
   name: string;
   durationMin: number;
-  bufferBeforeMin: number;
-  bufferAfterMin: number;
-  minNoticeMin: number;
-  maxHorizonDays: number;
+  bufferBeforeMin: number | null;
+  bufferAfterMin: number | null;
+  minNoticeMin: number | null;
+  maxHorizonDays: number | null;
   locationType: string;
 }
 
@@ -69,10 +69,11 @@ export interface Service {
   durationMin: number;
   minDurationMin?: number | null;
   maxDurationMin?: number | null;
-  bufferBeforeMin: number;
-  bufferAfterMin: number;
-  minNoticeMin: number;
-  maxHorizonDays: number;
+  /** null = inherit from the business defaults (then the platform fallback). */
+  bufferBeforeMin: number | null;
+  bufferAfterMin: number | null;
+  minNoticeMin: number | null;
+  maxHorizonDays: number | null;
   maxBookingsPerDay?: number | null;
   priceDisplayType: PriceDisplayType;
   fixedPrice?: number | null;
@@ -101,6 +102,11 @@ export interface BookingRules {
   maxBookingsPerDay: number | null;
   maxBookedMinutesPerDay: number | null;
   minGapMin: number | null;
+  /** DEFAULTS, not ceilings — used only where a service leaves the field null. */
+  defaultBufferBeforeMin: number | null;
+  defaultBufferAfterMin: number | null;
+  defaultMinNoticeMin: number | null;
+  defaultMaxHorizonDays: number | null;
 }
 
 export interface SchedulerConfig {

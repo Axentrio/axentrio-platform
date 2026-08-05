@@ -74,6 +74,26 @@ export class BookingSettings {
   @Column({ type: 'int', name: 'min_gap_min', nullable: true })
   minGapMin?: number | null;
 
+  /**
+   * Business-level timing DEFAULTS — distinct from the ceilings above.
+   *
+   * A ceiling always applies and the stricter wins; a default applies only where the
+   * service left the field null. This is what stops a solo owner restating the same
+   * notice period and buffers on every service they offer. Null here too means "no
+   * business default", falling through to the platform fallback.
+   */
+  @Column({ type: 'int', name: 'default_buffer_before_min', nullable: true })
+  defaultBufferBeforeMin?: number | null;
+
+  @Column({ type: 'int', name: 'default_buffer_after_min', nullable: true })
+  defaultBufferAfterMin?: number | null;
+
+  @Column({ type: 'int', name: 'default_min_notice_min', nullable: true })
+  defaultMinNoticeMin?: number | null;
+
+  @Column({ type: 'int', name: 'default_max_horizon_days', nullable: true })
+  defaultMaxHorizonDays?: number | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

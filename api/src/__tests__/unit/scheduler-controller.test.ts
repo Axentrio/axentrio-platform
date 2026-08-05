@@ -64,9 +64,13 @@ describe('scheduler.controller', () => {
 
     expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
     expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
-    // event type saved with a derived slug + schema defaults
+    // Event type saved with a derived slug. The inheritable timing fields are NOT stamped
+    // with schema defaults any more — an unsent maxHorizonDays stays undefined so the
+    // service inherits the business default, which is the whole point of making them
+    // nullable. A default here would have made "unset" unreachable.
     expect(etSave).toHaveBeenCalledOnce();
-    expect(etSave.mock.calls[0][0]).toMatchObject({ name: 'Intro call', slug: 'intro-call', durationMin: 30, maxHorizonDays: 60 });
+    expect(etSave.mock.calls[0][0]).toMatchObject({ name: 'Intro call', slug: 'intro-call', durationMin: 30 });
+    expect(etSave.mock.calls[0][0].maxHorizonDays).toBeUndefined();
     expect(ruleSave).toHaveBeenCalledOnce();
     expect(ruleSave.mock.calls[0][0]).toMatchObject({ timezone: 'Europe/Brussels', slotGranularityMin: 30 });
     expect(sendSuccess).toHaveBeenCalled();

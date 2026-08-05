@@ -15,6 +15,11 @@ import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
+import {
+  resolveServiceTiming,
+  type BusinessRules,
+  type ResolvedService,
+} from './service-timing';
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
 import { logger } from '../../utils/logger';
@@ -292,19 +297,20 @@ async function enforceServiceDayCapacity(
 }
 
 /** Business-level ceilings, normalised so null/negative/0 all read as "unlimited". */
-export interface BusinessRules {
-  maxBookingsPerDay: number;
-  maxBookedMinutesPerDay: number;
-  minGapMin: number;
-}
-
 export async function loadBusinessRules(botId: string): Promise<BusinessRules> {
   const row = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
   const n = (v: number | null | undefined): number => (typeof v === 'number' && v > 0 ? v : 0);
+  // Ceilings normalise 0/negative to "unlimited"; DEFAULTS must keep a real 0 (a business
+  // that genuinely wants zero notice is saying something different from "unset").
+  const d = (v: number | null | undefined): number | null => (typeof v === 'number' ? v : null);
   return {
     maxBookingsPerDay: n(row?.maxBookingsPerDay),
     maxBookedMinutesPerDay: n(row?.maxBookedMinutesPerDay),
     minGapMin: n(row?.minGapMin),
+    defaultBufferBeforeMin: d(row?.defaultBufferBeforeMin),
+    defaultBufferAfterMin: d(row?.defaultBufferAfterMin),
+    defaultMinNoticeMin: d(row?.defaultMinNoticeMin),
+    defaultMaxHorizonDays: d(row?.defaultMaxHorizonDays),
   };
 }
 
@@ -463,12 +469,14 @@ export class InternalProvider implements BookingProvider {
    * disambiguate). The `onlineBookable` filter mirrors the runtime GATE +
    * readiness so a service hidden from online booking is never silently resolved.
    */
-  private async resolveService(botId: string, serviceId?: string): Promise<ServiceType> {
+  private async resolveService(botId: string, serviceId?: string): Promise<ResolvedService> {
     const repo = AppDataSource.getRepository(ServiceType);
+    // Inheritance is applied HERE so every caller downstream sees resolved numbers.
+    const rules = await loadBusinessRules(botId);
     if (serviceId) {
       const svc = await repo.findOne({ where: { id: serviceId, botId, isActive: true, onlineBookable: true } });
       if (!svc) throw new BookingError('That service is unavailable', 'SERVICE_NOT_FOUND', 404);
-      return svc;
+      return resolveServiceTiming(svc, rules);
     }
     const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC' } });
     if (active.length === 0) {
@@ -477,7 +485,7 @@ export class InternalProvider implements BookingProvider {
     if (active.length > 1) {
       throw new BookingError('Please specify which service to book', 'SERVICE_REQUIRED', 400);
     }
-    return active[0];
+    return resolveServiceTiming(active[0], rules);
   }
 
   /**
@@ -486,10 +494,10 @@ export class InternalProvider implements BookingProvider {
    * it was later deactivated. Falls back to the sole active service for legacy
    * rows with no service id.
    */
-  private async serviceForBooking(booking: Booking): Promise<ServiceType> {
+  private async serviceForBooking(booking: Booking): Promise<ResolvedService> {
     if (booking.eventTypeId) {
       const svc = await AppDataSource.getRepository(ServiceType).findOne({ where: { id: booking.eventTypeId } });
-      if (svc) return svc;
+      if (svc) return resolveServiceTiming(svc, await loadBusinessRules(booking.botId));
     }
     return this.resolveService(booking.botId);
   }

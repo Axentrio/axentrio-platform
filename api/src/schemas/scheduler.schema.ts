@@ -39,15 +39,22 @@ export const bookingRulesSchema = z.object({
   maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
   maxBookedMinutesPerDay: z.number().int().min(15).max(1440).nullable().optional(),
   minGapMin: z.number().int().min(0).max(480).nullable().optional(),
+  // DEFAULTS, not ceilings: applied only where a service left the field null.
+  defaultBufferBeforeMin: z.number().int().min(0).max(480).nullable().optional(),
+  defaultBufferAfterMin: z.number().int().min(0).max(480).nullable().optional(),
+  defaultMinNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
+  defaultMaxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
 });
 
 export const eventTypeInputSchema = z.object({
   name: z.string().min(1).max(255),
   durationMin: z.number().int().min(5).max(1440),
-  bufferBeforeMin: z.number().int().min(0).max(480).default(0),
-  bufferAfterMin: z.number().int().min(0).max(480).default(0),
-  minNoticeMin: z.number().int().min(0).max(43200).default(0),
-  maxHorizonDays: z.number().int().min(1).max(365).default(60),
+  // No .default() — null means INHERIT from the business, and a default here would make
+  // "unset" unreachable, which is exactly what blocked business-level defaults before.
+  bufferBeforeMin: z.number().int().min(0).max(480).nullable().optional(),
+  bufferAfterMin: z.number().int().min(0).max(480).nullable().optional(),
+  minNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
+  maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
 });
 
@@ -107,10 +114,12 @@ export const serviceInputSchema = z.object({
   durationMin: z.number().int().min(5).max(1440),
   minDurationMin: z.number().int().min(5).max(1440).optional(),
   maxDurationMin: z.number().int().min(5).max(1440).optional(),
-  bufferBeforeMin: z.number().int().min(0).max(480).default(0),
-  bufferAfterMin: z.number().int().min(0).max(480).default(0),
-  minNoticeMin: z.number().int().min(0).max(43200).default(0),
-  maxHorizonDays: z.number().int().min(1).max(365).default(60),
+  // No .default() — null means INHERIT from the business, and a default here would make
+  // "unset" unreachable, which is exactly what blocked business-level defaults before.
+  bufferBeforeMin: z.number().int().min(0).max(480).nullable().optional(),
+  bufferAfterMin: z.number().int().min(0).max(480).nullable().optional(),
+  minNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
+  maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
   maxBookingsPerDay: z.number().int().min(1).max(100).optional(),
   priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request']).default('none'),
   fixedPrice: z.number().nonnegative().max(1_000_000).optional(),

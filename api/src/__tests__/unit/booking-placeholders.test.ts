@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatServicesForPlaceholder, formatHoursForPlaceholder } from '../../modules/booking.module';
+import { formatServicesForPlaceholder, formatHoursForPlaceholder, buildHoursSection } from '../../modules/booking.module';
 import { formatBusinessHoursForPlaceholder } from '../../utils/format-business-hours';
 import { composeSystemPrompt } from '../../llm/compose-system-prompt';
 
@@ -120,5 +120,73 @@ describe('{services} / {openingHours} substitution in the composed prompt', () =
     } as any);
     expect(prompt).not.toContain('Check-up');
     expect(prompt).not.toContain('{services}');
+  });
+});
+
+describe('buildHoursSection — date overrides reach the prompt', () => {
+  const NOW = new Date('2026-12-01T12:00:00Z');
+  const rule = (over: Record<string, unknown> = {}) =>
+    ({
+      timezone: 'Europe/Brussels',
+      availabilityMode: 'business_hours',
+      weeklyHours: { mon: [{ start: '09:00', end: '17:00' }] },
+      dateOverrides: [],
+      slotGranularityMin: 30,
+      ...over,
+    }) as never;
+
+  it('states an upcoming closure the engine will enforce', () => {
+    // The gap this closes: the bot answered "are you open on 25 December?" from the weekly
+    // grid and contradicted a closure the slot engine was about to apply.
+    const out = buildHoursSection(rule({ dateOverrides: [{ date: '2026-12-25', closed: true }] }), NOW)!;
+    expect(out).toContain('2026-12-25');
+    expect(out).toContain('CLOSED');
+  });
+
+  it('states one-off hours as a restriction, not a closure', () => {
+    const out = buildHoursSection(
+      rule({ dateOverrides: [{ date: '2026-12-24', windows: [{ start: '09:00', end: '12:00' }] }] }),
+      NOW,
+    )!;
+    expect(out).toContain('open 09:00–12:00 only');
+    expect(out).not.toContain('CLOSED');
+  });
+
+  it('drops overrides that have already passed', () => {
+    const out = buildHoursSection(
+      rule({ dateOverrides: [{ date: '2026-01-01', closed: true }, { date: '2026-12-25', closed: true }] }),
+      NOW,
+    )!;
+    expect(out).not.toContain('2026-01-01');
+    expect(out).toContain('2026-12-25');
+  });
+
+  it('shows closures for an ALWAYS-OPEN business too — a closure wins in every mode', () => {
+    const out = buildHoursSection(
+      rule({ availabilityMode: 'always_open', dateOverrides: [{ date: '2026-12-25', closed: true }] }),
+      NOW,
+    )!;
+    expect(out).toContain('24/7');
+    expect(out).toContain('2026-12-25');
+  });
+
+  it('caps the list and SAYS it was cut rather than truncating silently', () => {
+    const many = Array.from({ length: 12 }, (_, i) => ({
+      date: `2026-12-${String(i + 5).padStart(2, '0')}`,
+      closed: true,
+    }));
+    const out = buildHoursSection(rule({ dateOverrides: many }), NOW)!;
+    expect(out).toContain('and 4 more');
+  });
+
+  it('still returns null when there is nothing reliable to say at all', () => {
+    expect(buildHoursSection(rule({ weeklyHours: {} }), NOW)).toBeNull();
+  });
+
+  it('renders hours with no overrides exactly as before', () => {
+    const out = buildHoursSection(rule(), NOW)!;
+    expect(out).toContain('## OPENING HOURS');
+    expect(out).toContain('- Mon: 09:00–17:00');
+    expect(out).not.toContain('OVERRIDE');
   });
 });

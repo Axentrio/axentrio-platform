@@ -18,7 +18,12 @@ Votre bot fonde ses réponses sur les documents que vous téléversez sous *Bot 
 
 **Ce qu'il vaut mieux téléverser :**
 - Fiches produits, tarifs, FAQ, descriptions de services
-- Règles internes que le bot doit respecter (« nous remboursons sous 30 jours », « nos techniciens se déplacent dans un rayon de 25 km »)
+- Règles internes que le bot doit respecter (« nous remboursons sous 30 jours », « nous n'intervenons pas sur les chaudières industrielles »)
+
+> **Pas votre zone d'intervention.** Celle-ci se configure dans Réservations → Disponibilités →
+> Votre zone de service, où elle devient une vraie règle appliquée avant toute confirmation.
+> Dans un document, ce n'est qu'un texte que le bot peut citer — il confirmera quand même un
+> rendez-vous hors zone.
 - Tout ce qu'un client peut demander et qui ne figure pas sur votre site
 
 **Ce qu'il vaut mieux NE PAS téléverser :**

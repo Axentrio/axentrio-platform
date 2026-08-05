@@ -211,6 +211,7 @@ export const SchedulerSettings: React.FC = () => {
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
   const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
+  const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
     maxBookedMinutesPerDay: null,
@@ -234,6 +235,7 @@ export const SchedulerSettings: React.FC = () => {
     }
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
+    setBookingsPaused(data.bookingsPaused === true);
     setVenue({
       street: data.venueAddress?.street ?? null,
       postalCode: data.venueAddress?.postalCode ?? null,
@@ -298,6 +300,7 @@ export const SchedulerSettings: React.FC = () => {
       bookingRules: rules,
       // Same contract as the rules — always sent, so clearing a field really clears it.
       venueAddress: venue,
+      bookingsPaused,
     });
   };
 
@@ -608,6 +611,31 @@ export const SchedulerSettings: React.FC = () => {
                     (svc) => svc.isActive && svc.customerAddressRequired,
                   )}
                 />
+
+                {/*
+                  Pause. Deliberately at the TOP of this card: it is the thing an owner
+                  reaches for in a hurry, and the alternatives were deleting their weekly
+                  hours or pausing the whole bot (which also silences every non-booking
+                  question the assistant answers).
+                */}
+                <div className="space-y-2 border-t border-edge pt-4">
+                  <label htmlFor="bookings-paused" className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      id="bookings-paused"
+                      checked={bookingsPaused}
+                      onCheckedChange={(c) => setBookingsPaused(c === true)}
+                    />
+                    <span className="text-sm text-text-secondary">
+                      Pause new online bookings
+                      <span className="block text-xs text-text-muted">
+                        The assistant stops confirming appointments and instead takes down what the
+                        customer wants, for you to confirm. It never tells them you are closed or
+                        fully booked, and it keeps answering everything else. Your existing
+                        appointments are untouched.
+                      </span>
+                    </span>
+                  </label>
+                </div>
 
                 {/* Venue — where customers come TO. Never the VAT/legal address. */}
                 <div className="space-y-3 border-t border-edge pt-4">

@@ -135,6 +135,9 @@ async function readConfig(tenantId: string) {
       defaultMinNoticeMin: bookingSettings?.defaultMinNoticeMin ?? null,
       defaultMaxHorizonDays: bookingSettings?.defaultMaxHorizonDays ?? null,
     },
+    // Cherry-picked like everything else here, so omitting it would make the portal hydrate
+    // "not paused" and quietly un-pause a business on its next Save.
+    bookingsPaused: bookingSettings?.bookingsPaused === true,
     // Same reason as bookingRules: cherry-picked, so a field added to the entity but not
     // here reads as undefined, the editor hydrates it blank, and the next Save writes the
     // blank back over a real venue.
@@ -189,7 +192,12 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
   // `!== undefined`, not truthiness: [] is how the owner clears their service area, and
   // null is how they clear a capacity rule or a business default.
-  if (data.serviceArea !== undefined || data.bookingRules || data.venueAddress !== undefined) {
+  if (
+    data.serviceArea !== undefined ||
+    data.bookingRules ||
+    data.venueAddress !== undefined ||
+    data.bookingsPaused !== undefined
+  ) {
     const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
     // `venueAddress: null` clears the whole venue; an omitted key leaves it alone. Reusing
     // the rules' value+provided pairing means one mechanism, not two.
@@ -249,6 +257,19 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+      );
+    }
+
+    // NOT NULL, so the INSERT arm must always bind a real boolean — it cannot ride the
+    // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write.
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(data.bookingsPaused === true, data.bookingsPaused !== undefined);
+      insertCols.push('bookings_paused');
+      insertVals.push(valueParam);
+      updates.push(
+        `bookings_paused = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.bookings_paused END`
       );
     }
 

@@ -18,7 +18,11 @@ Your bot grounds its answers in the documents you upload under *AI Bot & Content
 
 **What to upload:**
 - Product spec sheets, pricing pages, FAQs, service descriptions
-- Internal policies the bot should follow ("we offer 30-day refunds", "engineers serve a 25km radius")
+- Internal policies the bot should follow ("we offer 30-day refunds", "we don't service commercial boilers")
+
+> **Not where you work.** Set that under Bookings → Availability → Your service area, where
+> it becomes a real rule the assistant applies before confirming a job. Written in a document
+> it is only text the bot may quote — it will still confirm an appointment outside your area.
 - Anything a customer might ask that isn't on your public website
 
 **What NOT to upload:**

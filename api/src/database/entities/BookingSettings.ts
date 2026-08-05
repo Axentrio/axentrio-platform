@@ -117,6 +117,23 @@ export class BookingSettings {
   @Column({ type: 'varchar', length: 2, name: 'venue_country', nullable: true })
   venueCountry?: string | null;
 
+  /**
+   * "Stop taking new bookings", without dismantling anything.
+   *
+   * An owner who is ill, away, or simply full had only two options: delete their weekly
+   * hours (and rebuild them afterwards from memory) or pause the whole bot, which also
+   * silences it for every question that has nothing to do with booking.
+   *
+   * NOT NULL with a default rather than nullable: the venue columns are nullable because
+   * "unset" is a meaningful, GDPR-relevant state for an address. A switch has two states,
+   * and a nullable boolean would invent a third that means the same as false.
+   *
+   * Paused CAPTURES, it does not refuse — see the enforcement in internal.provider, which
+   * joins the same fork as "no connected calendar".
+   */
+  @Column({ type: 'boolean', name: 'bookings_paused', default: false })
+  bookingsPaused!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

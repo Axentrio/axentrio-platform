@@ -336,6 +336,21 @@ describe('InternalProvider.createBooking', () => {
     expect(createCalendarEvent.mock.calls[0][1].conferencing).toBe(true);
   });
 
+  it('downgrades a direct create to a REQUEST when bookings are paused', async () => {
+    // Availability is advisory: a model that skipped the check, or a stale slot chip, must
+    // not slip a confirmation past a paused business.
+    bookingSettingsFindOne.mockResolvedValue({ bookingsPaused: true } as never);
+    bookingQuery.mockImplementation(async (sql: string) =>
+      sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-paused' }] : []
+    );
+    const res = await provider.createBooking(ctx, 'idem-paused', OFFERED_START, {
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+    expect(res.success).toBe(true);
+    expect(res.requested).toBe(true);
+  });
+
   it('mirrors the booking to Google and puts the Meet link in the invite when connected', async () => {
     // A video service, since a conference is only requested for one now.
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, locationType: 'google_meet' }]);
@@ -1131,5 +1146,44 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
     const res = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11');
     expect(res.serviceId).toBe('et-1');
     expect(res.timezone).toBe('Europe/Brussels');
+  });
+  describe('paused bookings', () => {
+    // The whole point of a pause is that the business stays HELPFUL. It must behave exactly
+    // like a business with no connected calendar: no times offered, no "we're closed", and the
+    // customer's preferred slot taken down as a request. A pause that refused customers would
+    // be worse than the workaround it replaces (deleting your weekly hours).
+    beforeEach(() => {
+      bookingSettingsFindOne.mockResolvedValue({ bookingsPaused: true } as never);
+    });
+
+    it('offers no times, and tells the bot to capture instead', async () => {
+      await expect(
+        provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+      ).rejects.toMatchObject({ code: 'BOOKINGS_PAUSED' });
+    });
+
+    it('instructs the bot NOT to say closed or fully booked', async () => {
+      // Those are the two sentences that lose the customer outright, so the guidance names
+      // them explicitly. (An earlier version of this test asserted the message did not
+      // CONTAIN them — which is backwards: it contains them as a prohibition.)
+      const err = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11').catch((e) => e);
+      expect(err.message).toMatch(/do not say they are fully booked or closed/i);
+      expect(err.message).toMatch(/request_appointment/);
+    });
+
+    it('does not gate an ADMIN caller — the owner still fills their own diary', async () => {
+      // adminAvailability shares this method. Gating it would break the portal's reschedule
+      // picker and the signed manage-link flow for a business that is merely paused.
+      await expect(
+        provider.checkAvailability({ ...ctx, isAdmin: true } as never, '2026-06-10', '2026-06-11')
+      ).resolves.toBeDefined();
+    });
+
+    it('leaves an unpaused business completely alone', async () => {
+      bookingSettingsFindOne.mockResolvedValue({ bookingsPaused: false } as never);
+      await expect(
+        provider.checkAvailability(ctx, '2026-06-10', '2026-06-11')
+      ).resolves.toBeDefined();
+    });
   });
 });

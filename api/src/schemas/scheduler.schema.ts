@@ -245,6 +245,9 @@ export const updateSchedulerSchema = z
     serviceArea: serviceAreaSchema.optional(),
     bookingRules: bookingRulesSchema.optional(),
     venueAddress: venueAddressSchema.nullable().optional(),
+    // Top-level, NOT inside bookingRules: that object's contract is "optional AND nullable —
+    // undefined leaves alone, null clears", which a two-state switch has no use for.
+    bookingsPaused: z.boolean().optional(),
   })
   .refine(
     (d) =>
@@ -253,7 +256,8 @@ export const updateSchedulerSchema = z
       d.availability ||
       d.serviceArea !== undefined ||
       d.bookingRules ||
-      d.venueAddress !== undefined,
+      d.venueAddress !== undefined ||
+      d.bookingsPaused !== undefined,
     { message: 'At least one of provider, eventType, availability, serviceArea, bookingRules is required' }
   );
 

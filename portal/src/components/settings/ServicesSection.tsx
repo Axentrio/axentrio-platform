@@ -69,6 +69,7 @@ interface FormState {
   priceNote: string;
   locationType: string;
   isActive: boolean;
+  onlineBookable: boolean;
   customerAddressRequired: boolean;
   customerLocationRequired: boolean;
   fileUploadAllowed: boolean;
@@ -99,6 +100,7 @@ const BLANK: FormState = {
   priceNote: '',
   locationType: 'custom',
   isActive: true,
+  onlineBookable: true,
   customerAddressRequired: false,
   customerLocationRequired: false,
   fileUploadAllowed: false,
@@ -130,6 +132,7 @@ function formFromService(s: Service): FormState {
     priceNote: s.priceNote ?? '',
     locationType: s.locationType,
     isActive: s.isActive,
+    onlineBookable: s.onlineBookable !== false,
     customerAddressRequired: !!s.customerAddressRequired,
     customerLocationRequired: !!s.customerLocationRequired,
     fileUploadAllowed: !!s.fileUploadAllowed,
@@ -166,6 +169,7 @@ function toInput(f: FormState): ServiceInput {
     priceNote: f.priceNote.trim() || undefined,
     locationType: f.locationType,
     isActive: f.isActive,
+    onlineBookable: f.onlineBookable,
     customerAddressRequired: f.customerAddressRequired,
     customerLocationRequired: f.customerLocationRequired,
     fileUploadAllowed: f.fileUploadAllowed,
@@ -317,13 +321,23 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
                 aria-label={s.isActive ? `Disable ${s.name}` : `Enable ${s.name}`}
                 title={s.isActive ? 'Disable (hide from customers)' : 'Enable (offer to customers)'}
               />
-              <Button variant="ghost" size="sm" type="button" onClick={() => openEdit(s)}>
+              {/* Icon-only, so they need a name — the toggle beside them already has one. */}
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-label={`Edit ${s.name}`}
+                title="Edit"
+                onClick={() => openEdit(s)}
+              >
                 <Pencil className="w-3.5 h-3.5" />
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 type="button"
+                aria-label={`Delete ${s.name}`}
+                title="Delete"
                 className="text-red-400 hover:text-red-300"
                 onClick={() => setPendingDelete(s)}
               >
@@ -581,6 +595,25 @@ const ServiceEditorDialog: React.FC<{
                   onCheckedChange={(c) => set('customerLocationRequired', c === true)}
                 />
                 <span className="text-sm text-text-secondary">Requires customer phone (mobile / on-site job)</span>
+              </label>
+              {/*
+                Without this the portal could only ever create bookable services: the field
+                was never in the form, so the API's `default(true)` always won. An owner who
+                wanted a service listed but not self-bookable had no way to say so.
+              */}
+              <label htmlFor="svc-online-bookable" className="flex items-center gap-2 cursor-pointer">
+                <Checkbox
+                  id="svc-online-bookable"
+                  checked={form.onlineBookable}
+                  onCheckedChange={(c) => set('onlineBookable', c === true)}
+                />
+                <span className="text-sm text-text-secondary">
+                  Customers can book this online
+                  <span className="block text-xs text-text-muted">
+                    Off: the assistant will not offer it or take a booking for it. Use this for a
+                    service you quote by phone first.
+                  </span>
+                </span>
               </label>
               <label htmlFor="svc-file-allowed" className="flex items-center gap-2 cursor-pointer">
                 <Checkbox

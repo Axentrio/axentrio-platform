@@ -77,6 +77,7 @@ const rules = (over: Partial<BusinessRules> = {}): BusinessRules => ({
   defaultMinNoticeMin: null,
   defaultMaxHorizonDays: null,
   venue: EMPTY_VENUE,
+  bookingsPaused: false,
   ...over,
 });
 

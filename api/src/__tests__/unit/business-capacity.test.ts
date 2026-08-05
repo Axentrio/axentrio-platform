@@ -140,6 +140,7 @@ describe('resolveServiceTiming — service → business → platform', () => {
     defaultMinNoticeMin: null,
     defaultMaxHorizonDays: null,
     venue: EMPTY_VENUE,
+  bookingsPaused: false,
     ...over,
   });
   const svc = (over: Record<string, unknown> = {}) =>

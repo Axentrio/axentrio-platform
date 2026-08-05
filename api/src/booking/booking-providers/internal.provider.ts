@@ -338,6 +338,8 @@ export async function loadBusinessRules(botId: string, manager?: EntityManager):
     defaultBufferAfterMin: d(row?.defaultBufferAfterMin),
     defaultMinNoticeMin: d(row?.defaultMinNoticeMin),
     defaultMaxHorizonDays: d(row?.defaultMaxHorizonDays),
+    // Absent settings row ⇒ not paused, which is every existing bot's behaviour.
+    bookingsPaused: !!row?.bookingsPaused,
     venue: normalizeVenue({
       street: row?.venueStreet,
       postalCode: row?.venuePostalCode,
@@ -640,6 +642,21 @@ export class InternalProvider implements BookingProvider {
         400
       );
     }
+    // A paused business still HELPS — it just stops auto-confirming. Same fork, same
+    // capture-don't-refuse machinery as a missing calendar, because the customer's
+    // experience should be identical: their preferred time is taken down and confirmed
+    // later. Admin/portal callers are exempt: adminAvailability shares this method, and an
+    // owner must still be able to see and fill their own diary while paused.
+    if (!ctx.isAdmin) {
+      const { bookingsPaused } = await loadBusinessRules(ctx.bot.id);
+      if (bookingsPaused) {
+        throw new BookingError(
+          `This business has paused new online bookings. Do not offer specific times and do not say they are fully booked or closed — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+          'BOOKINGS_PAUSED',
+          409
+        );
+      }
+    }
     if (!(await this.canAutoConfirm(ctx))) {
       // Distinguish the two reasons so the bot's guidance is accurate: a healthy
       // calendar with sync OFF (entitlement) is CALENDAR_SYNC_DISABLED; otherwise
@@ -876,7 +893,9 @@ export class InternalProvider implements BookingProvider {
 
     // Request-only service → capture a request/lead. No confirmed appointment,
     // no calendar event, no email/reminders. (Owner notification UX is P2.)
-    const canAuto = await this.canAutoConfirm(ctx);
+    // The write path enforces it too: availability is advisory, and a model that skipped the
+    // check (or a stale slot chip) must not slip a confirmation past a paused business.
+    const canAuto = (await this.canAutoConfirm(ctx)) && !(await loadBusinessRules(ctx.bot.id)).bookingsPaused;
     // Request-only OR can't auto-confirm (no healthy calendar OR sync disabled) →
     // capture a request, not a confirmed booking. Mirrors readiness willAutoConfirm.
     // Request-only, no healthy calendar, OR a variable-length job whose length nobody

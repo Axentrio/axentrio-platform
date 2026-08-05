@@ -26,6 +26,8 @@ export interface BusinessRules {
    * the caller already has in hand.
    */
   venue: VenueAddress;
+  /** Owner has switched new bookings off. Captures rather than refuses. */
+  bookingsPaused: boolean;
 }
 
 /**

@@ -447,3 +447,58 @@ describe('scheduler.controller · venue address upsert', () => {
     ).rejects.toBeDefined();
   });
 });
+
+describe('scheduler.controller · pause switch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('is a sufficient reason to write on its own', async () => {
+    const q = (await save({ bookingsPaused: true }))!;
+    expect(bound(q, 'bookings_paused')).toEqual({ provided: true, value: true });
+  });
+
+  it('binds a real boolean on the INSERT arm, never null', async () => {
+    // The column is NOT NULL, so it cannot ride the nullable RULE_COLUMNS loop — a null
+    // here fails the very first write for a bot with no settings row.
+    const q = (await save({ bookingsPaused: false }))!;
+    const m = /bookings_paused[\s\S]*?VALUES/.exec(q.sql);
+    expect(m).toBeTruthy();
+    expect(q.params.some((p) => p === null && false)).toBe(false);
+    expect(bound(q, 'bookings_paused').value).toBe(false);
+  });
+
+  it('leaves the stored value alone when the payload does not mention it', async () => {
+    // Saving the venue must not un-pause a business.
+    const q = (await save({ venueAddress: { city: 'Aalst' } }))!;
+    expect(bound(q, 'bookings_paused')).toEqual({ provided: false, value: false });
+  });
+
+  it('is returned by readConfig so the portal cannot hydrate it wrong', async () => {
+    bsFindOne.mockResolvedValue({ bookingsPaused: true } as never);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({ bookingsPaused: true });
+  });
+
+  it('reads a missing settings row as NOT paused', async () => {
+    bsFindOne.mockResolvedValue(null);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({ bookingsPaused: false });
+  });
+});

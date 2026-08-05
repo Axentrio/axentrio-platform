@@ -18,7 +18,12 @@ Je bot baseert zijn antwoorden op de documenten die je uploadt onder *AI-bot & i
 
 **Wat je best uploadt:**
 - Productfiches, prijslijsten, FAQ's, dienstbeschrijvingen
-- Interne afspraken waar de bot rekening mee moet houden ("we geven 30 dagen retourrecht", "onze techniekers rijden tot 25 km")
+- Interne afspraken waar de bot rekening mee moet houden ("we geven 30 dagen retourrecht", "we werken niet aan industriële ketels")
+
+> **Niet je werkgebied.** Dat stel je in bij Boekingen → Beschikbaarheid → Je servicegebied,
+> waar het een echte regel wordt die vóór elke bevestiging wordt toegepast. In een document is
+> het alleen tekst die de bot kan citeren — hij bevestigt dan nog steeds een afspraak buiten
+> je gebied.
 - Alles wat een klant kan vragen en niet op je website staat
 
 **Wat je beter NIET uploadt:**

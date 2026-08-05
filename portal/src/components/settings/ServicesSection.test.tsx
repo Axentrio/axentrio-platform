@@ -121,3 +121,62 @@ describe('ServicesSection — where does it happen?', () => {
     expect(await screen.findByText(/your address goes on the invite/i)).toBeInTheDocument();
   });
 });
+
+/**
+ * `onlineBookable` was in the API schema with `default(true)` but nowhere in the portal
+ * form — not in the state, not in the payload, not on screen. So the default always won and
+ * every service the portal created was self-bookable, with no way to say otherwise. It
+ * matters because the prompt catalog and `resolveService` both filter on it: a service the
+ * owner wanted quoted by phone first could not be expressed at all.
+ */
+describe('ServicesSection — online bookable', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const openNew = async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    return await screen.findByLabelText(/customers can book this online/i);
+  };
+
+  const submit = async () => {
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Bespoke quote' } });
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    return apiPost.mock.calls[0][1] as Record<string, unknown>;
+  };
+
+  it('defaults a new service to bookable', async () => {
+    const box = await openNew();
+    expect(box).toBeChecked();
+    expect(await submit()).toMatchObject({ onlineBookable: true });
+  });
+
+  it('sends false once the owner turns it off', async () => {
+    const box = await openNew();
+    fireEvent.click(box);
+    expect(await submit()).toMatchObject({ onlineBookable: false });
+  });
+
+  it('hydrates an existing non-bookable service as off', async () => {
+    // Editing a service must not silently switch it back on.
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: [{
+              id: 's1', name: 'Quote first', bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'none', isActive: true, sortOrder: 0, onlineBookable: false,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom',
+            }],
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /edit quote first/i }));
+    expect(await screen.findByLabelText(/customers can book this online/i)).not.toBeChecked();
+  });
+});

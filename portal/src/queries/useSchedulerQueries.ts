@@ -131,6 +131,8 @@ export interface SchedulerConfig {
   serviceArea?: ServiceAreaEntry[];
   bookingRules?: BookingRules;
   venueAddress?: VenueAddress;
+  /** Owner has switched new online bookings off. Captures requests rather than refusing. */
+  bookingsPaused?: boolean;
 }
 
 export interface UpdateSchedulerPayload {
@@ -142,6 +144,7 @@ export interface UpdateSchedulerPayload {
   bookingRules?: Partial<BookingRules>;
   /** `null` clears the whole venue; omitting the key leaves it untouched. */
   venueAddress?: Partial<VenueAddress> | null;
+  bookingsPaused?: boolean;
 }
 
 const schedulerKey = ['scheduler', 'config'] as const;

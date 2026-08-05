@@ -20,6 +20,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ServiceAreaField } from '@/components/settings/ServiceAreaField';
 import {
   useConnectGoogleCalendar,
   useGoogleCalendarStatus,
@@ -29,6 +30,7 @@ import {
   useUpdateSchedulerConfig,
   type WeeklyHours,
   type Weekday,
+  type ServiceAreaEntry,
 } from '@/queries/useSchedulerQueries';
 import type { StepProps } from './types';
 
@@ -62,9 +64,13 @@ export function BookingsStep({ submit }: StepProps) {
   const [opensAt, setOpensAt] = React.useState('09:00');
   const [closesAt, setClosesAt] = React.useState('17:00');
   const [slotMinutes, setSlotMinutes] = React.useState<number>(30);
+  const [serviceArea, setServiceArea] = React.useState<ServiceAreaEntry[]>([]);
   const [seeded, setSeeded] = React.useState(false);
 
   React.useEffect(() => {
+    // The area is seeded OUTSIDE the availability guard below, mirroring SchedulerSettings:
+    // a bot can have a service area before it has any hours.
+    if (!seeded && Array.isArray(scheduler?.serviceArea)) setServiceArea(scheduler.serviceArea);
     if (seeded || !scheduler?.availability) return;
     const weekly = scheduler.availability.weeklyHours ?? {};
     const days = WEEK_DAYS.filter((d) => (weekly[d.api]?.length ?? 0) > 0).map((d) => d.api);
@@ -99,6 +105,9 @@ export function BookingsStep({ submit }: StepProps) {
           dateOverrides: [],
           slotGranularityMin: slotMinutes,
         },
+        // Always sent, including empty — [] is a real value meaning "no area", which is the
+        // correct answer for a salon and must not be confused with "not asked".
+        serviceArea,
       });
       submit.mutate({ step: 'bookings' });
     } catch {
@@ -207,6 +216,20 @@ export function BookingsStep({ submit }: StepProps) {
         </div>
         <p className="text-xs text-text-muted">{t('setup.steps.bookings.servicesHint')}</p>
       </div>
+
+      {/*
+        Where the business travels. Asked HERE because otherwise it is asked nowhere: every
+        mobile trade finished setup with no area and then never found the setting, so the
+        gate that protects them from driving to Liège for a 40-minute job never armed.
+        Optional by design — a salon has no service area, and [] is the honest answer.
+      */}
+      <ServiceAreaField
+        value={serviceArea}
+        onChange={setServiceArea}
+        hasAddressService={(scheduler?.services ?? []).some(
+          (svc) => svc.isActive && svc.customerAddressRequired,
+        )}
+      />
 
       <div className="flex justify-end">
         <Button size="lg" onClick={save} disabled={busy || !connected || openDays.length === 0}>

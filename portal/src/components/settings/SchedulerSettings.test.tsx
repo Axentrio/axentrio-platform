@@ -74,6 +74,7 @@ const CONFIG = {
   serviceArea: AREA,
   bookingRules: RULES,
   venueAddress: VENUE,
+  bookingsPaused: false,
 };
 
 function renderUI() {
@@ -205,5 +206,23 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
     });
     expect(payload.venueAddress).toEqual({ street: null, postalCode: null, city: null, country: null });
     expect(JSON.stringify(payload)).not.toContain('Woonstraat');
+  });
+
+  it('returns the pause switch unchanged when the owner saves without editing', async () => {
+    // Same hazard as every other field on this card: hydrate it wrong and the next Save
+    // silently un-pauses a business that deliberately stopped taking bookings.
+    const payload = await saveUntouched({ ...CONFIG, bookingsPaused: true });
+    expect(payload.bookingsPaused).toBe(true);
+  });
+
+  it('always sends the switch, so it can be turned back off', async () => {
+    const payload = await saveUntouched(CONFIG);
+    expect(payload).toHaveProperty('bookingsPaused');
+    expect(payload.bookingsPaused).toBe(false);
+  });
+
+  it('treats a config that predates the column as not paused', async () => {
+    const payload = await saveUntouched({ ...CONFIG, bookingsPaused: undefined });
+    expect(payload.bookingsPaused).toBe(false);
   });
 });

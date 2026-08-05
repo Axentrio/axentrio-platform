@@ -515,7 +515,10 @@ describe('InternalProvider.createBooking', () => {
     ).rejects.toMatchObject({ code: 'BOOKING_NOT_CONFIGURED' });
     expect(serviceTypeFind).toHaveBeenCalledWith({
       where: { botId: 'bot-1', isActive: true, onlineBookable: true },
-      order: { sortOrder: 'ASC' },
+      // createdAt breaks the tie: every service starts at sortOrder 0, so without it the
+      // "sole active service" this path resolves is whatever Postgres returns first — and
+      // for a two-service catalog that is a coin toss on which one gets booked.
+      order: { sortOrder: 'ASC', createdAt: 'ASC' },
     });
   });
 

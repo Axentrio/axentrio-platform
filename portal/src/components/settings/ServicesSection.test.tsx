@@ -7,10 +7,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const { apiGet, apiPost } = vi.hoisted(() => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
+const { apiGet, apiPost, apiPut } = vi.hoisted(() => ({
+  apiGet: vi.fn(),
+  apiPost: vi.fn(),
+  apiPut: vi.fn(),
+}));
 
 vi.mock('../../services/apiClient', () => ({
-  api: { get: apiGet, post: apiPost, put: vi.fn(), patch: vi.fn(), delete: vi.fn() },
+  api: { get: apiGet, post: apiPost, put: apiPut, patch: vi.fn(), delete: vi.fn() },
   extractApiErrorMessage: () => undefined,
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
@@ -301,5 +305,56 @@ describe('ServicesSection — intake question authoring', () => {
     const dialog = await openWithQuestion();
     expect(within(dialog).getByRole('button', { name: /move question 1 up/i })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: /move question 1 down/i })).toBeDisabled();
+  });
+});
+
+/**
+ * Catalog order.
+ *
+ * Every service is created at sortOrder 0, and three of the queries that order by it had no
+ * tiebreak — so the order the assistant read services out in was whatever Postgres returned,
+ * free to differ between runs, while the portal showed a stable one. The owner arranged
+ * their catalog and the customer heard something else.
+ */
+describe('ServicesSection — catalog order', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const three = () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: ['Cut', 'Colour', 'Beard'].map((name, i) => ({
+              id: `s${i + 1}`, name, bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'none', isActive: true, sortOrder: i, onlineBookable: true,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom',
+            })),
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+  };
+
+  it('sends the WHOLE resulting order, not a move instruction', async () => {
+    // The server assigns positions from the array, so the client never invents sortOrder
+    // numbers and what is stored cannot disagree with what the owner just saw.
+    three();
+    fireEvent.click(await screen.findByRole('button', { name: /move colour up/i }));
+    await waitFor(() => expect(apiPut).toHaveBeenCalled());
+    expect(apiPut.mock.calls[0][0]).toContain('/services/reorder');
+    expect(apiPut.mock.calls[0][1]).toEqual({ serviceIds: ['s2', 's1', 's3'] });
+  });
+
+  it('moves a service down', async () => {
+    three();
+    fireEvent.click(await screen.findByRole('button', { name: /move cut down/i }));
+    await waitFor(() => expect(apiPut).toHaveBeenCalled());
+    expect(apiPut.mock.calls[0][1]).toEqual({ serviceIds: ['s2', 's1', 's3'] });
+  });
+
+  it('cannot move the first one up or the last one down', async () => {
+    three();
+    expect(await screen.findByRole('button', { name: /move cut up/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /move beard down/i })).toBeDisabled();
   });
 });

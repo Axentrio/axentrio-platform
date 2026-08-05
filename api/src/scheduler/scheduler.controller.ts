@@ -20,6 +20,7 @@ import {
   serviceUpdateSchema,
   listBookingsQuerySchema,
   availabilityQuerySchema,
+  reorderServicesSchema,
   cancelBookingBodySchema,
   rescheduleBookingBodySchema,
 } from '../schemas/scheduler.schema';
@@ -389,6 +390,43 @@ export async function updateService(req: Request, res: Response): Promise<void> 
  * To retire a service without removing it (e.g. a seasonal/recurring one), set
  * isActive=false via updateService instead.
  */
+/**
+ * Reorder the service catalog.
+ *
+ * Positions come from the ARRAY, not from numbers the client invents, so the stored order
+ * can never disagree with what the owner saw. Everything is renumbered 0..n-1 in one
+ * transaction: partial application would leave the catalog in an order nobody chose, and
+ * this is exactly the surface where every row starts life at sortOrder 0.
+ *
+ * Ids not belonging to this bot are ignored rather than rejected — a stale tab is a normal
+ * thing to have open, and it must not be able to renumber somebody else's catalog. Any
+ * service the client did not mention keeps its relative place AFTER the ones it did.
+ */
+export async function reorderServices(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  const { bot } = await getAnchorBotConfig(tenantId);
+  const { serviceIds } = reorderServicesSchema.parse(req.body);
+
+  await AppDataSource.transaction(async (manager) => {
+    const repo = manager.getRepository(ServiceType);
+    const owned = await repo.find({
+      where: { botId: bot.id },
+      order: { sortOrder: 'ASC', createdAt: 'ASC' },
+    });
+    const byId = new Map(owned.map((s) => [s.id, s]));
+    const ordered = serviceIds.map((id) => byId.get(id)).filter((s): s is ServiceType => !!s);
+    const rest = owned.filter((s) => !serviceIds.includes(s.id));
+    const final = [...ordered, ...rest];
+    for (let i = 0; i < final.length; i++) {
+      if (final[i].sortOrder !== i) await repo.update({ id: final[i].id }, { sortOrder: i });
+    }
+  });
+
+  logger.info('[Scheduler] services reordered', { tenantId, botId: bot.id, count: serviceIds.length });
+  sendSuccess(res, await readConfig(tenantId));
+}
+
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);

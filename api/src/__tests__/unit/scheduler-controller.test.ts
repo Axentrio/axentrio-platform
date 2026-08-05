@@ -12,6 +12,7 @@ vi.mock('../../billing/enforce', () => ({ requireFeature: (...a: any[]) => requi
 
 const etFindOne = vi.fn();
 const etSave = vi.fn((x) => x);
+const etUpdate = vi.fn(async (_where: any, _patch: any) => ({ affected: 1 }));
 const etCount = vi.fn(async () => 0);
 const etFind = vi.fn(async () => []);
 const ruleFindOne = vi.fn();
@@ -21,7 +22,7 @@ const bsFindOne = vi.fn(async () => null as any);
 const bsSave = vi.fn((x) => x);
 function repoFor(entity: any) {
   const name = entity?.name || entity;
-  if (name === 'ServiceType') return { findOne: etFindOne, find: etFind, count: etCount, create: (d: any) => d, save: etSave };
+  if (name === 'ServiceType') return { findOne: etFindOne, find: etFind, count: etCount, create: (d: any) => d, save: etSave, update: etUpdate };
   if (name === 'AvailabilityRule') return { findOne: ruleFindOne, create: (d: any) => d, save: ruleSave };
   if (name === 'BookingSettings') return { findOne: bsFindOne, create: (d: any) => d, save: bsSave };
   return {};
@@ -43,7 +44,7 @@ const sendSuccess = vi.fn();
 vi.mock('../../utils/response', () => ({ sendSuccess: (...a: any[]) => sendSuccess(...a) }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset } from '../../scheduler/scheduler.controller';
+import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset, reorderServices } from '../../scheduler/scheduler.controller';
 import { serviceInputSchema } from '../../schemas/scheduler.schema';
 
 const res: any = {};
@@ -552,5 +553,75 @@ describe('scheduler.controller · pause switch', () => {
     bsFindOne.mockResolvedValue(null);
     await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
     expect(sendSuccess.mock.calls[0][1]).toMatchObject({ bookingsPaused: false });
+  });
+});
+
+/**
+ * Reordering the service catalog.
+ *
+ * Every service is created at sortOrder 0, and three of the queries that order by it had no
+ * tiebreak — so the order the assistant listed services in was whatever Postgres happened to
+ * return, free to differ between runs, while the portal showed a stable one. The owner
+ * arranged their catalog and the customer heard something else.
+ */
+describe('scheduler.controller · reorder services', () => {
+  // Real uuids: the schema requires them, which is what stops a garbage payload
+  // renumbering the catalog.
+  const ID = {
+    a: 'aaaaaaaa-0000-4000-8000-000000000001',
+    b: 'bbbbbbbb-0000-4000-8000-000000000002',
+    c: 'cccccccc-0000-4000-8000-000000000003',
+    other: 'dddddddd-0000-4000-8000-000000000004',
+  };
+  const svcRows = (ids: string[]) =>
+    ids.map((id, i) => ({ id, botId: 'bot-1', sortOrder: i, createdAt: new Date(2026, 0, i + 1) }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    etFindOne.mockResolvedValue(null);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const reorder = async (serviceIds: string[], stored = svcRows([ID.a, ID.b, ID.c])) => {
+    etFind.mockResolvedValue(stored as never);
+    await reorderServices({ tenantId: 'ten-1', body: { serviceIds } } as any, res);
+    return etUpdate.mock.calls.map((c: any) => [c[0].id as string, c[1].sortOrder as number]);
+  };
+
+  it('assigns positions from the ARRAY, not from client-supplied numbers', async () => {
+    const writes = await reorder([ID.c, ID.a, ID.b]);
+    expect(new Map(writes as [string, number][])).toEqual(new Map([[ID.c, 0], [ID.a, 1], [ID.b, 2]]));
+  });
+
+  it('writes nothing for a service already in the right place', async () => {
+    // Renumbering every row on every save would churn updated_at across the catalog.
+    const writes = await reorder([ID.a, ID.b, ID.c]);
+    expect(writes).toEqual([]);
+  });
+
+  it('ignores an id belonging to someone else’s catalog', async () => {
+    // A stale tab is normal; it must not be able to renumber another bot's services.
+    const writes = await reorder([ID.c, ID.other, ID.a, ID.b]);
+    expect(writes.map((w) => w[0])).not.toContain(ID.other);
+    expect(new Map(writes as [string, number][])).toEqual(new Map([[ID.c, 0], [ID.a, 1], [ID.b, 2]]));
+  });
+
+  it('keeps unmentioned services after the ones that were mentioned', async () => {
+    // A client on an older catalog must not silently drop a service to the bottom at random.
+    const writes = await reorder([ID.c], svcRows([ID.a, ID.b, ID.c]));
+    expect(new Map(writes as [string, number][])).toEqual(new Map([[ID.c, 0], [ID.a, 1], [ID.b, 2]]));
+  });
+
+  it('is gated on the bookings feature like every other scheduler write', async () => {
+    await reorder([ID.a]);
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
+  });
+
+  it('rejects a non-uuid id rather than renumbering on garbage', async () => {
+    await expect(
+      reorderServices({ tenantId: 'ten-1', body: { serviceIds: ['nope'] } } as any, res)
+    ).rejects.toBeDefined();
   });
 });

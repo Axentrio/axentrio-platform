@@ -140,6 +140,17 @@ const intakeQuestionSchema = z.preprocess(
     })
 );
 
+/**
+ * Reorder the whole catalog in one write.
+ *
+ * The full ordered id list rather than a move-this-one-here instruction: reordering means
+ * renumbering several rows, and N separate updates can half-apply and leave the catalog in
+ * an order nobody chose. One list, one transaction, positions assigned from the array.
+ */
+export const reorderServicesSchema = z.object({
+  serviceIds: z.array(z.string().uuid()).min(1).max(200),
+});
+
 /** P3: optional per-service intake questions (max 8). `[]` clears; omitted leaves unchanged. */
 export const intakeQuestionsSchema = z.array(intakeQuestionSchema).max(8);
 

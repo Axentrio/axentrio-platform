@@ -317,7 +317,7 @@ export class AgentService {
           // {services} should advertise.
           const services = await AppDataSource.getRepository(ServiceType).find({
             where: { botId: bot.id, isActive: true, onlineBookable: true },
-            order: { sortOrder: 'ASC' },
+            order: { sortOrder: 'ASC', createdAt: 'ASC' },
           });
           bookingConfigured = isBookingConfigured(services, !!rule);
           bookingServices = formatServicesForPlaceholder(services);

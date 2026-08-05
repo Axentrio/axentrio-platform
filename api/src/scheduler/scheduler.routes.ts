@@ -18,6 +18,9 @@ router.put('/config', requireRole('admin'), asyncHandler(ctrl.updateSchedulerCon
 // Services catalog (multi-service). Reads for admin/supervisor/agent; mutations admin-only.
 router.get('/services', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listServices));
 router.post('/services', requireRole('admin'), asyncHandler(ctrl.createService));
+// Declared BEFORE '/services/:id' — otherwise Express matches 'reorder' as an id and the
+// request lands in updateService with a non-uuid param.
+router.put('/services/reorder', requireRole('admin'), asyncHandler(ctrl.reorderServices));
 router.put('/services/:id', requireRole('admin'), asyncHandler(ctrl.updateService));
 router.delete('/services/:id', requireRole('admin'), asyncHandler(ctrl.deleteService));
 

@@ -373,7 +373,11 @@ export const bookingModule: ModuleDefinition = {
         // to the bot, offered to the customer, and then thrown out as SERVICE_NOT_FOUND at
         // book time: the catalog the model reads has to be the catalog it can actually book.
         where: { botId: ctx.botId, isActive: true, onlineBookable: true },
-        order: { sortOrder: 'ASC' },
+        // createdAt breaks the tie. Without it every service a business has ever created
+        // shares sortOrder 0, so the order the bot lists them in is whatever Postgres
+        // returns — arbitrary, and free to differ between runs. The portal's own query has
+        // always had this tiebreak, so the owner saw one order and the customer heard another.
+        order: { sortOrder: 'ASC', createdAt: 'ASC' },
       }),
       AppDataSource.getRepository(AvailabilityRule).findOne({ where: { botId: ctx.botId } }),
       AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: ctx.botId } }),

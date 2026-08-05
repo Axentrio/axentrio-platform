@@ -576,7 +576,7 @@ export class InternalProvider implements BookingProvider {
       if (!svc) throw new BookingError('That service is unavailable', 'SERVICE_NOT_FOUND', 404);
       return resolveServiceTiming(svc, rules);
     }
-    const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC' } });
+    const active = await repo.find({ where: { botId, isActive: true, onlineBookable: true }, order: { sortOrder: 'ASC', createdAt: 'ASC' } });
     if (active.length === 0) {
       throw new BookingError('Booking not configured for this bot', 'BOOKING_NOT_CONFIGURED', 400);
     }

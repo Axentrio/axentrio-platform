@@ -40,6 +40,7 @@ import {
   useCreateService,
   useUpdateService,
   useDeleteService,
+  useReorderServices,
   usePresets,
   useApplyPreset,
   type Service,
@@ -232,6 +233,19 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
   const create = useCreateService();
   const update = useUpdateService();
   const remove = useDeleteService();
+  const reorder = useReorderServices();
+  /**
+   * Move a service one place. Sends the WHOLE resulting order, because the server assigns
+   * positions from the array — the client never invents sortOrder numbers, so what is
+   * stored cannot disagree with what the owner just saw.
+   */
+  const moveService = (index: number, delta: number) => {
+    const next = [...services];
+    const j = index + delta;
+    if (j < 0 || j >= next.length) return;
+    [next[index], next[j]] = [next[j], next[index]];
+    reorder.mutate(next.map((x) => x.id));
+  };
 
   const [editing, setEditing] = useState<Service | 'new' | null>(null);
   const [form, setForm] = useState<FormState>(BLANK);
@@ -335,6 +349,33 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
                   {s.durationMin} min{priceLabel(s) ? ` · ${priceLabel(s)}` : ''}
                   {s.category ? ` · ${s.category}` : ''}
                 </div>
+              </div>
+              {/*
+                Order is what the assistant reads out, so the owner needs to control it.
+                Up/down rather than drag: this list is short, and a keyboard-reachable
+                button works for everyone.
+              */}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  aria-label={`Move ${s.name} up`}
+                  disabled={reorder.isPending || services.indexOf(s) === 0}
+                  onClick={() => moveService(services.indexOf(s), -1)}
+                >
+                  <ChevronUp className="w-3.5 h-3.5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  aria-label={`Move ${s.name} down`}
+                  disabled={reorder.isPending || services.indexOf(s) === services.length - 1}
+                  onClick={() => moveService(services.indexOf(s), 1)}
+                >
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </Button>
               </div>
               <Switch
                 checked={s.isActive}

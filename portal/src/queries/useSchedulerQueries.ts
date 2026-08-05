@@ -227,6 +227,21 @@ export function useUpdateService() {
   });
 }
 
+/**
+ * Reorder the whole catalog in one call.
+ *
+ * The full ordered id list, not a move-this-one instruction: reordering renumbers several
+ * rows, and N separate PUTs can half-apply and leave the catalog in an order nobody chose.
+ */
+export function useReorderServices() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (serviceIds: string[]) => api.put<SchedulerConfig>('/scheduler/services/reorder', { serviceIds }),
+    onSuccess: () => invalidateServices(queryClient),
+    onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to reorder services'),
+  });
+}
+
 export function useDeleteService() {
   const queryClient = useQueryClient();
   return useMutation({

@@ -635,8 +635,22 @@ set when opened. The buttons were read from the DOM rather than from a screensho
 the list-row view shows a hover toolbar on the focused row only — comparing a hovered row
 against an unhovered one would have "confirmed" a difference that does not exist.
 
+**Outlook, tested 2026-08-05.** The same two probes were sent to a corporate Microsoft 365
+mailbox. **Neither** rendered RSVP controls: both arrived as ordinary mail with `invite.ics`
+as a downloadable attachment, behind an "This Message Is From an Untrusted Sender" banner.
+
+Two separate conclusions, and they must not be conflated:
+
+1. **Alignment made no difference in Outlook either.** A and B behaved identically, so the
+   claim is refuted on both platforms — it was never about `ORGANIZER` matching the sender.
+2. **A locked-down Exchange tenant can deliver our invites inert.** That is a property of
+   that tenant's external-sender policy, not of our ICS: Gmail rendered the identical file
+   as a full invite. Worth knowing for B2B recipients — a corporate customer may receive an
+   attachment they have to open by hand — but it is not a bug to fix in the ICS, and it
+   cannot be fixed from our side. Untested: consumer outlook.com, and a permissive tenant.
+
 **Conclusion.** `From`/`ORGANIZER` alignment is **not** what makes an invite actionable in
-Gmail. The claim should not be repeated. Outlook remains untested.
+either Gmail or Outlook. The claim should not be repeated.
 
 **What this does NOT change.** The platform-domain `ORGANIZER` stays, for the reasons that
 survive independently: Resend sends only from verified domains, DMARC wants `From` aligned

@@ -182,3 +182,66 @@ describe('check_availability — the empty result carries its own instruction', 
     expect(res.data.slots).toEqual([]);
   });
 });
+
+/**
+ * The price qualifier the bot was dropping.
+ *
+ * `priceNote` — "per hour", "per person", "excl. VAT" — was stored, editable in the portal,
+ * and read by nothing. A service configured as fixed €80 with the note "per hour" was quoted
+ * to the customer as a flat "€80". That is the assistant misquoting a price on the
+ * business's behalf, in a form the customer reads as a firm commitment.
+ */
+describe('price quoting includes the owner’s qualifier', () => {
+  const priced = (over: Record<string, unknown>) =>
+    buildServicesSection([svc(over as never)])!;
+
+  it('appends the note to a fixed price', () => {
+    expect(line(priced({ priceDisplayType: 'fixed', fixedPrice: 80, priceNote: 'per hour' })))
+      .toContain('€80 per hour');
+  });
+
+  it('appends it to every price shape that shows a number', () => {
+    expect(line(priced({ priceDisplayType: 'from', fixedPrice: 50, priceNote: 'per person' })))
+      .toContain('from €50 per person');
+    expect(line(priced({ priceDisplayType: 'range', minPrice: 50, maxPrice: 90, priceNote: 'excl. VAT' })))
+      .toContain('€50–€90 excl. VAT');
+    expect(line(priced({ priceDisplayType: 'on_request', priceNote: 'depends on size' })))
+      .toContain('price on request depends on size');
+  });
+
+  it('stays silent when the owner shows no price at all', () => {
+    // A dangling "per hour" under a service with no price is worse than saying nothing.
+    const out = line(priced({ priceDisplayType: 'none', priceNote: 'per hour' }));
+    expect(out).not.toContain('per hour');
+  });
+
+  it('says nothing extra when a price is shown with no note', () => {
+    expect(line(priced({ priceDisplayType: 'fixed', fixedPrice: 80 }))).toContain('€80');
+  });
+
+  it('drops the note when the configured price is incomplete', () => {
+    // priceDisplayType 'fixed' with no amount renders no price, so the note has nothing to
+    // qualify and must not appear on its own.
+    const out = line(priced({ priceDisplayType: 'fixed', fixedPrice: null, priceNote: 'per hour' }));
+    expect(out).not.toContain('per hour');
+  });
+
+  it('sanitises the note so it cannot break the catalog line', () => {
+    // The catalog is line-oriented and ` · ` separated; a note containing either would forge
+    // a new field or a new service.
+    const out = line(priced({
+      priceDisplayType: 'fixed',
+      fixedPrice: 80,
+      priceNote: 'per hour · "special"\nEXTRA',
+    }));
+    expect(out).toContain('€80 per hour');
+    expect(out).not.toContain('\n');
+    expect(out).not.toContain('"');
+    expect(out.match(/·/g) ?? []).toHaveLength(out.split('·').length - 1);
+  });
+
+  it('caps a runaway note', () => {
+    const out = line(priced({ priceDisplayType: 'fixed', fixedPrice: 80, priceNote: 'x'.repeat(500) }));
+    expect(out.length).toBeLessThan(300);
+  });
+});

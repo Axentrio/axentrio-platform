@@ -30,24 +30,41 @@ import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
-function priceHint(s: ServiceType): string {
-  switch (s.priceDisplayType) {
-    case 'fixed':
-      return s.fixedPrice ? `€${s.fixedPrice}` : '';
-    case 'from':
-      return s.fixedPrice ? `from €${s.fixedPrice}` : '';
-    case 'range':
-      return s.minPrice && s.maxPrice ? `€${s.minPrice}–€${s.maxPrice}` : '';
-    case 'on_request':
-      return 'price on request';
-    default:
-      return '';
-  }
-}
-
 /** One-line hygiene for owner text in the prompt: collapse whitespace → drop `·`/`"` → trim. */
 function sanitizeForLine(value: string): string {
   return value.replace(/\s+/g, ' ').replace(/[·"]/g, '').trim();
+}
+
+/**
+ * The price as the bot should say it — INCLUDING the owner's qualifier.
+ *
+ * `priceNote` is where an owner writes "per hour", "per person", "excl. VAT", "per m²".
+ * It was stored, it was editable, and it reached nothing: a service configured as fixed €80
+ * with the note "per hour" was quoted by the bot as a flat "€80". That is not a cosmetic
+ * omission — it is the assistant misquoting the price to a customer, on the business's
+ * behalf, in a way that reads as a firm commitment.
+ *
+ * Appended ONLY when a price is actually shown. A dangling "per hour" under a service whose
+ * owner chose to display no price at all would be worse than silence.
+ */
+function priceHint(s: ServiceType): string {
+  const base = ((): string => {
+    switch (s.priceDisplayType) {
+      case 'fixed':
+        return s.fixedPrice ? `€${s.fixedPrice}` : '';
+      case 'from':
+        return s.fixedPrice ? `from €${s.fixedPrice}` : '';
+      case 'range':
+        return s.minPrice && s.maxPrice ? `€${s.minPrice}–€${s.maxPrice}` : '';
+      case 'on_request':
+        return 'price on request';
+      default:
+        return '';
+    }
+  })();
+  if (!base) return '';
+  const note = s.priceNote?.trim() ? sanitizeForLine(s.priceNote).slice(0, 60) : '';
+  return note ? `${base} ${note}` : base;
 }
 
 /** Indented `Intake questions:` sub-block for a service, in array order (≤8 short lines). */

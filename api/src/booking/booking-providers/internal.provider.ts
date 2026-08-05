@@ -437,7 +437,11 @@ export async function enforceBusinessCapacity(
  * controls" when ORGANIZER disagrees with the envelope sender. That is FALSE, at least for
  * Gmail, and it was tested rather than reasoned about: two invites sent 2026-08-05 with an
  * identical From on the verified domain, differing ONLY in the ICS ORGANIZER (one matching,
- * one a foreign-domain address), both rendered Yes/Maybe/No. Outlook is untested.
+ * one a foreign-domain address), both rendered Yes/Maybe/No. Repeated against a corporate
+ * Microsoft 365 mailbox the same day: neither rendered RSVP controls, both arriving as an
+ * inert .ics attachment behind an untrusted-sender banner — identical treatment, so
+ * alignment made no difference there either. That tenant's policy, not our file: Gmail
+ * rendered the same ICS as a full invite.
  *
  * So alignment is NOT what forces this design. The reasons that do survive are: Resend can
  * only send from a verified domain, DMARC wants From aligned with that domain, and putting

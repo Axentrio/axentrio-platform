@@ -700,12 +700,12 @@ export default function Leads() {
                             )}
                             {/* Owner-authored intake answers — the customer's own words,
                                 collected at booking time. */}
-                            {lead.intakeAnswers &&
-                              Object.entries(lead.intakeAnswers).map(([k, v]) => (
-                                <div key={k}>
-                                  <span className="font-medium">{k}:</span> {String(v)}
-                                </div>
-                              ))}
+                            {lead.intakeAnswers?.map((a, i) => (
+                              // eslint-disable-next-line react/no-array-index-key -- labels are not unique
+                              <div key={`${a.label}-${i}`}>
+                                <span className="font-medium">{a.label}:</span> {a.answer}
+                              </div>
+                            ))}
                             <div>
                               <span className="font-medium">{t('leads.detail.createdAt')}:</span>{' '}
                               {new Date(lead.createdAt).toLocaleString()}

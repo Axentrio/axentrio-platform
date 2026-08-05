@@ -18,6 +18,7 @@ import type {
   TimeWindow,
   Weekday,
 } from '../../database/entities/AvailabilityRule';
+import { overrideCoversDate } from '../../database/entities/AvailabilityRule';
 import type { ServiceType } from '../../database/entities/ServiceType';
 import type { BookingSlot } from './types';
 
@@ -97,7 +98,10 @@ const ALL_DAY: TimeWindow[] = [{ start: '00:00', end: '24:00' }];
 
 function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
   const dateStr = day.toFormat('yyyy-MM-dd');
-  const override = (rule.dateOverrides || []).find((o) => o.date === dateStr);
+  // A multi-day closure is ONE row covering a range, so this is a containment test rather
+  // than an equality one. `isWithinBusinessHours` shares this function, so analytics and the
+  // scheduler cannot disagree about whether the business was shut.
+  const override = (rule.dateOverrides || []).find((o) => overrideCoversDate(o, dateStr));
   if (override) {
     // A date override wins in every mode: a holiday closure still closes an
     // always-open business, and custom one-off hours still apply.

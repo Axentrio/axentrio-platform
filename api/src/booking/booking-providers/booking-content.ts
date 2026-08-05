@@ -225,3 +225,39 @@ export function buildBookingEventContent(
     description: assembleCapped(head, middle, tail),
   };
 }
+
+/**
+ * The CUSTOMER's calendar entry body.
+ *
+ * Distinct from `buildBookingEventContent`, which writes the OWNER's — that one carries the
+ * phone number, the address, the intake answers and the internal reference, none of which
+ * belongs in the entry the customer keeps.
+ *
+ * Until now this was `meetUrl ? "Join the meeting: <url>" : undefined`, so every in-person
+ * booking gave the customer a calendar entry with a title, a time and nothing else: no
+ * indication of what to bring, and no way back to reschedule without digging out the email.
+ * The manage link goes LAST and is never truncated away, because it is the only self-service
+ * route the customer has.
+ */
+export function buildCustomerEventDescription(input: {
+  serviceName: string;
+  serviceDescription?: string | null;
+  durationMin?: number | null;
+  meetUrl?: string | null;
+  preparationInstructions?: string | null;
+  manageUrl?: string | null;
+  businessName?: string | null;
+}): string | undefined {
+  const lines: string[] = [];
+  if (present(input.businessName)) lines.push(`With: ${normalizeField(input.businessName)}`);
+  if (present(input.serviceDescription)) lines.push(normalizeField(input.serviceDescription));
+  if (typeof input.durationMin === 'number' && input.durationMin > 0) {
+    lines.push(`Duration: ${input.durationMin} min`);
+  }
+  if (present(input.meetUrl)) lines.push(`Join the meeting: ${input.meetUrl}`);
+  if (present(input.preparationInstructions)) {
+    lines.push(`Before your appointment: ${normalizeField(input.preparationInstructions)}`);
+  }
+  if (present(input.manageUrl)) lines.push(`Reschedule or cancel: ${input.manageUrl}`);
+  return lines.length ? lines.join('\n') : undefined;
+}

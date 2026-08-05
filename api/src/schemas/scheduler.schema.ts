@@ -9,11 +9,30 @@ export const timeWindow = z.object({ start: hhmm, end: hhmm });
 
 const weeklyHours = z.record(weekday, z.array(timeWindow));
 
-export const dateOverride = z.object({
+/** The plain object shape — presets `.extend()` this, which a refined schema forbids. */
+export const dateOverrideBase = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD'),
+  /** Inclusive last day. Absent = a single day, which is every pre-existing row. */
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected YYYY-MM-DD').nullable().optional(),
   closed: z.boolean().optional(),
   windows: z.array(timeWindow).optional(),
 });
+
+export const dateOverride = dateOverrideBase
+  .refine((o) => !o.endDate || o.endDate >= o.date, {
+    message: 'End date must be on or after the start date',
+    path: ['endDate'],
+  })
+  // A closure longer than a year is a mistake, not a holiday, and an unbounded range would
+  // be expanded on every prompt build.
+  .refine(
+    (o) => {
+      if (!o.endDate) return true;
+      const days = (Date.parse(`${o.endDate}T00:00:00Z`) - Date.parse(`${o.date}T00:00:00Z`)) / 86_400_000;
+      return Number.isFinite(days) && days <= 366;
+    },
+    { message: 'A single override cannot span more than a year', path: ['endDate'] }
+  );
 
 /**
  * A place the business serves. `id` is validated for shape only — an unknown province or

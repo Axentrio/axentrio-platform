@@ -25,7 +25,12 @@ export interface LeadStructuredFields {
   /** The tenant's OWN list price for the service — a fact, not an estimate. */
   servicePrice: number | null;
   priceBasis: LeadPriceBasis;
-  intakeAnswers: Record<string, unknown> | null;
+  /**
+   * Already joined to their question LABELS by the API — same shape the bookings surface
+   * uses. It was a uuid-keyed map, which the drawer printed verbatim, so an owner read
+   * "a3f2c1d0-…: Second floor" instead of "Which floor?: Second floor".
+   */
+  intakeAnswers: Array<{ label: string; answer: string }> | null;
   /** >1 means the booking shown is not the only one for this contact. */
   bookingCount: number;
   /**

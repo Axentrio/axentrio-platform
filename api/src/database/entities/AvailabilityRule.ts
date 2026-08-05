@@ -49,8 +49,38 @@ export type WeeklyHours = Partial<Record<Weekday, TimeWindow[]>>;
  */
 export interface DateOverride {
   date: string;
+  /**
+   * Inclusive last day of a multi-day override. Absent = a single day.
+   *
+   * Added because a closure could only ever be ONE date: a hairdresser shutting for two
+   * weeks in August had to add fourteen rows by hand, and only the first eight upcoming
+   * closures are ever stated to the bot — so from day nine it went back to quoting the
+   * weekly hours and telling customers their time would be confirmed for a day the
+   * business was shut.
+   */
+  endDate?: string;
   closed?: boolean;
   windows?: TimeWindow[];
+}
+
+/**
+ * Does this override apply on `dateStr` (YYYY-MM-DD)?
+ *
+ * ISO dates compare correctly as strings, so no parsing and no timezone maths — which also
+ * means this cannot drift from however the caller derived `dateStr`. A missing or malformed
+ * `endDate` degrades to a single-day override rather than swallowing a whole year.
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+export function overrideCoversDate(o: DateOverride, dateStr: string): boolean {
+  if (!o?.date) return false;
+  if (o.date === dateStr) return true;
+  // The SHAPE check is what matters, not just the ordering. A garbage `endDate` like "zzz"
+  // compares greater than every ISO date, so without this it becomes an open-ended upper
+  // bound and one malformed row closes the business forever. A backwards range is already
+  // empty by construction; a malformed one is not.
+  if (!o.endDate || !ISO_DATE.test(o.endDate) || o.endDate < o.date) return false;
+  return dateStr > o.date && dateStr <= o.endDate;
 }
 
 @Entity('chatbot_availability_rules')

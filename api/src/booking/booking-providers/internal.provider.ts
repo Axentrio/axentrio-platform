@@ -16,6 +16,7 @@ import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { normalizeVenue } from '../../contracts/venue-address';
 import { resolveEventLocation } from './event-location';
+import { buildCustomerEventDescription } from './booking-content';
 import { organizerAddressForTenant } from './organizer-address';
 import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
 import {
@@ -266,11 +267,16 @@ async function assertInServiceArea(
     verdict,
     hasAddress: !!address,
   });
+  // Two DIFFERENT failures, and conflating them cost real bookings. "Outside" is a decision
+  // the owner must make, so it becomes a request. "Could not be placed" usually just means
+  // the customer said "Kerkstraat 12" with no town — an in-area customer who would book
+  // happily if asked one more question. Distinct codes let the prompt ask instead of giving
+  // up, without ever letting it retry a genuine out-of-area address.
   throw new BookingError(
     verdict === 'outside'
       ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
-      : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed.`,
-    'OUT_OF_SERVICE_AREA',
+      : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed. Ask for a postcode or town.`,
+    verdict === 'outside' ? 'OUT_OF_SERVICE_AREA' : 'ADDRESS_NOT_PLACEABLE',
     400
   );
 }
@@ -1076,7 +1082,16 @@ export class InternalProvider implements BookingProvider {
         customerAddress: contact.address,
         venue,
       }),
-      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      // The CUSTOMER's copy — what they need, not the owner's operational detail.
+      description: buildCustomerEventDescription({
+        serviceName: service.name,
+        serviceDescription: service.description,
+        durationMin: effectiveDuration,
+        meetUrl,
+        preparationInstructions: service.preparationInstructions,
+        manageUrl: buildManageUrl(bookingId),
+        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+      }),
       // The owner's copy says exactly what their calendar entry says.
       ownerDetail: eventContent.description,
       timezone: rule.timezone,
@@ -1802,7 +1817,16 @@ export class InternalProvider implements BookingProvider {
         customerAddress: confirmed.customerAddress,
         venue,
       }),
-      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      // The CUSTOMER's copy — what they need, not the owner's operational detail.
+      description: buildCustomerEventDescription({
+        serviceName: service.name,
+        serviceDescription: service.description,
+        durationMin: effectiveDuration,
+        meetUrl,
+        preparationInstructions: service.preparationInstructions,
+        manageUrl: buildManageUrl(bookingId),
+        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+      }),
       // The owner's copy says exactly what their calendar entry says.
       ownerDetail: eventContent.description,
       timezone: rule.timezone,
@@ -2041,7 +2065,16 @@ export class InternalProvider implements BookingProvider {
         customerAddress: booking.customerAddress,
         venue,
       }),
-      description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      // The CUSTOMER's copy — what they need, not the owner's operational detail.
+      description: buildCustomerEventDescription({
+        serviceName: service.name,
+        serviceDescription: service.description,
+        durationMin: booking.bookedDurationMin,
+        meetUrl,
+        preparationInstructions: service.preparationInstructions,
+        manageUrl: buildManageUrl(booking.id),
+        businessName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
+      }),
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',
       attendeeEmail: booking.attendeeEmail ?? '',

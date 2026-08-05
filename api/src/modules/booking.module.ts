@@ -128,16 +128,32 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
   const overrides = Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [];
   const today = DateTime.fromJSDate(now).setZone(rule.timezone || 'UTC').toFormat('yyyy-MM-dd');
   const upcoming = overrides
-    .filter((o) => o && typeof o.date === 'string' && o.date >= today)
+    // A RANGE stays relevant until its last day: a fortnight's closure that started
+    // yesterday must still be stated, or the bot books the remaining thirteen days.
+    .filter((o) => {
+      if (!o || typeof o.date !== 'string') return false;
+      const end = typeof o.endDate === 'string' && o.endDate >= o.date ? o.endDate : o.date;
+      return end >= today;
+    })
     .sort((a, b) => a.date.localeCompare(b.date));
   if (!upcoming.length) return [];
 
+  const fmtDay = (iso: string): string => {
+    const d = DateTime.fromISO(iso, { zone: rule.timezone || 'UTC' });
+    return d.isValid ? d.toFormat('cccc d LLLL') : iso;
+  };
+
   const lines = upcoming.slice(0, MAX_OVERRIDE_LINES).map((o) => {
-    const day = DateTime.fromISO(o.date, { zone: rule.timezone || 'UTC' });
-    const label = day.isValid ? day.toFormat('cccc d LLLL') : o.date;
+    const end = typeof o.endDate === 'string' && o.endDate > o.date ? o.endDate : null;
+    // One line for the whole span. Enumerating a fortnight day by day would consume the
+    // entire line budget and push every later closure out of the prompt — which is exactly
+    // how a long holiday used to go unmentioned from its ninth day onwards.
+    const when = end
+      ? `${o.date} to ${end} (${fmtDay(o.date)} — ${fmtDay(end)}, inclusive)`
+      : `${o.date} (${fmtDay(o.date)})`;
     const windows = Array.isArray(o.windows) ? o.windows : [];
-    if (o.closed || !windows.length) return `- ${o.date} (${label}): CLOSED`;
-    return `- ${o.date} (${label}): open ${fmtWindows(windows)} only`;
+    if (o.closed || !windows.length) return `- ${when}: CLOSED`;
+    return `- ${when}: open ${fmtWindows(windows)} only`;
   });
   if (upcoming.length > MAX_OVERRIDE_LINES) {
     lines.push(`- …and ${upcoming.length - MAX_OVERRIDE_LINES} more later in the year — check before promising a date beyond these.`);
@@ -221,6 +237,8 @@ export function buildServiceAreaSection(entries: ServiceAreaEntry[]): string | n
 This business serves: ${sanitizeForLine(area)}.
 Answer questions about where you work from that list, and never widen it.
 If a customer is somewhere else, do NOT just turn them away and do NOT promise them a visit. Tell them it is outside the usual area, then still take their details and capture the job with request_appointment, saying plainly that it is a request the business owner will review and come back on. Ending the conversation at "no" is the one outcome to avoid — whether a job further out is worth doing is the owner's decision, not yours.
+When you need the customer's address for a job here, ask for one that can actually be located: a postcode or a town name as well as the street. A street and house number alone cannot be matched against the area above.
+If create_booking returns ADDRESS_NOT_PLACEABLE, the address was simply too vague to locate — this is NOT a refusal. Ask for the postcode or town, then retry create_booking ONCE with the fuller address. Only if it fails again should you capture the job with request_appointment.
 If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job with request_appointment exactly as above, and never present it as a confirmed appointment.`;
 }
 

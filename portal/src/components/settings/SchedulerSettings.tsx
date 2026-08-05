@@ -83,6 +83,8 @@ type DayState = Record<Weekday, DayRow>;
 /** A single date override row (holiday closure or one-off custom hours). */
 interface OverrideRow {
   date: string;
+  /** Inclusive last day of a multi-day closure. '' = a single day. */
+  endDate: string;
   closed: boolean;
   windows: TimeWindow[];
 }
@@ -90,9 +92,9 @@ interface OverrideRow {
 function overridesFromConfig(raw: unknown[] | undefined): OverrideRow[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((o) => {
-    const ov = o as { date?: string; closed?: boolean; windows?: TimeWindow[] };
+    const ov = o as { date?: string; endDate?: string | null; closed?: boolean; windows?: TimeWindow[] };
     const windows = Array.isArray(ov.windows) && ov.windows.length ? ov.windows : [{ ...DEFAULT_WINDOW }];
-    return { date: ov.date ?? '', closed: !!ov.closed, windows };
+    return { date: ov.date ?? '', endDate: ov.endDate ?? '', closed: !!ov.closed, windows };
   });
 }
 
@@ -279,9 +281,13 @@ export const SchedulerSettings: React.FC = () => {
       const row = days[key];
       if (row.enabled && row.windows.length) weeklyHours[key] = row.windows;
     }
-    const dateOverrides = overrides.flatMap((o) =>
-      o.date ? [o.closed ? { date: o.date, closed: true } : { date: o.date, windows: o.windows }] : [],
-    );
+    const dateOverrides = overrides.flatMap((o) => {
+      if (!o.date) return [];
+      // Only send an end date when it is a real, later day — an equal or earlier one is a
+      // half-finished edit, and the API rejects it rather than guessing.
+      const span = o.endDate && o.endDate > o.date ? { endDate: o.endDate } : {};
+      return [o.closed ? { date: o.date, ...span, closed: true } : { date: o.date, ...span, windows: o.windows }];
+    });
     update.mutate({
       provider: 'internal',
       availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
@@ -668,7 +674,7 @@ export const SchedulerSettings: React.FC = () => {
                       size="sm"
                       type="button"
                       onClick={() =>
-                        setOverrides((prev) => [...prev, { date: '', closed: true, windows: [{ ...DEFAULT_WINDOW }] }])
+                        setOverrides((prev) => [...prev, { date: '', endDate: '', closed: true, windows: [{ ...DEFAULT_WINDOW }] }])
                       }
                     >
                       <Plus className="w-3.5 h-3.5" /> Add
@@ -687,6 +693,20 @@ export const SchedulerSettings: React.FC = () => {
                             value={o.date}
                             onChange={(v) =>
                               setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, date: v } : x)))
+                            }
+                            className="w-44"
+                          />
+                          {/*
+                            An optional end date, so a fortnight's holiday is ONE row.
+                            Without it an owner date-picked fourteen rows, and only the
+                            first eight upcoming closures ever reach the bot — so from day
+                            nine it went back to quoting the weekly hours.
+                          */}
+                          <span className="text-xs text-text-muted">to</span>
+                          <DatePicker
+                            value={o.endDate}
+                            onChange={(v) =>
+                              setOverrides((prev) => prev.map((x, j) => (j === i ? { ...x, endDate: v } : x)))
                             }
                             className="w-44"
                           />

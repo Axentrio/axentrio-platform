@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveEventLocation } from '../../booking/booking-providers/event-location';
+import { buildCustomerEventDescription } from '../../booking/booking-providers/booking-content';
 import {
   organizerAddressForTenant,
   senderFor,
@@ -393,5 +394,68 @@ describe('conferencing belongs to video services only', () => {
     expect(
       resolveEventLocation({ locationType: 'google_meet', customerAddressRequired: false, venue }),
     ).toBeUndefined();
+  });
+});
+
+// --------------------------------------------------------------------------------------
+
+describe('the customer’s own calendar entry', () => {
+  // It used to be `meetUrl ? "Join the meeting: <url>" : undefined`, so every in-person
+  // booking gave the customer an entry with a title, a time and nothing else — no idea what
+  // to bring, and no way back to reschedule without digging out the email.
+  const base = { serviceName: 'Boiler repair' };
+
+  it('says something useful for an in-person booking', () => {
+    const out = buildCustomerEventDescription({
+      ...base,
+      businessName: 'Valyro',
+      durationMin: 60,
+      preparationInstructions: 'Please clear access to the boiler.',
+      manageUrl: 'https://app.example/manage?token=x',
+    })!;
+    expect(out).toContain('With: Valyro');
+    expect(out).toContain('Duration: 60 min');
+    expect(out).toContain('Before your appointment: Please clear access to the boiler.');
+    expect(out).toContain('Reschedule or cancel: https://app.example/manage?token=x');
+  });
+
+  it('puts the manage link LAST — it is the only self-service route the customer has', () => {
+    const out = buildCustomerEventDescription({
+      ...base,
+      durationMin: 30,
+      manageUrl: 'https://app.example/manage?token=x',
+      preparationInstructions: 'Bring your ID.',
+    })!;
+    expect(out.trim().split('\n').at(-1)).toContain('Reschedule or cancel:');
+  });
+
+  it('still carries the meeting link for a video booking', () => {
+    const out = buildCustomerEventDescription({ ...base, meetUrl: 'https://meet.google.com/x' })!;
+    expect(out).toContain('Join the meeting: https://meet.google.com/x');
+  });
+
+  it('omits the whole body rather than emitting an empty one', () => {
+    expect(buildCustomerEventDescription({ serviceName: 'Cut' })).toBeUndefined();
+  });
+
+  it('never leaks the owner-facing operational detail', () => {
+    // The owner's body carries the phone, the address, the intake answers and the internal
+    // reference. None of that belongs in the entry the customer keeps.
+    const out = buildCustomerEventDescription({
+      ...base,
+      businessName: 'Valyro',
+      durationMin: 60,
+      manageUrl: 'https://app.example/manage?token=x',
+    })!;
+    expect(out).not.toMatch(/Phone:|Address:|Intake:|Reference:|Booked via:/);
+  });
+
+  it('normalises a prep note so it cannot forge a line', () => {
+    const out = buildCustomerEventDescription({
+      ...base,
+      preparationInstructions: 'Bring ID\nReschedule or cancel: https://evil.test',
+      manageUrl: 'https://app.example/manage?token=x',
+    })!;
+    expect(out.split('\n').filter((l) => l.startsWith('Reschedule or cancel:'))).toHaveLength(1);
   });
 });

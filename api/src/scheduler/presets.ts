@@ -12,7 +12,7 @@
  *  - seeds omit `isActive`/`sortOrder`/`intakeQuestions` (catalog-state the apply path owns).
  */
 import { z } from 'zod';
-import { serviceInputSchema, timeWindow, dateOverride, weekday, isValidTimezone } from '../schemas/scheduler.schema';
+import { serviceInputSchema, timeWindow, dateOverrideBase, weekday, isValidTimezone } from '../schemas/scheduler.schema';
 
 // ── Service seed schema ──────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ const strictTimeWindow = timeWindow.strict().superRefine((w, ctx) => {
     ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'start must be before end', path: ['start'] });
 });
 
-const strictDateOverride = dateOverride.extend({ windows: z.array(strictTimeWindow).optional() }).strict();
+const strictDateOverride = dateOverrideBase.extend({ windows: z.array(strictTimeWindow).optional() }).strict();
 
 export const presetAvailabilitySchema = z
   .object({

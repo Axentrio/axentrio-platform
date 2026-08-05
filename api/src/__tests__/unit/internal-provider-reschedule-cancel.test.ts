@@ -181,8 +181,13 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({
       method: 'REQUEST',
       location: 'https://meet.google.com/abc-defg-hij',
-      description: 'Join the meeting: https://meet.google.com/abc-defg-hij',
     });
+    // The join link now rides inside a fuller customer-facing body rather than BEING the
+    // whole body — it used to be the only thing a customer's calendar entry ever said, and
+    // an in-person booking therefore said nothing at all.
+    expect(sendBookingEmail.mock.calls[0][0].description)
+      .toContain('Join the meeting: https://meet.google.com/abc-defg-hij');
+    expect(sendBookingEmail.mock.calls[0][0].description).toContain('Reschedule or cancel:');
   });
 
   it('rejects rescheduling to a non-offered time', async () => {

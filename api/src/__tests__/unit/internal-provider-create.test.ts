@@ -874,7 +874,34 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
         ctx, 'idem-area-unknown', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
         { customerAddress: 'the house behind the church' }
       )
+    ).rejects.toMatchObject({ code: 'ADDRESS_NOT_PLACEABLE' });
+  });
+
+  it('distinguishes "cannot be placed" from "outside", because the bot must act differently', async () => {
+    // Same refusal to auto-confirm, DIFFERENT code. An unplaceable address is usually an
+    // in-area customer who gave a street with no town — asking one more question recovers
+    // the booking. Sending both down the request path is how switching on a service area
+    // quietly turns paying customers into manual admin.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    await expect(
+      provider.createBooking(
+        ctx, 'idem-area-outside', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+        { customerAddress: 'Rue Neuve 12, 4000 Liège' }
+      )
     ).rejects.toMatchObject({ code: 'OUT_OF_SERVICE_AREA' });
+  });
+
+  it('tells the customer what would make the address placeable', async () => {
+    // The message is the only place the bot learns what to ask for next.
+    serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true }]);
+    bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
+    await expect(
+      provider.createBooking(
+        ctx, 'idem-area-msg', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
+        { customerAddress: 'the house behind the church' }
+      )
+    ).rejects.toMatchObject({ message: expect.stringMatching(/postcode or town/i) });
   });
 
   it('never gates a service that does not ask for an address', async () => {

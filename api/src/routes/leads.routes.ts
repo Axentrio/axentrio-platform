@@ -42,6 +42,8 @@ import {
   MAX_RETENTION_DAYS,
 } from '../leads/lead-retention.service';
 import { logAudit } from '../utils/audit';
+import { buildIntakeAnswers } from '../booking/intake-answers';
+import type { IntakeQuestion } from '../database/entities/ServiceType';
 
 const router = Router();
 
@@ -180,9 +182,15 @@ function projectBookingFields(l: Record<string, unknown>) {
 
   // The customer's answers to the owner-authored intake questions ARE the "reason for
   // contact" Story 3 asks for — already collected at booking time, previously discarded.
-  const intake = l.intake_answers;
-  const intakeAnswers =
-    intake && typeof intake === 'object' && !Array.isArray(intake) ? (intake as Record<string, unknown>) : null;
+  // Joined to their labels here rather than in the portal: the drawer used to print the
+  // raw question uuid as the field name, so an owner read
+  // "a3f2c1d0-…: Second floor" where "Which floor?: Second floor" belonged. Same builder
+  // the bookings surface uses, so the two can never disagree — it also preserves answers
+  // whose question has since been deleted, under the raw key.
+  const intakeAnswers = buildIntakeAnswers(
+    Array.isArray(l.intake_questions) ? (l.intake_questions as IntakeQuestion[]) : null,
+    l.intake_answers
+  );
 
   // Repeat detection. `person_*` is the nightly sweep's grouping answer across the
   // lead ROWS one human owns (repeat-detection.service.ts). There is deliberately ONE
@@ -396,7 +404,10 @@ router.get(
            SELECT b.id AS booking_id, b.status AS booking_status, b.start_utc, b.end_utc,
                   b.customer_address, b.intake_answers,
                   st.name AS service_name, st.price_display_type,
-                  st.fixed_price, st.min_price, st.max_price
+                  st.fixed_price, st.min_price, st.max_price,
+                  -- The question definitions, so an answer can be shown under its LABEL.
+                  -- Without them the drawer prints the raw uuid key as the label.
+                  st.intake_questions
              FROM chatbot_bookings b
              LEFT JOIN chatbot_service_types st ON st.id = b.event_type_id
             WHERE b.lead_id = l.id AND b.tenant_id = l.tenant_id

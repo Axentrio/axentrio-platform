@@ -422,10 +422,17 @@ export async function enforceBusinessCapacity(
  * everyone's deliverability. See `organizer-address.ts` for why the local part is derived
  * from the immutable tenant id rather than the business name.
  *
- * NOTE the caveat recorded in docs/booking-open-decisions-research.md §2: the claim that
- * Gmail and Outlook refuse RSVP controls when ORGANIZER disagrees with the envelope sender
- * has no primary source. Keeping From == ORGANIZER costs nothing and satisfies it whether
- * or not it is true.
+ * The comment that used to live here claimed Gmail and Outlook "refuse to render RSVP
+ * controls" when ORGANIZER disagrees with the envelope sender. That is FALSE, at least for
+ * Gmail, and it was tested rather than reasoned about: two invites sent 2026-08-05 with an
+ * identical From on the verified domain, differing ONLY in the ICS ORGANIZER (one matching,
+ * one a foreign-domain address), both rendered Yes/Maybe/No. Outlook is untested.
+ *
+ * So alignment is NOT what forces this design. The reasons that do survive are: Resend can
+ * only send from a verified domain, DMARC wants From aligned with that domain, and putting
+ * the owner's own address in ORGANIZER would print it into every customer's calendar — the
+ * same disclosure the venue field exists to avoid. Alignment is kept because it is free,
+ * not because a vendor requires it. See docs/booking-open-decisions-research.md §2.
  */
 const frozenOrganizerFor = (tenantId: string): string => organizerAddressForTenant(tenantId);
 

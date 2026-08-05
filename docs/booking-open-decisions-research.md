@@ -616,6 +616,37 @@ RFC 5322 §3.6.2 (https://www.rfc-editor.org/rfc/rfc5322.txt):
 tenant's unauthenticated domain in `From:`, so DMARC alignment fails. Not usable. Noted only so that the
 option is closed explicitly rather than left hanging.
 
+### 2.3b RESOLVED EMPIRICALLY — the Gmail claim is false (2026-08-05)
+
+The research below flagged the claim at `internal.provider.ts` — that Gmail and Outlook
+refuse RSVP controls when `ORGANIZER` disagrees with the envelope sender — as having **no
+primary-source support**. It has now been tested rather than argued about.
+
+**Method.** Two `METHOD:REQUEST` invites sent through Resend to a real Gmail account, five
+seconds apart, identical in every respect except the ICS `ORGANIZER`:
+
+| Probe | `From:` | ICS `ORGANIZER` | Gmail RSVP controls |
+|---|---|---|---|
+| A-ALIGNED | `bookings@notifications.axentrio.com` | same | **Yes / Maybe / No** |
+| B-MISMATCH | `bookings@notifications.axentrio.com` | `owner@valyro.be` | **Yes / Maybe / No** |
+
+Both were delivered to the Primary inbox (not spam) and both rendered the full RSVP button
+set when opened. The buttons were read from the DOM rather than from a screenshot, because
+the list-row view shows a hover toolbar on the focused row only — comparing a hovered row
+against an unhovered one would have "confirmed" a difference that does not exist.
+
+**Conclusion.** `From`/`ORGANIZER` alignment is **not** what makes an invite actionable in
+Gmail. The claim should not be repeated. Outlook remains untested.
+
+**What this does NOT change.** The platform-domain `ORGANIZER` stays, for the reasons that
+survive independently: Resend sends only from verified domains, DMARC wants `From` aligned
+with the sending domain (RFC 7489 §3.1), and moving `ORGANIZER` to the tenant's own address
+would print an often-personal address into every customer's calendar entry — the Q1 problem
+in a different field. Alignment is kept because it costs nothing, not because a vendor
+demands it.
+
+---
+
 ### 2.4 Recommendation for Q2
 
 **On `ORGANIZER` vs `SENT-BY`:**

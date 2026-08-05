@@ -258,6 +258,36 @@ describe('InternalProvider.createBooking', () => {
     ).rejects.toMatchObject({ code: 'INTAKE_REQUIRED' });
   });
 
+  it('does NOT demand an answer to a PAUSED required question', async () => {
+    // The deadlock this closes: `active: false` removes the question from the prompt, so the
+    // bot never asks it — but the gate still demanded an answer, refusing EVERY booking for
+    // the service. The model cannot answer a question it was never shown, and the error
+    // names a label it has no other knowledge of, so it could not even recover by guessing.
+    const svc = {
+      ...EVENT_TYPE,
+      intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true, active: false }],
+    };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    const res = await provider.createBooking(ctx, 'idem-paused-req', OFFERED_START, {
+      name: 'Ada',
+      email: 'ada@example.com',
+    });
+    expect(res.success).toBe(true);
+  });
+
+  it('still demands an answer to an ACTIVE required question', async () => {
+    const svc = {
+      ...EVENT_TYPE,
+      intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true, active: true }],
+    };
+    eventTypeFindOne.mockResolvedValue(svc);
+    serviceTypeFind.mockResolvedValue([svc]);
+    await expect(
+      provider.createBooking(ctx, 'idem-active-req', OFFERED_START, { name: 'Ada', email: 'ada@example.com' })
+    ).rejects.toMatchObject({ code: 'INTAKE_REQUIRED' });
+  });
+
   it('books when the required intake question is answered (M5)', async () => {
     const svc = { ...EVENT_TYPE, intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true }] };
     eventTypeFindOne.mockResolvedValue(svc);

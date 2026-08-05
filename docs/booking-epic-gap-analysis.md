@@ -15,6 +15,36 @@ hand (running the repo's own zod, reading the code) rather than taken on report.
 
 ## Scorecard
 
+**Refreshed 2026-08-05.** Every gap this document names was re-checked against the code by
+eight parallel agents, one per area, each required to cite `file:line` for its verdict.
+
+> **Read this before quoting a number.** The original 2026-08-04 header counts — 247
+> requirements, 106 built / 72 partial / 69 missing — were derived by enumerating the epic
+> text itself, and **that enumeration was never written down**. Only this document's prose
+> survived. The table below therefore counts THIS DOCUMENT'S FINDINGS, not epic
+> requirements, and the two are not the same unit. The original counts are retained further
+> down for history; they are stale in our favour and should not be cited as current.
+>
+> A genuine re-count against the epic needs the epic text pasted back in.
+
+| Area | Closed | Open | Declined | Doc was wrong | State today |
+|---|---|---|---|---|---|
+| Service type configuration | 15 | 4 | 3 | 1 | All 24 spec fields real and now all exposed in the portal (onlineBookable, locationType, preparationInstructions, ordering); intake questions gained intent fields, pause, calendar opt-out, safe reordering and multi-answer handling — field key, lead mapping and the 12 question types remain, the last deliberately deferred. |
+| Booking flow, statuses, AI rules | 4 | 4 | 1 | 0 | Mechanically solid and most fallbacks now have server-side teeth — duration, service area and a pause switch enforce; off-catalog service match and urgency/risk remain prompt-only. |
+| Calendar integration | 9 | 6 | 2 | 0 | Event and invite content is now rich, venue-aware and reconciler-identical, and sync failures surface on the Bookings list; what remains is calendar *choice* — the wizard still hard-requires Google, no portal picker exists, and Outlook is pinned to the default calendar. |
+| Portal pages | 9 | 0 | 0 | 1 | Portal now exposes what the API stores — all four service fields have controls, the three booking-record columns are returned and rendered, and both live defects (wizard weekday keys, split-shift truncation) are fixed and pinned by tests. |
+| Availability & capacity | 8 | 1 | 1 | 0 | Business-level ceilings and inherited defaults now exist and are enforced at both slot listing and create; date overrides reach the prompt and the timezone is IANA-validated. |
+| Intake & file upload | 8 | 4 | 2 | 0 | Question model is now 9 of 11 fields with pause, reorder and calendar-visibility controls, multi-answers and label joins fixed, and the widget upload path rewired to real endpoints; field key and lead-field mapping remain, and question types stay 2 by decision. (The required-plus-paused deadlock this re-audit found was fixed the same day — a paused question no longer counts as required.) |
+| Business-type presets | 0 | 8 | 1 | 2 | Still a service seeder, not a preset system: the apply path and picker work fine, but a preset seeds only services plus one Mon–Fri availability, the chosen business type is persisted nowhere, and the four missing pilot verticals were declined as content. |
+| Service area / mobile | 7 | 0 | 2 | 0 | Built end to end and enforcing — picked Belgian provinces/cities gate address-required auto-bookings down to a request, the verdict is stored on every booking and shown in the portal; radius/travel-time stays deliberately out. |
+| **Total** | **60** | **27** | **12** | **4** | 103 findings re-checked |
+
+**Closed** = the gap is gone, with evidence. **Open** = still real (includes partials).
+**Declined** = a deliberate decision exists, recorded in code, a design doc, or inline here.
+**Doc was wrong** = the finding was never true; those entries carry an inline correction.
+
+*Original 2026-08-04 counts, for history only:*
+
 | Area | Built | Partial | Missing | State |
 |---|---|---|---|---|
 | Service type configuration | 19 | 7 | 2 | Strongest area — all 24 spec fields are real columns |

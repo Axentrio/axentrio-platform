@@ -332,3 +332,28 @@ describe('intake questions — the calendar toggle', () => {
     expect(out.description).toContain('4417');
   });
 });
+
+/**
+ * A paused REQUIRED question must not deadlock the service.
+ *
+ * The `active` flag removed a question from the prompt, but the server-side required-intake
+ * gate still demanded an answer for it — so a service with one paused-but-required question
+ * refused EVERY booking, and the bot could not recover: it cannot answer a question it was
+ * never shown, and the error names a label it has no other knowledge of. Pausing a required
+ * question has to switch the requirement off with it.
+ */
+describe('paused questions do not deadlock a service', () => {
+  const Q = (over: Record<string, unknown>) =>
+    ({ id: 'q1', label: 'Which floor?', type: 'text', required: true, ...over });
+
+  it('is not asked AND not demanded when paused', () => {
+    const p = buildServicesSection([svc({ intakeQuestions: [Q({ active: false })] } as never)])!;
+    expect(p).not.toContain('Which floor?');
+  });
+
+  it('is both asked and demanded when active', () => {
+    const p = buildServicesSection([svc({ intakeQuestions: [Q({})] } as never)])!;
+    expect(p).toContain('Which floor?');
+    expect(p).toContain('required');
+  });
+});

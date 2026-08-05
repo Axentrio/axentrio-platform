@@ -210,7 +210,14 @@ function resolveContactFields(
  */
 function assertRequiredIntake(service: ServiceType, normalized: Record<string, string> | null): void {
   const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
-  const required = questions.filter((q) => q && q.required && typeof q.id === 'string');
+  // `active !== false` is load-bearing, not defensive. A paused question is removed from the
+  // prompt, so the bot never asks it — but this gate demanded an answer anyway, which
+  // deadlocked EVERY booking for that service: the model cannot supply an answer to a
+  // question it was never shown, and the error names a label it has no other knowledge of.
+  // Pausing a required question must switch the requirement off with it.
+  const required = questions.filter(
+    (q) => q && q.required && q.active !== false && typeof q.id === 'string'
+  );
   if (!required.length) return;
   const answers = normalized ?? {};
   const missing = required.filter((q) => !String(answers[q.id] ?? '').trim());

@@ -26,10 +26,15 @@ function repoFor(entity: any) {
   if (name === 'BookingSettings') return { findOne: bsFindOne, create: (d: any) => d, save: bsSave };
   return {};
 }
+// `query` was missing here, and no test exercised the booking-settings upsert — so the one
+// statement in this controller that hand-computes positional parameters was covered by
+// nothing at all, and a mock that lacked the method still went green.
+const dsQuery = vi.fn(async (..._a: any[]) => [] as any[]);
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
     getRepository: (entity: any) => repoFor(entity),
     manager: { getRepository: (entity: any) => repoFor(entity) },
+    query: (...a: any[]) => dsQuery(...a),
     transaction: (cb: any) => cb({ query: managerQuery, getRepository: (entity: any) => repoFor(entity) }),
   },
 }));
@@ -263,5 +268,111 @@ describe('presets endpoints (P4a)', () => {
       statusCode: 404,
       code: 'PRESET_NOT_FOUND',
     });
+  });
+});
+
+/**
+ * The booking-settings upsert: one statement, eighteen positional parameters, and the
+ * parameter numbers computed in a loop from `params.length`. A column bound one slot off
+ * writes the minimum gap into the default buffer and nothing ever throws — which is why
+ * these assertions decode the generated SQL rather than matching it as a string.
+ */
+describe('scheduler.controller · booking settings upsert', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const RULE_COLUMNS: Record<string, string> = {
+    maxBookingsPerDay: 'max_bookings_per_day',
+    maxBookedMinutesPerDay: 'max_booked_minutes_per_day',
+    minGapMin: 'min_gap_min',
+    defaultBufferBeforeMin: 'default_buffer_before_min',
+    defaultBufferAfterMin: 'default_buffer_after_min',
+    defaultMinNoticeMin: 'default_min_notice_min',
+    defaultMaxHorizonDays: 'default_max_horizon_days',
+  };
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  /** Resolve what a column actually binds to, by reading its CASE arm out of the SQL. */
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('writes nothing when the payload touches neither area nor rules', async () => {
+    const q = await save({ availability: { timezone: 'Europe/Brussels', weeklyHours: {} } });
+    expect(q).toBeNull();
+  });
+
+  it('binds every rule to its OWN value and its OWN provided flag', async () => {
+    const values: Record<string, number> = {
+      maxBookingsPerDay: 4,
+      maxBookedMinutesPerDay: 420,
+      minGapMin: 15,
+      defaultBufferBeforeMin: 5,
+      defaultBufferAfterMin: 10,
+      defaultMinNoticeMin: 120,
+      defaultMaxHorizonDays: 30,
+    };
+    const q = (await save({ bookingRules: values }))!;
+    // Distinct values on purpose — an off-by-one in the parameter numbering swaps two of
+    // these and every "is it a number" assertion would still pass.
+    for (const [key, column] of Object.entries(RULE_COLUMNS)) {
+      expect({ column, ...bound(q, column) }).toEqual({ column, provided: true, value: values[key] });
+    }
+  });
+
+  it('distinguishes an untouched rule from one explicitly cleared', async () => {
+    // The single hardest thing this statement has to do. An omitted key must keep whatever
+    // is stored; an explicit null must erase it. Collapsing the two loses either the
+    // owner's saved limits or their ability to remove one.
+    const q = (await save({ bookingRules: { minGapMin: null, defaultMinNoticeMin: 90 } }))!;
+    expect(bound(q, 'min_gap_min')).toEqual({ provided: true, value: null });
+    expect(bound(q, 'default_min_notice_min')).toEqual({ provided: true, value: 90 });
+    expect(bound(q, 'max_bookings_per_day')).toEqual({ provided: false, value: null });
+    expect(bound(q, 'default_max_horizon_days')).toEqual({ provided: false, value: null });
+  });
+
+  it('treats an explicit 0 as provided, not as absent', async () => {
+    // `br[key] ?? null` is correct; `br[key] || null` would turn a deliberate zero-minute
+    // notice period into "leave it alone".
+    const q = (await save({ bookingRules: { defaultMinNoticeMin: 0, defaultBufferAfterMin: 0 } }))!;
+    expect(bound(q, 'default_min_notice_min')).toEqual({ provided: true, value: 0 });
+    expect(bound(q, 'default_buffer_after_min')).toEqual({ provided: true, value: 0 });
+  });
+
+  it('clears the service area on an empty array rather than ignoring it', async () => {
+    // `[]` IS the clear gesture, so a truthiness check here strands an owner with an area
+    // they can never remove.
+    const q = (await save({ serviceArea: [] }))!;
+    expect(q.params[2]).toBe('[]');
+    expect(q.params[3]).toBe(true);
+  });
+
+  it('leaves the stored area untouched when only rules are sent', async () => {
+    const q = (await save({ bookingRules: { minGapMin: 15 } }))!;
+    expect(q.params[3]).toBe(false);
+    expect(q.sql).toContain('service_area = CASE WHEN $4 THEN');
+  });
+
+  it('serialises a real area and upserts on the bot, not the tenant', async () => {
+    const area = [{ kind: 'municipality', id: '41002', label: 'Aalst' }];
+    const q = (await save({ serviceArea: area }))!;
+    expect(q.params[0]).toBe('ten-1');
+    expect(q.params[1]).toBe('bot-1');
+    expect(JSON.parse(q.params[2] as string)).toEqual(area);
+    // The unique index is on bot_id — conflicting on anything else lets two concurrent
+    // first-writes for the same bot race to a 23505.
+    expect(q.sql).toContain('ON CONFLICT (bot_id) DO UPDATE SET');
   });
 });

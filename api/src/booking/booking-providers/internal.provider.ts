@@ -270,7 +270,7 @@ async function assertInServiceArea(
  * limit", never "no bookings"). Runs inside the caller's advisory-lock transaction so
  * the count-then-write is atomic. `excludeBookingId` skips the row being rescheduled.
  */
-async function enforceServiceDayCapacity(
+export async function enforceServiceDayCapacity(
   manager: EntityManager,
   service: ServiceType,
   start: Date,
@@ -337,7 +337,7 @@ export async function loadBusinessRules(botId: string, manager?: EntityManager):
  * `blocked_range` — it cannot see a required gap, so two concurrent bookers would otherwise
  * both pass the pre-lock re-validation and land back to back.
  */
-async function enforceBusinessCapacity(
+export async function enforceBusinessCapacity(
   manager: EntityManager,
   botId: string,
   rules: BusinessRules,
@@ -352,9 +352,9 @@ async function enforceBusinessCapacity(
     const local = DateTime.fromJSDate(window.start).setZone(timezone);
     const dayStart = local.startOf('day').toUTC().toISO();
     // plus THEN startOf: in a zone whose DST transition lands at midnight, adding 24h to the
-  // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
-  // clipped or double-counted an hour and the gate disagreed with the ledger.
-  const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
+    // start of the day gives 23:00 or 01:00 of the next day, not its start — so the window
+    // clipped or double-counted an hour and the gate disagreed with the ledger.
+    const nextDay = local.plus({ days: 1 }).startOf('day').toUTC().toISO();
     const params: unknown[] = [botId, dayStart, nextDay];
     // Minutes come from the stored span, not booked_duration_min — that column is null for
     // legacy rows and for requests, and a null would silently bill the job as zero minutes.

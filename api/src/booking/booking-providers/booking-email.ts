@@ -33,8 +33,15 @@ export interface BookingEmailParams {
    *  customer gives no email. The invite email is then skipped (they're
    *  confirmed in-channel and the owner sees it on their calendar). */
   attendeeEmail?: string;
-  /** Additional recipient (Phase 0: owner gets the invite too). */
+  /** The business's own address. Gets its OWN message now, not a seat on the customer's. */
   ownerEmail?: string;
+  /**
+   * The operational detail for the owner's copy — customer name, phone, address, intake
+   * answers, reference. Already assembled by `buildBookingEventContent` for the calendar
+   * body; passed through so the owner's email says the same thing their calendar entry
+   * does. Plain text in, escaped here.
+   */
+  ownerDetail?: string | null;
   /**
    * The FROZEN ICS organizer for this booking (Booking.organizer_email). Null on rows
    * predating that column, which fall back to the old ownerEmail-then-platform resolution
@@ -86,24 +93,45 @@ const inviteIdempotencyKey = (p: BookingEmailParams, audience: string): string =
   `booking:${p.uid}:${p.sequence}:${p.method}:${audience}`;
 
 /**
- * Tell the owner about a booking that has no customer to invite. Plain email, no ICS —
- * an invite with no ATTENDEE is not a meaningful invite, and the owner already has the
- * appointment on their calendar via the mirror.
+ * Tell the OWNER about a booking, in their own message.
+ *
+ * The owner used to be a second `To:` on the customer's invite. That was wrong three ways:
+ * they received a `METHOD:REQUEST` in which they hold no role at all (RFC 5546 frames a
+ * REQUEST as addressed to its Attendees, and the only ATTENDEE is the customer), the
+ * customer could see the owner's address in the header, and one body had to serve two
+ * audiences who need opposite things — the customer needs "your appointment is confirmed",
+ * the owner needs the phone number and the address.
+ *
+ * No ICS here on purpose. The owner's calendar entry comes from the mirror, which carries
+ * the same content; a second copy of the same event arriving as an invite is how you end up
+ * with duplicates in a calendar.
  */
-async function notifyOwnerWithoutInvite(params: BookingEmailParams): Promise<void> {
+async function notifyOwner(params: BookingEmailParams, customerWasInvited: boolean): Promise<void> {
   const cancelled = params.method === 'CANCEL';
   const who = params.attendeeName?.trim() ? esc(params.attendeeName.trim()) : 'A customer';
   const subject = `${cancelled ? 'Cancelled' : 'New booking'}: ${params.summary}`;
+  const detail = params.ownerDetail?.trim()
+    ? `<p>${esc(params.ownerDetail.trim()).replace(/\n/g, '<br/>')}</p>`
+    : '';
   const body =
     `<p>${who} ${cancelled ? 'cancelled their appointment' : 'booked an appointment'}.</p>` +
     `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
-    `<p>They booked through a messaging channel and gave no email address, so no invite was sent to them.</p>`;
+    (params.location ? `<p>Where: ${esc(params.location)}</p>` : '') +
+    detail +
+    (customerWasInvited
+      ? ''
+      : `<p>They booked through a messaging channel and gave no email address, so no invite was sent to them.</p>`);
   try {
     await getEmailService().send({
       to: [params.ownerEmail as string],
       subject,
       body,
-      idempotencyKey: inviteIdempotencyKey(params, 'owner-only'),
+      // Replying to an owner notification should reach the CUSTOMER, when there is one.
+      ...(customerWasInvited && params.attendeeEmail ? { replyTo: params.attendeeEmail } : {}),
+      // Distinct audiences keep distinct keys. 'owner-only' is retained for the
+      // no-customer-email case so keys already issued for in-flight sends keep their
+      // meaning; the accompanied case is a genuinely new message and gets a new key.
+      idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
     });
   } catch (err) {
     logger.warn('[Booking] owner notification failed (non-fatal)', {
@@ -119,7 +147,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   // so a channel booking that was later cancelled reached them only as an event quietly
   // vanishing from their calendar.
   if (!params.attendeeEmail || !params.attendeeEmail.trim()) {
-    if (params.ownerEmail?.trim()) await notifyOwnerWithoutInvite(params);
+    if (params.ownerEmail?.trim()) await notifyOwner(params, false);
     return;
   }
   // The organizer source may be a full RFC5322 "Name <email>" string (e.g.
@@ -143,7 +171,8 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
     attendeeName: params.attendeeName,
   });
 
-  const to = [params.attendeeEmail, ...(params.ownerEmail ? [params.ownerEmail] : [])];
+  // The customer alone. The owner gets their own message below.
+  const to = [params.attendeeEmail];
   const cancelled = params.method === 'CANCEL';
   const subject = `${cancelled ? 'Cancelled' : 'Confirmed'}: ${params.summary}`;
   const lead = cancelled
@@ -197,6 +226,10 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
       error: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Owner's own copy, sent whether or not the customer's invite succeeded — a failed
+  // customer send is precisely when the owner most needs to know a booking exists.
+  if (params.ownerEmail?.trim()) await notifyOwner(params, true);
 }
 
 export interface ReminderEmailParams {

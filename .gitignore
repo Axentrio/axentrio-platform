@@ -57,7 +57,20 @@ skills-lock.json
 api/.env
 portal/.env
 
-# Review packets / handoffs kept locally — contain reviewer test credentials
+# Review packets / handoffs kept locally. Ignored because they are app-review working
+# material that does not belong in a public repo — NOT because they hold secrets.
+#
+# CORRECTION: this comment, and the commit message on 97388e9, both used to claim these
+# files "contain reviewer test credentials". They do not. Every credential-shaped item in
+# all three is an env-var NAME followed by a blank; a scan for any 28+ character
+# alphanumeric run returns zero hits, and the only Meta App ID present is public by design.
+# The documents INSTRUCT a reader to create tester credentials; they contain none.
+#
+# This matters because the files remain reachable at 956332a, and the decision not to
+# rewrite history was taken knowing exactly that. Do not reopen it believing credentials
+# are sitting in the history — see docs/booking-open-decisions-research.md §3 for the
+# verification and the full cost/benefit. The 97388e9 message cannot be corrected without
+# the very rewrite that was declined, so this is where the record lives.
 docs/Axentrio-App-Review-Submission-Packet.pdf
 docs/meta-google-review-packet.md
 docs/handoff-composable-templates-enablement.md

@@ -35,6 +35,20 @@ export const serviceAreaSchema = z.array(serviceAreaEntry).max(MAX_SERVICE_AREA_
  * clears it back to unlimited. No `.default()` anywhere — a default here would let a client
  * that sends the object at all silently reset rules it never mentioned.
  */
+/**
+ * The venue customers come TO — never the VAT/legal address, which lives in the tenant's
+ * onboarding record and is off limits here. Every field is nullable and optional so the
+ * whole thing can be cleared back to "no venue", which is the state every tenant starts in
+ * and the only state GDPR Art. 25(2) permits as a default.
+ */
+export const venueAddressSchema = z.object({
+  street: z.string().max(200).nullable().optional(),
+  postalCode: z.string().max(200).nullable().optional(),
+  city: z.string().max(200).nullable().optional(),
+  // ISO 3166-1 alpha-2. Anything else is a typo, not a country.
+  country: z.string().regex(/^[A-Za-z]{2}$/, 'Use a 2-letter country code').nullable().optional(),
+});
+
 export const bookingRulesSchema = z.object({
   maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
   maxBookedMinutesPerDay: z.number().int().min(15).max(1440).nullable().optional(),
@@ -211,9 +225,16 @@ export const updateSchedulerSchema = z
     // which is why presence is tested with `!== undefined` rather than truthiness.
     serviceArea: serviceAreaSchema.optional(),
     bookingRules: bookingRulesSchema.optional(),
+    venueAddress: venueAddressSchema.nullable().optional(),
   })
   .refine(
-    (d) => d.provider || d.eventType || d.availability || d.serviceArea !== undefined || d.bookingRules,
+    (d) =>
+      d.provider ||
+      d.eventType ||
+      d.availability ||
+      d.serviceArea !== undefined ||
+      d.bookingRules ||
+      d.venueAddress !== undefined,
     { message: 'At least one of provider, eventType, availability, serviceArea, bookingRules is required' }
   );
 

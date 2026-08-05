@@ -376,3 +376,74 @@ describe('scheduler.controller · booking settings upsert', () => {
     expect(q.sql).toContain('ON CONFLICT (bot_id) DO UPDATE SET');
   });
 });
+
+describe('scheduler.controller · venue address upsert', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+  });
+
+  const VENUE_COLUMNS = ['venue_street', 'venue_postal_code', 'venue_city', 'venue_country'];
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('writes a venue on its own, without any other section', async () => {
+    // The venue must be a sufficient reason to touch the row — it is the only thing on the
+    // screen a brand-new tenant is likely to fill in first.
+    const q = (await save({
+      venueAddress: { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: 'BE' },
+    }))!;
+    expect(bound(q, 'venue_street')).toEqual({ provided: true, value: 'Grote Markt 1' });
+    expect(bound(q, 'venue_postal_code')).toEqual({ provided: true, value: '9300' });
+    expect(bound(q, 'venue_city')).toEqual({ provided: true, value: 'Aalst' });
+    expect(bound(q, 'venue_country')).toEqual({ provided: true, value: 'BE' });
+  });
+
+  it('leaves the stored venue alone when the payload does not mention it', async () => {
+    // Saving the capacity rules must not erase an address the owner set weeks ago.
+    const q = (await save({ bookingRules: { minGapMin: 15 } }))!;
+    for (const c of VENUE_COLUMNS) expect(bound(q, c)).toEqual({ provided: false, value: null });
+  });
+
+  it('clears every component on an explicit null', async () => {
+    const q = (await save({ venueAddress: null }))!;
+    for (const c of VENUE_COLUMNS) expect(bound(q, c)).toEqual({ provided: true, value: null });
+  });
+
+  it('stores a partial venue without inventing the missing parts', async () => {
+    const q = (await save({ venueAddress: { city: 'Aalst' } }))!;
+    expect(bound(q, 'venue_city')).toEqual({ provided: true, value: 'Aalst' });
+    expect(bound(q, 'venue_street')).toEqual({ provided: true, value: null });
+  });
+
+  it('treats a whitespace-only component as empty', async () => {
+    const q = (await save({ venueAddress: { street: '   ', city: 'Aalst' } }))!;
+    expect(bound(q, 'venue_street')).toEqual({ provided: true, value: null });
+  });
+
+  it('does not disturb the booking rules when only the venue is sent', async () => {
+    // The two share one statement; a venue-only save must not blank the capacity ceilings.
+    const q = (await save({ venueAddress: { city: 'Aalst' } }))!;
+    expect(bound(q, 'min_gap_min')).toEqual({ provided: false, value: null });
+    expect(bound(q, 'max_bookings_per_day')).toEqual({ provided: false, value: null });
+  });
+
+  it('rejects a country code that is not two letters', async () => {
+    await expect(
+      updateSchedulerConfig({ tenantId: 'ten-1', body: { venueAddress: { country: 'Belgium' } } } as any, res),
+    ).rejects.toBeDefined();
+  });
+});

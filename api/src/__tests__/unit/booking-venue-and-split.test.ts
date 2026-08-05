@@ -1,0 +1,251 @@
+/**
+ * The venue address, the LOCATION it resolves to, and the owner/customer mail split.
+ *
+ * `sendBookingEmail` used to put the owner on the customer's `To:` line. Changing that to
+ * two separate messages broke NO test in the suite, because nothing had ever asserted who
+ * receives what — the same shape of gap that let seven mutations survive the capacity
+ * gates. These tests exist so the next change to recipients cannot pass silently.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resolveEventLocation } from '../../booking/booking-providers/event-location';
+import {
+  normalizeVenue,
+  formatVenueLine,
+  hasVenue,
+  EMPTY_VENUE,
+  VENUE_FIELD_MAX,
+} from '../../contracts/venue-address';
+
+const send = vi.fn();
+// booking-email constructs its own `new EmailService(...)` and caches it, so the class is
+// what has to be replaced — there is no injectable accessor to stub.
+vi.mock('../../automations/email.service', () => ({
+  EmailService: class {
+    send(...a: unknown[]) {
+      return send(...a);
+    }
+  },
+}));
+vi.mock('../../utils/logger', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+import { sendBookingEmail } from '../../booking/booking-providers/booking-email';
+
+// --------------------------------------------------------------------------------------
+
+describe('venue address — normalise and flatten', () => {
+  it('is empty until someone fills it in', () => {
+    expect(hasVenue(EMPTY_VENUE)).toBe(false);
+    expect(hasVenue(null)).toBe(false);
+    expect(formatVenueLine(null)).toBeNull();
+  });
+
+  it('flattens to the Belgian one-line convention', () => {
+    expect(
+      formatVenueLine({ street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('keeps the postcode and city as ONE locality, not two comma-separated parts', () => {
+    // "9300, Aalst" is not how anyone writes or reads a Belgian address.
+    const line = formatVenueLine({ street: null, postalCode: '9300', city: 'Aalst', country: null });
+    expect(line).toBe('9300 Aalst');
+  });
+
+  it('appends a country only when one is set', () => {
+    expect(formatVenueLine({ street: 'Rue Neuve 1', postalCode: '1000', city: 'Bruxelles', country: 'BE' }))
+      .toBe('Rue Neuve 1, 1000 Bruxelles, BE');
+    expect(formatVenueLine({ street: 'Rue Neuve 1', postalCode: '1000', city: 'Bruxelles', country: null }))
+      .toBe('Rue Neuve 1, 1000 Bruxelles');
+  });
+
+  it('returns null rather than an empty string when there is nothing to print', () => {
+    // The caller must OMIT the property. An empty LOCATION names the venue "".
+    expect(formatVenueLine({ street: '   ', postalCode: '', city: null, country: null })).toBeNull();
+  });
+
+  it('collapses the line breaks that would forge an extra ICS property', () => {
+    const v = normalizeVenue({ street: 'Main St 1\r\nATTENDEE:mailto:evil@example.com', postalCode: null, city: null, country: null });
+    expect(v.street).toBe('Main St 1 ATTENDEE:mailto:evil@example.com');
+    // U+2028/U+2029/U+0085 end a line in most renderers but are not matched by \s in every
+    // engine — they have to be named explicitly.
+    expect(normalizeVenue({ street: 'a b cd' }).street).toBe('a b c d');
+  });
+
+  it('caps each component and uppercases the country', () => {
+    expect(normalizeVenue({ street: 'x'.repeat(500) }).street).toHaveLength(VENUE_FIELD_MAX);
+    expect(normalizeVenue({ country: 'be' }).country).toBe('BE');
+  });
+});
+
+// --------------------------------------------------------------------------------------
+
+describe('resolveEventLocation', () => {
+  const venue = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: null };
+
+  it('uses the meeting URL when there is one, whatever the service says', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'in_person',
+        customerAddressRequired: false,
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('sends the CUSTOMER’s address when the owner travels to them', () => {
+    // Their own address in their own invite discloses nothing to them, and it is the
+    // genuinely useful value on the owner's copy.
+    expect(
+      resolveEventLocation({
+        locationType: 'in_person',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        venue,
+      }),
+    ).toBe('Kerkstraat 12, 9310 Herdersem');
+  });
+
+  it('never leaks the venue into a job at the customer’s address', () => {
+    // A travel job with no captured address must omit, NOT fall back to the premises —
+    // that would send the customer to the wrong place entirely.
+    expect(
+      resolveEventLocation({
+        locationType: 'in_person',
+        customerAddressRequired: true,
+        customerAddress: null,
+        venue,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('sends the venue for an at-premises job', () => {
+    expect(
+      resolveEventLocation({ locationType: 'in_person', customerAddressRequired: false, venue }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('omits rather than inventing a location when no venue is set', () => {
+    // This is the grandfathered state for every existing tenant, and it must be silent.
+    expect(
+      resolveEventLocation({ locationType: 'in_person', customerAddressRequired: false, venue: null }),
+    ).toBeUndefined();
+  });
+
+  it('never emits the old "In person" placeholder', () => {
+    for (const v of [null, EMPTY_VENUE, venue]) {
+      for (const req of [true, false]) {
+        const out = resolveEventLocation({
+          locationType: 'in_person',
+          customerAddressRequired: req,
+          venue: v,
+        });
+        expect(out).not.toBe('In person');
+      }
+    }
+  });
+
+  it('omits for phone and custom services', () => {
+    expect(resolveEventLocation({ locationType: 'phone', customerAddressRequired: false, venue })).toBeUndefined();
+    expect(resolveEventLocation({ locationType: 'custom', customerAddressRequired: false, venue })).toBeUndefined();
+  });
+});
+
+// --------------------------------------------------------------------------------------
+
+const BASE = {
+  method: 'REQUEST' as const,
+  uid: 'uid-1',
+  sequence: 0,
+  start: new Date('2026-08-12T08:00:00Z'),
+  end: new Date('2026-08-12T09:00:00Z'),
+  summary: 'Boiler repair',
+  timezone: 'Europe/Brussels',
+  attendeeName: 'Ada Lovelace',
+  attendeeEmail: 'ada@example.com',
+  ownerEmail: 'owner@valyro.be',
+  organizerEmail: 'bookings@notifications.axentrio.com',
+};
+
+const sent = () => send.mock.calls.map((c) => c[0] as Record<string, unknown>);
+const toCustomer = () => sent().find((m) => (m.to as string[]).includes('ada@example.com'));
+const toOwner = () => sent().find((m) => (m.to as string[]).includes('owner@valyro.be'));
+
+describe('booking email — owner and customer get separate messages', () => {
+  beforeEach(() => {
+    send.mockReset();
+    send.mockResolvedValue(undefined);
+  });
+
+  it('sends exactly two messages, one per audience', async () => {
+    await sendBookingEmail({ ...BASE });
+    expect(sent()).toHaveLength(2);
+    expect(toCustomer()!.to).toEqual(['ada@example.com']);
+    expect(toOwner()!.to).toEqual(['owner@valyro.be']);
+  });
+
+  it('keeps the owner’s address off the customer’s message', async () => {
+    // The owner used to be a second To: on this message, so every customer could read it.
+    await sendBookingEmail({ ...BASE });
+    expect(JSON.stringify(toCustomer()!.to)).not.toContain('owner@valyro.be');
+  });
+
+  it('attaches the ICS to the customer only', async () => {
+    // The owner holds no role in a METHOD:REQUEST whose sole ATTENDEE is the customer, and
+    // their calendar entry already comes from the mirror — a second copy duplicates it.
+    await sendBookingEmail({ ...BASE });
+    expect(toCustomer()!.attachments).toHaveLength(1);
+    expect(toOwner()!.attachments).toBeUndefined();
+  });
+
+  it('writes each body for its own audience', async () => {
+    await sendBookingEmail({ ...BASE, ownerDetail: 'Phone: +32 470 11 22 33\nReference: AX-BKG-abc' });
+    expect(toCustomer()!.body).toContain('Your appointment is confirmed');
+    expect(toOwner()!.subject).toContain('New booking');
+    // The operational detail belongs to the owner and must not reach the customer.
+    expect(toOwner()!.body).toContain('+32 470 11 22 33');
+    expect(toCustomer()!.body).not.toContain('+32 470 11 22 33');
+  });
+
+  it('escapes the operational detail rather than interpolating it', async () => {
+    await sendBookingEmail({ ...BASE, ownerDetail: '<img src=x onerror=alert(1)>' });
+    expect(toOwner()!.body).not.toContain('<img');
+    expect(toOwner()!.body).toContain('&lt;img');
+  });
+
+  it('gives the two messages different idempotency keys', async () => {
+    // One key for both would mean the second send is silently swallowed as a duplicate.
+    await sendBookingEmail({ ...BASE });
+    expect(toCustomer()!.idempotencyKey).not.toBe(toOwner()!.idempotencyKey);
+  });
+
+  it('still tells the owner when the customer has no email at all', async () => {
+    await sendBookingEmail({ ...BASE, attendeeEmail: undefined });
+    expect(sent()).toHaveLength(1);
+    expect(toOwner()!.to).toEqual(['owner@valyro.be']);
+    expect(toOwner()!.body).toContain('no email address');
+    // A distinct key from the accompanied case, so the two never collide.
+    expect(toOwner()!.idempotencyKey).toContain('owner-only');
+  });
+
+  it('tells the owner even when the customer send throws', async () => {
+    // A failed customer send is exactly when the owner most needs to know a booking exists.
+    send.mockRejectedValueOnce(new Error('resend 500'));
+    await sendBookingEmail({ ...BASE });
+    expect(toOwner()).toBeDefined();
+  });
+
+  it('sends nothing to an owner who has no address', async () => {
+    await sendBookingEmail({ ...BASE, ownerEmail: undefined });
+    expect(sent()).toHaveLength(1);
+    expect(toCustomer()).toBeDefined();
+  });
+
+  it('puts the resolved location on both messages', async () => {
+    await sendBookingEmail({ ...BASE, location: 'Grote Markt 1, 9300 Aalst' });
+    expect(toCustomer()!.body).toContain('Grote Markt 1, 9300 Aalst');
+    expect(toOwner()!.body).toContain('Grote Markt 1, 9300 Aalst');
+  });
+});

@@ -23,6 +23,7 @@ import {
   type Weekday,
   type TimeWindow,
   type ServiceAreaEntry,
+  type VenueAddress,
   type BookingRules,
   type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
@@ -207,6 +208,7 @@ export const SchedulerSettings: React.FC = () => {
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
+  const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
     maxBookedMinutesPerDay: null,
@@ -230,6 +232,12 @@ export const SchedulerSettings: React.FC = () => {
     }
     // Outside the availability branch: a bot can have a service area before it has hours.
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
+    setVenue({
+      street: data.venueAddress?.street ?? null,
+      postalCode: data.venueAddress?.postalCode ?? null,
+      city: data.venueAddress?.city ?? null,
+      country: data.venueAddress?.country ?? null,
+    });
     setRules({
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
@@ -282,6 +290,8 @@ export const SchedulerSettings: React.FC = () => {
       // Whole object every time: a null clears one rule, an omitted key would leave the
       // stored value untouched, and this editor shows all three.
       bookingRules: rules,
+      // Same contract as the rules — always sent, so clearing a field really clears it.
+      venueAddress: venue,
     });
   };
 
@@ -592,6 +602,62 @@ export const SchedulerSettings: React.FC = () => {
                     (svc) => svc.isActive && svc.customerAddressRequired,
                   )}
                 />
+
+                {/* Venue — where customers come TO. Never the VAT/legal address. */}
+                <div className="space-y-3 border-t border-edge pt-4">
+                  <div>
+                    <h3 className="text-sm font-medium text-text-primary">Your address</h3>
+                    <p className="text-xs text-text-secondary mt-1">
+                      Where customers come to you. This goes on the calendar invite so they can find
+                      you — leave it empty and the invite simply won't mention a place. It is not used
+                      for jobs where you travel to the customer; those use their address instead.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <Label htmlFor="venue-street">Street and number</Label>
+                      <Input
+                        id="venue-street"
+                        value={venue.street ?? ''}
+                        maxLength={200}
+                        placeholder="Grote Markt 1"
+                        onChange={(e) => setVenue((v) => ({ ...v, street: e.target.value || null }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="venue-postal-code">Postcode</Label>
+                      <Input
+                        id="venue-postal-code"
+                        value={venue.postalCode ?? ''}
+                        maxLength={200}
+                        placeholder="9300"
+                        onChange={(e) => setVenue((v) => ({ ...v, postalCode: e.target.value || null }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="venue-city">City</Label>
+                      <Input
+                        id="venue-city"
+                        value={venue.city ?? ''}
+                        maxLength={200}
+                        placeholder="Aalst"
+                        onChange={(e) => setVenue((v) => ({ ...v, city: e.target.value || null }))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="venue-country">Country code</Label>
+                      <Input
+                        id="venue-country"
+                        value={venue.country ?? ''}
+                        maxLength={2}
+                        placeholder="BE"
+                        onChange={(e) =>
+                          setVenue((v) => ({ ...v, country: e.target.value.toUpperCase() || null }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </div>
 
                 {/* Date overrides — holidays / closures / one-off hours */}
                 <div className="space-y-3 border-t border-edge pt-4">

@@ -109,6 +109,19 @@ export interface BookingRules {
   defaultMaxHorizonDays: number | null;
 }
 
+/**
+ * Where customers come TO. Deliberately NOT the VAT/legal address captured at onboarding —
+ * that one is often the owner's home, and putting it on invites by default is precisely
+ * what GDPR Art. 25(2) prohibits. Empty until the owner types one in.
+ */
+export interface VenueAddress {
+  street: string | null;
+  postalCode: string | null;
+  city: string | null;
+  /** ISO 3166-1 alpha-2. */
+  country: string | null;
+}
+
 export interface SchedulerConfig {
   provider: 'calcom' | 'internal';
   eventType: SchedulerEventType | null;
@@ -117,6 +130,7 @@ export interface SchedulerConfig {
   /** Places the business travels to. Always an array — [] means none configured. */
   serviceArea?: ServiceAreaEntry[];
   bookingRules?: BookingRules;
+  venueAddress?: VenueAddress;
 }
 
 export interface UpdateSchedulerPayload {
@@ -126,6 +140,8 @@ export interface UpdateSchedulerPayload {
   /** [] is a real value here — it clears the area — so never drop an empty array. */
   serviceArea?: ServiceAreaEntry[];
   bookingRules?: Partial<BookingRules>;
+  /** `null` clears the whole venue; omitting the key leaves it untouched. */
+  venueAddress?: Partial<VenueAddress> | null;
 }
 
 const schedulerKey = ['scheduler', 'config'] as const;

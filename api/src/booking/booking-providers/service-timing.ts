@@ -7,6 +7,7 @@
  * entire entity graph (and a live DB connection) into any test that wanted to check the
  * arithmetic.
  */
+import type { VenueAddress } from '../../contracts/venue-address';
 import type { ServiceType } from '../../database/entities/ServiceType';
 
 /** Business-level knobs. CEILINGS always apply; DEFAULTS apply only where a service is null. */
@@ -18,6 +19,13 @@ export interface BusinessRules {
   defaultBufferAfterMin: number | null;
   defaultMinNoticeMin: number | null;
   defaultMaxHorizonDays: number | null;
+  /**
+   * The business's premises. Not a timing value, but it rides along because it comes off
+   * the same `chatbot_booking_settings` row — and the booking path reads that row once,
+   * inside the transaction. Fetching it separately would mean a second query for a fact
+   * the caller already has in hand.
+   */
+  venue: VenueAddress;
 }
 
 /**

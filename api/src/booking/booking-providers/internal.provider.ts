@@ -14,6 +14,8 @@ import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
 import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
+import { normalizeVenue } from '../../contracts/venue-address';
+import { resolveEventLocation } from './event-location';
 import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
 import {
   resolveServiceTiming,
@@ -319,6 +321,12 @@ export async function loadBusinessRules(botId: string, manager?: EntityManager):
     defaultBufferAfterMin: d(row?.defaultBufferAfterMin),
     defaultMinNoticeMin: d(row?.defaultMinNoticeMin),
     defaultMaxHorizonDays: d(row?.defaultMaxHorizonDays),
+    venue: normalizeVenue({
+      street: row?.venueStreet,
+      postalCode: row?.venuePostalCode,
+      city: row?.venueCity,
+      country: row?.venueCountry,
+    }),
   };
 }
 
@@ -997,6 +1005,9 @@ export class InternalProvider implements BookingProvider {
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
+    // The venue comes off the same booking-settings row the rules do; read at the tail
+    // because the transaction has already committed by here.
+    const { venue } = await loadBusinessRules(ctx.bot.id);
     await sendBookingEmail({
       method: 'REQUEST',
       uid: icsUid,
@@ -1004,8 +1015,19 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: service.name,
-      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
+      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
+      // which is a modality — it told the customer nothing and occupied the field their
+      // calendar would otherwise use for directions. Omitted entirely when unknown.
+      location: resolveEventLocation({
+        locationType: service.locationType,
+        customerAddressRequired: service.customerAddressRequired,
+        meetUrl,
+        customerAddress: contact.address,
+        venue,
+      }),
       description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      // The owner's copy says exactly what their calendar entry says.
+      ownerDetail: eventContent.description,
       timezone: rule.timezone,
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
@@ -1684,6 +1706,9 @@ export class InternalProvider implements BookingProvider {
     );
     const meetUrl = await this.syncCalendarCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
 
+    // The venue comes off the same booking-settings row the rules do; read at the tail
+    // because the transaction has already committed by here.
+    const { venue } = await loadBusinessRules(ctx.bot.id);
     await sendBookingEmail({
       method: 'REQUEST',
       uid: confirmed.icsUid,
@@ -1691,8 +1716,19 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: service.name,
-      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
+      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
+      // which is a modality — it told the customer nothing and occupied the field their
+      // calendar would otherwise use for directions. Omitted entirely when unknown.
+      location: resolveEventLocation({
+        locationType: service.locationType,
+        customerAddressRequired: service.customerAddressRequired,
+        meetUrl,
+        customerAddress: confirmed.customerAddress,
+        venue,
+      }),
       description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
+      // The owner's copy says exactly what their calendar entry says.
+      ownerDetail: eventContent.description,
       timezone: rule.timezone,
       attendeeName: confirmed.attendeeName ?? '',
       attendeeEmail: confirmed.attendeeEmail ?? '',
@@ -1909,6 +1945,9 @@ export class InternalProvider implements BookingProvider {
     // meetingUrl is still valid. Mirror the create path's location/description.
     const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     const meetUrl = ref?.meetingUrl ?? null;
+    // The venue comes off the same booking-settings row the rules do; read at the tail
+    // because the transaction has already committed by here.
+    const { venue } = await loadBusinessRules(ctx.bot.id);
     await sendBookingEmail({
       method: 'REQUEST',
       uid: booking.icsUid,
@@ -1916,7 +1955,16 @@ export class InternalProvider implements BookingProvider {
       start,
       end,
       summary: service.name,
-      location: meetUrl ?? (service.locationType === 'in_person' ? 'In person' : undefined),
+      // LOCATION is a VENUE (RFC 5545 §3.8.1.7). This used to send the literal "In person",
+      // which is a modality — it told the customer nothing and occupied the field their
+      // calendar would otherwise use for directions. Omitted entirely when unknown.
+      location: resolveEventLocation({
+        locationType: service.locationType,
+        customerAddressRequired: service.customerAddressRequired,
+        meetUrl,
+        customerAddress: booking.customerAddress,
+        venue,
+      }),
       description: meetUrl ? `Join the meeting: ${meetUrl}` : undefined,
       timezone: rule.timezone,
       attendeeName: booking.attendeeName ?? '',

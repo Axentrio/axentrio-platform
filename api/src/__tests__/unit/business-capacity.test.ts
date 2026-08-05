@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { computeSlots, type BusyInterval } from '../../booking/booking-providers/slot-engine';
 import { bookingRulesSchema, updateSchedulerSchema, serviceInputSchema } from '../../schemas/scheduler.schema';
 import { resolveServiceTiming, type BusinessRules } from '../../booking/booking-providers/service-timing';
+import { EMPTY_VENUE } from '../../contracts/venue-address';
 
 /** Wed 2026-06-10, 09:00–17:00 Brussels. */
 const RULE = {
@@ -138,6 +139,7 @@ describe('resolveServiceTiming — service → business → platform', () => {
     defaultBufferAfterMin: null,
     defaultMinNoticeMin: null,
     defaultMaxHorizonDays: null,
+    venue: EMPTY_VENUE,
     ...over,
   });
   const svc = (over: Record<string, unknown> = {}) =>

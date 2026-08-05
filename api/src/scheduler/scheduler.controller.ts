@@ -135,6 +135,15 @@ async function readConfig(tenantId: string) {
       defaultMinNoticeMin: bookingSettings?.defaultMinNoticeMin ?? null,
       defaultMaxHorizonDays: bookingSettings?.defaultMaxHorizonDays ?? null,
     },
+    // Same reason as bookingRules: cherry-picked, so a field added to the entity but not
+    // here reads as undefined, the editor hydrates it blank, and the next Save writes the
+    // blank back over a real venue.
+    venueAddress: {
+      street: bookingSettings?.venueStreet ?? null,
+      postalCode: bookingSettings?.venuePostalCode ?? null,
+      city: bookingSettings?.venueCity ?? null,
+      country: bookingSettings?.venueCountry ?? null,
+    },
   };
 }
 
@@ -180,8 +189,12 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 
   // `!== undefined`, not truthiness: [] is how the owner clears their service area, and
   // null is how they clear a capacity rule or a business default.
-  if (data.serviceArea !== undefined || data.bookingRules) {
+  if (data.serviceArea !== undefined || data.bookingRules || data.venueAddress !== undefined) {
     const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
+    // `venueAddress: null` clears the whole venue; an omitted key leaves it alone. Reusing
+    // the rules' value+provided pairing means one mechanism, not two.
+    const va = (data.venueAddress ?? {}) as Record<string, string | null | undefined>;
+    const venueProvided = data.venueAddress !== undefined;
     // Generated rather than hand-written: seven nullable int columns, each needing a value
     // AND a "was it provided" flag so an untouched rule keeps its stored value while an
     // explicit null clears it. Hand-maintaining fourteen positional params is how a column
@@ -194,6 +207,12 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       ['defaultBufferAfterMin', 'default_buffer_after_min'],
       ['defaultMinNoticeMin', 'default_min_notice_min'],
       ['defaultMaxHorizonDays', 'default_max_horizon_days'],
+    ];
+    const VENUE_COLUMNS: Array<[string, string]> = [
+      ['street', 'venue_street'],
+      ['postalCode', 'venue_postal_code'],
+      ['city', 'venue_city'],
+      ['country', 'venue_country'],
     ];
 
     const params: unknown[] = [
@@ -211,6 +230,21 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       const valueParam = `$${params.length + 1}`;
       const providedParam = `$${params.length + 2}`;
       params.push(br[key] ?? null, br[key] !== undefined);
+      insertCols.push(column);
+      insertVals.push(valueParam);
+      updates.push(
+        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+      );
+    }
+
+    for (const [key, column] of VENUE_COLUMNS) {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      // `venueAddress: null` already collapsed to `{}` above, so every component reads
+      // null and the venue clears — no special case needed. A partial edit sends only the
+      // components it has, and `venueProvided` alone decides whether the row is touched.
+      const raw = va[key] ?? null;
+      params.push(typeof raw === 'string' && raw.trim() ? raw.trim().slice(0, 200) : null, venueProvided);
       insertCols.push(column);
       insertVals.push(valueParam);
       updates.push(

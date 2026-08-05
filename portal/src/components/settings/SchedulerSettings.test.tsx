@@ -64,6 +64,8 @@ const AVAILABILITY = {
   ],
 };
 
+const VENUE = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: 'BE' };
+
 const CONFIG = {
   provider: 'internal',
   eventType: null,
@@ -71,6 +73,7 @@ const CONFIG = {
   availability: AVAILABILITY,
   serviceArea: AREA,
   bookingRules: RULES,
+  venueAddress: VENUE,
 };
 
 function renderUI() {
@@ -174,5 +177,33 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
       defaultMinNoticeMin: null,
       defaultMaxHorizonDays: null,
     });
+  });
+
+  it('returns the venue address unchanged when the owner saves without editing', async () => {
+    // Same hazard as the rules: a component the editor fails to hydrate arrives as null and
+    // Save writes the blank over a real address the owner set weeks ago.
+    const payload = await saveUntouched(CONFIG);
+    expect(payload.venueAddress).toEqual(VENUE);
+  });
+
+  it('sends every venue key even when the business has entered none', async () => {
+    // The grandfathered state for every existing tenant. It must save without inventing an
+    // address, and without dropping the key (which would mean "leave it alone" forever).
+    const empty = { street: null, postalCode: null, city: null, country: null };
+    const payload = await saveUntouched({ ...CONFIG, venueAddress: empty });
+    expect(payload).toHaveProperty('venueAddress');
+    expect(payload.venueAddress).toEqual(empty);
+  });
+
+  it('never prefills the venue from the registered company address', async () => {
+    // GDPR Art. 25(2): the VAT address is frequently the owner's home, and a prefill they
+    // click past is not the individual's intervention. It must stay empty.
+    const payload = await saveUntouched({
+      ...CONFIG,
+      venueAddress: { street: null, postalCode: null, city: null, country: null },
+      company: { street: 'Woonstraat 9', postalCode: '1000', city: 'Brussel' },
+    });
+    expect(payload.venueAddress).toEqual({ street: null, postalCode: null, city: null, country: null });
+    expect(JSON.stringify(payload)).not.toContain('Woonstraat');
   });
 });

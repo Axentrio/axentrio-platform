@@ -94,6 +94,29 @@ export class BookingSettings {
   @Column({ type: 'int', name: 'default_max_horizon_days', nullable: true })
   defaultMaxHorizonDays?: number | null;
 
+  /**
+   * Where customers come TO — never the VAT/legal address.
+   *
+   * The registered address sits in the tenant's onboarding record and is off limits here:
+   * it is write-once, unvalidated, and for a sole trader is usually their home. Putting it
+   * on invites sent to strangers is what GDPR Art. 25(2) means by making personal data
+   * accessible to an indefinite number of people *by default*. So these start null for
+   * every tenant, are never backfilled, and reach an invite only once an owner types one
+   * in. Components rather than a single line because Graph accepts structure and ICS does
+   * not — flattening later is free, parsing later is not.
+   */
+  @Column({ type: 'varchar', length: 200, name: 'venue_street', nullable: true })
+  venueStreet?: string | null;
+
+  @Column({ type: 'varchar', length: 200, name: 'venue_postal_code', nullable: true })
+  venuePostalCode?: string | null;
+
+  @Column({ type: 'varchar', length: 200, name: 'venue_city', nullable: true })
+  venueCity?: string | null;
+
+  @Column({ type: 'varchar', length: 2, name: 'venue_country', nullable: true })
+  venueCountry?: string | null;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

@@ -48,6 +48,7 @@ import {
   enforceBusinessCapacity,
 } from '../../booking/booking-providers/internal.provider';
 import type { BusinessRules } from '../../booking/booking-providers/service-timing';
+import { EMPTY_VENUE } from '../../contracts/venue-address';
 
 /** Records every statement and replays canned rows in order. */
 function fakeManager(...responses: unknown[][]) {
@@ -74,6 +75,7 @@ const rules = (over: Partial<BusinessRules> = {}): BusinessRules => ({
   defaultBufferAfterMin: null,
   defaultMinNoticeMin: null,
   defaultMaxHorizonDays: null,
+  venue: EMPTY_VENUE,
   ...over,
 });
 

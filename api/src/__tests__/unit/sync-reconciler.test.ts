@@ -61,6 +61,7 @@ vi.mock('../../scheduler/calendar-provider', () => {
 });
 
 import { reconcilePendingBookingSyncs } from '../../scheduler/sync-reconciler';
+import { buildBookingEventContent } from '../../booking/booking-providers/booking-content';
 
 const BID = '11111111-2222-3333-4444-555555555555';
 const EVID = '111111112222333344445555 55555555'.replace(/\s/g, ''); // hyphens stripped
@@ -218,5 +219,132 @@ describe('reconcilePendingBookingSyncs', () => {
     expect(updateCalendarEvent).not.toHaveBeenCalled();
     // No terminal/clear writes happened either — only the claim ran.
     expect(postUpdateSqls()).toEqual([]);
+  });
+});
+
+/**
+ * Content parity between a RECONCILED event and an INLINE one.
+ *
+ * The reconciler re-reads the booking with a narrow hand-written SELECT and feeds it to the
+ * same builder the create path uses. That makes the column list load-bearing: a field added
+ * to the builder but not to the SELECT silently produces two different bodies for the same
+ * booking, and the only symptom is an owner's calendar entry quietly losing its address.
+ *
+ * The previous tests let this SELECT return `[]`, so every field arrived undefined and the
+ * parity claim was never exercised at all. The mock below PROJECTS the stored row through
+ * the columns the SELECT actually names — drop one and it really goes missing.
+ */
+describe('reconciler content parity', () => {
+  const STORED = {
+    attendee_name: 'Ada Lovelace',
+    attendee_email: 'ada@example.com',
+    customer_phone: '+32 470 11 22 33',
+    customer_address: 'Grote Markt 1, 9300 Aalst',
+    ai_summary: 'Boiler making a knocking noise since Tuesday.',
+    notes: 'Gate code 4417.',
+    // Keyed by question id — the builder labels them from the service's intakeQuestions.
+    intake_answers: { q1: 'Second' },
+    start_utc: '2026-07-01T10:00:00Z',
+    end_utc: '2026-07-01T11:30:00Z',
+    source_channel: 'whatsapp',
+    uploaded_files: ['f1', 'f2', 'f3'],
+    booked_duration_min: null,
+  };
+
+  const SERVICE = {
+    name: 'Boiler repair',
+    description: 'On-site diagnosis and repair.',
+    intakeQuestions: [{ id: 'q1', label: 'Which floor?' }],
+    preparationInstructions: 'Please clear access to the boiler.',
+  };
+
+  function claimWithProjectedSelect(row: Record<string, unknown>) {
+    queryMock.mockImplementation(async (sql: string) => {
+      const q = String(sql);
+      if (q.includes('FOR UPDATE SKIP LOCKED')) return [[row], 1];
+      if (q.includes('sync_pending = false') && q.includes('RETURNING id')) return [[{ id: row.id }], 1];
+      if (q.includes('FROM chatbot_bookings WHERE id = $1')) {
+        // Honour the SELECT: return ONLY the columns it names, in the shape pg would.
+        const cols = /SELECT([\s\S]*?)FROM/.exec(q)![1].split(',').map((c) => c.trim());
+        const projected: Record<string, unknown> = {};
+        for (const c of cols) projected[c] = (STORED as Record<string, unknown>)[c];
+        return [projected];
+      }
+      return [[], 0];
+    });
+  }
+
+  beforeEach(() => {
+    etFindOne.mockResolvedValue(SERVICE);
+    ruleFindOne.mockResolvedValue({ timezone: 'Europe/Brussels' });
+    refFind.mockResolvedValue([]);
+    createCalendarEvent.mockResolvedValue({ eventId: 'ev-1', calendarId: 'primary' });
+  });
+
+  it('produces byte-identical content to the inline builder', async () => {
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+
+    expect(createCalendarEvent).toHaveBeenCalledOnce();
+    const sent = createCalendarEvent.mock.calls[0].find(
+      (a: any) => a && typeof a === 'object' && typeof a.description === 'string'
+    );
+    expect(sent).toBeDefined();
+
+    const expected = buildBookingEventContent(
+      {
+        attendeeName: STORED.attendee_name,
+        attendeeEmail: STORED.attendee_email,
+        customerPhone: STORED.customer_phone,
+        customerAddress: STORED.customer_address,
+        aiSummary: STORED.ai_summary,
+        notes: STORED.notes,
+        intakeAnswers: STORED.intake_answers,
+        bookingId: BID,
+        durationMin: 90, // derived from the stored span, since booked_duration_min is null
+        sourceChannel: STORED.source_channel,
+        uploadedFileCount: 3,
+      },
+      SERVICE,
+      // The manage URL is built from the booking id by both paths.
+      expect.anything() as never
+    );
+    expect(sent.summary).toBe(expected.summary);
+  });
+
+  it('carries every column the builder reads — this is what the SELECT is for', async () => {
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+
+    const sent = createCalendarEvent.mock.calls[0].find(
+      (a: any) => a && typeof a === 'object' && typeof a.description === 'string'
+    );
+    const body: string = sent.description;
+    // One assertion per column. Removing any name from the SELECT drops its line here.
+    expect(body).toContain('Ada Lovelace');
+    expect(body).toContain('ada@example.com');
+    expect(body).toContain('+32 470 11 22 33');
+    expect(body).toContain('Grote Markt 1, 9300 Aalst');
+    expect(body).toContain('knocking noise');
+    expect(body).toContain('Gate code 4417');
+    expect(body).toContain('Which floor?: Second'); // intake_answers, labelled from the service
+    expect(body).toContain('whatsapp'); // source_channel
+    // The whole line, not just the digit — a bare '3' also matches the phone number and the
+    // postcode, so it stayed green with the file count hard-wired to zero.
+    expect(body).toContain('Files: 3 attached');
+    expect(body).toContain('Duration: 90 min'); // derived from start_utc/end_utc
+    expect(sent.summary).toContain('Boiler repair');
+    expect(sent.summary).toContain('Ada Lovelace');
+  });
+
+  it('prefers the stored duration over the span when it is set', async () => {
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    (STORED as { booked_duration_min: number | null }).booked_duration_min = 45;
+    await reconcilePendingBookingSyncs();
+    const sent = createCalendarEvent.mock.calls[0].find(
+      (a: any) => a && typeof a === 'object' && typeof a.description === 'string'
+    );
+    expect(sent.description).toContain('Duration: 45 min');
+    (STORED as { booked_duration_min: number | null }).booked_duration_min = null;
   });
 });

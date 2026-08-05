@@ -13,7 +13,10 @@ import { computeSlots } from '../../booking/booking-providers/slot-engine';
 import { overrideCoversDate } from '../../database/entities/AvailabilityRule';
 import { buildHoursSection } from '../../modules/booking.module';
 import { dateOverride, updateSchedulerSchema } from '../../schemas/scheduler.schema';
-import { buildIntakeAnswers } from '../../booking/booking.service';
+// The pure module, not booking.service — that edge drags the whole booking graph into a
+// unit test and has already made unrelated suites flake once.
+import { buildIntakeAnswers } from '../../booking/intake-answers';
+import { calendarSyncState } from '../../booking/booking.service';
 
 const RULE = {
   timezone: 'Europe/Brussels',
@@ -192,5 +195,36 @@ describe('lead intake answers are joined to their labels', () => {
   it('returns null when there is nothing to show', () => {
     expect(buildIntakeAnswers(QS as never, {})).toBeNull();
     expect(buildIntakeAnswers(QS as never, null)).toBeNull();
+  });
+});
+
+/**
+ * The calendar sync pill.
+ *
+ * `sync_last_error` is written by BOTH the retry path and the terminal path — the difference
+ * is that only the terminal path clears `sync_pending` (sync-reconciler: `terminal()` sets it
+ * false, `recordFailure()` leaves it true). Testing the error first therefore reported
+ * attempt 1 of 6, with the next try due in minutes, as a red "Not on your calendar" alarm
+ * telling the owner to reconnect and add the event by hand — while the system was busy
+ * fixing it itself.
+ */
+describe('calendarSync status', () => {
+  const sync = (b: Record<string, unknown>, mirrored = false) => calendarSyncState(b as never, mirrored);
+
+  it('reads a RETRYING booking as pending, not failed', () => {
+    expect(sync({ status: 'confirmed', syncPending: true, syncLastError: 'ECONNRESET' })).toBe('pending');
+  });
+
+  it('reads a genuinely TERMINAL failure as failed', () => {
+    // terminal() clears sync_pending, which is what makes it distinguishable at all.
+    expect(sync({ status: 'confirmed', syncPending: false, syncLastError: 'no_access' })).toBe('failed');
+  });
+
+  it('still reports a healthy mirror as synced', () => {
+    expect(sync({ status: 'confirmed', syncPending: false, syncLastError: null }, true)).toBe('synced');
+  });
+
+  it('says nothing for a booking that is not confirmed', () => {
+    expect(sync({ status: 'request_created', syncPending: true, syncLastError: 'x' })).toBe('none');
   });
 });

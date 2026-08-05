@@ -328,12 +328,8 @@ export async function adminListBookings(
    * portal rendered it as an ordinary green "Confirmed". The owner could only find out by
    * noticing the absence. Surfacing it is the whole point of this field.
    */
-  const calendarSyncOf = (b: Booking): 'synced' | 'pending' | 'failed' | 'none' => {
-    if (b.status !== 'confirmed') return 'none';
-    if (b.syncLastError) return 'failed';
-    if (b.syncPending) return 'pending';
-    return mirroredBookingIds.has(b.id) ? 'synced' : 'none';
-  };
+  const calendarSyncOf = (b: Booking): CalendarSyncState =>
+    calendarSyncState(b, mirroredBookingIds.has(b.id));
 
   // Service-name lookup for display (requests have no Meet URL but do name the service).
   const serviceIds = [...new Set(rows.map((r) => r.eventTypeId).filter((v): v is string => !!v))];
@@ -483,3 +479,29 @@ export async function getManageBooking(
 
 // Lifted to its own dependency-free module; re-exported so existing importers are unaffected.
 export { buildIntakeAnswers };
+
+
+export type CalendarSyncState = 'synced' | 'pending' | 'failed' | 'none';
+
+/**
+ * What the owner is told about a booking's calendar mirror.
+ *
+ * `sync_last_error` is written by BOTH the retry path and the terminal one; the ONLY thing
+ * that distinguishes them is `sync_pending`, which `terminal()` clears and `recordFailure()`
+ * deliberately leaves true. So pending must be tested FIRST. Testing the error first
+ * reported attempt 1 of 6 — with the next try due in minutes — as a red "Not on your
+ * calendar" alarm telling the owner to reconnect and add the event by hand, while the
+ * reconciler was busy fixing it.
+ *
+ * Exported and pure so the rule can be tested directly rather than re-stated in a test.
+ */
+export function calendarSyncState(
+  b: Pick<Booking, 'status' | 'syncPending' | 'syncLastError'>,
+  hasMirror: boolean
+): CalendarSyncState {
+  if (b.status !== 'confirmed') return 'none';
+  if (b.syncPending) return 'pending';
+  if (b.syncLastError) return 'failed';
+  return hasMirror ? 'synced' : 'none';
+}
+

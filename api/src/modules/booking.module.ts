@@ -27,6 +27,7 @@ import {
 } from '../agent/tools/booking.tool';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
+import { formatVenueLine } from '../contracts/venue-address';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
@@ -221,14 +222,74 @@ export function formatServicesForPlaceholder(services: ServiceType[]): string {
 /**
  * Concise opening hours for the `{openingHours}` placeholder, e.g.
  * "Mon 09:00-17:00, Tue 09:00-17:00". Pure. No rule / no windows → ''.
+ *
+ * CLOSURES ARE PART OF THE ANSWER. This rendered the weekly grid alone, while the booking
+ * module's own OPENING HOURS block has stated upcoming date overrides since they were added
+ * — so a template using this placeholder, or any bot without a bookable catalog (where the
+ * block is suppressed entirely), would tell a customer the business is open on a day the
+ * owner had marked closed. A closure the owner took the trouble to enter is the single most
+ * important thing this string can carry.
+ *
+ * Kept SHORT deliberately: this is an inline value inside somebody's prose, not a section.
+ * Only closures are summarised — a date with one-off hours still resolves correctly at
+ * booking time, and spelling every variation out here would swamp the sentence it sits in.
  */
-export function formatHoursForPlaceholder(rule: AvailabilityRule | null): string {
+export function formatHoursForPlaceholder(rule: AvailabilityRule | null, now: Date = new Date()): string {
   if (!rule) return '';
-  if (rule.availabilityMode === 'always_open') return 'open 24/7';
-  return WEEKDAY_ORDER.flatMap(({ key, label }) => {
-    const wins = rule.weeklyHours?.[key];
-    return wins && wins.length ? [`${label} ${fmtWindows(wins)}`] : [];
-  }).join(', ');
+  const base =
+    rule.availabilityMode === 'always_open'
+      ? 'open 24/7'
+      : WEEKDAY_ORDER.flatMap(({ key, label }) => {
+          const wins = rule.weeklyHours?.[key];
+          return wins && wins.length ? [`${label} ${fmtWindows(wins)}`] : [];
+        }).join(', ');
+
+  const today = DateTime.fromJSDate(now).setZone(rule.timezone || 'UTC').toFormat('yyyy-MM-dd');
+  const closures = (Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [])
+    .filter((o) => {
+      if (!o || typeof o.date !== 'string' || !o.closed) return false;
+      // A RANGE stays relevant until its LAST day — a fortnight's closure that began
+      // yesterday still has thirteen days to go.
+      const end = typeof o.endDate === 'string' && o.endDate >= o.date ? o.endDate : o.date;
+      return end >= today;
+    })
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 3)
+    .map((o) => {
+      const end = typeof o.endDate === 'string' && o.endDate > o.date ? o.endDate : null;
+      return end ? `${o.date} to ${end}` : o.date;
+    });
+
+  if (!closures.length) return base;
+  const closed = `closed ${closures.join(', ')}`;
+  return base ? `${base} · ${closed}` : closed;
+}
+
+/**
+ * WHERE the business is, for the bot to say out loud.
+ *
+ * The venue was shipped as an invite-only field: it reaches the calendar event and the
+ * confirmation email, and nothing else. So an owner would fill in their address, and the
+ * assistant — asked "where are you based?" — answered that no location was specified. From
+ * the owner's side the setting simply appeared not to work.
+ *
+ * Distinct from the SERVICE AREA block, and both can be present: the area is where the
+ * business will TRAVEL TO, this is where customers COME TO. A business can have one, the
+ * other, or both.
+ */
+export function buildVenueSection(venue: {
+  street?: string | null;
+  postalCode?: string | null;
+  city?: string | null;
+  country?: string | null;
+} | null | undefined): string | null {
+  const line = formatVenueLine(venue);
+  if (!line) return null;
+  return `\n## OUR ADDRESS
+Customers come to us at: ${sanitizeForLine(line)}.
+Give this address when a customer asks where you are, how to find you, or where an
+appointment will take place. Do not invent directions, parking or opening arrangements
+that are not stated elsewhere.`;
 }
 
 /**
@@ -385,6 +446,12 @@ export const bookingModule: ModuleDefinition = {
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );
+    const venueSection = buildVenueSection({
+      street: bookingSettings?.venueStreet,
+      postalCode: bookingSettings?.venuePostalCode,
+      city: bookingSettings?.venueCity,
+      country: bookingSettings?.venueCountry,
+    });
     const businessCapacity = !!(
       bookingSettings?.maxBookingsPerDay ||
       bookingSettings?.maxBookedMinutesPerDay ||
@@ -393,8 +460,10 @@ export const bookingModule: ModuleDefinition = {
     const servicesSection = buildServicesSection(services, businessCapacity);
     // No bookable catalog → the services and hours blocks stay suppressed exactly as
     // before, but a configured service area is still worth stating on its own.
-    if (!servicesSection) return areaSection;
+    // An address is worth stating even for a bot with no bookable catalog — "where are you?"
+    // is not a booking question.
+    if (!servicesSection) return [venueSection, areaSection].filter(Boolean).join('') || null;
     const hoursSection = buildHoursSection(rule);
-    return [servicesSection, hoursSection, areaSection].filter(Boolean).join('');
+    return [servicesSection, hoursSection, venueSection, areaSection].filter(Boolean).join('');
   },
 };

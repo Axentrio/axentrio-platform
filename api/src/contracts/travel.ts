@@ -1,0 +1,165 @@
+/**
+ * Travel time between two jobs — the arithmetic, and nothing else.
+ *
+ * THE PROBLEM. A 10:00–10:30 job at X and a 10:30–11:00 job at Y were both bookable no
+ * matter how far apart X and Y are, because the only thing standing between two
+ * appointments was `BookingSettings.minGapMin` — one flat number for the whole business.
+ * A flat gap cannot be right twice: set it to 30 and every next-door job wastes half an
+ * hour, set it to 5 and the cross-country one is impossible the moment it is confirmed.
+ *
+ * WHAT THIS FILE IS. Pure functions over coordinates and minutes. No HTTP, no DB, no
+ * Google. `service-timing.ts` and `event-location.ts` exist separately for exactly this
+ * reason: importing the travel gate from `internal.provider` must not drag the entity graph
+ * (and a live DB connection) into a test that only wants to check the sums.
+ *
+ * WHICH WAY IT FAILS. Every unknown here degrades to the flat gap, never to a refusal. An
+ * un-geocodable address, a neighbouring job at no fixed address, a Routes API outage — all
+ * of them mean "this file has nothing to add", and the caller falls back to the behaviour
+ * the platform had before travel time existed. A false refusal costs a real customer a real
+ * booking; a false allow costs the owner the same rushed drive they already have today.
+ */
+
+/** WGS84, as Google returns and as we store on a booking. */
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * How precisely Google placed an address — and therefore whether we believe it.
+ *
+ * This is load-bearing, not metadata. `APPROXIMATE` is what a bare city name resolves to:
+ * a centroid that can sit kilometres from the real door. Gating a 30-minute drive on a
+ * point that vague authorises slots that are physically impossible, so it is treated as
+ * NOT KNOWN rather than as a location — see `isTrustedForTravel`.
+ */
+export type GeocodePrecision = 'rooftop' | 'range_interpolated' | 'geometric_center' | 'approximate';
+
+/**
+ * A precision we will let decide a booking. `approximate` is deliberately excluded: it is
+ * recorded on the row (so the owner and any later audit can see what we had) but it never
+ * drives the gate.
+ */
+export function isTrustedForTravel(precision: GeocodePrecision | null | undefined): boolean {
+  return precision === 'rooftop' || precision === 'range_interpolated' || precision === 'geometric_center';
+}
+
+/** Mean Earth radius (km), IUGG. */
+const EARTH_RADIUS_KM = 6371.0088;
+
+const toRad = (deg: number): number => (deg * Math.PI) / 180;
+
+/**
+ * Great-circle distance in km. Used ONLY as a lower bound — see `couldReachWithin`.
+ *
+ * Straight-line distance is never the answer to "how long is the drive", but it is a
+ * guaranteed underestimate of it, and that one-sidedness is what makes it safe to
+ * pre-filter with.
+ */
+export function haversineKm(a: GeoPoint, b: GeoPoint): number {
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * EARTH_RADIUS_KM * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * TWO BOUNDS, POINTING OPPOSITE WAYS.
+ *
+ * Both pre-filters below exist to avoid spending an API element on a pair whose answer is
+ * already certain. But "certainly too far" and "certainly close enough" are not the same
+ * question, and they CANNOT share a speed constant — an earlier draft used one for both
+ * and waved a 47 km intercity pair through a 60-minute gap, on the reasoning that a
+ * straight line at motorway speed fits. The real drive is about fifty minutes plus
+ * parking. It did not fit.
+ *
+ * So: each filter gets the speed that makes ITS answer one-sided.
+ *
+ * `MAX_KMH` — nobody beats this on public roads, so failing it is conclusive.
+ * `MIN_KMH` — effective straight-line speed through a dense city centre, once the detour
+ *   factor of real streets is folded in. Beating it is conclusive the other way.
+ *
+ * Moving MAX up, or MIN down, only ever costs API calls. Moving MAX down, or MIN up, is
+ * what silently authorises an impossible booking.
+ */
+export const PREFILTER_MAX_KMH = 120;
+export const PREFILTER_MIN_KMH = 20;
+
+/**
+ * Could a driver possibly cover `from`→`to` in `minutes`, ignoring roads and traffic?
+ *
+ * `false` is CERTAIN: not even a straight line at motorway speed fits, so no routing
+ * answer will fit either and the slot can be rejected without spending an API element.
+ * `true` is only "maybe" — the real drive may still be longer, so a `true` here means
+ * ASK GOOGLE, not "allow".
+ */
+export function couldReachWithin(from: GeoPoint, to: GeoPoint, minutes: number): boolean {
+  if (minutes <= 0) return haversineKm(from, to) === 0;
+  return haversineKm(from, to) <= (PREFILTER_MAX_KMH * minutes) / 60;
+}
+
+/**
+ * The mirror image: is this pair so close that the gap suffices even on the worst plausible
+ * drive?
+ *
+ * `true` is CERTAIN, because it clears the pessimistic bound: crawling through town at
+ * `PREFILTER_MIN_KMH` of effective straight-line progress still arrives in time, so no
+ * routing answer will change the verdict. `false` means ask Google.
+ *
+ * This is where most of the savings live — a plumber's next job three streets away is the
+ * common case, and it never costs an element.
+ */
+export function certainlyReachableWithin(from: GeoPoint, to: GeoPoint, minutes: number): boolean {
+  if (minutes <= 0) return false;
+  return haversineKm(from, to) <= (PREFILTER_MIN_KMH * minutes) / 60;
+}
+
+/** What the caller knows about the gap between one job and the next. */
+export interface TravelGapInput {
+  /**
+   * Routing's answer in minutes, or null when there isn't one — no coordinates on either
+   * side, an untrusted geocode, or the Routes API was unreachable. Null is the
+   * degrade-to-flat-gap signal and is a NORMAL outcome, not an error.
+   */
+  driveMin: number | null;
+  /** The owner's safety margin on top of the drive: parking, the doorstep, overrunning. */
+  slackMin: number;
+  /** The business's existing flat gap. Stays the floor — travel raises it, never lowers it. */
+  minGapMin: number;
+}
+
+/**
+ * How many free minutes must sit between two consecutive jobs.
+ *
+ * ADDITIVE ON TOP OF THE FLAT GAP, not a replacement for it. `minGapMin` is the owner's
+ * stated breathing room — they set it for reasons that have nothing to do with distance
+ * (a coffee, notes, a phone call), and a two-minute drive must not silently cancel it.
+ * So the answer is the LARGER of the flat gap and the drive-plus-slack, which means:
+ *
+ *   - no routing answer  → exactly today's behaviour, `minGapMin`
+ *   - a short drive      → still `minGapMin`, unchanged
+ *   - a long drive       → the drive, plus the owner's slack
+ *
+ * Slack is added only when there IS a drive to pad. Adding it to the null case would
+ * quietly tighten every business that never uses this feature.
+ */
+export function travelGapMinutes(input: TravelGapInput): number {
+  const floor = Math.max(0, input.minGapMin);
+  if (input.driveMin === null || !Number.isFinite(input.driveMin) || input.driveMin < 0) return floor;
+  return Math.max(floor, input.driveMin + Math.max(0, input.slackMin));
+}
+
+/**
+ * Cache key for one origin→destination lookup.
+ *
+ * Rounded to ~11 m (5 decimal places). Two customers in the same building must not each
+ * cost an API element, and a drive time is not sensitive to a house number. Rounding
+ * further would start merging genuinely different addresses on a long street.
+ */
+export function travelCacheKey(from: GeoPoint, to: GeoPoint, mode: string): string {
+  const r = (n: number): string => n.toFixed(5);
+  return `travel:${mode}:${r(from.lat)},${r(from.lng)}:${r(to.lat)},${r(to.lng)}`;
+}

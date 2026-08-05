@@ -16,6 +16,7 @@ import { AvailabilityRule } from '../../database/entities/AvailabilityRule';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { normalizeVenue } from '../../contracts/venue-address';
 import { resolveEventLocation } from './event-location';
+import { organizerAddressForTenant } from './organizer-address';
 import { describeServiceArea, isEnforceableEntry, matchServiceArea } from '../../contracts/service-area';
 import {
   resolveServiceTiming,
@@ -25,7 +26,6 @@ import {
 import { Booking } from '../../database/entities/Booking';
 import { BookingLog } from '../../database/entities/BookingLog';
 import { logger } from '../../utils/logger';
-import { config } from '../../config/environment';
 import {
   BookingError,
   BookingContext,
@@ -412,14 +412,22 @@ export async function enforceBusinessCapacity(
 }
 
 /**
- * The ICS organizer stamped on every NEW booking.
+ * The ICS organizer stamped on every NEW booking: a per-TENANT address on the platform's
+ * already-verified sending domain.
  *
- * The platform address, not the tenant's — deliberately. Resend only sends from verified
- * domains, so the envelope sender is always this address; an ORGANIZER that disagreed with
- * it made Gmail and Outlook refuse to render RSVP controls. The business's identity rides
- * along as the organizer's display name, and its real address as the reply-to.
+ * Still not the tenant's own address — Resend sends only from verified domains, and the
+ * envelope sender has to stay on ours for DMARC alignment. But it is no longer one shared
+ * `bookings@` for every tenant on the platform, which is the generic sending address
+ * Google's Calendar guidance explicitly warns against: abuse from one tenant would land on
+ * everyone's deliverability. See `organizer-address.ts` for why the local part is derived
+ * from the immutable tenant id rather than the business name.
+ *
+ * NOTE the caveat recorded in docs/booking-open-decisions-research.md §2: the claim that
+ * Gmail and Outlook refuse RSVP controls when ORGANIZER disagrees with the envelope sender
+ * has no primary source. Keeping From == ORGANIZER costs nothing and satisfies it whether
+ * or not it is true.
  */
-const FROZEN_ORGANIZER = config.email.fromAddress;
+const frozenOrganizerFor = (tenantId: string): string => organizerAddressForTenant(tenantId);
 
 /** True only when the service is configured for a variable duration with a valid range. */
 function hasValidRange(service: ServiceType): boolean {
@@ -935,7 +943,7 @@ export class InternalProvider implements BookingProvider {
             uploadedFiles ? JSON.stringify(uploadedFiles) : null,
             ctx.session?.channel ?? null,
             extras?.aiSummary ?? null,
-            FROZEN_ORGANIZER,
+            frozenOrganizerFor(ctx.tenant.id),
           ]
         );
         return rows[0].id;
@@ -1050,7 +1058,7 @@ export class InternalProvider implements BookingProvider {
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
       ownerEmail: ctx.botSettings.ai?.supportEmail ?? undefined,
-      organizerEmail: FROZEN_ORGANIZER,
+      organizerEmail: frozenOrganizerFor(ctx.tenant.id),
       organizerName: ctx.botSettings.ai?.brandVoice?.businessName || ctx.tenant.name,
       manageUrl: buildManageUrl(bookingId),
       durationMin: effectiveDuration,
@@ -1135,7 +1143,7 @@ export class InternalProvider implements BookingProvider {
           contact.phone,
           bookedDurationMin ?? null,
           uploadedFiles ? JSON.stringify(uploadedFiles) : null,
-          FROZEN_ORGANIZER,
+          frozenOrganizerFor(ctx.tenant.id),
         ]
       );
       bookingId = rows[0].id;

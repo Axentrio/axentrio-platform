@@ -9,6 +9,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolveEventLocation } from '../../booking/booking-providers/event-location';
 import {
+  organizerAddressForTenant,
+  senderFor,
+  isOnVerifiedDomain,
+} from '../../booking/booking-providers/organizer-address';
+import {
   normalizeVenue,
   formatVenueLine,
   hasVenue,
@@ -247,5 +252,93 @@ describe('booking email — owner and customer get separate messages', () => {
     await sendBookingEmail({ ...BASE, location: 'Grote Markt 1, 9300 Aalst' });
     expect(toCustomer()!.body).toContain('Grote Markt 1, 9300 Aalst');
     expect(toOwner()!.body).toContain('Grote Markt 1, 9300 Aalst');
+  });
+});
+
+// --------------------------------------------------------------------------------------
+
+describe('per-tenant sending address', () => {
+  // config.email.fromAddress in test env decides the verified domain; derive rather than
+  // hard-code it, so this suite states a RELATIONSHIP and not an environment.
+  const domain = organizerAddressForTenant('a3f2c1d0-0000-0000-0000-000000000000').split('@')[1];
+
+  it('gives two tenants two different addresses on the SAME verified domain', () => {
+    const a = organizerAddressForTenant('a3f2c1d0-1111-1111-1111-111111111111');
+    const b = organizerAddressForTenant('b7e40000-2222-2222-2222-222222222222');
+    expect(a).not.toBe(b);
+    expect(a.split('@')[1]).toBe(domain);
+    expect(b.split('@')[1]).toBe(domain);
+  });
+
+  it('is STATIC for a tenant — the same id always yields the same address', () => {
+    // Google's guidance is "unique AND static": reputation accrues per address, so an
+    // address derived from anything an owner can rename would reset it.
+    const id = 'a3f2c1d0-1111-1111-1111-111111111111';
+    expect(organizerAddressForTenant(id)).toBe(organizerAddressForTenant(id));
+  });
+
+  it('produces a syntactically valid local part from a uuid', () => {
+    const addr = organizerAddressForTenant('A3F2-C1D0-XXXX');
+    expect(addr).toMatch(/^[a-z0-9-]+@[^@]+$/);
+    expect(addr).not.toContain('--');
+  });
+
+  it('sends AS the frozen organizer when that address is ours', () => {
+    const frozen = `bookings-a3f2c1d0@${domain}`;
+    expect(senderFor(frozen, 'Valyro')).toBe(`Valyro <${frozen}>`);
+  });
+
+  it('refuses to send as an address on somebody else’s domain', () => {
+    // Migration 1788900000000 backfilled older rows with the tenant's own ai.supportEmail.
+    // Sending as that would be rejected by Resend and would break DMARC alignment.
+    const out = senderFor('info@valyro.be', 'Valyro');
+    expect(out).toContain(`@${domain}`);
+    expect(out).not.toContain('valyro.be');
+  });
+
+  it('falls back cleanly when a booking has no frozen organizer at all', () => {
+    expect(senderFor(null, 'Valyro')).toContain(`@${domain}`);
+    expect(senderFor(undefined, null)).toContain(`@${domain}`);
+  });
+
+  it('strips characters that would break the From header', () => {
+    const out = senderFor(`bookings-x@${domain}`, 'Smith & Sons <evil@attacker.test>');
+    expect(out).not.toContain('<evil@attacker.test>');
+    expect(out.match(/</g) ?? []).toHaveLength(1);
+  });
+
+  it('recognises our own domain case-insensitively', () => {
+    expect(isOnVerifiedDomain(`BOOKINGS-X@${domain.toUpperCase()}`)).toBe(true);
+    expect(isOnVerifiedDomain('someone@example.com')).toBe(false);
+    expect(isOnVerifiedDomain(null)).toBe(false);
+  });
+
+  it('is not fooled by a lookalike domain suffix', () => {
+    // `notaxentrio.com` ends with the same characters as `axentrio.com` would; the check
+    // must be on the @-boundary, not a bare endsWith.
+    expect(isOnVerifiedDomain(`x@not${domain}`)).toBe(false);
+  });
+});
+
+describe('booking email — From is aligned with the frozen ORGANIZER', () => {
+  beforeEach(() => {
+    send.mockReset();
+    send.mockResolvedValue(undefined);
+  });
+
+  const domain = organizerAddressForTenant('a3f2c1d0-0000-0000-0000-000000000000').split('@')[1];
+
+  it('sends both messages as the booking’s own organizer', async () => {
+    const frozen = `bookings-a3f2c1d0@${domain}`;
+    await sendBookingEmail({ ...BASE, organizerEmail: frozen, organizerName: 'Valyro' });
+    for (const m of sent()) expect(m.from).toBe(`Valyro <${frozen}>`);
+  });
+
+  it('does not try to send as a backfilled tenant address', async () => {
+    await sendBookingEmail({ ...BASE, organizerEmail: 'info@valyro.be', organizerName: 'Valyro' });
+    for (const m of sent()) {
+      expect(String(m.from)).toContain(`@${domain}`);
+      expect(String(m.from)).not.toContain('valyro.be');
+    }
   });
 });

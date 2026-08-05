@@ -9,6 +9,7 @@ import { config } from '../../config/environment';
 import { EmailService } from '../../automations/email.service';
 import { logger } from '../../utils/logger';
 import { buildIcs, IcsMethod } from './ics';
+import { senderFor, parseAddress } from './organizer-address';
 
 let emailService: EmailService | null = null;
 function getEmailService(): EmailService {
@@ -77,16 +78,18 @@ function esc(value: string): string {
     .replace(/'/g, '&#39;');
 }
 
-/** Split a possibly-"Name <email>" address into a bare email + optional name.
- *  Exported for the ICS-organizer regression test. */
-export function parseAddress(addr: string): { email: string; name?: string } {
-  const m = addr.match(/^\s*(.*?)\s*<([^>]+)>\s*$/);
-  if (m) {
-    const name = m[1].replace(/^"|"$/g, '').trim();
-    return { email: m[2].trim(), name: name || undefined };
-  }
-  return { email: addr.trim() };
-}
+/** Re-exported for the ICS-organizer regression test; the implementation is shared with
+ *  the sender resolution so the two can never disagree about what an address is. */
+export { parseAddress };
+
+/**
+ * `From:` for this booking, aligned with its FROZEN ICS ORGANIZER whenever that address is
+ * one we may legally send from. Recomputing it instead would drift away from the organizer
+ * the invite was issued under, and rows backfilled by migration 1788900000000 carry the
+ * tenant's OWN domain, which Resend would reject outright.
+ */
+const senderFrom = (p: BookingEmailParams): string =>
+  senderFor(p.organizerEmail, p.organizerName ?? undefined);
 
 /** Stable across retries of the SAME invite; a reconciler re-claim must not double-send. */
 const inviteIdempotencyKey = (p: BookingEmailParams, audience: string): string =>
@@ -124,6 +127,7 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
   try {
     await getEmailService().send({
       to: [params.ownerEmail as string],
+      from: senderFrom(params),
       subject,
       body,
       // Replying to an owner notification should reach the CUSTOMER, when there is one.
@@ -201,6 +205,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
   try {
     await getEmailService().send({
       to,
+      from: senderFrom(params),
       subject,
       body,
       // Replies reach the business rather than the platform's unattended from-address.

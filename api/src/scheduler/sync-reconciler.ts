@@ -17,6 +17,8 @@
 import { AppDataSource } from '../database/data-source';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
+import { BookingSettings } from '../database/entities/BookingSettings';
+import { resolveEventLocation } from '../booking/booking-providers/event-location';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { logger } from '../utils/logger';
 import { resolveCalendarProvider, providerFor, isCalendarSyncAllowed } from './calendar-provider';
@@ -155,6 +157,7 @@ async function processOne(row: ClaimedRow): Promise<void> {
     timezone: meta.timezone,
     summary: meta.content.summary,
     description: meta.content.description,
+    ...(meta.location ? { location: meta.location } : {}),
   };
 
   if (ref) {
@@ -208,7 +211,14 @@ async function processOne(row: ClaimedRow): Promise<void> {
  */
 async function loadEventMeta(
   row: ClaimedRow
-): Promise<{ content?: { summary: string; description: string }; timezone?: string; startUtc?: string; endUtc?: string }> {
+): Promise<{
+  content?: { summary: string; description: string };
+  /** Resolved venue for the mirror; absent means the event states no place. */
+  location?: string;
+  timezone?: string;
+  startUtc?: string;
+  endUtc?: string;
+}> {
   const etRepo = AppDataSource.getRepository(ServiceType);
   const eventType = row.event_type_id
     ? await etRepo.findOne({ where: { id: row.event_type_id } })
@@ -267,7 +277,31 @@ async function loadEventMeta(
     },
     buildManageUrl(row.id)
   );
-  return { content, timezone: rule.timezone, startUtc: b?.start_utc ?? row.start_utc, endUtc: b?.end_utc ?? row.end_utc };
+  // A rebuilt mirror must carry the SAME location an inline one does, or a crash silently
+  // downgrades the event the owner navigates by. Same pure helpers as the create path.
+  const settings = await AppDataSource.getRepository(BookingSettings).findOne({
+    where: { botId: row.bot_id },
+  });
+  const location = resolveEventLocation({
+    locationType: eventType.locationType,
+    customerAddressRequired: !!eventType.customerAddressRequired,
+    // As on the create path, the Meet URL is not an input to the event.
+    meetUrl: null,
+    customerAddress: b?.customer_address,
+    venue: {
+      street: settings?.venueStreet ?? null,
+      postalCode: settings?.venuePostalCode ?? null,
+      city: settings?.venueCity ?? null,
+      country: settings?.venueCountry ?? null,
+    },
+  });
+  return {
+    content,
+    location,
+    timezone: rule.timezone,
+    startUtc: b?.start_utc ?? row.start_utc,
+    endUtc: b?.end_utc ?? row.end_utc,
+  };
 }
 
 async function clear(row: ClaimedRow): Promise<void> {

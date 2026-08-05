@@ -424,6 +424,12 @@ export interface CalendarEventInput {
   timezone: string;
   summary: string;
   description?: string;
+  /**
+   * The venue, already resolved. Absent means the event states no place — which is the
+   * honest answer for an online, phone or unconfigured booking, and better than a
+   * placeholder the owner cannot navigate to.
+   */
+  location?: string;
 }
 
 export interface CalendarEventResult {
@@ -467,6 +473,7 @@ export async function createCalendarEvent(
           ...(opts.eventId ? { id: opts.eventId } : {}),
           summary: input.summary,
           description: input.description,
+          ...(input.location ? { location: input.location } : {}),
           start: { dateTime: input.startISO, timeZone: input.timezone },
           end: { dateTime: input.endISO, timeZone: input.timezone },
           conferenceData: {

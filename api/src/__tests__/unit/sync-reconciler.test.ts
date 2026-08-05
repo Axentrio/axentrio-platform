@@ -10,6 +10,7 @@ const refSave = vi.fn();
 const etFindOne = vi.fn();
 const ruleFindOne = vi.fn();
 const loggerInfo = vi.fn();
+const bsFindOne = vi.fn(async () => null as any);
 
 vi.mock('../../database/data-source', () => ({
   AppDataSource: {
@@ -19,6 +20,8 @@ vi.mock('../../database/data-source', () => ({
       if (name === 'BookingReference') return { find: refFind, save: refSave, create: (x: any) => x };
       if (name === 'ServiceType') return { findOne: etFindOne };
       if (name === 'AvailabilityRule') return { findOne: ruleFindOne };
+      // The mirror now carries a venue, so loadEventMeta reads the booking settings row.
+      if (name === 'BookingSettings') return { findOne: bsFindOne };
       return {};
     },
   },
@@ -335,6 +338,41 @@ describe('reconciler content parity', () => {
     expect(body).toContain('Duration: 90 min'); // derived from start_utc/end_utc
     expect(sent.summary).toContain('Boiler repair');
     expect(sent.summary).toContain('Ada Lovelace');
+  });
+
+  it('carries the venue onto the mirror, not just into the emailed ICS', async () => {
+    // The whole point of the venue is that the owner can navigate to it. The calendar event
+    // is the surface they actually use, and it carried no location at all until now.
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'in_person', customerAddressRequired: false });
+    bsFindOne.mockResolvedValue({
+      venueStreet: 'Grote Markt 1',
+      venuePostalCode: '9300',
+      venueCity: 'Aalst',
+      venueCountry: null,
+    });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    expect(createCalendarEvent.mock.calls[0][1].location).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('puts the CUSTOMER’s address on a travel job’s mirror', async () => {
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'in_person', customerAddressRequired: true });
+    // Deliberately DIFFERENT from the customer's address. They were the same string, so the
+    // test passed with the travel flag hard-wired to false and proved nothing.
+    bsFindOne.mockResolvedValue({ venueStreet: 'Werfplein 3', venuePostalCode: '9060', venueCity: 'Zelzate' });
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    // Never the venue — that would send the owner to their own shop instead of the job.
+    expect(createCalendarEvent.mock.calls[0][1].location).toBe(STORED.customer_address);
+    expect(createCalendarEvent.mock.calls[0][1].location).not.toContain('Zelzate');
+  });
+
+  it('omits location entirely when no venue is configured', async () => {
+    etFindOne.mockResolvedValue({ ...SERVICE, locationType: 'in_person', customerAddressRequired: false });
+    bsFindOne.mockResolvedValue(null);
+    claimWithProjectedSelect({ ...baseRow, status: 'confirmed' });
+    await reconcilePendingBookingSyncs();
+    expect(createCalendarEvent.mock.calls[0][1].location).toBeUndefined();
   });
 
   it('prefers the stored duration over the span when it is set', async () => {

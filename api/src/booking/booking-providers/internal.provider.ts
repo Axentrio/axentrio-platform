@@ -1001,13 +1001,31 @@ export class InternalProvider implements BookingProvider {
       service,
       buildManageUrl(bookingId),
     );
-    const meetUrl = await this.syncCalendarCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
+    // Read the venue BEFORE the mirror, not after: the calendar event is created here, so
+    // a venue loaded at the email tail arrived too late to reach it at all.
+    const { venue } = await loadBusinessRules(ctx.bot.id);
+    const eventLocation = resolveEventLocation({
+      locationType: service.locationType,
+      customerAddressRequired: service.customerAddressRequired,
+      // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
+      // an input to it. The physical venue is what the mirror carries; Google renders the
+      // Meet link itself from conferenceData.
+      meetUrl: null,
+      customerAddress: contact.address,
+      venue,
+    });
+    const meetUrl = await this.syncCalendarCreate(
+      ctx,
+      bookingId,
+      eventContent,
+      start,
+      end,
+      rule.timezone,
+      eventLocation
+    );
 
     // Confirmation invite (non-fatal). Customer always gets the ICS (+ owner in
     // Phase 0 fallback); the Meet link rides along when present.
-    // The venue comes off the same booking-settings row the rules do; read at the tail
-    // because the transaction has already committed by here.
-    const { venue } = await loadBusinessRules(ctx.bot.id);
     await sendBookingEmail({
       method: 'REQUEST',
       uid: icsUid,
@@ -1468,7 +1486,8 @@ export class InternalProvider implements BookingProvider {
     content: { summary: string; description: string },
     start: Date,
     end: Date,
-    timezone: string
+    timezone: string,
+    location?: string
   ): Promise<string | null> {
     const provider = await resolveCalendarProvider(ctx.bot.id);
     if (!provider) return null; // no calendar connection
@@ -1481,6 +1500,7 @@ export class InternalProvider implements BookingProvider {
           timezone,
           summary: content.summary,
           description: content.description,
+          ...(location ? { location } : {}),
         },
         { eventId: this.googleEventId(bookingId) }
       );
@@ -1704,11 +1724,29 @@ export class InternalProvider implements BookingProvider {
       service,
       buildManageUrl(bookingId)
     );
-    const meetUrl = await this.syncCalendarCreate(ctx, bookingId, eventContent, start, end, rule.timezone);
-
-    // The venue comes off the same booking-settings row the rules do; read at the tail
-    // because the transaction has already committed by here.
+    // Read the venue BEFORE the mirror, not after: the calendar event is created here, so
+    // a venue loaded at the email tail arrived too late to reach it at all.
     const { venue } = await loadBusinessRules(ctx.bot.id);
+    const eventLocation = resolveEventLocation({
+      locationType: service.locationType,
+      customerAddressRequired: service.customerAddressRequired,
+      // Explicitly null: the Meet URL is a RESULT of creating this event, so it cannot be
+      // an input to it. The physical venue is what the mirror carries; Google renders the
+      // Meet link itself from conferenceData.
+      meetUrl: null,
+      customerAddress: confirmed.customerAddress,
+      venue,
+    });
+    const meetUrl = await this.syncCalendarCreate(
+      ctx,
+      bookingId,
+      eventContent,
+      start,
+      end,
+      rule.timezone,
+      eventLocation
+    );
+
     await sendBookingEmail({
       method: 'REQUEST',
       uid: confirmed.icsUid,

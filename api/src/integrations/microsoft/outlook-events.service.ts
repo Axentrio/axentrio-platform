@@ -137,6 +137,9 @@ export async function createOutlookEvent(
   const base = {
     subject: input.summary,
     body: { contentType: 'text', content: input.description ?? '' },
+    // Graph accepts a structured address too, but the venue arrives already flattened and
+    // displayName is what Outlook actually shows.
+    ...(input.location ? { location: { displayName: input.location } } : {}),
     start: utcDateTime(input.startISO),
     end: utcDateTime(input.endISO),
     ...(opts.eventId ? { transactionId: opts.eventId } : {}),

@@ -26,6 +26,10 @@ import {
   useGoogleCalendarStatus,
 } from '@/queries/useGoogleCalendarQueries';
 import {
+  useConnectOutlookCalendar,
+  useOutlookCalendarStatus,
+} from '@/queries/useOutlookCalendarQueries';
+import {
   useSchedulerConfig,
   useUpdateSchedulerConfig,
   type WeeklyHours,
@@ -53,10 +57,34 @@ const DEFAULT_OPEN_DAYS: Weekday[] = ['mon', 'tue', 'wed', 'thu', 'fri'];
 /** Slot intervals people actually book in. Minutes. */
 const SLOT_CHOICES = [15, 30, 60] as const;
 
+/**
+ * Does the wizard's calendar requirement look satisfied?
+ *
+ * EITHER provider counts. The booking engine writes through a provider-agnostic port, so
+ * which one is connected changes nothing downstream — but this step read the GOOGLE status
+ * alone, and its Continue button gated on it, so a business running on Microsoft 365 could
+ * not finish setup at all. Outlook has been a first-class provider on the settings page for
+ * as long as Google, and works end to end once connected.
+ *
+ * Exported as a pure rule so the decision can be tested without a render harness.
+ */
+export function calendarRequirementMet(
+  google: { connected?: boolean } | null | undefined,
+  outlook: { connected?: boolean } | null | undefined
+): boolean {
+  return google?.connected === true || outlook?.connected === true;
+}
+
 export function BookingsStep({ submit }: StepProps) {
   const { t } = useTranslation();
   const { data: calendar, isLoading: calendarLoading } = useGoogleCalendarStatus();
   const connect = useConnectGoogleCalendar();
+  // Outlook is a first-class provider everywhere else in the product — the settings page
+  // has offered it for as long as Google. Only this step demanded Google, so a business
+  // running on Microsoft 365 could not finish setup at all: the Continue button gated on
+  // the GOOGLE status and there was no second option to click.
+  const { data: outlook, isLoading: outlookLoading } = useOutlookCalendarStatus();
+  const connectOutlook = useConnectOutlookCalendar();
   const { data: scheduler } = useSchedulerConfig();
   const updateScheduler = useUpdateSchedulerConfig();
 
@@ -116,8 +144,16 @@ export function BookingsStep({ submit }: StepProps) {
     }
   };
 
-  const connected = calendar?.connected === true;
-  const busy = updateScheduler.isPending || submit.isPending || connect.isPending;
+  // EITHER provider satisfies the step. The engine writes through a provider-agnostic port,
+  // so which one is connected changes nothing downstream.
+  const connected = calendarRequirementMet(calendar, outlook);
+  // Name whichever is actually connected — showing a Google address to an Outlook business
+  // would read as the wrong account being linked.
+  const connectedAccount =
+    calendar?.connected === true ? calendar?.accountEmail : outlook?.accountEmail;
+  const calendarLoadingAny = calendarLoading || outlookLoading;
+  const busy =
+    updateScheduler.isPending || submit.isPending || connect.isPending || connectOutlook.isPending;
 
   return (
     <div className="space-y-6">
@@ -136,21 +172,25 @@ export function BookingsStep({ submit }: StepProps) {
       {/* Connect first: everything below is meaningless without somewhere to write to. */}
       <div className="space-y-2 rounded-xl border border-edge bg-surface-2 p-4">
         <Label>{t('setup.steps.bookings.calendarLabel')}</Label>
-        {calendarLoading ? (
+        {calendarLoadingAny ? (
           <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
         ) : connected ? (
           <p className="flex items-center gap-1.5 text-sm text-status-online">
             <CheckCircle2 className="h-4 w-4" />
-            {t('setup.steps.bookings.calendarConnected', {
-              account: calendar?.accountEmail ?? '',
-            })}
+            {t('setup.steps.bookings.calendarConnected', { account: connectedAccount ?? '' })}
           </p>
         ) : (
           <div className="space-y-2">
-            <Button variant="outline" onClick={() => connect.mutate()} disabled={busy}>
-              {connect.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t('setup.steps.bookings.connectCalendar')}
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => connect.mutate()} disabled={busy}>
+                {connect.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {t('setup.steps.bookings.connectCalendar')}
+              </Button>
+              <Button variant="outline" onClick={() => connectOutlook.mutate()} disabled={busy}>
+                {connectOutlook.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Connect Outlook Calendar
+              </Button>
+            </div>
             <p className="text-xs text-text-muted">{t('setup.steps.bookings.calendarHint')}</p>
           </div>
         )}

@@ -46,6 +46,7 @@ vi.mock('../../webhooks/webhook.emitter', () => ({ emitWebhookEvent: vi.fn(), bu
 import {
   enforceServiceDayCapacity,
   enforceBusinessCapacity,
+  normalizeIntakeAnswers,
 } from '../../booking/booking-providers/internal.provider';
 import type { BusinessRules } from '../../booking/booking-providers/service-timing';
 import { EMPTY_VENUE } from '../../contracts/venue-address';
@@ -296,5 +297,48 @@ describe('enforceBusinessCapacity', () => {
     const dayOnly = fakeManager([{ n: 0, mins: 0 }]);
     await enforceBusinessCapacity(dayOnly.manager, 'bot-1', rules({ maxBookingsPerDay: 5 }), window60, TZ);
     expect(dayOnly.calls).toHaveLength(1);
+  });
+});
+
+/**
+ * Intake answers, and the multi-answer that used to vanish.
+ *
+ * A `choice` question the customer answers more than once arrives as an ARRAY. The
+ * normaliser dropped anything that was not a scalar, so the answer disappeared without a
+ * trace: the owner's calendar entry showed the question with no reply, which reads as "the
+ * customer declined to say" rather than "we lost it".
+ */
+describe('normalizeIntakeAnswers', () => {
+  const svcWith = (ids: string[]) =>
+    ({ intakeQuestions: ids.map((id) => ({ id, label: id, type: 'choice', required: false })) }) as never;
+
+  it('keeps a multi-answer instead of dropping it', () => {
+    const out = normalizeIntakeAnswers(svcWith(['q1']), { q1: ['Colour', 'Cut'] });
+    expect(out).toEqual({ q1: 'Colour, Cut' });
+  });
+
+  it('keeps the scalar members of a mixed array and discards the rest', () => {
+    // A nested object would otherwise render as "[object Object]" on the owner's calendar.
+    const out = normalizeIntakeAnswers(svcWith(['q1']), { q1: ['Cut', { nested: true }, 3, null, 'Colour'] });
+    expect(out).toEqual({ q1: 'Cut, 3, Colour' });
+  });
+
+  it('drops an array with nothing usable in it rather than storing an empty answer', () => {
+    expect(normalizeIntakeAnswers(svcWith(['q1']), { q1: [null, {}, '  '] })).toBeNull();
+  });
+
+  it('still stores plain scalars, and still ignores unknown question ids', () => {
+    const out = normalizeIntakeAnswers(svcWith(['q1']), { q1: 'Second floor', bogus: 'x' });
+    expect(out).toEqual({ q1: 'Second floor' });
+  });
+
+  it('still refuses a non-object payload', () => {
+    expect(normalizeIntakeAnswers(svcWith(['q1']), ['Cut'])).toBeNull();
+    expect(normalizeIntakeAnswers(svcWith(['q1']), 'Cut')).toBeNull();
+  });
+
+  it('caps a long flattened answer like any other', () => {
+    const out = normalizeIntakeAnswers(svcWith(['q1']), { q1: ['x'.repeat(1500), 'y'.repeat(1500)] });
+    expect(out!.q1).toHaveLength(2000);
   });
 });

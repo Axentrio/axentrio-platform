@@ -57,10 +57,60 @@ function googleEventId(bookingId: string): string {
  * Process one tick: claim a batch of due, unleased pending bookings and reconcile
  * each. Re-entrancy guarded in-process; safe to call from a setInterval.
  */
+/**
+ * How long a confirmed booking may legitimately sit with no calendar mirror and no pending
+ * flag before we treat it as orphaned.
+ *
+ * The inline create path commits the booking FIRST and mirrors it after — deliberately, so
+ * a calendar outage cannot cost a customer their slot. That leaves a short, entirely normal
+ * window in which `confirmed + no reference + sync_pending = false` is simply "the calendar
+ * call is still in flight". Ten minutes is far longer than that call can take and far
+ * shorter than a customer waits for their invite.
+ */
+const ORPHAN_GRACE_MINUTES = 10;
+
+/**
+ * Re-flag confirmed bookings whose mirror was never created and which nothing will ever
+ * retry.
+ *
+ * The claim below only ever sees `sync_pending = true`. If the process dies between the
+ * transaction commit and the `markSyncPending` that a failed calendar call performs, the row
+ * lands in a state no sweep reclaims: confirmed, no mirror, no flag. The customer holds a
+ * real slot the owner's calendar never learns about — and because the booking IS valid, the
+ * only symptom is a double-booking weeks later.
+ *
+ * Deliberately narrow: future bookings only (mirroring a past appointment helps nobody), and
+ * only rows past the grace window, so this never races the ordinary create path.
+ */
+async function reflagOrphanedMirrors(): Promise<void> {
+  const reflagged = returningRows<{ id: string }>(await AppDataSource.query(
+    `UPDATE chatbot_bookings b
+        SET sync_pending = true, updated_at = now()
+      WHERE b.status = 'confirmed'
+        AND b.sync_pending = false
+        AND b.start_utc > now()
+        AND b.created_at < now() - interval '${ORPHAN_GRACE_MINUTES} minutes'
+        AND NOT EXISTS (
+          SELECT 1 FROM chatbot_booking_references r WHERE r.booking_id = b.id
+        )
+      RETURNING b.id`
+  ));
+  if (reflagged.length) {
+    // Worth a WARN, not an info: reaching this means a process died mid-create, and the
+    // count is the number of customers who were holding an invisible appointment.
+    logger.warn('[Booking] re-flagged confirmed bookings with no calendar mirror', {
+      count: reflagged.length,
+      bookingIds: reflagged.slice(0, 10).map((r) => r.id),
+    });
+  }
+}
+
 export async function reconcilePendingBookingSyncs(): Promise<void> {
   if (running) return;
   running = true;
   try {
+    // Before claiming: rescue anything the claim can structurally never see.
+    await reflagOrphanedMirrors();
     // NOTE: UPDATE…RETURNING through .query() yields [rows, count], NOT rows —
     // consuming it raw produced two phantom "rows" per tick forever (see
     // utils/raw-sql.ts).

@@ -82,9 +82,16 @@ function claim(row: Record<string, unknown>) {
     return [[], 0];
   });
 }
+const ORPHAN_SWEEP = 'chatbot_booking_references r WHERE r.booking_id';
 function postUpdateSqls(): string[] {
-  return queryMock.mock.calls.map((c) => String(c[0])).filter((s) => !s.includes('FOR UPDATE SKIP LOCKED'));
+  // Excludes the claim AND the orphan sweep that runs before it — both are inputs to a
+  // tick, not outcomes of one. The sweep has its own assertions below.
+  return queryMock.mock.calls
+    .map((c) => String(c[0]))
+    .filter((s) => !s.includes('FOR UPDATE SKIP LOCKED') && !s.includes(ORPHAN_SWEEP));
 }
+const orphanSweepSql = (): string | undefined =>
+  queryMock.mock.calls.map((c) => String(c[0])).find((s) => s.includes(ORPHAN_SWEEP));
 const cleared = () => postUpdateSqls().some((s) => s.includes('sync_last_error = null'));
 const wentTerminal = () => postUpdateSqls().some((s) => s.includes('sync_last_error = $2') && !s.includes('sync_next_attempt_at'));
 const scheduledRetry = () => postUpdateSqls().some((s) => s.includes('sync_next_attempt_at = now()'));
@@ -384,5 +391,60 @@ describe('reconciler content parity', () => {
     );
     expect(sent.description).toContain('Duration: 45 min');
     (STORED as { booked_duration_min: number | null }).booked_duration_min = null;
+  });
+});
+
+/**
+ * The crash window the claim can structurally never see.
+ *
+ * The create path commits the booking, then mirrors it. If the process dies in between, the
+ * row is left confirmed, with no reference and with `sync_pending = false` — and the claim
+ * only ever selects `sync_pending = true`. The customer holds a real slot the owner's
+ * calendar never hears about, and the first symptom is a double-booking weeks later.
+ */
+describe('orphaned-mirror sweep', () => {
+  beforeEach(() => {
+    queryMock.mockResolvedValue(EMPTY_UPDATE);
+  });
+
+  it('runs before the claim on every tick', async () => {
+    await reconcilePendingBookingSyncs();
+    const sqls = queryMock.mock.calls.map((c) => String(c[0]));
+    const sweepAt = sqls.findIndex((s) => s.includes(ORPHAN_SWEEP));
+    const claimAt = sqls.findIndex((s) => s.includes('FOR UPDATE SKIP LOCKED'));
+    expect(sweepAt).toBeGreaterThanOrEqual(0);
+    expect(sweepAt).toBeLessThan(claimAt);
+  });
+
+  it('targets only confirmed bookings with no reference', async () => {
+    await reconcilePendingBookingSyncs();
+    const sql = orphanSweepSql()!;
+    expect(sql).toContain("b.status = 'confirmed'");
+    expect(sql).toContain('b.sync_pending = false');
+    expect(sql).toContain('NOT EXISTS');
+    expect(sql).toContain('chatbot_booking_references');
+  });
+
+  it('never touches a past booking', async () => {
+    // Mirroring an appointment that already happened helps nobody and would resurrect
+    // events the owner has moved on from.
+    expect(orphanSweepSql() ?? (await reconcilePendingBookingSyncs(), orphanSweepSql())!).toContain(
+      'b.start_utc > now()',
+    );
+  });
+
+  it('waits out a grace window so it cannot race an ordinary create', async () => {
+    // confirmed + no reference + sync_pending=false is the NORMAL state for the few seconds
+    // between the commit and the calendar call returning. Sweeping immediately would fight
+    // the create path for every booking on the platform.
+    await reconcilePendingBookingSyncs();
+    expect(orphanSweepSql()).toMatch(/created_at < now\(\) - interval '\d+ minutes'/);
+  });
+
+  it('sets the flag the claim looks for, rather than mirroring directly', async () => {
+    // Re-flagging reuses the whole existing retry/backoff/terminal machinery instead of
+    // opening a second path to the calendar with its own failure modes.
+    await reconcilePendingBookingSyncs();
+    expect(orphanSweepSql()).toContain('sync_pending = true');
   });
 });

@@ -74,7 +74,7 @@ const BOOKING_DEDUP_WINDOW_MS = 5 * 60 * 1000;
  * `{ id: string }` map or `null` if nothing remains. A malformed/non-array
  * `intakeQuestions` (legacy/hand-edited) degrades to "no questions" → null.
  */
-function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<string, string> | null {
+export function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<string, string> | null {
   const questions = Array.isArray(service.intakeQuestions) ? service.intakeQuestions : [];
   if (!questions.length) return null;
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
@@ -87,7 +87,18 @@ function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Record<stri
     let str: string;
     if (typeof value === 'string') str = value;
     else if (typeof value === 'number' || typeof value === 'boolean') str = String(value);
-    else continue; // null/undefined/array/object → dropped
+    else if (Array.isArray(value)) {
+      // An ARRAY is what a multi-answer looks like, and dropping it silently lost the
+      // customer's answer entirely — the owner saw a question with no reply rather than
+      // one with several. Flattened to a readable list; the scalar members are kept and
+      // anything nested is discarded rather than rendered as "[object Object]".
+      const parts = value
+        .filter((v): v is string | number | boolean => ['string', 'number', 'boolean'].includes(typeof v))
+        .map((v) => String(v).trim())
+        .filter(Boolean);
+      if (!parts.length) continue;
+      str = parts.join(', ');
+    } else continue; // null/undefined/object → dropped
     const trimmed = str.trim();
     if (!trimmed) continue;
     out[key] = trimmed.slice(0, 2000);

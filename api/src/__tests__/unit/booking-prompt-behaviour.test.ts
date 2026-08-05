@@ -17,7 +17,7 @@
  *    because the SERVICES block asks it to. That ask went missing once already, which is
  *    why the field looked broken in prod while its wiring was provably fine.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildServicesSection } from '../../modules/booking.module';
 import type { ServiceType } from '../../database/entities/ServiceType';
 
@@ -124,5 +124,61 @@ describe('aiSummary — the ask the model needs', () => {
   it('tells it the customer never sees it', () => {
     const p = buildServicesSection([svc()])!;
     expect(p).toMatch(/the customer never sees it/i);
+  });
+});
+
+/**
+ * The zero-availability fallback, moved off prose alone.
+ *
+ * "No slots in this range" is the most consequential thing check_availability can return,
+ * and until now the only thing telling the model what to do about it was a prompt rule. A
+ * model that reads `slots: []` and concludes "they are fully booked" has just told a paying
+ * customer to go elsewhere — when the correct answer, always, is to capture a request.
+ * Prose is the right place for the WORDING and the wrong place for the DECISION.
+ */
+describe('check_availability — the empty result carries its own instruction', () => {
+  const load = async (slots: unknown[]) => {
+    vi.resetModules();
+    const checkAvailability = vi.fn(async () => ({ slots, timezone: 'Europe/Brussels', serviceId: 's1', serviceName: 'Cut' }));
+    vi.doMock('../../booking/booking.service', async (orig) => ({
+      ...(await orig<Record<string, unknown>>()),
+      checkAvailability,
+    }));
+    const { CheckAvailabilityTool } = await import('../../agent/tools/booking.tool');
+    const tool = new CheckAvailabilityTool();
+    const res: any = await tool.execute(
+      { startDate: '2026-08-10', endDate: '2026-08-11' },
+      { sessionId: 'cs-1' } as never,
+    );
+    return res;
+  };
+
+  it('flags an empty range and names the action to take', async () => {
+    const res = await load([]);
+    expect(res.success).toBe(true);
+    expect(res.data.noSlotsInRange).toBe(true);
+    expect(res.data.suggestedAction).toBe('request_appointment');
+  });
+
+  it('says explicitly that this is NOT "closed" or "fully booked"', async () => {
+    // The two sentences a customer must never receive from an empty availability window.
+    const res = await load([]);
+    expect(res.data.guidance).toMatch(/does NOT mean the business is closed or fully booked/i);
+    expect(res.data.guidance).toMatch(/do not turn the customer away/i);
+    expect(res.data.guidance).toMatch(/request_appointment/);
+  });
+
+  it('adds nothing when slots exist', async () => {
+    const res = await load([{ start: '2026-08-10T08:00:00.000Z', end: '2026-08-10T08:30:00.000Z' }]);
+    expect(res.data.noSlotsInRange).toBeUndefined();
+    expect(res.data.suggestedAction).toBeUndefined();
+    expect(res.data.guidance).toBeUndefined();
+  });
+
+  it('keeps the original payload intact alongside the signal', async () => {
+    const res = await load([]);
+    expect(res.data.timezone).toBe('Europe/Brussels');
+    expect(res.data.serviceName).toBe('Cut');
+    expect(res.data.slots).toEqual([]);
   });
 });

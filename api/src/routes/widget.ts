@@ -10,6 +10,7 @@ import { Participant } from '../database/entities/Participant';
 import { Message } from '../database/entities/Message';
 import { Tenant } from '../database/entities/Tenant';
 import { Bot } from '../database/entities/Bot';
+import { assertUploadEnabledForSession } from '../file-handling/widget-upload-gate';
 import { resolveBotKeyStrict, BotPausedError, BotNotFoundError } from '../services/bot-resolution.service';
 import { authenticateWidget, asyncHandler, ValidationError, NotFoundError, RateLimitError, ForbiddenError } from '../middleware';
 import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
@@ -635,6 +636,8 @@ router.post(
     const w = req.widget!;
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     await requireFeature(w.tenantId, 'fileUpload', 'plan_limit_file_upload');
+    // Entitlement is the ceiling; the owner's own switch is what actually decides.
+    await assertUploadEnabledForSession(w.tenantId, w.sessionId);
     if (!isS3Configured()) {
       throw new ApiError('File uploads are not available right now', 503, 'STORAGE_UNAVAILABLE');
     }
@@ -669,6 +672,9 @@ router.post(
     if (!w.tenantId || !w.sessionId) throw new ValidationError('Widget session required');
     const { sessionId } = req.params;
     if (!UPLOAD_UUID_RE.test(sessionId)) throw new ValidationError('Invalid sessionId');
+    // Also gated: completing an upload started before the owner switched uploads off must
+    // not slip a file through the back half of the flow.
+    await assertUploadEnabledForSession(w.tenantId, w.sessionId);
     const { getUploadService } = await import('../file-handling/upload.service');
     const uploadService = getUploadService();
     const session = await uploadService.getSession(sessionId);

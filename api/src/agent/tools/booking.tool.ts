@@ -66,6 +66,23 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.serviceId as string | undefined,
         args.durationMin as number | undefined
       );
+      // An empty slot list is the single most consequential result this tool returns, and
+      // until now the ONLY thing telling the model what to do about it was a prompt rule.
+      // Prose is the right place for the wording; it is the wrong place for the decision.
+      // A model that reads `slots: []` and concludes "they're fully booked" has just told a
+      // customer to go elsewhere — the actual answer is always to capture a request.
+      if (Array.isArray(result?.slots) && result.slots.length === 0) {
+        return {
+          success: true,
+          data: {
+            ...result,
+            noSlotsInRange: true,
+            suggestedAction: 'request_appointment',
+            guidance:
+              'No auto-confirmable times in this range. This does NOT mean the business is closed or fully booked. Do not turn the customer away and do not hand off: ask for their preferred date and time and capture it with request_appointment, making clear the business will confirm it.',
+          },
+        };
+      }
       return { success: true, data: result };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };

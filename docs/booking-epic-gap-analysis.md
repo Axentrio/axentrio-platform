@@ -161,6 +161,18 @@ The epic devotes a section to protecting a solo owner. What is built is one per-
 - **daily working-hour limit** — nothing sums booked duration, so five 4-hour jobs fit an 8-hour day
 - **travel buffer** — the address is collected and never used for anything
 
+> **STATUS (2026-08-05): all four are now built.** Business daily cap, daily working-hour
+> limit and minimum gap ship on `chatbot_booking_settings`; the travel buffer is answered by
+> `minGapMin` as a flat number, a distance-derived one being blocked on geocoding this
+> platform deliberately does not have.
+>
+> **Not a gap, and not in this epic:** a later re-audit proposed that the ceilings should
+> also count events the owner types into their OWN Google/Outlook calendar. That is an
+> inference about the shipped feature, not a requirement listed above, and it was declined
+> on 2026-08-05 — we cannot distinguish a phone job from a dentist appointment, so counting
+> everything would let an owner's private life consume the allowance they set for paid work.
+> Do not re-open it as a missing requirement; it is a product decision that was made.
+
 Related: *every* rate-limiting knob the epic puts on a business-level `BookingSettings` record (default
 buffers, minimum notice, max days ahead) exists **per-service only**. A solo owner with five services
 sets the same three numbers five times, and nothing keeps them consistent. Preset-seeded services get

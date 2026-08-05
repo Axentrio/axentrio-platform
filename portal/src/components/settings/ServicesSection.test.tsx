@@ -180,3 +180,85 @@ describe('ServicesSection — online bookable', () => {
     expect(await screen.findByLabelText(/customers can book this online/i)).not.toBeChecked();
   });
 });
+
+/**
+ * Intake question authoring.
+ *
+ * Owners had label/type/required/options and nothing else, so they smuggled instructions
+ * into the label text ("What floor? (only ask if it's a flat)") — which the customer then
+ * read verbatim. These four fields give that intent somewhere honest to live, and the
+ * ordering is done by MOVING the array element rather than storing a sort index, because
+ * array position already is the order everywhere downstream.
+ */
+describe('ServicesSection — intake question authoring', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const openWithQuestion = async () => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services') ? Promise.resolve({ services: [] }) : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /add service/i }));
+    fireEvent.change(screen.getByPlaceholderText(/haircut/i), { target: { value: 'Repair' } });
+    fireEvent.click(screen.getByRole('button', { name: /add question/i }));
+    return screen.getByRole('dialog');
+  };
+
+  const save = async (dialog: HTMLElement) => {
+    fireEvent.click(within(dialog).getByRole('button', { name: /add service/i }));
+    await waitFor(() => expect(apiPost).toHaveBeenCalled());
+    return (apiPost.mock.calls[0][1] as { intakeQuestions?: Array<Record<string, unknown>> }).intakeQuestions!;
+  };
+
+  it('sends the owner’s steer and example answer', async () => {
+    const dialog = await openWithQuestion();
+    fireEvent.change(within(dialog).getByPlaceholderText(/question \(e\.g/i), { target: { value: 'Which floor?' } });
+    fireEvent.change(within(dialog).getByPlaceholderText(/how to ask/i), { target: { value: 'Only if it is a flat' } });
+    fireEvent.change(within(dialog).getByPlaceholderText(/example answer/i), { target: { value: 'Second' } });
+    const qs = await save(dialog);
+    expect(qs[0]).toMatchObject({
+      label: 'Which floor?',
+      aiInstruction: 'Only if it is a flat',
+      exampleAnswer: 'Second',
+    });
+  });
+
+  it('defaults a new question to asked and shown on the calendar', async () => {
+    // Absent means true for both, so a new question must not carry either key — writing
+    // them would add noise to every row for no change in meaning.
+    const dialog = await openWithQuestion();
+    fireEvent.change(within(dialog).getByPlaceholderText(/question \(e\.g/i), { target: { value: 'Which floor?' } });
+    const qs = await save(dialog);
+    expect(qs[0].active).toBeUndefined();
+    expect(qs[0].includeInCalendar).toBeUndefined();
+  });
+
+  it('sends an explicit false once either is switched off', async () => {
+    const dialog = await openWithQuestion();
+    fireEvent.change(within(dialog).getByPlaceholderText(/question \(e\.g/i), { target: { value: 'Which floor?' } });
+    fireEvent.click(within(dialog).getByLabelText(/ask this/i));
+    fireEvent.click(within(dialog).getByLabelText(/show on my calendar/i));
+    const qs = await save(dialog);
+    expect(qs[0]).toMatchObject({ active: false, includeInCalendar: false });
+  });
+
+  it('reorders by moving the array element, with no sort index', async () => {
+    const dialog = await openWithQuestion();
+    fireEvent.change(within(dialog).getByPlaceholderText(/question \(e\.g/i), { target: { value: 'First' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /add question/i }));
+    const labels = within(dialog).getAllByPlaceholderText(/question \(e\.g/i);
+    fireEvent.change(labels[1], { target: { value: 'Second' } });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /move question 2 up/i }));
+    const qs = await save(dialog);
+    expect(qs.map((q) => q.label)).toEqual(['Second', 'First']);
+    // Position IS the order — a sortOrder field would be a second source of truth.
+    expect(qs[0]).not.toHaveProperty('sortOrder');
+  });
+
+  it('cannot move the first question up or the last one down', async () => {
+    const dialog = await openWithQuestion();
+    expect(within(dialog).getByRole('button', { name: /move question 1 up/i })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: /move question 1 down/i })).toBeDisabled();
+  });
+});

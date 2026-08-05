@@ -36,6 +36,27 @@ export interface IntakeQuestion {
   required: boolean;
   /** Only present for `choice`. */
   options?: string[];
+  /**
+   * A short owner-written steer for HOW or WHEN to ask, given to the model alongside the
+   * label — "only if they mention a leak", "accept a rough guess". The label alone says
+   * what to ask and nothing about judgement, which is the whole reason owners were
+   * smuggling instructions into the label text.
+   */
+  aiInstruction?: string;
+  /** A sample answer, shown to the model so it recognises a good one. */
+  exampleAnswer?: string;
+  /**
+   * Whether this question is currently asked. Absent = true, which is every existing row.
+   *
+   * A paused question keeps its id, so ANSWERS ALREADY COLLECTED still render under their
+   * label — deleting the question instead orphans them to a raw uuid.
+   */
+  active?: boolean;
+  /**
+   * Whether the answer goes on the owner's calendar entry. Absent = true (today's
+   * behaviour). Off for the ones that are useful to the bot but noise in a calendar body.
+   */
+  includeInCalendar?: boolean;
 }
 
 /** Postgres `numeric` round-trips as a string in node-pg; map to number both ways. */

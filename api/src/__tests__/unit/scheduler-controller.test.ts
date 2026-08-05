@@ -162,6 +162,58 @@ describe('intake questions id reconciliation (P3a)', () => {
     expect(saved.intakeQuestions[1]).toMatchObject({ type: 'choice', options: ['Short', 'Long'] });
   });
 
+  it('preserves the authoring fields through reconciliation', async () => {
+    // reconcileIntakeQuestions rebuilds each question FIELD BY FIELD rather than spreading,
+    // deliberately, so a client cannot invent properties. The cost is that a field added to
+    // the type and forgotten here is silently discarded on every save, with no error
+    // anywhere — which is exactly what happened to all four of these the first time.
+    const req: any = {
+      tenantId: 'ten-1',
+      body: { name: 'Cut', durationMin: 30, intakeQuestions: [
+        {
+          label: 'Which floor?', type: 'text', required: true,
+          aiInstruction: 'Only if it is a flat', exampleAnswer: 'Second',
+          active: false, includeInCalendar: false,
+        },
+      ] },
+    };
+    await createService(req, res);
+    expect(etSave.mock.calls[0][0].intakeQuestions[0]).toMatchObject({
+      label: 'Which floor?',
+      aiInstruction: 'Only if it is a flat',
+      exampleAnswer: 'Second',
+      active: false,
+      includeInCalendar: false,
+    });
+  });
+
+  it('stores no key for the default true values', async () => {
+    // Absent means "ask it" and "show it". Writing them explicitly would add noise to every
+    // stored question for no change in meaning, and would make the absent case look like a
+    // legacy row rather than the norm.
+    const req: any = {
+      tenantId: 'ten-1',
+      body: { name: 'Cut', durationMin: 30, intakeQuestions: [
+        { label: 'Which floor?', type: 'text', required: true, active: true, includeInCalendar: true },
+      ] },
+    };
+    await createService(req, res);
+    const q = etSave.mock.calls[0][0].intakeQuestions[0];
+    expect(q).not.toHaveProperty('active');
+    expect(q).not.toHaveProperty('includeInCalendar');
+  });
+
+  it('drops a whitespace-only steer rather than storing it', async () => {
+    const req: any = {
+      tenantId: 'ten-1',
+      body: { name: 'Cut', durationMin: 30, intakeQuestions: [
+        { label: 'Which floor?', type: 'text', required: true, aiInstruction: '   ' },
+      ] },
+    };
+    await createService(req, res);
+    expect(etSave.mock.calls[0][0].intakeQuestions[0]).not.toHaveProperty('aiInstruction');
+  });
+
   it('keeps a matching stored id, remints an unknown id, drops an absent one', async () => {
     etFindOne.mockResolvedValue({
       id: 'svc-1', botId: 'bot-1',

@@ -4,7 +4,7 @@
  * separate, shared section in SchedulerSettings.
  */
 import React, { useState } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Sparkles } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Sparkles, ChevronUp, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -183,6 +183,14 @@ function toInput(f: FormState): ServiceInput {
       ...(q.type === 'choice'
         ? { options: (q.options ?? []).flatMap((o) => { const t = o.trim(); return t.length > 0 ? [t] : []; }) }
         : {}),
+      // Rebuilt field by field, exactly like the server reconciler — which means a field
+      // added to the editor but forgotten HERE is silently dropped on every save, with no
+      // error anywhere. Only the non-default values are sent: absent means "ask it" and
+      // "show it", so writing those adds noise for no change in meaning.
+      ...(q.aiInstruction?.trim() ? { aiInstruction: q.aiInstruction.trim() } : {}),
+      ...(q.exampleAnswer?.trim() ? { exampleAnswer: q.exampleAnswer.trim() } : {}),
+      ...(q.active === false ? { active: false } : {}),
+      ...(q.includeInCalendar === false ? { includeInCalendar: false } : {}),
     })),
   };
 }
@@ -758,6 +766,21 @@ const QuestionsEditor: React.FC<{
   const update = (i: number, patch: Partial<IntakeQuestion>) =>
     onChange(questions.map((q, idx) => (idx === i ? { ...q, ...patch } : q)));
   const remove = (i: number) => onChange(questions.filter((_, idx) => idx !== i));
+  /**
+   * Reorder by MOVING the array element, not by storing a sort index.
+   *
+   * Array position already IS the order everywhere downstream — the prompt renders in array
+   * order and the reconciler preserves it. A `sortOrder` field would be a second source of
+   * truth for the same fact, and the two would drift the first time anyone edited one
+   * without the other.
+   */
+  const move = (i: number, delta: number) => {
+    const j = i + delta;
+    if (j < 0 || j >= questions.length) return;
+    const next = [...questions];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  };
   const add = () => onChange([...questions, { label: '', type: 'text', required: false }]);
 
   return (
@@ -807,10 +830,66 @@ const QuestionsEditor: React.FC<{
             </Button>
           </div>
 
-          <label htmlFor={`question-required-${i}`} className="flex items-center gap-2 cursor-pointer">
-            <Checkbox id={`question-required-${i}`} checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
-            <span className="text-xs text-text-secondary">Required</span>
-          </label>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input
+              value={q.aiInstruction ?? ''}
+              maxLength={200}
+              onChange={(e) => update(i, { aiInstruction: e.target.value || undefined })}
+              placeholder="How to ask (e.g. only if they mention a leak)"
+            />
+            <Input
+              value={q.exampleAnswer ?? ''}
+              maxLength={120}
+              onChange={(e) => update(i, { exampleAnswer: e.target.value || undefined })}
+              placeholder="Example answer (e.g. Second floor)"
+            />
+          </div>
+
+          <div className="flex items-center gap-4 flex-wrap">
+            <label htmlFor={`question-required-${i}`} className="flex items-center gap-2 cursor-pointer">
+              <Checkbox id={`question-required-${i}`} checked={q.required} onCheckedChange={(c) => update(i, { required: c === true })} />
+              <span className="text-xs text-text-secondary">Required</span>
+            </label>
+            {/* Pause rather than delete: deleting orphans every answer already collected. */}
+            <label htmlFor={`question-active-${i}`} className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                id={`question-active-${i}`}
+                checked={q.active !== false}
+                onCheckedChange={(c) => update(i, { active: c === true ? undefined : false })}
+              />
+              <span className="text-xs text-text-secondary">Ask this</span>
+            </label>
+            <label htmlFor={`question-calendar-${i}`} className="flex items-center gap-2 cursor-pointer">
+              <Checkbox
+                id={`question-calendar-${i}`}
+                checked={q.includeInCalendar !== false}
+                onCheckedChange={(c) => update(i, { includeInCalendar: c === true ? undefined : false })}
+              />
+              <span className="text-xs text-text-secondary">Show on my calendar</span>
+            </label>
+            <div className="ml-auto flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-label={`Move question ${i + 1} up`}
+                disabled={i === 0}
+                onClick={() => move(i, -1)}
+              >
+                <ChevronUp className="w-3.5 h-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-label={`Move question ${i + 1} down`}
+                disabled={i === questions.length - 1}
+                onClick={() => move(i, 1)}
+              >
+                <ChevronDown className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
 
           {q.type === 'choice' && (
             <div className="space-y-1.5 pl-1">

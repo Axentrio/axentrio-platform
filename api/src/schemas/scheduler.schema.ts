@@ -113,6 +113,13 @@ const intakeQuestionSchema = z.preprocess(
       type: z.enum(['text', 'choice']),
       required: z.boolean().default(false),
       options: z.array(z.string().trim().min(1).max(80)).optional(),
+      // Capped hard: these ride into the system prompt on the question's own line, so a
+      // long one costs tokens on every single turn, not just when the question is asked.
+      aiInstruction: z.string().trim().max(200).optional(),
+      exampleAnswer: z.string().trim().max(120).optional(),
+      // Absent = true for both, which is exactly what every stored question means today.
+      active: z.boolean().optional(),
+      includeInCalendar: z.boolean().optional(),
     })
     .superRefine((q, ctx) => {
       if (q.type !== 'choice') return;

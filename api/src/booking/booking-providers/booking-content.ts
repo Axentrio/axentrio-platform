@@ -58,7 +58,7 @@ export interface ServiceContentInput {
    *  server-minted question id, so these are used to render each answer under its
    *  human label instead of the raw uuid. Defensively typed; malformed entries are
    *  skipped and unknown/deleted ids fall back to the raw key. */
-  intakeQuestions?: ReadonlyArray<{ id?: unknown; label?: unknown }> | null;
+  intakeQuestions?: ReadonlyArray<{ id?: unknown; label?: unknown; includeInCalendar?: unknown }> | null;
   /** Owner-authored prep notes. Stored since P5 and, until now, read by nothing at all. */
   preparationInstructions?: string | null;
 }
@@ -125,13 +125,20 @@ function intakeLines(
   }
   const obj = intakeAnswers as Record<string, unknown>;
   const labelById = new Map<string, string>();
+  // Questions the owner marked as not-for-the-calendar. Their answers are still collected
+  // and still shown in the portal — they are simply noise in an event body the owner reads
+  // at a glance on their phone.
+  const excluded = new Set<string>();
   if (Array.isArray(questions)) {
     for (const q of questions) {
-      if (q && typeof q.id === 'string' && typeof q.label === 'string') labelById.set(q.id, q.label);
+      if (!q || typeof q.id !== 'string') continue;
+      if (typeof q.label === 'string') labelById.set(q.id, q.label);
+      if (q.includeInCalendar === false) excluded.add(q.id);
     }
   }
   const entries: string[] = [];
   for (const key of Object.keys(obj).sort()) {
+    if (excluded.has(key)) continue;
     const rendered = renderIntakeValue(obj[key]);
     if (rendered === null) continue;
     const label = normalizeField(labelById.get(key) ?? key);

@@ -85,7 +85,17 @@ async function uniqueSlug(
  * absent from the submission are dropped. An empty result collapses to `null`.
  */
 function reconcileIntakeQuestions(
-  submitted: Array<{ id?: string; label: string; type: 'text' | 'choice'; required: boolean; options?: string[] }>,
+  submitted: Array<{
+    id?: string;
+    label: string;
+    type: 'text' | 'choice';
+    required: boolean;
+    options?: string[];
+    aiInstruction?: string;
+    exampleAnswer?: string;
+    active?: boolean;
+    includeInCalendar?: boolean;
+  }>,
   stored: IntakeQuestion[] | null | undefined
 ): IntakeQuestion[] | null {
   const storedIds = new Set(
@@ -97,6 +107,15 @@ function reconcileIntakeQuestions(
     usedIds.add(id);
     const question: IntakeQuestion = { id, label: q.label, type: q.type, required: q.required };
     if (q.type === 'choice') question.options = q.options ?? [];
+    // Rebuilt field by field rather than spread, so anything the client invents is dropped
+    // — which also means a field added above and forgotten HERE is silently discarded on
+    // every save. Only store what was actually set: `active: true` and
+    // `includeInCalendar: true` are the absent-value defaults, so writing them adds noise
+    // to every row for no change in meaning.
+    if (q.aiInstruction?.trim()) question.aiInstruction = q.aiInstruction.trim();
+    if (q.exampleAnswer?.trim()) question.exampleAnswer = q.exampleAnswer.trim();
+    if (q.active === false) question.active = false;
+    if (q.includeInCalendar === false) question.includeInCalendar = false;
     return question;
   });
   return out.length ? out : null;

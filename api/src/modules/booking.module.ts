@@ -77,6 +77,10 @@ function intakeLines(s: ServiceType): string {
       (q): q is IntakeQuestion =>
         !!q && typeof q.id === 'string' && typeof q.label === 'string' && (q.type === 'text' || q.type === 'choice')
     )
+    // A PAUSED question is not asked. It keeps its id and its stored answers, so anything
+    // already collected still renders under its label — which is the entire reason an owner
+    // pauses one instead of deleting it.
+    .filter((q) => q.active !== false)
     .map((q) => {
       const label = sanitizeForLine(q.label);
       const req = q.required ? 'required' : 'optional';
@@ -85,7 +89,16 @@ function intakeLines(s: ServiceType): string {
           ? q.options.filter((o): o is string => typeof o === 'string')
           : [];
       const opts = validOptions.length ? ` · options: ${validOptions.map(sanitizeForLine).join(', ')}` : '';
-      return `    - ${q.id} · "${label}" · ${q.type} · ${req}${opts}`;
+      // The owner's own steer and example. Capped again here even though the schema caps
+      // them: this line is rebuilt into the system prompt on every turn, and a legacy or
+      // hand-edited row never passed through that schema.
+      const steer = q.aiInstruction?.trim()
+        ? ` · how to ask: ${sanitizeForLine(q.aiInstruction).slice(0, 200)}`
+        : '';
+      const eg = q.exampleAnswer?.trim()
+        ? ` · e.g. ${sanitizeForLine(q.exampleAnswer).slice(0, 120)}`
+        : '';
+      return `    - ${q.id} · "${label}" · ${q.type} · ${req}${opts}${steer}${eg}`;
     });
   if (!lines.length) return '';
   return `\n  Intake questions:\n${lines.join('\n')}`;

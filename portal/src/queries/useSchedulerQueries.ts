@@ -56,6 +56,15 @@ export interface IntakeQuestion {
   type: IntakeQuestionType;
   required: boolean;
   options?: string[];
+  /** Owner's steer on HOW or WHEN to ask. Rides into the prompt on this question's line. */
+  aiInstruction?: string;
+  /** A sample answer, so the model recognises a good one. */
+  exampleAnswer?: string;
+  /** Absent = true. A paused question keeps its id, so answers already collected still
+   *  render under their label instead of orphaning to a uuid. */
+  active?: boolean;
+  /** Absent = true. Off for answers that are useful to the bot but noise on a calendar. */
+  includeInCalendar?: boolean;
 }
 
 export interface Service {

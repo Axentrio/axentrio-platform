@@ -358,3 +358,95 @@ describe('ServicesSection — catalog order', () => {
     expect(screen.getByRole('button', { name: /move beard down/i })).toBeDisabled();
   });
 });
+
+/**
+ * Clearing an optional field.
+ *
+ * `undefined` does not survive JSON.stringify, so blanking a description, price note or prep
+ * instructions dropped the key entirely, the server's `Object.assign` left the stored value
+ * untouched, and the owner's old text kept reaching the prompt, the invite and the customer.
+ * No error was raised anywhere — the field simply refused to empty. Same trap the timing
+ * fields were explicitly fixed for; these had been left behind.
+ */
+describe('ServicesSection — clearing an optional field', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const editExisting = async (over: Record<string, unknown> = {}) => {
+    apiGet.mockImplementation((url: string) =>
+      url.includes('/services')
+        ? Promise.resolve({
+            services: [{
+              id: 's1', name: 'Repair', bookingMode: 'auto', durationMin: 30,
+              priceDisplayType: 'fixed', fixedPrice: 80, priceNote: 'per hour',
+              category: 'Plumbing', description: 'On-site repair',
+              preparationInstructions: 'Clear access to the boiler',
+              maxBookingsPerDay: 4, isActive: true, sortOrder: 0, onlineBookable: true,
+              durationMode: 'fixed', bufferBeforeMin: 0, bufferAfterMin: 0, minNoticeMin: 0,
+              maxHorizonDays: 60, locationType: 'custom', ...over,
+            }],
+          })
+        : Promise.resolve({ presets: [] }),
+    );
+    renderUI();
+    fireEvent.click(await screen.findByRole('button', { name: /edit repair/i }));
+    return screen.getByRole('dialog');
+  };
+
+  const save = async (dialog: HTMLElement) => {
+    fireEvent.click(within(dialog).getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(apiPut).toHaveBeenCalled());
+    return apiPut.mock.calls[0][1] as Record<string, unknown>;
+  };
+
+  it('sends null — not undefined — for every blanked text field', async () => {
+    const dialog = await editExisting();
+    for (const ph of [/optional short description/i, /e\.g\. per hour/i, /clean, dry hair/i]) {
+      fireEvent.change(within(dialog).getByPlaceholderText(ph), { target: { value: '' } });
+    }
+    const payload = await save(dialog);
+    // `toBeNull` and not `toBeUndefined`: undefined is dropped by JSON.stringify and never
+    // reaches the server at all, which is the whole defect.
+    expect(payload.description).toBeNull();
+    expect(payload.priceNote).toBeNull();
+    expect(payload.preparationInstructions).toBeNull();
+  });
+
+  it('keeps a field that was NOT blanked', async () => {
+    const dialog = await editExisting();
+    fireEvent.change(within(dialog).getByPlaceholderText(/optional short description/i), { target: { value: '' } });
+    const payload = await save(dialog);
+    expect(payload.description).toBeNull();
+    expect(payload.priceNote).toBe('per hour');
+  });
+
+  it('clears a blanked NUMBER, not just text', async () => {
+    // maxBookingsPerDay is the one field that uses the bare number helper, so it is the only
+    // thing that catches that helper regressing to undefined.
+    const dialog = await editExisting({ maxBookingsPerDay: 4 });
+    fireEvent.change(within(dialog).getByLabelText(/max bookings per day/i), { target: { value: '' } });
+    const payload = await save(dialog);
+    expect(payload.maxBookingsPerDay).toBeNull();
+  });
+
+  it('clears the range bounds when a service switches back to a fixed duration', async () => {
+    // Their schema comment already promised this — "switching a service from range back to
+    // fixed must be able to CLEAR the bounds" — but the payload sent undefined, so the
+    // bounds silently resurrected if the owner ever flipped back to range.
+    const dialog = await editExisting({ durationMode: 'range', minDurationMin: 30, maxDurationMin: 90 });
+    // Actually SWITCH it — an earlier version of this test loaded a range service and saved
+    // it unchanged, so keeping the bounds was correct and the test proved nothing.
+    fireEvent.change(within(dialog).getByLabelText(/^duration$/i), { target: { value: 'fixed' } });
+    const payload = await save(dialog);
+    expect(payload.minDurationMin).toBeNull();
+    expect(payload.maxDurationMin).toBeNull();
+  });
+
+  it('clears the prices a display type no longer uses', async () => {
+    // priceDisplayType 'fixed' must not leave a stale min/max range behind.
+    const dialog = await editExisting({ priceDisplayType: 'fixed', fixedPrice: 80, minPrice: 50, maxPrice: 90 });
+    const payload = await save(dialog);
+    expect(payload.minPrice).toBeNull();
+    expect(payload.maxPrice).toBeNull();
+    expect(payload.fixedPrice).toBe(80);
+  });
+});

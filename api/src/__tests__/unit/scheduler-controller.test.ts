@@ -45,7 +45,7 @@ vi.mock('../../utils/response', () => ({ sendSuccess: (...a: any[]) => sendSucce
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
 import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset, reorderServices } from '../../scheduler/scheduler.controller';
-import { serviceInputSchema } from '../../schemas/scheduler.schema';
+import { serviceInputSchema, serviceUpdateSchema } from '../../schemas/scheduler.schema';
 
 const res: any = {};
 
@@ -623,5 +623,48 @@ describe('scheduler.controller · reorder services', () => {
     await expect(
       reorderServices({ tenantId: 'ten-1', body: { serviceIds: ['nope'] } } as any, res)
     ).rejects.toBeDefined();
+  });
+});
+
+/**
+ * Clearing an optional service field.
+ *
+ * The schema accepted only `undefined` for these, and undefined does not survive
+ * JSON.stringify — so blanking a description dropped the key, `Object.assign` left the row
+ * untouched, and the old text kept reaching the prompt, the invite and the customer with no
+ * error anywhere. `null` has to be accepted AND written.
+ */
+describe('scheduler.controller · clearing optional service fields', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+  });
+
+  it('accepts null for every clearable field', () => {
+    const r = serviceUpdateSchema.safeParse({
+      category: null, description: null, priceNote: null, preparationInstructions: null,
+      fixedPrice: null, minPrice: null, maxPrice: null, maxBookingsPerDay: null,
+    });
+    expect(r.success).toBe(true);
+  });
+
+  it('WRITES the null through to the row rather than skipping it', async () => {
+    etFindOne.mockResolvedValue({ id: 'svc-1', botId: 'bot-1', name: 'Repair', description: 'old text', priceNote: 'per hour' });
+    await updateService(
+      { tenantId: 'ten-1', params: { id: 'svc-1' }, body: { description: null, priceNote: null } } as any,
+      res,
+    );
+    const saved = etSave.mock.calls[0][0];
+    expect(saved.description).toBeNull();
+    expect(saved.priceNote).toBeNull();
+  });
+
+  it('leaves a field the payload does not mention', async () => {
+    // Partial update semantics still hold: only what was SENT changes.
+    etFindOne.mockResolvedValue({ id: 'svc-1', botId: 'bot-1', name: 'Repair', description: 'old text', priceNote: 'per hour' });
+    await updateService({ tenantId: 'ten-1', params: { id: 'svc-1' }, body: { description: null } } as any, res);
+    const saved = etSave.mock.calls[0][0];
+    expect(saved.description).toBeNull();
+    expect(saved.priceNote).toBe('per hour');
   });
 });

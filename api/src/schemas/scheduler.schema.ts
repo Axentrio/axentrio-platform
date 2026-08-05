@@ -157,8 +157,16 @@ export const intakeQuestionsSchema = z.array(intakeQuestionSchema).max(8);
 /** Full service (ServiceType) input for the multi-service CRUD (K3). */
 export const serviceInputSchema = z.object({
   name: z.string().min(1).max(255),
-  category: z.string().max(255).optional(),
-  description: z.string().max(2000).optional(),
+  /**
+   * NULLABLE, not merely optional — `null` is how the owner CLEARS one.
+   *
+   * These were optional-only, and `undefined` does not survive JSON: blanking a description
+   * dropped the key, the controller's `Object.assign` left the stored value untouched, and
+   * the old text kept reaching the prompt, the invite and the customer with no error
+   * anywhere. Exactly the trap the duration and timing fields above were fixed for.
+   */
+  category: z.string().max(255).nullable().optional(),
+  description: z.string().max(2000).nullable().optional(),
   bookingMode: z.enum(['auto', 'request']).default('auto'),
   onlineBookable: z.boolean().default(true),
   durationMode: z.enum(['fixed', 'range', 'ai']).default('fixed'),
@@ -174,16 +182,16 @@ export const serviceInputSchema = z.object({
   bufferAfterMin: z.number().int().min(0).max(480).nullable().optional(),
   minNoticeMin: z.number().int().min(0).max(43200).nullable().optional(),
   maxHorizonDays: z.number().int().min(1).max(365).nullable().optional(),
-  maxBookingsPerDay: z.number().int().min(1).max(100).optional(),
+  maxBookingsPerDay: z.number().int().min(1).max(100).nullable().optional(),
   priceDisplayType: z.enum(['none', 'fixed', 'from', 'range', 'on_request']).default('none'),
-  fixedPrice: z.number().nonnegative().max(1_000_000).optional(),
-  minPrice: z.number().nonnegative().max(1_000_000).optional(),
-  maxPrice: z.number().nonnegative().max(1_000_000).optional(),
-  priceNote: z.string().max(255).optional(),
+  fixedPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  minPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  maxPrice: z.number().nonnegative().max(1_000_000).nullable().optional(),
+  priceNote: z.string().max(255).nullable().optional(),
   customerLocationRequired: z.boolean().default(false),
   customerAddressRequired: z.boolean().default(false),
   fileUploadAllowed: z.boolean().default(false),
-  preparationInstructions: z.string().max(2000).optional(),
+  preparationInstructions: z.string().max(2000).nullable().optional(),
   locationType: z.enum(['google_meet', 'phone', 'in_person', 'custom']).default('custom'),
   sortOrder: z.number().int().min(0).default(0),
   isActive: z.boolean().default(true),

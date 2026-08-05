@@ -146,35 +146,44 @@ function formFromService(s: Service): FormState {
 }
 
 function toInput(f: FormState): ServiceInput {
-  const num = (v: string) => (v.trim() === '' ? undefined : Number(v));
-  // Blank means INHERIT — send null, not undefined, so an update CLEARS a stored value.
-  const inherit = (v: string): number | null => (v.trim() === '' ? null : Number(v));
+  /**
+   * Blank means CLEAR — send null, never undefined.
+   *
+   * `undefined` does not survive JSON.stringify, so the key never reaches the server, the
+   * controller's `Object.assign` leaves the stored value untouched, and the owner's old
+   * description, price note or prep instructions keep reaching the prompt, the invite and
+   * the customer. No error is raised anywhere; the field simply refuses to empty.
+   */
+  const num = (v: string): number | null => (v.trim() === '' ? null : Number(v));
+  const text = (v: string): string | null => (v.trim() === '' ? null : v.trim());
+  // Same contract, kept under its original name for the timing fields it was written for.
+  const inherit = num;
   return {
     name: f.name.trim(),
-    category: f.category.trim() || undefined,
-    description: f.description.trim() || undefined,
-    preparationInstructions: f.preparationInstructions.trim() || undefined,
+    category: text(f.category),
+    description: text(f.description),
+    preparationInstructions: text(f.preparationInstructions),
     bookingMode: f.bookingMode,
     durationMode: f.durationMode,
     durationMin: f.durationMin,
-    minDurationMin: f.durationMode === 'fixed' ? undefined : (f.minDurationMin.trim() === '' ? undefined : Number(f.minDurationMin)),
-    maxDurationMin: f.durationMode === 'fixed' ? undefined : (f.maxDurationMin.trim() === '' ? undefined : Number(f.maxDurationMin)),
+    minDurationMin: f.durationMode === 'fixed' ? null : num(f.minDurationMin),
+    maxDurationMin: f.durationMode === 'fixed' ? null : num(f.maxDurationMin),
     bufferBeforeMin: inherit(f.bufferBeforeMin),
     bufferAfterMin: inherit(f.bufferAfterMin),
     minNoticeMin: inherit(f.minNoticeMin),
     maxHorizonDays: inherit(f.maxHorizonDays),
     priceDisplayType: f.priceDisplayType,
-    fixedPrice: f.priceDisplayType === 'fixed' || f.priceDisplayType === 'from' ? num(f.fixedPrice) : undefined,
-    minPrice: f.priceDisplayType === 'range' ? num(f.minPrice) : undefined,
-    maxPrice: f.priceDisplayType === 'range' ? num(f.maxPrice) : undefined,
-    priceNote: f.priceNote.trim() || undefined,
+    fixedPrice: f.priceDisplayType === 'fixed' || f.priceDisplayType === 'from' ? num(f.fixedPrice) : null,
+    minPrice: f.priceDisplayType === 'range' ? num(f.minPrice) : null,
+    maxPrice: f.priceDisplayType === 'range' ? num(f.maxPrice) : null,
+    priceNote: text(f.priceNote),
     locationType: f.locationType,
     isActive: f.isActive,
     onlineBookable: f.onlineBookable,
     customerAddressRequired: f.customerAddressRequired,
     customerLocationRequired: f.customerLocationRequired,
     fileUploadAllowed: f.fileUploadAllowed,
-    maxBookingsPerDay: f.maxBookingsPerDay.trim() === '' ? undefined : Number(f.maxBookingsPerDay),
+    maxBookingsPerDay: num(f.maxBookingsPerDay),
     // Always send the array (even []) so the server replaces/clears; echo each id.
     intakeQuestions: f.intakeQuestions.map((q) => ({
       ...(q.id ? { id: q.id } : {}),
@@ -528,8 +537,9 @@ const ServiceEditorDialog: React.FC<{
             </div>
 
             <div>
-              <Label className="text-text-secondary mb-1 block">Duration</Label>
+              <Label htmlFor="svc-duration-mode" className="text-text-secondary mb-1 block">Duration</Label>
               <select
+                id="svc-duration-mode"
                 value={form.durationMode}
                 onChange={(e) => set('durationMode', e.target.value as FormState['durationMode'])}
                 className="w-full px-3 py-2 bg-surface-3 border border-edge rounded-xl text-text-primary text-sm"
@@ -687,8 +697,9 @@ const ServiceEditorDialog: React.FC<{
                 <span className="text-sm text-text-secondary">Allow file upload (e.g. a photo of the job)</span>
               </label>
               <div>
-                <Label className="text-text-secondary mb-1 block">Max bookings per day</Label>
+                <Label htmlFor="svc-max-per-day" className="text-text-secondary mb-1 block">Max bookings per day</Label>
                 <Input
+                  id="svc-max-per-day"
                   type="number"
                   min={1}
                   value={form.maxBookingsPerDay}

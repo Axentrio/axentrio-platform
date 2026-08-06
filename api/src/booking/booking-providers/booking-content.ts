@@ -136,8 +136,28 @@ function intakeLines(
       if (q.includeInCalendar === false) excluded.add(q.id);
     }
   }
+  // Authored order, not key order. The answer keys are v4 uuids, so sorting them ordered the
+  // owner's calendar body by random bytes — and made the reorder control in the service editor
+  // a no-op on this one surface, while the portal's booking detail and Leads (which both walk
+  // the question array) already honoured it. Three owner-facing views of the same answers must
+  // not disagree about their order.
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  if (Array.isArray(questions)) {
+    for (const q of questions) {
+      if (!q || typeof q.id !== 'string' || seen.has(q.id)) continue;
+      if (Object.prototype.hasOwnProperty.call(obj, q.id)) {
+        ordered.push(q.id);
+        seen.add(q.id);
+      }
+    }
+  }
+  // An answer whose question has since been deleted still belongs in the body — it is a thing
+  // the customer told them. Sorted, so at least these have a stable order.
+  for (const key of Object.keys(obj).sort()) if (!seen.has(key)) ordered.push(key);
+
   const entries: string[] = [];
-  for (const key of Object.keys(obj).sort()) {
+  for (const key of ordered) {
     if (excluded.has(key)) continue;
     const rendered = renderIntakeValue(obj[key]);
     if (rendered === null) continue;

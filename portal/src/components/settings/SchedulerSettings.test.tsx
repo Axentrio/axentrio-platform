@@ -226,3 +226,82 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
     expect(payload.bookingsPaused).toBe(false);
   });
 });
+
+/**
+ * Save-blocking validation.
+ *
+ * The API parses the entire payload before any write, so anything this editor lets through
+ * rejects all ~20 controls at once behind one unattributable "Validation failed" toast. Two
+ * inputs could reach that state, and one of them was worse than a rejection: a backwards
+ * closure range was quietly rewritten to a single day and saved under a SUCCESS toast, so the
+ * rest of the intended closure stayed bookable and the pickers kept showing the range the
+ * owner thought they had stored.
+ */
+describe('SchedulerSettings — refuses to save what the API will reject', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  /** Load `config`, wait for hydration, and hand back the Save button unpressed. */
+  async function hydrate(config: unknown) {
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/scheduler/config')) return Promise.resolve(config);
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      if (url.includes('/availability')) return Promise.resolve({ slots: [], timezone: 'Europe/Brussels' });
+      return Promise.resolve({});
+    });
+    apiPut.mockResolvedValue(config);
+    renderUI();
+    const save = (await screen.findByRole('button', { name: /^save$/i })) as HTMLButtonElement;
+    await waitFor(() => expect(document.getElementById('override-closed-1')).not.toBeNull());
+    return save;
+  }
+
+  it('blocks the save on a one-letter country code instead of sending it', async () => {
+    const save = await hydrate(CONFIG);
+    expect(save.disabled).toBe(false);
+
+    fireEvent.change(document.getElementById('venue-country')!, { target: { value: 'B' } });
+
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(screen.getByText(/2-letter code/i)).toBeTruthy();
+    fireEvent.click(save);
+    expect(apiPut).not.toHaveBeenCalled();
+  });
+
+  it('accepts a valid two-letter code', async () => {
+    const save = await hydrate(CONFIG);
+    fireEvent.change(document.getElementById('venue-country')!, { target: { value: 'NL' } });
+    await waitFor(() => expect(save.disabled).toBe(false));
+  });
+
+  it('blocks a backwards closure range rather than silently saving one day of it', async () => {
+    const save = await hydrate({
+      ...CONFIG,
+      availability: {
+        ...AVAILABILITY,
+        dateOverrides: [
+          { date: '2026-08-07', closed: true },
+          { date: '2026-08-20', endDate: '2026-08-10', closed: true },
+        ],
+      },
+    });
+
+    await waitFor(() => expect(save.disabled).toBe(true));
+    expect(screen.getByText(/end date must be on or after the start date/i)).toBeTruthy();
+    fireEvent.click(save);
+    expect(apiPut).not.toHaveBeenCalled();
+  });
+
+  it('leaves a forwards range saveable', async () => {
+    const save = await hydrate({
+      ...CONFIG,
+      availability: {
+        ...AVAILABILITY,
+        dateOverrides: [
+          { date: '2026-08-07', closed: true },
+          { date: '2026-08-10', endDate: '2026-08-20', closed: true },
+        ],
+      },
+    });
+    expect(save.disabled).toBe(false);
+  });
+});

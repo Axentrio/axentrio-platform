@@ -47,6 +47,36 @@ describe('extractApiErrorMessage', () => {
     ).toBe('msg');
   });
 
+  it('names the offending fields on a "Validation failed" envelope', () => {
+    // The API parses the whole payload before any write, so one bad field rejects a ~20-control
+    // settings save — and the envelope message is always the bare string "Validation failed".
+    // The field names are already on the wire in `details`; this helper simply never read them.
+    expect(
+      extractApiErrorMessage(
+        makeAxiosError({
+          error: {
+            message: 'Validation failed',
+            details: { formErrors: [], fieldErrors: { venueAddress: ['Use a 2-letter country code'] } },
+          },
+        }),
+      ),
+    ).toBe('Validation failed: venueAddress: Use a 2-letter country code');
+  });
+
+  it('caps a long field list rather than emitting an unreadable toast', () => {
+    const fieldErrors = { a: ['x'], b: ['x'], c: ['x'], d: ['x'], e: ['x'] };
+    expect(
+      extractApiErrorMessage(makeAxiosError({ error: { message: 'Validation failed', details: { fieldErrors } } })),
+    ).toBe('Validation failed: a: x; b: x; c: x; +2 more');
+  });
+
+  it('leaves a message untouched when details carry no usable field errors', () => {
+    expect(
+      extractApiErrorMessage(makeAxiosError({ error: { message: 'msg', details: { fieldErrors: {} } } })),
+    ).toBe('msg');
+    expect(extractApiErrorMessage(makeAxiosError({ error: { message: 'msg', details: 'nope' } }))).toBe('msg');
+  });
+
   it('returns undefined when the error object has no message (e.g. only code)', () => {
     expect(
       extractApiErrorMessage(makeAxiosError({ error: { code: 'X' } })),

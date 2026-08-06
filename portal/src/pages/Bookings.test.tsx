@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -159,5 +160,61 @@ describe('Bookings — unlocked (Pro tenant)', () => {
     // LockedPreview-only copy should NOT be present.
     expect(screen.queryByText(/let customers schedule appointments/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /start pro trial/i })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * The service-area flag outlives the decision it was written for.
+ *
+ * `service_area_match` is recorded when a REQUEST is captured and never rewritten — Accept
+ * updates status, calendar_key and blocked_range, and leaves this column alone. Both amber
+ * sentences were phrased as advice about a choice still to be made, so once the owner accepted
+ * an out-of-area job it sat under a green Confirmed pill telling them they had not committed
+ * to it, next to a calendar invite and a confirmation email that say otherwise.
+ */
+describe('Bookings — the out-of-area note matches the decision already taken', () => {
+  const outsideBooking = {
+    id: 'bk-1',
+    serviceName: 'Boiler repair',
+    attendeeName: 'Ada',
+    startTime: '2099-06-10T08:00:00.000Z',
+    endTime: '2099-06-10T09:00:00.000Z',
+    status: 'confirmed',
+    serviceAreaMatch: 'outside',
+  };
+
+  function renderWithBookings(scopeBookings: Record<string, unknown[]>) {
+    hasFeatureMock.mockReturnValue(true);
+    apiGet.mockImplementation(async (url: string) => {
+      if (url.includes('/scheduler/services')) {
+        return { services: [{ id: 's1', name: 'Intro call', durationMin: 30, active: true }] };
+      }
+      const scope = /scope=(\w+)/.exec(url)?.[1];
+      if (scope) return { bookings: scopeBookings[scope] ?? [], total: (scopeBookings[scope] ?? []).length };
+      return entitlementsPayload;
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Bookings />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('does not tell the owner they are uncommitted to a booking they already accepted', async () => {
+    renderWithBookings({ upcoming: [outsideBooking] });
+    expect(await screen.findByText(/outside your service area/i)).toBeInTheDocument();
+    expect(screen.queryByText(/you have not committed to this one/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/accepted anyway/i)).toBeInTheDocument();
+  });
+
+  it('still says exactly that while it IS an open request', async () => {
+    renderWithBookings({ requests: [{ ...outsideBooking, status: 'request_created' }] });
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    expect(await screen.findByText(/you have not committed to this one/i)).toBeInTheDocument();
   });
 });

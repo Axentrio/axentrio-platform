@@ -72,15 +72,66 @@ export interface DateOverride {
  */
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * The override's inclusive last day, or `null` when it is a single-day row.
+ *
+ * The SHAPE check is what matters, not just the ordering. A garbage `endDate` like "zzz"
+ * compares greater than every ISO date, so without this it becomes an open-ended upper
+ * bound and one malformed row closes the business forever. A backwards range is already
+ * empty by construction; a malformed one is not.
+ *
+ * Every surface that interprets `endDate` must go through this. The engine used to shape-check
+ * while the prompt builder only compared ordering, so a hand-edited `"zzz"` was stated to
+ * customers as a closure that never ends while the engine ignored the row entirely.
+ */
+export function effectiveEndDate(o: DateOverride): string | null {
+  if (!o?.date || !o.endDate) return null;
+  if (!ISO_DATE.test(o.endDate) || o.endDate < o.date) return null;
+  return o.endDate;
+}
+
+/** A row that spans more than its start date. Single-day rows are the common case. */
+export function isRangedOverride(o: DateOverride): boolean {
+  const end = effectiveEndDate(o);
+  return end !== null && end > o.date;
+}
+
 export function overrideCoversDate(o: DateOverride, dateStr: string): boolean {
   if (!o?.date) return false;
   if (o.date === dateStr) return true;
-  // The SHAPE check is what matters, not just the ordering. A garbage `endDate` like "zzz"
-  // compares greater than every ISO date, so without this it becomes an open-ended upper
-  // bound and one malformed row closes the business forever. A backwards range is already
-  // empty by construction; a malformed one is not.
-  if (!o.endDate || !ISO_DATE.test(o.endDate) || o.endDate < o.date) return false;
-  return dateStr > o.date && dateStr <= o.endDate;
+  const end = effectiveEndDate(o);
+  if (!end) return false;
+  return dateStr > o.date && dateStr <= end;
+}
+
+/**
+ * Of the overrides covering a date, the one that actually applies: the **narrowest**.
+ *
+ * Rows are stored in the order the owner added them and nothing sorts or merges them, so
+ * plain first-match made precedence depend on insertion order — invisible in the portal and
+ * unchangeable by the owner. A re-open day typed inside an existing closure range lost to the
+ * range, while the prompt stated both rows, so the bot offered a day it could not book.
+ * Narrowest-wins makes the specific exception beat the broad rule, which is the only reading
+ * that matches how the two rows are worded on screen.
+ */
+export function pickOverrideForDate(
+  overrides: DateOverride[] | null | undefined,
+  dateStr: string
+): DateOverride | undefined {
+  let best: DateOverride | undefined;
+  let bestSpan = Infinity;
+  for (const o of overrides || []) {
+    if (!overrideCoversDate(o, dateStr)) continue;
+    const end = effectiveEndDate(o);
+    // Cheap ordinal span: ISO dates make lexical comparison total, and only the RANKING
+    // matters here, so counting calendar days would buy nothing.
+    const span = end ? Date.parse(`${end}T00:00:00Z`) - Date.parse(`${o.date}T00:00:00Z`) : 0;
+    if (span < bestSpan) {
+      best = o;
+      bestSpan = span;
+    }
+  }
+  return best;
 }
 
 @Entity('chatbot_availability_rules')

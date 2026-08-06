@@ -14,6 +14,8 @@ import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import {
   AvailabilityRule,
+  effectiveEndDate,
+  isRangedOverride,
   type Weekday,
   type TimeWindow,
 } from '../database/entities/AvailabilityRule';
@@ -146,7 +148,7 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
     // yesterday must still be stated, or the bot books the remaining thirteen days.
     .filter((o) => {
       if (!o || typeof o.date !== 'string') return false;
-      const end = typeof o.endDate === 'string' && o.endDate >= o.date ? o.endDate : o.date;
+      const end = effectiveEndDate(o) ?? o.date;
       return end >= today;
     })
     .sort((a, b) => a.date.localeCompare(b.date));
@@ -158,7 +160,7 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
   };
 
   const lines = upcoming.slice(0, MAX_OVERRIDE_LINES).map((o) => {
-    const end = typeof o.endDate === 'string' && o.endDate > o.date ? o.endDate : null;
+    const end = isRangedOverride(o) ? effectiveEndDate(o) : null;
     // One line for the whole span. Enumerating a fortnight day by day would consume the
     // entire line budget and push every later closure out of the prompt — which is exactly
     // how a long holiday used to go unmentioned from its ninth day onwards.
@@ -250,13 +252,13 @@ export function formatHoursForPlaceholder(rule: AvailabilityRule | null, now: Da
       if (!o || typeof o.date !== 'string' || !o.closed) return false;
       // A RANGE stays relevant until its LAST day — a fortnight's closure that began
       // yesterday still has thirteen days to go.
-      const end = typeof o.endDate === 'string' && o.endDate >= o.date ? o.endDate : o.date;
+      const end = effectiveEndDate(o) ?? o.date;
       return end >= today;
     })
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
     .map((o) => {
-      const end = typeof o.endDate === 'string' && o.endDate > o.date ? o.endDate : null;
+      const end = isRangedOverride(o) ? effectiveEndDate(o) : null;
       return end ? `${o.date} to ${end}` : o.date;
     });
 
@@ -282,13 +284,26 @@ export function buildVenueSection(venue: {
   postalCode?: string | null;
   city?: string | null;
   country?: string | null;
-} | null | undefined): string | null {
+} | null | undefined,
+/**
+ * True when at least one bookable service is carried out at the CUSTOMER's address. The block
+ * used to be built from the four venue columns alone, so it told the bot to give this address
+ * for "where an appointment will take place" — including for travel jobs, whose invite says
+ * the opposite. A business with real premises AND one mobile service hits that with no
+ * misconfiguration at all; it just fills in the venue exactly as the field asks.
+ */
+hasTravelServices = false): string | null {
   const line = formatVenueLine(venue);
   if (!line) return null;
+  const whereClause = hasTravelServices
+    ? `Give this address when a customer asks where you are or how to find you. Do NOT assume
+their appointment happens here: some services are carried out at the customer's own address,
+and each service says which it is. If it is one of those, the appointment is where they are.`
+    : `Give this address when a customer asks where you are, how to find you, or where an
+appointment will take place.`;
   return `\n## OUR ADDRESS
 Customers come to us at: ${sanitizeForLine(line)}.
-Give this address when a customer asks where you are, how to find you, or where an
-appointment will take place. Do not invent directions, parking or opening arrangements
+${whereClause} Do not invent directions, parking or opening arrangements
 that are not stated elsewhere.`;
 }
 
@@ -446,12 +461,15 @@ export const bookingModule: ModuleDefinition = {
     const areaSection = buildServiceAreaSection(
       Array.isArray(bookingSettings?.serviceArea) ? bookingSettings.serviceArea : [],
     );
-    const venueSection = buildVenueSection({
-      street: bookingSettings?.venueStreet,
-      postalCode: bookingSettings?.venuePostalCode,
-      city: bookingSettings?.venueCity,
-      country: bookingSettings?.venueCountry,
-    });
+    const venueSection = buildVenueSection(
+      {
+        street: bookingSettings?.venueStreet,
+        postalCode: bookingSettings?.venuePostalCode,
+        city: bookingSettings?.venueCity,
+        country: bookingSettings?.venueCountry,
+      },
+      services.some((s) => s.customerAddressRequired),
+    );
     const businessCapacity = !!(
       bookingSettings?.maxBookingsPerDay ||
       bookingSettings?.maxBookedMinutesPerDay ||

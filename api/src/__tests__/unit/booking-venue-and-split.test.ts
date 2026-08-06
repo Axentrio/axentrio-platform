@@ -157,6 +157,42 @@ describe('resolveEventLocation', () => {
     expect(resolveEventLocation({ locationType: 'phone', customerAddressRequired: false, venue })).toBeUndefined();
     expect(resolveEventLocation({ locationType: 'custom', customerAddressRequired: false, venue })).toBeUndefined();
   });
+
+  it("uses the customer's address even when locationType was never set away from 'custom'", () => {
+    // `custom` is the default the column shipped with, so every service created by hand
+    // before the dropdown existed still carries it and no migration ever backfilled them.
+    // Checking locationType first meant a service that geocodes and REFUSES bookings outside
+    // the service area — on customerAddressRequired alone — simultaneously put no address on
+    // the invite at all. The two authorities have to agree about what kind of job it is.
+    expect(
+      resolveEventLocation({
+        locationType: 'custom',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9310 Herdersem',
+        venue,
+      }),
+    ).toBe('Kerkstraat 12, 9310 Herdersem');
+  });
+
+  it('still prefers a meeting URL over the customer address', () => {
+    expect(
+      resolveEventLocation({
+        locationType: 'custom',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12',
+        meetUrl: 'https://meet.google.com/abc-defg-hij',
+        venue,
+      }),
+    ).toBe('https://meet.google.com/abc-defg-hij');
+  });
+
+  it('never falls back to the VENUE for a travel job with no address yet', () => {
+    // Sending the business's own address for a job at the customer's would be worse than
+    // sending none: the customer's calendar would tell them to drive to the wrong place.
+    expect(
+      resolveEventLocation({ locationType: 'custom', customerAddressRequired: true, venue }),
+    ).toBeUndefined();
+  });
 });
 
 // --------------------------------------------------------------------------------------

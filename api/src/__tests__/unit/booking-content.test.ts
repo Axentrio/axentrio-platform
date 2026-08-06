@@ -187,6 +187,41 @@ describe('buildBookingEventContent — intake value rendering', () => {
     expect(intake).toEqual(['  Colour: blue', '  zz-deleted: x']);
   });
 
+  it('follows the order the owner authored the questions in, not the uuid order', () => {
+    // Answer keys are v4 uuids, so sorting them ordered the owner's calendar body by random
+    // bytes and made the service editor's reorder control a no-op here — while the portal's
+    // booking detail and Leads already walked the question array and honoured it.
+    const first = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+    const second = '00000000-0000-4000-8000-000000000000';
+    const { description } = build(
+      { attendeeName: 'Ada', attendeeEmail: 'a@x.io', intakeAnswers: { [second]: 'ground', [first]: 'lift' } },
+      {
+        name: 'Repair',
+        // Authored order deliberately opposes both uuid order and insertion order.
+        intakeQuestions: [
+          { id: first, label: 'Access' },
+          { id: second, label: 'Floor' },
+        ],
+      },
+    );
+    const intake = description.split('\n').filter((l) => l.startsWith('  '));
+    expect(intake).toEqual(['  Access: lift', '  Floor: ground']);
+  });
+
+  it('keeps orphaned answers after the authored ones, in stable order', () => {
+    const known = '11111111-1111-1111-1111-111111111111';
+    const { description } = build(
+      {
+        attendeeName: 'Ada',
+        attendeeEmail: 'a@x.io',
+        intakeAnswers: { 'zz-old': 'z', [known]: 'blue', 'aa-old': 'a' },
+      },
+      { name: 'Haircut', intakeQuestions: [{ id: known, label: 'Colour' }] },
+    );
+    const intake = description.split('\n').filter((l) => l.startsWith('  '));
+    expect(intake).toEqual(['  Colour: blue', '  aa-old: a', '  zz-old: z']);
+  });
+
   it('sorts intake entries by RAW key, not by normalized label', () => {
     const { description } = build({
       attendeeName: 'Ada',

@@ -404,14 +404,25 @@ function BookingRow({
           this existed only as a server log line, so an owner could hold back work for months
           and never learn the area they drew was costing them.
         */}
+        {/*
+          Both sentences are advice about a decision the owner has not taken yet, but the
+          column survives Accept untouched — so a CONFIRMED booking, with a calendar invite
+          and a confirmation email already sent, sat under a green pill being told it was not
+          committed to. The flag stays either way; only the wording turns on whether the
+          decision is still open.
+        */}
         {booking.serviceAreaMatch === 'outside' && (
           <div className="mt-1 text-xs text-amber-400">
-            Outside your service area — you have not committed to this one.
+            {isRequest
+              ? 'Outside your service area — you have not committed to this one.'
+              : 'Outside your service area — accepted anyway.'}
           </div>
         )}
         {booking.serviceAreaMatch === 'unknown' && (
           <div className="mt-1 text-xs text-amber-400">
-            Address could not be matched to your service area — worth checking before you confirm.
+            {isRequest
+              ? 'Address could not be matched to your service area — worth checking before you confirm.'
+              : 'Address could not be matched to your service area.'}
           </div>
         )}
         {booking.notes && (

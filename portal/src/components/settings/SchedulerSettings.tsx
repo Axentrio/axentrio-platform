@@ -274,8 +274,23 @@ export const SchedulerSettings: React.FC = () => {
       for (const { key, label } of DAYS) if (days[key].enabled) check(label, days[key].windows);
     }
     for (const o of overrides) if (o.date && !o.closed) check(`Override ${o.date}`, o.windows);
+    // A backwards range used to be dropped on the way out and saved as a ONE-DAY row under a
+    // success toast, so the rest of the intended closure stayed bookable and the pickers went
+    // on showing the range the owner thought they had saved. The API has always rejected it;
+    // silently repairing the payload is what stopped that rejection from being seen.
+    for (const o of overrides) {
+      if (o.date && o.endDate && o.endDate < o.date) {
+        e.push(`Override ${o.date}: end date must be on or after the start date.`);
+      }
+    }
+    // Sent in the same PUT as everything else, and the API parses the whole payload before
+    // any write — so one bad character here rejected the entire scheduler save, and the toast
+    // could only say "Validation failed" with nothing pointing at this box.
+    if (venue.country && !/^[A-Za-z]{2}$/.test(venue.country)) {
+      e.push('Venue address: country must be a 2-letter code, like BE.');
+    }
     return [...new Set(e)];
-  }, [days, overrides, availabilityMode]);
+  }, [days, overrides, availabilityMode, venue]);
 
   const handleSave = () => {
     const weeklyHours: WeeklyHours = {};
@@ -285,8 +300,9 @@ export const SchedulerSettings: React.FC = () => {
     }
     const dateOverrides = overrides.flatMap((o) => {
       if (!o.date) return [];
-      // Only send an end date when it is a real, later day — an equal or earlier one is a
-      // half-finished edit, and the API rejects it rather than guessing.
+      // Only send an end date when it is a real, later day. An EQUAL one is just a one-day
+      // override stated the long way; an earlier one can no longer reach here at all, because
+      // `errors` now blocks the save instead of quietly rewriting what the owner asked for.
       const span = o.endDate && o.endDate > o.date ? { endDate: o.endDate } : {};
       return [o.closed ? { date: o.date, ...span, closed: true } : { date: o.date, ...span, windows: o.windows }];
     });

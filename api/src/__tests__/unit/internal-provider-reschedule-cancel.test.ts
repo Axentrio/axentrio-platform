@@ -64,12 +64,17 @@ vi.mock('../../integrations/google/google-calendar.service', () => ({
 // InternalProvider routes calendar work through the port; these tests focus on
 // reschedule/cancel LOGIC, so a benign "no connection" adapter suffices.
 const providerGetBusy = vi.fn();
+// Exposed (rather than inlined in the factory) so a test can drive the not_found RECREATE
+// branch and read the event payload it builds — the branch that silently rebuilt the mirror
+// without its location or conferencing.
+const providerCreateEvent = vi.fn();
+const providerUpdateEvent = vi.fn();
 vi.mock('../../scheduler/calendar-provider', () => {
   const adapter = {
     providerType: 'google',
     getBusy: (...a: any[]) => providerGetBusy(...a),
-    createEvent: vi.fn().mockResolvedValue(null),
-    updateEvent: vi.fn().mockResolvedValue('no_connection'),
+    createEvent: (...a: any[]) => providerCreateEvent(...a),
+    updateEvent: (...a: any[]) => providerUpdateEvent(...a),
     deleteEvent: vi.fn().mockResolvedValue('ok'),
     resolveIdentity: vi.fn().mockResolvedValue(null),
   };
@@ -144,6 +149,8 @@ describe('InternalProvider reschedule / cancel / list', () => {
     bookingRefFind.mockResolvedValue([]); // no calendar ref by default
     chatSessionFindOne.mockResolvedValue(null); // owning session not found by default
     providerGetBusy.mockResolvedValue(null); // no external busy by default
+    providerCreateEvent.mockResolvedValue(null);
+    providerUpdateEvent.mockResolvedValue('no_connection');
     bookingQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('lower(blocked_range)')) return []; // busy
       if (sql.includes("status='cancelled'")) return [{ sequence: 1 }]; // cancel update
@@ -188,6 +195,67 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(sendBookingEmail.mock.calls[0][0].description)
       .toContain('Join the meeting: https://meet.google.com/abc-defg-hij');
     expect(sendBookingEmail.mock.calls[0][0].description).toContain('Reschedule or cancel:');
+  });
+
+  describe('the mirror was deleted in the calendar (not_found → recreate)', () => {
+    // A recreate builds the event from nothing, and it SUCCEEDS — so markSyncPending never
+    // fires and the reconciler, which claims sync_pending rows only, never revisits it.
+    // Anything left out here is gone permanently, and the stored meetingUrl is overwritten
+    // with whatever comes back. That is what made the loss compound: the nulled URL then
+    // blanked the join link on every later reschedule and in the portal's booking list.
+    beforeEach(() => {
+      bookingRefFind.mockResolvedValue([
+        {
+          bookingId: 'bk-1',
+          providerType: 'google',
+          externalEventId: 'ev-old',
+          externalCalendarId: 'cal-1',
+          meetingUrl: 'https://meet.google.com/abc-defg-hij',
+          createdAt: new Date('2026-06-01T00:00:00Z'),
+        },
+      ]);
+      providerUpdateEvent.mockResolvedValue('not_found');
+      providerCreateEvent.mockResolvedValue({
+        eventId: 'ev-new',
+        calendarId: 'cal-1',
+        meetUrl: 'https://meet.google.com/new-link',
+      });
+    });
+
+    it('rebuilds a video booking WITH conferencing, so a fresh join link is minted', async () => {
+      eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'google_meet' });
+
+      await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+
+      expect(providerCreateEvent).toHaveBeenCalledOnce();
+      expect(providerCreateEvent.mock.calls[0][1]).toMatchObject({ conferencing: true });
+    });
+
+    it('rebuilds an in-person booking WITH the venue on it', async () => {
+      eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'in_person' });
+      bookingSettingsFindOne.mockResolvedValue({
+        venueStreet: 'Grote Markt 1',
+        venuePostalCode: '9300',
+        venueCity: 'Aalst',
+        venueCountry: 'BE',
+      } as any);
+
+      await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+
+      expect(providerCreateEvent.mock.calls[0][1]).toMatchObject({
+        location: 'Grote Markt 1, 9300 Aalst, BE',
+      });
+      // Not a video service — minting a conference would also steal the LOCATION field.
+      expect(providerCreateEvent.mock.calls[0][1].conferencing).toBeUndefined();
+    });
+
+    it('still carries the full body, not just a bare title', async () => {
+      eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, locationType: 'in_person' });
+      await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+      const input = providerCreateEvent.mock.calls[0][1];
+      expect(input.summary).toBeTruthy();
+      expect(input.description).toContain('Ada');
+    });
   });
 
   it('rejects rescheduling to a non-offered time', async () => {

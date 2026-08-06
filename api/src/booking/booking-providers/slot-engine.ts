@@ -18,7 +18,7 @@ import type {
   TimeWindow,
   Weekday,
 } from '../../database/entities/AvailabilityRule';
-import { overrideCoversDate } from '../../database/entities/AvailabilityRule';
+import { isRangedOverride, pickOverrideForDate } from '../../database/entities/AvailabilityRule';
 import type { ServiceType } from '../../database/entities/ServiceType';
 import type { BookingSlot } from './types';
 
@@ -96,23 +96,36 @@ function parseHHMM(s: string): { h: number; m: number } | null {
 /** A full calendar day (00:00–24:00) — the implicit window in `always_open` mode. */
 const ALL_DAY: TimeWindow[] = [{ start: '00:00', end: '24:00' }];
 
-function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
-  const dateStr = day.toFormat('yyyy-MM-dd');
-  // A multi-day closure is ONE row covering a range, so this is a containment test rather
-  // than an equality one. `isWithinBusinessHours` shares this function, so analytics and the
-  // scheduler cannot disagree about whether the business was shut.
-  const override = (rule.dateOverrides || []).find((o) => overrideCoversDate(o, dateStr));
-  if (override) {
-    // A date override wins in every mode: a holiday closure still closes an
-    // always-open business, and custom one-off hours still apply.
-    if (override.closed) return [];
-    return override.windows || [];
-  }
+/** The day's hours ignoring date overrides — the weekly grid, or all day when always-open. */
+function baseWindowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
   // Always-open: bookable around the clock; the calendar's busy intervals (passed
   // in `busy`) are the only limit. Weekly hours are ignored in this mode.
   if (rule.availabilityMode === 'always_open') return ALL_DAY;
   const key = WEEKDAY_KEYS[day.weekday - 1];
   return rule.weeklyHours?.[key] || [];
+}
+
+function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
+  const dateStr = day.toFormat('yyyy-MM-dd');
+  // A multi-day closure is ONE row covering a range, so this is a containment test rather
+  // than an equality one. `isWithinBusinessHours` shares this function, so analytics and the
+  // scheduler cannot disagree about whether the business was shut. Narrowest row wins, so a
+  // one-day exception typed inside a longer range beats it regardless of insertion order.
+  const override = pickOverrideForDate(rule.dateOverrides, dateStr);
+  if (override) {
+    // A date override wins in every mode: a holiday closure still closes an
+    // always-open business, and custom one-off hours still apply.
+    if (override.closed) return [];
+    // ...with one asymmetry between a single date and a RANGE. Naming one date is how an
+    // owner opens a day they are normally shut — a one-off Sunday. A range is how they
+    // restate the hours of a stretch ("short hours all fortnight"), and it is entered with
+    // two date pickers and no weekday control, so applying it to every date it spans opened
+    // the weekends inside it and the create path confirmed those bookings. A ranged
+    // hours row therefore changes the hours of days already open and opens nothing new.
+    if (isRangedOverride(override) && baseWindowsForDay(rule, day).length === 0) return [];
+    return override.windows || [];
+  }
+  return baseWindowsForDay(rule, day);
 }
 
 function overlapsBusy(startMs: number, endMs: number, busy: BusyInterval[]): boolean {

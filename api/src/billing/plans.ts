@@ -28,6 +28,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       unifiedInbox: false,
       bookings: false,
       calendarSync: false,
+      // Granted per tenant via override, never by tier — see feature-taxonomy.
+      travelTime: false,
       leadCapture: false,
       leadEnrichment: false,
       proactiveLeadCapture: false,
@@ -59,6 +61,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       unifiedInbox: true,
       bookings: false,
       calendarSync: false,
+      // Granted per tenant via override, never by tier — see feature-taxonomy.
+      travelTime: false,
       leadCapture: true, // basic — module-level access
       leadEnrichment: false, // Essential = passive contact capture only
       proactiveLeadCapture: false,
@@ -94,6 +98,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       unifiedInbox: true,
       bookings: true,
       calendarSync: true, // Cal.com only in v1 per D23
+      // Granted per tenant via override, never by tier — see feature-taxonomy.
+      travelTime: false,
       leadCapture: true,
       // Pro's real lead differentiation lives in THIS flag, not in a comment:
       // structured fields (address, service, preferred date, booking status,
@@ -131,6 +137,8 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       unifiedInbox: true,
       bookings: true,
       calendarSync: true,
+      // Granted per tenant via override, never by tier — see feature-taxonomy.
+      travelTime: false,
       leadCapture: true,
       leadEnrichment: true,
       proactiveLeadCapture: true, // ceiling only; tenant toggle defaults OFF

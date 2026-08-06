@@ -140,6 +140,7 @@ describe('wire contract — /entitlements', () => {
       'leadEnrichment',
       'platformAssistant',
       'proactiveLeadCapture',
+      'travelTime',
       'unifiedInbox',
     ]);
     expect(keysOf(data.plans[0])).toEqual([

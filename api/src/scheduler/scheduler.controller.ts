@@ -13,6 +13,7 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
+import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
 import {
   updateSchedulerSchema,
   serviceInputSchema,
@@ -51,6 +52,34 @@ function asApiError(err: unknown): never {
  * sync only and is never read here.
  */
 const BOOKINGS_FEATURE_ERROR = 'plan_limit_bookings';
+
+/** Switching travel time ON needs the separately-sold `travelTime` grant (ADR-0014). */
+const TRAVEL_FEATURE_ERROR = 'plan_limit_travel_time';
+
+/**
+ * Refuse to switch travel time on while another Agent's diary resolves to the same
+ * itinerary key.
+ *
+ * This is the multi-driver case arriving early by accident (ADR-0016), and it is the one
+ * configuration in which the feature makes a business worse off than not having it: the
+ * two bots' bookings read as one person's day, so the gate strips slots for journeys
+ * neither of them makes. The message says why, because "invalid state" would send an owner
+ * looking for a fault in their booking settings when the fix is in their calendar
+ * connection.
+ */
+async function assertTravelEnableAllowed(tenantId: string, botId: string): Promise<void> {
+  await requireFeature(tenantId, 'travelTime', TRAVEL_FEATURE_ERROR);
+  const itineraryKey = await resolveItineraryKey(botId);
+  if (await itineraryKeyIsShared(tenantId, botId, itineraryKey)) {
+    throw new ApiError(
+      'Travel time cannot be switched on while another assistant books into the same calendar. ' +
+        'Their appointments would be treated as one person’s day, and times would be held back ' +
+        'for journeys nobody makes. Give each assistant its own calendar first.',
+      409,
+      'travel_shared_itinerary'
+    );
+  }
+}
 
 /** Exported for the P4 preset CI invariant test (intra-preset slug-collision check). */
 export function slugify(name: string): string {
@@ -167,6 +196,13 @@ async function readConfig(tenantId: string) {
       city: bookingSettings?.venueCity ?? null,
       country: bookingSettings?.venueCountry ?? null,
     },
+    // Cherry-picked like everything else here — a field on the entity but missing from this
+    // object hydrates the editor blank and the owner's next Save writes the blank back.
+    travel: {
+      enabled: bookingSettings?.travelTimeEnabled === true,
+      slackMin: bookingSettings?.travelSlackMin ?? null,
+      startFromBase: bookingSettings?.travelStartFromBase === true,
+    },
   };
 }
 
@@ -210,13 +246,22 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     await repo.save(rule);
   }
 
+  // Checked BEFORE the upsert, so a refused enable leaves nothing written — not even the
+  // slack value that rode along in the same payload. Only an enable is gated: switching
+  // travel OFF must always be possible, including for a tenant who has since lost the
+  // entitlement or connected a second bot to their calendar.
+  if (data.travel?.enabled === true) {
+    await assertTravelEnableAllowed(tenantId, bot.id);
+  }
+
   // `!== undefined`, not truthiness: [] is how the owner clears their service area, and
   // null is how they clear a capacity rule or a business default.
   if (
     data.serviceArea !== undefined ||
     data.bookingRules ||
     data.venueAddress !== undefined ||
-    data.bookingsPaused !== undefined
+    data.bookingsPaused !== undefined ||
+    data.travel !== undefined
   ) {
     const br = (data.bookingRules ?? {}) as Record<string, number | null | undefined>;
     // `venueAddress: null` clears the whole venue; an omitted key leaves it alone. Reusing
@@ -281,15 +326,34 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     }
 
     // NOT NULL, so the INSERT arm must always bind a real boolean — it cannot ride the
-    // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write.
+    // RULE_COLUMNS loop, which binds `?? null` and would fail on a first write. Same for
+    // the two travel switches below.
+    const BOOLEAN_COLUMNS: Array<[boolean | undefined, string]> = [
+      [data.bookingsPaused, 'bookings_paused'],
+      [data.travel?.enabled, 'travel_time_enabled'],
+      [data.travel?.startFromBase, 'travel_start_from_base'],
+    ];
+    for (const [submitted, column] of BOOLEAN_COLUMNS) {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(submitted === true, submitted !== undefined);
+      insertCols.push(column);
+      insertVals.push(valueParam);
+      updates.push(
+        `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+      );
+    }
+
+    // Nullable int, so it follows the RULE_COLUMNS contract — undefined leaves the stored
+    // value alone, an explicit null clears it.
     {
       const valueParam = `$${params.length + 1}`;
       const providedParam = `$${params.length + 2}`;
-      params.push(data.bookingsPaused === true, data.bookingsPaused !== undefined);
-      insertCols.push('bookings_paused');
+      params.push(data.travel?.slackMin ?? null, data.travel?.slackMin !== undefined);
+      insertCols.push('travel_slack_min');
       insertVals.push(valueParam);
       updates.push(
-        `bookings_paused = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.bookings_paused END`
+        `travel_slack_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_slack_min END`
       );
     }
 

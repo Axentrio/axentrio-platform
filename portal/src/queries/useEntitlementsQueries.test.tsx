@@ -44,6 +44,7 @@ const ESSENTIAL_FEATURES = {
   unifiedInbox: true,
   bookings: false,
   calendarSync: false,
+  travelTime: false,
   leadCapture: true,
   leadEnrichment: false,
   proactiveLeadCapture: false,

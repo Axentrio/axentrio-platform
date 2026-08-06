@@ -134,6 +134,67 @@ export class BookingSettings {
   @Column({ type: 'boolean', name: 'bookings_paused', default: false })
   bookingsPaused!: boolean;
 
+  /**
+   * Travel-time aware scheduling, per bot (ADR-0016).
+   *
+   * ON THE BOT, NOT ON THE ITINERARY KEY, and that is the tempting mistake rather than an
+   * incidental choice: `rekeyBotBookings` rewrites the key whenever an owner connects,
+   * switches or disconnects a calendar, so anything hung off the key is orphaned by an
+   * ordinary settings change. The key scopes *enforcement*; the bot owns *configuration*.
+   *
+   * Default off for every existing bot, and the platform refuses to switch it on while a
+   * second bot shares this bot's itinerary key — under a shared key the two bots' bookings
+   * read as one person's day, so a two-plumber business would find slots stripped for
+   * journeys neither of them makes, which is worse than not having the feature.
+   */
+  @Column({ type: 'boolean', name: 'travel_time_enabled', default: false })
+  travelTimeEnabled!: boolean;
+
+  /**
+   * The owner's margin on top of the drive itself: parking, finding the door, the job
+   * before running five minutes late. Added only when there IS a drive to pad — adding it
+   * to the no-answer case would quietly tighten every business that never uses this.
+   */
+  @Column({ type: 'int', name: 'travel_slack_min', nullable: true })
+  travelSlackMin?: number | null;
+
+  /**
+   * Gate the FIRST job of the day against the venue, as though the owner starts from
+   * there. Opt-in, because plenty of owners do not. Return-home time is never gated.
+   *
+   * Note this can TIGHTEN a day, not only slacken it: with this on, cancelling the day's
+   * first job makes venue→(next job) the new constraint, which may be a longer drive than
+   * venue→(the job that was dropped). Reschedule and cancel must re-check rather than
+   * assume that removing work can only create slack.
+   */
+  @Column({ type: 'boolean', name: 'travel_start_from_base', default: false })
+  travelStartFromBase!: boolean;
+
+  /**
+   * The venue's coordinates. Not owner-typed — geocoded from the venue address above, and
+   * required because an at-premises appointment is a KNOWN location. That is easy to get
+   * backwards: a 09:00 job at the owner's own premises followed by a 10:00 mobile job is a
+   * fully knowable drive, not an unknown one.
+   */
+  @Column({ type: 'double precision', name: 'venue_lat', nullable: true })
+  venueLat?: number | null;
+
+  @Column({ type: 'double precision', name: 'venue_lng', nullable: true })
+  venueLng?: number | null;
+
+  /**
+   * Day-scoring settings, carried by the same migration and read by nothing.
+   *
+   * Efficiency is deliberately out of v1: whether a job further out is worth doing is the
+   * owner's decision, and a soft preference must never refuse a booking a hard constraint
+   * would have allowed. These exist so that work is a feature, not a second migration.
+   */
+  @Column({ type: 'int', name: 'travel_max_detour_min', nullable: true })
+  travelMaxDetourMin?: number | null;
+
+  @Column({ type: 'boolean', name: 'travel_prefer_clusters', default: false })
+  travelPreferClusters!: boolean;
+
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
 

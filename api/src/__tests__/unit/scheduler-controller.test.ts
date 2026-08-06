@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const getAnchorBotConfig = vi.fn();
 const replaceAnchorBotSettingsSection = vi.fn();
@@ -9,6 +9,13 @@ vi.mock('../../services/bot-config.service', () => ({
 
 const requireFeature = vi.fn();
 vi.mock('../../billing/enforce', () => ({ requireFeature: (...a: any[]) => requireFeature(...a) }));
+
+const resolveItineraryKey = vi.fn(async () => 'gcal:owner@acme.com');
+const itineraryKeyIsShared = vi.fn(async () => false);
+vi.mock('../../scheduler/itinerary-key', () => ({
+  resolveItineraryKey: (...a: any[]) => resolveItineraryKey(...(a as [])),
+  itineraryKeyIsShared: (...a: any[]) => itineraryKeyIsShared(...(a as [])),
+}));
 
 const etFindOne = vi.fn();
 const etSave = vi.fn((x) => x);
@@ -553,6 +560,120 @@ describe('scheduler.controller · pause switch', () => {
     bsFindOne.mockResolvedValue(null);
     await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
     expect(sendSuccess.mock.calls[0][1]).toMatchObject({ bookingsPaused: false });
+  });
+});
+
+/**
+ * The travel-time switch: gates 2 and 3 of the five that stand in front of a paid external
+ * dependency. Switching it ON is the only direction that is ever refused.
+ */
+describe('scheduler.controller · travel time switch', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+    resolveItineraryKey.mockResolvedValue('gcal:owner@acme.com');
+    itineraryKeyIsShared.mockResolvedValue(false);
+  });
+
+  // `clearAllMocks` wipes calls but keeps implementations, so an unentitled stub set inside
+  // a test here would follow the suite into every describe below it.
+  afterEach(() => requireFeature.mockReset());
+
+  const save = async (body: Record<string, unknown>) => {
+    await updateSchedulerConfig({ tenantId: 'ten-1', body } as any, res);
+    const call = dsQuery.mock.calls.find((c) => String(c[0]).includes('chatbot_booking_settings'));
+    return call ? { sql: String(call[0]), params: call[1] as unknown[] } : null;
+  };
+
+  const bound = (q: { sql: string; params: unknown[] }, column: string) => {
+    const m = new RegExp(`(?:^|, )${column} = CASE WHEN \\$(\\d+) THEN \\$(\\d+) ELSE`).exec(q.sql);
+    if (!m) throw new Error(`no update arm for ${column}`);
+    return { provided: q.params[Number(m[1]) - 1], value: q.params[Number(m[2]) - 1] };
+  };
+
+  it('writes all three settings and is a sufficient reason to write on its own', async () => {
+    const q = (await save({ travel: { enabled: true, slackMin: 10, startFromBase: true } }))!;
+    expect(bound(q, 'travel_time_enabled')).toEqual({ provided: true, value: true });
+    expect(bound(q, 'travel_slack_min')).toEqual({ provided: true, value: 10 });
+    expect(bound(q, 'travel_start_from_base')).toEqual({ provided: true, value: true });
+  });
+
+  it('requires the separately-sold travelTime grant to switch on', async () => {
+    await save({ travel: { enabled: true } });
+    expect(requireFeature).toHaveBeenCalledWith('ten-1', 'travelTime', expect.any(String));
+  });
+
+  it('refuses to switch on while another bot shares the diary, and says why', async () => {
+    // Under a shared key the two bots' bookings read as one person's day, so the business
+    // would find times held back for journeys neither of them makes.
+    itineraryKeyIsShared.mockResolvedValue(true);
+    await expect(
+      updateSchedulerConfig({ tenantId: 'ten-1', body: { travel: { enabled: true } } } as any, res)
+    ).rejects.toMatchObject({ statusCode: 409, code: 'travel_shared_itinerary' });
+    expect(itineraryKeyIsShared).toHaveBeenCalledWith('ten-1', 'bot-1', 'gcal:owner@acme.com');
+  });
+
+  it('writes NOTHING when the enable is refused, not even the fields that rode along', async () => {
+    itineraryKeyIsShared.mockResolvedValue(true);
+    await updateSchedulerConfig(
+      { tenantId: 'ten-1', body: { travel: { enabled: true, slackMin: 15 } } } as any,
+      res
+    ).catch(() => undefined);
+    expect(dsQuery.mock.calls.some((c) => String(c[0]).includes('chatbot_booking_settings'))).toBe(false);
+  });
+
+  it('never refuses switching OFF', async () => {
+    // A tenant who has since lost the entitlement, or connected a second bot to their
+    // calendar, must still be able to turn it off.
+    itineraryKeyIsShared.mockResolvedValue(true);
+    requireFeature.mockImplementation(async (_t: string, feature: string) => {
+      if (feature === 'travelTime') throw new Error('not entitled');
+    });
+    const q = (await save({ travel: { enabled: false } }))!;
+    expect(bound(q, 'travel_time_enabled')).toEqual({ provided: true, value: false });
+    expect(requireFeature).not.toHaveBeenCalledWith('ten-1', 'travelTime', expect.any(String));
+  });
+
+  it('binds real booleans on the INSERT arm — both columns are NOT NULL', async () => {
+    const q = (await save({ travel: { enabled: false } }))!;
+    expect(bound(q, 'travel_time_enabled').value).toBe(false);
+    expect(bound(q, 'travel_start_from_base').value).toBe(false);
+  });
+
+  it('clears the slack on an explicit null', async () => {
+    const q = (await save({ travel: { slackMin: null } }))!;
+    expect(bound(q, 'travel_slack_min')).toEqual({ provided: true, value: null });
+  });
+
+  it('leaves a stored slack alone when the travel payload does not mention it', async () => {
+    const q = (await save({ travel: { enabled: true } }))!;
+    expect(bound(q, 'travel_slack_min')).toEqual({ provided: false, value: null });
+  });
+
+  it('leaves every travel setting alone when the payload does not mention travel', async () => {
+    // Saving the venue must not switch travel time on or off.
+    const q = (await save({ venueAddress: { city: 'Aalst' } }))!;
+    expect(bound(q, 'travel_time_enabled')).toEqual({ provided: false, value: false });
+    expect(bound(q, 'travel_start_from_base')).toEqual({ provided: false, value: false });
+  });
+
+  it('is returned by readConfig so the portal cannot hydrate it wrong', async () => {
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelStartFromBase: true } as never);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
+      travel: { enabled: true, slackMin: 10, startFromBase: true },
+    });
+  });
+
+  it('reads a missing settings row as off, with no slack', async () => {
+    bsFindOne.mockResolvedValue(null);
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    expect(sendSuccess.mock.calls[0][1]).toMatchObject({
+      travel: { enabled: false, slackMin: null, startFromBase: false },
+    });
   });
 });
 

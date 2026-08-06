@@ -44,6 +44,17 @@ export interface PlanFeatures {
   unifiedInbox: boolean;
   bookings: boolean;
   calendarSync: boolean;
+  /**
+   * Travel-time aware scheduling (ADR-0014): the scheduler refuses to offer a slot
+   * the owner could not physically drive to.
+   *
+   * Its own key rather than part of `bookings` because it is the only booking
+   * capability with a real per-use external cost (Google Geocoding + Routes), and a
+   * cost centre must be separately revocable — killing it must not take the whole
+   * booking product with it. NOT a `ToggleableFeatureKey`: that union is the
+   * tenant's own preference, and this is the commercial grant.
+   */
+  travelTime: boolean;
   leadCapture: boolean;
   /**
    * Structured lead data: the wide Pro column set (address, requested service,

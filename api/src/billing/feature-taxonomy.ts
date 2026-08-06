@@ -38,6 +38,16 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
     group: 'bookings',
     requires: 'bookings',
   },
+  // Off at every tier in the catalog, so granting it is always a deliberate per-tenant
+  // override. That is not timidity about an unfinished feature: it spends real money at
+  // Google on every use, and rollout gate 5 requires the billing account to be off its
+  // free trial before ANY tenant is entitled — a tier default would entitle every Pro
+  // tenant the moment it deployed, and a lapsed trial degrades silently.
+  travelTime: {
+    label: 'Travel-time aware scheduling',
+    group: 'bookings',
+    requires: 'bookings',
+  },
   // The widget is the native channel — always on, no key, never listed here.
   channelWhatsapp: { label: 'WhatsApp', group: 'channels' },
   channelMessenger: { label: 'Facebook Messenger', group: 'channels' },

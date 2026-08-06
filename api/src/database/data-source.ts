@@ -49,6 +49,7 @@ import { ServiceType } from './entities/ServiceType';
 import { AvailabilityRule } from './entities/AvailabilityRule';
 import { BookingSettings } from './entities/BookingSettings';
 import { Booking } from './entities/Booking';
+import { TravelUsage } from './entities/TravelUsage';
 import { TenantModule } from './entities/TenantModule';
 import { CalendarCredential } from './entities/CalendarCredential';
 import { BookingReference } from './entities/BookingReference';
@@ -123,6 +124,7 @@ export const AppDataSource = new DataSource({
     AvailabilityRule,
     BookingSettings,
     Booking,
+    TravelUsage,
     TenantModule,
     CalendarCredential,
     BookingReference,

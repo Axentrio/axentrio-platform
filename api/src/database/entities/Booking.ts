@@ -133,6 +133,68 @@ export class Booking {
   @Column({ type: 'varchar', length: 512, name: 'customer_address', nullable: true })
   customerAddress?: string | null;
 
+  /**
+   * WHERE the job is, as opposed to what the customer typed. All null on every row
+   * created before travel-time scheduling, and all null forever on a service that needs
+   * no address — which reads as "unknown location" and behaves exactly as today.
+   *
+   * The split between the next two groups is a licensing constraint, not a modelling
+   * preference (ADR-0014). `customerPlaceId` is Google's durable identity and may be kept
+   * for as long as the booking lives. The coordinates are a DERIVED CACHE the Maps terms
+   * permit for 30 consecutive days and no longer, so they are deleted on expiry and
+   * re-resolved from the place id — with a 60-day default booking horizon, re-resolution
+   * before a far-future appointment is the normal path, not an edge case.
+   */
+  @Column({ type: 'varchar', length: 256, name: 'customer_place_id', nullable: true })
+  customerPlaceId?: string | null;
+
+  @Column({ type: 'double precision', name: 'customer_lat', nullable: true })
+  customerLat?: number | null;
+
+  @Column({ type: 'double precision', name: 'customer_lng', nullable: true })
+  customerLng?: number | null;
+
+  /** When the coordinates above were resolved — what the 30-day deletion job reads. */
+  @Column({ type: 'timestamptz', name: 'customer_coords_at', nullable: true })
+  customerCoordsAt?: Date | null;
+
+  /**
+   * The address string that was actually placed and checked, which is not always the one
+   * the customer typed. Bound to the booking so create cannot silently confirm against a
+   * different string than the one availability was filtered on.
+   */
+  @Column({ type: 'varchar', length: 512, name: 'customer_address_verified', nullable: true })
+  customerAddressVerified?: string | null;
+
+  /**
+   * How precisely Google placed it (`GeocodePrecision` in contracts/travel.ts).
+   *
+   * Load-bearing, not metadata. `approximate` is a town centre — it collapses every
+   * address in a municipality onto one dot, so it can prove a drive impossible and can
+   * never prove one fine. Stored even when untrusted, so an owner or an audit can see
+   * what the gate had to work with.
+   */
+  @Column({ type: 'varchar', length: 24, name: 'geocode_precision', nullable: true })
+  geocodePrecision?: string | null;
+
+  /** `'pin'` (the customer shared a location) | `'geocoded'`. Provenance decides trust. */
+  @Column({ type: 'varchar', length: 16, name: 'location_source', nullable: true })
+  locationSource?: 'pin' | 'geocoded' | null;
+
+  /**
+   * What the travel gate DID: `'ok'` verified, `'degraded'` decided on the haversine
+   * proofs alone because routing was unreachable or the tenant's cap was spent,
+   * `'captured'` held as a request because there was nothing to reason over, and
+   * `'overridden'` confirmed by the owner accepting that request.
+   *
+   * Null means the gate did not apply, which is what every pre-existing row holds. It is
+   * not a fifth verdict, and `'degraded'` in particular must never read as `'ok'` — a
+   * sustained run of it is a silent Google outage, and telling those apart afterwards is
+   * the only way anyone finds out.
+   */
+  @Column({ type: 'varchar', length: 24, name: 'travel_check', nullable: true })
+  travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;
+
   /** P5c — frozen effective length in minutes (null only for pre-P5c rows). */
   @Column({ type: 'int', name: 'booked_duration_min', nullable: true })
   bookedDurationMin?: number | null;

@@ -111,6 +111,17 @@ const envSchema = z.object({
   S3_SIGNED_URL_EXPIRY: z.string().default('900').transform(Number),
   CDN_URL: z.string().optional(),
 
+  // Google Maps Platform — travel-time aware scheduling (ADR-0014).
+  // ONE platform-held key for Geocoding + Routes. Absent is a supported state and the
+  // emergency stop: with no key the whole feature is inert platform-wide and the scheduler
+  // behaves byte-identically to how it did before travel time existed.
+  GOOGLE_MAPS_API_KEY: z.string().optional(),
+  // Billable Google units per tenant per calendar month. NOT a cost target — cost was
+  // explicitly ruled a non-driver — but a blast radius limit: one tenant with a runaway
+  // conversation loop must not be able to spend the platform's whole Maps budget. 5000
+  // elements is roughly €25 at Route Matrix Essentials pricing, against a €99 plan.
+  TRAVEL_MONTHLY_ELEMENT_CAP: z.string().default('5000').transform(Number),
+
   // LLM / RAG
   OPENAI_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -399,6 +410,12 @@ export const config = {
   llmRateLimit: {
     // Daily LLM call cap per tenant. Used when Tenant.dailyLlmCallLimit is null.
     dailyLimitPerTenant: env.LLM_DAILY_LIMIT_PER_TENANT,
+  },
+
+  travel: {
+    // Gate 1 of five, and the cheapest one to check: absent ⇒ nothing else is consulted.
+    googleMapsApiKey: env.GOOGLE_MAPS_API_KEY,
+    monthlyElementCapPerTenant: env.TRAVEL_MONTHLY_ELEMENT_CAP,
   },
 
   rag: {

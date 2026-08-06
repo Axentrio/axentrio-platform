@@ -261,6 +261,25 @@ export const availabilityInputSchema = z.object({
   slotGranularityMin: z.number().int().min(5).max(240).default(30),
 });
 
+/**
+ * Travel-time settings, in their own object rather than inside `bookingRules`.
+ *
+ * `bookingRules` has a single consistent contract — every member is an optional nullable
+ * int where undefined leaves alone and null clears — and both switches here are two-state
+ * booleans with a NOT NULL column behind them, which that contract has no use for. It is
+ * also the reason `bookingsPaused` sits at the top level rather than in the rules.
+ *
+ * `venueLat`/`venueLng` are deliberately absent: they are geocoded from the venue address,
+ * not typed by an owner, so there is nothing here for a client to send.
+ */
+export const travelSettingsSchema = z.object({
+  enabled: z.boolean().optional(),
+  // Slack pads the drive, so an hour is already generous and 480 would let it swallow a
+  // working day. Nullable so an owner can clear it back to "no margin".
+  slackMin: z.number().int().min(0).max(120).nullable().optional(),
+  startFromBase: z.boolean().optional(),
+});
+
 export const updateSchedulerSchema = z
   .object({
     provider: z.enum(['calcom', 'internal']).optional(),
@@ -274,6 +293,7 @@ export const updateSchedulerSchema = z
     // Top-level, NOT inside bookingRules: that object's contract is "optional AND nullable —
     // undefined leaves alone, null clears", which a two-state switch has no use for.
     bookingsPaused: z.boolean().optional(),
+    travel: travelSettingsSchema.optional(),
   })
   .refine(
     (d) =>
@@ -283,7 +303,8 @@ export const updateSchedulerSchema = z
       d.serviceArea !== undefined ||
       d.bookingRules ||
       d.venueAddress !== undefined ||
-      d.bookingsPaused !== undefined,
+      d.bookingsPaused !== undefined ||
+      d.travel !== undefined,
     { message: 'At least one of provider, eventType, availability, serviceArea, bookingRules is required' }
   );
 

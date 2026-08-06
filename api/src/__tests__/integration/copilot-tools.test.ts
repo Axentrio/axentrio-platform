@@ -364,6 +364,7 @@ describe('getEntitlements', () => {
         'leadEnrichment',
         'platformAssistant',
         'proactiveLeadCapture',
+        'travelTime',
         'unifiedInbox',
       ].sort(),
     );

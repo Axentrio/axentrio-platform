@@ -36,6 +36,19 @@ export function conflictKeyFor(
  * double-bookings being surfaced, not created here.
  */
 export async function rekeyBotBookings(botId: string, newKey: string): Promise<void> {
+  // BEFORE the no-rows early return below: a bot's diary identity can move onto another
+  // bot's key with no future bookings to carry across, and that state is exactly as
+  // hazardous for travel time as one with a full diary. Lazily imported to keep the
+  // dependency one-directional — `itinerary-key` reads `conflictKeyFor` from this module.
+  // Wrapped because this is observability and the rekey is not: a booking must never be
+  // left on a stale key because a warning could not be produced.
+  try {
+    const { warnIfTravelItineraryNowShared } = await import('../booking/travel/travel-eligibility');
+    await warnIfTravelItineraryNowShared(botId, newKey);
+  } catch (err) {
+    logger.warn('[Booking] travel shared-itinerary re-check unavailable during rekey', { botId, err });
+  }
+
   const repo = AppDataSource.getRepository(Booking);
   const rows: Array<{ id: string; calendar_key: string }> = await repo.query(
     `SELECT id, calendar_key FROM chatbot_bookings

@@ -7,14 +7,17 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { resolveStoredCalendarIdentity } = vi.hoisted(() => ({ resolveStoredCalendarIdentity: vi.fn() }));
+const { resolveStoredCalendarIdentity, dsQuery } = vi.hoisted(() => ({
+  resolveStoredCalendarIdentity: vi.fn(),
+  dsQuery: vi.fn(async (..._a: unknown[]) => [] as unknown[]),
+}));
 vi.mock('../../scheduler/calendar-provider', () => ({ resolveStoredCalendarIdentity }));
 vi.mock('../../database/data-source', () => ({
-  AppDataSource: { getRepository: () => ({ query: vi.fn() }) },
+  AppDataSource: { getRepository: () => ({ query: vi.fn() }), query: (...a: unknown[]) => dsQuery(...a) },
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
-import { resolveItineraryKey } from '../../scheduler/itinerary-key';
+import { resolveItineraryKey, itineraryKeyIsShared } from '../../scheduler/itinerary-key';
 
 describe('resolveItineraryKey', () => {
   beforeEach(() => resolveStoredCalendarIdentity.mockReset());
@@ -52,5 +55,57 @@ describe('resolveItineraryKey', () => {
   it('separates two bots with no shared calendar', async () => {
     resolveStoredCalendarIdentity.mockResolvedValue(null);
     expect(await resolveItineraryKey('bot-a')).not.toBe(await resolveItineraryKey('bot-b'));
+  });
+});
+
+/**
+ * The one state in which travel enforcement leaves a business WORSE OFF than not having
+ * it: two bots on one diary, so the gate strips slots for journeys neither of them makes.
+ */
+describe('itineraryKeyIsShared', () => {
+  beforeEach(() => {
+    resolveStoredCalendarIdentity.mockReset();
+    dsQuery.mockReset();
+    dsQuery.mockResolvedValue([]);
+  });
+
+  it('answers a bot-scoped key without touching the database', async () => {
+    // `bot:<id>` embeds the bot's own id, so no other bot can produce it. A business with
+    // no connected calendar is provably its own itinerary — not a lookup, an identity.
+    expect(await itineraryKeyIsShared('ten-1', 'bot-a', 'bot:bot-a')).toBe(false);
+    expect(dsQuery).not.toHaveBeenCalled();
+  });
+
+  it('is false when the tenant has no other bot with a connected calendar', async () => {
+    dsQuery.mockResolvedValue([]);
+    expect(await itineraryKeyIsShared('ten-1', 'bot-a', 'gcal:owner@acme.com')).toBe(false);
+    expect(resolveStoredCalendarIdentity).not.toHaveBeenCalled();
+  });
+
+  it('is true when a sibling bot resolves to the same key', async () => {
+    dsQuery.mockResolvedValue([{ id: 'bot-b' }]);
+    resolveStoredCalendarIdentity.mockResolvedValue({ identity: 'owner@acme.com', providerType: 'google' });
+    expect(await itineraryKeyIsShared('ten-1', 'bot-a', 'gcal:owner@acme.com')).toBe(true);
+  });
+
+  it('is false when a sibling is on a different calendar', async () => {
+    dsQuery.mockResolvedValue([{ id: 'bot-b' }]);
+    resolveStoredCalendarIdentity.mockResolvedValue({ identity: 'other@acme.com', providerType: 'google' });
+    expect(await itineraryKeyIsShared('ten-1', 'bot-a', 'gcal:owner@acme.com')).toBe(false);
+  });
+
+  it('does not confuse one identity across two providers', async () => {
+    dsQuery.mockResolvedValue([{ id: 'bot-b' }]);
+    resolveStoredCalendarIdentity.mockResolvedValue({ identity: 'owner@acme.com', providerType: 'microsoft' });
+    expect(await itineraryKeyIsShared('ten-1', 'bot-a', 'gcal:owner@acme.com')).toBe(false);
+  });
+
+  it('excludes the bot itself and soft-deleted siblings in the query', async () => {
+    await itineraryKeyIsShared('ten-1', 'bot-a', 'gcal:owner@acme.com');
+    const [sql, params] = dsQuery.mock.calls[0] as [string, unknown[]];
+    expect(sql).toMatch(/b\.id <> \$2/);
+    expect(sql).toMatch(/b\.deleted_at IS NULL/);
+    expect(sql).toMatch(/c\.status = 'active'/);
+    expect(params).toEqual(['ten-1', 'bot-a']);
   });
 });

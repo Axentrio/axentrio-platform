@@ -12,6 +12,9 @@ vi.mock('../../database/data-source', () => ({
 }));
 vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
 
+const warnIfTravelItineraryNowShared = vi.fn(async () => undefined);
+vi.mock('../../booking/travel/travel-eligibility', () => ({ warnIfTravelItineraryNowShared }));
+
 import { rekeyBotBookings, conflictKeyFor } from '../../scheduler/calendar-rekey';
 
 describe('conflictKeyFor', () => {
@@ -62,5 +65,14 @@ describe('rekeyBotBookings', () => {
     queryMock.mockResolvedValueOnce([]); // SELECT
     await rekeyBotBookings('b1', 'gcal:x');
     expect(queryMock.mock.calls.filter((c) => String(c[0]).includes('UPDATE'))).toHaveLength(0);
+  });
+
+  it('re-evaluates travel’s shared-diary state EVEN when no bookings move', async () => {
+    // A bot can land on another bot's key with an empty future diary, and that state is
+    // exactly as hazardous for travel time as one with bookings in it. Putting the check
+    // after the no-rows early return would have missed it.
+    queryMock.mockResolvedValueOnce([]); // SELECT
+    await rekeyBotBookings('b1', 'gcal:shared@acme.com');
+    expect(warnIfTravelItineraryNowShared).toHaveBeenCalledWith('b1', 'gcal:shared@acme.com');
   });
 });

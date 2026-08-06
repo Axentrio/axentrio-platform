@@ -46,14 +46,13 @@ import {
   resolveCalendarProvider,
   providerFor,
   isCalendarSyncAllowed,
-  resolveStoredCalendarIdentity,
   hasHealthyCalendarConnection,
 } from '../../scheduler/calendar-provider';
 import { BookingReference } from '../../database/entities/BookingReference';
 import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
-import { conflictKeyFor } from '../../scheduler/calendar-rekey';
+import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -401,16 +400,17 @@ export async function loadBusinessRules(botId: string, manager?: EntityManager):
  * THE TWO HALVES SCOPE DIFFERENTLY, deliberately. The day ceilings ask "how much has this
  * BUSINESS sold today", a question about the bot's own catalogue, so they count by `bot_id`.
  * The gap asks "is anything parked too close to this in the DIARY", a question about one
- * person's day — and two bots pointed at one real calendar share a `calendar_key` (see
- * `calendarKey()`), so a bot-scoped gap query cannot see the neighbour that the advisory lock
- * and `loadBusy` both already count. It passed, and the two bookings landed back to back on a
- * calendar that had room for only one of them. Scoping the gap to `calendar_key` also lets it
- * use the `(calendar_key, blocked_range)` exclusion index rather than filtering on `bot_id`.
+ * person's day — so it scopes to the ITINERARY KEY (ADR-0016), and two bots pointed at one
+ * real calendar share one. A bot-scoped gap query could not see the neighbour that the
+ * advisory lock and `loadBusy` both already count: it passed, and the two bookings landed
+ * back to back on a calendar that had room for only one of them. Scoping the gap to the key
+ * also lets it use the `(calendar_key, blocked_range)` exclusion index rather than filtering
+ * on `bot_id`. Travel feasibility will land on this same half, for the same reason.
  */
 export async function enforceBusinessCapacity(
   manager: EntityManager,
   botId: string,
-  calendarKey: string,
+  itineraryKey: ItineraryKey,
   rules: BusinessRules,
   window: { start: Date; end: Date; blockedStart: Date; blockedEnd: Date },
   timezone: string,
@@ -455,7 +455,7 @@ export async function enforceBusinessCapacity(
   if (minGapMin) {
     const gapMs = minGapMin * 60_000;
     const params: unknown[] = [
-      calendarKey,
+      itineraryKey,
       new Date(window.blockedStart.getTime() - gapMs).toISOString(),
       new Date(window.blockedEnd.getTime() + gapMs).toISOString(),
     ];
@@ -627,22 +627,6 @@ export class InternalProvider implements BookingProvider {
     return bookingId.replace(/-/g, '');
   }
 
-  /**
-   * Conflict key for a bot. Normalized to the connected calendar's account-unique
-   * identity (`gcal:<email-or-calendarId>`) so bots sharing one real calendar
-   * share one key (the EXCLUDE constraint then blocks cross-bot double-booking).
-   * Falls back to `bot:<id>` when the calendar identity is unknown (no/legacy
-   * connection) — never `gcal:primary`, which would collide globally.
-   */
-  private async calendarKey(ctx: BookingContext): Promise<string> {
-    // DB-only stored identity (plan D9): conflict keys keep the connected
-    // calendar's identity even when external sync is entitlement-disabled, so
-    // existing conflict records never silently weaken to bot-scoped keys.
-    const stored = await resolveStoredCalendarIdentity(ctx.bot.id);
-    if (!stored) return conflictKeyFor(ctx.bot.id, null);
-    return conflictKeyFor(ctx.bot.id, stored.identity, stored.providerType);
-  }
-
   /** Auto-confirmation requires a live calendar the owner actually sees — without one
    *  a "confirmed" booking would be invisible to them (no sync) and risk a no-show. So
    *  auto services degrade to request-mode when there is no healthy connected calendar. */
@@ -722,9 +706,13 @@ export class InternalProvider implements BookingProvider {
           );
     }
     const { rangeStart, rangeEnd } = normalizeDateRange(startDate, endDate, rule.timezone);
+    // Resolved once and passed down, like every other booking path: the diary this
+    // availability is being computed for is a fact about the request, not something each
+    // helper should re-derive. Travel filtering will scope to this same key (ADR-0016).
+    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
     const busy = await this.loadAllBusy(
       ctx,
-      await this.calendarKey(ctx),
+      itineraryKey,
       rangeStart,
       rangeEnd,
       rule.timezone,
@@ -760,18 +748,19 @@ export class InternalProvider implements BookingProvider {
    * never conflicts with its own current slot).
    */
   private async loadBusy(
-    calendarKey: string,
+    itineraryKey: ItineraryKey,
     rangeStartIso: string,
     rangeEndIso: string,
     excludeId?: string
   ): Promise<BusyInterval[]> {
     const rows: Array<{ s: string; e: string }> = await AppDataSource.getRepository(Booking).query(
+      // `calendar_key` is the stored column; the itinerary key is what it means here.
       `SELECT lower(blocked_range) AS s, upper(blocked_range) AS e
          FROM chatbot_bookings
         WHERE calendar_key = $1 AND status IN ('pending','confirmed')
           AND blocked_range && tstzrange($2, $3, '[)')
           AND ($4::uuid IS NULL OR id <> $4::uuid)`,
-      [calendarKey, rangeStartIso, rangeEndIso, excludeId ?? null]
+      [itineraryKey, rangeStartIso, rangeEndIso, excludeId ?? null]
     );
     return rows.map((r) => ({ start: new Date(r.s), end: new Date(r.e) }));
   }
@@ -807,14 +796,14 @@ export class InternalProvider implements BookingProvider {
    */
   private async loadAllBusy(
     ctx: BookingContext,
-    calendarKey: string,
+    itineraryKey: ItineraryKey,
     rangeStartIso: string,
     rangeEndIso: string,
     timezone?: string,
     excludeId?: string,
     excludeExternalInterval?: { start: Date; end: Date }
   ): Promise<BusyInterval[]> {
-    let internal = await this.loadBusy(calendarKey, rangeStartIso, rangeEndIso, excludeId);
+    let internal = await this.loadBusy(itineraryKey, rangeStartIso, rangeEndIso, excludeId);
     // Business minimum gap: pad OUR bookings only. Padding the owner's personal calendar
     // events too would quietly refuse slots around their dentist appointment, which is not
     // what "minimum time between bookings" asks for. Applied on this side ONLY — the engine
@@ -889,7 +878,7 @@ export class InternalProvider implements BookingProvider {
     // Create-time revalidation: the service must still exist, belong to this bot,
     // and be active (a slot chip / multi-turn gap can go stale).
     const service = await this.resolveService(ctx.bot.id, serviceId);
-    const calendarKey = await this.calendarKey(ctx);
+    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
     const bookingRepo = AppDataSource.getRepository(Booking);
 
     // 1. Idempotency: a live (non-failed) booking with this key → return it.
@@ -947,7 +936,7 @@ export class InternalProvider implements BookingProvider {
     if (service.bookingMode === 'request' || !canAuto || durationUnresolved(service, extras?.durationMin)) {
       // Carry the model's summary through the downgrade — passing `undefined` here meant a
       // job captured because the calendar was down reached the owner with no context.
-      return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, extras?.aiSummary, intakeAnswers, extras, effectiveDuration);
+      return this.createRequest(ctx, idempotencyKey, service, itineraryKey, start, end, attendee, notes, extras?.aiSummary, intakeAnswers, extras, effectiveDuration);
     }
 
     // P5a: required address/phone gate (recoverable; the agent re-asks). Auto path.
@@ -972,7 +961,7 @@ export class InternalProvider implements BookingProvider {
     //    (rules, buffers, min-notice, horizon, internal + Google busy).
     const busy = await this.loadAllBusy(
       ctx,
-      calendarKey,
+      itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
       rule.timezone
@@ -990,20 +979,20 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
     }
 
-    // 4. Reserve + insert under a per-calendar advisory lock. The exclusion
+    // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
     //    constraint is the last-line guard: a racing create gets 23P01.
     const icsUid = `${uuidv4()}@axentrio`;
     let bookingId: string;
     try {
       bookingId = await AppDataSource.transaction(async (manager) => {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [itineraryKey]);
         // P5b: capacity gate — count held bookings for this service on the slot's local
         // day, inside the same lock so the count-then-insert is atomic.
         await enforceServiceDayCapacity(manager, service, start, rule.timezone);
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          calendarKey,
+          itineraryKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone
@@ -1026,7 +1015,7 @@ export class InternalProvider implements BookingProvider {
             end.toISOString(),
             blockedStart.toISOString(),
             blockedEnd.toISOString(),
-            calendarKey,
+            itineraryKey,
             attendee.name,
             attendee.email ?? null,
             notes ?? null,
@@ -1201,7 +1190,7 @@ export class InternalProvider implements BookingProvider {
     ctx: BookingContext,
     idempotencyKey: string,
     service: ServiceType,
-    calendarKey: string,
+    itineraryKey: ItineraryKey,
     start: Date,
     end: Date,
     attendee: { name: string; email?: string },
@@ -1240,7 +1229,7 @@ export class InternalProvider implements BookingProvider {
           ctx.session.id,
           start.toISOString(),
           end.toISOString(),
-          calendarKey,
+          itineraryKey,
           attendee.name,
           attendee.email ?? null,
           notes ?? null,
@@ -1354,7 +1343,7 @@ export class InternalProvider implements BookingProvider {
     // Resolve the service (sole-active default / SERVICE_REQUIRED / SERVICE_NOT_FOUND).
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
-    const calendarKey = await this.calendarKey(ctx);
+    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
 
     const start = parseBookingStart(preferredTime, rule.timezone);
     if (!start) {
@@ -1386,7 +1375,7 @@ export class InternalProvider implements BookingProvider {
       return this.toResult(recentDup, true);
     }
 
-    return this.createRequest(ctx, idempotencyKey, service, calendarKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras, effectiveDuration);
+    return this.createRequest(ctx, idempotencyKey, service, itineraryKey, start, end, attendee, notes, aiSummary, intakeAnswers, extras, effectiveDuration);
   }
 
   /**
@@ -1746,8 +1735,8 @@ export class InternalProvider implements BookingProvider {
 
   /**
    * Owner accepts a `request_created` lead → confirm it. Uses the request's FROZEN
-   * start/end + booked duration; refreshes the conflict key + buffer-expanded range
-   * to current; re-checks availability + capacity under the per-calendar lock; then
+   * start/end + booked duration; refreshes the itinerary key + buffer-expanded range
+   * to current; re-checks availability + capacity under the per-itinerary lock; then
    * creates the calendar event, sends the confirmation, and schedules reminders. The
    * request's already-snapshotted uploaded_files ride along unchanged.
    */
@@ -1765,16 +1754,16 @@ export class InternalProvider implements BookingProvider {
     const service = await this.serviceForBooking(booking);
     // Frozen length (stored span for legacy rows; never recompute from the service).
     const effectiveDuration = booking.bookedDurationMin ?? Math.round((end.getTime() - start.getTime()) / 60_000);
-    // Refresh the conflict key (owner may have connected/switched/disconnected since)
+    // Refresh the itinerary key (owner may have connected/switched/disconnected since)
     // and the buffer-expanded range (request rows store the RAW start/end).
-    const calendarKey = await this.calendarKey(ctx);
+    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
     const blockedStart = new Date(start.getTime() - service.bufferBeforeMin * 60_000);
     const blockedEnd = new Date(end.getTime() + service.bufferAfterMin * 60_000);
 
     // Re-validate the stored slot at the frozen duration (the lead may be days old).
     const busy = await this.loadAllBusy(
       ctx,
-      calendarKey,
+      itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
       rule.timezone,
@@ -1797,14 +1786,14 @@ export class InternalProvider implements BookingProvider {
     try {
       // UPDATE…RETURNING via .query() yields [rows, count] — normalize (raw-sql.ts).
       updatedRows = returningRows<{ id: string }>(await AppDataSource.transaction(async (manager) => {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [itineraryKey]);
         await enforceServiceDayCapacity(manager, service, start, rule.timezone, bookingId);
         // A request consumes no capacity while it sits as a request — accepting it is the
         // moment it does, so this is the gate that matters for a captured lead.
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          calendarKey,
+          itineraryKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,
@@ -1815,7 +1804,7 @@ export class InternalProvider implements BookingProvider {
               SET status='confirmed', calendar_key=$2, blocked_range=tstzrange($3,$4,'[)'), updated_at=now()
             WHERE id=$1 AND tenant_id=$5 AND status='request_created'
             RETURNING id`,
-          [bookingId, calendarKey, blockedStart.toISOString(), blockedEnd.toISOString(), ctx.tenant.id]
+          [bookingId, itineraryKey, blockedStart.toISOString(), blockedEnd.toISOString(), ctx.tenant.id]
         );
       }));
     } catch (err) {
@@ -2027,7 +2016,7 @@ export class InternalProvider implements BookingProvider {
     }
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.serviceForBooking(booking);
-    const calendarKey = await this.calendarKey(ctx);
+    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
 
     // Anchor a zoneless/loose time to the business timezone (mirrors create/request):
     // raw `new Date(newStartTime)` reads a zoneless string as UTC, drifting the booking
@@ -2046,7 +2035,7 @@ export class InternalProvider implements BookingProvider {
     // Re-validate the new slot (excluding this booking's own current range).
     const busy = await this.loadAllBusy(
       ctx,
-      calendarKey,
+      itineraryKey,
       new Date(start.getTime() - 24 * 3600_000).toISOString(),
       new Date(end.getTime() + 24 * 3600_000).toISOString(),
       rule.timezone,
@@ -2065,13 +2054,13 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
     }
 
-    // Single atomic UPDATE under the calendar lock: frees the old slot and
+    // Single atomic UPDATE under the itinerary lock: frees the old slot and
     // reserves the new one in one statement; the exclusion constraint validates
     // the new range against other bookings (the row is excluded from itself).
     let sequence: number;
     try {
       sequence = await AppDataSource.transaction(async (manager) => {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [calendarKey]);
+        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [itineraryKey]);
         // P5b: a reschedule into a DIFFERENT local day consumes capacity on the target
         // day — gate it (excluding this booking's own row). Same-day time moves don't.
         const oldDay = DateTime.fromJSDate(booking.startUtc).setZone(rule.timezone).toISODate();
@@ -2085,7 +2074,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
-          calendarKey,
+          itineraryKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,

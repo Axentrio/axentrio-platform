@@ -171,6 +171,11 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
       )
     );
   } catch (err) {
+    // The sibling POST handlers both do this; only the page that OPENS the flow did not, so
+    // every domain error here — a paused business, a temporarily unavailable diary, a
+    // multi-service tenant needing a service id — was reported to the customer as a broken
+    // link. They then have no reason to try again, and the owner never hears about it.
+    if (err instanceof BookingError) return errorPage(res, err.message);
     logger.warn('[BookingPublic] reschedule page error', { error: err instanceof Error ? err.message : String(err) });
     errorPage(res, 'This link is invalid or has expired.');
   }

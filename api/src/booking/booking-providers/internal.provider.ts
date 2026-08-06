@@ -679,7 +679,7 @@ export class InternalProvider implements BookingProvider {
       const { bookingsPaused } = await loadBusinessRules(ctx.bot.id);
       if (bookingsPaused) {
         throw new BookingError(
-          `This business has paused new online bookings. Do not offer specific times and do not say they are fully booked or closed — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm.`,
+          `This business has paused NEW online bookings. Do not offer specific times and do not say they are fully booked or closed — ask the customer for their preferred date/time in their own words and capture it with request_appointment as a request the business will confirm. EXCEPTION: if this customer already has an appointment and wants to MOVE it, that is not a new booking — call reschedule_booking with their preferred time, which still works while bookings are paused. Never answer a reschedule with request_appointment: it leaves the original appointment standing and the business ends up with two.`,
           'BOOKINGS_PAUSED',
           409
         );
@@ -1650,7 +1650,17 @@ export class InternalProvider implements BookingProvider {
     content: { summary: string; description: string },
     start: Date,
     end: Date,
-    timezone: string
+    timezone: string,
+    /**
+     * Only the RECREATE branches use these — a plain update deliberately PATCHes times alone
+     * so the owner's own edits to the event survive. But a recreate builds the event from
+     * nothing, so anything omitted here is gone for good: the recreate succeeds, so
+     * `markSyncPending` never fires and the reconciler (which claims `sync_pending` rows only)
+     * never revisits it. Omitting them cost the venue AND nulled the stored Meet URL, which
+     * then blanked the join link on every later reschedule and in the portal's booking list.
+     */
+    location?: string,
+    conferencing?: boolean
   ): Promise<void> {
     // Plan D9: no external calendar calls when sync is entitlement-disabled.
     // The booking itself is already updated internally; the mirror is
@@ -1660,6 +1670,13 @@ export class InternalProvider implements BookingProvider {
     const ref = await this.canonicalRef(ctx.bot.id, bookingId);
     try {
       const input = { startISO: start.toISOString(), endISO: end.toISOString(), timezone };
+      const recreateInput = {
+        ...input,
+        summary: content.summary,
+        description: content.description,
+        ...(location ? { location } : {}),
+        ...(conferencing ? { conferencing } : {}),
+      };
       if (ref) {
         // Route by the REF's provider — the event lives there. After a provider
         // switch, rescheduling an OLD event targets its original provider, which
@@ -1668,11 +1685,10 @@ export class InternalProvider implements BookingProvider {
         const res = await provider.updateEvent(ctx.bot.id, ref.externalEventId, input, ref.externalCalendarId);
         if (res === 'not_found') {
           // Owner deleted it in the calendar → recreate (deterministic id) on its home.
-          const ev = await provider.createEvent(
-            ctx.bot.id,
-            { ...input, summary: content.summary, description: content.description },
-            { eventId: this.googleEventId(bookingId), calendarId: ref.externalCalendarId }
-          );
+          const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
+            eventId: this.googleEventId(bookingId),
+            calendarId: ref.externalCalendarId,
+          });
           if (ev) {
             ref.externalEventId = ev.eventId;
             ref.externalCalendarId = ev.calendarId;
@@ -1688,11 +1704,9 @@ export class InternalProvider implements BookingProvider {
         // current active provider now.
         const provider = await resolveCalendarProvider(ctx.bot.id);
         if (!provider) return;
-        const ev = await provider.createEvent(
-          ctx.bot.id,
-          { ...input, summary: content.summary, description: content.description },
-          { eventId: this.googleEventId(bookingId) }
-        );
+        const ev = await provider.createEvent(ctx.bot.id, recreateInput, {
+          eventId: this.googleEventId(bookingId),
+        });
         if (ev) {
           await refRepo.save(
             refRepo.create({
@@ -2173,7 +2187,25 @@ export class InternalProvider implements BookingProvider {
       service,
       buildManageUrl(bookingId)
     );
-    await this.syncCalendarReschedule(ctx, bookingId, rescheduledContent, start, end, rule.timezone).catch(() => undefined);
+    await this.syncCalendarReschedule(
+      ctx,
+      bookingId,
+      rescheduledContent,
+      start,
+      end,
+      rule.timezone,
+      // Same derivation as the create path — a recreate has to rebuild the whole event, so it
+      // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
+      // event: Google mints a fresh one from `conferencing` and we store what comes back.
+      resolveEventLocation({
+        locationType: service.locationType,
+        customerAddressRequired: service.customerAddressRequired,
+        meetUrl: null,
+        customerAddress: booking.customerAddress,
+        venue,
+      }),
+      service.locationType === 'google_meet'
+    ).catch(() => undefined);
 
     return {
       success: true,

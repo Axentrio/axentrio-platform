@@ -244,14 +244,42 @@ function safeDecode(v: string): string | undefined {
 //      e.g. today's rate-limit body. Picking message before string-error gives the more
 //      useful copy "Rate limit exceeded. Please try again later." instead of "Too Many Requests".)
 //   3. data.error as string (legacy string-only error bodies).
+/**
+ * Name the offending fields from a `ZodError.flatten()` payload.
+ *
+ * The API parses a whole payload before any write, so one bad character rejects the entire
+ * save — and the envelope's message for that is always the bare string "Validation failed".
+ * The settings editors PUT ~20 controls at once, so without the field names the owner is told
+ * only that something, somewhere, is wrong.
+ */
+function describeFieldErrors(details: unknown): string | undefined {
+  if (!details || typeof details !== 'object') return undefined;
+  const { formErrors, fieldErrors } = details as {
+    formErrors?: unknown;
+    fieldErrors?: Record<string, unknown>;
+  };
+  const parts: string[] = [];
+  if (Array.isArray(formErrors)) {
+    for (const m of formErrors) if (typeof m === 'string' && m) parts.push(m);
+  }
+  for (const [field, msgs] of Object.entries(fieldErrors ?? {})) {
+    const first = Array.isArray(msgs) ? msgs.find((m) => typeof m === 'string' && m) : undefined;
+    if (first) parts.push(`${field}: ${first}`);
+  }
+  if (!parts.length) return undefined;
+  // Cap it: a toast that lists twelve fields is as unreadable as one that lists none.
+  return parts.length > 3 ? `${parts.slice(0, 3).join('; ')}; +${parts.length - 3} more` : parts.join('; ');
+}
+
 export function extractApiErrorMessage(error: unknown): string | undefined {
   if (!axios.isAxiosError(error)) return undefined;
   if (!error.response) return undefined; // network/timeout — caller falls back to err.message
   const data = error.response.data as
-    | { error?: string | { message?: string; code?: string }; message?: string }
+    | { error?: string | { message?: string; code?: string; details?: unknown }; message?: string }
     | undefined;
   if (data?.error && typeof data.error === 'object' && typeof data.error.message === 'string') {
-    return data.error.message;
+    const fields = describeFieldErrors(data.error.details);
+    return fields ? `${data.error.message}: ${fields}` : data.error.message;
   }
   if (typeof data?.message === 'string') return data.message;
   if (typeof data?.error === 'string') return data.error;

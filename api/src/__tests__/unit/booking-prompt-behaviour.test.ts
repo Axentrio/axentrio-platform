@@ -375,6 +375,22 @@ describe('the venue reaches the prompt', () => {
     expect(out).toMatch(/where you are|how to find you/i);
   });
 
+  it('stops claiming the appointment happens here once a service travels to the customer', () => {
+    // The block was built from the venue columns alone, so it told the bot to give this
+    // address for "where an appointment will take place" — for every service, including the
+    // ones whose calendar invite says the customer's own address. A business with real
+    // premises AND one mobile service reaches that with no misconfiguration: it fills in the
+    // venue exactly as the field asks.
+    const withTravel = buildVenueSection(V, true)!;
+    expect(withTravel).toContain('Grote Markt 1, 9300 Aalst, BE');
+    expect(withTravel).toMatch(/where you are|how to find you/i);
+    expect(withTravel).not.toMatch(/where an\s+appointment will take place/i);
+    expect(withTravel).toMatch(/customer's own address/i);
+
+    // The premises-only business is unchanged — the plain claim is correct there.
+    expect(buildVenueSection(V, false)!).toMatch(/where an\s+appointment will take place/i);
+  });
+
   it('adds nothing at all when no venue is set', () => {
     // Every tenant starts here, and a heading with no address under it is worse than silence.
     expect(buildVenueSection(null)).toBeNull();

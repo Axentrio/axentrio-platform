@@ -228,3 +228,71 @@ describe('calendarSync status', () => {
     expect(sync({ status: 'request_created', syncPending: true, syncLastError: 'x' })).toBe('none');
   });
 });
+
+/**
+ * Precedence and reach — the two ways a RANGE was quietly wrong.
+ *
+ * Ranges made two silent promises nobody had checked: that the row the owner sees as the
+ * specific one actually wins, and that a range of one-off HOURS reaches only the days the
+ * business was already open. Both failed, and both failed invisibly — the prompt stated one
+ * thing while the engine did another, which is the only combination that reaches a customer.
+ */
+describe('overlapping and ranged overrides', () => {
+  /** Mon 2026-08-10 → Fri 2026-08-21, so the span contains Sat 15 and Sun 16. */
+  const slotsForFortnight = (dateOverrides: unknown[]) =>
+    computeSlots({
+      rule: { ...RULE, dateOverrides },
+      eventType: SERVICE,
+      rangeStart: '2026-08-10T00:00:00Z',
+      rangeEnd: '2026-08-22T00:00:00Z',
+      now: new Date('2026-08-09T00:00:00Z'),
+    } as never);
+
+  const CLOSURE = { date: '2026-08-10', endDate: '2026-08-21', closed: true };
+  const REOPEN = { date: '2026-08-14', windows: [{ start: '10:00', end: '14:00' }] };
+
+  it('lets a one-day re-open beat the closure range it sits inside', () => {
+    const days = new Set(slotsForFortnight([CLOSURE, REOPEN]).map((s) => s.start.slice(0, 10)));
+    expect([...days]).toEqual(['2026-08-14']);
+  });
+
+  it('gives the same answer whichever order the owner happened to add the two rows', () => {
+    // The portal appends new rows and shows no ordering control, so first-match precedence
+    // made the outcome depend on something the owner could neither see nor change.
+    const a = slotsForFortnight([CLOSURE, REOPEN]).map((s) => s.start);
+    const b = slotsForFortnight([REOPEN, CLOSURE]).map((s) => s.start);
+    expect(a).toEqual(b);
+    expect(a.length).toBeGreaterThan(0);
+  });
+
+  it('does not open a weekend that the weekly hours never open', () => {
+    // A fortnight of one-off hours is entered with two date pickers and no weekday control.
+    // Applying it to every date it spanned opened Sat and Sun, and the create path then
+    // confirmed those bookings — computeSlots is what it re-validates against.
+    const days = new Set(
+      slotsForFortnight([{ date: '2026-08-10', endDate: '2026-08-21', windows: [{ start: '10:00', end: '14:00' }] }])
+        .map((s) => s.start.slice(0, 10)),
+    );
+    expect(days.has('2026-08-15')).toBe(false); // Saturday
+    expect(days.has('2026-08-16')).toBe(false); // Sunday
+    expect(days.has('2026-08-14')).toBe(true); // Friday, still restated to 10:00–14:00
+  });
+
+  it('still opens a single named date the weekly hours never open', () => {
+    // The asymmetry is deliberate: naming ONE date is how a one-off Sunday is expressed.
+    const days = new Set(
+      slotsForFortnight([{ date: '2026-08-16', windows: [{ start: '10:00', end: '14:00' }] }])
+        .map((s) => s.start.slice(0, 10)),
+    );
+    expect(days.has('2026-08-16')).toBe(true);
+  });
+
+  it('never states a malformed end date to a customer', () => {
+    // The engine shape-checks 'zzz' and ignores the row; the prompt only compared ordering,
+    // and 'zzz' sorts above every ISO date — so the bot announced a closure that never ends
+    // while the engine kept taking bookings. The two surfaces must agree.
+    const rule = { ...RULE, dateOverrides: [{ date: '2026-01-05', endDate: 'zzz', closed: true }] };
+    const out = buildHoursSection(rule as never, new Date('2026-08-09T00:00:00Z'));
+    expect(out ?? '').not.toMatch(/zzz/);
+  });
+});

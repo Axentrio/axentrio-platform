@@ -55,12 +55,22 @@ export function resolveEventLocation(input: EventLocationInput): string | undefi
   const meetUrl = input.meetUrl?.trim();
   if (meetUrl) return meetUrl;
 
-  if (input.locationType !== 'in_person') return undefined;
-
+  // `customerAddressRequired` is checked BEFORE `locationType`, because it is the stronger
+  // statement and the one the rest of the system already acts on alone: service-area gating
+  // geocodes the customer's address and REFUSES the booking on this flag without ever reading
+  // locationType. A service that is a travel job for that purpose cannot also be "no location
+  // at all" for invite purposes. Ordering it the other way silently dropped the customer's own
+  // address from the invite for every service still on the `custom` default the column
+  // shipped with — which is every service created by hand before the dropdown existed.
   if (input.customerAddressRequired) {
     const customer = input.customerAddress?.replace(/\s+/g, ' ').trim();
     return customer ? customer : undefined;
   }
+
+  // Past here the location is the business's own premises, which only `in_person` means.
+  // `custom` stays deliberately empty: the dropdown tells the owner it puts no location on
+  // the invite, so an owner who picked it has asked for exactly that.
+  if (input.locationType !== 'in_person') return undefined;
 
   return formatVenueLine(input.venue) ?? undefined;
 }

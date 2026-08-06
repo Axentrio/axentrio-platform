@@ -408,6 +408,11 @@ export async function adminAvailability(
     tenant,
     bot,
     botSettings: settings,
+    // Both callers of this helper are moving a booking that already exists: the owner's
+    // portal picker and the customer's token-verified manage link. A booking pause stops
+    // *new* online bookings, so neither may be gated by it — without this the pause makes
+    // the owner's own diary look empty and reports the customer's link as expired.
+    isAdmin: true,
   };
   // Pass the booking's service + frozen length so the reschedule picker resolves
   // the right service (no SERVICE_REQUIRED when several are active) and shows

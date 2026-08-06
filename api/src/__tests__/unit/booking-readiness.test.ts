@@ -187,6 +187,29 @@ describe('hasUpcomingOpenOverride / hasEffectiveHours — dateOverride cases', (
     expect(hasEffectiveHours(closed, TODAY)).toBe(false);
   });
 
+  it('an IN-PROGRESS open range still counts — it is relevant until its last day', () => {
+    // Readiness tested the START date only, so a business running purely on an open range
+    // was told from day two that its hours were missing, while the slot engine went on
+    // opening every remaining day of that range. Readiness must not contradict the engine.
+    const rule = ruleWith([
+      { date: '2026-06-01', endDate: '2026-07-31', windows: [{ start: '10:00', end: '18:00' }] },
+    ]);
+    expect(hasUpcomingOpenOverride(rule, TODAY)).toBe(true);
+    expect(hasEffectiveHours(rule, TODAY)).toBe(true);
+  });
+
+  it('a range that has fully elapsed does NOT count', () => {
+    const rule = ruleWith([
+      { date: '2026-01-01', endDate: '2026-02-01', windows: [{ start: '10:00', end: '18:00' }] },
+    ]);
+    expect(hasUpcomingOpenOverride(rule, TODAY)).toBe(false);
+  });
+
+  it('a malformed endDate degrades to its start date rather than counting forever', () => {
+    const rule = ruleWith([{ date: '2026-01-01', endDate: 'zzz', windows: [{ start: '10:00', end: '18:00' }] }]);
+    expect(hasUpcomingOpenOverride(rule, TODAY)).toBe(false);
+  });
+
   it('always_open ⇒ effective hours regardless of weeklyHours/overrides', () => {
     expect(hasEffectiveHours({ availabilityMode: 'always_open', weeklyHours: {}, dateOverrides: [], timezone: 'UTC' } as any, TODAY)).toBe(true);
   });

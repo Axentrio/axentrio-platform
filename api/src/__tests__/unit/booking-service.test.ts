@@ -21,8 +21,10 @@ vi.mock('../../utils/logger', () => ({
 }));
 
 const mockGetBotConfigForSession = vi.fn();
+const mockGetAnchorBotConfig = vi.fn();
 vi.mock('../../services/bot-config.service', () => ({
   getBotConfigForSession: (...args: unknown[]) => mockGetBotConfigForSession(...args),
+  getAnchorBotConfig: (...args: unknown[]) => mockGetAnchorBotConfig(...args),
 }));
 
 // The service-boundary gate (D7) resolves entitlements; stub it here so these
@@ -63,6 +65,7 @@ import {
   cancelBooking,
   adminCancelBooking,
   adminAcceptRequest,
+  adminAvailability,
 } from '../../booking/booking.service';
 
 const VALID_UUID = '550e8400-e29b-41d4-a716-446655440000';
@@ -135,6 +138,32 @@ describe('Booking Service (internal dispatcher)', () => {
         expect.any(Object),
         '2026-04-01',
         '2026-04-02',
+        undefined,
+        undefined,
+      );
+    });
+
+    it('marks adminAvailability as an ADMIN context so a booking pause cannot hide the slots', async () => {
+      // Regression: the pause gate in checkAvailability exempts `ctx.isAdmin`, and the
+      // comment there names adminAvailability as the reason the exemption exists — but this
+      // builder was the one context that never set the flag. A merely-paused business got an
+      // empty reschedule picker in the portal, and its customers were told their signed
+      // manage link was "invalid or has expired". Asserting on a hand-built ctx (as the
+      // provider test does) cannot catch that; only the real caller can.
+      mockTenantFindOne.mockResolvedValue({ id: TENANT_ID, name: 'Test Tenant', settings: {} });
+      mockGetAnchorBotConfig.mockResolvedValue({
+        bot: { id: 'bot-anchor', tenantId: TENANT_ID, isDefault: true },
+        settings: { businessHours: { timezone: 'Europe/Amsterdam' } },
+      });
+      internalMethods.checkAvailability.mockResolvedValue({ slots: [] });
+
+      await adminAvailability('scheduler-admin', TENANT_ID, '2026-04-01', '2026-04-02');
+
+      expect(internalMethods.checkAvailability).toHaveBeenCalledWith(
+        expect.objectContaining({ isAdmin: true }),
+        '2026-04-01',
+        '2026-04-02',
+        undefined,
         undefined,
         undefined,
       );

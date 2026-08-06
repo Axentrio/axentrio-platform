@@ -14,6 +14,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ServiceType } from '../../database/entities/ServiceType';
 import {
   AvailabilityRule,
+  effectiveEndDate,
   type WeeklyHours,
   type TimeWindow,
 } from '../../database/entities/AvailabilityRule';
@@ -66,7 +67,14 @@ export function hasNonEmptyWeeklyHours(weeklyHours: WeeklyHours | null | undefin
  */
 export function hasUpcomingOpenOverride(rule: AvailabilityRule, today: string): boolean {
   return (rule.dateOverrides || []).some(
-    (o) => o.date >= today && !o.closed && Array.isArray(o.windows) && o.windows.some(isValidWindow),
+    // A RANGE stays relevant until its LAST day, not its first. Testing only `o.date` told a
+    // business running on an in-progress open range that its hours were missing from day two,
+    // while the engine kept opening every remaining day of that range.
+    (o) =>
+      (effectiveEndDate(o) ?? o.date) >= today &&
+      !o.closed &&
+      Array.isArray(o.windows) &&
+      o.windows.some(isValidWindow),
   );
 }
 

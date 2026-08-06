@@ -1261,6 +1261,18 @@ describe('InternalProvider.checkAvailability — calendar gate', () => {
       expect(err.message).toMatch(/request_appointment/);
     });
 
+    it('tells the bot that MOVING an existing appointment is not a new booking', async () => {
+      // The message was written for the create case only, and the bot is trained hard by the
+      // rest of the prompt that an availability failure means "capture with request_appointment".
+      // Applied to a customer moving an appointment, that writes a SECOND request while the
+      // original confirmed booking stands — nothing dedups them, and accepting one leaves the
+      // owner with two appointments, two calendar events, and a customer holding the old
+      // invite. reschedule_booking never reads the pause flag, so it genuinely still works.
+      const err = await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11').catch((e) => e);
+      expect(err.message).toMatch(/reschedule_booking/);
+      expect(err.message).toMatch(/never answer a reschedule with request_appointment/i);
+    });
+
     it('does not gate an ADMIN caller — the owner still fills their own diary', async () => {
       // adminAvailability shares this method. Gating it would break the portal's reschedule
       // picker and the signed manage-link flow for a business that is merely paused.

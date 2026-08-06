@@ -397,10 +397,20 @@ export async function loadBusinessRules(botId: string, manager?: EntityManager):
  * exist separately because the `EXCLUDE USING gist` constraint only understands overlap of
  * `blocked_range` — it cannot see a required gap, so two concurrent bookers would otherwise
  * both pass the pre-lock re-validation and land back to back.
+ *
+ * THE TWO HALVES SCOPE DIFFERENTLY, deliberately. The day ceilings ask "how much has this
+ * BUSINESS sold today", a question about the bot's own catalogue, so they count by `bot_id`.
+ * The gap asks "is anything parked too close to this in the DIARY", a question about one
+ * person's day — and two bots pointed at one real calendar share a `calendar_key` (see
+ * `calendarKey()`), so a bot-scoped gap query cannot see the neighbour that the advisory lock
+ * and `loadBusy` both already count. It passed, and the two bookings landed back to back on a
+ * calendar that had room for only one of them. Scoping the gap to `calendar_key` also lets it
+ * use the `(calendar_key, blocked_range)` exclusion index rather than filtering on `bot_id`.
  */
 export async function enforceBusinessCapacity(
   manager: EntityManager,
   botId: string,
+  calendarKey: string,
   rules: BusinessRules,
   window: { start: Date; end: Date; blockedStart: Date; blockedEnd: Date },
   timezone: string,
@@ -445,12 +455,12 @@ export async function enforceBusinessCapacity(
   if (minGapMin) {
     const gapMs = minGapMin * 60_000;
     const params: unknown[] = [
-      botId,
+      calendarKey,
       new Date(window.blockedStart.getTime() - gapMs).toISOString(),
       new Date(window.blockedEnd.getTime() + gapMs).toISOString(),
     ];
     let sql = `SELECT 1 FROM chatbot_bookings
-                WHERE bot_id = $1 AND status IN ('pending','confirmed')
+                WHERE calendar_key = $1 AND status IN ('pending','confirmed')
                   AND blocked_range && tstzrange($2, $3, '[)')`;
     if (excludeBookingId) {
       sql += ` AND id <> $4`;
@@ -993,6 +1003,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
+          calendarKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone
@@ -1793,6 +1804,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
+          calendarKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,
@@ -2073,6 +2085,7 @@ export class InternalProvider implements BookingProvider {
         await enforceBusinessCapacity(
           manager,
           ctx.bot.id,
+          calendarKey,
           await loadBusinessRules(ctx.bot.id, manager),
           { start, end, blockedStart, blockedEnd },
           rule.timezone,

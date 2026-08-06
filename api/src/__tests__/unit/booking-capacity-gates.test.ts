@@ -165,7 +165,7 @@ describe('enforceServiceDayCapacity', () => {
 describe('enforceBusinessCapacity', () => {
   it('never queries when no business rule is set', async () => {
     const { manager, calls } = fakeManager();
-    await enforceBusinessCapacity(manager, 'bot-1', rules(), window60, TZ);
+    await enforceBusinessCapacity(manager, 'bot-1', 'cal-1', rules(), window60, TZ);
     expect(calls).toEqual([]);
   });
 
@@ -173,7 +173,7 @@ describe('enforceBusinessCapacity', () => {
     const m = fakeManager([{ n: 4, mins: 240 }]);
     expect(
       await reason(() =>
-        enforceBusinessCapacity(m.manager, 'bot-1', rules({ maxBookingsPerDay: 4 }), window60, TZ)
+        enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ maxBookingsPerDay: 4 }), window60, TZ)
       )
     ).toBe('CAPACITY_REACHED:This business is fully booked that day');
     expect(m.calls[0].params[0]).toBe('bot-1'); // bot-wide, not per service
@@ -186,6 +186,7 @@ describe('enforceBusinessCapacity', () => {
     await enforceBusinessCapacity(
       spring.manager,
       'bot-1',
+      'cal-1',
       rules({ maxBookingsPerDay: 5 }),
       { ...window60, start: new Date('2026-03-29T10:00:00Z') },
       TZ
@@ -196,6 +197,7 @@ describe('enforceBusinessCapacity', () => {
     await enforceBusinessCapacity(
       autumn.manager,
       'bot-1',
+      'cal-1',
       rules({ maxBookingsPerDay: 5 }),
       { ...window60, start: new Date('2026-10-25T10:00:00Z') },
       TZ
@@ -210,6 +212,7 @@ describe('enforceBusinessCapacity', () => {
     await enforceBusinessCapacity(
       m.manager,
       'bot-1',
+      'cal-1',
       rules({ maxBookingsPerDay: 5, minGapMin: 15 }),
       window60,
       TZ
@@ -233,7 +236,7 @@ describe('enforceBusinessCapacity', () => {
     };
     expect(
       await reason(() =>
-        enforceBusinessCapacity(m.manager, 'bot-1', rules({ maxBookedMinutesPerDay: 420 }), long, TZ)
+        enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ maxBookedMinutesPerDay: 420 }), long, TZ)
       )
     ).toBe('CAPACITY_REACHED:This business has no working time left that day');
   });
@@ -243,13 +246,13 @@ describe('enforceBusinessCapacity', () => {
     // job of every fully-planned day.
     const m = fakeManager([{ n: 0, mins: 360 }]);
     await expect(
-      enforceBusinessCapacity(m.manager, 'bot-1', rules({ maxBookedMinutesPerDay: 420 }), window60, TZ)
+      enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ maxBookedMinutesPerDay: 420 }), window60, TZ)
     ).resolves.toBeUndefined();
   });
 
   it('reads minutes from the stored span so a null booked_duration_min cannot bill zero', async () => {
     const m = fakeManager([{ n: 0, mins: 0 }]);
-    await enforceBusinessCapacity(m.manager, 'bot-1', rules({ maxBookedMinutesPerDay: 420 }), window60, TZ);
+    await enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ maxBookedMinutesPerDay: 420 }), window60, TZ);
     expect(m.calls[0].sql).toContain('EXTRACT(EPOCH FROM (end_utc - start_utc))');
     expect(m.calls[0].sql).not.toContain('booked_duration_min');
   });
@@ -258,18 +261,41 @@ describe('enforceBusinessCapacity', () => {
     // This is the whole of the min-gap feature at the write site. The old test re-implemented
     // the padding in the test body and asserted its own arithmetic, which proves nothing.
     const m = fakeManager([]);
-    await enforceBusinessCapacity(m.manager, 'bot-1', rules({ minGapMin: 30 }), window60, TZ);
+    await enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ minGapMin: 30 }), window60, TZ);
     expect(m.calls).toHaveLength(1); // no day query — neither day cap is set
-    const [botId, from, to] = m.calls[0].params;
-    expect(botId).toBe('bot-1');
+    const [scope, from, to] = m.calls[0].params;
+    expect(scope).toBe('cal-1');
     expect(from).toBe('2026-06-10T07:30:00.000Z'); // blockedStart − 30m
     expect(to).toBe('2026-06-10T09:30:00.000Z'); // blockedEnd + 30m
+  });
+
+  it('scopes the gap to the DIARY and the day ceilings to the BOT', async () => {
+    // The two halves answer different questions and must not share a scope. Two bots pointed
+    // at one real calendar share a `calendar_key`, so a bot-scoped gap query cannot see the
+    // neighbour the advisory lock and `loadBusy` both already count: both bookings passed and
+    // landed back to back on a calendar with room for one. The day ceilings stay bot-scoped —
+    // "how much has this business sold today" is a question about its own catalogue.
+    const m = fakeManager([{ n: 0, mins: 0 }], []);
+    await enforceBusinessCapacity(
+      m.manager,
+      'bot-1',
+      'gcal:shared@example.com',
+      rules({ maxBookingsPerDay: 5, minGapMin: 30 }),
+      window60,
+      TZ
+    );
+    const [dayQuery, gapQuery] = m.calls;
+    expect(dayQuery.sql).toContain('bot_id = $1');
+    expect(dayQuery.params[0]).toBe('bot-1');
+    expect(gapQuery.sql).toContain('calendar_key = $1');
+    expect(gapQuery.sql).not.toContain('bot_id');
+    expect(gapQuery.params[0]).toBe('gcal:shared@example.com');
   });
 
   it('refuses a booking that lands inside another job’s gap', async () => {
     const m = fakeManager([{ '?column?': 1 }]);
     expect(
-      await reason(() => enforceBusinessCapacity(m.manager, 'bot-1', rules({ minGapMin: 30 }), window60, TZ))
+      await reason(() => enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ minGapMin: 30 }), window60, TZ))
     ).toBe('CAPACITY_REACHED:That time is too close to another appointment');
   });
 
@@ -277,7 +303,7 @@ describe('enforceBusinessCapacity', () => {
     // Without this a reschedule of 15 minutes always fails: the row being moved sits well
     // inside its own padded range.
     const m = fakeManager([]);
-    await enforceBusinessCapacity(m.manager, 'bot-1', rules({ minGapMin: 30 }), window60, TZ, 'bk-9');
+    await enforceBusinessCapacity(m.manager, 'bot-1', 'cal-1', rules({ minGapMin: 30 }), window60, TZ, 'bk-9');
     expect(m.calls[0].params[3]).toBe('bk-9');
     expect(m.calls[0].sql).toContain('id <> $4');
   });
@@ -287,6 +313,7 @@ describe('enforceBusinessCapacity', () => {
     await enforceBusinessCapacity(
       both.manager,
       'bot-1',
+      'cal-1',
       rules({ maxBookingsPerDay: 5, minGapMin: 15 }),
       window60,
       TZ
@@ -296,7 +323,7 @@ describe('enforceBusinessCapacity', () => {
     // A day cap alone must not fabricate a gap query — a zero gap would match the candidate's
     // own range and refuse every booking.
     const dayOnly = fakeManager([{ n: 0, mins: 0 }]);
-    await enforceBusinessCapacity(dayOnly.manager, 'bot-1', rules({ maxBookingsPerDay: 5 }), window60, TZ);
+    await enforceBusinessCapacity(dayOnly.manager, 'bot-1', 'cal-1', rules({ maxBookingsPerDay: 5 }), window60, TZ);
     expect(dayOnly.calls).toHaveLength(1);
   });
 });

@@ -1091,7 +1091,9 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       if (sql.includes('count(*)') && sql.includes('bot_id = $1')) {
         return rows && rows !== 'gap-clash' ? [{ n: rows.n ?? 0, mins: rows.mins ?? 0 }] : [{ n: 0, mins: 0 }];
       }
-      if (sql.includes('blocked_range &&') && sql.includes('bot_id = $1')) {
+      // The gap query is scoped to the DIARY, not the bot — two bots on one calendar share a
+      // key, so a bot-scoped gap cannot see the neighbour the lock already counts.
+      if (sql.includes('blocked_range &&') && sql.includes('calendar_key = $1')) {
         return rows === 'gap-clash' ? [{ '?column?': 1 }] : [];
       }
       if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'bk-1' }];

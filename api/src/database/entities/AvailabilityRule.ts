@@ -113,6 +113,11 @@ export function overrideCoversDate(o: DateOverride, dateStr: string): boolean {
  * range, while the prompt stated both rows, so the bot offered a day it could not book.
  * Narrowest-wins makes the specific exception beat the broad rule, which is the only reading
  * that matches how the two rows are worded on screen.
+ *
+ * On an exact tie — two rows of the same width covering the same date — CLOSED wins, so the
+ * answer still does not depend on insertion order. That direction is the recoverable one: a
+ * business wrongly shown as shut loses an enquiry it can still answer, while one that offers a
+ * slot it cannot honour has already taken the customer's time.
  */
 export function pickOverrideForDate(
   overrides: DateOverride[] | null | undefined,
@@ -126,7 +131,7 @@ export function pickOverrideForDate(
     // Cheap ordinal span: ISO dates make lexical comparison total, and only the RANKING
     // matters here, so counting calendar days would buy nothing.
     const span = end ? Date.parse(`${end}T00:00:00Z`) - Date.parse(`${o.date}T00:00:00Z`) : 0;
-    if (span < bestSpan) {
+    if (span < bestSpan || (span === bestSpan && o.closed && !best?.closed)) {
       best = o;
       bestSpan = span;
     }

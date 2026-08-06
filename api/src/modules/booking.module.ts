@@ -295,7 +295,7 @@ export function buildVenueSection(venue: {
 hasTravelServices = false): string | null {
   const line = formatVenueLine(venue);
   if (!line) return null;
-  const whereClause = hasTravelServices
+  const whereToSay = hasTravelServices
     ? `Give this address when a customer asks where you are or how to find you. Do NOT assume
 their appointment happens here: some services are carried out at the customer's own address,
 and each service says which it is. If it is one of those, the appointment is where they are.`
@@ -303,7 +303,7 @@ and each service says which it is. If it is one of those, the appointment is whe
 appointment will take place.`;
   return `\n## OUR ADDRESS
 Customers come to us at: ${sanitizeForLine(line)}.
-${whereClause} Do not invent directions, parking or opening arrangements
+${whereToSay} Do not invent directions, parking or opening arrangements
 that are not stated elsewhere.`;
 }
 

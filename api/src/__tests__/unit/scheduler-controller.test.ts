@@ -17,6 +17,17 @@ vi.mock('../../scheduler/itinerary-key', () => ({
   itineraryKeyIsShared: (...a: any[]) => itineraryKeyIsShared(...(a as [])),
 }));
 
+// Only `config.travel` is overridden — the controller's dependency graph pulls in the
+// calendar services, which read half a dozen other config sections and fail to load
+// against a stub.
+const { travelConfig } = vi.hoisted(() => ({
+  travelConfig: { googleMapsApiKey: 'key-1' as string | undefined, monthlyElementCapPerTenant: 5000 },
+}));
+vi.mock('../../config/environment', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../config/environment')>();
+  return { ...actual, config: { ...actual.config, travel: travelConfig } };
+});
+
 const etFindOne = vi.fn();
 const etSave = vi.fn((x) => x);
 const etUpdate = vi.fn(async (_where: any, _patch: any) => ({ affected: 1 }));
@@ -576,6 +587,7 @@ describe('scheduler.controller · travel time switch', () => {
     bsFindOne.mockResolvedValue(null);
     resolveItineraryKey.mockResolvedValue('gcal:owner@acme.com');
     itineraryKeyIsShared.mockResolvedValue(false);
+    travelConfig.googleMapsApiKey = 'key-1';
   });
 
   // `clearAllMocks` wipes calls but keeps implementations, so an unentitled stub set inside
@@ -604,6 +616,24 @@ describe('scheduler.controller · travel time switch', () => {
   it('requires the separately-sold travelTime grant to switch on', async () => {
     await save({ travel: { enabled: true } });
     expect(requireFeature).toHaveBeenCalledWith('ten-1', 'travelTime', expect.any(String));
+  });
+
+  it('refuses on a platform with no Maps key, WITHOUT consulting the entitlement resolver', async () => {
+    // Cheapest gate first here too. Arming a switch the platform cannot honour is a worse
+    // answer than saying so, and an unentitled tenant must not be told to upgrade for a
+    // capability that would still be inert afterwards.
+    travelConfig.googleMapsApiKey = undefined;
+    await expect(
+      updateSchedulerConfig({ tenantId: 'ten-1', body: { travel: { enabled: true } } } as any, res)
+    ).rejects.toMatchObject({ statusCode: 503, code: 'TRAVEL_UNAVAILABLE' });
+    expect(requireFeature).not.toHaveBeenCalledWith('ten-1', 'travelTime', expect.any(String));
+    expect(resolveItineraryKey).not.toHaveBeenCalled();
+  });
+
+  it('still lets travel be switched OFF on a platform with no Maps key', async () => {
+    travelConfig.googleMapsApiKey = undefined;
+    const q = (await save({ travel: { enabled: false } }))!;
+    expect(bound(q, 'travel_time_enabled')).toEqual({ provided: true, value: false });
   });
 
   it('refuses to switch on while another bot shares the diary, and says why', async () => {

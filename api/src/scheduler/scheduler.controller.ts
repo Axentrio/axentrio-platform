@@ -14,6 +14,7 @@ import { BookingSettings } from '../database/entities/BookingSettings';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
 import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
+import { config } from '../config/environment';
 import {
   updateSchedulerSchema,
   serviceInputSchema,
@@ -68,6 +69,14 @@ const TRAVEL_FEATURE_ERROR = 'plan_limit_travel_time';
  * connection.
  */
 async function assertTravelEnableAllowed(tenantId: string, botId: string): Promise<void> {
+  // Same cheapest-first order the runtime gate uses, and for the same reason it is worth
+  // stating: with no platform key the feature is inert, so arming a switch that cannot do
+  // anything is a worse answer than saying so. Checking this BEFORE the entitlement also
+  // stops an unentitled tenant being told to upgrade for a capability the platform could
+  // not have delivered either way.
+  if (!config.travel.googleMapsApiKey) {
+    throw new ApiError('Travel time is not available on this platform', 503, 'TRAVEL_UNAVAILABLE');
+  }
   await requireFeature(tenantId, 'travelTime', TRAVEL_FEATURE_ERROR);
   const itineraryKey = await resolveItineraryKey(botId);
   if (await itineraryKeyIsShared(tenantId, botId, itineraryKey)) {

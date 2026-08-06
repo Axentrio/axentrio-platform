@@ -1492,15 +1492,23 @@ describe('InternalProvider.createBooking - travel placement', () => {
 
     beforeEach(() => travelling({ applies: true, outcome: 'placed', place: PLACE }));
 
-    it('confirms and stamps `ok` when the drives either side are PROVEN', async () => {
+    it('confirms and stamps `degraded` when the drives either side are PROVEN', async () => {
       loadTravelNeighbours.mockResolvedValue([
         // Metres away, finishing an hour before the 07:00 slot. Nothing here is in doubt.
         neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 }),
       ]);
       await expect(single('idem-gate-clear')).resolves.toMatchObject({ success: true });
-      // `ok`, not `degraded`: the haversine bounds are proofs, so this drive was genuinely
-      // checked. `degraded` has to keep meaning "a check I normally do was unavailable".
-      expect(insertParam(writtenInsert(), 'travel_check')).toBe('ok');
+      // `degraded`, not `ok`, and the glossary is what decides: CONTEXT.md defines `ok` as
+      // "verified against routing" and `degraded` as "decided on the haversine proofs alone".
+      // A pessimistic bound CLEARS a drive; it does not MEASURE one. Stamping `ok` here would
+      // be indistinguishable from a genuinely routed booking once routing lands.
+      expect(insertParam(writtenInsert(), 'travel_check')).toBe('degraded');
+    });
+
+    it('never writes `ok` — that word belongs to a routing answer nobody has yet', async () => {
+      loadTravelNeighbours.mockResolvedValue([]);
+      await expect(single('idem-gate-empty-day')).resolves.toMatchObject({ success: true });
+      expect(insertParam(writtenInsert(), 'travel_check')).not.toBe('ok');
     });
 
     it('refuses a time the owner provably cannot reach', async () => {
@@ -1669,7 +1677,7 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
   });
 
   it('does not demand an address from the OWNER filling their own diary', async () => {
-    await expect(check(undefined, { isAdmin: true })).resolves.toBeDefined();
+    await expect(check(undefined, { isAdmin: true, travelPolicy: 'annotate' })).resolves.toBeDefined();
   });
 
   it('takes the address off the booking being moved, scoped to this tenant and bot', async () => {
@@ -1689,7 +1697,7 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     const res = await check(ADDRESS);
     expect(res.slots).toHaveLength(4);
     expect(res.travel?.requestableSlots).toHaveLength(0);
-    expect(res.travel?.unreachableCount).toBe(0);
+    expect(res.travel?.unreachableSlots).toHaveLength(0);
   });
 
   it('drops only the starts the owner provably cannot reach', async () => {
@@ -1700,7 +1708,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     ]);
     const res = await check(ADDRESS);
     expect(res.slots.some((s) => s.start === '2026-06-10T07:00:00.000Z')).toBe(false);
-    expect(res.travel?.unreachableCount).toBeGreaterThan(0);
+    // NAMED, not counted: an annotating caller has to mark the row it is showing, and no
+    // integer can say which one that is.
+    expect(res.travel?.unreachableSlots.map((s) => s.start)).toContain('2026-06-10T07:00:00.000Z');
   });
 
   it('hands the undecided middle back as times to REQUEST, not as an empty diary', async () => {
@@ -1716,7 +1726,7 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     expect(res.slots).toHaveLength(1);
     expect(res.slots[0].start).toBe('2026-06-10T08:30:00.000Z');
     expect(res.travel?.requestableSlots).toHaveLength(3);
-    expect(res.travel?.unreachableCount).toBe(0);
+    expect(res.travel?.unreachableSlots).toHaveLength(0);
     expect(res.travel?.addressTooVague).toBeUndefined();
   });
 
@@ -1742,6 +1752,67 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     // Reuses the code the calendar outage already raises: the prompt's coaching for it is
     // exactly right, and a second code would teach the model the same lesson twice.
     await expect(check(ADDRESS)).rejects.toMatchObject({ code: 'BOOKING_TEMPORARILY_UNAVAILABLE' });
+  });
+
+  /**
+   * The OWNER is not the customer, however alike they look to `isAdmin`.
+   *
+   * Both the portal picker and the customer's signed manage link set `isAdmin`, because neither
+   * is a new online booking. Feasibility is a different question, and the answers differ: the
+   * owner may book anything in their own diary and the customer may not be handed a drive
+   * nobody can make.
+   */
+  describe('who the slots are for', () => {
+    const owner = { travelPolicy: 'annotate' as const, isAdmin: true };
+    const customerLink = { travelPolicy: 'enforce' as const, isAdmin: true };
+
+    it('never removes a slot from the OWNER, and names the ones to warn about', async () => {
+      // A Liège job ten minutes before the 07:00 start. The bot would never be offered it.
+      loadTravelNeighbours.mockResolvedValue([
+        neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+      ]);
+      const res = await check(ADDRESS, owner);
+      expect(res.slots).toHaveLength(4);
+      expect(res.travel?.unreachableSlots.map((s) => s.start)).toContain('2026-06-10T07:00:00.000Z');
+    });
+
+    it('DOES remove it from the customer following a manage link', async () => {
+      loadTravelNeighbours.mockResolvedValue([
+        neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+      ]);
+      const res = await check(ADDRESS, customerLink);
+      expect(res.slots.some((s) => s.start === '2026-06-10T07:00:00.000Z')).toBe(false);
+    });
+
+    it('never throws at the owner for a missing address — it says nothing was judged', async () => {
+      const res = await check(undefined, owner);
+      expect(res.slots).toHaveLength(4);
+      expect(res.travel?.unavailableReason).toBe('no_address');
+      expect(res.travel?.unreachableSlots).toHaveLength(0);
+    });
+
+    it('never throws at the owner for an address that will not place', async () => {
+      placeAddressFor.mockResolvedValue({ applies: true, outcome: 'not_placeable' });
+      const res = await check(ADDRESS, owner);
+      expect(res.slots).toHaveLength(4);
+      expect(res.travel?.unavailableReason).toBe('not_placeable');
+    });
+
+    it('never throws at the owner when Google is unreachable', async () => {
+      // The state travel is in during an outage, and exactly when an owner most needs telling
+      // that they are on their own judgement rather than being shown an empty screen.
+      placeAddressFor.mockResolvedValue({ applies: true, outcome: 'unavailable' });
+      const res = await check(ADDRESS, owner);
+      expect(res.slots).toHaveLength(4);
+      expect(res.travel?.unavailableReason).toBe('lookup_unavailable');
+    });
+
+    it('still throws at the customer link for the same failures', async () => {
+      placeAddressFor.mockResolvedValue({ applies: true, outcome: 'unavailable' });
+      await expect(check(ADDRESS, customerLink)).rejects.toMatchObject({
+        code: 'BOOKING_TEMPORARILY_UNAVAILABLE',
+      });
+    });
   });
 
   it('scopes the diary it reads to the itinerary key travel was resolved for', async () => {

@@ -44,7 +44,7 @@ vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
 }));
 
-import Bookings from './Bookings';
+import Bookings, { travelVerdictLookup } from './Bookings';
 
 function renderUI({ services = [] }: { services?: Array<Record<string, unknown>> } = {}) {
   // The dashboard gates its tabs on the services query (first-run owners with
@@ -216,5 +216,43 @@ describe('Bookings — the out-of-area note matches the decision already taken',
     renderWithBookings({ requests: [{ ...outsideBooking, status: 'request_created' }] });
     await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
     expect(await screen.findByText(/you have not committed to this one/i)).toBeInTheDocument();
+  });
+});
+
+/**
+ * Travel time on the OWNER's reschedule picker.
+ *
+ * The API stopped filtering this list, because feasibility is a hard constraint against the bot
+ * and never against the person who owns the diary. That is only safe if the screen WARNS: an
+ * unfiltered list with no marking silently regains the impossible times and shows them looking
+ * exactly like the safe ones, which is worse than the filtering it replaced.
+ */
+describe('Bookings — which reschedule slots carry a drive nobody vouched for', () => {
+  const slot = (h: number) => ({ start: `2026-06-10T${String(h).padStart(2, '0')}:00:00.000Z` });
+
+  it('marks a proven-impossible time', () => {
+    const verdict = travelVerdictLookup({ unreachableSlots: [slot(7)], requestableSlots: [] });
+    expect(verdict(slot(7).start)).toBe('unreachable');
+  });
+
+  it('marks a time whose drive nobody measured', () => {
+    const verdict = travelVerdictLookup({ unreachableSlots: [], requestableSlots: [slot(9)] });
+    expect(verdict(slot(9).start)).toBe('requestable');
+  });
+
+  it('leaves a cleared time unmarked', () => {
+    const verdict = travelVerdictLookup({ unreachableSlots: [slot(7)], requestableSlots: [slot(9)] });
+    expect(verdict(slot(11).start)).toBeNull();
+  });
+
+  it('marks nothing at all for a business not using travel time', () => {
+    // Every Agent on the platform today. The picker must look exactly as it did.
+    const verdict = travelVerdictLookup(undefined);
+    expect(verdict(slot(7).start)).toBeNull();
+  });
+
+  it('lets impossible win over merely tight if a slot somehow appears in both', () => {
+    const verdict = travelVerdictLookup({ unreachableSlots: [slot(7)], requestableSlots: [slot(7)] });
+    expect(verdict(slot(7).start)).toBe('unreachable');
   });
 });

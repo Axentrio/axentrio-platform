@@ -348,6 +348,24 @@ export function useBookingAvailability(
       return (await api.get<Any>(`/scheduler/availability?${params.toString()}`)) as {
         slots: AvailabilitySlot[];
         timezone: string;
+        /**
+         * What travel time made of these slots — present only for a business using it.
+         *
+         * THE OWNER'S PICKER IS NEVER FILTERED. Feasibility is a hard constraint against the
+         * bot and never against the person who owns the diary, so `slots` here holds the whole
+         * day and this says which of those the owner should think twice about. Dropping it at
+         * this cast is how the picker came to show an unreachable time as an ordinary one.
+         */
+        travel?: {
+          /** Reachable only if the drive is short enough, and nothing has measured it. */
+          requestableSlots: AvailabilitySlot[];
+          /** Proven impossible from the jobs either side. */
+          unreachableSlots: AvailabilitySlot[];
+          /** The address placed only to a town centre, so nothing here could be cleared. */
+          addressTooVague?: true;
+          /** The check could not run at all — so NONE of these times were assessed. */
+          unavailableReason?: 'no_address' | 'not_placeable' | 'lookup_unavailable';
+        };
       };
     },
   });

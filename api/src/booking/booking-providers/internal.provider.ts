@@ -857,6 +857,16 @@ export class InternalProvider implements BookingProvider {
    * as times the owner can be asked about — a Request, which is this platform's answer to every
    * booking it cannot safely confirm.
    *
+   * TWO POLICIES, AND THEY ARE NOT `isAdmin`. Everything the bot touches, and the customer's own
+   * manage link, ENFORCE: a slot the owner cannot reach is removed. The OWNER's picker
+   * ANNOTATES: nothing is removed, nothing throws, and the caller is told which slots are which
+   * so it can warn. Feasibility is a hard constraint against the bot and never against the
+   * person who owns the diary (ADR-0015), and a portal booking warns rather than blocks (plan
+   * §6.17) — but a customer following a signed link is not the owner, and handing them a
+   * proven-impossible time because they share an `isAdmin` flag is the bug that reading looks
+   * like. An annotating caller that does not RENDER the warning is worse off than one that
+   * filtered, which is why `travelPolicy` is documented as an obligation and not a preference.
+   *
    * Returns the input untouched, with no summary, for every Agent that is not using this
    * feature. That is not an optimisation: it is the guarantee that turning travel time on is
    * the only thing that can change anybody's slots.
@@ -885,18 +895,23 @@ export class InternalProvider implements BookingProvider {
     });
     if (!eligibility.active) return { slots: input.slots };
 
+    const annotating = ctx.travelPolicy === 'annotate';
+    // AN ANNOTATING CALLER IS NEVER REFUSED. The owner asked to see their own diary; answering
+    // with an error because a customer's address will not place would hide the whole day from
+    // them over a fact about somebody else's typing. They get every slot and a reason why none
+    // of it was judged, which their picker is obliged to show — see `travelPolicy`.
+    const unjudged = (reason: TravelFilterSummary['unavailableReason']) => ({
+      slots: input.slots,
+      summary: { requestableSlots: [], unreachableSlots: [], unavailableReason: reason },
+    });
+
     const address = await this.travelAddressFor(ctx, input.customerAddress, input.excludeBookingId);
     // NOT a pass. Without an address there is no filtering to do, and returning the unfiltered
     // list would quietly hand back exactly the slots this feature exists to remove — with the
     // model's compliance as the only thing standing between a customer and an impossible drive.
     // The code and its prompt recovery are the ones create has always used.
     if (!address) {
-      // The OWNER is exempt, and the two callers who set this are both moving a booking that
-      // already exists: the portal's reschedule picker and the customer's signed manage link.
-      // Neither is a conversation anyone can be asked a question in, and an owner filling their
-      // own diary is trusted to know their own day — the same principle that lets a portal
-      // booking warn rather than block.
-      if (ctx.isAdmin) return { slots: input.slots };
+      if (annotating) return unjudged('no_address');
       throw new BookingError(
         "Where is the job? This service is carried out at the customer's address, and the times that can be offered depend on it. Ask for the address and call check_availability again with customerAddress.",
         'ADDRESS_REQUIRED',
@@ -904,7 +919,13 @@ export class InternalProvider implements BookingProvider {
       );
     }
 
-    const candidate = travelCandidatePoint(await placeAddressFor(eligibility, address));
+    const placement = await placeAddressFor(eligibility, address);
+    if (annotating && (!placement.applies || placement.outcome !== 'placed')) {
+      // The two ways a placement fails stay apart even here, because they are what an owner
+      // would do next: a vague address is worth correcting on the booking, an outage is not.
+      return unjudged(placement.applies && placement.outcome === 'not_placeable' ? 'not_placeable' : 'lookup_unavailable');
+    }
+    const candidate = travelCandidatePoint(placement);
     const neighbours = await loadTravelNeighbours({
       eligibility,
       botId: ctx.bot.id,
@@ -913,9 +934,9 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId: input.excludeBookingId,
     });
 
-    const offered: Array<{ start: string; end: string }> = [];
+    const cleared: Array<{ start: string; end: string }> = [];
     const requestableSlots: Array<{ start: string; end: string }> = [];
-    let unreachableCount = 0;
+    const unreachableSlots: Array<{ start: string; end: string }> = [];
     for (const slot of input.slots) {
       const verdict = assessSlot({
         candidate: {
@@ -926,27 +947,30 @@ export class InternalProvider implements BookingProvider {
         neighbours,
         slackMin: eligibility.slackMin,
       });
-      if (verdict === 'clear') offered.push(slot);
+      if (verdict === 'clear') cleared.push(slot);
       else if (verdict === 'undecided') requestableSlots.push(slot);
-      else unreachableCount += 1;
+      else unreachableSlots.push(slot);
     }
 
-    if (unreachableCount || requestableSlots.length) {
-      logger.info('[Travel] filtered offered slots', {
+    if (unreachableSlots.length || requestableSlots.length) {
+      logger.info('[Travel] judged the offered slots', {
         botId: ctx.bot.id,
         tenantId: ctx.tenant.id,
-        offered: offered.length,
+        policy: annotating ? 'annotate' : 'enforce',
+        cleared: cleared.length,
         requestable: requestableSlots.length,
-        unreachable: unreachableCount,
+        unreachable: unreachableSlots.length,
         coarseAddress: candidate.coarse,
       });
     }
 
     return {
-      slots: offered,
+      // The one line the policy decides. An annotating caller keeps the whole list and marks it
+      // up from the two arrays below; an enforcing one is handed only what was proven.
+      slots: annotating ? input.slots : cleared,
       summary: {
         requestableSlots,
-        unreachableCount,
+        unreachableSlots,
         ...(candidate.coarse ? { addressTooVague: true as const } : {}),
       },
     };
@@ -1288,7 +1312,7 @@ export class InternalProvider implements BookingProvider {
     // several turns ago. Two of the three answers are not refusals: the undecided middle band
     // becomes a Request, which is the platform's answer to every booking it cannot safely
     // confirm, and only a drive PROVEN impossible is turned away.
-    let travelCheck: 'ok' | 'captured' | null = null;
+    let travelCheck: 'degraded' | 'captured' | null = null;
     if (travelEligibility.active) {
       // An address we could not place at all still stops here, exactly as it did before there
       // was a drive to check: there is a postcode that would settle it and the prompt asks for
@@ -1334,10 +1358,23 @@ export class InternalProvider implements BookingProvider {
           { placement, travelCheck: 'captured' }
         );
       }
-      // `ok`, not `degraded`: the haversine bounds are proofs, so a slot they cleared was
-      // genuinely checked. `degraded` is reserved for a world with a routing answer that could
-      // have been missing, and the alert that watches for it needs the word to mean that.
-      travelCheck = 'ok';
+      // `degraded`, and NOT `ok`. CONTEXT.md is the vocabulary this column speaks and it
+      // defines the two: `ok` is "verified against routing", `degraded` is "decided on the
+      // haversine proofs alone". No routing call exists anywhere in this codebase yet, so every
+      // row written here is haversine-only — stamping `ok` would make them indistinguishable
+      // from a genuinely routed booking the moment routing lands, and would take away the one
+      // thing the degradation alert was ever going to key on.
+      //
+      // The bounds ARE proofs, which is the argument for `ok`, and it is not enough: a
+      // pessimistic bound CLEARS a drive, it does not MEASURE one, and the glossary draws its
+      // line at whether the measurement happened. A column that under-claims can never be
+      // mistaken for a verification that never ran; one that over-claims is the silent
+      // wrongness this whole feature exists to prevent.
+      //
+      // `ok` belongs to the ticket that adds routing, on the condition that EVERY constraining
+      // leg got a routing answer — a booking where the bounds settled one leg and routing the
+      // other is still `degraded`, or the word means two things depending on the diary.
+      travelCheck = 'degraded';
     }
 
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion

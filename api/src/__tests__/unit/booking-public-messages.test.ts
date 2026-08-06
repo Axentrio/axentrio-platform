@@ -11,7 +11,7 @@
  * listed, so an error added anywhere else in the booking engine cannot leak by default.
  */
 import { describe, it, expect } from 'vitest';
-import { CUSTOMER_MESSAGE, customerMessage } from '../../scheduler/booking-public.controller';
+import { CUSTOMER_MESSAGE, customerMessage, rescheduleOptionsState } from '../../scheduler/booking-public.controller';
 import { BookingError } from '../../booking/booking-providers/types';
 
 /** Vocabulary that only ever makes sense to the model. */
@@ -58,5 +58,33 @@ describe('customer-facing copy for a BookingError', () => {
     // just because nobody remembered this file.
     const err = new BookingError('Internal: itinerary key resolution failed for bot xyz', 'SOME_NEW_CODE', 500);
     expect(customerMessage(err)).toBe('This link is invalid or has expired.');
+  });
+});
+
+/**
+ * What the reschedule page says when travel time has judged the diary.
+ *
+ * The bug this covers: the page read an empty slot list as an empty diary and told the customer
+ * "No available times in the next 30 days. Please contact us directly." Travel time made those
+ * two different things — a customer whose address placed only to a town centre has EVERY time
+ * judged undecided by design, so nothing is confirmable while the business could very well fit
+ * them in. Turning that customer away at "no" is the one outcome the booking design forbids.
+ */
+describe('what the reschedule page offers', () => {
+  it('picks times when they are all confirmable', () => {
+    expect(rescheduleOptionsState(4, 0)).toBe('pick');
+  });
+
+  it('does NOT claim an empty diary when every time merely needs confirming', () => {
+    // The coarse-address case, and the regression this function exists to make impossible.
+    expect(rescheduleOptionsState(0, 4)).toBe('request-only');
+  });
+
+  it('shows both lists when the day has some of each', () => {
+    expect(rescheduleOptionsState(1, 3)).toBe('both');
+  });
+
+  it('still says there is nothing when there genuinely is nothing', () => {
+    expect(rescheduleOptionsState(0, 0)).toBe('none');
   });
 });

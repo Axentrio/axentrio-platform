@@ -76,6 +76,34 @@ function whenLabel(startIso: string, tz: string): string {
   return `${DateTime.fromISO(startIso).setZone(tz).toFormat('cccc d LLLL yyyy, HH:mm')} (${tz})`;
 }
 
+/**
+ * What the reschedule page has to say, given what availability came back with.
+ *
+ * ONE FUNCTION BECAUSE ONE MISTAKE. This page used to read an empty slot list as an empty
+ * diary, and travel time made those two different things: a customer whose address placed only
+ * to a town centre has EVERY time judged undecided by design — a coarse position may refuse a
+ * drive and may never clear one — so nothing is confirmable while the business could very well
+ * fit them in. Telling that customer there is nothing available is false, and turning them away
+ * at "no" is the single outcome the whole booking design is written to avoid.
+ *
+ * `request-only` is not a lesser `pick`. Those times are deliberately not buttons: submitting
+ * one goes straight to a confirmed reschedule, and confirming a drive nobody measured is the
+ * defect travel time exists to prevent. They are stated, and the customer is pointed at the
+ * business, until write-time enforcement gives this page a real request path.
+ *
+ * Pure and exported so the distinction can be tested without a signed token and an HTTP round
+ * trip, which is what let the original mistake ship untested.
+ */
+export function rescheduleOptionsState(
+  confirmable: number,
+  requestable: number
+): 'pick' | 'both' | 'request-only' | 'none' {
+  if (confirmable && requestable) return 'both';
+  if (confirmable) return 'pick';
+  if (requestable) return 'request-only';
+  return 'none';
+}
+
 /** GET /manage?token= — booking summary + cancel/reschedule actions. */
 export async function getManagePage(req: Request, res: Response): Promise<void> {
   try {
@@ -147,7 +175,7 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
     const start = new Date();
     const end = new Date(start.getTime() + 30 * 24 * 3600_000);
     // D8: slot lookup inside the token-verified reschedule flow.
-    const { slots } = await adminAvailability(
+    const { slots, travel } = await adminAvailability(
       { kind: 'public-manage', verifiedBookingId: bookingId },
       booking.tenantId,
       start.toISOString(),
@@ -185,14 +213,41 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
               `</div>`
           )
           .join('')
-      : `<p>No available times in the next 30 days. Please contact us directly.</p>`;
+      : '';
+
+    // TRAVEL TIME CAN EMPTY THIS LIST WITHOUT THE DIARY BEING EMPTY, and saying "no available
+    // times" then is simply false. A customer whose address placed only to a town centre has
+    // EVERY time judged undecided by design — a coarse position may refuse a drive and may
+    // never clear one — so the confirmable list is empty while the business could very well
+    // fit them in. Refusing them at that point is the one outcome the whole booking prompt is
+    // written to avoid, and it would be this page doing it silently.
+    //
+    // These times are deliberately NOT buttons. Submitting one goes straight to a confirmed
+    // reschedule, and confirming a drive nobody has measured is the defect this feature exists
+    // to prevent. So they are stated, and the customer is pointed at the business, until the
+    // ticket that adds write-time enforcement gives this page a real request path.
+    const requestable = travel?.requestableSlots ?? [];
+    const state = rescheduleOptionsState(slots.length, requestable.length);
+    const requestableHtml =
+      state === 'both' || state === 'request-only'
+        ? `<p>${
+            state === 'both' ? 'These times may also be possible' : 'These times may still be possible'
+          }, but the business has to confirm them because of the travel involved. Get in touch and mention the one you would like:</p>
+           <p class="when">${requestable.map((s) => esc(whenLabel(s.start, timezone))).join('<br/>')}</p>`
+        : '';
+    const nothingOffered =
+      state === 'none'
+        ? `<p>No available times in the next 30 days. Please contact us directly.</p>`
+        : '';
 
     res.status(200).send(
       page(
         'Reschedule appointment',
         `<h1>Reschedule</h1>
-         <p>${esc(eventName)} — currently ${esc(whenLabel(booking.startUtc.toISOString(), timezone))}. Pick a new time:</p>
-         ${slotsHtml}
+         <p>${esc(eventName)} — currently ${esc(whenLabel(booking.startUtc.toISOString(), timezone))}.${
+           slots.length ? ' Pick a new time:' : ''
+         }</p>
+         ${slotsHtml}${requestableHtml}${nothingOffered}
          <p class="muted">Times shown in ${esc(timezone)}.</p>`
       )
     );

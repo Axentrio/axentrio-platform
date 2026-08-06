@@ -421,6 +421,12 @@ export async function adminAvailability(
     // *new* online bookings, so neither may be gated by it — without this the pause makes
     // the owner's own diary look empty and reports the customer's link as expired.
     isAdmin: true,
+    // ...and here the two part company. `isAdmin` covers them both because neither is a new
+    // online booking. Feasibility is a different question — whose judgement decides whether a
+    // drive is possible — and the answer is the owner's for their own diary and NOT the
+    // customer's for theirs. A customer following a manage link must never be offered a time
+    // nobody can drive to, so they get the same enforcement the bot does.
+    travelPolicy: caller === 'scheduler-admin' ? 'annotate' : 'enforce',
   };
   // Pass the booking's service + frozen length so the reschedule picker resolves
   // the right service (no SERVICE_REQUIRED when several are active) and shows

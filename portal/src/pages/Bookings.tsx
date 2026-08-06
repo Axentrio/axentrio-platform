@@ -509,6 +509,31 @@ function BookingRow({
 
 // ---------------------------------------------------------------------------
 
+/** What travel time thought of one slot the owner is being shown, or null for a clean one. */
+export type SlotTravelVerdict = 'unreachable' | 'requestable' | null;
+
+/**
+ * Which of the slots on screen carry a drive nobody could vouch for.
+ *
+ * THE OWNER IS WARNED, NEVER BLOCKED. Feasibility is a hard constraint against the bot and never
+ * against the person who owns the diary, so the API hands this screen the WHOLE day and says
+ * separately which entries in it are which. Annotating without warning would be strictly worse
+ * than filtering — the impossible times would quietly return, looking exactly like the safe ones.
+ *
+ * Matching is on the slot's `start` string because both lists come from the same response, so
+ * they are the same instants in the same format. Pure and exported so that stays pinned by a
+ * test rather than by a component nobody renders in one.
+ */
+export function travelVerdictLookup(travel?: {
+  requestableSlots?: Array<{ start: string }>;
+  unreachableSlots?: Array<{ start: string }>;
+}): (start: string) => SlotTravelVerdict {
+  const unreachable = new Set((travel?.unreachableSlots ?? []).map((s) => s.start));
+  const requestable = new Set((travel?.requestableSlots ?? []).map((s) => s.start));
+  return (start) =>
+    unreachable.has(start) ? 'unreachable' : requestable.has(start) ? 'requestable' : null;
+}
+
 function RescheduleDialog({
   booking,
   timezone,
@@ -550,6 +575,25 @@ function RescheduleDialog({
     return Array.from(out.entries());
   }, [data, timezone]);
 
+  /**
+   * What travel time made of each slot the owner is being shown.
+   *
+   * THE OWNER IS NEVER BLOCKED, ONLY WARNED. Feasibility is a hard constraint against the bot
+   * and never against the person who owns the diary — an owner rearranging their own day knows
+   * things the scheduler does not. So every slot stays clickable and the picker says which ones
+   * carry a drive nobody could vouch for.
+   *
+   * Annotating without warning would be strictly worse than filtering: the list would silently
+   * regain the impossible times and they would look exactly like the safe ones.
+   */
+  const travelVerdict = useMemo(() => travelVerdictLookup(data?.travel), [data]);
+
+  // The fourth state, and the one easiest to drop: the check could not run at all, so NOTHING
+  // below was assessed. Without saying so the picker implies a verification that never
+  // happened — which is exactly the state travel is in during a Google outage, when the owner
+  // most needs to know they are on their own judgement.
+  const unassessed = data?.travel?.unavailableReason;
+
   return (
     <Dialog open={!!booking} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
@@ -577,29 +621,62 @@ function RescheduleDialog({
             </p>
           ) : (
             <div className="space-y-4">
+              {unassessed && (
+                <p
+                  data-testid="travel-unassessed"
+                  className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-text-primary"
+                >
+                  {unassessed === 'no_address'
+                    ? 'This booking has no address on it, so none of these times have been checked for travel.'
+                    : unassessed === 'not_placeable'
+                      ? 'This booking’s address could not be located, so none of these times have been checked for travel.'
+                      : 'Travel could not be checked just now, so none of these times have been checked for it.'}{' '}
+                  You can still pick any of them.
+                </p>
+              )}
               {grouped.map(([day, slots]) => (
                 <div key={day}>
                   <div className="mb-2 text-xs font-medium uppercase tracking-wide text-text-secondary">
                     {day}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {slots.map((s) => (
-                      <button
-                        type="button"
-                        key={s.start}
-                        disabled={reschedule.isPending}
-                        onClick={() => {
-                          if (!booking) return;
-                          reschedule.mutate(
-                            { id: booking.id, newStartTime: s.start },
-                            { onSuccess: onClose },
-                          );
-                        }}
-                        className="rounded-lg border border-edge bg-surface-2 px-3 py-1.5 text-sm text-text-primary hover:border-primary-500 hover:bg-primary-500/10 disabled:opacity-50"
-                      >
-                        {timeLabel(s.start, timezone)}
-                      </button>
-                    ))}
+                    {slots.map((s) => {
+                      const verdict = travelVerdict(s.start);
+                      return (
+                        <button
+                          type="button"
+                          key={s.start}
+                          // Never disabled on a travel verdict. The owner decides.
+                          disabled={reschedule.isPending}
+                          title={
+                            verdict === 'unreachable'
+                              ? 'Too far from the job before or after it — this drive does not fit'
+                              : verdict === 'requestable'
+                                ? 'The drive may not fit; nothing has measured it'
+                                : undefined
+                          }
+                          data-travel={verdict ?? undefined}
+                          onClick={() => {
+                            if (!booking) return;
+                            reschedule.mutate(
+                              { id: booking.id, newStartTime: s.start },
+                              { onSuccess: onClose },
+                            );
+                          }}
+                          className={`rounded-lg border px-3 py-1.5 text-sm text-text-primary disabled:opacity-50 ${
+                            verdict === 'unreachable'
+                              ? 'border-red-500/50 bg-red-500/10 hover:border-red-400'
+                              : verdict === 'requestable'
+                                ? 'border-amber-500/50 bg-amber-500/10 hover:border-amber-400'
+                                : 'border-edge bg-surface-2 hover:border-primary-500 hover:bg-primary-500/10'
+                          }`}
+                        >
+                          {timeLabel(s.start, timezone)}
+                          {verdict === 'unreachable' && <span className="ml-1 text-red-400">·&nbsp;too far</span>}
+                          {verdict === 'requestable' && <span className="ml-1 text-amber-400">·&nbsp;tight</span>}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

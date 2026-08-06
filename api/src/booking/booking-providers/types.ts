@@ -35,6 +35,25 @@ export interface BookingContext {
    *  The customer/widget path leaves this false so it is scoped to its own chat
    *  session (see loadOwned / listBookings in the internal provider). */
   isAdmin?: boolean;
+  /**
+   * Whose judgement decides whether a drive is possible — a DIFFERENT question from `isAdmin`.
+   *
+   * `isAdmin` answers "may this caller manage any booking in the tenant, and is this a new
+   * online booking?", which is what the pause exemption and the address demand turn on. Both
+   * the owner's portal picker and the customer's signed manage link answer yes to it, and they
+   * are not remotely alike here: the owner may book anything in their own diary, and the
+   * customer may not be handed a drive nobody can make. Collapsing the two onto one flag is
+   * how a proven-impossible slot reaches a customer.
+   *
+   * `enforce` — the default, and everything the bot touches: unreachable slots are removed and
+   * the undecided middle comes back separately as times to request.
+   * `annotate` — the OWNER only: nothing is removed and nothing throws, and the caller is told
+   * which slots are which so it can warn. Plan §6.17, "owner-created bookings in the portal
+   * warn, never block"; ADR-0015, "feasibility is a hard constraint against the bot, never
+   * against the person who owns the diary". A caller that asks for this MUST render the warning
+   * — annotating without warning is strictly worse than filtering.
+   */
+  travelPolicy?: 'enforce' | 'annotate';
 }
 
 export interface BookingSlot {
@@ -65,13 +84,29 @@ export interface TravelFilterSummary {
    * NOT confirmable: they go through `request_appointment` for the owner to decide.
    */
   requestableSlots: BookingSlot[];
-  /** Candidate starts proven unreachable and removed. Observability, not an instruction. */
-  unreachableCount: number;
+  /**
+   * Times proven impossible from the jobs either side.
+   *
+   * NAMED, not counted. A count answers "how many did you drop", which is only ever
+   * observability; an annotating caller has to answer "which of the rows I am SHOWING is the
+   * dangerous one", and no integer can. `enforce` callers never see these in `slots`;
+   * `annotate` callers see them and must mark them.
+   */
+  unreachableSlots: BookingSlot[];
   /**
    * The address placed only to a town centre, so NOTHING here can be confirmed — a coarse
    * point may refuse a drive and may never clear one. A postcode is what fixes it.
    */
   addressTooVague?: true;
+  /**
+   * The gate could not run AT ALL, so every slot beside it is unjudged.
+   *
+   * Only ever set for an `annotate` caller, because an `enforce` caller is refused outright in
+   * these cases. It exists so the owner's picker cannot show an unassessed list that looks
+   * exactly like a checked one — which is the state travel is in during a Google outage, and
+   * precisely when an owner most needs telling they are on their own judgement.
+   */
+  unavailableReason?: 'no_address' | 'not_placeable' | 'lookup_unavailable';
 }
 
 export interface AvailabilityResult {

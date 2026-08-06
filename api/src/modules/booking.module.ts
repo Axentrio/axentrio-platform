@@ -30,6 +30,9 @@ import {
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { describeServiceArea, type ServiceAreaEntry } from '../contracts/service-area';
 import { formatVenueLine } from '../contracts/venue-address';
+import { resolveTravelEligibility } from '../booking/travel/travel-eligibility';
+import { resolveItineraryKey } from '../scheduler/itinerary-key';
+import { logger } from '../utils/logger';
 import type { ModuleDefinition, ModulePromptContext } from './module-catalog';
 
 /** Human price hint for the service catalog (prices are populated in a later slice). */
@@ -364,8 +367,28 @@ ${ADDRESS_LOCATABILITY_COACHING}
 If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job with request_appointment exactly as above, and never present it as a confirmed appointment.`;
 }
 
+/**
+ * The one rule that changes the ORDER of a booking conversation.
+ *
+ * Everywhere else the address is collected before the booking tool is called. With travel time
+ * on it has to come before the AVAILABILITY tool instead, because which times exist at all now
+ * depends on where the job is: the owner cannot be in two places an hour apart. That is real
+ * friction moved earlier in the conversation, and it is accepted only because it is confined to
+ * services whose customers have to give an address anyway — and because the alternative is
+ * offering a time and then taking it back, which this codebase has already ruled against.
+ *
+ * Emitted only when travel time is actually running for the Agent, so no other business is made
+ * to ask for anything sooner than it does today.
+ */
+const TRAVEL_ADDRESS_FIRST_RULE = `- Where the job is: for a service flagged "needs address", ask for the customer's address BEFORE you call check_availability, and pass it as customerAddress. The times this business can offer depend on where the job is — it travels to customers, so a time is only bookable if the owner can get there from the jobs either side of it. If check_availability returns ADDRESS_REQUIRED, ask for the address and call it again. Some results also carry travel.requestableSlots: those times cannot be auto-confirmed, so if the customer wants one, capture it with request_appointment and say plainly that the business will confirm it.`;
+
 /** The SERVICES (bookable) prompt section for a service catalog. Exported for tests. */
-export function buildServicesSection(services: ServiceType[], businessCapacity = false): string | null {
+export function buildServicesSection(
+  services: ServiceType[],
+  businessCapacity = false,
+  /** Travel time is entitled, enabled and not stranded on a shared diary — not merely toggled. */
+  travelTimeActive = false
+): string | null {
   if (!services.length) return null;
   const lines = services
     .map((s) => {
@@ -442,7 +465,7 @@ Then follow these rules IN ORDER:
 7. For a service shown with a duration RANGE (e.g. "30-90 min"), establish the length FIRST — ask the customer how long they need ("choose length"), or estimate it from what they have described ("AI-estimated") — then pass that as durationMin to check_availability AND the booking tool (same value). Never call create_booking for one of these without a durationMin: an unestablished length is captured as a REQUEST for the owner to scope, not confirmed at the shortest option, because guessing short books the wrong appointment rather than a cautious one. If you genuinely cannot tell, say so and capture it with request_appointment. If a tool returns DURATION_OUT_OF_RANGE, pick a length within the shown range. If create_booking returns SLOT_UNAVAILABLE for a range service, the chosen length didn't fit that start — offer a different start or a shorter length within range; don't retry the same start+length.`
       : ''
   }
-- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
+${travelTimeActive && services.some((s) => s.customerAddressRequired) ? `${TRAVEL_ADDRESS_FIRST_RULE}\n` : ''}- Availability: if check_availability returns no available times, or the customer wants a time outside the opening hours, do NOT tell them you are closed or fully booked, and do NOT hand off to the team. Instead capture their preferred date/time with request_appointment, and make clear it is a REQUEST the business will confirm — never imply it is a booked, confirmed appointment. This is the correct path for out-of-hours, after-hours, and emergency requests. The opening hours guide which times you can auto-confirm; they never stop you from helping or capturing a request.
 - Calendar errors: if check_availability FAILS with a temporary or technical error (e.g. BOOKING_TEMPORARILY_UNAVAILABLE — the calendar could not be reached), this is NOT the same as having no free times. Do NOT tell the customer there are no slots or that you are fully booked — that would be untrue. Briefly say you're having trouble checking live availability right now, then capture their preferred date/time with request_appointment as a request the business will confirm shortly. Never present a captured request as a confirmed booking.
 - No connected calendar: if check_availability or create_booking returns CALENDAR_NOT_CONNECTED, this business has not connected a calendar yet, so you CANNOT auto-confirm. Do NOT offer specific time slots — ask the customer for their preferred date/time and capture it with request_appointment as a request the business will confirm. Never tell the customer it is booked or confirmed.
 - Price: if asked, you may state the price shown on a service line (e.g. "€25", "from €80"); NEVER invent or guess a number. A service whose price is not shown has no fixed price to quote.${
@@ -508,12 +531,36 @@ export const bookingModule: ModuleDefinition = {
       bookingSettings?.maxBookedMinutesPerDay ||
       bookingSettings?.minGapMin
     );
-    const servicesSection = buildServicesSection(services, businessCapacity);
+    // EFFECTIVE, not merely toggled. The stored switch is one of four gates: a tenant that is
+    // not entitled, a platform with no Maps key, or an Agent sharing a diary with another all
+    // leave travel inert — and a prompt that made those customers hand over an address earlier
+    // in the conversation would be charging them friction for a feature that never runs.
+    let travelTimeActive = false;
+    if (bookingSettings?.travelTimeEnabled === true) {
+      try {
+        const eligibility = await resolveTravelEligibility({
+          tenantId: ctx.tenantId,
+          botId: ctx.botId,
+          itineraryKey: await resolveItineraryKey(ctx.botId),
+        });
+        travelTimeActive = eligibility.active;
+      } catch (error) {
+        // A prompt must still be built. Reading as inactive costs one prompt rule; throwing
+        // here would take the whole assistant down over a settings lookup.
+        logger.warn('[Travel] could not resolve eligibility while building the prompt', {
+          botId: ctx.botId,
+          error,
+        });
+      }
+    }
+    const servicesSection = buildServicesSection(services, businessCapacity, travelTimeActive);
     // Only reachable when travel time is on and no area is drawn, so it is null for every
     // Agent on the platform today. It carries no business data — just how to recover from
     // ADDRESS_NOT_PLACEABLE, which the travel gate can now throw where the area gate never did.
     const customerAddressSection = buildCustomerAddressSection({
-      travelTimeEnabled: bookingSettings?.travelTimeEnabled === true,
+      // The EFFECTIVE verdict, for the same reason the rule above uses it: the recovery this
+      // block teaches is for an error only a running gate can raise.
+      travelTimeEnabled: travelTimeActive,
       hasServiceArea: !!areaSection,
     });
     // No bookable catalog → the services and hours blocks stay suppressed exactly as

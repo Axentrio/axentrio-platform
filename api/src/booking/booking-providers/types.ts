@@ -52,12 +52,36 @@ export interface ListBookingsResult {
   }>;
 }
 
+/**
+ * What travel time did to a slot list, when it ran at all.
+ *
+ * `slots` above holds only times the owner is PROVEN able to reach. This holds the rest of the
+ * story, and it exists because dropping the undecided ones silently would be a refusal wearing
+ * the clothes of an empty diary — a customer an hour away would be told there is nothing free.
+ */
+export interface TravelFilterSummary {
+  /**
+   * Times that are reachable if the drive is short enough, and nothing has measured it.
+   * NOT confirmable: they go through `request_appointment` for the owner to decide.
+   */
+  requestableSlots: BookingSlot[];
+  /** Candidate starts proven unreachable and removed. Observability, not an instruction. */
+  unreachableCount: number;
+  /**
+   * The address placed only to a town centre, so NOTHING here can be confirmed — a coarse
+   * point may refuse a drive and may never clear one. A postcode is what fixes it.
+   */
+  addressTooVague?: true;
+}
+
 export interface AvailabilityResult {
   slots: BookingSlot[];
   timezone: string;
   /** The service these slots are for (so the agent can book the right one). */
   serviceId?: string;
   serviceName?: string;
+  /** Absent unless travel time actually ran — which is every bot on the platform today. */
+  travel?: TravelFilterSummary;
 }
 
 export interface CreateBookingResult {
@@ -133,7 +157,13 @@ export interface BookingProvider {
     serviceId?: string,
     durationMin?: number,
     /** Booking being rescheduled — excluded from busy and from day-capacity totals. */
-    excludeBookingId?: string
+    excludeBookingId?: string,
+    /**
+     * Where the job is, for a service carried out at the customer's address. Only read when
+     * travel time is active for the Agent; ignored otherwise, so a provider that does not
+     * implement travel time is unaffected by its presence.
+     */
+    customerAddress?: string
   ): Promise<AvailabilityResult>;
   createBooking(
     ctx: BookingContext,

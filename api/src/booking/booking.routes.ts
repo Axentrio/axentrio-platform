@@ -87,9 +87,22 @@ router.post('/availability', verifyInternalAuth, [
   body('sessionId').isUUID(),
   body('startDate').isISO8601(),
   body('endDate').isISO8601(),
+  // Optional, and only read by a business that travels to its customers: with travel time on,
+  // which times can be offered depends on where the job is, so an availability call for one of
+  // those services answers ADDRESS_REQUIRED without it. Forwarded here rather than left out,
+  // so this endpoint cannot become the one entry point the feature is unreachable through.
+  body('customerAddress').optional().isString(),
 ], validate, async (req: Request, res: Response): Promise<void> => {
   try {
-    const result = await checkAvailability('internal-n8n', req.body.sessionId, req.body.startDate, req.body.endDate);
+    const result = await checkAvailability(
+      'internal-n8n',
+      req.body.sessionId,
+      req.body.startDate,
+      req.body.endDate,
+      undefined,
+      undefined,
+      req.body.customerAddress
+    );
     res.json({ data: result });
   } catch (error) { handleBookingError(error, res); }
 });

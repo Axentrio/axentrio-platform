@@ -112,6 +112,66 @@ describe('KbSearchTool', () => {
     );
   });
 
+  describe('travel time — times that need a request rather than a confirmation', () => {
+    const slot = (h: number) => ({ start: `2026-04-01T${String(h).padStart(2, '0')}:00:00Z`, end: `2026-04-01T${String(h).padStart(2, '0')}:30:00Z` });
+
+    it('tells the model that requestable times are NOT confirmable', async () => {
+      mockCheckAvailability.mockResolvedValue({
+        slots: [slot(10)], timezone: 'UTC',
+        travel: { requestableSlots: [slot(14)], unreachableCount: 1 },
+      });
+      const result = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-04-01', endDate: '2026-04-02', customerAddress: 'Kerkstraat 12, 9000 Gent' },
+        makeCtx({ sessionId: 'sess-1' })
+      );
+      expect((result.data as any).suggestedAction).toBe('request_appointment');
+      expect((result.data as any).guidance).toMatch(/request_appointment/);
+      expect((result.data as any).guidance).toMatch(/cannot be auto-confirmed/i);
+    });
+
+    it('asks for a postcode when the address was only located to the town', async () => {
+      // The one thing that can turn these into confirmable times, and the reason a coarse
+      // address is filtered coarsely rather than refused outright.
+      mockCheckAvailability.mockResolvedValue({
+        slots: [], timezone: 'UTC',
+        travel: { requestableSlots: [slot(10), slot(14)], unreachableCount: 0, addressTooVague: true },
+      });
+      const result = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-04-01', endDate: '2026-04-02', customerAddress: 'Gent' },
+        makeCtx({ sessionId: 'sess-1' })
+      );
+      expect((result.data as any).guidance).toMatch(/postcode/i);
+      expect((result.data as any).guidance).toMatch(/check_availability again/i);
+    });
+
+    it('does NOT read an all-requestable result out as an empty range', async () => {
+      // Handled after the empty-slots branch this would say "no times available", turning a
+      // list of perfectly askable times into a dead end.
+      mockCheckAvailability.mockResolvedValue({
+        slots: [], timezone: 'UTC',
+        travel: { requestableSlots: [slot(10)], unreachableCount: 0 },
+      });
+      const result = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-04-01', endDate: '2026-04-02' },
+        makeCtx({ sessionId: 'sess-1' })
+      );
+      expect((result.data as any).noSlotsInRange).toBeUndefined();
+      expect((result.data as any).guidance).not.toMatch(/No auto-confirmable times in this range/);
+    });
+
+    it('says nothing extra when travel filtered nothing out', async () => {
+      mockCheckAvailability.mockResolvedValue({
+        slots: [slot(10)], timezone: 'UTC',
+        travel: { requestableSlots: [], unreachableCount: 0 },
+      });
+      const result = await new CheckAvailabilityTool().execute(
+        { startDate: '2026-04-01', endDate: '2026-04-02' },
+        makeCtx({ sessionId: 'sess-1' })
+      );
+      expect((result.data as any).suggestedAction).toBeUndefined();
+    });
+  });
+
   it('execute returns success=false with error on failure', async () => {
     const tool = new KbSearchTool();
     mockSearchKnowledge.mockRejectedValue(new Error('DB connection failed'));
@@ -142,7 +202,9 @@ describe('CheckAvailabilityTool', () => {
 
     expect(result.success).toBe(true);
     expect(result.data).toEqual(slots);
-    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined);
+    // The trailing undefined is `customerAddress`: only businesses that travel to the
+    // customer collect one, and it is passed straight through when they do.
+    expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined);
   });
 
   it('execute returns success=false with error on failure', async () => {

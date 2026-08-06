@@ -35,6 +35,7 @@ import {
   placeBookingAddress,
   bookingPlaceColumns,
   placementIsTrusted,
+  placementIsCoarse,
   blocksAutoConfirm,
   requestTravelCheck,
   ensureBookingPlace,
@@ -144,9 +145,19 @@ describe('the three readings of a placement', () => {
     expect(placementIsTrusted({ applies: false })).toBe(false);
   });
 
-  it('blocks an auto-confirm the customer can fix, and never one they cannot', () => {
-    expect(blocksAutoConfirm(placed('approximate'))).toBe(true);
+  it('marks a town-centre placement coarse, and nothing else', () => {
+    expect(placementIsCoarse(placed('approximate'))).toBe(true);
+    expect(placementIsCoarse(placed('rooftop'))).toBe(false);
+    expect(placementIsCoarse({ applies: true, outcome: 'not_placeable' })).toBe(false);
+    expect(placementIsCoarse({ applies: false })).toBe(false);
+  });
+
+  it('blocks an auto-confirm ONLY for an address the customer can fix', () => {
     expect(blocksAutoConfirm({ applies: true, outcome: 'not_placeable' })).toBe(true);
+    // A town centre no longer stops the booking dead. It is a real point that can prove a
+    // drive impossible and can never clear one, so the travel gate takes it from here — which
+    // leaves the customer with times to request instead of a dead end.
+    expect(blocksAutoConfirm(placed('approximate'))).toBe(false);
     // Google being unreachable is not a vague address. Refusing a booking over someone
     // else's downtime is the failure ADR-0015 exists to prevent.
     expect(blocksAutoConfirm({ applies: true, outcome: 'unavailable' })).toBe(false);
@@ -154,12 +165,21 @@ describe('the three readings of a placement', () => {
     expect(blocksAutoConfirm({ applies: false })).toBe(false);
   });
 
-  it('agrees with itself: anything that blocks a confirm also marks a request captured', () => {
-    // The two readings differ on exactly one case, the outage, and nowhere else. Drift
-    // between them would mean a job the auto path refused and the request path called fine.
+  it('captures a request for everything the gate could not clear, including a coarse one', () => {
+    // Wider than `blocksAutoConfirm` on purpose: a request row records that nothing vouched
+    // for the drive, which is true of a vague address AND of one placed only to a town.
+    expect(requestTravelCheck(placed('approximate'))).toBe('captured');
+    expect(requestTravelCheck({ applies: true, outcome: 'not_placeable' })).toBe('captured');
+    expect(requestTravelCheck(placed('rooftop'))).toBeNull();
+    expect(requestTravelCheck({ applies: false })).toBeNull();
+  });
+
+  it('never blocks a confirm for something a request would not have flagged', () => {
+    // The direction that matters: anything the auto path refuses must also be visible on a
+    // request row. The reverse does not hold — a coarse address is captured, not refused.
     for (const p of [placed('rooftop'), placed('approximate'), { applies: false } as BookingPlacement,
       { applies: true, outcome: 'not_placeable' } as BookingPlacement]) {
-      expect(blocksAutoConfirm(p)).toBe(requestTravelCheck(p) === 'captured');
+      if (blocksAutoConfirm(p)) expect(requestTravelCheck(p)).toBe('captured');
     }
   });
 });

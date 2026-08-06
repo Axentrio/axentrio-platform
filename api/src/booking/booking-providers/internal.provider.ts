@@ -34,6 +34,7 @@ import {
   BookingExtras,
   ListBookingsResult,
   AvailabilityResult,
+  TravelFilterSummary,
   CreateBookingResult,
   RescheduleResult,
   CancelResult,
@@ -55,11 +56,17 @@ import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
 import {
   placeBookingAddress,
+  placeAddressFor,
   bookingPlaceColumns,
   blocksAutoConfirm,
+  placementIsCoarse,
   requestTravelCheck,
   type BookingPlacement,
 } from '../travel/booking-place';
+import type { GeoPoint } from '../../contracts/travel';
+import { resolveTravelEligibility, type ActiveTravelEligibility } from '../travel/travel-eligibility';
+import { loadTravelNeighbours } from '../travel/travel-neighbours';
+import { assessSlot, type TravelNeighbour, type TravelVerdict } from '../travel/travel-gate';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -344,6 +351,42 @@ function assertPlaceableForTravel(placement: BookingPlacement): void {
     'ADDRESS_NOT_PLACEABLE',
     400
   );
+}
+
+/**
+ * Travel time: we could not find out where anything is, so nothing here may be confirmed.
+ *
+ * NOT the customer's fault and NOT recoverable by them — Google was unreachable, or the
+ * tenant's element cap is spent. Asking for a postcode would be friction that could not
+ * possibly help, so this reuses the code the calendar outage already raises: the prompt's
+ * coaching for it is exactly right ("do not say there are no slots, capture their preferred
+ * time as a request"), and inventing a second code would mean teaching the model the same
+ * lesson twice. Which failure it was is in the logs, where a sustained run of it belongs.
+ */
+function throwTravelUnavailable(): never {
+  throw new BookingError(
+    'The journey could not be checked right now, so times cannot be confirmed. Ask the customer for their preferred date and time and capture it with request_appointment.',
+    'BOOKING_TEMPORARILY_UNAVAILABLE',
+    503
+  );
+}
+
+/**
+ * A placement turned into the point the gate reasons over, or a refusal.
+ *
+ * THE THREE OUTCOMES OF #62 BECOME THE THREE BRANCHES OF ADR-0015 HERE, and this is the only
+ * place that mapping exists. An address we could not place at all has a recovery the customer
+ * can act on. An address placed only to a town centre is a usable point that may refuse and may
+ * never clear. An outage is neither, and refuses to confirm anything without pretending the
+ * customer typed something wrong.
+ */
+function travelCandidatePoint(placement: BookingPlacement): { point: GeoPoint; coarse: boolean } {
+  assertPlaceableForTravel(placement);
+  if (!placement.applies || placement.outcome !== 'placed') throwTravelUnavailable();
+  return {
+    point: { lat: placement.place.lat, lng: placement.place.lng },
+    coarse: placementIsCoarse(placement),
+  };
 }
 
 /**
@@ -688,7 +731,17 @@ export class InternalProvider implements BookingProvider {
      * which has always passed this id, would have allowed the move. Silent: no error, just
      * missing options.
      */
-    excludeBookingId?: string
+    excludeBookingId?: string,
+    /**
+     * WHERE THE JOB IS, collected before any time is offered.
+     *
+     * Only read for a service that needs the customer's address, on an Agent with travel time
+     * on. Asking for it earlier in the conversation is real friction, accepted because it is
+     * confined to services whose customers must give an address anyway, and because the
+     * alternative is offering a time and then refusing it — the behaviour this provider has
+     * already ruled against once (see the SLOT_UNAVAILABLE note on create).
+     */
+    customerAddress?: string
   ): Promise<AvailabilityResult> {
     const rule = await this.loadRule(ctx.bot.id);
     const service = await this.resolveService(ctx.bot.id, serviceId);
@@ -771,7 +824,211 @@ export class InternalProvider implements BookingProvider {
       business,
       dayLedger,
     });
-    return { slots, timezone: rule.timezone, serviceId: service.id, serviceName: service.name };
+    // Travel time filters what the engine produced rather than teaching the engine about it.
+    // The engine is pure and DST-critical and expresses everything as busy intervals; this pad
+    // is asymmetric, per-neighbour and depends on where the customer lives, which that model
+    // cannot say. Post-filtering also means an Agent without travel time runs byte-identical
+    // code to yesterday's.
+    const travel = await this.filterSlotsForTravel(ctx, {
+      service,
+      itineraryKey,
+      slots,
+      rangeStart,
+      rangeEnd,
+      customerAddress,
+      excludeBookingId,
+    });
+    return {
+      slots: travel.slots,
+      timezone: rule.timezone,
+      serviceId: service.id,
+      serviceName: service.name,
+      travel: travel.summary,
+    };
+  }
+
+  /**
+   * Keep the slots the owner can actually reach; hand back the ones nobody can vouch for.
+   *
+   * THREE OUTCOMES PER SLOT, because two would force a lie. Offering everything confirms drives
+   * nobody checked; offering only what is proven would strip most of a country from a customer's
+   * options on the strength of "we did not measure it". So a slot proven fine is offered, a slot
+   * proven impossible is dropped without comment, and the undecided middle comes back separately
+   * as times the owner can be asked about — a Request, which is this platform's answer to every
+   * booking it cannot safely confirm.
+   *
+   * Returns the input untouched, with no summary, for every Agent that is not using this
+   * feature. That is not an optimisation: it is the guarantee that turning travel time on is
+   * the only thing that can change anybody's slots.
+   */
+  private async filterSlotsForTravel(
+    ctx: BookingContext,
+    input: {
+      service: ResolvedService;
+      itineraryKey: ItineraryKey;
+      slots: Array<{ start: string; end: string }>;
+      rangeStart: string;
+      rangeEnd: string;
+      customerAddress?: string;
+      excludeBookingId?: string;
+    }
+  ): Promise<{ slots: Array<{ start: string; end: string }>; summary?: TravelFilterSummary }> {
+    const { service } = input;
+    // A phone consultation is not a travel job however the Agent is configured — the cheapest
+    // gate, and a fact about the SERVICE rather than about the owner.
+    if (!service.customerAddressRequired) return { slots: input.slots };
+
+    const eligibility = await resolveTravelEligibility({
+      tenantId: ctx.tenant.id,
+      botId: ctx.bot.id,
+      itineraryKey: input.itineraryKey,
+    });
+    if (!eligibility.active) return { slots: input.slots };
+
+    const address = await this.travelAddressFor(ctx, input.customerAddress, input.excludeBookingId);
+    // NOT a pass. Without an address there is no filtering to do, and returning the unfiltered
+    // list would quietly hand back exactly the slots this feature exists to remove — with the
+    // model's compliance as the only thing standing between a customer and an impossible drive.
+    // The code and its prompt recovery are the ones create has always used.
+    if (!address) {
+      // The OWNER is exempt, and the two callers who set this are both moving a booking that
+      // already exists: the portal's reschedule picker and the customer's signed manage link.
+      // Neither is a conversation anyone can be asked a question in, and an owner filling their
+      // own diary is trusted to know their own day — the same principle that lets a portal
+      // booking warn rather than block.
+      if (ctx.isAdmin) return { slots: input.slots };
+      throw new BookingError(
+        "Where is the job? This service is carried out at the customer's address, and the times that can be offered depend on it. Ask for the address and call check_availability again with customerAddress.",
+        'ADDRESS_REQUIRED',
+        400
+      );
+    }
+
+    const candidate = travelCandidatePoint(await placeAddressFor(eligibility, address));
+    const neighbours = await loadTravelNeighbours({
+      eligibility,
+      botId: ctx.bot.id,
+      from: new Date(input.rangeStart),
+      to: new Date(input.rangeEnd),
+      excludeBookingId: input.excludeBookingId,
+    });
+
+    const offered: Array<{ start: string; end: string }> = [];
+    const requestableSlots: Array<{ start: string; end: string }> = [];
+    let unreachableCount = 0;
+    for (const slot of input.slots) {
+      const verdict = assessSlot({
+        candidate: {
+          ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
+          point: candidate.point,
+          coarse: candidate.coarse,
+        },
+        neighbours,
+        slackMin: eligibility.slackMin,
+      });
+      if (verdict === 'clear') offered.push(slot);
+      else if (verdict === 'undecided') requestableSlots.push(slot);
+      else unreachableCount += 1;
+    }
+
+    if (unreachableCount || requestableSlots.length) {
+      logger.info('[Travel] filtered offered slots', {
+        botId: ctx.bot.id,
+        tenantId: ctx.tenant.id,
+        offered: offered.length,
+        requestable: requestableSlots.length,
+        unreachable: unreachableCount,
+        coarseAddress: candidate.coarse,
+      });
+    }
+
+    return {
+      slots: offered,
+      summary: {
+        requestableSlots,
+        unreachableCount,
+        ...(candidate.coarse ? { addressTooVague: true as const } : {}),
+      },
+    };
+  }
+
+  /**
+   * The address to filter against, falling back to the one already on the booking being moved.
+   *
+   * A reschedule is not a new job. The customer picking a different time has not been asked for
+   * their address again and should not be — it is on the row, verbatim, from when they booked.
+   * Scoped by tenant AND bot rather than by row id, because an id arriving from a caller is not
+   * on its own proof of anything.
+   */
+  private async travelAddressFor(
+    ctx: BookingContext,
+    supplied?: string,
+    excludeBookingId?: string
+  ): Promise<string | null> {
+    const given = supplied?.trim();
+    if (given) return given;
+    if (!excludeBookingId) return null;
+    const row = await AppDataSource.getRepository(Booking).findOne({
+      where: { id: excludeBookingId, tenantId: ctx.tenant.id, botId: ctx.bot.id },
+    });
+    return row?.customerAddress?.trim() || null;
+  }
+
+  /**
+   * A candidate's blocked range: the appointment plus the service's own buffers.
+   *
+   * The gap between two jobs is measured between BLOCKED ranges, never raw times, because the
+   * buffers are already inside them — which is what makes a service buffer additive with the
+   * flat gap while a drive composes with it by `max`. Same arithmetic the INSERT uses, kept
+   * here so the offer path and the write path cannot disagree about where a job begins.
+   */
+  private blockedRangeFor(
+    service: Pick<ResolvedService, 'bufferBeforeMin' | 'bufferAfterMin'>,
+    start: Date,
+    end: Date
+  ): { blockedStart: Date; blockedEnd: Date } {
+    return {
+      blockedStart: new Date(start.getTime() - service.bufferBeforeMin * 60_000),
+      blockedEnd: new Date(end.getTime() + service.bufferAfterMin * 60_000),
+    };
+  }
+
+  /**
+   * The travel verdict for ONE candidate time, on the write path.
+   *
+   * `null` when travel does not apply, which every Agent on the platform is today.
+   *
+   * OUTSIDE THE TRANSACTION, always. Holding a database transaction open across a network call
+   * is the pool-exhaustion pattern `loadBusinessRules` already warns about, and this reads a
+   * diary and may geocode. The lock-scoped re-assert that closes the concurrent-booking race is
+   * a separate ticket; what this closes is the larger hole, which is a model booking a time
+   * availability never offered.
+   */
+  private async travelVerdictForBooking(
+    ctx: BookingContext,
+    input: {
+      eligibility: ActiveTravelEligibility;
+      service: ResolvedService;
+      placement: BookingPlacement;
+      start: Date;
+      end: Date;
+      excludeBookingId?: string;
+    }
+  ): Promise<TravelVerdict> {
+    const candidate = travelCandidatePoint(input.placement);
+    const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
+    const neighbours: TravelNeighbour[] = await loadTravelNeighbours({
+      eligibility: input.eligibility,
+      botId: ctx.bot.id,
+      from: input.start,
+      to: input.end,
+      excludeBookingId: input.excludeBookingId,
+    });
+    return assessSlot({
+      candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
+      neighbours,
+      slackMin: input.eligibility.slackMin,
+    });
   }
 
   /**
@@ -1017,15 +1274,71 @@ export class InternalProvider implements BookingProvider {
     // has already been given its chance to fail first. Outside the transaction for the other
     // reason the whole file cares about: a network call under an advisory lock is the
     // pool-exhaustion pattern documented on `loadBusinessRules`.
-    const placement = await placeBookingAddress({
-      tenantId: ctx.tenant.id,
-      botId: ctx.bot.id,
-      itineraryKey,
-      service,
-      address: contact.address,
-    });
-    assertPlaceableForTravel(placement);
+    const travelEligibility = service.customerAddressRequired
+      ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
+      : { active: false as const, reason: 'bot_disabled' as const };
+    const placement: BookingPlacement =
+      travelEligibility.active && contact.address?.trim()
+        ? await placeAddressFor(travelEligibility, contact.address)
+        : { applies: false };
     const place = bookingPlaceColumns(placement);
+
+    // CAN THE OWNER GET THERE? Availability already filtered this time out if not, so reaching
+    // here with a bad verdict means the model booked a time it never checked, or checked it
+    // several turns ago. Two of the three answers are not refusals: the undecided middle band
+    // becomes a Request, which is the platform's answer to every booking it cannot safely
+    // confirm, and only a drive PROVEN impossible is turned away.
+    let travelCheck: 'ok' | 'captured' | null = null;
+    if (travelEligibility.active) {
+      // An address we could not place at all still stops here, exactly as it did before there
+      // was a drive to check: there is a postcode that would settle it and the prompt asks for
+      // one. Everything else below reasons over coordinates.
+      assertPlaceableForTravel(placement);
+      const verdict =
+        placement.applies && placement.outcome === 'placed'
+          ? await this.travelVerdictForBooking(ctx, {
+              eligibility: travelEligibility,
+              service,
+              placement,
+              start,
+              end,
+            })
+          : // Google unreachable or the tenant's month spent. Not the customer's address being
+            // vague, so there is no question worth asking them — and nothing to reason over,
+            // which ADR-0015 answers with a Request rather than a confirmation of a drive
+            // nobody checked or a refusal of a job the owner may well want.
+            'undecided';
+      if (verdict === 'unreachable') {
+        logger.info('[Travel] refusing a booking the owner could not reach', {
+          botId: ctx.bot.id,
+          tenantId: ctx.tenant.id,
+          start: start.toISOString(),
+        });
+        throw new BookingError(
+          'That time cannot be reached from the appointments either side of it. Offer one of the other available times instead, and do not retry this one.',
+          'TRAVEL_TIME_CONFLICT',
+          409
+        );
+      }
+      if (verdict === 'undecided') {
+        logger.info('[Travel] capturing a request travel could not clear', {
+          botId: ctx.bot.id,
+          tenantId: ctx.tenant.id,
+          start: start.toISOString(),
+        });
+        // The placement travels with it, so the request row records the SAME evidence the
+        // verdict was reached on rather than paying to resolve the address a second time.
+        return this.createRequest(
+          ctx, idempotencyKey, service, itineraryKey, start, end, attendee, notes,
+          extras?.aiSummary, intakeAnswers, extras, effectiveDuration,
+          { placement, travelCheck: 'captured' }
+        );
+      }
+      // `ok`, not `degraded`: the haversine bounds are proofs, so a slot they cleared was
+      // genuinely checked. `degraded` is reserved for a world with a routing answer that could
+      // have been missing, and the alert that watches for it needs the word to mean that.
+      travelCheck = 'ok';
+    }
 
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
     //    constraint is the last-line guard: a racing create gets 23P01.
@@ -1053,8 +1366,8 @@ export class InternalProvider implements BookingProvider {
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
               ai_summary, organizer_email, service_area_match,
               customer_place_id, customer_lat, customer_lng, customer_coords_at,
-              customer_address_verified, geocode_precision, location_source)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
+              customer_address_verified, geocode_precision, location_source, travel_check)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -1082,8 +1395,7 @@ export class InternalProvider implements BookingProvider {
             // The gate above already passed, so this is 'inside' whenever it applied at all.
             areaMatch,
             // All null unless travel time is active for this Agent and the address placed to
-            // a precision worth trusting. `travel_check` stays null: this booking's ADDRESS
-            // was verified, its DRIVE was not, and the column records what the gate did.
+            // a precision worth trusting.
             place.placeId,
             place.lat,
             place.lng,
@@ -1091,6 +1403,9 @@ export class InternalProvider implements BookingProvider {
             place.addressVerified,
             place.precision,
             place.locationSource,
+            // `ok` only when the gate ran and PROVED the drives either side. Null means it
+            // never applied — no travel time on this Agent, or a service nobody drives to.
+            travelCheck,
           ]
         );
         return rows[0].id;
@@ -1258,7 +1573,15 @@ export class InternalProvider implements BookingProvider {
     aiSummary?: string,
     intakeAnswers?: unknown,
     extras?: BookingExtras,
-    bookedDurationMin?: number
+    bookedDurationMin?: number,
+    /**
+     * A verdict the AUTO path already reached, handed down rather than re-derived.
+     *
+     * Set only when create ran the travel gate and could not clear the drive. Carrying the
+     * placement across means the request row records the very evidence the verdict was reached
+     * on — and does not pay Google a second time for the same address moments later.
+     */
+    travel?: { placement: BookingPlacement; travelCheck: 'captured' }
   ): Promise<CreateBookingResult> {
     const bookingRepo = AppDataSource.getRepository(Booking);
     const icsUid = `${uuidv4()}@axentrio`;
@@ -1272,13 +1595,15 @@ export class InternalProvider implements BookingProvider {
     // will read is exactly the right home for a job we could not locate — refusing one is
     // the single outcome the prompt forbids — but capturing it silently is how an owner
     // ends up standing in the wrong town holding a request nobody flagged.
-    const placement = await placeBookingAddress({
-      tenantId: ctx.tenant.id,
-      botId: ctx.bot.id,
-      itineraryKey,
-      service,
-      address: contact.address,
-    });
+    const placement =
+      travel?.placement ??
+      (await placeBookingAddress({
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        itineraryKey,
+        service,
+        address: contact.address,
+      }));
     const place = bookingPlaceColumns(placement);
     // The row records THAT the gate had nothing to work with; only this line records WHY.
     // `travel_check` has four values describing what the gate DID, and it did nothing in
@@ -1339,11 +1664,12 @@ export class InternalProvider implements BookingProvider {
           place.addressVerified,
           place.precision,
           place.locationSource,
-          // `captured` — held as a request because there was nothing to reason over. Only
-          // ever written when travel was actually active and the address did not place to a
-          // precision worth trusting; a request whose address placed cleanly keeps a null,
-          // because nothing has checked its drive yet.
-          requestTravelCheck(placement),
+          // `captured` — held as a request because the gate could not clear it. Two writers,
+          // one meaning: a request the customer asked for whose address would not place, and a
+          // booking the AUTO path downgraded because the drive could not be settled. A request
+          // whose address placed cleanly and was never travel-checked keeps a null, because
+          // nothing has judged its drive.
+          travel?.travelCheck ?? requestTravelCheck(placement),
         ]
       );
       bookingId = rows[0].id;

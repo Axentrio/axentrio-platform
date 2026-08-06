@@ -51,6 +51,11 @@ export class CheckAvailabilityTool implements ToolAdapter {
         description:
           "For a service whose duration is a range or AI-estimated (flagged in the SERVICES list), the chosen/estimated length in minutes, so the offered slots fit. Omit for fixed-duration services.",
       },
+      customerAddress: {
+        type: 'string',
+        description:
+          "The customer's address, when the prompt tells you to collect it before checking times. Only some businesses need it: for those, which times can be offered depends on where the job is, and calling without it returns ADDRESS_REQUIRED.",
+      },
     },
     required: ['startDate', 'endDate'],
   };
@@ -64,8 +69,26 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.startDate as string,
         args.endDate as string,
         args.serviceId as string | undefined,
-        args.durationMin as number | undefined
+        args.durationMin as number | undefined,
+        args.customerAddress as string | undefined
       );
+      // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
+      // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
+      // empty-slots branch below it would be read out as "no times in this range", which turns
+      // a list of perfectly askable times into a dead end.
+      const travel = result?.travel;
+      if (travel && travel.requestableSlots.length > 0) {
+        return {
+          success: true,
+          data: {
+            ...result,
+            suggestedAction: 'request_appointment',
+            guidance: travel.addressTooVague
+              ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
+              : 'Times in "slots" can be confirmed now. Times in "travel.requestableSlots" are further away and the journey has not been measured, so they CANNOT be auto-confirmed: offer them as times the business will confirm, and if the customer picks one, capture it with request_appointment rather than create_booking. Never present a requestable time as booked.',
+          },
+        };
+      }
       // An empty slot list is the single most consequential result this tool returns, and
       // until now the ONLY thing telling the model what to do about it was a prompt rule.
       // Prose is the right place for the wording; it is the wrong place for the decision.

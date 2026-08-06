@@ -105,11 +105,19 @@ export async function checkAvailability(
   startDate: string,
   endDate: string,
   serviceId?: string,
-  durationMin?: number
+  durationMin?: number,
+  /**
+   * Where the job is. Only consulted for a service carried out at the customer's address on an
+   * Agent with travel time on — the times that can be offered depend on whether the owner can
+   * physically get there between whatever is already in the diary.
+   */
+  customerAddress?: string
 ) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
-  return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId, durationMin);
+  // `excludeBookingId` stays undefined here: this entry point is a NEW booking. The reschedule
+  // picker has its own function below, which passes both it and the address on the row.
+  return selectProvider().checkAvailability(ctx, startDate, endDate, serviceId, durationMin, undefined, customerAddress);
 }
 
 export async function createBooking(

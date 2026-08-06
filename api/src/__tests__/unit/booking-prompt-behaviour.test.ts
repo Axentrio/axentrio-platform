@@ -474,3 +474,36 @@ describe('{openingHours} carries closures', () => {
     expect(out.length).toBeLessThan(160);
   });
 });
+
+/**
+ * Travel time changes the ORDER of the conversation, and only for the businesses using it.
+ *
+ * Everywhere else the address is collected before the BOOKING tool. With travel on it has to
+ * come before the AVAILABILITY tool instead, because which times exist at all now depends on
+ * where the job is. That is real friction moved earlier, so nobody else may be charged it.
+ */
+describe('travel time — asking for the address before the times', () => {
+  const mobile = svc({ customerAddressRequired: true, locationType: 'custom' });
+
+  it('says nothing at all when travel time is not running', () => {
+    const section = buildServicesSection([mobile])!;
+    expect(section).not.toMatch(/BEFORE you call check_availability/);
+  });
+
+  it('tells the bot to collect the address before checking times when it is', () => {
+    const section = buildServicesSection([mobile], false, true)!;
+    expect(section).toMatch(/BEFORE you call check_availability/);
+    expect(section).toMatch(/customerAddress/);
+    // The recovery, so a model that forgets is not left stuck on the error.
+    expect(section).toMatch(/ADDRESS_REQUIRED/);
+    // And what a requestable time means, since those cannot be confirmed.
+    expect(section).toMatch(/requestableSlots/);
+  });
+
+  it('says nothing to a business whose services nobody drives to', () => {
+    // Travel can be on for an Agent whose catalog is all phone consultations. Asking those
+    // customers for an address earlier would be friction for a gate that never runs.
+    const section = buildServicesSection([svc({ customerAddressRequired: false })], false, true)!;
+    expect(section).not.toMatch(/BEFORE you call check_availability/);
+  });
+});

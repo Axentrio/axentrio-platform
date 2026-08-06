@@ -78,7 +78,22 @@ export async function placeBookingAddress(input: {
   });
   if (!eligibility.active) return { applies: false };
 
-  const result = await geocodeAddress(eligibility, input.address);
+  return placeAddressFor(eligibility, input.address);
+}
+
+/**
+ * The same placement, for a caller that has already resolved the gates.
+ *
+ * The travel gate needs the eligibility itself — the itinerary key to scope neighbours by, and
+ * the owner's slack — so re-deriving it inside `placeBookingAddress` and then asking for it
+ * again outside would run the four gates twice per booking. Splitting the entry point is the
+ * same discipline ADR-0016 applies to the key: resolve once, hand it down.
+ */
+export async function placeAddressFor(
+  eligibility: ActiveTravelEligibility,
+  address: string
+): Promise<BookingPlacement> {
+  const result = await geocodeAddress(eligibility, address);
   return result.status === 'placed'
     ? { applies: true, outcome: 'placed', place: result.place }
     : { applies: true, outcome: result.status };
@@ -147,7 +162,7 @@ const COORDINATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
  * columns is a separate job and a separate ticket; refusing to USE them is what stops an
  * out-of-date position from deciding anything in the meantime.
  */
-function storedPlace(booking: Booking): PlacedAddress | null {
+export function storedPlace(booking: Booking): PlacedAddress | null {
   // A row with coordinates but no stamp cannot be shown to be inside the window, and the
   // safe reading of an unknown age is that it has expired. A stamp in the FUTURE is refused
   // for the same reason and is the more dangerous of the two: clock skew or a hand-edited
@@ -251,28 +266,38 @@ export function placementIsTrusted(placement: BookingPlacement): boolean {
 }
 
 /**
+ * Is this a position that may refuse a drive but never clear one?
+ *
+ * A town centre collapses every address in a municipality onto one dot (ADR-0014). The gate
+ * still uses it — a dot eighty kilometres away proves a ten-minute drive impossible whichever
+ * door it stands for — but nothing placed this coarsely may confirm an appointment.
+ */
+export function placementIsCoarse(placement: BookingPlacement): boolean {
+  return placement.applies && placement.outcome === 'placed' && !isTrustedForTravel(placement.place.precision);
+}
+
+/**
  * Must the AUTO path refuse to confirm this?
  *
- * Yes for an address we could not place, and for one placed only to a town centre: ADR-0015
- * sends both through the postcode recovery, which retries once and then captures a Request.
+ * ONLY for an address we could not place AT ALL. That address has a recovery the customer can
+ * act on — a postcode or a town — and the prompt already asks for one, retries once, and
+ * captures a Request if it fails again.
  *
- * NO when Google itself was unreachable or the Tenant's element cap was spent, and that
- * branch is DELIBERATELY INCOMPLETE UNTIL TRAVEL ENFORCEMENT LANDS. The finished feature
- * captures a Request there (plan §10, "Routes AND Geocoding down"), and it can, because by
- * then the haversine proofs still refuse the impossible slots and confirm the certain ones,
- * so a Request means something. Today there is no drive being checked at all: capturing here
- * would convert a Google outage into a platform-wide manual-triage avalanche while verifying
- * nothing, which is the exact failure ADR-0015 names in its opening paragraph. So an outage
- * confirms exactly as it did before travel time existed, with no location on the row and
- * nothing claiming a check that never ran.
+ * NOT for an address placed only to a town centre, and that changed when travel enforcement
+ * landed. Refusing a coarse placement outright was right while there was no drive being
+ * checked, because there was nothing else to do with it. Now there is: ADR-0015's rule is that
+ * a coarse point falls through to the coordinate branch, where it can still refuse the
+ * provably impossible and can never clear anything — so the customer keeps a list of times to
+ * request instead of a dead end, and the appointment is still never silently confirmed.
+ * `placementIsCoarse` is what carries that through to the gate.
  *
- * The ticket that closes this is the one that adds routing. Until it lands, a sustained run
- * of `[Travel] geocoding unreachable` is the only signal that this branch is firing, which
- * is why that log line carries the cause.
+ * NOT when Google itself was unreachable or the Tenant's element cap was spent either. That is
+ * not the customer's address being vague; the postcode recovery cannot help, so sending them
+ * into it would be friction with no upside. The travel gate refuses to CLEAR anything without
+ * coordinates, which is where an outage is actually handled.
  */
 export function blocksAutoConfirm(placement: BookingPlacement): boolean {
-  if (!placement.applies || placement.outcome === 'unavailable') return false;
-  return !placementIsTrusted(placement);
+  return placement.applies && placement.outcome === 'not_placeable';
 }
 
 /**

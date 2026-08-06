@@ -131,9 +131,36 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
 const placeBookingAddress = vi.fn(
   async (..._a: unknown[]): Promise<BookingPlacement> => ({ applies: false })
 );
+const placeAddressFor = vi.fn(
+  async (..._a: unknown[]): Promise<BookingPlacement> => ({ applies: false })
+);
 vi.mock('../../booking/travel/booking-place', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/booking-place')>();
-  return { ...actual, placeBookingAddress: (...a: unknown[]) => placeBookingAddress(...a) };
+  return {
+    ...actual,
+    placeBookingAddress: (...a: unknown[]) => placeBookingAddress(...a),
+    placeAddressFor: (...a: unknown[]) => placeAddressFor(...a),
+  };
+});
+
+// The four gates are settled in travel-eligibility.test.ts. Here the question is only what the
+// provider does once they have passed, so the verdict is injected. Inactive by default, which
+// is the state of every Agent on the platform and of every other test in this file.
+const resolveTravelEligibility = vi.fn(async (..._a: unknown[]) => ({
+  active: false as const,
+  reason: 'no_api_key' as const,
+}));
+vi.mock('../../booking/travel/travel-eligibility', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/travel-eligibility')>();
+  return { ...actual, resolveTravelEligibility: (...a: unknown[]) => resolveTravelEligibility(...a) };
+});
+
+// The diary the gate reasons over. Loading it is settled in travel-neighbours.test.ts; the
+// arithmetic is settled in travel-gate.test.ts. Both stay REAL below — only the rows are given.
+const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
+vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/travel-neighbours')>();
+  return { ...actual, loadTravelNeighbours: (...a: unknown[]) => loadTravelNeighbours(...a) };
 });
 
 import type { BookingPlacement } from '../../booking/travel/booking-place';
@@ -1330,10 +1357,22 @@ describe('InternalProvider.createBooking - travel placement', () => {
       String(c[0]).includes('INSERT INTO chatbot_bookings')
     ) as [string, unknown[]];
 
+  /** All four gates passed. Whether they should have is travel-eligibility.test.ts's question. */
+  const ACTIVE = {
+    active: true as const,
+    tenantId: 'ten-1',
+    itineraryKey: 'bot:bot-1',
+    slackMin: 0,
+    startFromBase: false,
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
     bookingSettingsFindOne.mockResolvedValue(null as any);
     placeBookingAddress.mockResolvedValue({ applies: false });
+    placeAddressFor.mockResolvedValue({ applies: false });
+    resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
+    loadTravelNeighbours.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -1368,8 +1407,15 @@ describe('InternalProvider.createBooking - travel placement', () => {
     }
   });
 
+  /** Travel on, and the customer's address placed however this test wants it. */
+  const travelling = (placement: BookingPlacement): void => {
+    resolveTravelEligibility.mockResolvedValue(ACTIVE as any);
+    placeAddressFor.mockResolvedValue(placement);
+    placeBookingAddress.mockResolvedValue(placement);
+  };
+
   it('persists the durable identity, the coordinates and the VERIFIED string', async () => {
-    placeBookingAddress.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    travelling({ applies: true, outcome: 'placed', place: PLACE });
     await single('idem-travel-placed');
     const insert = writtenInsert();
     expect(insertParam(insert, 'customer_place_id')).toBe('ChIJ_place');
@@ -1387,30 +1433,31 @@ describe('InternalProvider.createBooking - travel placement', () => {
   });
 
   it('scopes the placement to the SAME itinerary the lock and the row use', async () => {
-    placeBookingAddress.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    travelling({ applies: true, outcome: 'placed', place: PLACE });
     await single('idem-travel-key');
     // ADR-0016: resolved once at the top of the path and handed down. A second derivation
     // could scope travel to a different diary than the one being written to.
-    expect(placeBookingAddress).toHaveBeenCalledWith(
+    expect(resolveTravelEligibility).toHaveBeenCalledWith(
       expect.objectContaining({ itineraryKey: insertParam(writtenInsert(), 'calendar_key') })
     );
   });
 
   it('refuses to AUTO-CONFIRM an address it could not place', async () => {
-    placeBookingAddress.mockResolvedValue({ applies: true, outcome: 'not_placeable' });
+    travelling({ applies: true, outcome: 'not_placeable' });
     await expect(single('idem-travel-vague')).rejects.toMatchObject({ code: 'ADDRESS_NOT_PLACEABLE' });
     // The same code the service area throws, so the prompt's existing recovery - ask for a
     // postcode, retry once, then capture - applies without teaching the model a second rule.
     expect(managerQuery).not.toHaveBeenCalled();
   });
 
-  it('refuses to AUTO-CONFIRM against a town centre, however confidently placed', async () => {
-    placeBookingAddress.mockResolvedValue({
-      applies: true, outcome: 'placed', place: { ...PLACE, precision: 'approximate' }
-    });
-    // An approximate point collapses every address in a municipality onto one dot. It can
-    // prove a drive impossible; it can never prove one fine.
-    await expect(single('idem-travel-coarse')).rejects.toMatchObject({ code: 'ADDRESS_NOT_PLACEABLE' });
+  it('CAPTURES rather than refuses when the address placed only to a town centre', async () => {
+    // An approximate point collapses every address in a municipality onto one dot: it can
+    // prove a drive impossible and can never prove one fine. Refusing it outright was right
+    // while no drive was being checked; now the gate takes it and the customer keeps a job
+    // the owner can look at instead of a dead end.
+    travelling({ applies: true, outcome: 'placed', place: { ...PLACE, precision: 'approximate' } });
+    await expect(single('idem-travel-coarse')).resolves.toMatchObject({ requested: true });
+    expect(insertParam(writtenInsert(), 'travel_check')).toBe('captured');
   });
 
   it('spends nothing on a booking that was going to fail for free anyway', async () => {
@@ -1424,13 +1471,88 @@ describe('InternalProvider.createBooking - travel placement', () => {
     expect(placeBookingAddress).not.toHaveBeenCalled();
   });
 
-  it('does NOT refuse when GOOGLE is the thing that failed', async () => {
-    placeBookingAddress.mockResolvedValue({ applies: true, outcome: 'unavailable' });
-    // The postcode recovery cannot help with someone else's downtime, and refusing a
-    // booking over it is the failure ADR-0015 exists to prevent. Behaves as it did before
-    // travel time existed: confirmed, with no location recorded.
-    await expect(single('idem-travel-outage')).resolves.toMatchObject({ success: true });
-    expect(insertParam(writtenInsert(), 'customer_place_id')).toBeNull();
+  it('does NOT refuse when GOOGLE is the thing that failed — it captures', async () => {
+    travelling({ applies: true, outcome: 'unavailable' });
+    // The postcode recovery cannot help with someone else's downtime, and refusing a booking
+    // over it is the failure ADR-0015 exists to prevent. But with a gate now standing here,
+    // confirming would be claiming a check that never ran — so the job is held for the owner.
+    await expect(single('idem-travel-outage')).resolves.toMatchObject({ requested: true });
+    const insert = writtenInsert();
+    expect(insertParam(insert, 'travel_check')).toBe('captured');
+    expect(insertParam(insert, 'customer_place_id')).toBeNull();
+  });
+
+  describe('the gate itself', () => {
+    /** A held job either side, at a distance this test chooses. */
+    const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
+      blockedStart: new Date(start),
+      blockedEnd: new Date(end),
+      location: { kind: 'known', point },
+    });
+
+    beforeEach(() => travelling({ applies: true, outcome: 'placed', place: PLACE }));
+
+    it('confirms and stamps `ok` when the drives either side are PROVEN', async () => {
+      loadTravelNeighbours.mockResolvedValue([
+        // Metres away, finishing an hour before the 07:00 slot. Nothing here is in doubt.
+        neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 }),
+      ]);
+      await expect(single('idem-gate-clear')).resolves.toMatchObject({ success: true });
+      // `ok`, not `degraded`: the haversine bounds are proofs, so this drive was genuinely
+      // checked. `degraded` has to keep meaning "a check I normally do was unavailable".
+      expect(insertParam(writtenInsert(), 'travel_check')).toBe('ok');
+    });
+
+    it('refuses a time the owner provably cannot reach', async () => {
+      // Liège is ~87 km from Gent as the crow flies, and the job before this one ends ten
+      // minutes earlier. Not even a straight line at motorway speed fits.
+      loadTravelNeighbours.mockResolvedValue([
+        neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+      ]);
+      await expect(single('idem-gate-refuse')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
+      // Refused before anything was written, not rolled back after.
+      expect(managerQuery).not.toHaveBeenCalled();
+    });
+
+    it('captures the undecided middle instead of confirming or refusing it', async () => {
+      // ~47 km with an hour to cover it: possible at motorway speed, not proven at a crawl.
+      // Without a routing answer that is an opinion, and an opinion is the owner's to hold.
+      loadTravelNeighbours.mockResolvedValue([
+        neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+      ]);
+      await expect(single('idem-gate-middle')).resolves.toMatchObject({ requested: true });
+      const insert = writtenInsert();
+      expect(insertParam(insert, 'travel_check')).toBe('captured');
+      // The evidence the verdict was reached on rides along, rather than being re-bought.
+      expect(insertParam(insert, 'customer_place_id')).toBe('ChIJ_place');
+      expect(placeAddressFor).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not run at all for a service nobody drives to', async () => {
+      const desk = { ...EVENT_TYPE, customerAddressRequired: false };
+      eventTypeFindOne.mockResolvedValue(desk);
+      serviceTypeFind.mockResolvedValue([desk]);
+      await expect(single('idem-gate-desk')).resolves.toMatchObject({ success: true });
+      expect(loadTravelNeighbours).not.toHaveBeenCalled();
+      expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
+    });
+
+    it('never reads the diary from inside the transaction', async () => {
+      // Holding a transaction open across a network call is the pool-exhaustion pattern this
+      // provider already warns about, and the gate both reads a diary and may geocode.
+      loadTravelNeighbours.mockImplementation(async () => {
+        expect(managerQuery).not.toHaveBeenCalled();
+        return [];
+      });
+      await expect(single('idem-gate-outside')).resolves.toMatchObject({ success: true });
+      expect(loadTravelNeighbours).toHaveBeenCalled();
+    });
+
+    it('leaves travel_check null when travel is inert, rather than claiming a check', async () => {
+      resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'bot_disabled' } as any);
+      await expect(single('idem-gate-off')).resolves.toMatchObject({ success: true });
+      expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
+    });
   });
 
   describe('the request path', () => {
@@ -1460,5 +1582,172 @@ describe('InternalProvider.createBooking - travel placement', () => {
       await expect(single('idem-req-off')).resolves.toMatchObject({ requested: true });
       expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
     });
+  });
+});
+
+/**
+ * Travel time — the times a customer is actually offered (#63).
+ *
+ * The write path refuses; this one never has to, because a slot the owner cannot reach is
+ * simply not among the ones the customer sees. Three outcomes per slot rather than two: proven
+ * fine is offered, proven impossible is dropped, and everything in between comes back as a time
+ * the owner can be asked about. Dropping that middle silently would read to the customer as an
+ * empty diary, which is the one answer this codebase has ruled against.
+ */
+describe('InternalProvider.checkAvailability - travel filtering', () => {
+  let provider: InternalProvider;
+
+  const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
+  const ADDRESS = 'Kerkstraat 12, 9000 Gent';
+  const PLACE = {
+    placeId: 'ChIJ_place',
+    lat: 51.05,
+    lng: 3.72,
+    precision: 'rooftop' as const,
+    formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium',
+  };
+  const ACTIVE = {
+    active: true as const,
+    tenantId: 'ten-1',
+    itineraryKey: 'bot:bot-1',
+    slackMin: 0,
+    startFromBase: false,
+  };
+  const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
+    blockedStart: new Date(start),
+    blockedEnd: new Date(end),
+    location: { kind: 'known', point },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null as any);
+    resolveTravelEligibility.mockResolvedValue(ACTIVE as any);
+    placeAddressFor.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    loadTravelNeighbours.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(MOBILE);
+    serviceTypeFind.mockResolvedValue([MOBILE]);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue(null);
+    bookingQuery.mockResolvedValue([]);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  /** Wednesday 09:00-11:00 Brussels = 07:00-09:00 UTC: four half-hour starts. */
+  const check = (address?: string, over: Record<string, unknown> = {}) =>
+    provider.checkAvailability({ ...ctx, ...over } as never, '2026-06-10', '2026-06-11',
+      undefined, undefined, undefined, address);
+
+  it('leaves an Agent without travel time byte-identical to yesterday', async () => {
+    resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
+    const res = await check();
+    expect(res.slots).toHaveLength(4);
+    expect(res.travel).toBeUndefined();
+    // Nothing was placed, no diary was read, and no address was demanded.
+    expect(placeAddressFor).not.toHaveBeenCalled();
+    expect(loadTravelNeighbours).not.toHaveBeenCalled();
+  });
+
+  it('leaves a service nobody drives to alone, even on an Agent with travel on', async () => {
+    const desk = { ...EVENT_TYPE, customerAddressRequired: false };
+    eventTypeFindOne.mockResolvedValue(desk);
+    serviceTypeFind.mockResolvedValue([desk]);
+    const res = await check();
+    expect(res.slots).toHaveLength(4);
+    expect(res.travel).toBeUndefined();
+    expect(resolveTravelEligibility).not.toHaveBeenCalled();
+  });
+
+  it('REFUSES to answer without an address rather than returning unfiltered times', async () => {
+    // Prompt compliance is not enforcement. Handing back the full list here would quietly
+    // return exactly the slots this feature exists to remove.
+    await expect(check()).rejects.toMatchObject({ code: 'ADDRESS_REQUIRED' });
+  });
+
+  it('does not demand an address from the OWNER filling their own diary', async () => {
+    await expect(check(undefined, { isAdmin: true })).resolves.toBeDefined();
+  });
+
+  it('takes the address off the booking being moved, scoped to this tenant and bot', async () => {
+    // A reschedule is not a new job: the customer already gave their address when they booked.
+    bookingFindOne.mockResolvedValue({ customerAddress: ADDRESS } as never);
+    await provider.checkAvailability(ctx, '2026-06-10', '2026-06-11', undefined, undefined, 'bk-9');
+    expect(bookingFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: 'bk-9', tenantId: 'ten-1', botId: 'bot-1' }) })
+    );
+    expect(placeAddressFor).toHaveBeenCalledWith(ACTIVE, ADDRESS);
+  });
+
+  it('offers every slot when the whole day is next door', async () => {
+    loadTravelNeighbours.mockResolvedValue([
+      neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 }),
+    ]);
+    const res = await check(ADDRESS);
+    expect(res.slots).toHaveLength(4);
+    expect(res.travel?.requestableSlots).toHaveLength(0);
+    expect(res.travel?.unreachableCount).toBe(0);
+  });
+
+  it('drops only the starts the owner provably cannot reach', async () => {
+    // A job in Liège finishing at 06:50 UTC, ~87 km from the customer. The 07:00 start is
+    // ten minutes later and impossible; the later starts have the hours it needs.
+    loadTravelNeighbours.mockResolvedValue([
+      neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+    ]);
+    const res = await check(ADDRESS);
+    expect(res.slots.some((s) => s.start === '2026-06-10T07:00:00.000Z')).toBe(false);
+    expect(res.travel?.unreachableCount).toBeGreaterThan(0);
+  });
+
+  it('hands the undecided middle back as times to REQUEST, not as an empty diary', async () => {
+    // Brussels is ~47 km away: reachable at motorway speed, unproven at a crawl. Nothing
+    // measured it, so nothing may confirm it — and nothing may hide it either.
+    loadTravelNeighbours.mockResolvedValue([
+      neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+    ]);
+    const res = await check(ADDRESS);
+    // The last start of the morning has two and a half hours of clearance, which is enough
+    // for 47 km even at the pessimistic crawl — so it is proven, offered, and NOT a request.
+    // The three earlier ones are opinion, and opinion is the owner's to hold.
+    expect(res.slots).toHaveLength(1);
+    expect(res.slots[0].start).toBe('2026-06-10T08:30:00.000Z');
+    expect(res.travel?.requestableSlots).toHaveLength(3);
+    expect(res.travel?.unreachableCount).toBe(0);
+    expect(res.travel?.addressTooVague).toBeUndefined();
+  });
+
+  it('confirms nothing at all when the address placed only to a town centre', async () => {
+    placeAddressFor.mockResolvedValue({
+      applies: true, outcome: 'placed', place: { ...PLACE, precision: 'approximate' },
+    });
+    const res = await check(ADDRESS);
+    expect(res.slots).toHaveLength(0);
+    expect(res.travel?.requestableSlots).toHaveLength(4);
+    // The flag the tool turns into "ask for their postcode and check again", which is the one
+    // thing that can turn these into confirmable times.
+    expect(res.travel?.addressTooVague).toBe(true);
+  });
+
+  it('sends an address it could not place at all into the postcode recovery', async () => {
+    placeAddressFor.mockResolvedValue({ applies: true, outcome: 'not_placeable' });
+    await expect(check(ADDRESS)).rejects.toMatchObject({ code: 'ADDRESS_NOT_PLACEABLE' });
+  });
+
+  it('offers nothing when Google is down, and does not blame the customer for it', async () => {
+    placeAddressFor.mockResolvedValue({ applies: true, outcome: 'unavailable' });
+    // Reuses the code the calendar outage already raises: the prompt's coaching for it is
+    // exactly right, and a second code would teach the model the same lesson twice.
+    await expect(check(ADDRESS)).rejects.toMatchObject({ code: 'BOOKING_TEMPORARILY_UNAVAILABLE' });
+  });
+
+  it('scopes the diary it reads to the itinerary key travel was resolved for', async () => {
+    await check(ADDRESS);
+    expect(loadTravelNeighbours).toHaveBeenCalledWith(
+      expect.objectContaining({ eligibility: ACTIVE, botId: 'bot-1' })
+    );
   });
 });

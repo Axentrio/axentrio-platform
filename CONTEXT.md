@@ -112,6 +112,10 @@ _Avoid_: global setting, fallback (that's the platform layer specifically), defa
 Padding a Service reserves around its own bookings for prep and cleanup, set per Service. Distinct from the **Minimum Gap**, which is business-wide breathing room and travel time applied around *every* appointment regardless of Service. Both are additive.
 _Avoid_: padding, break, travel time (that is the Minimum Gap's purpose, not its name), gap (say which).
 
+**Minimum Gap**:
+Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. One of the three **Capacity Ceilings**. It is a floor rather than a fixed value: where the platform can estimate the drive between two consecutive appointments, the clearance is the larger of the owner's stated gap and that drive plus their slack, so a short drive never shortens the gap they asked for and a long one is never silently ignored. Additive with **Buffer**, which the **Blocked Range** already contains.
+_Avoid_: travel time (that is what the gap is *for*, not what it is called), padding, buffer (a Buffer is per-Service), minGap.
+
 **Blocked Range**:
 The stored, buffer-expanded time span a Booking occupies, held as a `tstzrange` and protected by an exclusion constraint on `(calendar_key, blocked_range)`. It is the only race-proof guarantee that two customers cannot take the same time. It understands overlap and nothing else — day counts, minutes budgets and gaps cannot be expressed in it, which is why those run as their own locked checks.
 _Avoid_: busy time (that is the merged in-memory view including the external calendar), reservation window, lock.

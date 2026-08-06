@@ -134,10 +134,14 @@ export interface TravelGapInput {
 /**
  * How many free minutes must sit between two consecutive jobs.
  *
- * ADDITIVE ON TOP OF THE FLAT GAP, not a replacement for it. `minGapMin` is the owner's
- * stated breathing room — they set it for reasons that have nothing to do with distance
+ * THE FLAT GAP IS A FLOOR, NOT A TERM IN A SUM. `minGapMin` is the owner's stated
+ * breathing room — they set it for reasons that have nothing to do with distance
  * (a coffee, notes, a phone call), and a two-minute drive must not silently cancel it.
  * So the answer is the LARGER of the flat gap and the drive-plus-slack, which means:
+ *
+ * (Do not read "additive" here. The Minimum Gap is additive with a Service's BUFFERS —
+ * those sit inside `blocked_range` and this gap is measured between blocked ranges, so
+ * the two compose by addition. Drive time composes with the flat gap by `max`.)
  *
  *   - no routing answer  → exactly today's behaviour, `minGapMin`
  *   - a short drive      → still `minGapMin`, unchanged

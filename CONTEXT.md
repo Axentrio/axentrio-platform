@@ -110,11 +110,19 @@ _Avoid_: global setting, fallback (that's the platform layer specifically), defa
 
 **Buffer**:
 Padding a Service reserves around its own bookings for prep and cleanup, set per Service. Distinct from the **Minimum Gap**, which is business-wide breathing room and travel time applied around *every* appointment regardless of Service. Both are additive.
-_Avoid_: padding, break, travel time (that is the Minimum Gap's purpose, not its name), gap (say which).
+_Avoid_: padding, break, gap (say which), travel time as a name for a Buffer (**Travel Time** is its own term — a Buffer is never it).
 
 **Minimum Gap**:
 Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. One of the three **Capacity Ceilings**, and the one that scopes to the **Itinerary Key** rather than the Agent, because it is a claim about one person's day. It is a floor rather than a fixed value: where the platform can estimate the drive between two consecutive appointments, the clearance is the larger of the owner's stated gap and that drive plus their slack, so a short drive never shortens the gap they asked for and a long one is never silently ignored. Additive with **Buffer**, which the **Blocked Range** already contains.
-_Avoid_: travel time (that is what the gap is *for*, not what it is called), padding, buffer (a Buffer is per-Service), minGap.
+_Avoid_: travel time as a name for the gap (the gap is the floor **Travel Time** raises, not the thing itself), padding, buffer (a Buffer is per-Service), minGap.
+
+**Travel Time**:
+The drive between two consecutive Bookings on one **Itinerary Key**, and the hard feasibility constraint derived from it: a Slot the owner could not physically reach in the clearance available is not offered. It raises the **Minimum Gap** to a floor of `max(minGap, drive + slack)` — it never lowers it, and it is never a term in a sum with it. Feasibility only: whether a job further out is *worth* doing is the owner's decision, so nothing here may refuse a booking that is merely inefficient. Sold as its own **Feature** (`travelTime`) rather than as part of bookings, because it is the only booking capability with a per-use external cost. Until 2026-08 this glossary listed "travel time" as a name to avoid, when it was only ever the Minimum Gap's *purpose*; ADR-0014 made it a thing in its own right.
+_Avoid_: travel buffer (a Buffer is per-Service prep/cleanup), distance, drive time (say Travel Time), routing, ETA.
+
+**Travel Check**:
+What the travel gate actually did to one Booking, recorded on the row: `ok` verified against routing, `degraded` decided on the haversine proofs alone because routing was unreachable or the Tenant's element cap was spent, `captured` held as a **Request** because there was nothing to reason over, and `overridden` confirmed by the owner accepting that Request. Absent means the gate did not apply — no address required, or the feature inert — which is not a fifth verdict. `degraded` must never be read as `ok`: a sustained run of it is a silent Google outage, and telling them apart afterwards is how anyone finds out.
+_Avoid_: travel status, verified (that is one of four values, not the concept), unavailable (the old single fail-open state — ADR-0015 split it three ways by cause).
 
 **Blocked Range**:
 The stored, buffer-expanded time span a Booking occupies, held as a `tstzrange` and protected by an exclusion constraint on `(calendar_key, blocked_range)`. It is the only race-proof guarantee that two customers cannot take the same time. It understands overlap and nothing else — day counts, minutes budgets and gaps cannot be expressed in it, which is why those run as their own locked checks.

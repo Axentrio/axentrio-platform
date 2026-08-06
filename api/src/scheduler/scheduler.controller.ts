@@ -71,12 +71,14 @@ async function assertTravelEnableAllowed(tenantId: string, botId: string): Promi
   await requireFeature(tenantId, 'travelTime', TRAVEL_FEATURE_ERROR);
   const itineraryKey = await resolveItineraryKey(botId);
   if (await itineraryKeyIsShared(tenantId, botId, itineraryKey)) {
+    // UPPER_SNAKE like every other hand-thrown code here (ADR-0011). The lowercase
+    // `plan_limit_*` family belongs to PlanLimitError, which this is not.
     throw new ApiError(
-      'Travel time cannot be switched on while another assistant books into the same calendar. ' +
+      'Travel time cannot be switched on while another bot books into the same calendar. ' +
         'Their appointments would be treated as one person’s day, and times would be held back ' +
-        'for journeys nobody makes. Give each assistant its own calendar first.',
+        'for journeys nobody makes. Give each bot its own calendar first.',
       409,
-      'travel_shared_itinerary'
+      'TRAVEL_SHARED_ITINERARY'
     );
   }
 }

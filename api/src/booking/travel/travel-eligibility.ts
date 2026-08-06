@@ -5,15 +5,15 @@
  * question is asked on the booking hot path, in front of a paid external dependency, and
  * the answer is "no" for almost every tenant on the platform. So the first gate is a
  * string already in memory, and a platform with no Maps key never resolves an entitlement,
- * never reads a settings row, and never queries for sibling bots.
+ * never reads a settings row, and never queries for sibling Agents.
  *
- *   1. No `GOOGLE_MAPS_API_KEY`   → inert platform-wide. The emergency stop.
- *   2. `travelTime` not entitled  → inert for that tenant. The commercial grant.
- *   3. Bot toggle off             → inert for that bot. The owner's switch, default off.
- *   4. Another bot shares the key → inert, and the toggle refuses to be switched on.
+ *   1. No `GOOGLE_MAPS_API_KEY`     → inert platform-wide. The emergency stop.
+ *   2. `travelTime` not entitled    → inert for that Tenant. The commercial grant.
+ *   3. Agent toggle off             → inert for that Agent. The owner's switch, default off.
+ *   4. Another Agent shares the key → inert, and the toggle refuses to be switched on.
  *
  * GATE 4 IS NOT A SAFETY CATCH, IT IS THE FEATURE'S ONE HARMFUL STATE. Under a shared
- * itinerary key two bots' bookings read as one person's day, so a two-plumber business
+ * itinerary key two Agents' bookings read as one person's day, so a two-plumber business
  * would find slots stripped for journeys neither of them makes — worse off than before the
  * feature existed. It is re-checked here, at runtime, and not only when the owner flips the
  * switch, because connecting or switching a calendar can create the shared state months
@@ -77,7 +77,7 @@ export async function resolveTravelEligibility(input: {
   const settings = await AppDataSource.getRepository(BookingSettings).findOne({
     where: { botId: input.botId },
   });
-  // No settings row is the state every bot starts in, and it reads as off.
+  // No settings row is the state every Agent starts in, and it reads as off.
   if (settings?.travelTimeEnabled !== true) return { active: false, reason: 'bot_disabled' };
 
   if (await itineraryKeyIsShared(input.tenantId, input.botId, input.itineraryKey)) {
@@ -93,11 +93,11 @@ export async function resolveTravelEligibility(input: {
 }
 
 /**
- * A bot's diary identity just changed — say so if that has quietly stranded its travel
+ * An Agent's diary identity just changed — say so if that has quietly stranded its travel
  * setting.
  *
- * Connecting, switching or disconnecting a calendar re-keys a bot's whole diary, and it can
- * land the bot on a key another bot already holds. The enable-time refusal cannot see that
+ * Connecting, switching or disconnecting a calendar re-keys an Agent's whole diary, and it
+ * can land it on a key another Agent already holds. The enable-time refusal cannot see that
  * coming: the shared state is created afterwards, by a settings change on a different
  * screen. Gate 4 in `resolveTravelEligibility` means the feature is already inert by then,
  * so nothing unsafe happens — but nothing VISIBLE happens either, and an owner whose travel
@@ -114,13 +114,13 @@ export async function resolveTravelEligibility(input: {
  */
 export async function warnIfTravelItineraryNowShared(botId: string, newKey: ItineraryKey): Promise<void> {
   try {
-    // The settings row carries the tenant too, so the common case — a bot with travel off,
-    // which is every bot by default — costs exactly one indexed read.
+    // The settings row carries the tenant too, so the common case — an Agent with travel
+    // off, which is every Agent by default — costs exactly one indexed read.
     const settings = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId } });
     if (settings?.travelTimeEnabled !== true) return;
     if (!(await itineraryKeyIsShared(settings.tenantId, botId, newKey))) return;
     logger.warn(
-      '[Travel] TRAVEL_SHARED_ITINERARY — travel time is enabled on a bot that now shares a diary, and is inert until they are separated',
+      '[Travel] TRAVEL_SHARED_ITINERARY — travel time is enabled on an Agent that now shares a diary, and is inert until they are separated',
       { botId, tenantId: settings.tenantId, itineraryKey: newKey }
     );
   } catch (error) {

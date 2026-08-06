@@ -16,6 +16,7 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
+import type { GeocodePrecision } from '../../contracts/travel';
 
 /**
  * `'failed'` is deliberately ABSENT.
@@ -167,15 +168,16 @@ export class Booking {
   customerAddressVerified?: string | null;
 
   /**
-   * How precisely Google placed it (`GeocodePrecision` in contracts/travel.ts).
+   * How precisely Google placed it.
    *
    * Load-bearing, not metadata. `approximate` is a town centre — it collapses every
    * address in a municipality onto one dot, so it can prove a drive impossible and can
    * never prove one fine. Stored even when untrusted, so an owner or an audit can see
-   * what the gate had to work with.
+   * what the gate had to work with. Typed off the contract rather than left a bare
+   * string, so `isTrustedForTravel` and this column can never fall out of step.
    */
   @Column({ type: 'varchar', length: 24, name: 'geocode_precision', nullable: true })
-  geocodePrecision?: string | null;
+  geocodePrecision?: GeocodePrecision | null;
 
   /** `'pin'` (the customer shared a location) | `'geocoded'`. Provenance decides trust. */
   @Column({ type: 'varchar', length: 16, name: 'location_source', nullable: true })

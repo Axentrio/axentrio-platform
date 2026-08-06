@@ -305,7 +305,11 @@ export const updateSchedulerSchema = z
       d.venueAddress !== undefined ||
       d.bookingsPaused !== undefined ||
       d.travel !== undefined,
-    { message: 'At least one of provider, eventType, availability, serviceArea, bookingRules is required' }
+    {
+      message:
+        'At least one of provider, eventType, availability, serviceArea, bookingRules, ' +
+        'venueAddress, bookingsPaused or travel is required',
+    }
   );
 
 export type UpdateSchedulerInput = z.infer<typeof updateSchedulerSchema>;

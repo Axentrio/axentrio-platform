@@ -612,7 +612,7 @@ describe('scheduler.controller · travel time switch', () => {
     itineraryKeyIsShared.mockResolvedValue(true);
     await expect(
       updateSchedulerConfig({ tenantId: 'ten-1', body: { travel: { enabled: true } } } as any, res)
-    ).rejects.toMatchObject({ statusCode: 409, code: 'travel_shared_itinerary' });
+    ).rejects.toMatchObject({ statusCode: 409, code: 'TRAVEL_SHARED_ITINERARY' });
     expect(itineraryKeyIsShared).toHaveBeenCalledWith('ten-1', 'bot-1', 'gcal:owner@acme.com');
   });
 

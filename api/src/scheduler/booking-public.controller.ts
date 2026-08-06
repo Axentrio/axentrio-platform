@@ -46,6 +46,32 @@ function errorPage(res: Response, message: string): void {
   res.status(200).send(page('Link unavailable', `<h1>This link can’t be used</h1><p>${esc(message)}</p>`));
 }
 
+/**
+ * What to SAY to the customer about a BookingError.
+ *
+ * `BookingError.message` is written for the model — it is fed to the LLM verbatim by
+ * `booking.tool.ts` and reads as instructions ("Do not offer specific times… capture it with
+ * request_appointment"). This is the one place those errors reach a human being's browser, so
+ * they cannot be rendered raw: the customer would be reading the bot's stage directions.
+ *
+ * An unknown code falls back to the generic line. That is deliberate — a message reaches this
+ * page only by being listed here, so a new error added elsewhere can never leak by default.
+ */
+export const CUSTOMER_MESSAGE: Record<string, string> = {
+  BOOKINGS_PAUSED: 'This business has paused online booking changes for now. Please contact them directly to move your appointment.',
+  CALENDAR_NOT_CONNECTED: 'This business can’t confirm changes online at the moment. Please contact them directly to move your appointment.',
+  CALENDAR_SYNC_DISABLED: 'This business can’t confirm changes online at the moment. Please contact them directly to move your appointment.',
+  REQUEST_ONLY_SERVICE: 'This appointment can’t be moved online. Please contact the business directly.',
+  BOOKING_TEMPORARILY_UNAVAILABLE: 'We couldn’t load the available times just now. Please try again in a few minutes.',
+  SERVICE_REQUIRED: 'We couldn’t load the available times for this appointment. Please contact the business directly.',
+  SLOT_UNAVAILABLE: 'That time has just been taken. Please pick another.',
+  BOOKING_NOT_FOUND: 'This appointment could no longer be found.',
+};
+
+export function customerMessage(err: BookingError): string {
+  return CUSTOMER_MESSAGE[err.code] ?? 'This link is invalid or has expired.';
+}
+
 function whenLabel(startIso: string, tz: string): string {
   return `${DateTime.fromISO(startIso).setZone(tz).toFormat('cccc d LLLL yyyy, HH:mm')} (${tz})`;
 }
@@ -102,7 +128,7 @@ export async function postCancel(req: Request, res: Response): Promise<void> {
       )
     );
   } catch (err) {
-    if (err instanceof BookingError) return errorPage(res, err.message);
+    if (err instanceof BookingError) return errorPage(res, customerMessage(err));
     logger.warn('[BookingPublic] cancel error', { error: err instanceof Error ? err.message : String(err) });
     errorPage(res, 'This link is invalid or has expired.');
   }
@@ -175,7 +201,7 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
     // every domain error here — a paused business, a temporarily unavailable diary, a
     // multi-service tenant needing a service id — was reported to the customer as a broken
     // link. They then have no reason to try again, and the owner never hears about it.
-    if (err instanceof BookingError) return errorPage(res, err.message);
+    if (err instanceof BookingError) return errorPage(res, customerMessage(err));
     logger.warn('[BookingPublic] reschedule page error', { error: err instanceof Error ? err.message : String(err) });
     errorPage(res, 'This link is invalid or has expired.');
   }
@@ -201,7 +227,7 @@ export async function postReschedule(req: Request, res: Response): Promise<void>
       )
     );
   } catch (err) {
-    if (err instanceof BookingError) return errorPage(res, err.message);
+    if (err instanceof BookingError) return errorPage(res, customerMessage(err));
     logger.warn('[BookingPublic] reschedule error', { error: err instanceof Error ? err.message : String(err) });
     errorPage(res, 'This link is invalid or has expired.');
   }

@@ -287,6 +287,20 @@ describe('overlapping and ranged overrides', () => {
     expect(days.has('2026-08-16')).toBe(true);
   });
 
+  it('resolves an exact tie toward CLOSED, not toward insertion order', () => {
+    // Two same-width rows on one date is the case narrowest-wins cannot rank. Falling back to
+    // array order would put the owner back where they started: an outcome they can neither
+    // see nor change. Closed is the recoverable direction — a business wrongly shown as shut
+    // loses an enquiry it can still answer; one that offers a slot it cannot honour has
+    // already taken the customer's time.
+    const closed = { date: '2026-08-14', closed: true };
+    const open = { date: '2026-08-14', windows: [{ start: '10:00', end: '14:00' }] };
+    const withOpenFirst = slotsForFortnight([open, closed]).map((s) => s.start.slice(0, 10));
+    const withClosedFirst = slotsForFortnight([closed, open]).map((s) => s.start.slice(0, 10));
+    expect(withOpenFirst).toEqual(withClosedFirst);
+    expect(withOpenFirst).not.toContain('2026-08-14');
+  });
+
   it('never states a malformed end date to a customer', () => {
     // The engine shape-checks 'zzz' and ignores the row; the prompt only compared ordering,
     // and 'zzz' sorts above every ISO date — so the bot announced a closure that never ends

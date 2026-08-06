@@ -308,6 +308,40 @@ that are not stated elsewhere.`;
 }
 
 /**
+ * How to get a locatable address, and what to do when one still cannot be placed.
+ *
+ * ONE COPY, because two different gates now throw the same code and neither owns the
+ * wording. The service area throws it when the Belgian municipality table cannot match the
+ * text; travel time throws it when Google cannot place the door. To the model these are one
+ * situation with one right answer, and two wordings of one rule is how the two wordings
+ * drift apart. The recovery sentence is kept verbatim from the version the service-area
+ * block shipped with, which is the version that was tested against real conversations.
+ *
+ * Only ever emitted once per prompt: `buildServiceAreaSection` carries it when an area is
+ * drawn, and `buildCustomerAddressSection` covers the case where nothing else would.
+ */
+export const ADDRESS_LOCATABILITY_COACHING = `When you need the customer's address for a job, ask for one that can actually be located: a postcode or a town name as well as the street. A street and house number alone are not enough.
+If create_booking returns ADDRESS_NOT_PLACEABLE, the address was simply too vague to locate — this is NOT a refusal. Ask for the postcode or town, then retry create_booking ONCE with the fuller address. Only if it fails again should you capture the job with request_appointment.`;
+
+/**
+ * The CUSTOMER ADDRESS block, for a business with travel time on and no service area drawn.
+ *
+ * Null in every other case, and the second condition is the point of the function rather
+ * than an optimisation: the coaching already sits inside the SERVICE AREA block, so a
+ * business with both would be told the same thing twice in one prompt. This closes the hole
+ * where an Agent could throw ADDRESS_NOT_PLACEABLE with nothing anywhere in its prompt
+ * telling it what that means, which is how a recoverable error becomes a dead end.
+ */
+export function buildCustomerAddressSection(input: {
+  travelTimeEnabled: boolean;
+  hasServiceArea: boolean;
+}): string | null {
+  if (!input.travelTimeEnabled || input.hasServiceArea) return null;
+  return `\n## CUSTOMER ADDRESS
+${ADDRESS_LOCATABILITY_COACHING}`;
+}
+
+/**
  * The SERVICE AREA prompt block — where this business works.
  *
  * The tool-error rule alone is not enough, and an earlier draft proved it: telling the bot
@@ -326,8 +360,7 @@ export function buildServiceAreaSection(entries: ServiceAreaEntry[]): string | n
 This business serves: ${sanitizeForLine(area)}.
 Answer questions about where you work from that list, and never widen it.
 If a customer is somewhere else, do NOT just turn them away and do NOT promise them a visit. Tell them it is outside the usual area, then still take their details and capture the job with request_appointment, saying plainly that it is a request the business owner will review and come back on. Ending the conversation at "no" is the one outcome to avoid — whether a job further out is worth doing is the owner's decision, not yours.
-When you need the customer's address for a job here, ask for one that can actually be located: a postcode or a town name as well as the street. A street and house number alone cannot be matched against the area above.
-If create_booking returns ADDRESS_NOT_PLACEABLE, the address was simply too vague to locate — this is NOT a refusal. Ask for the postcode or town, then retry create_booking ONCE with the fuller address. Only if it fails again should you capture the job with request_appointment.
+${ADDRESS_LOCATABILITY_COACHING}
 If create_booking returns OUT_OF_SERVICE_AREA, do NOT retry it: capture the job with request_appointment exactly as above, and never present it as a confirmed appointment.`;
 }
 
@@ -476,12 +509,21 @@ export const bookingModule: ModuleDefinition = {
       bookingSettings?.minGapMin
     );
     const servicesSection = buildServicesSection(services, businessCapacity);
+    // Only reachable when travel time is on and no area is drawn, so it is null for every
+    // Agent on the platform today. It carries no business data — just how to recover from
+    // ADDRESS_NOT_PLACEABLE, which the travel gate can now throw where the area gate never did.
+    const customerAddressSection = buildCustomerAddressSection({
+      travelTimeEnabled: bookingSettings?.travelTimeEnabled === true,
+      hasServiceArea: !!areaSection,
+    });
     // No bookable catalog → the services and hours blocks stay suppressed exactly as
     // before, but a configured service area is still worth stating on its own.
     // An address is worth stating even for a bot with no bookable catalog — "where are you?"
     // is not a booking question.
     if (!servicesSection) return [venueSection, areaSection].filter(Boolean).join('') || null;
     const hoursSection = buildHoursSection(rule);
-    return [servicesSection, hoursSection, venueSection, areaSection].filter(Boolean).join('');
+    return [servicesSection, hoursSection, venueSection, areaSection, customerAddressSection]
+      .filter(Boolean)
+      .join('');
   },
 };

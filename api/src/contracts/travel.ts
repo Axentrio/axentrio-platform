@@ -44,6 +44,16 @@ export function isTrustedForTravel(precision: GeocodePrecision | null | undefine
   return precision === 'rooftop' || precision === 'range_interpolated' || precision === 'geometric_center';
 }
 
+/**
+ * How a location was obtained, which is a different question from how precise it is.
+ *
+ * `geocoded` is a string we sent to Google. `pin` is the customer tapping their own location,
+ * which arrives already placed and skips forward-geocoding ambiguity entirely. Typed here
+ * beside `GeocodePrecision` rather than inline at each use, for the same reason: provenance
+ * decides trust, so the column and the code that reads it must not be able to drift apart.
+ */
+export type LocationSource = 'pin' | 'geocoded';
+
 /** Mean Earth radius (km), IUGG. */
 const EARTH_RADIUS_KM = 6371.0088;
 

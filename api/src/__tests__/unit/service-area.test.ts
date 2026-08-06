@@ -13,7 +13,11 @@ import {
   PROVINCES,
   MUNICIPALITIES,
 } from '../../contracts/belgium-geo';
-import { buildServiceAreaSection } from '../../modules/booking.module';
+import {
+  buildServiceAreaSection,
+  buildCustomerAddressSection,
+  ADDRESS_LOCATABILITY_COACHING,
+} from '../../modules/booking.module';
 import { serviceAreaSchema } from '../../schemas/scheduler.schema';
 import { composeSystemPrompt } from '../../llm/compose-system-prompt';
 import { PLACEHOLDER_CATALOG } from '../../contracts/prompt-placeholders';
@@ -210,6 +214,33 @@ describe('buildServiceAreaSection', () => {
     expect(out).toContain('request_appointment');
     // It must never teach the bot to turn the customer away.
     expect(out).not.toMatch(/cannot help|we don't serve/i);
+  });
+
+  it('carries the shared ADDRESS_NOT_PLACEABLE recovery rather than its own wording', () => {
+    expect(buildServiceAreaSection([province(OOST)])!).toContain(ADDRESS_LOCATABILITY_COACHING);
+  });
+});
+
+/**
+ * Travel time can throw ADDRESS_NOT_PLACEABLE where the service-area gate never did, so an
+ * Agent with travel on and no area drawn would otherwise get the error with nothing in its
+ * prompt saying what to do about it — which turns a recoverable error into a dead end.
+ */
+describe('buildCustomerAddressSection', () => {
+  it('is silent for every Agent that is not in exactly that state', () => {
+    expect(buildCustomerAddressSection({ travelTimeEnabled: false, hasServiceArea: false })).toBeNull();
+    expect(buildCustomerAddressSection({ travelTimeEnabled: false, hasServiceArea: true })).toBeNull();
+    // The area block already carries the recovery; saying it twice in one prompt is worse
+    // than saying it once.
+    expect(buildCustomerAddressSection({ travelTimeEnabled: true, hasServiceArea: true })).toBeNull();
+  });
+
+  it('teaches the recovery, in the same words, when nothing else would', () => {
+    const out = buildCustomerAddressSection({ travelTimeEnabled: true, hasServiceArea: false })!;
+    expect(out).toContain('## CUSTOMER ADDRESS');
+    expect(out).toContain(ADDRESS_LOCATABILITY_COACHING);
+    // Asking for a locatable address in the first place is what makes the recovery rare.
+    expect(out).toMatch(/postcode/i);
   });
 });
 

@@ -38,31 +38,70 @@ export function currentTravelPeriod(now: Date = new Date()): string {
 }
 
 /**
- * Add `elements` billable Google units to this tenant's month.
+ * Claim `elements` billable Google units for this tenant's month, or refuse.
+ *
+ * RESERVE BEFORE SPENDING, IN ONE STATEMENT, and that is what makes this a cap rather than
+ * a hint. Asking "am I over?" and then counting afterwards leaves a window between the two
+ * where every concurrent caller reads the same under-limit total and every one of them
+ * proceeds, so the real ceiling becomes the cap plus however many requests happen to be in
+ * flight. Here the check IS the increment: the `WHERE` on the conflict arm means Postgres
+ * either counts the units and returns the new total, or matches nothing and returns no rows,
+ * and no two callers can both win the last element.
  *
  * ELEMENTS, NOT CALLS. Route Matrix prices per origin×destination pair, so one request
- * covering three candidate slots costs three. Counting requests would undercount by
- * exactly the factor that varies.
+ * covering three candidate slots costs three. Counting requests would undercount by exactly
+ * the factor that varies. Reserved BEFORE the call rather than after, because Google bills
+ * the request and not the answer, so a timeout costs the same as a hit.
  *
- * One statement, so two concurrent bookings cannot read-modify-write over each other —
- * the unique index on `(tenant_id, period_start)` is what makes the ON CONFLICT arm
- * reachable, and without it each would insert its own row and the total would silently
- * halve. Never throws: losing the count is bad, but failing the customer's booking because
- * the meter hiccuped is worse, and the next call re-reads the real stored total anyway.
+ * A METERING FAILURE REFUSES. See the header: degraded mode is safe by construction and
+ * unmetered spend is not, which is the opposite of the LLM budget check next door.
+ *
+ * Returns `true` when the units are yours to spend.
  */
-export async function recordTravelElements(tenantId: string, elements: number): Promise<void> {
-  if (!Number.isFinite(elements) || elements <= 0) return;
+export async function reserveTravelElements(tenantId: string, elements: number): Promise<boolean> {
+  // A genuine zero is a caller that wants nothing, and it proceeds having claimed nothing.
+  if (elements === 0) return true;
+  // EVERYTHING ELSE MUST BE A POSITIVE WHOLE NUMBER. A caller that cannot say how much it
+  // wants does not get to spend. Negatives and fractions are called out because both would
+  // otherwise read as "nothing to claim" and wave the request straight through: a negative
+  // is obviously a bug, and a fraction floors to zero, which is the quieter version of one.
+  if (!Number.isInteger(elements) || elements < 0) {
+    logger.warn('[Travel] refusing a reservation for a nonsensical element count', { tenantId, elements });
+    return false;
+  }
+  const n = elements;
+
+  const cap = config.travel.monthlyElementCapPerTenant;
+  // A malformed or absent limit reads as "no limit", matching every other ceiling on this
+  // platform — a bad env var must never quietly disable travel for every tenant at once.
+  const uncapped = !Number.isFinite(cap) || cap <= 0;
+  // Guarded here as well as in SQL: the plain INSERT arm below is the first request of a
+  // tenant's month and no `ON CONFLICT` clause can constrain it, so a single request larger
+  // than the whole cap would otherwise sail through on the one day it is unopposed.
+  if (!uncapped && n > cap) {
+    logger.warn('[Travel] refusing a reservation larger than the whole monthly cap', { tenantId, elements: n, cap });
+    return false;
+  }
+
   try {
-    await AppDataSource.query(
+    const rows: unknown[] = await AppDataSource.query(
       `INSERT INTO chatbot_travel_usage (tenant_id, period_start, elements)
        VALUES ($1, $2::date, $3)
        ON CONFLICT (tenant_id, period_start)
        DO UPDATE SET elements = chatbot_travel_usage.elements + EXCLUDED.elements,
-                     updated_at = now()`,
-      [tenantId, currentTravelPeriod(), Math.floor(elements)]
+                     updated_at = now()
+             WHERE $4::boolean OR chatbot_travel_usage.elements + EXCLUDED.elements <= $5
+       RETURNING elements`,
+      [tenantId, currentTravelPeriod(), n, uncapped, uncapped ? n : cap]
     );
+    if (rows.length) return true;
+    logger.warn('[Travel] monthly element cap reached', { tenantId, elements: n, cap });
+    return false;
   } catch (error) {
-    logger.warn('[Travel] failed to record element usage', { tenantId, elements, error });
+    // Fail CLOSED. Losing the count is not the risk; spending real money at an unknown rate
+    // with nothing counting it is.
+    logger.warn('[Travel] could not reserve elements — refusing to spend', { tenantId, elements: n, error });
+    return false;
   }
 }
 
@@ -79,10 +118,13 @@ export async function getTravelElementsUsed(tenantId: string): Promise<number> {
  * Has this tenant spent its month? `true` means degrade per ADR-0015 — it does NOT mean
  * refuse the booking, and a caller that treats it as a refusal has inverted the feature.
  *
+ * THE QUESTION, NOT THE SPENDING. Anything about to call Google reserves through
+ * `reserveTravelElements` instead, which is atomic; this exists for the callers that need
+ * to know which branch they are on WITHOUT claiming an element — chiefly the degraded path,
+ * which decides on the haversine proofs alone and spends nothing.
+ *
  * A cap of 0 or less means uncapped, matching how every other limit on this platform
- * degrades: a malformed limit must read as "no limit", never as "nothing allowed". This is
- * the only place that spelling appears, so a misconfigured env var cannot quietly disable
- * travel checks for every tenant at once.
+ * degrades: a malformed limit must read as "no limit", never as "nothing allowed".
  */
 export async function isTravelSpendExhausted(tenantId: string): Promise<boolean> {
   const cap = config.travel.monthlyElementCapPerTenant;

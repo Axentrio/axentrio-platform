@@ -53,6 +53,13 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
+import {
+  placeBookingAddress,
+  bookingPlaceColumns,
+  blocksAutoConfirm,
+  requestTravelCheck,
+  type BookingPlacement,
+} from '../travel/booking-place';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -310,6 +317,31 @@ async function assertInServiceArea(
       ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
       : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed. Ask for a postcode or town.`,
     verdict === 'outside' ? 'OUT_OF_SERVICE_AREA' : 'ADDRESS_NOT_PLACEABLE',
+    400
+  );
+}
+
+/**
+ * Travel time: don't AUTO-CONFIRM a job we cannot locate well enough to plan the drive to.
+ *
+ * A SEPARATE GATE FROM THE SERVICE AREA, and the difference is worth stating because the two
+ * throw the same code. The area asks "is this town on the owner's list", which the Belgian
+ * municipality table answers for free from the address text. This asks "where is the door",
+ * which only Google can answer, so a street the area gate matched to Sint-Niklaas can still
+ * be unplaceable here, and a business with no area configured at all is still gated once
+ * travel is on.
+ *
+ * Recoverable (400), and deliberately the SAME code the service area already uses: the
+ * prompt's recovery, which asks for a postcode, retries once and then captures with
+ * request_appointment, is exactly the right handling, and a second code would need the model
+ * taught a second time. WHICH placements block is `blocksAutoConfirm`, kept beside the other
+ * readings of a placement rather than restated here.
+ */
+function assertPlaceableForTravel(placement: BookingPlacement): void {
+  if (!blocksAutoConfirm(placement)) return;
+  throw new BookingError(
+    'That address could not be located precisely enough to plan the journey. Ask for a postcode or town.',
+    'ADDRESS_NOT_PLACEABLE',
     400
   );
 }
@@ -979,6 +1011,22 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
     }
 
+    // Travel time: place the address, LAST of the pre-transaction checks and deliberately so.
+    // It is the only one that costs money, so every free way this booking could still fail —
+    // a missing address, an out-of-area job, a slot that went while the customer was typing —
+    // has already been given its chance to fail first. Outside the transaction for the other
+    // reason the whole file cares about: a network call under an advisory lock is the
+    // pool-exhaustion pattern documented on `loadBusinessRules`.
+    const placement = await placeBookingAddress({
+      tenantId: ctx.tenant.id,
+      botId: ctx.bot.id,
+      itineraryKey,
+      service,
+      address: contact.address,
+    });
+    assertPlaceableForTravel(placement);
+    const place = bookingPlaceColumns(placement);
+
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
     //    constraint is the last-line guard: a racing create gets 23P01.
     const icsUid = `${uuidv4()}@axentrio`;
@@ -1003,8 +1051,10 @@ export class InternalProvider implements BookingProvider {
               start_utc, end_utc, blocked_range, calendar_key,
               attendee_name, attendee_email, notes, ics_uid, idempotency_key, intake_answers,
               customer_address, customer_phone, booked_duration_min, uploaded_files, source_channel,
-              ai_summary, organizer_email, service_area_match)
-           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23)
+              ai_summary, organizer_email, service_area_match,
+              customer_place_id, customer_lat, customer_lng, customer_coords_at,
+              customer_address_verified, geocode_precision, location_source)
+           VALUES ($1,$2,'internal',$3,'auto',$4,'confirmed',$5,$6, tstzrange($7,$8,'[)'),$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30)
            RETURNING id`,
           [
             ctx.tenant.id,
@@ -1031,6 +1081,16 @@ export class InternalProvider implements BookingProvider {
             frozenOrganizerFor(ctx.tenant.id),
             // The gate above already passed, so this is 'inside' whenever it applied at all.
             areaMatch,
+            // All null unless travel time is active for this Agent and the address placed to
+            // a precision worth trusting. `travel_check` stays null: this booking's ADDRESS
+            // was verified, its DRIVE was not, and the column records what the gate did.
+            place.placeId,
+            place.lat,
+            place.lng,
+            place.coordsAt,
+            place.addressVerified,
+            place.precision,
+            place.locationSource,
           ]
         );
         return rows[0].id;
@@ -1208,6 +1268,29 @@ export class InternalProvider implements BookingProvider {
     assertRequiredIntake(service, intakeJson);
     // P5a: required address/phone gate (request path).
     const contact = resolveContactFields(service, extras, ctx.session);
+    // Travel time: place the address here too, and NEVER enforce it. A request the owner
+    // will read is exactly the right home for a job we could not locate — refusing one is
+    // the single outcome the prompt forbids — but capturing it silently is how an owner
+    // ends up standing in the wrong town holding a request nobody flagged.
+    const placement = await placeBookingAddress({
+      tenantId: ctx.tenant.id,
+      botId: ctx.bot.id,
+      itineraryKey,
+      service,
+      address: contact.address,
+    });
+    const place = bookingPlaceColumns(placement);
+    // The row records THAT the gate had nothing to work with; only this line records WHY.
+    // `travel_check` has four values describing what the gate DID, and it did nothing in
+    // both of these cases, so a vague address and a Google outage land on one value. Telling
+    // a sustained run of the second apart from a bad week of the first is what this is for.
+    if (requestTravelCheck(placement) === 'captured') {
+      logger.info('[Booking] capturing a request travel could not place', {
+        botId: ctx.bot.id,
+        tenantId: ctx.tenant.id,
+        outcome: placement.applies ? placement.outcome : 'n/a',
+      });
+    }
     // P5e: validate + snapshot attached files for the request row too.
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
@@ -1219,8 +1302,10 @@ export class InternalProvider implements BookingProvider {
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
             source_channel, ai_summary, intake_answers, customer_address, customer_phone, booked_duration_min, uploaded_files,
-            organizer_email, service_area_match)
-         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21)
+            organizer_email, service_area_match,
+            customer_place_id, customer_lat, customer_lng, customer_coords_at,
+            customer_address_verified, geocode_precision, location_source, travel_check)
+         VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
          RETURNING id`,
         [
           ctx.tenant.id,
@@ -1247,6 +1332,18 @@ export class InternalProvider implements BookingProvider {
           // one is the single outcome the prompt forbids — but capturing it silently is how
           // an owner turns work away for months without ever seeing it.
           (await evaluateServiceArea(ctx, service, contact.address ?? null)).match,
+          place.placeId,
+          place.lat,
+          place.lng,
+          place.coordsAt,
+          place.addressVerified,
+          place.precision,
+          place.locationSource,
+          // `captured` — held as a request because there was nothing to reason over. Only
+          // ever written when travel was actually active and the address did not place to a
+          // precision worth trusting; a request whose address placed cleanly keeps a null,
+          // because nothing has checked its drive yet.
+          requestTravelCheck(placement),
         ]
       );
       bookingId = rows[0].id;

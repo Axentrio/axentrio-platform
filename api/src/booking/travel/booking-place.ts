@@ -1,0 +1,293 @@
+/**
+ * Turning a Booking's address into a placed address, and deciding when we are allowed to ask.
+ *
+ * `geocoding.service.ts` knows Google and nothing about bookings. This file knows bookings
+ * and nothing about HTTP. The split is what lets the client be tested with a mocked axios
+ * and lets the gates be tested without one.
+ *
+ * WHO PAYS, AND WHEN. An element is only ever spent for a Service that asks for the
+ * customer's address, on an Agent that passed all four gates from `travel-eligibility.ts`,
+ * for a Tenant that has not spent its month. A phone consultation, an Agent with the switch
+ * off, a platform with no Maps key: none of them reach Google, and none of them behave any
+ * differently from how they did before travel time existed. Both entry points below take
+ * `ActiveTravelEligibility` rather than a tenant id, so that sentence is enforced by the
+ * compiler and not by this paragraph.
+ *
+ * TWO ENTRY POINTS, DIFFERENT LIFECYCLES. `placeBookingAddress` runs while a booking is
+ * being written, so it answers with something the INSERT can carry. `ensureBookingPlace`
+ * runs when an EXISTING row is read and found to have an address but no coordinates, and it
+ * writes back. There is no backfill job on purpose (plan §6.10): resolving lazily never
+ * geocodes history nobody will query, and it self-limits to the bookings that matter.
+ *
+ * THE THREE QUESTIONS CALLERS ASK are the three predicates at the bottom, and they are here
+ * rather than at the call sites deliberately. Each is one reading of the same placement, the
+ * readings disagree (an outage refuses nothing but still records something), and a copy of
+ * that cascade living in the booking provider is how the two paths drift apart.
+ */
+import { AppDataSource } from '../../database/data-source';
+import { Booking } from '../../database/entities/Booking';
+import type { ServiceType } from '../../database/entities/ServiceType';
+import { isTrustedForTravel, type LocationSource, type GeocodePrecision } from '../../contracts/travel';
+import { logger } from '../../utils/logger';
+import { resolveTravelEligibility, type ActiveTravelEligibility } from './travel-eligibility';
+import { geocodeAddress, resolvePlaceId, isUsablePlace, type PlacedAddress } from './geocoding.service';
+import type { ItineraryKey } from '../../scheduler/itinerary-key';
+
+/**
+ * What happened when we tried to place a booking's address.
+ *
+ * `applies: false` is not a failure and not a fourth outcome. It is the state every Agent on
+ * the platform is in today, and it must be indistinguishable from the world before this
+ * feature existed.
+ *
+ * Note there is no `trusted` flag: trust is a function of `place.precision` and deriving it
+ * twice is how the two derivations come to disagree. `placementIsTrusted` is the one reading.
+ */
+export type BookingPlacement =
+  | { applies: false }
+  | { applies: true; outcome: 'placed'; place: PlacedAddress }
+  | { applies: true; outcome: 'not_placeable' }
+  | { applies: true; outcome: 'unavailable' };
+
+/**
+ * Place the address a booking is about to be written with.
+ *
+ * Never throws. Whether an unplaceable address stops the booking is the CALLER's decision
+ * and the two callers answer differently on purpose: the auto path refuses to confirm a job
+ * it cannot locate, and the request path records the same verdict without enforcing it.
+ * Capturing an unplaceable job is correct; capturing it silently is not.
+ */
+export async function placeBookingAddress(input: {
+  tenantId: string;
+  botId: string;
+  itineraryKey: ItineraryKey;
+  service: Pick<ServiceType, 'customerAddressRequired'>;
+  address: string | null;
+}): Promise<BookingPlacement> {
+  // Cheapest gate of all, and it is not in `resolveTravelEligibility` because it is a fact
+  // about the SERVICE rather than about the Agent: an online consultation is never a travel
+  // job, however the Agent is configured.
+  if (!input.service.customerAddressRequired) return { applies: false };
+  if (!input.address?.trim()) return { applies: false };
+
+  const eligibility = await resolveTravelEligibility({
+    tenantId: input.tenantId,
+    botId: input.botId,
+    // Resolved once by the booking path and handed down, never re-derived here (ADR-0016).
+    itineraryKey: input.itineraryKey,
+  });
+  if (!eligibility.active) return { applies: false };
+
+  const result = await geocodeAddress(eligibility, input.address);
+  return result.status === 'placed'
+    ? { applies: true, outcome: 'placed', place: result.place }
+    : { applies: true, outcome: result.status };
+}
+
+/**
+ * An existing booking's placed address, geocoding it once and writing it back when the row
+ * has an address and no coordinates.
+ *
+ * TAKES THE ELIGIBILITY, NOT A TENANT ID. The caller reads a whole diary's worth of
+ * neighbours for one travel check and resolved the gates once for that diary before it
+ * started (ADR-0016), so re-resolving per neighbour would ask one question a dozen times.
+ * Requiring the proof as an argument is what stops that shortcut from also becoming a hole:
+ * there is no way to reach Google from here without having passed all four gates.
+ *
+ * A row with coordinates but no `place_id` counts as unresolved and is geocoded again. That
+ * combination cannot come from this code, only from hand-edited or imported data, and the
+ * durable identity is what #66 will re-resolve expired coordinates from. Re-placing it is
+ * self-healing; treating it as complete would leave a row that can never be refreshed.
+ *
+ * Never throws: a booking whose position cannot be resolved is a booking with no position,
+ * which every path here already handles, and a failed write-back only means the next read
+ * pays for the lookup again.
+ */
+export async function ensureBookingPlace(
+  booking: Booking,
+  eligibility: ActiveTravelEligibility
+): Promise<PlacedAddress | null> {
+  const stored = storedPlace(booking);
+  if (stored) return stored;
+
+  // BY IDENTITY WHEN WE HAVE ONE. A booking whose coordinates aged out is not an unplaced
+  // booking: we still know exactly which door it is, and the place id is the handle that
+  // keeps the refresh identity-preserving. Re-reading the customer's typed string instead
+  // would let the same words resolve somewhere else months later, silently moving a
+  // confirmed appointment. Forward geocoding is the fallback for rows that never had a
+  // place id at all, which is every row written before this feature existed.
+  const result = booking.customerPlaceId
+    ? await resolvePlaceId(eligibility, booking.customerPlaceId)
+    : booking.customerAddress?.trim()
+      ? await geocodeAddress(eligibility, booking.customerAddress)
+      : null;
+
+  if (result?.status !== 'placed') return null;
+  await writeBackPlace(booking, result.place);
+  return result.place;
+}
+
+/**
+ * Coordinates stop being ours after this long.
+ *
+ * ADR-0014: the Maps terms permit latitude and longitude for 30 consecutive calendar days
+ * and no longer, while `place_id` may be kept for as long as the booking. That is a licence
+ * boundary rather than a freshness heuristic, so it is enforced on every read here as well
+ * as by the deletion job that removes the columns outright.
+ */
+const COORDINATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/**
+ * The placed address already on the row, or null when there is nothing usable there.
+ *
+ * AGE IS A HARD CONDITION, not a preference. Coordinates older than the licence permits read
+ * as absent, which sends the caller back through `geocodeAddress` and re-derives them. With
+ * a 60-day default booking horizon that re-resolution is the NORMAL path for a far-future
+ * appointment, not an edge case, so this branch is expected traffic. Deleting the expired
+ * columns is a separate job and a separate ticket; refusing to USE them is what stops an
+ * out-of-date position from deciding anything in the meantime.
+ */
+function storedPlace(booking: Booking): PlacedAddress | null {
+  // A row with coordinates but no stamp cannot be shown to be inside the window, and the
+  // safe reading of an unknown age is that it has expired. A stamp in the FUTURE is refused
+  // for the same reason and is the more dangerous of the two: clock skew or a hand-edited
+  // row would otherwise keep one set of coordinates permanently fresh.
+  const stampedAt = booking.customerCoordsAt ? new Date(booking.customerCoordsAt).getTime() : NaN;
+  const age = Date.now() - stampedAt;
+  if (!Number.isFinite(age) || age < 0 || age > COORDINATE_MAX_AGE_MS) return null;
+
+  const candidate = {
+    placeId: booking.customerPlaceId,
+    lat: booking.customerLat,
+    lng: booking.customerLng,
+    precision: booking.geocodePrecision,
+    formattedAddress: booking.customerAddressVerified ?? booking.customerAddress,
+  } as PlacedAddress;
+  // The same boundary Google's answers and the Redis cache cross. A row is no more trusted
+  // than either of those: it can be hand-edited, imported, or written by an older version of
+  // this code, and a placement that would fail the live checks must fail here too.
+  return isUsablePlace(candidate) ? candidate : null;
+}
+
+/** Persist a lazily-resolved placement, and keep the in-memory row in step with it. */
+async function writeBackPlace(booking: Booking, place: PlacedAddress): Promise<void> {
+  const columns = bookingPlaceColumns({ applies: true, outcome: 'placed', place });
+  const fields = {
+    customerPlaceId: columns.placeId,
+    customerLat: columns.lat,
+    customerLng: columns.lng,
+    customerCoordsAt: columns.coordsAt,
+    customerAddressVerified: columns.addressVerified,
+    geocodePrecision: columns.precision,
+    locationSource: columns.locationSource,
+  };
+  try {
+    await AppDataSource.getRepository(Booking).update(booking.id, fields);
+    // Assigned from the same object that was persisted, so a caller still holding this row
+    // reads exactly what the database now holds and does not re-resolve it moments later.
+    Object.assign(booking, fields);
+  } catch (error) {
+    logger.warn('[Travel] could not write back a resolved place', { bookingId: booking.id, error });
+  }
+}
+
+/** The columns a placement writes onto `chatbot_bookings`, in one place so two INSERTs cannot drift. */
+export interface BookingPlaceColumns {
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
+  coordsAt: Date | null;
+  addressVerified: string | null;
+  precision: GeocodePrecision | null;
+  locationSource: LocationSource | null;
+}
+
+/**
+ * A placement as row values.
+ *
+ * An UNTRUSTED result is still stored, in full. That is not an oversight to tidy up later:
+ * the precision is what tells a later reader the position may only refuse and never clear,
+ * and dropping the row's only record of what the gate had to work with would make an audit
+ * of a wrong decision impossible. `isTrustedForTravel` is the single predicate that decides
+ * what may be done with it.
+ */
+export function bookingPlaceColumns(placement: BookingPlacement): BookingPlaceColumns {
+  if (!placement.applies || placement.outcome !== 'placed') {
+    return {
+      placeId: null,
+      lat: null,
+      lng: null,
+      coordsAt: null,
+      addressVerified: null,
+      precision: null,
+      locationSource: null,
+    };
+  }
+  return {
+    placeId: placement.place.placeId,
+    lat: placement.place.lat,
+    lng: placement.place.lng,
+    // What the 30-day deletion job reads (ADR-0014). Stamped beside the coordinates rather
+    // than derived from `created_at`, because a re-resolved booking has fresh coordinates on
+    // an old row.
+    coordsAt: new Date(),
+    addressVerified: placement.place.formattedAddress || null,
+    precision: placement.place.precision,
+    // Everything is `geocoded` in v1. `pin` arrives with the customer sharing a location,
+    // which WhatsApp and Telegram already deliver and the platform currently discards.
+    locationSource: 'geocoded',
+  };
+}
+
+/**
+ * Did we end up with a position good enough to decide a drive?
+ *
+ * The one reading of trust, so nothing downstream can arrive at a second one. An
+ * `approximate` result is a town centre: it collapses every address in a municipality onto
+ * one dot, which can prove a drive impossible and can never prove one fine.
+ */
+export function placementIsTrusted(placement: BookingPlacement): boolean {
+  return placement.applies && placement.outcome === 'placed' && isTrustedForTravel(placement.place.precision);
+}
+
+/**
+ * Must the AUTO path refuse to confirm this?
+ *
+ * Yes for an address we could not place, and for one placed only to a town centre: ADR-0015
+ * sends both through the postcode recovery, which retries once and then captures a Request.
+ *
+ * NO when Google itself was unreachable or the Tenant's element cap was spent, and that
+ * branch is DELIBERATELY INCOMPLETE UNTIL TRAVEL ENFORCEMENT LANDS. The finished feature
+ * captures a Request there (plan §10, "Routes AND Geocoding down"), and it can, because by
+ * then the haversine proofs still refuse the impossible slots and confirm the certain ones,
+ * so a Request means something. Today there is no drive being checked at all: capturing here
+ * would convert a Google outage into a platform-wide manual-triage avalanche while verifying
+ * nothing, which is the exact failure ADR-0015 names in its opening paragraph. So an outage
+ * confirms exactly as it did before travel time existed, with no location on the row and
+ * nothing claiming a check that never ran.
+ *
+ * The ticket that closes this is the one that adds routing. Until it lands, a sustained run
+ * of `[Travel] geocoding unreachable` is the only signal that this branch is firing, which
+ * is why that log line carries the cause.
+ */
+export function blocksAutoConfirm(placement: BookingPlacement): boolean {
+  if (!placement.applies || placement.outcome === 'unavailable') return false;
+  return !placementIsTrusted(placement);
+}
+
+/**
+ * The Travel Check to stamp on a REQUEST row, or null to leave the column alone.
+ *
+ * `captured` means the job was held as a Request because there was nothing to reason over
+ * (ADR-0015), which is true of an address we could not place AND of one we could not try to
+ * place. The column cannot tell those two apart, and deliberately so: its four values
+ * describe what the gate DID, and in both cases it did nothing. The cause is carried in the
+ * logs, which is where a sustained run of either belongs anyway.
+ *
+ * A request whose address placed cleanly gets null. Nothing has checked a drive yet, and
+ * `ok` is a claim about a gate that does not run until travel enforcement lands.
+ */
+export function requestTravelCheck(placement: BookingPlacement): 'captured' | null {
+  if (!placement.applies) return null;
+  return placementIsTrusted(placement) ? null : 'captured';
+}

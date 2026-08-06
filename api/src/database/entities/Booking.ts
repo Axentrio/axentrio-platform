@@ -16,7 +16,7 @@ import {
   UpdateDateColumn,
   Index,
 } from 'typeorm';
-import type { GeocodePrecision } from '../../contracts/travel';
+import type { GeocodePrecision, LocationSource } from '../../contracts/travel';
 
 /**
  * `'failed'` is deliberately ABSENT.
@@ -146,7 +146,12 @@ export class Booking {
    * re-resolved from the place id — with a 60-day default booking horizon, re-resolution
    * before a far-future appointment is the normal path, not an edge case.
    */
-  @Column({ type: 'varchar', length: 256, name: 'customer_place_id', nullable: true })
+  /**
+   * TEXT rather than a bounded varchar on purpose: Google documents that "there is no
+   * maximum length for place IDs". Any ceiling we picked would be a guess that turns a valid
+   * answer into a failed INSERT on a customer's booking.
+   */
+  @Column({ type: 'text', name: 'customer_place_id', nullable: true })
   customerPlaceId?: string | null;
 
   @Column({ type: 'double precision', name: 'customer_lat', nullable: true })
@@ -181,7 +186,7 @@ export class Booking {
 
   /** `'pin'` (the customer shared a location) | `'geocoded'`. Provenance decides trust. */
   @Column({ type: 'varchar', length: 16, name: 'location_source', nullable: true })
-  locationSource?: 'pin' | 'geocoded' | null;
+  locationSource?: LocationSource | null;
 
   /**
    * What the travel gate DID: `'ok'` verified, `'degraded'` decided on the haversine

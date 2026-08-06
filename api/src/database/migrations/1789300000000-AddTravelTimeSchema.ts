@@ -31,9 +31,13 @@ export class AddTravelTimeSchema1789300000000 implements MigrationInterface {
   name = 'AddTravelTimeSchema1789300000000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // `customer_place_id` is TEXT and not a bounded varchar, because Google documents that
+    // "there is no maximum length for place IDs". A guessed ceiling would turn a perfectly
+    // valid Google answer into a failed INSERT on the customer's booking, and the durable
+    // identity is the one field on this row we are licensed to keep indefinitely.
     await queryRunner.query(`
       ALTER TABLE chatbot_bookings
-        ADD COLUMN IF NOT EXISTS customer_place_id varchar(256),
+        ADD COLUMN IF NOT EXISTS customer_place_id text,
         ADD COLUMN IF NOT EXISTS customer_lat double precision,
         ADD COLUMN IF NOT EXISTS customer_lng double precision,
         ADD COLUMN IF NOT EXISTS customer_coords_at timestamptz,

@@ -14,7 +14,7 @@ vi.mock('../../config/environment', () => ({ config: { travel: travelConfig } })
 
 import {
   currentTravelPeriod,
-  recordTravelElements,
+  reserveTravelElements,
   getTravelElementsUsed,
   isTravelSpendExhausted,
 } from '../../booking/travel/travel-usage.service';
@@ -32,33 +32,69 @@ describe('currentTravelPeriod', () => {
   });
 });
 
-describe('recordTravelElements', () => {
+describe('reserveTravelElements', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    dsQuery.mockResolvedValue([]);
+    travelConfig.monthlyElementCapPerTenant = 5000;
+    dsQuery.mockResolvedValue([{ elements: 3 }]);
   });
 
-  it('increments in ONE statement rather than read-modify-write', async () => {
-    await recordTravelElements('ten-1', 3);
+  it('claims and checks in ONE statement, so no two callers win the last element', async () => {
+    expect(await reserveTravelElements('ten-1', 3)).toBe(true);
     expect(dsQuery).toHaveBeenCalledOnce();
     const [sql, params] = dsQuery.mock.calls[0] as [string, unknown[]];
-    // Two concurrent bookings must not lose an increment; the ON CONFLICT arm is what
-    // makes that true, and it is only reachable because of the unique index.
+    // Asking "am I over?" and counting afterwards leaves a window in which every concurrent
+    // caller reads the same under-limit total and all of them proceed. Here the check IS the
+    // increment: Postgres either counts the units and returns a row, or matches nothing.
     expect(sql).toMatch(/ON CONFLICT \(tenant_id, period_start\)/);
     expect(sql).toMatch(/elements = chatbot_travel_usage\.elements \+ EXCLUDED\.elements/);
-    expect(params).toEqual(['ten-1', currentTravelPeriod(), 3]);
+    expect(sql).toMatch(/WHERE .*chatbot_travel_usage\.elements \+ EXCLUDED\.elements <= /);
+    expect(sql).toMatch(/RETURNING elements/);
+    expect(params).toEqual(['ten-1', currentTravelPeriod(), 3, false, 5000]);
   });
 
-  it('spends nothing on a zero, negative or non-finite count', async () => {
-    await recordTravelElements('ten-1', 0);
-    await recordTravelElements('ten-1', -5);
-    await recordTravelElements('ten-1', Number.NaN);
+  it('refuses when the statement matched nothing, which IS the cap being reached', async () => {
+    dsQuery.mockResolvedValue([]);
+    expect(await reserveTravelElements('ten-1', 1)).toBe(false);
+  });
+
+  it('refuses a single reservation bigger than the whole cap without querying', async () => {
+    // The plain INSERT arm is a tenant's first request of the month and no ON CONFLICT
+    // clause constrains it, so an oversized claim would sail through on that one day.
+    expect(await reserveTravelElements('ten-1', 5001)).toBe(false);
     expect(dsQuery).not.toHaveBeenCalled();
   });
 
-  it('never throws — a hiccuping meter must not fail the customer’s booking', async () => {
+  it('treats a cap of zero as uncapped, never as nothing-allowed', async () => {
+    travelConfig.monthlyElementCapPerTenant = 0;
+    expect(await reserveTravelElements('ten-1', 999_999)).toBe(true);
+    const [, params] = dsQuery.mock.calls[0] as [string, unknown[]];
+    // The uncapped flag short-circuits the SQL condition rather than passing a huge ceiling.
+    expect(params[3]).toBe(true);
+  });
+
+  it('claims nothing, and allows the caller through, when it wants nothing', async () => {
+    expect(await reserveTravelElements('ten-1', 0)).toBe(true);
+    expect(dsQuery).not.toHaveBeenCalled();
+  });
+
+  it('refuses a caller that cannot say how much it wants', async () => {
+    // Bugs in the caller, all of them, and a buggy caller does not get to spend. A negative
+    // would otherwise read as "nothing to claim" and wave the request straight through.
+    expect(await reserveTravelElements('ten-1', -5)).toBe(false);
+    expect(await reserveTravelElements('ten-1', Number.NaN)).toBe(false);
+    expect(await reserveTravelElements('ten-1', Infinity)).toBe(false);
+    // A fraction is the quiet version of the same bug: it floors to zero and would sail
+    // through as "nothing to claim".
+    expect(await reserveTravelElements('ten-1', 0.5)).toBe(false);
+    expect(dsQuery).not.toHaveBeenCalled();
+  });
+
+  it('fails CLOSED when the meter itself is unwritable', async () => {
+    // Losing the count is not the risk. Spending real money at an unknown rate with nothing
+    // counting it is, and refusing is safe because the degraded path still answers.
     dsQuery.mockRejectedValue(new Error('db down'));
-    await expect(recordTravelElements('ten-1', 2)).resolves.toBeUndefined();
+    expect(await reserveTravelElements('ten-1', 1)).toBe(false);
   });
 });
 

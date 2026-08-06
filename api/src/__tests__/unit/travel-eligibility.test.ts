@@ -44,6 +44,10 @@ describe('resolveTravelEligibility', () => {
   it('is active when all four gates pass, carrying the settings the gate will need', async () => {
     expect(await resolveTravelEligibility(ARGS)).toEqual({
       active: true,
+      // Carried so that anything able to spend a billable element can take this value as its
+      // argument instead of a bare tenant id, which is what makes "only ever for an entitled
+      // Tenant on an enabled Agent" a rule the compiler enforces.
+      tenantId: 'ten-1',
       itineraryKey: 'gcal:owner@acme.com',
       slackMin: 10,
       startFromBase: true,

@@ -37,15 +37,27 @@ export type TravelInactiveReason = 'no_api_key' | 'not_entitled' | 'bot_disabled
 
 export type TravelEligibility =
   | { active: false; reason: TravelInactiveReason }
-  | {
-      active: true;
-      /** The diary travel is a claim about (ADR-0016). */
-      itineraryKey: ItineraryKey;
-      /** The owner's margin on top of the drive. Never applied without a drive to pad. */
-      slackMin: number;
-      /** Gate the day's first job against the venue. */
-      startFromBase: boolean;
-    };
+  | ActiveTravelEligibility;
+
+/**
+ * Proof that all four gates passed, as a value.
+ *
+ * Anything that can spend a billable element takes one of these rather than a tenant id, so
+ * "only ever for an entitled Tenant on an enabled Agent" is checked by the compiler instead
+ * of by a comment. The same discipline ADR-0016 applies to the itinerary key: resolve once,
+ * hand it down, and give no helper the option of deciding for itself.
+ */
+export interface ActiveTravelEligibility {
+  active: true;
+  /** The Tenant whose month the element is billed to. */
+  tenantId: string;
+  /** The diary travel is a claim about (ADR-0016). */
+  itineraryKey: ItineraryKey;
+  /** The owner's margin on top of the drive. Never applied without a drive to pad. */
+  slackMin: number;
+  /** Gate the day's first job against the venue. */
+  startFromBase: boolean;
+}
 
 /**
  * The itinerary key is passed IN, never re-resolved here.
@@ -86,6 +98,7 @@ export async function resolveTravelEligibility(input: {
 
   return {
     active: true,
+    tenantId: input.tenantId,
     itineraryKey: input.itineraryKey,
     slackMin: Math.max(0, settings.travelSlackMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,

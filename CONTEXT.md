@@ -113,12 +113,16 @@ Padding a Service reserves around its own bookings for prep and cleanup, set per
 _Avoid_: padding, break, travel time (that is the Minimum Gap's purpose, not its name), gap (say which).
 
 **Minimum Gap**:
-Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. One of the three **Capacity Ceilings**. It is a floor rather than a fixed value: where the platform can estimate the drive between two consecutive appointments, the clearance is the larger of the owner's stated gap and that drive plus their slack, so a short drive never shortens the gap they asked for and a long one is never silently ignored. Additive with **Buffer**, which the **Blocked Range** already contains.
+Business-wide clearance held around *every* appointment regardless of Service — the owner's breathing room and their travel time between jobs. One of the three **Capacity Ceilings**, and the one that scopes to the **Itinerary Key** rather than the Agent, because it is a claim about one person's day. It is a floor rather than a fixed value: where the platform can estimate the drive between two consecutive appointments, the clearance is the larger of the owner's stated gap and that drive plus their slack, so a short drive never shortens the gap they asked for and a long one is never silently ignored. Additive with **Buffer**, which the **Blocked Range** already contains.
 _Avoid_: travel time (that is what the gap is *for*, not what it is called), padding, buffer (a Buffer is per-Service), minGap.
 
 **Blocked Range**:
 The stored, buffer-expanded time span a Booking occupies, held as a `tstzrange` and protected by an exclusion constraint on `(calendar_key, blocked_range)`. It is the only race-proof guarantee that two customers cannot take the same time. It understands overlap and nothing else — day counts, minutes budgets and gaps cannot be expressed in it, which is why those run as their own locked checks.
 _Avoid_: busy time (that is the merged in-memory view including the external calendar), reservation window, lock.
+
+**Itinerary Key**:
+Whose day a Booking sits in, and the scope of every question about what is parked *next to* it: the lock that serialises writes, the busy intervals availability is computed against, the **Minimum Gap**, and the travel time that rides on it. It equals the connected calendar's identity today, so two Agents pointed at one real calendar are one itinerary and a business with no calendar is its own — which means a second person on the road is a second itinerary rather than a new shape of Booking. Nothing may be stored against it: connecting, switching or disconnecting a calendar rewrites it, so configuration stays on the Agent. Distinct from the Agent, which is who *sold* the work — the day and minute **Capacity Ceilings** count per Agent, adjacency scopes per itinerary.
+_Avoid_: calendar key (that is the stored column, not the concept), conflict key, driver, resource, technician.
 
 **Calendar Mirror**:
 The event written into the Tenant's connected Google or Outlook calendar for a confirmed Booking. A mirror, not the source of truth: the Booking row is authoritative, and a Booking whose mirror is missing or stale is still a real Booking. Reconciled asynchronously.

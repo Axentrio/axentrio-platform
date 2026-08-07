@@ -14,10 +14,18 @@
  * compiler and not by this paragraph.
  *
  * TWO ENTRY POINTS, DIFFERENT LIFECYCLES. `placeBookingAddress` runs while a booking is
- * being written, so it answers with something the INSERT can carry. `ensureBookingPlace`
- * runs when an EXISTING row is read and found to have an address but no coordinates, and it
- * writes back. There is no backfill job on purpose (plan §6.10): resolving lazily never
- * geocodes history nobody will query, and it self-limits to the bookings that matter.
+ * being written, so it answers with something the INSERT can carry. `placeExistingBooking`
+ * runs against a row that already exists — one whose coordinates are absent or have aged out
+ * — and it refreshes by the durable identity and writes back. There is no backfill job on
+ * purpose (plan §6.10): resolving lazily never geocodes history nobody will query, and it
+ * self-limits to the bookings that matter.
+ *
+ * WHICH ENTRY POINT IS A QUESTION ABOUT THE ADDRESS, NOT ABOUT THE CALLER. A string a
+ * customer just typed is placed by text, because there is nothing else to place it by. An
+ * address already on a row is placed by its `place_id`, because the same words can resolve
+ * somewhere else months later and a confirmed appointment would move without anybody
+ * touching it. Reschedule is the case that makes this concrete: the job has not moved, only
+ * the time, so re-reading the typed words would be asking a question nobody asked.
  *
  * THE THREE QUESTIONS CALLERS ASK are the three predicates at the bottom, and they are here
  * rather than at the call sites deliberately. Each is one reading of the same placement, the
@@ -100,8 +108,8 @@ export async function placeAddressFor(
 }
 
 /**
- * An existing booking's placed address, geocoding it once and writing it back when the row
- * has an address and no coordinates.
+ * An existing booking's placed address, refreshing it once and writing it back when the row
+ * has no usable coordinates.
  *
  * TAKES THE ELIGIBILITY, NOT A TENANT ID. The caller reads a whole diary's worth of
  * neighbours for one travel check and resolved the gates once for that diary before it
@@ -110,20 +118,19 @@ export async function placeAddressFor(
  * there is no way to reach Google from here without having passed all four gates.
  *
  * A row with coordinates but no `place_id` counts as unresolved and is geocoded again. That
- * combination cannot come from this code, only from hand-edited or imported data, and the
- * durable identity is what #66 will re-resolve expired coordinates from. Re-placing it is
- * self-healing; treating it as complete would leave a row that can never be refreshed.
+ * combination cannot come from this code, only from hand-edited or imported data. Re-placing
+ * it is self-healing; treating it as complete would leave a row that can never be refreshed.
  *
  * Never throws: a booking whose position cannot be resolved is a booking with no position,
  * which every path here already handles, and a failed write-back only means the next read
  * pays for the lookup again.
  */
-export async function ensureBookingPlace(
+export async function placeExistingBooking(
   booking: Booking,
   eligibility: ActiveTravelEligibility
-): Promise<PlacedAddress | null> {
+): Promise<BookingPlacement> {
   const stored = storedPlace(booking);
-  if (stored) return stored;
+  if (stored) return { applies: true, outcome: 'placed', place: stored };
 
   // BY IDENTITY WHEN WE HAVE ONE. A booking whose coordinates aged out is not an unplaced
   // booking: we still know exactly which door it is, and the place id is the handle that
@@ -137,9 +144,27 @@ export async function ensureBookingPlace(
       ? await geocodeAddress(eligibility, booking.customerAddress)
       : null;
 
-  if (result?.status !== 'placed') return null;
+  // A row carrying neither an identity nor an address is not a failed lookup — there was
+  // nothing to look up. `applies: false` says that, where `unavailable` would blame Google.
+  if (!result) return { applies: false };
+  if (result.status !== 'placed') return { applies: true, outcome: result.status };
   await writeBackPlace(booking, result.place);
-  return result.place;
+  return { applies: true, outcome: 'placed', place: result.place };
+}
+
+/**
+ * The same refresh for a caller that only wants the position.
+ *
+ * The neighbour loader has one question — where is this job — and the three ways a lookup
+ * can fail to answer it all mean the same thing to it: `unresolved`. Handing it the full
+ * placement would make it re-derive that collapse per call site.
+ */
+export async function ensureBookingPlace(
+  booking: Booking,
+  eligibility: ActiveTravelEligibility
+): Promise<PlacedAddress | null> {
+  const placement = await placeExistingBooking(booking, eligibility);
+  return placement.applies && placement.outcome === 'placed' ? placement.place : null;
 }
 
 /**
@@ -149,8 +174,12 @@ export async function ensureBookingPlace(
  * and no longer, while `place_id` may be kept for as long as the booking. That is a licence
  * boundary rather than a freshness heuristic, so it is enforced on every read here as well
  * as by the deletion job that removes the columns outright.
+ *
+ * Exported for that job, which has to delete strictly BEFORE this line rather than at it —
+ * see `coordinate-retention.service.ts`. Two constants would be two answers to one licence
+ * question, and the one that drifts would be the one nobody reads.
  */
-const COORDINATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+export const COORDINATE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
  * The placed address already on the row, or null when there is nothing usable there.

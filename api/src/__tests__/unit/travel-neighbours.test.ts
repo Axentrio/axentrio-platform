@@ -160,6 +160,20 @@ describe('classifying a row', () => {
     expect(n.location.kind).toBe('known');
   });
 
+  it('leaves an aged-out job whose identity will not re-resolve UNRESOLVED', async () => {
+    // The other half of the expiry story, and the half that decides a booking. Once the
+    // sweep has taken the coordinates, a neighbour whose place id cannot be re-resolved is
+    // a job we no longer know the position of — so it withholds the slot rather than
+    // clearing it, and the candidate becomes a Request instead of confirming at the flat gap.
+    byPlaceId.mockResolvedValue({ status: 'unavailable', cause: 'api_error' });
+    query.mockResolvedValue([
+      row({ customer_lat: null, customer_lng: null, customer_coords_at: null }),
+    ]);
+    const [n] = (await load()).neighbours;
+    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+    expect(n.location).toEqual({ kind: 'unresolved' });
+  });
+
   it('leaves a travel job we could not place UNRESOLVED, never locationless', async () => {
     // The whole point of four classes rather than two: an outage must not read as an empty
     // diary. Unresolved never clears a slot; locationless always would.

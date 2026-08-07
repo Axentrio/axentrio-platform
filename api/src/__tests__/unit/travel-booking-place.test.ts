@@ -39,6 +39,7 @@ import {
   blocksAutoConfirm,
   requestTravelCheck,
   ensureBookingPlace,
+  placeExistingBooking,
   type BookingPlacement,
 } from '../../booking/travel/booking-place';
 
@@ -351,6 +352,42 @@ describe('ensureBookingPlace - lazy, on read, with write-back', () => {
     geocode.mockResolvedValue({ status, cause: 'whatever' });
     expect(await ensureBookingPlace(row(), ACTIVE)).toBeNull();
     expect(update).not.toHaveBeenCalled();
+  });
+
+  describe('placeExistingBooking - the same refresh, without the collapse', () => {
+    // `ensureBookingPlace` folds every failure into null because its one caller treats them
+    // alike. Reschedule does not: a vague address is worth correcting on the booking and an
+    // outage is not, and the owner's picker shows the two differently. So the distinction
+    // has to survive here, and these are the cases that prove it does.
+    it('answers placed, from the durable identity, when coordinates have aged out', async () => {
+      byPlaceId.mockResolvedValue({ status: 'placed', place: PLACE });
+      const expired = resolved({ customerCoordsAt: new Date('2026-06-01T00:00:00Z') });
+
+      expect(await placeExistingBooking(expired, ACTIVE)).toEqual({
+        applies: true,
+        outcome: 'placed',
+        place: PLACE,
+      });
+      expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+      expect(geocode).not.toHaveBeenCalled();
+    });
+
+    it.each(['not_placeable', 'unavailable'] as const)('reports %s rather than nothing', async (status) => {
+      byPlaceId.mockResolvedValue({ status });
+      const expired = resolved({ customerCoordsAt: new Date('2026-06-01T00:00:00Z') });
+
+      expect(await placeExistingBooking(expired, ACTIVE)).toEqual({ applies: true, outcome: status });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('does not apply at all to a row with neither an identity nor an address', async () => {
+      // Not `unavailable`: there was nothing to look up, so blaming Google would be a lie
+      // that an owner-facing reason string would then repeat back to them.
+      expect(await placeExistingBooking(row({ customerAddress: null }), ACTIVE)).toEqual({
+        applies: false,
+      });
+      expect(geocode).not.toHaveBeenCalled();
+    });
   });
 
   it('still answers when the write-back fails', async () => {

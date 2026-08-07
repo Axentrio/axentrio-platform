@@ -57,6 +57,7 @@ import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerar
 import {
   placeBookingAddress,
   placeAddressFor,
+  placeExistingBooking,
   bookingPlaceColumns,
   blocksAutoConfirm,
   placementIsCoarse,
@@ -2714,6 +2715,13 @@ export class InternalProvider implements BookingProvider {
     // The address comes off the ROW, not from a caller. The customer gave it when they booked
     // and has not been asked again; asking would be the wrong question anyway, since the job has
     // not moved, only the time.
+    //
+    // And it is placed by IDENTITY, not by re-reading the typed words. A booking rescheduled
+    // more than thirty days after it was made has had its coordinates deleted by then (ADR-0014
+    // and the expiry sweep), which is ordinary rather than exceptional at a 60-day horizon —
+    // and re-geocoding the same string can land somewhere else months later, moving a confirmed
+    // appointment nobody touched. `placeExistingBooking` refreshes from `customer_place_id` and
+    // writes the fresh position back.
     const travelEligibility = service.customerAddressRequired
       ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
       : { active: false as const, reason: 'bot_disabled' as const };
@@ -2721,8 +2729,8 @@ export class InternalProvider implements BookingProvider {
       | { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null; drives: DriveRecords }
       | null = null;
     let travelCheck: 'ok' | 'degraded' | 'overridden' | null = null;
-    if (travelEligibility.active && booking.customerAddress?.trim()) {
-      const placement = await placeAddressFor(travelEligibility, booking.customerAddress);
+    if (travelEligibility.active && (booking.customerPlaceId || booking.customerAddress?.trim())) {
+      const placement = await placeExistingBooking(booking, travelEligibility);
       // An owner moving a job in their own diary is warned by their picker, never blocked
       // (ADR-0015). A customer on a signed manage link gets the same enforcement the bot does:
       // they may not move themselves into a drive nobody can make.

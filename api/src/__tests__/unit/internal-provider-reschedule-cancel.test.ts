@@ -89,10 +89,14 @@ vi.mock('../../scheduler/calendar-provider', () => {
 
 // Travel time: the gates and the arithmetic are settled elsewhere. What matters here is what
 // the RESCHEDULE path does with a verdict, so only the verdict and the diary are injected.
-const placeAddressFor = vi.fn(async (..._a: unknown[]) => ({ applies: false }) as any);
+// A reschedule places an EXISTING row, by its durable identity — never by re-reading the
+// address the customer typed, which can resolve somewhere else once the coordinates have
+// aged out (ADR-0014). `placeAddressFor` is left REAL so that a regression to it would have
+// to reach a geocoder that is not mocked here, and fail loudly.
+const placeExistingBooking = vi.fn(async (..._a: unknown[]) => ({ applies: false }) as any);
 vi.mock('../../booking/travel/booking-place', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/booking-place')>();
-  return { ...actual, placeAddressFor: (...a: unknown[]) => placeAddressFor(...a) };
+  return { ...actual, placeExistingBooking: (...a: unknown[]) => placeExistingBooking(...a) };
 });
 const resolveTravelEligibility = vi.fn(async (..._a: unknown[]) => ({ active: false as const, reason: 'no_api_key' as const }));
 vi.mock('../../booking/travel/travel-eligibility', async (importOriginal) => {
@@ -185,7 +189,7 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
     vi.clearAllMocks();
     bookingSettingsFindOne.mockResolvedValue(null as any);
     resolveTravelEligibility.mockResolvedValue(ACTIVE as any);
-    placeAddressFor.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    placeExistingBooking.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
     loadTravelNeighbours.mockResolvedValue({ neighbours: [], venue: null });
     loadStoredNeighbours.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
@@ -219,9 +223,15 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
     expect(managerQuery).not.toHaveBeenCalled();
   });
 
-  it('takes the address off the ROW — the customer is not asked again for a job that has not moved', async () => {
+  it('places the ROW, by identity — the customer is not asked again for a job that has not moved', async () => {
+    // And not by the typed address either. A booking rescheduled more than thirty days after
+    // it was made has had its coordinates swept, so this is the ordinary path at a 60-day
+    // horizon — and re-geocoding the same words months later can silently move the job.
     await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
-    expect(placeAddressFor).toHaveBeenCalledWith(ACTIVE, 'Kerkstraat 12, 9000 Gent');
+    expect(placeExistingBooking).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'bk-1', customerAddress: 'Kerkstraat 12, 9000 Gent' }),
+      ACTIVE
+    );
   });
 
   it('re-asserts under the lock, so a neighbour that lands mid-confirm still refuses', async () => {

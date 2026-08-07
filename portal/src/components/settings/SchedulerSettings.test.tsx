@@ -26,7 +26,7 @@ vi.mock('../../services/apiClient', () => ({
   api: { get: apiGet, put: apiPut, post: apiPost, patch: vi.fn(), delete: vi.fn() },
   extractApiErrorMessage: () => undefined,
 }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() } }));
 
 import { SchedulerSettings } from './SchedulerSettings';
 
@@ -70,7 +70,7 @@ const TRAVEL = {
   enabled: true,
   slackMin: 10,
   startFromBase: true,
-  blockedReason: null as null | 'platform' | 'not_entitled' | 'shared_itinerary',
+  blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
 };
 
 const CONFIG = {
@@ -283,6 +283,37 @@ describe('SchedulerSettings — travel time', () => {
     expect(await screen.findByText(/books into the same calendar/i)).toBeInTheDocument();
     expect(await screen.findByText(/give each agent its own calendar/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText(/only offer times i can reach/i)).toBeDisabled());
+  });
+
+  it('lets the owner switch travel OFF when a shared calendar blocked it', async () => {
+    // THE LOCKOUT. Travel is on, somebody connects a second Agent to the calendar months
+    // later, and the stored preference is deliberately left alone. Disabling the box outright
+    // meant the owner could not clear the one field making their whole settings page
+    // unsaveable — venue, opening hours and pause along with it.
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/scheduler/config')) {
+        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, enabled: true, blockedReason: 'shared_itinerary' } });
+      }
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      return Promise.resolve({});
+    });
+    renderUI();
+
+    const box = await screen.findByLabelText(/only offer times i can reach/i);
+    await waitFor(() => expect(box).toBeChecked());
+    expect(box).not.toBeDisabled();
+  });
+
+  it('refuses a slack value the API would reject, before the Save', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/scheduler/config')) {
+        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, slackMin: 500 } });
+      }
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      return Promise.resolve({});
+    });
+    renderUI();
+    expect(await screen.findByText(/whole number between 0 and 120/i)).toBeInTheDocument();
   });
 
   it('states the single-driver assumption', async () => {

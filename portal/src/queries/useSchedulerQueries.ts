@@ -156,7 +156,7 @@ export interface SchedulerConfig {
      * Why the switch cannot be turned on, or null when it can. The API refuses each of these
      * on write too; this is what lets the screen say so BEFORE the owner tries.
      */
-    blockedReason: 'platform' | 'not_entitled' | 'shared_itinerary' | null;
+    blockedReason: 'no_maps_key' | 'not_entitled' | 'shared_itinerary' | null;
   };
   /** Owner has switched new online bookings off. Captures requests rather than refusing. */
   bookingsPaused?: boolean;
@@ -175,7 +175,7 @@ export interface UpdateSchedulerPayload {
   bookingsPaused?: boolean;
 }
 
-const schedulerKey = ['scheduler', 'config'] as const;
+const schedulerKey = ['scheduler', 'config', 'default-agent'] as const;
 
 export function useSchedulerConfig(enabled = true) {
   return useQuery({
@@ -423,7 +423,13 @@ export function useCancelBooking() {
       // business address, and its journey does not clear. A separate, longer-lived toast
       // rather than a line inside the success one: it is a different fact about a different
       // booking, and it asks the owner to go and look at something.
-      if (result?.travelWarning) toast.warning(result.travelWarning, { duration: 10000 });
+      // ATTRIBUTED IN THE TOAST ITSELF. The warning is a verdict derived from coordinates
+      // Google placed, and a toast is its own visual container — an attribution rendered on the
+      // page behind it does not cover content floating above it. As a description rather than
+      // appended to the sentence, so the warning still reads as one instruction.
+      if (result?.travelWarning) {
+        toast.warning(result.travelWarning, { description: 'Powered by Google', duration: 10000 });
+      }
     },
     onError: (err: Any) => {
       toast.error(extractApiErrorMessage(err) ?? 'Failed to cancel booking');
@@ -473,7 +479,13 @@ export function useRescheduleBooking() {
       // The owner was ALLOWED to make this move — feasibility is never enforced against the
       // person who owns the diary — so this is the other half of that permission. Allowing
       // silently would be the same defect as annotating a slot list without marking it.
-      if (result?.travelWarning) toast.warning(result.travelWarning, { duration: 10000 });
+      // ATTRIBUTED IN THE TOAST ITSELF. The warning is a verdict derived from coordinates
+      // Google placed, and a toast is its own visual container — an attribution rendered on the
+      // page behind it does not cover content floating above it. As a description rather than
+      // appended to the sentence, so the warning still reads as one instruction.
+      if (result?.travelWarning) {
+        toast.warning(result.travelWarning, { description: 'Powered by Google', duration: 10000 });
+      }
     },
     onError: (err: Any) => {
       toast.error(extractApiErrorMessage(err) ?? 'Failed to reschedule booking');

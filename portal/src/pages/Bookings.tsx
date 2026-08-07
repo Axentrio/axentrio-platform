@@ -454,16 +454,17 @@ function BookingRow({
           together, where the flat gap settled the drive for free. Flagging it would put a
           warning on most of a good day and teach the owner to ignore all of them.
         */}
-        {booking.travelCheck === 'captured' && (
-          <div className="mt-1 text-xs text-amber-400" data-testid="travel-captured">
-            {isRequest
-              ? 'Travel could not clear this time. Check the journey before accepting.'
-              : 'Travel could not clear this time — the journey was never verified.'}
-          </div>
-        )}
-        {booking.travelCheck === 'overridden' && (
-          <div className="mt-1 text-xs text-amber-400" data-testid="travel-captured">
-            Travel could not clear this time — accepted anyway.
+        {(booking.travelCheck === 'captured' || booking.travelCheck === 'overridden') && (
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-amber-400" data-testid="travel-captured">
+            <span>
+              {booking.travelCheck === 'overridden'
+                ? 'Travel could not clear this time — accepted anyway.'
+                : isRequest
+                  ? 'Travel could not clear this time. Check the journey before accepting.'
+                  : 'Travel could not clear this time — the journey was never verified.'}
+            </span>
+            {/* A verdict IS Google-derived content, even on a row carrying no distance. */}
+            <GoogleAttribution />
           </div>
         )}
         {/*
@@ -658,6 +659,13 @@ function RescheduleDialog({
   // happened — which is exactly the state travel is in during a Google outage, when the owner
   // most needs to know they are on their own judgement.
   const unassessed = data?.travel?.unavailableReason;
+  // Did travel put ANYTHING Google-derived on this screen — a verdict on a chip, a tooltip, or
+  // the banner explaining that nothing could be judged? That is what carries the attribution
+  // obligation, and it is a different question from "is travel switched on".
+  const travelAnnotated =
+    !!unassessed ||
+    (data?.travel?.unreachableSlots?.length ?? 0) > 0 ||
+    (data?.travel?.requestableSlots?.length ?? 0) > 0;
 
   return (
     <Dialog open={!!booking} onOpenChange={(o) => !o && onClose()}>
@@ -748,7 +756,18 @@ function RescheduleDialog({
             </div>
           )}
         </div>
-        <p className="text-xs text-text-secondary">Times shown in {timezone}.</p>
+        {/*
+          ONE attribution for the whole picker, at the foot of the container that holds the
+          content it attributes — which is what "inside the same visual container, near the top
+          or bottom" means. Per BADGE would be four notices in a row of chips and would make the
+          requirement read as decoration. Shown only when travel actually annotated something:
+          a picker with nothing Google-derived on it has nothing to attribute, and a notice that
+          appears when it need not is how the real one stops being read.
+        */}
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-xs text-text-secondary">Times shown in {timezone}.</p>
+          {travelAnnotated && <GoogleAttribution />}
+        </div>
       </DialogContent>
     </Dialog>
   );

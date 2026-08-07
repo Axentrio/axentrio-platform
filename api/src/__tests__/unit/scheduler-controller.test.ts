@@ -117,6 +117,35 @@ describe('scheduler.controller — why travel time cannot be switched on', () =>
     expect(itineraryKeyIsShared).not.toHaveBeenCalled();
   });
 
+  it('does not refuse an unrelated Save just because travel is already on and now blocked', async () => {
+    // THE LOCKOUT. A tenant enables travel, somebody connects a second Agent to the calendar
+    // months later, and the stored preference is deliberately left alone — travel goes inert
+    // and returns by itself when the diaries separate. The editor keeps sending `enabled: true`,
+    // so gating on the VALUE rather than on a TRANSITION made every Save of the whole page 409:
+    // venue, opening hours and the pause switch with it. An owner locked out of their booking
+    // settings by a state they did not create and could not clear.
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true } as any);
+    itineraryKeyIsShared.mockResolvedValue(true);
+    getEntitlements.mockResolvedValue({ features: { travelTime: true } } as any);
+
+    await expect(
+      updateSchedulerConfig(
+        { tenantId: 'ten-1', body: { venueAddress: { city: 'Gent' }, travel: { enabled: true } } } as any,
+        res
+      )
+    ).resolves.not.toThrow();
+  });
+
+  it('still refuses to switch travel ON while the diary is shared', async () => {
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: false } as any);
+    itineraryKeyIsShared.mockResolvedValue(true);
+    getEntitlements.mockResolvedValue({ features: { travelTime: true } } as any);
+
+    await expect(
+      updateSchedulerConfig({ tenantId: 'ten-1', body: { travel: { enabled: true } } } as any, res)
+    ).rejects.toMatchObject({ code: 'TRAVEL_SHARED_ITINERARY' });
+  });
+
   it('names the Agent these settings belong to', async () => {
     // Every field on that object is the DEFAULT Agent's, because that is the only row the
     // endpoint can write (#86). An owner of several Agents edits one and cannot otherwise tell.

@@ -304,8 +304,14 @@ export const SchedulerSettings: React.FC = () => {
     if (venue.country && !/^[A-Za-z]{2}$/.test(venue.country)) {
       e.push('Venue address: country must be a 2-letter code, like BE.');
     }
+    // Mirrors `travelSettingsSchema`: an integer 0-120. Slack PADS every drive, so an hour is
+    // already generous and a fat-fingered 500 would swallow the working day — the API refuses
+    // it, and this is the difference between being told before the Save and after it.
+    if (travelSlack !== null && (!Number.isInteger(travelSlack) || travelSlack < 0 || travelSlack > 120)) {
+      e.push('Travel time: extra minutes must be a whole number between 0 and 120.');
+    }
     return [...new Set(e)];
-  }, [days, overrides, availabilityMode, venue]);
+  }, [days, overrides, availabilityMode, venue, travelSlack]);
 
   const handleSave = () => {
     const weeklyHours: WeeklyHours = {};
@@ -771,9 +777,11 @@ export const SchedulerSettings: React.FC = () => {
                   {travelBlockedReason && (
                     <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
                       {travelBlockedReason === 'shared_itinerary'
-                        ? 'Another Agent books into the same calendar, so this cannot be switched on. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar first.'
+                        ? travelEnabled
+                          ? 'Another Agent now books into the same calendar, so travel time has stopped running. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar, or switch this off.'
+                          : 'Another Agent books into the same calendar, so this cannot be switched on. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar first.'
                         : travelBlockedReason === 'not_entitled'
-                          ? 'Travel time is not part of your current plan.'
+                          ? 'Travel time is not part of your current Tier.'
                           : 'Travel time is not available on this platform yet.'}
                     </div>
                   )}
@@ -782,7 +790,11 @@ export const SchedulerSettings: React.FC = () => {
                     <Checkbox
                       id="travel-enabled"
                       checked={travelEnabled}
-                      disabled={!!travelBlockedReason}
+                      // Blocks turning it ON, never turning it OFF. A tenant whose diary became
+                      // shared months after enabling travel has it on and cannot fix that from
+                      // the calendar screen alone — disabling the box outright left them unable
+                      // to switch off the one thing making their settings unsaveable.
+                      disabled={!!travelBlockedReason && !travelEnabled}
                       onCheckedChange={(c) => setTravelEnabled(c === true)}
                     />
                     <span className="text-sm text-text-secondary">

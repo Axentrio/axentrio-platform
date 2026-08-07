@@ -64,7 +64,7 @@ const TRAVEL_FEATURE_ERROR = 'plan_limit_travel_time';
  *
  * This is the multi-driver case arriving early by accident (ADR-0016), and it is the one
  * configuration in which the feature makes a business worse off than not having it: the
- * two bots' bookings read as one person's day, so the gate strips slots for journeys
+ * two Agents' bookings read as one person's day, so the gate strips slots for journeys
  * neither of them makes. The message says why, because "invalid state" would send an owner
  * looking for a fault in their booking settings when the fix is in their calendar
  * connection.
@@ -84,9 +84,13 @@ async function assertTravelEnableAllowed(tenantId: string, botId: string): Promi
     // UPPER_SNAKE like every other hand-thrown code here (ADR-0011). The lowercase
     // `plan_limit_*` family belongs to PlanLimitError, which this is not.
     throw new ApiError(
-      'Travel time cannot be switched on while another bot books into the same calendar. ' +
-        'Their appointments would be treated as one person’s day, and times would be held back ' +
-        'for journeys nobody makes. Give each bot its own calendar first.',
+      // WORD FOR WORD the sentence the settings screen shows, because both are owner-facing
+      // and both are reachable — the screen explains it before the attempt, this answers a
+      // client that tried anyway. Two spellings of one refusal is how an owner starts
+      // wondering whether they are two different problems. `Agent`, not `bot`: CONTEXT.md.
+      'Travel time cannot be switched on while another Agent books into the same calendar. ' +
+        'Their appointments would be read as one person’s day and times would be held back ' +
+        'for journeys nobody makes. Give each Agent its own calendar first.',
       409,
       'TRAVEL_SHARED_ITINERARY'
     );
@@ -107,8 +111,8 @@ async function assertTravelEnableAllowed(tenantId: string, botId: string): Promi
 async function travelBlockedReason(
   tenantId: string,
   botId: string
-): Promise<'platform' | 'not_entitled' | 'shared_itinerary' | null> {
-  if (!config.travel.googleMapsApiKey) return 'platform';
+): Promise<'no_maps_key' | 'not_entitled' | 'shared_itinerary' | null> {
+  if (!config.travel.googleMapsApiKey) return 'no_maps_key';
   const entitlements = await getEntitlements(tenantId);
   if (!entitlements.features.travelTime) return 'not_entitled';
   const itineraryKey = await resolveItineraryKey(botId);
@@ -301,8 +305,19 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // Checked BEFORE the upsert, so a refused enable leaves nothing written — not even the
   // slack value that rode along in the same payload. Only an enable is gated: switching
   // travel OFF must always be possible, including for a tenant who has since lost the
-  // entitlement or connected a second bot to their calendar.
-  if (data.travel?.enabled === true) {
+  // entitlement or connected a second Agent to their calendar.
+  //
+  // A TRANSITION, NOT A VALUE. This used to fire whenever the payload carried `enabled: true`,
+  // including when travel was ALREADY on — which is the state a tenant lands in when somebody
+  // connects a second Agent to their calendar months later. The stored preference is
+  // deliberately not rewritten then (see `resolveTravelEligibility`: travel goes inert and
+  // returns by itself when the diaries separate), so the editor keeps sending `true`, and every
+  // Save of the WHOLE page began to 409 — venue, opening hours and the pause switch along with
+  // it. An owner was locked out of their booking settings by a state they did not create and
+  // could not clear.
+  const travelAlreadyOn = (await AppDataSource.getRepository(BookingSettings)
+    .findOne({ where: { botId: bot.id } }))?.travelTimeEnabled === true;
+  if (data.travel?.enabled === true && !travelAlreadyOn) {
     await assertTravelEnableAllowed(tenantId, bot.id);
   }
 

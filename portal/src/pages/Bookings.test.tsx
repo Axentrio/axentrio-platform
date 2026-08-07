@@ -41,7 +41,7 @@ vi.mock('../services/apiClient', () => ({
 }));
 
 vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() },
 }));
 
 import Bookings, { travelVerdictLookup } from './Bookings';
@@ -314,10 +314,22 @@ describe('Bookings — Google attribution rides with the drive estimate', () => 
     expect(estimate).toHaveTextContent(/powered by google/i);
   });
 
+  it('attributes a travel VERDICT too, on a row carrying no distance at all', async () => {
+    // The first pass covered only the row that shows kilometres. A "travel could not clear
+    // this time" line is equally Google-derived — it is a verdict computed from coordinates
+    // Google placed — and it appears on rows that have no estimate on them.
+    renderWithBookings({
+      requests: [{ ...requestRow, travelEstimate: null, travelCheck: 'captured' }],
+    });
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    const verdict = await screen.findByTestId('travel-captured');
+    expect(verdict).toHaveTextContent(/powered by google/i);
+  });
+
   it('shows no attribution when there is no estimate to attribute', async () => {
     // Nothing Google-derived is on screen, so the notice would be decoration — and a notice
     // that appears when it need not is how the real one stops being read.
-    renderWithBookings({ requests: [{ ...requestRow, travelEstimate: null }] });
+    renderWithBookings({ requests: [{ ...requestRow, travelEstimate: null, travelCheck: null }] });
     await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
     await screen.findByText(/Boiler repair/);
     expect(screen.queryByText(/powered by google/i)).not.toBeInTheDocument();

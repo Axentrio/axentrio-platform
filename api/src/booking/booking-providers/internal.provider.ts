@@ -949,6 +949,7 @@ export class InternalProvider implements BookingProvider {
     // every lookup is a paid element, so the list is bounded in both — see `routeBudget`.
     const budget = routeBudget();
 
+    const slotCauses = new Set<string>();
     const cleared: Array<{ start: string; end: string }> = [];
     const requestableSlots: Array<{ start: string; end: string }> = [];
     const unreachableSlots: Array<{ start: string; end: string }> = [];
@@ -958,7 +959,7 @@ export class InternalProvider implements BookingProvider {
     // actually enforced: fired concurrently, every slot would pass the check before any of
     // them decremented it.
     for (const slot of input.slots) {
-      const { verdict } = await assessSlotRouted({
+      const { verdict, degradedCauses } = await assessSlotRouted({
         candidate: {
           ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
           point: candidate.point,
@@ -972,6 +973,19 @@ export class InternalProvider implements BookingProvider {
       if (verdict === 'clear') cleared.push(slot);
       else if (verdict === 'undecided') requestableSlots.push(slot);
       else unreachableSlots.push(slot);
+      for (const cause of degradedCauses) slotCauses.add(cause);
+    }
+
+    // Availability is the ONLY path with a budget, so `budget_spent` exists nowhere else —
+    // logging causes only on the write path would make the one signal unique to a slot list
+    // invisible. Also the only place an abandoned booking flow leaves any trace at all.
+    if (slotCauses.size) {
+      logger.info('[Travel] some slots went unmeasured', {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        causes: [...slotCauses],
+        requestable: requestableSlots.length,
+      });
     }
 
     if (unreachableSlots.length || requestableSlots.length) {
@@ -1499,7 +1513,13 @@ export class InternalProvider implements BookingProvider {
       // bounds settled one leg and routing the other stays `degraded`, or the word means two
       // things depending on what the diary happened to look like, and #68's alert inherits the
       // ambiguity. `fullyRouted` is the gate's all-or-nothing answer to exactly that.
-      travelCheck = checked?.fullyRouted ? 'ok' : 'degraded';
+      //
+      // NULL when no leg constrained the verdict at all — an empty day, or one whose only
+      // neighbours are phone jobs. Nothing was measured and nothing was unavailable, which is
+      // exactly what NULL already means on this column. Reschedule must spell this the same
+      // way; two paths disagreeing about the same situation is how the column stops meaning
+      // anything.
+      travelCheck = !checked?.hadConstrainingLeg ? null : checked.fullyRouted ? 'ok' : 'degraded';
     }
 
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion

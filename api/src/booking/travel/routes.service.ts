@@ -42,9 +42,13 @@ export type DriveResult =
   /** Google routed it. `minutes` is the duration to fit into the gap. */
   | { status: 'routed'; minutes: number }
   /**
-   * Google looked and there is no drivable route — an island, a pedestrian-only address, a
-   * coordinate in water. A fact about the PAIR, and a definite no rather than an absence of
-   * an answer, so the caller may refuse the slot on it.
+   * Google found no drivable route for these coordinates with today's data.
+   *
+   * NOT a definite no, and it used to be treated as one. An island produces this; so does a
+   * geocode landing in a canal, a road closed this week, and an address Google routes to
+   * badly. Every other refusal in this system comes from a bound we control and can reason
+   * about — this one is a third party's data quality, so the caller degrades it into a
+   * Request the owner can see rather than turning a customer away on it.
    */
   | { status: 'no_route' }
   /** A fact about Google, or about a tenant that has spent its month. Degrade, never refuse. */

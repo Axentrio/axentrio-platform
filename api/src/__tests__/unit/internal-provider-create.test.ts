@@ -1524,13 +1524,28 @@ describe('InternalProvider.createBooking - travel placement', () => {
       expect(insertParam(writtenInsert(), 'travel_check')).toBe('degraded');
     });
 
-    it('never writes `ok` — that word belongs to a routing answer nobody has yet', async () => {
+    it('writes NULL for an empty day — nothing was measured and nothing was unavailable', async () => {
+      // NOT `ok`: no routing answer was ever sought, and the glossary reserves that word for
+      // one that was. NOT `degraded` either, which has to keep meaning "a check we normally
+      // run was unavailable" or #68's alert has nothing to watch. NULL already means "the gate
+      // did not apply", and this is that. Reschedule has the matching assertion; the two paths
+      // disagreeing about the same situation is how this column stops meaning anything.
       loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
       await expect(single('idem-gate-empty-day')).resolves.toMatchObject({ success: true });
-      // An empty day IS `ok`, and that is not a loophole. `degraded` has to keep meaning "a
-      // check we normally run was unavailable" or #68's alert has nothing to watch — and
-      // nothing was unavailable here, there was simply no drive to measure.
-      expect(insertParam(writtenInsert(), 'travel_check')).toBe('ok');
+      expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
+    });
+
+    it('writes NULL when the only neighbours are phone jobs', async () => {
+      // A locationless neighbour constrains nothing — the owner could take that call from the
+      // van — so there is no drive to measure even though the day is not empty.
+      loadTravelNeighbours.mockResolvedValue({
+        venue: null,
+        neighbours: [
+          { blockedStart: new Date('2026-06-10T05:00:00Z'), blockedEnd: new Date('2026-06-10T06:00:00Z'), location: { kind: 'locationless' } },
+        ],
+      });
+      await expect(single('idem-gate-phone-only')).resolves.toMatchObject({ success: true });
+      expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
     });
 
     it('refuses a time the owner provably cannot reach', async () => {

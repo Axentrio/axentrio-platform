@@ -121,7 +121,9 @@ The drive between two consecutive Bookings on one **Itinerary Key**, and the har
 _Avoid_: travel buffer (a Buffer is per-Service prep/cleanup), distance, drive time (say Travel Time), routing, ETA.
 
 **Travel Check**:
-What the travel gate actually did to one Booking, recorded on the row: `ok` verified against routing, `degraded` decided on the haversine proofs alone because routing was unreachable or the Tenant's element cap was spent, `captured` held as a **Request** because there was nothing to reason over, and `overridden` confirmed by the owner accepting that Request. Absent means the gate did not apply — no address required, or the feature inert — which is not a fifth verdict. `degraded` must never be read as `ok`: a sustained run of it is a silent Google outage, and telling them apart afterwards is how anyone finds out.
+What the travel gate actually did to one Booking, recorded on the row. `ok` means routing measured **every** leg that constrained the verdict. `degraded` means it did not — and that is a statement about provenance, **not** a fault: it covers the ordinary, healthy case of a short hop the haversine floor settled for free just as much as it covers an outage or a spent element cap. `captured` is held as a **Request** because there was nothing to reason over, and `overridden` is the owner confirming one anyway. Absent means no leg constrained the verdict at all — the gate did not apply, or there was simply no drive to consider — which is not a fifth verdict.
+
+**A sustained run of `degraded` is therefore NOT an outage signal**, and reading it as one would alert on every business whose jobs are close together. Whatever watches for silent degradation must key on the structured cause the gate returns (`no_route`, `cap_exhausted`, `api_error`, `budget_spent`, `settled_by_bounds`, …), never on this column. The column answers "was this verified"; only the cause answers "why not".
 _Avoid_: travel status, verified (that is one of four values, not the concept), unavailable (the old single fail-open state — ADR-0015 split it three ways by cause).
 
 **Placed Address**:

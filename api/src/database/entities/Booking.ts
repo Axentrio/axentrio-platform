@@ -194,10 +194,14 @@ export class Booking {
    * `'captured'` held as a request because there was nothing to reason over, and
    * `'overridden'` confirmed by the owner accepting that request.
    *
-   * Null means the gate did not apply, which is what every pre-existing row holds. It is
-   * not a fifth verdict, and `'degraded'` in particular must never read as `'ok'` — a
-   * sustained run of it is a silent Google outage, and telling those apart afterwards is
-   * the only way anyone finds out.
+   * Null means no leg constrained the verdict — the gate did not apply, or there was simply
+   * no drive to consider. Not a fifth verdict, and what every pre-existing row holds.
+   *
+   * `'degraded'` IS NOT A FAULT and a run of it IS NOT AN OUTAGE. It says only that routing
+   * did not measure every constraining leg, which is the ordinary state of a business whose
+   * jobs are close together — the haversine floor settles those for free, on purpose. An
+   * outage looks identical in this column, which is why anything watching for one must key on
+   * the structured cause the gate returns and never on this value.
    */
   @Column({ type: 'varchar', length: 24, name: 'travel_check', nullable: true })
   travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;

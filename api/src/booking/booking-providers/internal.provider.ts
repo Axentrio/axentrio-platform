@@ -1135,6 +1135,8 @@ export class InternalProvider implements BookingProvider {
     venue: NeighbourLocation | null;
     /** True only when routing answered every constraining leg — this is what licenses `ok`. */
     fullyRouted: boolean;
+    /** False when nothing constrained the verdict at all — see the NULL stamp at the callers. */
+    hadConstrainingLeg: boolean;
     /** Carried into the transaction so the in-lock assert can replay rather than re-ask. */
     drives: DriveRecords;
   }> {
@@ -1151,13 +1153,23 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId: input.excludeBookingId,
     });
     const drives: DriveRecords = {};
-    const { verdict, fullyRouted } = await assessSlotRouted({
+    const { verdict, fullyRouted, hadConstrainingLeg, degradedCauses } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
       neighbours,
       slackMin: input.eligibility.slackMin,
       lookup: recordingLookup(driveLookupFor(input.eligibility, ctx.session?.id ?? null), drives),
     });
-    return { verdict, candidate, venue, fullyRouted, drives };
+    // The only place a degradation CAUSE exists — the column records that a booking degraded,
+    // never why. #68 will consume it properly; until then it is at least diagnosable.
+    if (degradedCauses.length) {
+      logger.info('[Travel] a leg went unmeasured', {
+        tenantId: input.eligibility.tenantId,
+        itineraryKey: input.eligibility.itineraryKey,
+        verdict,
+        causes: degradedCauses,
+      });
+    }
+    return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives };
   }
 
   /**
@@ -2730,7 +2742,14 @@ export class InternalProvider implements BookingProvider {
       // rewritten rather than left describing a journey nobody is making any more. `ok` when
       // routing answered every constraining leg, `degraded` when the proofs alone cleared it,
       // and `overridden` when the owner moved it anyway past a verdict that did not clear.
-      travelCheck = verdict !== 'clear' ? 'overridden' : checked?.fullyRouted ? 'ok' : 'degraded';
+      travelCheck =
+        verdict !== 'clear'
+          ? 'overridden'
+          : !checked?.hadConstrainingLeg
+            ? null
+            : checked.fullyRouted
+              ? 'ok'
+              : 'degraded';
     }
 
     // Single atomic UPDATE under the itinerary lock: frees the old slot and

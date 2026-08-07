@@ -114,7 +114,7 @@ vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
 // matters. Unavailable by default, which is both the state of a platform with no Maps key and
 // ADR-0015's degraded branch — so every test that does not opt in is exercising the fallback.
 const driveAnswer = vi.fn(
-  async (..._a: unknown[]): Promise<{ minutes: number | null; noRoute?: boolean }> => ({ minutes: null })
+  async (..._a: unknown[]): Promise<{ minutes: number | null; cause?: string }> => ({ minutes: null })
 );
 vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/routes.service')>();
@@ -261,13 +261,16 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
   });
 
   it('REWRITES travel_check, because the move invalidates whatever the old time was checked against', async () => {
-    // An empty diary, which is `ok` rather than `degraded`: nothing was unavailable, there was
-    // simply no drive to measure. What must never happen is the column being left describing
-    // the journey to the OLD time, which nobody is making any more.
+    // An empty diary writes NULL, not `ok` and not `degraded`. Nothing was measured and
+    // nothing was unavailable, which is exactly what NULL already means on this column —
+    // `ok` would claim a routing answer nobody sought, and `degraded` would put a permanent
+    // stream of rows into the signal #68 has to watch for outages. What must never happen is
+    // the column being left describing the journey to the OLD time.
     await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
     const [sql, params] = updateSql();
     expect(sql).toContain('travel_check=');
-    expect(params).toContain('ok');
+    expect(params).toContain(null);
+    expect(params).not.toContain('ok');
   });
 
   it('warns the OWNER rather than blocking them — their diary, their judgement', async () => {

@@ -108,15 +108,6 @@ export interface TravelCandidate {
   coarse: boolean;
 }
 
-export interface AssessTravelInput {
-  candidate: TravelCandidate;
-  /** The immediately preceding held job, or null when nothing precedes it. */
-  before: TravelNeighbour | null;
-  /** The immediately following held job, or null. */
-  after: TravelNeighbour | null;
-  /** The owner's margin on top of the drive: parking, the doorstep, overrunning. */
-  slackMin: number;
-}
 
 /** Whole minutes between two instants, floored — a partial minute is not a minute of driving. */
 function minutesBetween(from: Date, to: Date): number {
@@ -194,22 +185,6 @@ function assessSide(
   };
 }
 
-/**
- * The candidate's verdict, from the jobs either side of it.
- *
- * NO DAY BOUNDARY ANYWHERE. A 23:30 job and a 00:15 job are physically adjacent and are checked
- * against each other. The "same local day" framing that day-CAPACITY uses is a fact about what
- * a business sold, and has nothing to do with whether a van can cover the distance.
- *
- * The two sides are combined worst-first: a proof of impossibility on either side settles it,
- * then any absence of proof, and only a slot proven fine on both sides is `clear`.
- */
-export function assessTravel(input: AssessTravelInput): TravelVerdict {
-  return combine(input.candidate, [
-    assessSide(input.candidate, input.before, input.slackMin, 'before'),
-    assessSide(input.candidate, input.after, input.slackMin, 'after'),
-  ]);
-}
 
 /** Fold two sides into one verdict. Shared so the routed path cannot combine them differently. */
 function combine(candidate: TravelCandidate, outcomes: SideOutcome[]): TravelVerdict {
@@ -319,19 +294,6 @@ export function estimateDrive(from: GeoPoint, to: GeoPoint): DriveEstimate {
   };
 }
 
-/** Both sides at once, for a caller walking a list of candidate slots. */
-export function assessSlot(input: {
-  candidate: TravelCandidate;
-  neighbours: TravelNeighbour[];
-  slackMin: number;
-}): TravelVerdict {
-  return assessTravel({
-    candidate: input.candidate,
-    before: precedingNeighbour(input.neighbours, input.candidate),
-    after: followingNeighbour(input.neighbours, input.candidate),
-    slackMin: input.slackMin,
-  });
-}
 
 /**
  * Ask something for a real drive time. Injected so this file stays free of HTTP and every
@@ -422,8 +384,6 @@ export function replayLookup(records: DriveRecords): DriveLookup {
 export interface RoutedLeg {
   /** Minutes for the drive, or null when routing was unavailable. */
   minutes: number | null;
-  /** Routing looked and there is no drivable route at all — a definite no. */
-  noRoute?: boolean;
   /**
    * WHY it could not answer, when it could not.
    *
@@ -453,6 +413,17 @@ export interface RoutedAssessment {
    * answered everything, or when nothing needed asking. Not persisted — #68's to consume.
    */
   degradedCauses: string[];
+  /**
+   * Did ANY leg actually constrain this verdict?
+   *
+   * False for an empty day, and for one whose only neighbours are phone or online jobs. Such
+   * a booking is cleared without a single drive being considered, so it is neither verified
+   * (`ok`) nor degraded (`degraded`) — it is the case `travel_check` already spells NULL,
+   * "the gate did not apply". Stamping `ok` there would make the column claim a routing
+   * answer that was never sought, and `degraded` would put a permanent stream of rows into
+   * the signal #68 has to watch for outages.
+   */
+  hadConstrainingLeg: boolean;
 }
 
 /**
@@ -513,11 +484,6 @@ export async function assessSlotRouted(input: {
     }
 
     const answer = await input.lookup(outcome.leg);
-    if (answer.noRoute) {
-      // Routing looked and there is no way to drive it. A fact about the pair, so it refuses.
-      resolved.push({ verdict: 'unreachable', constraining: true });
-      continue;
-    }
     if (answer.minutes === null || !Number.isFinite(answer.minutes)) {
       // Degraded: leave it exactly where the bounds left it, but keep WHY.
       routedEvery = false;
@@ -534,5 +500,10 @@ export async function assessSlotRouted(input: {
   const verdict = combine(input.candidate, resolved);
   // `ok` is only ever a claim about a CLEARED slot. A refusal needs no such stamp, and an
   // undecided one is a Request by definition.
-  return { verdict, fullyRouted: verdict === 'clear' && routedEvery, degradedCauses: [...causes] };
+  return {
+    verdict,
+    fullyRouted: verdict === 'clear' && routedEvery,
+    degradedCauses: [...causes],
+    hadConstrainingLeg: resolved.some((o) => o.constraining),
+  };
 }

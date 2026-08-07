@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import {
-  assessTravel,
-  assessSlot,
   estimateDrive,
   precedingNeighbour,
   followingNeighbour,
@@ -64,11 +62,40 @@ const unresolved = (start: string, end: string): TravelNeighbour => ({
   location: { kind: 'unresolved' },
 });
 
+/**
+ * The bounds-only verdict — what `assessSlotRouted` reduces to when routing answers nothing.
+ *
+ * The synchronous `assessTravel`/`assessSlot` used to be exported for this, and were removed:
+ * they were a live entry point that skipped routing without saying so. A replay lookup over an
+ * empty snapshot is the same behaviour, stated rather than implied, and it is exactly what the
+ * in-lock assert does in production.
+ */
+const boundsVerdict = async (input: {
+  candidate: TravelCandidate;
+  before?: TravelNeighbour | null;
+  after?: TravelNeighbour | null;
+  slackMin: number;
+}) =>
+  (
+    await assessSlotRouted({
+      candidate: input.candidate,
+      neighbours: [input.before, input.after].filter((n): n is TravelNeighbour => !!n),
+      slackMin: input.slackMin,
+      lookup: replayLookup({}),
+    })
+  ).verdict;
+
+const slotVerdict = async (input: {
+  candidate: TravelCandidate;
+  neighbours: TravelNeighbour[];
+  slackMin: number;
+}) => (await assessSlotRouted({ ...input, lookup: replayLookup({}) })).verdict;
+
 describe('assessTravel — the certain no', () => {
-  it('refuses a slot whose preceding job cannot possibly be left in time', () => {
+  it('refuses a slot whose preceding job cannot possibly be left in time', async () => {
     // Liège→Brussels is ~87 km straight line. A 10-minute gap covers 20 km at motorway
     // speed. Not even a helicopter fits.
-    const verdict = assessTravel({
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T10:10:00Z', end: '2026-09-01T11:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', LIEGE),
       after: null,
@@ -77,8 +104,8 @@ describe('assessTravel — the certain no', () => {
     expect(verdict).toBe('unreachable');
   });
 
-  it('refuses on the FOLLOWING side too — the drive out is as real as the drive in', () => {
-    const verdict = assessTravel({
+  it('refuses on the FOLLOWING side too — the drive out is as real as the drive in', async () => {
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T09:00:00Z', end: '2026-09-01T10:00:00Z' }),
       before: null,
       after: known('2026-09-01T10:10:00Z', '2026-09-01T11:00:00Z', LIEGE),
@@ -87,10 +114,10 @@ describe('assessTravel — the certain no', () => {
     expect(verdict).toBe('unreachable');
   });
 
-  it('spends the slack before the drive, so a big margin can make a short hop impossible', () => {
+  it('spends the slack before the drive, so a big margin can make a short hop impossible', async () => {
     // 60 minutes of gap, but 58 of them are the owner's own margin: 2 minutes left, and
     // 47 km does not fit in 2 minutes.
-    const verdict = assessTravel({
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT),
       after: null,
@@ -101,8 +128,8 @@ describe('assessTravel — the certain no', () => {
 });
 
 describe('assessTravel — the certain yes', () => {
-  it('clears two jobs a few doors apart', () => {
-    const verdict = assessTravel({
+  it('clears two jobs a few doors apart', async () => {
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
       after: null,
@@ -111,9 +138,9 @@ describe('assessTravel — the certain yes', () => {
     expect(verdict).toBe('clear');
   });
 
-  it('clears an empty day', () => {
+  it('clears an empty day', async () => {
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z' }),
         before: null,
         after: null,
@@ -124,10 +151,10 @@ describe('assessTravel — the certain yes', () => {
 });
 
 describe('assessTravel — the undecided middle', () => {
-  it('cannot settle a pair between the two bounds', () => {
+  it('cannot settle a pair between the two bounds', async () => {
     // Ghent→Brussels is ~47 km. A 60-minute gap covers 120 km at motorway speed (so it
     // could fit) but only 20 km at the pessimistic crawl (so it is not proven to fit).
-    const verdict = assessTravel({
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT),
       after: null,
@@ -136,8 +163,8 @@ describe('assessTravel — the undecided middle', () => {
     expect(verdict).toBe('undecided');
   });
 
-  it('lets an impossible side override an undecided one', () => {
-    const verdict = assessTravel({
+  it('lets an impossible side override an undecided one', async () => {
+    const verdict = await boundsVerdict({
       candidate: candidate({ start: '2026-09-01T11:00:00Z', end: '2026-09-01T12:00:00Z' }),
       before: known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', GHENT), // undecided
       after: known('2026-09-01T12:05:00Z', '2026-09-01T13:00:00Z', LIEGE), // impossible
@@ -148,11 +175,11 @@ describe('assessTravel — the undecided middle', () => {
 });
 
 describe('assessTravel — what a neighbour without coordinates means', () => {
-  it('treats a locationless neighbour as no constraint at all', () => {
+  it('treats a locationless neighbour as no constraint at all', async () => {
     // A phone consultation. The owner could take it from the van, so the flat gap — which
     // was already applied before this function ran — is the whole rule.
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z' }),
         before: locationless('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: null,
@@ -161,11 +188,11 @@ describe('assessTravel — what a neighbour without coordinates means', () => {
     ).toBe('clear');
   });
 
-  it('never clears past a neighbour whose location we merely FAILED to obtain', () => {
+  it('never clears past a neighbour whose location we merely FAILED to obtain', async () => {
     // The distinction that stops this feature silently confirming a drive nobody checked:
     // "has no location" and "we could not get its location" are opposite claims.
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z' }),
         before: unresolved('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: null,
@@ -176,9 +203,9 @@ describe('assessTravel — what a neighbour without coordinates means', () => {
 });
 
 describe('assessTravel — coarse points may refuse, never clear', () => {
-  it('lets a town-centre neighbour prove a drive impossible', () => {
+  it('lets a town-centre neighbour prove a drive impossible', async () => {
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:10:00Z', end: '2026-09-01T11:00:00Z' }),
         before: coarse('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', LIEGE),
         after: null,
@@ -187,9 +214,9 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
     ).toBe('unreachable');
   });
 
-  it('refuses to let a town-centre neighbour clear one, however close the dot looks', () => {
+  it('refuses to let a town-centre neighbour clear one, however close the dot looks', async () => {
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
         before: coarse('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
         after: null,
@@ -198,11 +225,11 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
     ).toBe('undecided');
   });
 
-  it('refuses to clear a COARSE CANDIDATE even with no neighbours anywhere', () => {
+  it('refuses to clear a COARSE CANDIDATE even with no neighbours anywhere', async () => {
     // The rule the per-side logic cannot express on its own. An empty day would otherwise
     // auto-confirm a job at an address located only to a municipality, and stamp it checked.
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z', coarse: true }),
         before: null,
         after: null,
@@ -211,9 +238,9 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
     ).toBe('undecided');
   });
 
-  it('refuses to clear a coarse candidate past locationless neighbours either', () => {
+  it('refuses to clear a coarse candidate past locationless neighbours either', async () => {
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({ start: '2026-09-01T10:05:00Z', end: '2026-09-01T11:00:00Z', coarse: true }),
         before: locationless('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z'),
         after: locationless('2026-09-01T11:05:00Z', '2026-09-01T12:00:00Z'),
@@ -222,9 +249,9 @@ describe('assessTravel — coarse points may refuse, never clear', () => {
     ).toBe('undecided');
   });
 
-  it('still refuses a coarse candidate that is provably too far', () => {
+  it('still refuses a coarse candidate that is provably too far', async () => {
     expect(
-      assessTravel({
+      await boundsVerdict({
         candidate: candidate({
           start: '2026-09-01T10:10:00Z',
           end: '2026-09-01T11:00:00Z',
@@ -247,22 +274,22 @@ describe('neighbour selection', () => {
     known('2026-09-01T14:00:00Z', '2026-09-01T15:00:00Z', BRUSSELS),
   ];
 
-  it('picks the LATEST job that finishes before the slot, not merely one of them', () => {
+  it('picks the LATEST job that finishes before the slot, not merely one of them', async () => {
     const before = precedingNeighbour(diary, { blockedStart: at('2026-09-01T11:00:00Z') });
     expect(before?.blockedEnd.toISOString()).toBe('2026-09-01T10:00:00.000Z');
   });
 
-  it('picks the EARLIEST job that starts after the slot', () => {
+  it('picks the EARLIEST job that starts after the slot', async () => {
     const after = followingNeighbour(diary, { blockedEnd: at('2026-09-01T11:00:00Z') });
     expect(after?.blockedStart.toISOString()).toBe('2026-09-01T12:00:00.000Z');
   });
 
-  it('returns null on the empty sides of a diary', () => {
+  it('returns null on the empty sides of a diary', async () => {
     expect(precedingNeighbour(diary, { blockedStart: at('2026-09-01T07:00:00Z') })).toBeNull();
     expect(followingNeighbour(diary, { blockedEnd: at('2026-09-01T16:00:00Z') })).toBeNull();
   });
 
-  it('ignores a job that overlaps the candidate — overlap is not travel s business', () => {
+  it('ignores a job that overlaps the candidate — overlap is not travel s business', async () => {
     // 11:30 sits inside the 12:00-13:00 job's blocked range on neither side; the exclusion
     // constraint is what refuses a real overlap, and it did so before this ran.
     const overlapping = [known('2026-09-01T11:00:00Z', '2026-09-01T12:00:00Z', LIEGE)];
@@ -270,7 +297,7 @@ describe('neighbour selection', () => {
     expect(followingNeighbour(overlapping, { blockedEnd: at('2026-09-01T11:30:00Z') })).toBeNull();
   });
 
-  it('LOOKS PAST a locationless job to the last place the owner had to be', () => {
+  it('LOOKS PAST a locationless job to the last place the owner had to be', async () => {
     // The bug this exists to stop: a Brussels job finishing at 10:00, a five-minute phone call
     // at 10:05, and a candidate in Liège at 10:15. If the phone call counts as the
     // predecessor it has no location, the side reads clear, and the gate has just confirmed
@@ -283,7 +310,7 @@ describe('neighbour selection', () => {
       precedingNeighbour(diaryWithCall, { blockedStart: at('2026-09-01T10:15:00Z') })?.location.kind
     ).toBe('known');
     expect(
-      assessSlot({
+      await slotVerdict({
         candidate: candidate({ start: '2026-09-01T10:15:00Z', end: '2026-09-01T11:00:00Z', point: LIEGE }),
         neighbours: diaryWithCall,
         slackMin: 0,
@@ -291,7 +318,7 @@ describe('neighbour selection', () => {
     ).toBe('unreachable');
   });
 
-  it('does NOT look past a job whose location we merely failed to obtain', () => {
+  it('does NOT look past a job whose location we merely failed to obtain', async () => {
     // Transparent and unknown are different: one constrains nothing, the other is a
     // constraint we could not evaluate.
     const diaryWithGap: TravelNeighbour[] = [
@@ -303,7 +330,7 @@ describe('neighbour selection', () => {
     ).toBe('unresolved');
   });
 
-  it('measures the drive across a locationless job, not from the end of it', () => {
+  it('measures the drive across a locationless job, not from the end of it', async () => {
     // The owner could take that call from the van, so the window for the drive is the whole
     // span between the two physical jobs — 2.5 hours here, which clears 2 km at the floor's
     // crawl. Measured from the END of the call it would be 60 minutes, which does not.
@@ -312,7 +339,7 @@ describe('neighbour selection', () => {
       locationless('2026-09-01T09:30:00Z', '2026-09-01T10:30:00Z'),
     ];
     expect(
-      assessSlot({
+      await slotVerdict({
         candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
         neighbours,
         slackMin: 0,
@@ -322,7 +349,7 @@ describe('neighbour selection', () => {
     // The same pair with only the 60 minutes after the call does NOT clear — which is what
     // makes the assertion above about the window rather than about the distance.
     expect(
-      assessSlot({
+      await slotVerdict({
         candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
         neighbours: [known('2026-09-01T10:00:00Z', '2026-09-01T10:30:00Z', ACROSS_TOWN)],
         slackMin: 0,
@@ -330,9 +357,9 @@ describe('neighbour selection', () => {
     ).toBe('undecided');
   });
 
-  it('has NO DAY BOUNDARY: a 23:30 job and a 00:15 job are neighbours', () => {
+  it('has NO DAY BOUNDARY: a 23:30 job and a 00:15 job are neighbours', async () => {
     const overnight = [known('2026-09-01T23:00:00Z', '2026-09-01T23:30:00Z', LIEGE)];
-    const verdict = assessSlot({
+    const verdict = await slotVerdict({
       candidate: candidate({ start: '2026-09-02T00:15:00Z', end: '2026-09-02T01:00:00Z' }),
       neighbours: overnight,
       slackMin: 0,
@@ -344,8 +371,8 @@ describe('neighbour selection', () => {
 });
 
 describe('assessSlot — both sides at once', () => {
-  it('clears a slot wedged between two next-door jobs', () => {
-    const verdict = assessSlot({
+  it('clears a slot wedged between two next-door jobs', async () => {
+    const verdict = await slotVerdict({
       candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
       neighbours: [
         known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
@@ -356,8 +383,8 @@ describe('assessSlot — both sides at once', () => {
     expect(verdict).toBe('clear');
   });
 
-  it('refuses a slot the owner could reach but could not leave', () => {
-    const verdict = assessSlot({
+  it('refuses a slot the owner could reach but could not leave', async () => {
+    const verdict = await slotVerdict({
       candidate: candidate({ start: '2026-09-01T10:30:00Z', end: '2026-09-01T11:00:00Z', point: NEXT_DOOR }),
       neighbours: [
         known('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z', BRUSSELS),
@@ -370,7 +397,7 @@ describe('assessSlot — both sides at once', () => {
 });
 
 describe('estimateDrive — what the owner reads before overriding', () => {
-  it('gives a RANGE, because nothing has routed anything', () => {
+  it('gives a RANGE, because nothing has routed anything', async () => {
     const e = estimateDrive(BRUSSELS, GHENT);
     // ~47 km: about 24 minutes at the optimistic bound, about 140 at the pessimistic one.
     expect(e.km).toBeGreaterThan(45);
@@ -379,17 +406,17 @@ describe('estimateDrive — what the owner reads before overriding', () => {
     expect(e.fastestMin).toBeGreaterThan(0);
   });
 
-  it('is zero-ish for two doors on the same street', () => {
+  it('is zero-ish for two doors on the same street', async () => {
     const e = estimateDrive(BRUSSELS, NEXT_DOOR);
     expect(e.km).toBe(0);
     expect(e.slowestMin).toBe(0);
   });
 
-  it('is symmetric — a drive is the same length in both directions', () => {
+  it('is symmetric — a drive is the same length in both directions', async () => {
     expect(estimateDrive(BRUSSELS, LIEGE)).toEqual(estimateDrive(LIEGE, BRUSSELS));
   });
 
-  it('never claims to be a measured drive: the slow end assumes a crawl, not a road', () => {
+  it('never claims to be a measured drive: the slow end assumes a crawl, not a road', async () => {
     // Brussels→Liège is ~87 km. The real drive is about an hour; the range must CONTAIN that
     // rather than pretend to be it, which is the whole reason it is a range.
     const e = estimateDrive(BRUSSELS, LIEGE);
@@ -502,5 +529,50 @@ describe('assessSlotRouted — the per-call budget', () => {
     });
     expect(fullyRouted).toBe(false);
     expect(degradedCauses).toEqual(['settled_by_bounds']);
+  });
+});
+
+/**
+ * Which bookings may claim to have been checked at all.
+ *
+ * `travel_check` has a NULL that already means "the gate did not apply". A day with nothing
+ * to drive between belongs there: no drive was measured, and nothing was unavailable either.
+ * Stamping `ok` would claim a routing answer nobody sought; stamping `degraded` would feed a
+ * permanent stream of rows into the signal #68 has to watch for outages.
+ */
+describe('assessSlotRouted — did anything actually constrain the verdict', () => {
+  const slot = candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z' });
+  const run = (neighbours: TravelNeighbour[]) =>
+    assessSlotRouted({ candidate: slot, neighbours, slackMin: 0, lookup: replayLookup({}) });
+
+  it('an empty day constrains nothing', async () => {
+    const { verdict, hadConstrainingLeg } = await run([]);
+    expect(verdict).toBe('clear');
+    expect(hadConstrainingLeg).toBe(false);
+  });
+
+  it('a day of only phone jobs constrains nothing either', async () => {
+    // The owner could take those from the van, so there is no drive to measure on either side.
+    const { verdict, hadConstrainingLeg } = await run([
+      locationless('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z'),
+      locationless('2026-09-01T12:00:00Z', '2026-09-01T13:00:00Z'),
+    ]);
+    expect(verdict).toBe('clear');
+    expect(hadConstrainingLeg).toBe(false);
+  });
+
+  it('one real neighbour is enough to constrain it', async () => {
+    const { hadConstrainingLeg } = await run([
+      known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', NEXT_DOOR),
+    ]);
+    expect(hadConstrainingLeg).toBe(true);
+  });
+
+  it('a neighbour we could not place constrains it too — that is the point of `unresolved`', async () => {
+    const { verdict, hadConstrainingLeg } = await run([
+      unresolved('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z'),
+    ]);
+    expect(verdict).toBe('undecided');
+    expect(hadConstrainingLeg).toBe(true);
   });
 });

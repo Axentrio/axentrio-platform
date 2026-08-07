@@ -174,7 +174,7 @@ vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
 // matters. Unavailable by default, which is both the state of a platform with no Maps key and
 // ADR-0015's degraded branch — so every test that does not opt in is exercising the fallback.
 const driveAnswer = vi.fn(
-  async (..._a: unknown[]): Promise<{ minutes: number | null; noRoute?: boolean }> => ({ minutes: null })
+  async (..._a: unknown[]): Promise<{ minutes: number | null; cause?: string }> => ({ minutes: null })
 );
 vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/routes.service')>();
@@ -1812,17 +1812,19 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     expect(res.slots.length).toBeGreaterThan(0);
   });
 
-  it('refuses the whole band when routing says there is no drivable route at all', async () => {
-    // A definite no about the PAIR, not an absence of an answer — so it refuses rather than
-    // degrading into Requests.
+  it('hands a no-route answer to the OWNER rather than refusing on Google’s data quality', async () => {
+    // `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with TODAY's data,
+    // which a geocode into a canal or a closed road produces as readily as an island does.
+    // Every other refusal here comes from a bound we control; this one does not, so it
+    // degrades into Requests the owner can see rather than silently turning a customer away.
     loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
     ] });
-    driveAnswer.mockResolvedValue({ minutes: null, noRoute: true });
+    driveAnswer.mockResolvedValue({ minutes: null, cause: 'no_route' });
     const res = await check(ADDRESS);
     expect(res.slots).toHaveLength(0);
-    expect(res.travel?.requestableSlots).toHaveLength(0);
-    expect(res.travel?.unreachableSlots).toHaveLength(4);
+    expect(res.travel?.requestableSlots).toHaveLength(4);
+    expect(res.travel?.unreachableSlots).toHaveLength(0);
   });
 
   it('confirms nothing at all when the address placed only to a town centre', async () => {

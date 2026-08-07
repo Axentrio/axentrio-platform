@@ -144,8 +144,7 @@ async function readCache(key: string): Promise<DriveResult | null> {
     // Matched against the union rather than merely being present, so anything else living at
     // this key cannot be returned as a verdict.
     if (parsed?.status === 'routed') return Number.isFinite(parsed.minutes) && parsed.minutes >= 0 ? parsed : null;
-    if (parsed?.status === 'no_route') return parsed;
-    // `unavailable` is deliberately NOT cached — see the write path.
+    // Neither `no_route` nor `unavailable` is cached — see the write path.
     return null;
   } catch (error) {
     logger.warn('[Travel] drive cache read failed', { error });
@@ -156,8 +155,10 @@ async function readCache(key: string): Promise<DriveResult | null> {
 async function writeCache(key: string, result: DriveResult): Promise<void> {
   // An outage is a fact about this MOMENT, not about the pair. Caching it would extend one
   // bad second across the rest of a conversation, and the retry that would have succeeded
-  // never happens.
-  if (result.status === 'unavailable') return;
+  // never happens. `no_route` is cached for the same reason it is not a refusal: it is a
+  // claim about Google's current data, and one bad answer must not poison every remaining
+  // slot in the conversation. The per-call budget bounds what re-asking can cost.
+  if (result.status === 'unavailable' || result.status === 'no_route') return;
   const redis = getRedisClient();
   if (!redis) return;
   try {
@@ -299,7 +300,13 @@ export function driveLookupFor(
       sessionId,
     });
     if (result.status === 'routed') return { minutes: result.minutes };
-    if (result.status === 'no_route') return { minutes: null, noRoute: true };
+    // NOT a refusal. `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with
+    // TODAY's data — which a geocode into a canal, a closed road, or a pedestrianised address
+    // all produce just as readily as an island does. Every other refusal in this system comes
+    // from a bound we control and can reason about; this one is a third party's data quality,
+    // and turning a customer away on it silently is the outcome this product least wants. It
+    // degrades to a Request, where the owner sees the job and decides.
+    if (result.status === 'no_route') return { minutes: null, cause: 'no_route' };
     // The cause rides along: the gate does not branch on it, but #68 has to tell a spent cap
     // (one tenant's problem) from a revoked key (everybody's), and this is where it exists.
     return { minutes: null, cause: result.cause };

@@ -21,7 +21,7 @@ import { Booking } from '../../database/entities/Booking';
 import { createTestTenant, createTestAnchorBot } from '../helpers/factories';
 import type { Tenant } from '../../database/entities/Tenant';
 import { loadStoredNeighbours } from '../../booking/travel/travel-neighbours';
-import { assessSlot } from '../../booking/travel/travel-gate';
+import { assessSlotRouted, replayLookup } from '../../booking/travel/travel-gate';
 import type { ActiveTravelEligibility } from '../../booking/travel/travel-eligibility';
 
 /** Real Belgian coordinates: ~87 km apart, so nothing crosses it in ten minutes. */
@@ -93,7 +93,11 @@ async function book(
       to: new Date(at.end),
       venue: null,
     });
-    const verdict = assessSlot({
+    // The SHIPPED in-lock path: `assessSlotRouted` with a replay lookup over an empty
+    // snapshot, which is exactly what `assertTravelFeasible` does inside the transaction.
+    // Calling the sync `assessSlot` here made this test a divergent copy of the thing it
+    // claims to cover — it would have stayed green through a change to the real gate.
+    const { verdict } = await assessSlotRouted({
       candidate: {
         blockedStart: new Date(at.start),
         blockedEnd: new Date(at.end),
@@ -102,6 +106,7 @@ async function book(
       },
       neighbours,
       slackMin: 0,
+      lookup: replayLookup({}),
     });
     if (verdict !== 'clear') return 'refused';
     await manager.query(

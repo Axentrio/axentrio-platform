@@ -27,7 +27,7 @@
  *
  * NEVER THROWS. Every failure is `unavailable`, because the caller is a booking path and an
  * exception escaping here would turn Google's downtime into a refused appointment. ADR-0015
- * says an outage degrades to the haversine proofs; it never degrades to a wrong answer.
+ * says an outage degrades to the haversine bounds; it never degrades to a wrong answer.
  */
 import axios from 'axios';
 import { config } from '../../config/environment';
@@ -300,6 +300,8 @@ export function driveLookupFor(
     });
     if (result.status === 'routed') return { minutes: result.minutes };
     if (result.status === 'no_route') return { minutes: null, noRoute: true };
-    return { minutes: null };
+    // The cause rides along: the gate does not branch on it, but #68 has to tell a spent cap
+    // (one tenant's problem) from a revoked key (everybody's), and this is where it exists.
+    return { minutes: null, cause: result.cause };
   };
 }

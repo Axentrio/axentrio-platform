@@ -11,7 +11,7 @@
  *
  * WHICH WAY IT FAILS. Exhausting the cap is NOT an outage and must not read as one. It
  * lands on the same branch as Routes being unreachable (ADR-0015): the haversine bounds
- * in `contracts/travel.ts` are PROOFS, so a spent tenant still refuses the slots that are
+ * in `contracts/travel.ts` still SPEAK, so a spent tenant still refuses the slots that are
  * provably impossible and still confirms the ones that are provably fine, and only the
  * undecided middle band becomes a request. Degraded is strictly better than the flat gap
  * that shipped before this feature — it just never claims a verification it did not do.
@@ -121,7 +121,7 @@ export async function getTravelElementsUsed(tenantId: string): Promise<number> {
  * THE QUESTION, NOT THE SPENDING. Anything about to call Google reserves through
  * `reserveTravelElements` instead, which is atomic; this exists for the callers that need
  * to know which branch they are on WITHOUT claiming an element — chiefly the degraded path,
- * which decides on the haversine proofs alone and spends nothing.
+ * which decides on the haversine bounds alone and spends nothing.
  *
  * A cap of 0 or less means uncapped, matching how every other limit on this platform
  * degrades: a malformed limit must read as "no limit", never as "nothing allowed".

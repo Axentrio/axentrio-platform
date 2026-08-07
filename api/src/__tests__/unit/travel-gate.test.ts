@@ -7,6 +7,10 @@ import {
   followingNeighbour,
   type TravelNeighbour,
   type TravelCandidate,
+  assessSlotRouted,
+  routeBudget,
+  replayLookup,
+  type RoutableLeg,
 } from '../../booking/travel/travel-gate';
 import type { GeoPoint } from '../../contracts/travel';
 
@@ -391,5 +395,112 @@ describe('estimateDrive — what the owner reads before overriding', () => {
     const e = estimateDrive(BRUSSELS, LIEGE);
     expect(e.fastestMin).toBeLessThan(60);
     expect(e.slowestMin).toBeGreaterThan(60);
+  });
+});
+
+/**
+ * The budget, which exists because the cache does NOT make a slot list cheap. Consecutive
+ * candidates share both endpoints but differ in departure time, and the traffic-aware bucket
+ * is finer than the usual slot spacing — so every slot is its own paid lookup and its own
+ * round-trip a customer is waiting behind.
+ */
+describe('assessSlotRouted — the per-call budget', () => {
+  const BAND = { lat: 50.8800, lng: 4.3517 }; // ~3 km: neither bound settles it
+  const diary = (start: string, end: string) => [known(start, end, BAND)];
+  const slot = (start: string, end: string) => candidate({ start, end, point: BRUSSELS });
+
+  const counting = (minutes: number | null) => {
+    const calls: RoutableLeg[] = [];
+    return {
+      calls,
+      lookup: async (leg: RoutableLeg) => {
+        calls.push(leg);
+        return { minutes };
+      },
+    };
+  };
+
+  it('stops looking up once the shared budget is spent', async () => {
+    const { calls, lookup } = counting(5);
+    const budget = routeBudget();
+    // Twelve slots against a budget of ten. The neighbour moves WITH each slot so every one
+    // has the same 30-minute gap — a fixed neighbour would give the later slots hours of
+    // clearance, which the floor settles for free, and the test would then be measuring the
+    // bounds rather than the budget.
+    for (let i = 0; i < 12; i += 1) {
+      const hour = String(9 + i).padStart(2, '0');
+      await assessSlotRouted({
+        candidate: slot(`2026-09-01T${hour}:30:00Z`, `2026-09-01T${hour}:50:00Z`),
+        neighbours: diary(`2026-09-01T${hour}:00:00Z`, `2026-09-01T${hour}:00:00Z`),
+        slackMin: 0,
+        lookup,
+        budget,
+      });
+    }
+    expect(calls).toHaveLength(10);
+    expect(budget.remaining).toBe(0);
+  });
+
+  it('degrades the slots past the ceiling rather than clearing them', async () => {
+    const { lookup } = counting(5);
+    const budget = { remaining: 0, deadline: Date.now() + 60_000 };
+    const { verdict, fullyRouted, degradedCauses } = await assessSlotRouted({
+      candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
+      neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
+      slackMin: 0,
+      lookup,
+      budget,
+    });
+    // Withheld into a Request, never confirmed — the safe direction.
+    expect(verdict).toBe('undecided');
+    expect(fullyRouted).toBe(false);
+    expect(degradedCauses).toContain('budget_spent');
+  });
+
+  it('stops on the deadline even with lookups left to spend', async () => {
+    const { calls, lookup } = counting(5);
+    const budget = { remaining: 10, deadline: Date.now() - 1 };
+    await assessSlotRouted({
+      candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
+      neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
+      slackMin: 0,
+      lookup,
+      budget,
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('is unbounded when no budget is given — the single-slot create path', async () => {
+    const { calls, lookup } = counting(5);
+    await assessSlotRouted({
+      candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
+      neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
+      slackMin: 0,
+      lookup,
+    });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('carries WHY a leg went unanswered, which is all #68 will have to key on', async () => {
+    const { verdict, degradedCauses } = await assessSlotRouted({
+      candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
+      neighbours: diary('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z'),
+      slackMin: 0,
+      lookup: async () => ({ minutes: null, cause: 'cap_exhausted' }),
+    });
+    expect(verdict).toBe('undecided');
+    expect(degradedCauses).toEqual(['cap_exhausted']);
+  });
+
+  it('reports a leg the BOUNDS settled as its own cause, not as an outage', async () => {
+    // Nothing was unavailable — it simply was not measured. #68 must not alert on this.
+    const { fullyRouted, degradedCauses } = await assessSlotRouted({
+      candidate: slot('2026-09-01T09:00:00Z', '2026-09-01T09:30:00Z'),
+      neighbours: [known('2026-09-01T06:00:00Z', '2026-09-01T06:30:00Z', NEXT_DOOR)],
+      slackMin: 0,
+      lookup: replayLookup({}),
+    });
+    expect(fullyRouted).toBe(false);
+    expect(degradedCauses).toEqual(['settled_by_bounds']);
   });
 });

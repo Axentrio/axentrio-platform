@@ -70,6 +70,7 @@ import {
   assessSlotRouted,
   recordingLookup,
   replayLookup,
+  routeBudget,
   type DriveRecords,
   type NeighbourLocation,
   type TravelVerdict,
@@ -944,13 +945,18 @@ export class InternalProvider implements BookingProvider {
 
     // Bound to this conversation, because that is the only scope a cached duration may have.
     const lookup = driveLookupFor(eligibility, ctx.session?.id ?? null);
+    // ONE budget for the whole list, not one per slot. A customer is waiting behind this and
+    // every lookup is a paid element, so the list is bounded in both — see `routeBudget`.
+    const budget = routeBudget();
 
     const cleared: Array<{ start: string; end: string }> = [];
     const requestableSlots: Array<{ start: string; end: string }> = [];
     const unreachableSlots: Array<{ start: string; end: string }> = [];
-    // Sequential on purpose. The slots of one availability check share both endpoints and
-    // differ only in departure time, so the earlier ones populate the cache the later ones
-    // read — running them concurrently would race every slot to a miss and pay for each.
+    // Sequential, and NOT because the cache makes later slots free — it does not. Slots share
+    // both endpoints but differ in departure time, and the traffic-aware bucket is finer than
+    // the usual slot spacing, so each one is its own key. Sequential so the shared budget is
+    // actually enforced: fired concurrently, every slot would pass the check before any of
+    // them decremented it.
     for (const slot of input.slots) {
       const { verdict } = await assessSlotRouted({
         candidate: {
@@ -961,6 +967,7 @@ export class InternalProvider implements BookingProvider {
         neighbours,
         slackMin: eligibility.slackMin,
         lookup,
+        budget,
       });
       if (verdict === 'clear') cleared.push(slot);
       else if (verdict === 'undecided') requestableSlots.push(slot);
@@ -1467,18 +1474,14 @@ export class InternalProvider implements BookingProvider {
           { placement, travelCheck: 'captured' }
         );
       }
-      // `degraded`, and NOT `ok`. CONTEXT.md is the vocabulary this column speaks and it
-      // defines the two: `ok` is "verified against routing", `degraded` is "decided on the
-      // haversine proofs alone". No routing call exists anywhere in this codebase yet, so every
-      // row written here is haversine-only — stamping `ok` would make them indistinguishable
-      // from a genuinely routed booking the moment routing lands, and would take away the one
-      // thing the degradation alert was ever going to key on.
+      // CONTEXT.md is the vocabulary this column speaks and it draws the line at whether a
+      // MEASUREMENT happened: `ok` is "verified against routing", `degraded` is "decided on
+      // the haversine bounds alone". A bound CLEARS a drive, it does not measure one — so
+      // even before the floor was found to be a calibration rather than a proof, clearing was
+      // never enough to earn `ok`.
       //
-      // The bounds ARE proofs, which is the argument for `ok`, and it is not enough: a
-      // pessimistic bound CLEARS a drive, it does not MEASURE one, and the glossary draws its
-      // line at whether the measurement happened. A column that under-claims can never be
-      // mistaken for a verification that never ran; one that over-claims is the silent
-      // wrongness this whole feature exists to prevent.
+      // A column that under-claims can never be mistaken for a verification that never ran;
+      // one that over-claims is the silent wrongness this whole feature exists to prevent.
       //
       // `ok` requires that EVERY constraining leg got a routing answer — a booking where the
       // bounds settled one leg and routing the other stays `degraded`, or the word means two

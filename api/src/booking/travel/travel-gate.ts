@@ -29,7 +29,13 @@ import {
 } from '../../contracts/travel';
 
 /**
- * `unreachable` and `clear` are PROOFS; `undecided` is the absence of one.
+ * `unreachable` is a proof; `clear` is either a proof or a measurement depending on how it
+ * was reached; `undecided` is the absence of both.
+ *
+ * The asymmetry is not sloppiness. `unreachable` from `couldReachWithin` really is
+ * conclusive — nothing beats a straight line at motorway speed. `clear` is conclusive when
+ * routing measured it, and a calibrated bet when only `certainlyReachableWithin` did, which
+ * is exactly the distinction `travel_check` records as `ok` versus `degraded`.
  *
  * Named for what is known rather than for what to do about it, because the two callers do
  * different things with the same verdict: availability withholds an `undecided` slot from the
@@ -336,6 +342,49 @@ export type DriveLookup = (leg: RoutableLeg) => Promise<RoutedLeg>;
 /** Drive answers from one pass, so a later pass can reach the same verdict without asking again. */
 export type DriveRecords = Record<string, RoutedLeg>;
 
+/**
+ * How many drives one availability check may buy, and how long it may take buying them.
+ *
+ * THE CACHE DOES NOT SAVE YOU HERE, and assuming it did was the mistake this exists to fix.
+ * Consecutive candidate slots share both endpoints and differ only in departure time — but
+ * the traffic-aware cache buckets at a quarter hour while slots are commonly half an hour
+ * apart, so every slot lands in its own bucket and shares nothing. A morning of eight slots
+ * with a job either side is sixteen distinct lookups, each a paid element and each a
+ * round-trip a customer is sitting behind.
+ *
+ * Ten is the same ceiling the lazy geocode path took, for the same reason: it bounds the
+ * FIRST query over a busy diary rather than trusting that a later one will be cheaper.
+ */
+const MAX_ROUTE_LOOKUPS_PER_CALL = 10;
+
+/**
+ * And the latency bound, because a count cap is not one.
+ *
+ * Ten lookups that each time out at five seconds is fifty seconds of silence in a chat
+ * window, and that happens exactly when Google is unreachable — when every one of them was
+ * going to fail anyway. Like the geocode deadline this bounds when the LAST lookup may
+ * START, so the real ceiling is this plus one client timeout. Racing an in-flight request
+ * against a timer would abandon a call Google has already been paid for.
+ */
+const ROUTE_LOOKUP_DEADLINE_MS = 8_000;
+
+export interface RouteBudget {
+  remaining: number;
+  deadline: number;
+}
+
+/** One budget per availability check, shared by every slot in it. */
+export function routeBudget(): RouteBudget {
+  return { remaining: MAX_ROUTE_LOOKUPS_PER_CALL, deadline: Date.now() + ROUTE_LOOKUP_DEADLINE_MS };
+}
+
+/** Spend one, or report that there is nothing left to spend. */
+function claimRouteBudget(budget: RouteBudget): boolean {
+  if (budget.remaining <= 0 || Date.now() >= budget.deadline) return false;
+  budget.remaining -= 1;
+  return true;
+}
+
 /** Identity of a leg: both ends at ~11 m, and the minute the van leaves. */
 export function legKey(leg: RoutableLeg): string {
   const p = (v: number): string => v.toFixed(5);
@@ -375,6 +424,16 @@ export interface RoutedLeg {
   minutes: number | null;
   /** Routing looked and there is no drivable route at all — a definite no. */
   noRoute?: boolean;
+  /**
+   * WHY it could not answer, when it could not.
+   *
+   * Carried rather than collapsed because the responses differ and #68 is required to tell
+   * them apart: a spent cap is one tenant's problem and a revoked key is everybody's. This is
+   * the only place in the system where that distinction exists — the column records only THAT
+   * a booking degraded, never why — so discarding it here would leave the alert with nothing
+   * to key on but a count.
+   */
+  cause?: string;
 }
 
 export interface RoutedAssessment {
@@ -389,6 +448,11 @@ export interface RoutedAssessment {
    * look like — which #68's alert would then inherit.
    */
   fullyRouted: boolean;
+  /**
+   * Distinct reasons a leg went unanswered, in the order they were met. Empty when routing
+   * answered everything, or when nothing needed asking. Not persisted — #68's to consume.
+   */
+  degradedCauses: string[];
 }
 
 /**
@@ -411,6 +475,11 @@ export async function assessSlotRouted(input: {
   neighbours: TravelNeighbour[];
   slackMin: number;
   lookup: DriveLookup;
+  /**
+   * Shared across every slot of one availability check — see `routeBudget`. Omitted means
+   * unbounded, which is right for the single-slot create path and wrong for a list.
+   */
+  budget?: RouteBudget;
 }): Promise<RoutedAssessment> {
   const outcomes = [
     assessSide(input.candidate, precedingNeighbour(input.neighbours, input.candidate), input.slackMin, 'before'),
@@ -420,10 +489,25 @@ export async function assessSlotRouted(input: {
   const resolved: SideOutcome[] = [];
   // A leg the bounds settled counts against `fullyRouted` — see RoutedAssessment.
   let routedEvery = true;
+  const causes = new Set<string>();
 
   for (const outcome of outcomes) {
     if (outcome.verdict !== 'undecided' || !outcome.leg) {
-      if (outcome.constraining && outcome.verdict !== 'undecided') routedEvery = false;
+      if (outcome.constraining && outcome.verdict !== 'undecided') {
+        // Settled by the bounds, so nothing was unavailable — it simply was not measured.
+        routedEvery = false;
+        causes.add('settled_by_bounds');
+      }
+      resolved.push(outcome);
+      continue;
+    }
+
+    // Checked BEFORE each lookup, so a spent budget degrades exactly like an outage rather
+    // than half-answering a slot list. The remaining slots stay undecided, which withholds
+    // them into Requests — the safe direction.
+    if (input.budget && !claimRouteBudget(input.budget)) {
+      routedEvery = false;
+      causes.add('budget_spent');
       resolved.push(outcome);
       continue;
     }
@@ -435,8 +519,9 @@ export async function assessSlotRouted(input: {
       continue;
     }
     if (answer.minutes === null || !Number.isFinite(answer.minutes)) {
-      // Degraded: leave it exactly where the bounds left it.
+      // Degraded: leave it exactly where the bounds left it, but keep WHY.
       routedEvery = false;
+      causes.add(answer.cause ?? 'unknown');
       resolved.push(outcome);
       continue;
     }
@@ -449,5 +534,5 @@ export async function assessSlotRouted(input: {
   const verdict = combine(input.candidate, resolved);
   // `ok` is only ever a claim about a CLEARED slot. A refusal needs no such stamp, and an
   // undecided one is a Request by definition.
-  return { verdict, fullyRouted: verdict === 'clear' && routedEvery };
+  return { verdict, fullyRouted: verdict === 'clear' && routedEvery, degradedCauses: [...causes] };
 }

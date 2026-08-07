@@ -22,7 +22,7 @@
  * silently rewritten, and travel simply returns when the diaries separate again.
  *
  * WHAT IS DELIBERATELY NOT HERE: the spend cap. Exhausting it is not inertness — it is
- * ADR-0015's degraded branch, where the haversine proofs still refuse the impossible slots
+ * ADR-0015's degraded branch, where the haversine bounds still refuse the impossible slots
  * and still confirm the certain ones. Folding it in would turn a graceful degradation into
  * a silent fail-open. See `isTravelSpendExhausted`.
  */

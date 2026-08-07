@@ -29,7 +29,6 @@ import {
   useCancelBooking,
   useRescheduleBooking,
   useAcceptRequest,
-  useRequestTravelEstimate,
   useDeclineRequest,
   useBookingAvailability,
   useServices,
@@ -352,10 +351,10 @@ function BookingRow({
   onDecline: () => void;
 }) {
   const pill = statusPill(booking.status);
-  // Only for a request, because that is the only row anyone is about to override. Accepting is
-  // an owner override of a drive the gate could not clear; an override whose grounds nobody can
-  // see is a rubber stamp, which is the failure the design names in its own opening paragraph.
-  const { data: travel, isLoading: travelLoading } = useRequestTravelEstimate(booking.id, isRequest);
+  // Comes down WITH the list, not fetched per row. It has to be on the row — accepting is an
+  // owner override and the button is right here — but a fetch inside this component turned
+  // thirty requests into thirty calls to learn thirty times that travel is off.
+  const travel = booking.travelEstimate;
   return (
     <li className="flex items-start gap-4 px-4 py-4">
       <div className="min-w-0 flex-1">
@@ -436,7 +435,7 @@ function BookingRow({
           single figure would be a guess wearing the clothes of a measurement, handed to the one
           person who must not be given one.
         */}
-        {isRequest && !travelLoading && travel && (
+        {isRequest && travel && (
           <div className="mt-1 text-xs text-text-secondary" data-testid="travel-estimate">
             {[
               travel.before && `${travel.before.km} km from the job before (${travel.before.fastestMin}-${travel.before.slowestMin} min)`,

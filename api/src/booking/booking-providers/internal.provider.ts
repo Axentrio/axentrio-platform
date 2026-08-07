@@ -55,7 +55,6 @@ import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
 import {
-  ensureBookingPlace,
   placeBookingAddress,
   placeAddressFor,
   bookingPlaceColumns,
@@ -67,16 +66,7 @@ import {
 import type { GeoPoint } from '../../contracts/travel';
 import { resolveTravelEligibility, type ActiveTravelEligibility } from '../travel/travel-eligibility';
 import { loadTravelNeighbours, loadStoredNeighbours } from '../travel/travel-neighbours';
-import {
-  assessSlot,
-  estimateDrive,
-  precedingNeighbour,
-  followingNeighbour,
-  type DriveEstimate,
-  type NeighbourLocation,
-  type TravelNeighbour,
-  type TravelVerdict,
-} from '../travel/travel-gate';
+import { assessSlot, type NeighbourLocation, type TravelVerdict } from '../travel/travel-gate';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -2314,61 +2304,6 @@ export class InternalProvider implements BookingProvider {
    * creates the calendar event, sends the confirmation, and schedules reminders. The
    * request's already-snapshotted uploaded_files ride along unchanged.
    */
-  /**
-   * The drive either side of a captured Request, for the owner deciding whether to accept it.
-   *
-   * ADR-0015 makes acceptance an OVERRIDE: the gate does not run, the owner decides. That only
-   * means anything if they can see what they are overriding. An accept button next to a job the
-   * system quietly判 refused is a rubber stamp, which is the failure ADR-0015 names in its own
-   * opening paragraph.
-   *
-   * Honest about what it is not. Nothing has routed anything, so this is a straight line between
-   * two points at the two speed bounds the gate reasons with, and the range is wide on purpose.
-   * `null` beats a fabricated number every time: travel off, no usable position on the request,
-   * or neither neighbour placed all return nothing, and an owner reading "not known" can pick up
-   * the phone.
-   */
-  async requestTravelEstimate(
-    ctx: BookingContext,
-    booking: Booking
-  ): Promise<{ before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' } | null> {
-    const service = await this.serviceForBooking(booking);
-    if (!service.customerAddressRequired) return null;
-    const itineraryKey = await resolveItineraryKey(ctx.bot.id);
-    const eligibility = await resolveTravelEligibility({
-      tenantId: ctx.tenant.id,
-      botId: ctx.bot.id,
-      itineraryKey,
-    });
-    if (!eligibility.active) return null;
-
-    const place = await ensureBookingPlace(booking, eligibility);
-    if (!place) return null;
-
-    const { neighbours } = await loadTravelNeighbours({
-      eligibility,
-      botId: ctx.bot.id,
-      from: booking.startUtc,
-      to: booking.endUtc,
-      // A request holds no blocked range, so it is not among its own neighbours anyway — but
-      // excluding it explicitly keeps this honest if that ever changes.
-      excludeBookingId: booking.id,
-    });
-    const { blockedStart, blockedEnd } = this.blockedRangeFor(service, booking.startUtc, booking.endUtc);
-    const point = { lat: place.lat, lng: place.lng };
-    const before = precedingNeighbour(neighbours, { blockedStart });
-    const after = followingNeighbour(neighbours, { blockedEnd });
-    const leg = (n: TravelNeighbour | null): DriveEstimate | null =>
-      n && (n.location.kind === 'known' || n.location.kind === 'coarse')
-        ? estimateDrive(n.location.point, point)
-        : null;
-
-    const estimate = { before: leg(before), after: leg(after), basis: 'distance' as const };
-    // Nothing on either side that could be measured. Saying so is the answer; inventing a
-    // number for an empty day would be worse than silence.
-    return estimate.before || estimate.after ? estimate : null;
-  }
-
   async acceptRequest(ctx: BookingContext, bookingId: string): Promise<CreateBookingResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     if (booking.provider !== 'internal' || booking.status !== 'request_created') {

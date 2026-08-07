@@ -24,6 +24,17 @@ import { InternalProvider } from './booking-providers/internal.provider';
 import { upsertLead } from '../leads/lead-capture.service';
 import { requireFeature } from '../billing/enforce';
 import { buildIntakeAnswers } from './intake-answers';
+import { logger } from '../utils/logger';
+import { resolveItineraryKey } from '../scheduler/itinerary-key';
+import { resolveTravelEligibility } from './travel/travel-eligibility';
+import { loadTravelNeighbours } from './travel/travel-neighbours';
+import { storedPlace } from './travel/booking-place';
+import {
+  estimateDrive,
+  precedingNeighbour,
+  followingNeighbour,
+  type DriveEstimate,
+} from './travel/travel-gate';
 
 // Re-export so existing importers (`import { BookingError } from './booking.service'`)
 // keep working unchanged.
@@ -259,6 +270,8 @@ export interface AdminBookingRow {
   /** P5a: captured contact details (null when not collected). */
   customerAddress?: string | null;
   customerPhone?: string | null;
+  /** Requests only: the drive either side, from distance alone. Null when nothing can be said. */
+  travelEstimate?: { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' } | null;
   /** P5e: attached files (snapshot subset for display/download). */
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
 }
@@ -292,6 +305,63 @@ async function buildAdminContext(tenantId: string, booking: Booking): Promise<Bo
     // which is the failure the read side already had to fix once.
     travelPolicy: 'annotate',
   };
+}
+
+/**
+ * The drive either side of every request on ONE page, from one diary read.
+ *
+ * THE COST SHAPE IS THE POINT. Per-row this is N HTTP calls and N diary reads to answer the
+ * same question N times; here it is one span covering every request on the page, loaded once and
+ * matched in memory. The requests a business is looking at cluster in time, so that span is
+ * usually a few days.
+ *
+ * Everything expensive is behind the same four gates the rest of travel is, so for every tenant
+ * on the platform today this returns an empty map after one settings read.
+ *
+ * Never throws. An estimate is a courtesy on a list; failing to produce one must not fail the
+ * list.
+ */
+async function travelEstimatesForRequests(
+  tenantId: string,
+  botId: string,
+  rows: Booking[],
+  services: ServiceType[]
+): Promise<Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>> {
+  const out = new Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>();
+  const travelServices = new Set(services.filter((s) => s.customerAddressRequired).map((s) => s.id));
+  const candidates = rows.filter((b) => b.eventTypeId && travelServices.has(b.eventTypeId));
+  if (!candidates.length) return out;
+
+  try {
+    const itineraryKey = await resolveItineraryKey(botId);
+    const eligibility = await resolveTravelEligibility({ tenantId, botId, itineraryKey });
+    if (!eligibility.active) return out;
+
+    const from = new Date(Math.min(...candidates.map((b) => b.startUtc.getTime())));
+    const to = new Date(Math.max(...candidates.map((b) => b.endUtc.getTime())));
+    const { neighbours } = await loadTravelNeighbours({ eligibility, botId, from, to });
+
+    for (const b of candidates) {
+      // A request holds no blocked range, so its own row is not among the neighbours and there
+      // is nothing to exclude. Its place is read from the row rather than resolved: a list is
+      // not the place to spend an element, and a request whose address was never placed simply
+      // has no estimate.
+      const place = storedPlace(b);
+      if (!place) continue;
+      const point = { lat: place.lat, lng: place.lng };
+      const before = precedingNeighbour(neighbours, { blockedStart: b.startUtc });
+      const after = followingNeighbour(neighbours, { blockedEnd: b.endUtc });
+      const leg = (n: typeof before): DriveEstimate | null =>
+        n && (n.location.kind === 'known' || n.location.kind === 'coarse')
+          ? estimateDrive(n.location.point, point)
+          : null;
+      const estimate = { before: leg(before), after: leg(after), basis: 'distance' as const };
+      if (estimate.before || estimate.after) out.set(b.id, estimate);
+    }
+  } catch (error) {
+    logger.warn('[Travel] could not estimate drives for the requests list', { tenantId, botId, error });
+  }
+  return out;
 }
 
 /** List the tenant anchor bot's internal bookings, upcoming or past. */
@@ -364,6 +434,15 @@ export async function adminListBookings(
   // Reuse the already-loaded service rows for the per-row intake-answer labels (no extra query).
   const questionsByService = new Map(services.map((s) => [s.id, s.intakeQuestions]));
 
+  // ONE diary read for the whole page, not one per row. Accepting a captured Request is an
+  // owner OVERRIDE (ADR-0015), and an override whose grounds nobody can see is a rubber stamp —
+  // so the drive has to be on the row, next to the button, before it is clicked. The first
+  // version of that put a fetch INSIDE the row component, which turned "thirty requests" into
+  // thirty HTTP calls to learn thirty times that travel is off. Same information, one query,
+  // computed here where the whole page is already in hand.
+  const estimateByBooking =
+    scope === 'requests' ? await travelEstimatesForRequests(tenantId, bot.id, rows, services) : new Map();
+
   return {
     total,
     bookings: rows.map((b) => ({
@@ -395,6 +474,13 @@ export async function adminListBookings(
        * server log, which meant a business could turn jobs away for months without knowing.
        */
       serviceAreaMatch: b.serviceAreaMatch ?? null,
+      /**
+       * How far this sits from the jobs either side of it — DISTANCE, not a routed drive, and
+       * labelled as such where it is rendered. Null whenever there is nothing honest to say:
+       * travel off, no usable position, or neither neighbour placed. An owner reading "not
+       * known" can pick up the phone; one reading a fabricated number cannot.
+       */
+      travelEstimate: estimateByBooking.get(b.id) ?? null,
       customerPhone: b.customerPhone ?? null,
       uploadedFiles: Array.isArray(b.uploadedFiles)
         ? (b.uploadedFiles as Array<Record<string, unknown>>)
@@ -479,30 +565,6 @@ export async function adminAcceptRequest(caller: BookingCaller, tenantId: string
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.acceptRequest(ctx, bookingId);
-}
-
-/**
- * How far this request is from the jobs either side of it, for the owner about to decide.
- *
- * AT THE MOMENT OF ACCEPTING, and not on the list. A list of thirty requests would mean thirty
- * diary reads to render a column nobody is looking at; the owner opening ONE request is the
- * moment the number matters and the moment it is cheap.
- *
- * DISTANCE, NOT ROUTING, and it says so. Nothing here has asked Google how long the drive takes
- * — that arrives with the routing ticket — so this is a straight line divided by the two speed
- * bounds the gate reasons with, presented as the range it is. `null` when travel does not apply,
- * when the request has no usable position, or when neither neighbour has one: an owner reading
- * "not known" can ask; an owner reading a fabricated "35 min" cannot.
- */
-export async function adminRequestTravelEstimate(
-  caller: BookingCaller,
-  tenantId: string,
-  bookingId: string
-) {
-  await enforceBookingsFeature(tenantId, caller);
-  const booking = await loadAdminBooking(tenantId, bookingId);
-  const ctx = await buildAdminContext(tenantId, booking);
-  return internalProvider.requestTravelEstimate(ctx, booking);
 }
 
 export async function adminDeclineRequest(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {

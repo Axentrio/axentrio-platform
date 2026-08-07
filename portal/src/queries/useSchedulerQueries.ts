@@ -304,6 +304,18 @@ export interface AdminBooking {
   customerAddress?: string | null;
   /** What the service-area gate saw. Null = it did not apply to this booking. */
   serviceAreaMatch?: 'inside' | 'outside' | 'unknown' | null;
+  /**
+   * Requests only: how far this sits from the jobs either side, from DISTANCE alone.
+   *
+   * Rides down with the list rather than being fetched per row. Null whenever there is nothing
+   * honest to say — travel off, no usable position, neither neighbour placed — and "not known"
+   * is what the owner should read then, never a fabricated number.
+   */
+  travelEstimate?: {
+    before: { km: number; fastestMin: number; slowestMin: number } | null;
+    after: { km: number; fastestMin: number; slowestMin: number } | null;
+    basis: 'distance';
+  } | null;
   customerPhone?: string | null;
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
   /** Whether the booking actually reached the owner's connected calendar. */
@@ -387,30 +399,6 @@ export function useCancelBooking() {
 }
 
 /** Accept a request_created lead → confirm it (creates the calendar event + email). */
-/**
- * How far a captured Request sits from the jobs either side of it.
- *
- * Fetched when the owner is LOOKING at the request, not with the list: accepting is an override
- * (ADR-0015), and an override nobody can see the grounds for is a rubber stamp. Enabled only for
- * a request, because that is the only row anyone is about to override.
- *
- * `null` data is a real answer and must be rendered as one — travel off, no usable position, or
- * neither neighbour placed. "Not known" is something an owner can act on; a fabricated number is
- * not.
- */
-export function useRequestTravelEstimate(bookingId: string | null, enabled: boolean) {
-  return useQuery({
-    queryKey: ['scheduler', 'travel-estimate', bookingId],
-    enabled: enabled && !!bookingId,
-    queryFn: async () =>
-      (await api.get<Any>(`/scheduler/bookings/${bookingId}/travel-estimate`)) as {
-        before: { km: number; fastestMin: number; slowestMin: number } | null;
-        after: { km: number; fastestMin: number; slowestMin: number } | null;
-        basis: 'distance';
-      } | null,
-  });
-}
-
 export function useAcceptRequest() {
   const queryClient = useQueryClient();
   return useMutation({

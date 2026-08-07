@@ -33,7 +33,6 @@ import {
   adminCancelBooking,
   adminRescheduleBooking,
   adminAcceptRequest,
-  adminRequestTravelEstimate,
   adminDeclineRequest,
 } from '../booking/booking.service';
 import { findPreset, listPresetSummaries, presetServiceSchema, presetAvailabilitySchema } from './presets';
@@ -632,23 +631,6 @@ export async function rescheduleBooking(req: Request, res: Response): Promise<vo
 }
 
 /** Accept a request_created lead → confirm it (creates the calendar event + email). */
-/**
- * GET /scheduler/bookings/:id/travel-estimate — what the owner is about to override.
- *
- * Read at the moment of accepting rather than on the requests LIST: thirty requests would mean
- * thirty diary reads for a column nobody is looking at, and the owner opening one request is
- * both when the number matters and when it is cheap. `null` when there is nothing honest to say.
- */
-export async function getRequestTravelEstimate(req: Request, res: Response): Promise<void> {
-  const tenantId = (req as { tenantId?: string }).tenantId!;
-  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  try {
-    sendSuccess(res, await adminRequestTravelEstimate('scheduler-admin', tenantId, req.params.id));
-  } catch (err) {
-    asApiError(err);
-  }
-}
-
 export async function acceptRequest(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);

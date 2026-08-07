@@ -250,25 +250,27 @@ export async function loadTravelNeighbours(input: {
     return venuePromise;
   };
 
-  // START-FROM-BASE IS NOT ENFORCED YET, and an owner who switched it on is entitled to know
-  // that rather than to discover it. It is named in the ACs of the settings screen and of its
-  // own ticket; until one of them lands, this line is the only thing standing between "quietly
-  // does nothing" and "nobody could have known".
-  if (input.eligibility.startFromBase) {
-    logger.warn('[Travel] travel_start_from_base is set but is not enforced yet', {
-      botId: input.botId,
-      tenantId: input.eligibility.tenantId,
-    });
-  }
-
   const neighbours = await readNeighbours(
     { query: (sql, params) => AppDataSource.getRepository(Booking).query(sql, params) },
     input,
     { budget, venue, allowLookups: true }
   );
+
+  // START-FROM-BASE FORCES THE VENUE, and without this the rule silently does nothing.
+  //
+  // The memo above is invoked only when a neighbour classifies as an at-premises job. An empty
+  // morning classifies none — and an empty morning is precisely the case the base exists for,
+  // since any constraining predecessor suppresses it. So the lazy path returns `venue: null`
+  // exactly when the base is needed, and a feature that passed every test seeding a premises
+  // job would do nothing whatsoever in production.
+  //
+  // Placed AFTER the scan rather than before it, so a diary that already needed the venue pays
+  // for one lookup rather than two, and so the day's other lookups get first call on the budget.
+  if (input.eligibility.startFromBase) await venue();
+
   // The venue is handed BACK, not just used. The transactional re-read cannot place it — it may
   // not touch the network — so whoever holds the lock needs the value this pass already paid
-  // for. Null when no premises job was seen, which is when nothing needed it.
+  // for. Null when nothing needed it: no premises job AND start-from-base off.
   return { neighbours, venue: venuePromise ? await venuePromise : null };
 }
 
@@ -363,6 +365,7 @@ async function readNeighbours(
     // Sequential rather than concurrent, because the lazy-geocode budget is a running total
     // and resolving in parallel would let every row read the same remaining count.
     neighbours.push({
+      bookingId: row.id,
       blockedStart: new Date(row.blocked_start),
       blockedEnd: new Date(row.blocked_end),
       location: await classify(row, input.eligibility, opts.budget, opts.venue, opts.allowLookups),

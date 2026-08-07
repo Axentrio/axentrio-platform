@@ -105,7 +105,15 @@ function baseWindowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWi
   return rule.weeklyHours?.[key] || [];
 }
 
-function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
+/**
+ * Exported for the travel gate's start-from-base rule, which needs a day's first opening
+ * instant and must not re-derive day hours. `dateOverrides` are authoritative — they replace
+ * a day's hours, close a day the weekly pattern opens, and open one it does not — so a second
+ * derivation reading `weeklyHours` alone would use an earlier opening than the day really has
+ * (falsely clearing an unreachable first job) or find no window on a one-off opening and
+ * suppress the check entirely.
+ */
+export function windowsForDay(rule: SlotEngineInput['rule'], day: DateTime): TimeWindow[] {
   const dateStr = day.toFormat('yyyy-MM-dd');
   // A multi-day closure is ONE row covering a range, so this is a containment test rather
   // than an equality one. `isWithinBusinessHours` shares this function, so analytics and the

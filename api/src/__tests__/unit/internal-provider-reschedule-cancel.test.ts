@@ -87,6 +87,29 @@ vi.mock('../../scheduler/calendar-provider', () => {
   };
 });
 
+// Travel time: the gates and the arithmetic are settled elsewhere. What matters here is what
+// the RESCHEDULE path does with a verdict, so only the verdict and the diary are injected.
+const placeAddressFor = vi.fn(async (..._a: unknown[]) => ({ applies: false }) as any);
+vi.mock('../../booking/travel/booking-place', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/booking-place')>();
+  return { ...actual, placeAddressFor: (...a: unknown[]) => placeAddressFor(...a) };
+});
+const resolveTravelEligibility = vi.fn(async (..._a: unknown[]) => ({ active: false as const, reason: 'no_api_key' as const }));
+vi.mock('../../booking/travel/travel-eligibility', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/travel-eligibility')>();
+  return { ...actual, resolveTravelEligibility: (...a: unknown[]) => resolveTravelEligibility(...a) };
+});
+const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => ({ neighbours: [] as unknown[], venue: null }));
+const loadStoredNeighbours = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
+vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/travel-neighbours')>();
+  return {
+    ...actual,
+    loadTravelNeighbours: (...a: unknown[]) => loadTravelNeighbours(...a),
+    loadStoredNeighbours: (...a: unknown[]) => loadStoredNeighbours(...a),
+  };
+});
+
 import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 
 const ctx: any = {
@@ -131,6 +154,101 @@ const confirmedBooking = () => ({
 });
 
 const NEW_START = '2026-06-10T08:00:00Z'; // 10:00 Brussels CEST — an offered slot
+
+/**
+ * A reschedule is a booking being made again — same job, different neighbours — so it earns the
+ * same travel check. Without it the gate is a front door with the side door left open.
+ */
+describe('InternalProvider.rescheduleBooking — travel', () => {
+  let provider: InternalProvider;
+  const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
+  const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
+  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false };
+  const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
+    blockedStart: new Date(start), blockedEnd: new Date(end), location: { kind: 'known', point },
+  });
+  const updateSql = () =>
+    (managerQuery.mock.calls.find((c: any) => String(c[0]).includes('UPDATE chatbot_bookings')) ?? []) as [string, unknown[]];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null as any);
+    resolveTravelEligibility.mockResolvedValue(ACTIVE as any);
+    placeAddressFor.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    loadTravelNeighbours.mockResolvedValue({ neighbours: [], venue: null });
+    loadStoredNeighbours.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(MOBILE);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), customerAddress: 'Kerkstraat 12, 9000 Gent' });
+    bookingRefFind.mockResolvedValue([]);
+    chatSessionFindOne.mockResolvedValue(null);
+    providerGetBusy.mockResolvedValue(null);
+    providerUpdateEvent.mockResolvedValue('no_connection');
+    bookingQuery.mockImplementation(async (sql: string) => (sql.includes('lower(blocked_range)') ? [] : []));
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('UPDATE chatbot_bookings')) return [{ sequence: 1 }];
+      return [];
+    });
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('refuses a move the owner provably cannot reach', async () => {
+    // Liège, ten minutes before the new 08:00 start.
+    loadTravelNeighbours.mockResolvedValue({
+      venue: null,
+      neighbours: [neighbour('2026-06-10T07:00:00Z', '2026-06-10T07:50:00Z', { lat: 50.6326, lng: 5.5797 })],
+    });
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'TRAVEL_TIME_CONFLICT',
+    });
+    expect(managerQuery).not.toHaveBeenCalled();
+  });
+
+  it('takes the address off the ROW — the customer is not asked again for a job that has not moved', async () => {
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(placeAddressFor).toHaveBeenCalledWith(ACTIVE, 'Kerkstraat 12, 9000 Gent');
+  });
+
+  it('re-asserts under the lock, so a neighbour that lands mid-confirm still refuses', async () => {
+    loadStoredNeighbours.mockResolvedValue([
+      neighbour('2026-06-10T07:00:00Z', '2026-06-10T07:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+    ]);
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'TRAVEL_TIME_CONFLICT',
+    });
+  });
+
+  it('REWRITES travel_check, because the move invalidates whatever the old time was checked against', async () => {
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const [sql, params] = updateSql();
+    expect(sql).toContain('travel_check=');
+    expect(params).toContain('degraded');
+  });
+
+  it('warns the OWNER rather than blocking them — their diary, their judgement', async () => {
+    // ADR-0015: feasibility is a hard constraint against the bot, never against the person who
+    // owns the diary. The portal picker already marks the risky rows.
+    loadTravelNeighbours.mockResolvedValue({
+      venue: null,
+      neighbours: [neighbour('2026-06-10T07:00:00Z', '2026-06-10T07:50:00Z', { lat: 50.6326, lng: 5.5797 })],
+    });
+    await expect(
+      provider.rescheduleBooking({ ...ctx, isAdmin: true, travelPolicy: 'annotate' } as never, 'bk-1', NEW_START)
+    ).resolves.toMatchObject({ success: true });
+    expect(updateSql()[1]).toContain('overridden');
+  });
+
+  it('leaves a service nobody drives to completely alone', async () => {
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).resolves.toMatchObject({ success: true });
+    expect(resolveTravelEligibility).not.toHaveBeenCalled();
+    expect(updateSql()[1]).toContain(null);
+  });
+});
 
 describe('InternalProvider reschedule / cancel / list', () => {
   let provider: InternalProvider;

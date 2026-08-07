@@ -128,7 +128,7 @@ describe('the query', () => {
 describe('classifying a row', () => {
   it('uses coordinates already on the row, free', async () => {
     query.mockResolvedValue([row()]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'known', point: { lat: 51.05, lng: 3.72 } });
     expect(geocode).not.toHaveBeenCalled();
     expect(byPlaceId).not.toHaveBeenCalled();
@@ -136,7 +136,7 @@ describe('classifying a row', () => {
 
   it('marks a town-centre placement coarse rather than known', async () => {
     query.mockResolvedValue([row({ geocode_precision: 'approximate' })]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location.kind).toBe('coarse');
   });
 
@@ -144,7 +144,7 @@ describe('classifying a row', () => {
     query.mockResolvedValue([
       row({ customer_address_required: false, location_type: 'phone', customer_address: null, customer_lat: null, customer_lng: null, customer_place_id: null, customer_coords_at: null }),
     ]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'locationless' });
   });
 
@@ -155,7 +155,7 @@ describe('classifying a row', () => {
     query.mockResolvedValue([
       row({ customer_coords_at: new Date(Date.now() - 31 * 24 * 3600_000).toISOString() }),
     ]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
     expect(n.location.kind).toBe('known');
   });
@@ -166,7 +166,7 @@ describe('classifying a row', () => {
     query.mockResolvedValue([
       row({ customer_coords_at: null, customer_lat: null, customer_lng: null }),
     ]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'unresolved' });
   });
 });
@@ -186,14 +186,14 @@ describe('a row whose service has been deleted', () => {
   it('still tries the place id the row carries', async () => {
     byPlaceId.mockResolvedValue({ status: 'placed', place: PLACE });
     query.mockResolvedValue([orphan()]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location.kind).toBe('known');
   });
 
   it('falls back to the address when there is no place id', async () => {
     geocode.mockResolvedValue({ status: 'placed', place: PLACE });
     query.mockResolvedValue([orphan({ customer_place_id: null })]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(geocode).toHaveBeenCalled();
     expect(n.location.kind).toBe('known');
   });
@@ -203,7 +203,7 @@ describe('a row whose service has been deleted', () => {
     // field deletion removes. Calling that "no constraint" would let a deleted travel job read
     // as an empty diary the moment its coordinates expired.
     query.mockResolvedValue([orphan({ customer_place_id: null, customer_address: null })]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'unresolved' });
   });
 });
@@ -223,7 +223,7 @@ describe('an at-premises job', () => {
     findOne.mockResolvedValue({ venueStreet: 'Grote Markt 1', venuePostalCode: '9000', venueCity: 'Gent', venueCountry: 'BE' });
     geocode.mockResolvedValue({ status: 'placed', place: PLACE });
     query.mockResolvedValue([premises]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'known', point: { lat: 51.05, lng: 3.72 } });
   });
 
@@ -249,7 +249,7 @@ describe('an at-premises job', () => {
       row({ id: 'id-0', customer_lat: null, customer_lng: null, customer_coords_at: null }),
       { ...premises, id: 'id-1' },
     ]);
-    const loaded = await load();
+    const loaded = (await load()).neighbours;
     expect(geocode).not.toHaveBeenCalled();
     expect(loaded[1].location).toEqual({ kind: 'unresolved' });
     vi.mocked(Date.now).mockRestore();
@@ -258,7 +258,7 @@ describe('an at-premises job', () => {
   it('is unresolved when the owner never entered their premises address', async () => {
     findOne.mockResolvedValue({});
     query.mockResolvedValue([premises]);
-    const [n] = await load();
+    const [n] = (await load()).neighbours;
     expect(n.location).toEqual({ kind: 'unresolved' });
     // Nothing to place, so nothing is spent trying.
     expect(geocode).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe('the lazy geocode budget', () => {
     query.mockResolvedValue(
       Array.from({ length: MAX_LAZY_GEOCODES_PER_CALL + 3 }, (_, i) => ({ ...unplaced, id: `id-${i}` }))
     );
-    const loaded = await load();
+    const loaded = (await load()).neighbours;
     expect(byPlaceId).toHaveBeenCalledTimes(MAX_LAZY_GEOCODES_PER_CALL);
     // Past the cap they are unresolved, which withholds a slot rather than clearing one — the
     // same answer a spent element cap gives.
@@ -305,7 +305,7 @@ describe('the lazy geocode budget', () => {
     query.mockResolvedValue([
       { ...unplaced, id: 'id-0' }, { ...unplaced, id: 'id-1' }, { ...unplaced, id: 'id-2' },
     ]);
-    const loaded = await load();
+    const loaded = (await load()).neighbours;
     expect(byPlaceId).toHaveBeenCalledTimes(1);
     expect(loaded.every((n) => n.location.kind === 'unresolved')).toBe(true);
     vi.mocked(Date.now).mockRestore();

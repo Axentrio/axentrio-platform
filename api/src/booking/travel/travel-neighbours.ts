@@ -168,7 +168,16 @@ async function classify(
   row: NeighbourRow,
   eligibility: ActiveTravelEligibility,
   budget: { remaining: number; deadline: number },
-  venue: () => Promise<NeighbourLocation>
+  venue: () => Promise<NeighbourLocation>,
+  /**
+   * False inside a transaction, where nothing may touch the network.
+   *
+   * ONE CLASSIFIER, TWO CALLERS, because two would drift on what a row MEANS — and the two
+   * readings are used to make the same decision moments apart, one advisory and one
+   * authoritative. With lookups off, every branch that would have reached Google returns
+   * `unresolved` instead: never `locationless`, which would clear a slot, and never a guess.
+   */
+  allowLookups: boolean
 ): Promise<NeighbourLocation> {
   const booking = asBooking(row);
 
@@ -192,6 +201,11 @@ async function classify(
   // its own address or place id. Both are worth one lookup.
   const worthResolving = isTravelJob || !!row.customer_place_id || !!row.customer_address?.trim();
   if (!worthResolving) return { kind: 'unresolved' };
+
+  // Inside the lock this is where the road ends. The pre-lock pass already resolved and wrote
+  // back every neighbour it could see, so a row still needing a lookup here is one that landed
+  // in the last few milliseconds — a genuine race, and the honest answer is that we do not know.
+  if (!allowLookups) return { kind: 'unresolved' };
 
   if (budget.remaining <= 0 || Date.now() >= budget.deadline) {
     logger.info('[Travel] neighbour left unresolved — lazy geocode budget spent for this call', {
@@ -223,11 +237,96 @@ export async function loadTravelNeighbours(input: {
   from: Date;
   to: Date;
   excludeBookingId?: string;
-}): Promise<TravelNeighbour[]> {
+}): Promise<{ neighbours: TravelNeighbour[]; venue: NeighbourLocation | null }> {
+  const budget = {
+    remaining: MAX_LAZY_GEOCODES_PER_CALL,
+    deadline: Date.now() + LAZY_GEOCODE_DEADLINE_MS,
+  };
+  // Resolved at most once per call however many premises jobs sit in the diary, and not at all
+  // when none do — an owner with no at-premises services never pays for their venue.
+  let venuePromise: Promise<NeighbourLocation> | null = null;
+  const venue = (): Promise<NeighbourLocation> => {
+    venuePromise ??= venueLocation(input.eligibility, input.botId, budget);
+    return venuePromise;
+  };
+
+  // START-FROM-BASE IS NOT ENFORCED YET, and an owner who switched it on is entitled to know
+  // that rather than to discover it. It is named in the ACs of the settings screen and of its
+  // own ticket; until one of them lands, this line is the only thing standing between "quietly
+  // does nothing" and "nobody could have known".
+  if (input.eligibility.startFromBase) {
+    logger.warn('[Travel] travel_start_from_base is set but is not enforced yet', {
+      botId: input.botId,
+      tenantId: input.eligibility.tenantId,
+    });
+  }
+
+  const neighbours = await readNeighbours(
+    { query: (sql, params) => AppDataSource.getRepository(Booking).query(sql, params) },
+    input,
+    { budget, venue, allowLookups: true }
+  );
+  // The venue is handed BACK, not just used. The transactional re-read cannot place it — it may
+  // not touch the network — so whoever holds the lock needs the value this pass already paid
+  // for. Null when no premises job was seen, which is when nothing needed it.
+  return { neighbours, venue: venuePromise ? await venuePromise : null };
+}
+
+/**
+ * The same diary, read INSIDE a transaction, where nothing may touch the network.
+ *
+ * WHY A SECOND ENTRY POINT AND NOT A FLAG ON THE FIRST. Holding a database transaction open
+ * across a network call is the pool-exhaustion pattern this codebase already warns about, and
+ * the pre-lock read both geocodes and writes back. Rather than trusting a caller to pass the
+ * right flag under a lock, the two are separate functions over one query and one classifier: the
+ * shape below cannot reach Google because it is never given the means to.
+ *
+ * `venue` is placed by the CALLER, outside the lock, and handed in. Absent ⇒ premises neighbours
+ * are `unresolved`, which withholds a slot rather than clearing one.
+ *
+ * A neighbour that would have needed a lookup reads `unresolved` here. The pre-lock pass already
+ * resolved and wrote back everything it could see, so such a row landed in the last few
+ * milliseconds — which is exactly the race this read exists to catch.
+ */
+export async function loadStoredNeighbours(
+  manager: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  input: {
+    eligibility: ActiveTravelEligibility;
+    from: Date;
+    to: Date;
+    excludeBookingId?: string;
+    venue: NeighbourLocation | null;
+  }
+): Promise<TravelNeighbour[]> {
+  const venue = input.venue ?? { kind: 'unresolved' as const };
+  return readNeighbours(manager, input, {
+    // Unreachable with lookups off, but the shape is shared, so it is given a spent one rather
+    // than a live one — belt as well as braces.
+    budget: { remaining: 0, deadline: 0 },
+    venue: async () => venue,
+    allowLookups: false,
+  });
+}
+
+/** The one query and the one loop, so the advisory and the authoritative read cannot drift. */
+async function readNeighbours(
+  runner: { query: (sql: string, params?: unknown[]) => Promise<unknown> },
+  input: {
+    eligibility: ActiveTravelEligibility;
+    from: Date;
+    to: Date;
+    excludeBookingId?: string;
+  },
+  opts: {
+    budget: { remaining: number; deadline: number };
+    venue: () => Promise<NeighbourLocation>;
+    allowLookups: boolean;
+  }
+): Promise<TravelNeighbour[]> {
   const windowStart = new Date(input.from.getTime() - NEIGHBOUR_MARGIN_MS);
   const windowEnd = new Date(input.to.getTime() + NEIGHBOUR_MARGIN_MS);
 
-  const rows: NeighbourRow[] = await AppDataSource.getRepository(Booking).query(
+  const rows = (await runner.query(
     // LEFT JOIN, not INNER: `event_type_id` is nullable and service deletion sets it null, so
     // an inner join would drop held bookings out of the diary entirely — the exact rows whose
     // location is hardest to establish would become invisible instead of uncertain.
@@ -257,33 +356,7 @@ export async function loadTravelNeighbours(input: {
       windowEnd.toISOString(),
       input.excludeBookingId ?? null,
     ]
-  );
-
-  const budget = {
-    remaining: MAX_LAZY_GEOCODES_PER_CALL,
-    deadline: Date.now() + LAZY_GEOCODE_DEADLINE_MS,
-  };
-  // Resolved at most once per call however many premises jobs sit in the diary, and not at all
-  // when none do — an owner with no at-premises services never pays for their venue.
-  let venuePromise: Promise<NeighbourLocation> | null = null;
-  const venue = (): Promise<NeighbourLocation> => {
-    venuePromise ??= venueLocation(input.eligibility, input.botId, budget);
-    return venuePromise;
-  };
-
-  // START-FROM-BASE IS NOT ENFORCED YET, and an owner who switched it on is entitled to know
-  // that rather than to discover it. Gating the day's FIRST job against the premises needs a
-  // departure time, which only the business's opening hours can supply — a day boundary this
-  // ticket deliberately has none of, and whose interaction with an out-of-hours booking is
-  // real design rather than a line of code. It is named in the ACs of the write-time ticket
-  // and of the settings screen; until one of them lands, this line is the only thing standing
-  // between "quietly does nothing" and "nobody could have known".
-  if (input.eligibility.startFromBase) {
-    logger.warn('[Travel] travel_start_from_base is set but is not enforced yet', {
-      botId: input.botId,
-      tenantId: input.eligibility.tenantId,
-    });
-  }
+  )) as NeighbourRow[];
 
   const neighbours: TravelNeighbour[] = [];
   for (const row of rows) {
@@ -292,7 +365,7 @@ export async function loadTravelNeighbours(input: {
     neighbours.push({
       blockedStart: new Date(row.blocked_start),
       blockedEnd: new Date(row.blocked_end),
-      location: await classify(row, input.eligibility, budget, venue),
+      location: await classify(row, input.eligibility, opts.budget, opts.venue, opts.allowLookups),
     });
   }
   return neighbours;

@@ -65,8 +65,8 @@ import {
 } from '../travel/booking-place';
 import type { GeoPoint } from '../../contracts/travel';
 import { resolveTravelEligibility, type ActiveTravelEligibility } from '../travel/travel-eligibility';
-import { loadTravelNeighbours } from '../travel/travel-neighbours';
-import { assessSlot, type TravelNeighbour, type TravelVerdict } from '../travel/travel-gate';
+import { loadTravelNeighbours, loadStoredNeighbours } from '../travel/travel-neighbours';
+import { assessSlot, type NeighbourLocation, type TravelVerdict } from '../travel/travel-gate';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -926,7 +926,7 @@ export class InternalProvider implements BookingProvider {
       return unjudged(placement.applies && placement.outcome === 'not_placeable' ? 'not_placeable' : 'lookup_unavailable');
     }
     const candidate = travelCandidatePoint(placement);
-    const neighbours = await loadTravelNeighbours({
+    const { neighbours } = await loadTravelNeighbours({
       eligibility,
       botId: ctx.bot.id,
       from: new Date(input.rangeStart),
@@ -1028,6 +1028,68 @@ export class InternalProvider implements BookingProvider {
    * a separate ticket; what this closes is the larger hole, which is a model booking a time
    * availability never offered.
    */
+  /**
+   * The same verdict, re-reached UNDER THE ADVISORY LOCK, as the last thing before the write.
+   *
+   * WHY IT EXISTS AT ALL. Everything the pre-lock check saw was true when it looked, and two
+   * customers finishing a conversation in the same second both see it. The `EXCLUDE USING gist`
+   * constraint that stops them taking the same slot understands OVERLAP and nothing else — it
+   * cannot express "these two are forty minutes apart and eighty kilometres apart", so without
+   * this both bookings pass every check and land back to back at addresses the owner cannot
+   * drive between. That is the exact failure this feature exists to prevent, arriving through
+   * the one door the feature had left open.
+   *
+   * NOTHING HERE TOUCHES THE NETWORK. `loadStoredNeighbours` reads the placement columns and
+   * cannot geocode; a neighbour it cannot place reads `unresolved`, which never clears a slot.
+   * The venue was placed outside the lock and is handed in. Holding a transaction open across a
+   * network call is the pool-exhaustion pattern `loadBusinessRules` already warns about.
+   *
+   * AND `undecided` IS A CONFLICT HERE, though it is a Request outside. There is nowhere to
+   * capture a Request inside somebody else's transaction, and the honest answer to "a neighbour
+   * appeared that I cannot vouch for" is to send the caller back to availability, which is where
+   * the Request lives. That is the same 409 a genuinely impossible drive gets, and the message
+   * says what to do rather than what happened.
+   */
+  private async assertTravelFeasible(
+    manager: EntityManager,
+    input: {
+      eligibility: ActiveTravelEligibility;
+      service: Pick<ResolvedService, 'bufferBeforeMin' | 'bufferAfterMin'>;
+      candidate: { point: GeoPoint; coarse: boolean };
+      venue: NeighbourLocation | null;
+      start: Date;
+      end: Date;
+      excludeBookingId?: string;
+    }
+  ): Promise<void> {
+    const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
+    const neighbours = await loadStoredNeighbours(manager, {
+      eligibility: input.eligibility,
+      from: input.start,
+      to: input.end,
+      excludeBookingId: input.excludeBookingId,
+      venue: input.venue,
+    });
+    const verdict = assessSlot({
+      candidate: { blockedStart, blockedEnd, point: input.candidate.point, coarse: input.candidate.coarse },
+      neighbours,
+      slackMin: input.eligibility.slackMin,
+    });
+    if (verdict === 'clear') return;
+
+    logger.info('[Travel] refused under the lock — the diary moved after the pre-lock check', {
+      tenantId: input.eligibility.tenantId,
+      itineraryKey: input.eligibility.itineraryKey,
+      start: input.start.toISOString(),
+      verdict,
+    });
+    throw new BookingError(
+      'Another appointment was taken while this one was being confirmed, and this time can no longer be reached from it. Check availability again and offer one of the times it returns.',
+      'TRAVEL_TIME_CONFLICT',
+      409
+    );
+  }
+
   private async travelVerdictForBooking(
     ctx: BookingContext,
     input: {
@@ -1038,21 +1100,25 @@ export class InternalProvider implements BookingProvider {
       end: Date;
       excludeBookingId?: string;
     }
-  ): Promise<TravelVerdict> {
+  ): Promise<{ verdict: TravelVerdict; candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null }> {
     const candidate = travelCandidatePoint(input.placement);
     const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
-    const neighbours: TravelNeighbour[] = await loadTravelNeighbours({
+    // The candidate point and the venue are carried out of here so the in-lock assert can reuse
+    // them: it may not geocode, and re-deriving either would be a second answer to a question
+    // this pass already paid Google to answer once.
+    const { neighbours, venue } = await loadTravelNeighbours({
       eligibility: input.eligibility,
       botId: ctx.bot.id,
       from: input.start,
       to: input.end,
       excludeBookingId: input.excludeBookingId,
     });
-    return assessSlot({
+    const verdict = assessSlot({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
       neighbours,
       slackMin: input.eligibility.slackMin,
     });
+    return { verdict, candidate, venue };
   }
 
   /**
@@ -1313,12 +1379,15 @@ export class InternalProvider implements BookingProvider {
     // becomes a Request, which is the platform's answer to every booking it cannot safely
     // confirm, and only a drive PROVEN impossible is turned away.
     let travelCheck: 'degraded' | 'captured' | null = null;
+    // Non-null only when the gate ran AND cleared, which is the only path that reaches the
+    // transaction. Everything else has already thrown or become a Request by then.
+    let travelSnapshot: { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null } | null = null;
     if (travelEligibility.active) {
       // An address we could not place at all still stops here, exactly as it did before there
       // was a drive to check: there is a postcode that would settle it and the prompt asks for
       // one. Everything else below reasons over coordinates.
       assertPlaceableForTravel(placement);
-      const verdict =
+      const checked =
         placement.applies && placement.outcome === 'placed'
           ? await this.travelVerdictForBooking(ctx, {
               eligibility: travelEligibility,
@@ -1331,7 +1400,13 @@ export class InternalProvider implements BookingProvider {
             // vague, so there is no question worth asking them — and nothing to reason over,
             // which ADR-0015 answers with a Request rather than a confirmation of a drive
             // nobody checked or a refusal of a job the owner may well want.
-            'undecided';
+            null;
+      const verdict: TravelVerdict = checked?.verdict ?? 'undecided';
+      // Carried into the transaction so the in-lock assert can re-reach this verdict without
+      // geocoding anything: the candidate's point and the venue were both paid for above.
+      travelSnapshot = checked && verdict === 'clear'
+        ? { candidate: checked.candidate, venue: checked.venue }
+        : null;
       if (verdict === 'unreachable') {
         logger.info('[Travel] refusing a booking the owner could not reach', {
           botId: ctx.bot.id,
@@ -1395,6 +1470,21 @@ export class InternalProvider implements BookingProvider {
           { start, end, blockedStart, blockedEnd },
           rule.timezone
         );
+        // LAST, and inside the lock. Everything above is a fact about this booking alone; this
+        // is the only check that asks what ELSE has landed in the diary since the pre-lock pass
+        // looked, and it is the only protection against two customers confirming in the same
+        // second at addresses the owner cannot drive between. The exclusion constraint below
+        // cannot help: it understands overlap, and these two do not overlap.
+        if (travelSnapshot && travelEligibility.active) {
+          await this.assertTravelFeasible(manager, {
+            eligibility: travelEligibility,
+            service,
+            candidate: travelSnapshot.candidate,
+            venue: travelSnapshot.venue,
+            start,
+            end,
+          });
+        }
         const rows: Array<{ id: string }> = await manager.query(
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
@@ -2528,6 +2618,60 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
     }
 
+    // CAN THE OWNER STILL GET THERE, at the new time? A reschedule is a booking being made
+    // again — the same job, against a different set of neighbours — so it earns the same check.
+    // Without it the gate is a front door with the side door left open: a customer who books a
+    // reachable slot and then moves it lands wherever they like.
+    //
+    // The address comes off the ROW, not from a caller. The customer gave it when they booked
+    // and has not been asked again; asking would be the wrong question anyway, since the job has
+    // not moved, only the time.
+    const travelEligibility = service.customerAddressRequired
+      ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
+      : { active: false as const, reason: 'bot_disabled' as const };
+    let travelSnapshot: { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null } | null = null;
+    let travelCheck: 'degraded' | 'overridden' | null = null;
+    if (travelEligibility.active && booking.customerAddress?.trim()) {
+      const placement = await placeAddressFor(travelEligibility, booking.customerAddress);
+      // An owner moving a job in their own diary is warned by their picker, never blocked
+      // (ADR-0015). A customer on a signed manage link gets the same enforcement the bot does:
+      // they may not move themselves into a drive nobody can make.
+      const enforcing = ctx.travelPolicy !== 'annotate';
+      const checked =
+        placement.applies && placement.outcome === 'placed'
+          ? await this.travelVerdictForBooking(ctx, {
+              eligibility: travelEligibility,
+              service,
+              placement,
+              start,
+              end,
+              excludeBookingId: bookingId,
+            })
+          : null;
+      const verdict: TravelVerdict = checked?.verdict ?? 'undecided';
+      if (verdict !== 'clear' && enforcing) {
+        logger.info('[Travel] refusing a reschedule the owner could not reach', {
+          botId: ctx.bot.id,
+          tenantId: ctx.tenant.id,
+          bookingId,
+          verdict,
+        });
+        throw new BookingError(
+          verdict === 'unreachable'
+            ? 'That time cannot be reached from the appointments either side of it. Offer one of the other available times instead, and do not retry this one.'
+            : 'The journey to that time could not be checked. Check availability again and offer one of the times it returns.',
+          'TRAVEL_TIME_CONFLICT',
+          409
+        );
+      }
+      travelSnapshot = checked && verdict === 'clear' ? { candidate: checked.candidate, venue: checked.venue } : null;
+      // The MOVE invalidates whatever the old time was checked against, so the column is
+      // rewritten rather than left describing a journey nobody is making any more. `degraded`
+      // when the proofs cleared it (routing does not exist yet); `overridden` when the owner
+      // moved it anyway past a verdict that did not clear.
+      travelCheck = verdict === 'clear' ? 'degraded' : 'overridden';
+    }
+
     // Single atomic UPDATE under the itinerary lock: frees the old slot and
     // reserves the new one in one statement; the exclusion constraint validates
     // the new range against other bookings (the row is excluded from itself).
@@ -2554,6 +2698,17 @@ export class InternalProvider implements BookingProvider {
           rule.timezone,
           bookingId
         );
+        if (travelSnapshot && travelEligibility.active) {
+          await this.assertTravelFeasible(manager, {
+            eligibility: travelEligibility,
+            service,
+            candidate: travelSnapshot.candidate,
+            venue: travelSnapshot.venue,
+            start,
+            end,
+            excludeBookingId: bookingId,
+          });
+        }
         const rows = returningRows<{ sequence: number }>(await manager.query(
           // `calendar_key` MOVES WITH THE BOOKING, and until now it did not.
           //
@@ -2573,7 +2728,7 @@ export class InternalProvider implements BookingProvider {
           // the same line, in the path that was missing it.
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
-                  calendar_key=$5, sequence=sequence+1, updated_at=now()
+                  calendar_key=$5, travel_check=$8, sequence=sequence+1, updated_at=now()
             WHERE id=$6 AND tenant_id=$7 AND status='confirmed'
             RETURNING sequence`,
           [
@@ -2584,6 +2739,10 @@ export class InternalProvider implements BookingProvider {
             itineraryKey,
             bookingId,
             ctx.tenant.id,
+            // Null when travel did not apply, which also CLEARS a stale value from a booking
+            // whose service or Agent stopped needing one. A check nobody ran must not be
+            // inherited from a time nobody is keeping.
+            travelCheck,
           ]
         ));
         if (!rows.length) {

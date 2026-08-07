@@ -157,10 +157,17 @@ vi.mock('../../booking/travel/travel-eligibility', async (importOriginal) => {
 
 // The diary the gate reasons over. Loading it is settled in travel-neighbours.test.ts; the
 // arithmetic is settled in travel-gate.test.ts. Both stay REAL below — only the rows are given.
-const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
+// Returns the diary AND the venue it placed: the in-lock re-read may not geocode, so the
+// pre-lock pass hands the venue point forward rather than making the transaction find it.
+const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => ({ neighbours: [] as unknown[], venue: null }));
+const loadStoredNeighbours = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
 vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/travel-neighbours')>();
-  return { ...actual, loadTravelNeighbours: (...a: unknown[]) => loadTravelNeighbours(...a) };
+  return {
+    ...actual,
+    loadTravelNeighbours: (...a: unknown[]) => loadTravelNeighbours(...a),
+    loadStoredNeighbours: (...a: unknown[]) => loadStoredNeighbours(...a),
+  };
 });
 
 import type { BookingPlacement } from '../../booking/travel/booking-place';
@@ -1372,7 +1379,8 @@ describe('InternalProvider.createBooking - travel placement', () => {
     placeBookingAddress.mockResolvedValue({ applies: false });
     placeAddressFor.mockResolvedValue({ applies: false });
     resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'no_api_key' } as any);
-    loadTravelNeighbours.mockResolvedValue([]);
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
+    loadStoredNeighbours.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -1493,10 +1501,10 @@ describe('InternalProvider.createBooking - travel placement', () => {
     beforeEach(() => travelling({ applies: true, outcome: 'placed', place: PLACE }));
 
     it('confirms and stamps `degraded` when the drives either side are PROVEN', async () => {
-      loadTravelNeighbours.mockResolvedValue([
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
         // Metres away, finishing an hour before the 07:00 slot. Nothing here is in doubt.
         neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 }),
-      ]);
+      ] });
       await expect(single('idem-gate-clear')).resolves.toMatchObject({ success: true });
       // `degraded`, not `ok`, and the glossary is what decides: CONTEXT.md defines `ok` as
       // "verified against routing" and `degraded` as "decided on the haversine proofs alone".
@@ -1506,7 +1514,7 @@ describe('InternalProvider.createBooking - travel placement', () => {
     });
 
     it('never writes `ok` — that word belongs to a routing answer nobody has yet', async () => {
-      loadTravelNeighbours.mockResolvedValue([]);
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
       await expect(single('idem-gate-empty-day')).resolves.toMatchObject({ success: true });
       expect(insertParam(writtenInsert(), 'travel_check')).not.toBe('ok');
     });
@@ -1514,9 +1522,9 @@ describe('InternalProvider.createBooking - travel placement', () => {
     it('refuses a time the owner provably cannot reach', async () => {
       // Liège is ~87 km from Gent as the crow flies, and the job before this one ends ten
       // minutes earlier. Not even a straight line at motorway speed fits.
-      loadTravelNeighbours.mockResolvedValue([
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
         neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
-      ]);
+      ] });
       await expect(single('idem-gate-refuse')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
       // Refused before anything was written, not rolled back after.
       expect(managerQuery).not.toHaveBeenCalled();
@@ -1525,9 +1533,9 @@ describe('InternalProvider.createBooking - travel placement', () => {
     it('captures the undecided middle instead of confirming or refusing it', async () => {
       // ~47 km with an hour to cover it: possible at motorway speed, not proven at a crawl.
       // Without a routing answer that is an opinion, and an opinion is the owner's to hold.
-      loadTravelNeighbours.mockResolvedValue([
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
         neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
-      ]);
+      ] });
       await expect(single('idem-gate-middle')).resolves.toMatchObject({ requested: true });
       const insert = writtenInsert();
       expect(insertParam(insert, 'travel_check')).toBe('captured');
@@ -1545,15 +1553,62 @@ describe('InternalProvider.createBooking - travel placement', () => {
       expect(insertParam(writtenInsert(), 'travel_check')).toBeNull();
     });
 
-    it('never reads the diary from inside the transaction', async () => {
+    it('never GEOCODES from inside the transaction — only the stored read runs there', async () => {
       // Holding a transaction open across a network call is the pool-exhaustion pattern this
-      // provider already warns about, and the gate both reads a diary and may geocode.
+      // provider already warns about, and the pre-lock pass both reads a diary and may geocode.
+      // The in-lock re-read is a different function precisely so it cannot: `loadStoredNeighbours`
+      // has no way to reach Google, and a neighbour it cannot place reads `unresolved`.
       loadTravelNeighbours.mockImplementation(async () => {
         expect(managerQuery).not.toHaveBeenCalled();
-        return [];
+        return { neighbours: [], venue: null };
       });
       await expect(single('idem-gate-outside')).resolves.toMatchObject({ success: true });
       expect(loadTravelNeighbours).toHaveBeenCalled();
+    });
+
+    it('RE-ASSERTS under the lock, after capacity and before the insert', async () => {
+      // The race guard. Two customers finishing in the same second both pass the pre-lock check;
+      // the exclusion constraint cannot catch them because their bookings do not overlap.
+      loadTravelNeighbours.mockResolvedValue({
+        venue: null,
+        neighbours: [neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 })],
+      });
+      await expect(single('idem-gate-relock')).resolves.toMatchObject({ success: true });
+      expect(loadStoredNeighbours).toHaveBeenCalled();
+      // Inside the transaction: the lock was taken before the stored read happened.
+      const lockedFirst = managerQuery.mock.calls.findIndex((c: any) =>
+        String(c[0]).includes('pg_advisory_xact_lock')
+      );
+      expect(lockedFirst).toBe(0);
+    });
+
+    it('refuses when a neighbour lands between the pre-lock check and the write', async () => {
+      // Nothing was there when availability looked; a Liège job appears while the customer is
+      // confirming. Under the lock it is visible, and the booking is refused rather than
+      // written back-to-back with a drive nobody can make.
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
+      loadStoredNeighbours.mockResolvedValue([
+        neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
+      ]);
+      await expect(single('idem-gate-raced')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
+      // Refused before the row was written.
+      expect(managerQuery.mock.calls.some((c: any) =>
+        String(c[0]).includes('INSERT INTO chatbot_bookings')
+      )).toBe(false);
+    });
+
+    it('treats a raced neighbour it cannot place as a conflict, never as clear', async () => {
+      // `loadStoredNeighbours` may not geocode, so a row that landed seconds ago reads
+      // `unresolved`. That can never clear a slot — the whole point of the fourth class.
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
+      loadStoredNeighbours.mockResolvedValue([
+        {
+          blockedStart: new Date('2026-06-10T06:00:00Z'),
+          blockedEnd: new Date('2026-06-10T06:50:00Z'),
+          location: { kind: 'unresolved' },
+        },
+      ]);
+      await expect(single('idem-gate-raced-unknown')).rejects.toMatchObject({ code: 'TRAVEL_TIME_CONFLICT' });
     });
 
     it('leaves travel_check null when travel is inert, rather than claiming a check', async () => {
@@ -1632,7 +1687,8 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     bookingSettingsFindOne.mockResolvedValue(null as any);
     resolveTravelEligibility.mockResolvedValue(ACTIVE as any);
     placeAddressFor.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
-    loadTravelNeighbours.mockResolvedValue([]);
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
+    loadStoredNeighbours.mockResolvedValue([]);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
     provider = new InternalProvider();
@@ -1691,9 +1747,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
   });
 
   it('offers every slot when the whole day is next door', async () => {
-    loadTravelNeighbours.mockResolvedValue([
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 51.0501, lng: 3.7201 }),
-    ]);
+    ] });
     const res = await check(ADDRESS);
     expect(res.slots).toHaveLength(4);
     expect(res.travel?.requestableSlots).toHaveLength(0);
@@ -1703,9 +1759,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
   it('drops only the starts the owner provably cannot reach', async () => {
     // A job in Liège finishing at 06:50 UTC, ~87 km from the customer. The 07:00 start is
     // ten minutes later and impossible; the later starts have the hours it needs.
-    loadTravelNeighbours.mockResolvedValue([
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
-    ]);
+    ] });
     const res = await check(ADDRESS);
     expect(res.slots.some((s) => s.start === '2026-06-10T07:00:00.000Z')).toBe(false);
     // NAMED, not counted: an annotating caller has to mark the row it is showing, and no
@@ -1716,9 +1772,9 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
   it('hands the undecided middle back as times to REQUEST, not as an empty diary', async () => {
     // Brussels is ~47 km away: reachable at motorway speed, unproven at a crawl. Nothing
     // measured it, so nothing may confirm it — and nothing may hide it either.
-    loadTravelNeighbours.mockResolvedValue([
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
-    ]);
+    ] });
     const res = await check(ADDRESS);
     // The last start of the morning has two and a half hours of clearance, which is enough
     // for 47 km even at the pessimistic crawl — so it is proven, offered, and NOT a request.
@@ -1768,18 +1824,18 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
 
     it('never removes a slot from the OWNER, and names the ones to warn about', async () => {
       // A Liège job ten minutes before the 07:00 start. The bot would never be offered it.
-      loadTravelNeighbours.mockResolvedValue([
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
         neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
-      ]);
+      ] });
       const res = await check(ADDRESS, owner);
       expect(res.slots).toHaveLength(4);
       expect(res.travel?.unreachableSlots.map((s) => s.start)).toContain('2026-06-10T07:00:00.000Z');
     });
 
     it('DOES remove it from the customer following a manage link', async () => {
-      loadTravelNeighbours.mockResolvedValue([
+      loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
         neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:50:00Z', { lat: 50.6326, lng: 5.5797 }),
-      ]);
+      ] });
       const res = await check(ADDRESS, customerLink);
       expect(res.slots.some((s) => s.start === '2026-06-10T07:00:00.000Z')).toBe(false);
     });

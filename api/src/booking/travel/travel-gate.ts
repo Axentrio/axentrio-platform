@@ -291,6 +291,12 @@ export function withBaseNeighbour(
   dayStart: Date
 ): TravelNeighbour[] {
   if (!base) return neighbours;
+  // A BASE IS ONLY EVER A PREDECESSOR, and this line is what keeps it one. Appended blind, the
+  // premises would also satisfy `followingNeighbour` for any candidate that ENDS before opening
+  // — an 07:00 job on a business that opens at 08:00 — and the gate would measure the drive
+  // home. Return-home is never gated: the owner's evening is not an appointment anyone can be
+  // late for, and refusing a slot because of it would invent a constraint out of the clock.
+  if (base.at.getTime() > candidate.blockedStart.getTime()) return neighbours;
   const suppressed = neighbours.some(
     (n) =>
       constrains(n) &&
@@ -344,8 +350,8 @@ export function firstJobOfDay(
  */
 export type FirstJobSelection =
   | { kind: 'none' }
-  | { kind: 'unplaced' }
-  | { kind: 'assessable'; candidate: TravelCandidate; others: TravelNeighbour[] };
+  | { kind: 'unplaced'; bookingId?: string }
+  | { kind: 'assessable'; bookingId?: string; candidate: TravelCandidate; others: TravelNeighbour[] };
 
 export function selectFirstJob(
   neighbours: TravelNeighbour[],
@@ -359,9 +365,13 @@ export function selectFirstJob(
   // point, and it must not be silently skipped either: skipping would let the day's first job
   // read as absent and clear a base leg nobody evaluated, which is the inversion `unresolved`
   // exists to prevent.
-  if (loc.kind !== 'known' && loc.kind !== 'coarse') return { kind: 'unplaced' };
+  if (loc.kind !== 'known' && loc.kind !== 'coarse') return { kind: 'unplaced', bookingId: first.bookingId };
   return {
     kind: 'assessable',
+    // Carried so a caller that lets an owner proceed past a non-clear verdict can restamp THIS
+    // booking's Travel Check. Its situation changed without it being written to, and a row left
+    // saying `ok` would claim a verification that no longer covers the journey it now has.
+    bookingId: first.bookingId,
     candidate: {
       blockedStart: first.blockedStart,
       blockedEnd: first.blockedEnd,

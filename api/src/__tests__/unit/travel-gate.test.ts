@@ -631,6 +631,16 @@ describe('withBaseNeighbour — when the premises count as the predecessor', () 
     expect(precedingNeighbour(out, cand)?.blockedEnd).toEqual(OPENING.at);
   });
 
+  it('is NEVER the FOLLOWING neighbour — return-home is not gated', () => {
+    // Appended blind, the premises also satisfy `followingNeighbour` for any candidate ending
+    // before opening, and the gate would measure the drive HOME. Assumption 7 is explicit that
+    // return-home is never gated: the owner's evening is not an appointment to be late for.
+    const early = candidate({ start: '2026-09-01T05:00:00Z', end: '2026-09-01T06:00:00Z' });
+    const out = withBaseNeighbour([], early, OPENING, DAY_START);
+    expect(followingNeighbour(out, early)).toBeNull();
+    expect(out).toEqual([]);
+  });
+
   it('is not the predecessor of a job that starts BEFORE opening', () => {
     // An owner who took an 07:00 booking outside their own hours is not departing from the
     // premises at 08:00. No special case is needed: the base simply ends after the candidate

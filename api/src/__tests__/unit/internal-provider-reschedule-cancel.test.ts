@@ -103,7 +103,7 @@ vi.mock('../../booking/travel/travel-eligibility', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/travel-eligibility')>();
   return { ...actual, resolveTravelEligibility: (...a: unknown[]) => resolveTravelEligibility(...a) };
 });
-const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => ({ neighbours: [] as unknown[], venue: null }));
+const loadTravelNeighbours = vi.fn(async (..._a: unknown[]) => ({ neighbours: [] as unknown[], venue: null as unknown }));
 const loadStoredNeighbours = vi.fn(async (..._a: unknown[]) => [] as unknown[]);
 vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/travel/travel-neighbours')>();
@@ -297,9 +297,16 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
   });
 
   it('leaves a service nobody drives to completely alone', async () => {
+    // "Alone" means NOTHING IS SPENT and NOTHING IS STAMPED: no address is placed, so no Google
+    // element is bought, and `travel_check` stays null.
+    //
+    // It does NOT mean the eligibility row goes unread. Since #76 that cheap read also answers
+    // "is start-from-base on for this diary", because moving an at-premises job can expose a
+    // first job just as surely as moving a mobile one — see the exposure test below. Asserting
+    // the read never happens would lock in the bug that made a workshop move assert nothing.
     eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
     await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).resolves.toMatchObject({ success: true });
-    expect(resolveTravelEligibility).not.toHaveBeenCalled();
+    expect(placeExistingBooking).not.toHaveBeenCalled();
     expect(updateSql()[1]).toContain(null);
   });
 });
@@ -743,6 +750,42 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
     // The mirror of the test above — otherwise a mechanism that never ran would satisfy it.
     await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
     expect(loadStoredNeighbours.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('asserts exposure even for an AT-PREMISES move, which has no travel snapshot of its own', async () => {
+    // The moved booking is a workshop job: `customerAddressRequired` false, so it is never
+    // travel-checked itself and produces no snapshot. It is still a constraining neighbour, and
+    // removing it exposes whatever sat behind it. Gating exposure on the MOVED booking's own
+    // eligibility meant this asserted nothing at all.
+    eventTypeFindOne.mockResolvedValue(EVENT_TYPE);
+    loadStoredNeighbours.mockResolvedValue([held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)]);
+    loadTravelNeighbours.mockResolvedValue({
+      neighbours: [held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)],
+      venue: VENUE,
+    });
+
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'TRAVEL_TIME_CONFLICT',
+    });
+  });
+
+  it('restamps the EXPOSED booking and warns, when the owner proceeds anyway', async () => {
+    // The exposed row was not written to, but its journey changed. Left saying `ok` it would
+    // claim a verification that no longer covers the leg it now has.
+    loadStoredNeighbours.mockResolvedValue([held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)]);
+    loadTravelNeighbours.mockResolvedValue({
+      neighbours: [held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)],
+      venue: VENUE,
+    });
+
+    const result = await provider.rescheduleBooking(
+      { ...ctx, isAdmin: true, travelPolicy: 'annotate' } as never,
+      'bk-1',
+      NEW_START
+    );
+    expect(result.travelWarning).toMatch(/business address/i);
+    const restamp = managerQuery.mock.calls.find((c: any) => String(c[0]).includes("travel_check='overridden'"));
+    expect(restamp?.[1]).toContain('bk-2');
   });
 
   it('takes both itinerary locks in sorted order when the move crosses diaries', async () => {

@@ -151,6 +151,15 @@ export interface RescheduleResult {
     /** #6: pre-formatted local time the AI must quote VERBATIM (never re-derive). */
     displayTime?: string;
   };
+  /**
+   * The move exposed ANOTHER booking that day as the day's first, and its journey from the
+   * premises does not clear.
+   *
+   * Only ever set on the owner's own path. A caller that ENFORCES is refused outright rather
+   * than warned, because stranding a confirmed job is a feasibility violation and not a matter
+   * of taste — so this field being present means somebody deliberately chose to proceed.
+   */
+  travelWarning?: string;
 }
 
 export interface CancelResult {

@@ -89,14 +89,58 @@ export function haversineKm(a: GeoPoint, b: GeoPoint): number {
  * So: each filter gets the speed that makes ITS answer one-sided.
  *
  * `MAX_KMH` — nobody beats this on public roads, so failing it is conclusive.
- * `MIN_KMH` — effective straight-line speed through a dense city centre, once the detour
- *   factor of real streets is folded in. Beating it is conclusive the other way.
+ * `MIN_KMH` — a measured floor on effective straight-line speed. NOT conclusive; see below.
  *
  * Moving MAX up, or MIN down, only ever costs API calls. Moving MAX down, or MIN up, is
  * what silently authorises an impossible booking.
  */
 export const PREFILTER_MAX_KMH = 120;
-export const PREFILTER_MIN_KMH = 20;
+
+/**
+ * A MEASURED FLOOR, NOT A THEOREM — and it was 20 until live data said otherwise.
+ *
+ * Straight-line distance does not bound drive time from below in any useful way, because
+ * what governs a short drive is topology rather than distance. The case that settled it:
+ * Sint-Jansvliet to Frederik van Eedenplein in Antwerp is **550 metres apart and a 16.7
+ * minute drive**, because the Scheldt is in between and you go under it. That is 2.0 km/h
+ * effective. At the old 20 the bound "proved" a 1.65 minute fit, so every gap from about
+ * 1.7 to 16.7 minutes was cleared for a drive the owner could not make — and ordinary
+ * business minimum gaps sit at 5 to 15.
+ *
+ * Ten short urban pairs were measured against live Routes across Antwerp, Brussels, Ghent
+ * and Mechelen (2026-08-07). **Every one came in under 20 km/h**; the range was 2.0 to 14.3.
+ * Ten longer intercity pairs came in at 24 to 51, so the failure is specific to short hops,
+ * where fixed costs — one-way systems, pedestrian cores, a river — dominate the distance.
+ *
+ * 1 sits at twice the margin under the worst case seen, which is the most that can honestly
+ * be claimed for it. It still does the job the branch exists for: at a 30 minute gap it
+ * clears anything within 500 m, at 60 minutes within a kilometre.
+ *
+ * TWO THINGS A READER SHOULD NOT ASSUME. The shape is wrong as well as the number —
+ * effective speed climbs with distance, so a fixed overhead plus a rate would fit far
+ * better than any constant, and no constant can be made tight. And this is not the only
+ * thing between two jobs: `travel-gate.ts` subtracts the owner's slack from the gap BEFORE
+ * calling either bound, so parking and the doorstep are already out of the budget by the
+ * time this runs.
+ */
+export const PREFILTER_MIN_KMH = 1;
+
+/**
+ * The slow end of a drive estimate SHOWN TO A PERSON — deliberately not the safety floor.
+ *
+ * These were one constant until the floor had to drop to 1, and that exposed them as two
+ * jobs wearing one number. A floor decides whether to clear a booking, so being far too
+ * pessimistic costs only an API call. A displayed range is read by an owner deciding whether
+ * to accept a captured Request, and "up to 30 minutes" for a job 500 metres away is not
+ * cautious, it is useless — they stop reading the number at all.
+ *
+ * 20 km/h is what the pair used to share, so the estimate an owner sees is unchanged. It is
+ * a plausible slow city speed rather than a bound, and it can understate a barrier crossing
+ * exactly as badly as the floor did; that is acceptable here because nothing is decided on
+ * it. Once routing is available the real duration replaces this, and it survives only as the
+ * degraded-mode fallback.
+ */
+export const DISPLAY_SLOWEST_KMH = 20;
 
 /**
  * Could a driver possibly cover `from`→`to` in `minutes`, ignoring roads and traffic?
@@ -112,15 +156,18 @@ export function couldReachWithin(from: GeoPoint, to: GeoPoint, minutes: number):
 }
 
 /**
- * The mirror image: is this pair so close that the gap suffices even on the worst plausible
- * drive?
+ * The mirror image: is this pair so close that the gap suffices even on the worst drive we
+ * have ever measured?
  *
- * `true` is CERTAIN, because it clears the pessimistic bound: crawling through town at
- * `PREFILTER_MIN_KMH` of effective straight-line progress still arrives in time, so no
- * routing answer will change the verdict. `false` means ask Google.
+ * `true` IS NOT A PROOF, and the name overstates it — kept only because renaming it would
+ * churn every call site for no change in behaviour. It says the pair clears a floor
+ * calibrated against real Belgian drives, which is a strong bet and not a certainty: no
+ * constant speed can be conclusive when a river or a pedestrian core decides the route. See
+ * `PREFILTER_MIN_KMH`, which records the measurement and the case that falsified the old one.
  *
- * This is where most of the savings live — a plumber's next job three streets away is the
- * common case, and it never costs an element.
+ * `false` means ask Google — and once routing exists, a `true` here is the cheaper answer
+ * rather than the better one. The branch earns its place mainly in DEGRADED mode, where
+ * routing is unreachable and the alternative to a calibrated bet is no answer at all.
  */
 export function certainlyReachableWithin(from: GeoPoint, to: GeoPoint, minutes: number): boolean {
   if (minutes <= 0) return false;

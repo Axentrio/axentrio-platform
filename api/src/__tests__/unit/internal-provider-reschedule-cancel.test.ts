@@ -110,6 +110,17 @@ vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
   };
 });
 
+// Routing. The client itself is settled in travel-routes.test.ts; here only its ANSWER
+// matters. Unavailable by default, which is both the state of a platform with no Maps key and
+// ADR-0015's degraded branch — so every test that does not opt in is exercising the fallback.
+const driveAnswer = vi.fn(
+  async (..._a: unknown[]): Promise<{ minutes: number | null; noRoute?: boolean }> => ({ minutes: null })
+);
+vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/routes.service')>();
+  return { ...actual, driveLookupFor: () => (leg: unknown) => driveAnswer(leg) };
+});
+
 import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 
 const ctx: any = {
@@ -222,11 +233,41 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
     });
   });
 
-  it('REWRITES travel_check, because the move invalidates whatever the old time was checked against', async () => {
+  it('stamps `ok` when routing answered every constraining leg of the new time', async () => {
+    // A real neighbour far enough away that the floor cannot settle it, so the leg genuinely
+    // goes to routing. Five minutes fits — clear AND routed, the only combination earning `ok`.
+    const far = [neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:30:00Z', { lat: 50.8503, lng: 4.3517 })];
+    loadTravelNeighbours.mockResolvedValue({ neighbours: far, venue: null });
+    loadStoredNeighbours.mockResolvedValue(far);
+    driveAnswer.mockResolvedValue({ minutes: 5 });
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const [sql, params] = updateSql();
+    expect(sql).toContain('travel_check=');
+    expect(params).toContain('ok');
+  });
+
+  it('stamps `degraded` when the proofs cleared a leg routing never answered', async () => {
+    // The mixed-leg rule from the other side: a neighbour close enough that the floor settles
+    // it on its own. Nothing was unavailable, but nothing was VERIFIED AGAINST ROUTING either,
+    // and `CONTEXT.md` reserves `ok` for the second. Routing is never even called.
+    const near = [neighbour('2026-06-10T06:00:00Z', '2026-06-10T06:30:00Z', { lat: 51.0505, lng: 3.7205 })];
+    loadTravelNeighbours.mockResolvedValue({ neighbours: near, venue: null });
+    loadStoredNeighbours.mockResolvedValue(near);
     await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
     const [sql, params] = updateSql();
     expect(sql).toContain('travel_check=');
     expect(params).toContain('degraded');
+    expect(driveAnswer).not.toHaveBeenCalled();
+  });
+
+  it('REWRITES travel_check, because the move invalidates whatever the old time was checked against', async () => {
+    // An empty diary, which is `ok` rather than `degraded`: nothing was unavailable, there was
+    // simply no drive to measure. What must never happen is the column being left describing
+    // the journey to the OLD time, which nobody is making any more.
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const [sql, params] = updateSql();
+    expect(sql).toContain('travel_check=');
+    expect(params).toContain('ok');
   });
 
   it('warns the OWNER rather than blocking them — their diary, their judgement', async () => {

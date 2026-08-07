@@ -170,6 +170,17 @@ vi.mock('../../booking/travel/travel-neighbours', async (importOriginal) => {
   };
 });
 
+// Routing. The client itself is settled in travel-routes.test.ts; here only its ANSWER
+// matters. Unavailable by default, which is both the state of a platform with no Maps key and
+// ADR-0015's degraded branch — so every test that does not opt in is exercising the fallback.
+const driveAnswer = vi.fn(
+  async (..._a: unknown[]): Promise<{ minutes: number | null; noRoute?: boolean }> => ({ minutes: null })
+);
+vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/travel/routes.service')>();
+  return { ...actual, driveLookupFor: () => (leg: unknown) => driveAnswer(leg) };
+});
+
 import type { BookingPlacement } from '../../booking/travel/booking-place';
 import { InternalProvider } from '../../booking/booking-providers/internal.provider';
 import { BookingError } from '../../booking/booking-providers/types';
@@ -1516,7 +1527,10 @@ describe('InternalProvider.createBooking - travel placement', () => {
     it('never writes `ok` — that word belongs to a routing answer nobody has yet', async () => {
       loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [] });
       await expect(single('idem-gate-empty-day')).resolves.toMatchObject({ success: true });
-      expect(insertParam(writtenInsert(), 'travel_check')).not.toBe('ok');
+      // An empty day IS `ok`, and that is not a loophole. `degraded` has to keep meaning "a
+      // check we normally run was unavailable" or #68's alert has nothing to watch — and
+      // nothing was unavailable here, there was simply no drive to measure.
+      expect(insertParam(writtenInsert(), 'travel_check')).toBe('ok');
     });
 
     it('refuses a time the owner provably cannot reach', async () => {
@@ -1769,21 +1783,46 @@ describe('InternalProvider.checkAvailability - travel filtering', () => {
     expect(res.travel?.unreachableSlots.map((s) => s.start)).toContain('2026-06-10T07:00:00.000Z');
   });
 
-  it('hands the undecided middle back as times to REQUEST, not as an empty diary', async () => {
-    // Brussels is ~47 km away: reachable at motorway speed, unproven at a crawl. Nothing
-    // measured it, so nothing may confirm it — and nothing may hide it either.
+  it('hands the undecided middle back as times to REQUEST when routing cannot answer', async () => {
+    // Brussels is ~47 km away: reachable at motorway speed, unproven at the floor's crawl.
+    // With routing unavailable nothing measures it, so nothing may confirm it — and nothing
+    // may hide it either. This is ADR-0015's degraded branch, and it is the DEFAULT here
+    // because `driveAnswer` returns null unless a test opts in.
     loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
       neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
     ] });
     const res = await check(ADDRESS);
-    // The last start of the morning has two and a half hours of clearance, which is enough
-    // for 47 km even at the pessimistic crawl — so it is proven, offered, and NOT a request.
-    // The three earlier ones are opinion, and opinion is the owner's to hold.
-    expect(res.slots).toHaveLength(1);
-    expect(res.slots[0].start).toBe('2026-06-10T08:30:00.000Z');
-    expect(res.travel?.requestableSlots).toHaveLength(3);
+    expect(res.slots).toHaveLength(0);
+    expect(res.travel?.requestableSlots).toHaveLength(4);
     expect(res.travel?.unreachableSlots).toHaveLength(0);
     expect(res.travel?.addressTooVague).toBeUndefined();
+  });
+
+  it('RESOLVES the middle band once routing answers, which is the point of the ticket', async () => {
+    // The same 47 km pair, now measured. Google says 50 minutes, so the slots with an hour or
+    // more of clearance are confirmable and the tight ones are refused outright — no longer
+    // handed to the owner as a pile of Requests to adjudicate by hand.
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
+      neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+    ] });
+    driveAnswer.mockResolvedValue({ minutes: 50 });
+    const res = await check(ADDRESS);
+    expect(res.travel?.requestableSlots).toHaveLength(0);
+    expect(res.slots.length + (res.travel?.unreachableSlots.length ?? 0)).toBe(4);
+    expect(res.slots.length).toBeGreaterThan(0);
+  });
+
+  it('refuses the whole band when routing says there is no drivable route at all', async () => {
+    // A definite no about the PAIR, not an absence of an answer — so it refuses rather than
+    // degrading into Requests.
+    loadTravelNeighbours.mockResolvedValue({ venue: null, neighbours: [
+      neighbour('2026-06-10T05:00:00Z', '2026-06-10T06:00:00Z', { lat: 50.8503, lng: 4.3517 }),
+    ] });
+    driveAnswer.mockResolvedValue({ minutes: null, noRoute: true });
+    const res = await check(ADDRESS);
+    expect(res.slots).toHaveLength(0);
+    expect(res.travel?.requestableSlots).toHaveLength(0);
+    expect(res.travel?.unreachableSlots).toHaveLength(4);
   });
 
   it('confirms nothing at all when the address placed only to a town centre', async () => {

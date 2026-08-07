@@ -18,6 +18,22 @@ const ANTWERP: GeoPoint = { lat: 51.2194, lng: 4.4025 };
 /** Two doors on the same street — the case that must not cost an API element. */
 const NEXT_DOOR: GeoPoint = { lat: 50.8504, lng: 4.3518 };
 
+/**
+ * THE PAIR THAT FALSIFIED THE OLD FLOOR, with real coordinates and a real measured drive.
+ *
+ * Sint-Jansvliet and Frederik van Eedenplein sit on opposite banks of the Scheldt in
+ * Antwerp: 550 m apart, 16.7 minutes by road (live Routes, 2026-08-07), because the route
+ * goes under the river. 2.0 km/h effective.
+ *
+ * These are held-out numbers, not the samples the constant was fitted to. Asserting against
+ * `PREFILTER_MIN_KMH` would be circular — it would pass at any value — so the assertions
+ * below use the measured 16.7 directly. If someone raises the constant back toward 20, this
+ * is the test that fails.
+ */
+const SCHELDT_WEST: GeoPoint = { lat: 51.2196, lng: 4.3958 };
+const SCHELDT_EAST: GeoPoint = { lat: 51.2185, lng: 4.3891 };
+const SCHELDT_REAL_DRIVE_MIN = 16.7;
+
 describe('haversineKm', () => {
   it('measures a known intercity distance', () => {
     // Brussels→Ghent is ~47 km as the crow flies (~56 km by road).
@@ -90,6 +106,30 @@ describe('certainlyReachableWithin — the certain-yes pre-filter', () => {
     const gap = 40;
     expect(couldReachWithin(BRUSSELS, GHENT, gap)).toBe(true);
     expect(certainlyReachableWithin(BRUSSELS, GHENT, gap)).toBe(false);
+  });
+
+  it('does not clear the Scheldt crossing inside its real drive time', () => {
+    // The regression this constant exists to prevent. 550 m apart and a 16.7 minute drive,
+    // so any gap shorter than that must NOT be cleared — at the old 20 km/h every gap from
+    // ~1.7 minutes up was, and ordinary business minimum gaps are 5 to 15.
+    for (const gap of [2, 5, 10, 15]) {
+      expect(
+        certainlyReachableWithin(SCHELDT_WEST, SCHELDT_EAST, gap),
+        `a ${gap}-minute gap must not clear a ${SCHELDT_REAL_DRIVE_MIN}-minute drive`
+      ).toBe(false);
+    }
+  });
+
+  it('still clears the Scheldt crossing once the gap genuinely covers the drive', () => {
+    // The floor must not be so low that it refuses to clear anything — that would make the
+    // branch dead code and leave degraded mode with nothing it can confirm.
+    expect(certainlyReachableWithin(SCHELDT_WEST, SCHELDT_EAST, 45)).toBe(true);
+  });
+
+  it('still skips the lookup for the case the branch exists for', () => {
+    // A next-door job at an ordinary gap. If this ever goes false the floor has been lowered
+    // past usefulness and every travel booking starts costing an element.
+    expect(certainlyReachableWithin(BRUSSELS, NEXT_DOOR, 30)).toBe(true);
   });
 });
 

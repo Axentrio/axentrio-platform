@@ -15,6 +15,12 @@ const BRUSSELS: GeoPoint = { lat: 50.8503, lng: 4.3517 };
 const GHENT: GeoPoint = { lat: 51.0543, lng: 3.7174 }; // ~47 km from Brussels
 const LIEGE: GeoPoint = { lat: 50.6326, lng: 5.5797 }; // ~87 km from Brussels
 const NEXT_DOOR: GeoPoint = { lat: 50.8504, lng: 4.3518 }; // metres from Brussels
+/**
+ * ~2 km from Brussels. Sized against `PREFILTER_MIN_KMH`, which is a crawl by design: the
+ * floor clears 1 km in an hour and 2.5 km in 2.5 hours, so this is a pair whose verdict
+ * genuinely turns on how wide the window is rather than on how far apart the jobs are.
+ */
+const ACROSS_TOWN: GeoPoint = { lat: 50.8680, lng: 4.3520 };
 
 const at = (iso: string): Date => new Date(iso);
 
@@ -295,18 +301,29 @@ describe('neighbour selection', () => {
 
   it('measures the drive across a locationless job, not from the end of it', () => {
     // The owner could take that call from the van, so the window for the drive is the whole
-    // span between the two physical jobs — 2.5 hours here, which clears 47 km even at a crawl.
-    // Measured from the END of the call it would be 60 minutes, which proves nothing.
+    // span between the two physical jobs — 2.5 hours here, which clears 2 km at the floor's
+    // crawl. Measured from the END of the call it would be 60 minutes, which does not.
+    const neighbours = [
+      known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', ACROSS_TOWN),
+      locationless('2026-09-01T09:30:00Z', '2026-09-01T10:30:00Z'),
+    ];
     expect(
       assessSlot({
         candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
-        neighbours: [
-          known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', GHENT),
-          locationless('2026-09-01T09:30:00Z', '2026-09-01T10:30:00Z'),
-        ],
+        neighbours,
         slackMin: 0,
       })
     ).toBe('clear');
+
+    // The same pair with only the 60 minutes after the call does NOT clear — which is what
+    // makes the assertion above about the window rather than about the distance.
+    expect(
+      assessSlot({
+        candidate: candidate({ start: '2026-09-01T11:30:00Z', end: '2026-09-01T12:00:00Z' }),
+        neighbours: [known('2026-09-01T10:00:00Z', '2026-09-01T10:30:00Z', ACROSS_TOWN)],
+        slackMin: 0,
+      })
+    ).toBe('undecided');
   });
 
   it('has NO DAY BOUNDARY: a 23:30 job and a 00:15 job are neighbours', () => {

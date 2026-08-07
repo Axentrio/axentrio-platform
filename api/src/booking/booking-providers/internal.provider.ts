@@ -66,7 +66,15 @@ import {
 import type { GeoPoint } from '../../contracts/travel';
 import { resolveTravelEligibility, type ActiveTravelEligibility } from '../travel/travel-eligibility';
 import { loadTravelNeighbours, loadStoredNeighbours } from '../travel/travel-neighbours';
-import { assessSlot, type NeighbourLocation, type TravelVerdict } from '../travel/travel-gate';
+import {
+  assessSlotRouted,
+  recordingLookup,
+  replayLookup,
+  type DriveRecords,
+  type NeighbourLocation,
+  type TravelVerdict,
+} from '../travel/travel-gate';
+import { driveLookupFor } from '../travel/routes.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -934,11 +942,17 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId: input.excludeBookingId,
     });
 
+    // Bound to this conversation, because that is the only scope a cached duration may have.
+    const lookup = driveLookupFor(eligibility, ctx.session?.id ?? null);
+
     const cleared: Array<{ start: string; end: string }> = [];
     const requestableSlots: Array<{ start: string; end: string }> = [];
     const unreachableSlots: Array<{ start: string; end: string }> = [];
+    // Sequential on purpose. The slots of one availability check share both endpoints and
+    // differ only in departure time, so the earlier ones populate the cache the later ones
+    // read — running them concurrently would race every slot to a miss and pay for each.
     for (const slot of input.slots) {
-      const verdict = assessSlot({
+      const { verdict } = await assessSlotRouted({
         candidate: {
           ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
           point: candidate.point,
@@ -946,6 +960,7 @@ export class InternalProvider implements BookingProvider {
         },
         neighbours,
         slackMin: eligibility.slackMin,
+        lookup,
       });
       if (verdict === 'clear') cleared.push(slot);
       else if (verdict === 'undecided') requestableSlots.push(slot);
@@ -1060,6 +1075,8 @@ export class InternalProvider implements BookingProvider {
       start: Date;
       end: Date;
       excludeBookingId?: string;
+      /** What the pre-lock pass paid Google for. Absent means nothing was routed. */
+      drives?: DriveRecords;
     }
   ): Promise<void> {
     const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
@@ -1070,10 +1087,15 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId: input.excludeBookingId,
       venue: input.venue,
     });
-    const verdict = assessSlot({
+    // Replayed, never routed. This runs inside the caller's transaction, and holding a pool
+    // connection open across a Google round-trip is the pattern this file already warns
+    // about. A leg the pre-lock pass did not record answers null, which reads as undecided
+    // and refuses — so a diary that moved under the lock costs a retry, never a wrong yes.
+    const { verdict } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: input.candidate.point, coarse: input.candidate.coarse },
       neighbours,
       slackMin: input.eligibility.slackMin,
+      lookup: replayLookup(input.drives ?? {}),
     });
     if (verdict === 'clear') return;
 
@@ -1100,7 +1122,15 @@ export class InternalProvider implements BookingProvider {
       end: Date;
       excludeBookingId?: string;
     }
-  ): Promise<{ verdict: TravelVerdict; candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null }> {
+  ): Promise<{
+    verdict: TravelVerdict;
+    candidate: { point: GeoPoint; coarse: boolean };
+    venue: NeighbourLocation | null;
+    /** True only when routing answered every constraining leg — this is what licenses `ok`. */
+    fullyRouted: boolean;
+    /** Carried into the transaction so the in-lock assert can replay rather than re-ask. */
+    drives: DriveRecords;
+  }> {
     const candidate = travelCandidatePoint(input.placement);
     const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
     // The candidate point and the venue are carried out of here so the in-lock assert can reuse
@@ -1113,12 +1143,14 @@ export class InternalProvider implements BookingProvider {
       to: input.end,
       excludeBookingId: input.excludeBookingId,
     });
-    const verdict = assessSlot({
+    const drives: DriveRecords = {};
+    const { verdict, fullyRouted } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
       neighbours,
       slackMin: input.eligibility.slackMin,
+      lookup: recordingLookup(driveLookupFor(input.eligibility, ctx.session?.id ?? null), drives),
     });
-    return { verdict, candidate, venue };
+    return { verdict, candidate, venue, fullyRouted, drives };
   }
 
   /**
@@ -1378,10 +1410,12 @@ export class InternalProvider implements BookingProvider {
     // several turns ago. Two of the three answers are not refusals: the undecided middle band
     // becomes a Request, which is the platform's answer to every booking it cannot safely
     // confirm, and only a drive PROVEN impossible is turned away.
-    let travelCheck: 'degraded' | 'captured' | null = null;
+    let travelCheck: 'ok' | 'degraded' | 'captured' | null = null;
     // Non-null only when the gate ran AND cleared, which is the only path that reaches the
     // transaction. Everything else has already thrown or become a Request by then.
-    let travelSnapshot: { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null } | null = null;
+    let travelSnapshot:
+      | { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null; drives: DriveRecords }
+      | null = null;
     if (travelEligibility.active) {
       // An address we could not place at all still stops here, exactly as it did before there
       // was a drive to check: there is a postcode that would settle it and the prompt asks for
@@ -1405,7 +1439,7 @@ export class InternalProvider implements BookingProvider {
       // Carried into the transaction so the in-lock assert can re-reach this verdict without
       // geocoding anything: the candidate's point and the venue were both paid for above.
       travelSnapshot = checked && verdict === 'clear'
-        ? { candidate: checked.candidate, venue: checked.venue }
+        ? { candidate: checked.candidate, venue: checked.venue, drives: checked.drives }
         : null;
       if (verdict === 'unreachable') {
         logger.info('[Travel] refusing a booking the owner could not reach', {
@@ -1446,10 +1480,11 @@ export class InternalProvider implements BookingProvider {
       // mistaken for a verification that never ran; one that over-claims is the silent
       // wrongness this whole feature exists to prevent.
       //
-      // `ok` belongs to the ticket that adds routing, on the condition that EVERY constraining
-      // leg got a routing answer — a booking where the bounds settled one leg and routing the
-      // other is still `degraded`, or the word means two things depending on the diary.
-      travelCheck = 'degraded';
+      // `ok` requires that EVERY constraining leg got a routing answer — a booking where the
+      // bounds settled one leg and routing the other stays `degraded`, or the word means two
+      // things depending on what the diary happened to look like, and #68's alert inherits the
+      // ambiguity. `fullyRouted` is the gate's all-or-nothing answer to exactly that.
+      travelCheck = checked?.fullyRouted ? 'ok' : 'degraded';
     }
 
     // 4. Reserve + insert under a per-itinerary advisory lock. The exclusion
@@ -1481,6 +1516,7 @@ export class InternalProvider implements BookingProvider {
             service,
             candidate: travelSnapshot.candidate,
             venue: travelSnapshot.venue,
+            drives: travelSnapshot.drives,
             start,
             end,
           });
@@ -2646,8 +2682,10 @@ export class InternalProvider implements BookingProvider {
     const travelEligibility = service.customerAddressRequired
       ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
       : { active: false as const, reason: 'bot_disabled' as const };
-    let travelSnapshot: { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null } | null = null;
-    let travelCheck: 'degraded' | 'overridden' | null = null;
+    let travelSnapshot:
+      | { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null; drives: DriveRecords }
+      | null = null;
+    let travelCheck: 'ok' | 'degraded' | 'overridden' | null = null;
     if (travelEligibility.active && booking.customerAddress?.trim()) {
       const placement = await placeAddressFor(travelEligibility, booking.customerAddress);
       // An owner moving a job in their own diary is warned by their picker, never blocked
@@ -2681,12 +2719,15 @@ export class InternalProvider implements BookingProvider {
           409
         );
       }
-      travelSnapshot = checked && verdict === 'clear' ? { candidate: checked.candidate, venue: checked.venue } : null;
+      travelSnapshot =
+        checked && verdict === 'clear'
+          ? { candidate: checked.candidate, venue: checked.venue, drives: checked.drives }
+          : null;
       // The MOVE invalidates whatever the old time was checked against, so the column is
-      // rewritten rather than left describing a journey nobody is making any more. `degraded`
-      // when the proofs cleared it (routing does not exist yet); `overridden` when the owner
-      // moved it anyway past a verdict that did not clear.
-      travelCheck = verdict === 'clear' ? 'degraded' : 'overridden';
+      // rewritten rather than left describing a journey nobody is making any more. `ok` when
+      // routing answered every constraining leg, `degraded` when the proofs alone cleared it,
+      // and `overridden` when the owner moved it anyway past a verdict that did not clear.
+      travelCheck = verdict !== 'clear' ? 'overridden' : checked?.fullyRouted ? 'ok' : 'degraded';
     }
 
     // Single atomic UPDATE under the itinerary lock: frees the old slot and
@@ -2721,6 +2762,7 @@ export class InternalProvider implements BookingProvider {
             service,
             candidate: travelSnapshot.candidate,
             venue: travelSnapshot.venue,
+            drives: travelSnapshot.drives,
             start,
             end,
             excludeBookingId: bookingId,

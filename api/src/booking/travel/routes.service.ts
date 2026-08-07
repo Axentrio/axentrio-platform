@@ -1,0 +1,305 @@
+/**
+ * How long is the drive? The one place that asks Google Routes.
+ *
+ * WHAT THIS IS FOR. The two haversine bounds in `contracts/travel.ts` settle a pair only
+ * when it is absurdly close or absurdly far. Everything between them is opinion, and until
+ * this existed that opinion was "capture it as a Request and let the owner decide". Live
+ * measurement of Belgian pairs put roughly four in five realistic neighbour checks in that
+ * band, so the middle was not an edge case — it was the product.
+ *
+ * ONLY THE UNDECIDED BAND REACHES HERE. The caller must have run both bounds first. That is
+ * not an optimisation to be tidied away later: it is the whole cost model, and it matters
+ * more than usual because ADR-0014 forbids caching a duration beyond the conversation that
+ * produced it, so there is no long-lived cache to amortise a wasted call against.
+ *
+ * TRAFFIC-AWARE ONLY INSIDE ~24 HOURS. Beyond that Google increasingly returns historical
+ * averages and bills the Pro SKU for the privilege — twice the price on half the free
+ * allowance. Inside the window the traffic answer is worth paying for, because that is where
+ * "45 minutes" and "70 minutes" are actually different journeys.
+ *
+ * THE CACHE IS SCOPED TO ONE CONVERSATION, and the key carries the routing preference and a
+ * departure bucket. Both halves are load-bearing. The scope is a licence constraint: §19.3
+ * of the Maps terms enumerates lat/lng and says nothing about durations, and §11.8 grants
+ * duration explicitly for a different API, so the omission reads as deliberate. Holding one
+ * for the life of a booking flow is a deliberate short reach, documented as such in ADR-0014
+ * rather than claimed as a permission. The key is the correctness half: a rush-hour duration
+ * replayed against a 2pm slot authorises a booking nobody can make.
+ *
+ * NEVER THROWS. Every failure is `unavailable`, because the caller is a booking path and an
+ * exception escaping here would turn Google's downtime into a refused appointment. ADR-0015
+ * says an outage degrades to the haversine proofs; it never degrades to a wrong answer.
+ */
+import axios from 'axios';
+import { config } from '../../config/environment';
+import { getRedisClient } from '../../config/redis';
+import { logger } from '../../utils/logger';
+import type { GeoPoint } from '../../contracts/travel';
+import type { ActiveTravelEligibility } from './travel-eligibility';
+import type { DriveLookup } from './travel-gate';
+import { reserveTravelElements } from './travel-usage.service';
+
+export type DriveResult =
+  /** Google routed it. `minutes` is the duration to fit into the gap. */
+  | { status: 'routed'; minutes: number }
+  /**
+   * Google looked and there is no drivable route — an island, a pedestrian-only address, a
+   * coordinate in water. A fact about the PAIR, and a definite no rather than an absence of
+   * an answer, so the caller may refuse the slot on it.
+   */
+  | { status: 'no_route' }
+  /** A fact about Google, or about a tenant that has spent its month. Degrade, never refuse. */
+  | { status: 'unavailable'; cause: 'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' };
+
+const ROUTES_URL = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';
+
+/** Only what we read. A narrower mask is a smaller bill on some SKUs and a smaller surface here. */
+const FIELD_MASK = 'originIndex,destinationIndex,duration,condition,status';
+
+/**
+ * A customer is waiting for slots behind this, and a slot list is several of these. Tighter
+ * than the geocoding timeout because a matrix is a heavier computation on Google's side and
+ * a slow one is more likely to be a bad minute than a hard problem — falling back to the
+ * bounds is a better answer than making the customer wait twice.
+ */
+const TIMEOUT_MS = 5_000;
+
+/**
+ * Inside this, ask for traffic. Beyond it, do not.
+ *
+ * The number is Google's behaviour rather than our preference: past roughly a day the
+ * traffic model degrades to historical averages, so the Pro SKU buys an average dressed as a
+ * prediction. Note also that `departureTime` is REQUEST-level, so distinct departure times
+ * cannot share one matrix — traffic-aware lookups cannot be batched even in principle.
+ */
+const TRAFFIC_HORIZON_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Fifteen minutes.
+ *
+ * The bucket exists so two candidate slots close together in the same conversation share a
+ * lookup, and it is fifteen because that is short enough that no bucket spans the shoulder of
+ * a rush hour. Traffic-UNAWARE answers are time-independent and deliberately bucket to a
+ * constant, so a whole day of far-future candidates between one pair of addresses costs one
+ * element rather than one per slot.
+ */
+const DEPARTURE_BUCKET_MS = 15 * 60 * 1000;
+
+/**
+ * Thirty minutes — the life of a conversation, not of a booking.
+ *
+ * Matched to the widget's own session auto-close so the cache cannot outlive the flow that
+ * justified it. See the header: this TTL is the shape of a licence argument, not a
+ * performance tuning knob, and lengthening it is a legal change rather than a config one.
+ */
+const CACHE_TTL_SECONDS = 30 * 60;
+
+/** Bumped whenever the cached shape changes; old entries orphan and expire on their own TTL. */
+const CACHE_VERSION = 'v1';
+
+/** ~11 m. Two customers in one building must not each cost an element; a long street must not merge. */
+const round5 = (n: number): string => n.toFixed(5);
+
+/**
+ * The cache key. Conversation, both ends, routing preference, departure bucket — all five.
+ *
+ * Dropping the session makes it a cross-conversation cache we do not hold a licence for.
+ * Dropping the preference lets a traffic-free answer satisfy a traffic-aware question.
+ * Dropping the bucket lets a rush-hour duration authorise a 2pm slot. None of the three is
+ * an optimisation detail.
+ */
+export function driveCacheKey(input: {
+  sessionId: string;
+  from: GeoPoint;
+  to: GeoPoint;
+  trafficAware: boolean;
+  bucket: number;
+}): string {
+  const pref = input.trafficAware ? 'ta' : 'tu';
+  const from = `${round5(input.from.lat)},${round5(input.from.lng)}`;
+  const to = `${round5(input.to.lat)},${round5(input.to.lng)}`;
+  return `drive:${CACHE_VERSION}:${input.sessionId}:${pref}:${input.bucket}:${from}:${to}`;
+}
+
+/** Traffic-aware answers bucket by quarter hour; traffic-unaware ones are time-independent. */
+export function departureBucket(departAt: Date, trafficAware: boolean): number {
+  if (!trafficAware) return 0;
+  return Math.floor(departAt.getTime() / DEPARTURE_BUCKET_MS);
+}
+
+interface MatrixElement {
+  originIndex?: number;
+  destinationIndex?: number;
+  duration?: string;
+  condition?: string;
+  status?: { code?: number; message?: string };
+}
+
+async function readCache(key: string): Promise<DriveResult | null> {
+  const redis = getRedisClient();
+  if (!redis) return null;
+  try {
+    const hit = await redis.get(key);
+    if (!hit) return null;
+    const parsed = JSON.parse(hit) as DriveResult;
+    // Matched against the union rather than merely being present, so anything else living at
+    // this key cannot be returned as a verdict.
+    if (parsed?.status === 'routed') return Number.isFinite(parsed.minutes) && parsed.minutes >= 0 ? parsed : null;
+    if (parsed?.status === 'no_route') return parsed;
+    // `unavailable` is deliberately NOT cached — see the write path.
+    return null;
+  } catch (error) {
+    logger.warn('[Travel] drive cache read failed', { error });
+    return null;
+  }
+}
+
+async function writeCache(key: string, result: DriveResult): Promise<void> {
+  // An outage is a fact about this MOMENT, not about the pair. Caching it would extend one
+  // bad second across the rest of a conversation, and the retry that would have succeeded
+  // never happens.
+  if (result.status === 'unavailable') return;
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.set(key, JSON.stringify(result), 'EX', CACHE_TTL_SECONDS);
+  } catch (error) {
+    logger.warn('[Travel] drive cache write failed', { error });
+  }
+}
+
+/**
+ * Drive time from `from` to `to`, departing at `departAt`.
+ *
+ * TAKES THE PROOF THAT THE GATES PASSED, not a tenant id — the same rule the geocoder
+ * follows, and for the same reason: nothing may reach Google without an entitled Tenant and
+ * an enabled Agent behind it, and a parameter is the only version of that a future caller
+ * cannot forget to read.
+ *
+ * `sessionId` may be null, and then NOTHING IS CACHED. That is the honest reading of the
+ * licence rather than an oversight: without a conversation to scope it to there is no
+ * argument for holding the duration at all. The portal's own paths land here.
+ */
+export async function driveMinutes(
+  eligibility: ActiveTravelEligibility,
+  input: { from: GeoPoint; to: GeoPoint; departAt: Date; sessionId: string | null }
+): Promise<DriveResult> {
+  const apiKey = config.travel.googleMapsApiKey;
+  if (!apiKey) return { status: 'unavailable', cause: 'no_api_key' };
+
+  const departMs = input.departAt.getTime();
+  if (!Number.isFinite(departMs)) return { status: 'unavailable', cause: 'malformed_response' };
+
+  // Google rejects a departure in the past. A candidate slot that has just gone stale is a
+  // normal race rather than an error, and the caller degrades to the bounds for it.
+  const now = Date.now();
+  if (departMs < now) return { status: 'unavailable', cause: 'departed' };
+
+  const trafficAware = departMs - now <= TRAFFIC_HORIZON_MS;
+  const bucket = departureBucket(input.departAt, trafficAware);
+  const cacheKey = input.sessionId
+    ? driveCacheKey({ sessionId: input.sessionId, from: input.from, to: input.to, trafficAware, bucket })
+    : null;
+
+  if (cacheKey) {
+    const hit = await readCache(cacheKey);
+    if (hit) return hit;
+  }
+
+  // Claimed BEFORE the request. Google bills the request rather than the answer, so a
+  // timeout costs exactly what a hit costs. One origin by one destination is one element.
+  if (!(await reserveTravelElements(eligibility.tenantId, 1))) {
+    return { status: 'unavailable', cause: 'cap_exhausted' };
+  }
+
+  const body: Record<string, unknown> = {
+    origins: [{ waypoint: { location: { latLng: { latitude: input.from.lat, longitude: input.from.lng } } } }],
+    destinations: [{ waypoint: { location: { latLng: { latitude: input.to.lat, longitude: input.to.lng } } } }],
+    travelMode: 'DRIVE',
+  };
+  if (trafficAware) {
+    body.routingPreference = 'TRAFFIC_AWARE';
+    body.departureTime = new Date(departMs).toISOString();
+  }
+
+  let elements: MatrixElement[];
+  try {
+    const res = await axios.post<MatrixElement[]>(ROUTES_URL, body, {
+      headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': apiKey, 'X-Goog-FieldMask': FIELD_MASK },
+      timeout: TIMEOUT_MS,
+      validateStatus: (s) => s === 200,
+    });
+    elements = Array.isArray(res.data) ? res.data : [];
+  } catch (error) {
+    logger.warn('[Travel] routes unreachable', {
+      tenantId: eligibility.tenantId,
+      trafficAware,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { status: 'unavailable', cause: 'api_error' };
+  }
+
+  const result = interpret(elements, eligibility.tenantId);
+  if (cacheKey) await writeCache(cacheKey, result);
+  return result;
+}
+
+/**
+ * The one element we asked for, in our vocabulary.
+ *
+ * A per-element `status.code` is Google reporting a problem with THIS pair while the request
+ * itself succeeded, and it is not the same as no route existing — so it degrades rather than
+ * refusing. Only an explicit `ROUTE_NOT_FOUND` is allowed to say no.
+ */
+function interpret(elements: MatrixElement[], tenantId: string): DriveResult {
+  const el = elements[0];
+  if (!el) {
+    logger.warn('[Travel] routes returned no elements', { tenantId });
+    return { status: 'unavailable', cause: 'malformed_response' };
+  }
+
+  if (el.status?.code) {
+    logger.warn('[Travel] routes element carried an error', { tenantId, code: el.status.code });
+    return { status: 'unavailable', cause: 'api_error' };
+  }
+
+  if (el.condition === 'ROUTE_NOT_FOUND') return { status: 'no_route' };
+
+  // Seconds with a trailing `s`, per protobuf Duration. Anything else is a wire surprise and
+  // must not be coerced — a NaN here would sail through the gap arithmetic as "no constraint".
+  const raw = typeof el.duration === 'string' ? el.duration.trim() : '';
+  const seconds = /^\d+(\.\d+)?s$/.test(raw) ? Number(raw.slice(0, -1)) : Number.NaN;
+  if (!Number.isFinite(seconds) || seconds < 0) {
+    logger.warn('[Travel] routes returned an unreadable duration', { tenantId, duration: el.duration });
+    return { status: 'unavailable', cause: 'malformed_response' };
+  }
+
+  // Rounded UP to the minute. The gap arithmetic works in whole minutes, and rounding a
+  // drive down is the direction that authorises a booking the owner cannot make.
+  return { status: 'routed', minutes: Math.ceil(seconds / 60) };
+}
+
+/**
+ * The gate's `DriveLookup`, bound to one tenant and one conversation.
+ *
+ * The adapter exists so `travel-gate.ts` never learns what HTTP is: it is handed a function,
+ * and every branch it takes is reachable in a unit test by handing it a different one. It
+ * also collapses the client's four failure causes into the one distinction the gate acts on —
+ * "no drivable route" refuses, everything else degrades — because a gate that branched on
+ * `cap_exhausted` versus `api_error` would be re-deciding a question ADR-0015 already settled.
+ */
+export function driveLookupFor(
+  eligibility: ActiveTravelEligibility,
+  sessionId: string | null
+): DriveLookup {
+  return async (leg) => {
+    const result = await driveMinutes(eligibility, {
+      from: leg.from,
+      to: leg.to,
+      departAt: leg.departAt,
+      sessionId,
+    });
+    if (result.status === 'routed') return { minutes: result.minutes };
+    if (result.status === 'no_route') return { minutes: null, noRoute: true };
+    return { minutes: null };
+  };
+}

@@ -217,6 +217,39 @@ describe('Bookings — the out-of-area note matches the decision already taken',
     await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
     expect(await screen.findByText(/you have not committed to this one/i)).toBeInTheDocument();
   });
+
+  /**
+   * Why a travel-captured Request is sitting there.
+   *
+   * It used to look identical to a Request captured for any other reason, with the cause only
+   * in a server log. ADR-0015 names the consequence: an owner drowning in indistinguishable
+   * Requests rubber-stamps them, which buys back the wrongness the gate was meant to buy off.
+   */
+  const travelBooking = { ...outsideBooking, serviceAreaMatch: null };
+
+  it('tells the owner to check the journey while the decision is still open', async () => {
+    renderWithBookings({ requests: [{ ...travelBooking, status: 'request_created', travelCheck: 'captured' }] });
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    expect(await screen.findByText(/check the journey before accepting/i)).toBeInTheDocument();
+  });
+
+  it('keeps saying so after Accept, without pretending the decision is still open', async () => {
+    // The service-area note above had to learn this: advice about a choice already made reads
+    // as nonsense under a green Confirmed pill. A booking whose journey was never verified is
+    // worth remembering on the morning of the job, so the fact stays and only the tense moves.
+    renderWithBookings({ upcoming: [{ ...travelBooking, travelCheck: 'overridden' }] });
+    expect(await screen.findByText(/accepted anyway/i)).toBeInTheDocument();
+    expect(screen.queryByText(/before accepting/i)).not.toBeInTheDocument();
+  });
+
+  it.each(['ok', 'degraded'] as const)('says nothing at all when the check SUCCEEDED (%s)', async (check) => {
+    // `degraded` is provenance, not a fault — the ordinary state of a business whose jobs sit
+    // close together, where the flat gap settled the drive for free. Warning on it would flag
+    // most of a good day and teach the owner to ignore the warning that matters.
+    renderWithBookings({ upcoming: [{ ...travelBooking, travelCheck: check }] });
+    expect(await screen.findByText(/Boiler repair/)).toBeInTheDocument();
+    expect(screen.queryByTestId('travel-captured')).not.toBeInTheDocument();
+  });
 });
 
 /**

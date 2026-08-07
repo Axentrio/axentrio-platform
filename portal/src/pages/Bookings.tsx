@@ -430,6 +430,42 @@ function BookingRow({
           </div>
         )}
         {/*
+          WHY this Request is sitting here, which until now lived only in a server log.
+
+          A Request the travel gate captured looked identical to one captured for any other
+          reason, and the case that needs the warning arrives with no other signal: when Google
+          answers `ROUTE_NOT_FOUND` the gate degrades to a Request rather than refusing, because
+          that answer means "no route for these coordinates with today's data" — a geocode in a
+          canal or a road closed this week produces it as readily as an island does. Turning a
+          paying customer away on a third party's data quality was the wrong call, but the
+          Request it becomes is only useful if the owner can see what it is. ADR-0015 names the
+          failure exactly: an owner drowning in Requests rubber-stamps them, which buys back the
+          wrongness the strictness was meant to buy off.
+
+          The wording turns on the decision, not on the status, which is the lesson the
+          service-area note above had to learn the hard way: a sentence phrased as advice about
+          a choice still open reads as nonsense once the choice is made. `overridden` is the
+          same fact after Accept, and it stays on screen — a confirmed booking whose journey was
+          never verified is precisely the one worth remembering on the morning of the job.
+
+          `ok` and `degraded` are not rendered. Both are successful checks, and `degraded` is
+          provenance rather than a fault — the ordinary state of a business whose jobs sit close
+          together, where the flat gap settled the drive for free. Flagging it would put a
+          warning on most of a good day and teach the owner to ignore all of them.
+        */}
+        {booking.travelCheck === 'captured' && (
+          <div className="mt-1 text-xs text-amber-400" data-testid="travel-captured">
+            {isRequest
+              ? 'Travel could not clear this time. Check the journey before accepting.'
+              : 'Travel could not clear this time — the journey was never verified.'}
+          </div>
+        )}
+        {booking.travelCheck === 'overridden' && (
+          <div className="mt-1 text-xs text-amber-400" data-testid="travel-captured">
+            Travel could not clear this time — accepted anyway.
+          </div>
+        )}
+        {/*
           What the owner is about to override. A RANGE, and wide on purpose: nothing has routed
           anything, so this is a straight line at the two speed bounds the gate reasons with. A
           single figure would be a guess wearing the clothes of a measurement, handed to the one

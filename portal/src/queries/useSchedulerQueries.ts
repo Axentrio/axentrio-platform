@@ -305,6 +305,15 @@ export interface AdminBooking {
   /** What the service-area gate saw. Null = it did not apply to this booking. */
   serviceAreaMatch?: 'inside' | 'outside' | 'unknown' | null;
   /**
+   * What the travel gate DID. Null = it did not apply, which is every booking today.
+   *
+   * `ok` and `degraded` are both successful checks and are deliberately NOT rendered: the
+   * first is unremarkable, and the second is provenance rather than a fault — it is the
+   * ordinary state of a business whose jobs sit close together, so labelling it would
+   * flag most of a good day. Only `captured` and `overridden` reach the owner.
+   */
+  travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;
+  /**
    * Requests only: how far this sits from the jobs either side, from DISTANCE alone.
    *
    * Rides down with the list rather than being fetched per row. Null whenever there is nothing

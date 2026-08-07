@@ -272,6 +272,8 @@ export interface AdminBookingRow {
   customerPhone?: string | null;
   /** Requests only: the drive either side, from distance alone. Null when nothing can be said. */
   travelEstimate?: { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' } | null;
+  /** What the travel gate DID. Null = it did not apply, which is every booking today. */
+  travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;
   /** P5e: attached files (snapshot subset for display/download). */
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
 }
@@ -474,6 +476,18 @@ export async function adminListBookings(
        * server log, which meant a business could turn jobs away for months without knowing.
        */
       serviceAreaMatch: b.serviceAreaMatch ?? null,
+      /**
+       * What the travel gate DID, for the same reason the line above exists: it was visible
+       * only in a `logger.info` nobody reads. A Request the gate captured looked identical on
+       * screen to one captured for any other reason, and ADR-0015 names the consequence —
+       * *"an owner drowning in Requests rubber-stamps them, which buys back exactly the
+       * wrongness the strictness was meant to buy off."*
+       *
+       * The whole column ships, not just the value the portal currently renders. Filtering
+       * here would put the decision about what an owner may see inside a list mapper, where
+       * the next surface to need `degraded` would not find it.
+       */
+      travelCheck: b.travelCheck ?? null,
       /**
        * How far this sits from the jobs either side of it — DISTANCE, not a routed drive, and
        * labelled as such where it is rendered. Null whenever there is nothing honest to say:

@@ -180,6 +180,28 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(logSave).toHaveBeenCalledOnce();
   });
 
+  it('moves calendar_key with the booking, so the row lands on the diary it was validated against', async () => {
+    // The gap #60 recorded and left. Everything above the UPDATE resolves the itinerary key
+    // FRESHLY — the advisory lock takes it, loadAllBusy filters on it, the capacity gap scopes
+    // to it — because the owner may have connected or switched a calendar since the booking was
+    // made. The UPDATE then left the row on its OLD key, so a reschedule after a calendar change
+    // validated against one diary and wrote into another, and the row went invisible to every
+    // later query scoped by the key: its own next reschedule, the Minimum Gap check, and the
+    // travel gate's neighbour scan. It still blocked its range through the exclusion constraint,
+    // which is why this never looked like a double-booking — it looked like a gap that was not
+    // enforced, against a job nobody could see.
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    const update = managerQuery.mock.calls.find((c: any) =>
+      String(c[0]).includes('UPDATE chatbot_bookings')
+    ) as [string, unknown[]];
+    expect(update[0]).toContain('calendar_key=');
+    // The value written is the same key the lock was taken on, not whatever the row carried.
+    const lock = managerQuery.mock.calls.find((c: any) =>
+      String(c[0]).includes('pg_advisory_xact_lock')
+    ) as [string, unknown[]];
+    expect(update[1]).toContain(lock[1][0]);
+  });
+
   it('reschedule invite keeps the meeting join link (location + description)', async () => {
     bookingRefFind.mockResolvedValue([
       { bookingId: 'bk-1', providerType: 'google', meetingUrl: 'https://meet.google.com/abc-defg-hij', createdAt: new Date('2026-06-01T00:00:00Z') },

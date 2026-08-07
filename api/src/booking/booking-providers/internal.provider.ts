@@ -2555,12 +2555,36 @@ export class InternalProvider implements BookingProvider {
           bookingId
         );
         const rows = returningRows<{ sequence: number }>(await manager.query(
+          // `calendar_key` MOVES WITH THE BOOKING, and until now it did not.
+          //
+          // Everything above this line resolved the itinerary key freshly — the lock is taken
+          // on it, `loadAllBusy` filters on it, `enforceBusinessCapacity` scopes the gap to it —
+          // because the owner may have connected, switched or disconnected a calendar since the
+          // booking was made, and `rekeyBotBookings` rewrites the key on their future bookings
+          // when they do. The UPDATE then left the row on its OLD key. So a reschedule after a
+          // calendar change validated against one diary and wrote into another, and the row
+          // became invisible to every later query scoped by the key: its own next reschedule,
+          // the Minimum Gap check, and now the travel gate's neighbour scan. The booking still
+          // existed and still blocked its range through the exclusion constraint, which is why
+          // this never showed up as a double-booking — it showed up as a gap that was not
+          // enforced, against a job nobody could see.
+          //
+          // `acceptRequest` has always refreshed the key here, for exactly this reason. This is
+          // the same line, in the path that was missing it.
           `UPDATE chatbot_bookings
               SET start_utc=$1, end_utc=$2, blocked_range=tstzrange($3,$4,'[)'),
-                  sequence=sequence+1, updated_at=now()
-            WHERE id=$5 AND tenant_id=$6 AND status='confirmed'
+                  calendar_key=$5, sequence=sequence+1, updated_at=now()
+            WHERE id=$6 AND tenant_id=$7 AND status='confirmed'
             RETURNING sequence`,
-          [start.toISOString(), end.toISOString(), blockedStart.toISOString(), blockedEnd.toISOString(), bookingId, ctx.tenant.id]
+          [
+            start.toISOString(),
+            end.toISOString(),
+            blockedStart.toISOString(),
+            blockedEnd.toISOString(),
+            itineraryKey,
+            bookingId,
+            ctx.tenant.id,
+          ]
         ));
         if (!rows.length) {
           throw new BookingError('Booking is no longer reschedulable', 'BOOKING_NOT_RESCHEDULABLE', 409);

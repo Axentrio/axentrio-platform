@@ -190,7 +190,7 @@ describe('how the sweep behaves as a job', () => {
     });
 
     const result = await sweepExpiredCoordinates();
-    expect(result).toMatchObject({ cleared: 2, tenants: 2 });
+    expect(result).toMatchObject({ cleared: 2, tenantsAffected: 2 });
     expect(audits.entries).toHaveLength(2);
     const [actor, action, entityType, entityId, tenantId, meta] = audits.entries[0] as [
       string,

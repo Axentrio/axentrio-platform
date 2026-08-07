@@ -23,9 +23,9 @@
  * remembers to switch it on is a licence control we do not have.
  *
  * NO TENANT NOTIFICATION either, unlike lead retention. Nothing an owner can see changes: the
- * appointment, the address and the map pin they read are all still there, and the position is
- * restored the next time anything needs it. Telling them would be reporting an internal cache
- * eviction as an event. The audit trail is per tenant, which is where the record belongs.
+ * appointment and the address they read are still there, and the position is restored the next
+ * time anything needs it. Telling them would be reporting an internal cache eviction as an
+ * event. The audit trail is per tenant, which is where the record belongs.
  *
  * `updated_at` IS DELIBERATELY NOT TOUCHED, which raw SQL gives for free and an entity-level
  * `update()` would not. A booking whose cached position was evicted has not been modified —
@@ -89,8 +89,8 @@ let running = false;
 export interface CoordinateSweepResult {
   /** Bookings whose coordinates were removed. */
   cleared: number;
-  /** Tenants those bookings belonged to. */
-  tenants: number;
+  /** How many tenants those bookings belonged to. */
+  tenantsAffected: number;
   batches: number;
   /** True when the loop stopped at `MAX_BATCHES` with rows still expired. */
   reachedBatchCeiling: boolean;
@@ -107,15 +107,18 @@ export interface CoordinateSweepResult {
  * drained one, so a few rows can wait for tomorrow's run. That is why the age above deletes a
  * whole interval early: a row deferred one run still goes at 30 days rather than past them.
  *
- * Never throws. A sweep that fails is retried tomorrow, and in the meantime the read-side
- * age check means nothing expired can be used regardless.
+ * IT THROWS, and the caller in `server.ts` is what catches. That is the shape `sweepLeadRetention`
+ * already has, and it is the right one: a licence job that swallowed its own database failures
+ * would report a clean run every day while deleting nothing. What it must not do is lose the
+ * batches that already committed — each is its own transaction — so a failure logs the running
+ * total before it goes up, and only then rethrows.
  */
 export async function sweepExpiredCoordinates(
   opts: { batchSize?: number } = {}
 ): Promise<CoordinateSweepResult> {
   const result: CoordinateSweepResult = {
     cleared: 0,
-    tenants: 0,
+    tenantsAffected: 0,
     batches: 0,
     reachedBatchCeiling: false,
   };
@@ -134,10 +137,12 @@ export async function sweepExpiredCoordinates(
     let drained = false;
 
     while (!drained && result.batches < MAX_BATCHES) {
-      // The three conditions are the same three `storedPlace` refuses to read, and they are
-      // in both places on purpose. A coordinate the read path will not use and this job will
-      // not delete is one we hold for ever while pretending not to have it — so the rule that
-      // decides "expired" has to be one rule, whichever side asks.
+      // The three shapes are the three `storedPlace` refuses to read — too old, no stamp,
+      // dated ahead — because a coordinate the read path will not use and this job will not
+      // delete is one held for ever while pretending not to have it. The THRESHOLDS are
+      // deliberately not the same: this side deletes a whole interval early and tolerates an
+      // hour of clock skew, both argued above. So the two agree on what expiry MEANS and
+      // disagree, on purpose, about when to act on it — this side always acting first.
       //
       // Nulling the stamp alongside the coordinates is what makes the loop terminate and the
       // count honest: a swept row no longer matches, so it is neither re-selected tomorrow
@@ -176,7 +181,7 @@ export async function sweepExpiredCoordinates(
     }
 
     result.reachedBatchCeiling = !drained;
-    result.tenants = perTenant.size;
+    result.tenantsAffected = perTenant.size;
 
     for (const [tenantId, cleared] of perTenant) {
       await logAudit('system', 'bookings.coordinates_expired', 'tenant', tenantId, tenantId, {
@@ -192,7 +197,46 @@ export async function sweepExpiredCoordinates(
     // are the two answers this line exists to tell apart, and only one of them is a problem.
     logger.info('[travel-coords] sweep complete', result);
     return result;
+  } catch (error) {
+    // Each batch is its own transaction, so a failure part-way through has still deleted
+    // everything up to it. Rethrowing without saying that would leave the operator reading a
+    // stack trace and no record of what actually went, which is the AC this job is measured on.
+    logger.error('[travel-coords] sweep failed part-way through', {
+      ...result,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   } finally {
     running = false;
   }
+}
+
+/**
+ * Put the sweep on its schedule.
+ *
+ * THE SCHEDULE LIVES HERE, not in `server.ts`, and that is a deliberate break from every other
+ * background job in this codebase. For the others the interval is an operational preference:
+ * run the lead sweep twice a day and nothing is wrong, only different. Here it is an input to
+ * correctness — `COORDINATE_DELETE_AGE_MS` is derived from it, and a `setInterval` edited in
+ * another file without the constant reintroduces the 31st day silently. A comment asking the
+ * next reader to keep two numbers in step is not a mechanism. One caller, one number.
+ *
+ * ONE RUN SHORTLY AFTER BOOT AS WELL AS ON THE INTERVAL, and that is not belt-and-braces. A
+ * plain 24-hour timer only ever fires if the process lives 24 hours, and this one redeploys
+ * more often than that — so a deletion obligation hung on the interval alone could go months
+ * without running while looking perfectly well scheduled. 90s of headroom so the first run
+ * starts behind the boot traffic.
+ */
+export function startCoordinateExpirySweep(): void {
+  const run = () => {
+    sweepExpiredCoordinates().catch((error) => {
+      // Already logged with its running total inside; this is the last line of defence that
+      // keeps one bad night from taking an unhandled rejection to the process.
+      logger.error('[travel-coords] scheduled sweep failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+  setTimeout(run, 90_000);
+  setInterval(run, SWEEP_INTERVAL_MS);
 }

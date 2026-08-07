@@ -155,9 +155,10 @@ export async function placeExistingBooking(
 /**
  * The same refresh for a caller that only wants the position.
  *
- * The neighbour loader has one question — where is this job — and the three ways a lookup
- * can fail to answer it all mean the same thing to it: `unresolved`. Handing it the full
- * placement would make it re-derive that collapse per call site.
+ * One caller, the neighbour loader, and it has one question — where is this job — for which
+ * all three ways a lookup can fail mean the same thing: `unresolved`. This exists so that
+ * collapse is written down once, next to the placement it collapses, rather than at the call
+ * site where a later reader would have to check it still matches the outcomes above.
  */
 export async function ensureBookingPlace(
   booking: Booking,

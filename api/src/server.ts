@@ -659,30 +659,17 @@ async function startServer(): Promise<void> {
     };
     setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
 
-    // Coordinate expiry (ADR-0014). The Maps terms permit a booking's latitude and longitude
-    // for 30 consecutive days and no longer; `place_id` stays. Unflagged and ungated for the
-    // same reason as lead retention above — it is a no-op for every tenant that has never
-    // placed an address, and a licence control nobody remembers to enable is not a control.
+    // Coordinate expiry, daily plus one run shortly after boot (ADR-0014). The Maps terms
+    // permit a booking's latitude and longitude for 30 consecutive days and no longer;
+    // `place_id` stays. Unflagged and ungated for the same reason as lead retention above —
+    // it is a no-op for every tenant that has never placed an address, and a licence control
+    // nobody remembers to enable is not a control.
     //
-    // ONE RUN AT BOOT AS WELL AS DAILY, and that is not belt-and-braces. A plain 24-hour
-    // interval only ever fires if the process lives 24 hours, and this one redeploys more
-    // often than that — so a deletion obligation hung on the interval alone could go months
-    // without running while looking perfectly well scheduled. 90s of headroom so it starts
-    // behind the boot traffic.
-    const sweepCoordinates = async () => {
-      try {
-        const { sweepExpiredCoordinates } = await import('./booking/travel/coordinate-retention.service');
-        await sweepExpiredCoordinates();
-      } catch (err) {
-        logger.error('[travel-coords] sweep failed', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    };
-    setTimeout(sweepCoordinates, 90_000);
-    // `SWEEP_INTERVAL_MS` in the service is this number, and it is what sets how early the
-    // sweep deletes. Changing one without the other reintroduces the 31st day.
-    setInterval(sweepCoordinates, 24 * 60 * 60 * 1000); // Daily
+    // THE INTERVAL IS NOT SET HERE, unlike every sweep above it. The age at which this one
+    // deletes is derived from how often it runs, so the two numbers cannot live in different
+    // files — see `startCoordinateExpirySweep`.
+    const { startCoordinateExpirySweep } = await import('./booking/travel/coordinate-retention.service');
+    startCoordinateExpirySweep();
 
     // Repeat-customer detection (Story 3). Groups a tenant's live leads by person —
     // leads are one row per IDENTITY, so the same human on WhatsApp and in the widget

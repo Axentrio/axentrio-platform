@@ -279,7 +279,19 @@ async function buildAdminContext(tenantId: string, booking: Booking): Promise<Bo
   if (!session) {
     session = { id: booking.sessionId ?? booking.id, tenantId, botId: bot.id } as ChatSession;
   }
-  return { session, tenant, bot, botSettings: bot.settings ?? ({} as BotSettings), isAdmin: true };
+  return {
+    session,
+    tenant,
+    bot,
+    botSettings: bot.settings ?? ({} as BotSettings),
+    isAdmin: true,
+    // The OWNER acting on their own diary. Travel warns them and never blocks them — plan
+    // §6.17, ADR-0015 — and this is the one place every owner-side write path gets the policy,
+    // so accept, decline, cancel and the portal reschedule cannot disagree about it. Set here
+    // rather than at each call site because a path that forgot would silently gate the owner,
+    // which is the failure the read side already had to fix once.
+    travelPolicy: 'annotate',
+  };
 }
 
 /** List the tenant anchor bot's internal bookings, upcoming or past. */
@@ -467,6 +479,30 @@ export async function adminAcceptRequest(caller: BookingCaller, tenantId: string
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
   return internalProvider.acceptRequest(ctx, bookingId);
+}
+
+/**
+ * How far this request is from the jobs either side of it, for the owner about to decide.
+ *
+ * AT THE MOMENT OF ACCEPTING, and not on the list. A list of thirty requests would mean thirty
+ * diary reads to render a column nobody is looking at; the owner opening ONE request is the
+ * moment the number matters and the moment it is cheap.
+ *
+ * DISTANCE, NOT ROUTING, and it says so. Nothing here has asked Google how long the drive takes
+ * — that arrives with the routing ticket — so this is a straight line divided by the two speed
+ * bounds the gate reasons with, presented as the range it is. `null` when travel does not apply,
+ * when the request has no usable position, or when neither neighbour has one: an owner reading
+ * "not known" can ask; an owner reading a fabricated "35 min" cannot.
+ */
+export async function adminRequestTravelEstimate(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string
+) {
+  await enforceBookingsFeature(tenantId, caller);
+  const booking = await loadAdminBooking(tenantId, bookingId);
+  const ctx = await buildAdminContext(tenantId, booking);
+  return internalProvider.requestTravelEstimate(ctx, booking);
 }
 
 export async function adminDeclineRequest(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {

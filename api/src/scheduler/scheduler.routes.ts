@@ -34,6 +34,10 @@ router.get('/bookings', requireRole('admin', 'supervisor', 'agent'), asyncHandle
 router.get('/availability', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.getBookingAvailability));
 router.post('/bookings/:id/cancel', requireRole('admin'), asyncHandler(ctrl.cancelBooking));
 router.post('/bookings/:id/reschedule', requireRole('admin'), asyncHandler(ctrl.rescheduleBooking));
+// Read BEFORE the accept, so the owner overriding a captured Request can see what they are
+// overriding. ADR-0015 makes acceptance an owner override; an override nobody can see the
+// grounds for is a rubber stamp.
+router.get('/bookings/:id/travel-estimate', requireRole('admin'), asyncHandler(ctrl.getRequestTravelEstimate));
 router.post('/bookings/:id/accept', requireRole('admin'), asyncHandler(ctrl.acceptRequest));
 router.post('/bookings/:id/decline', requireRole('admin'), asyncHandler(ctrl.declineRequest));
 

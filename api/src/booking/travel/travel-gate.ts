@@ -22,6 +22,9 @@
 import {
   certainlyReachableWithin,
   couldReachWithin,
+  haversineKm,
+  PREFILTER_MAX_KMH,
+  PREFILTER_MIN_KMH,
   type GeoPoint,
 } from '../../contracts/travel';
 
@@ -230,6 +233,38 @@ export function followingNeighbour(
     if (!best || n.blockedStart.getTime() < best.blockedStart.getTime()) best = n;
   }
   return best;
+}
+
+/**
+ * How long the drive might take, for a human being to read.
+ *
+ * A RANGE, NOT A NUMBER, and the width of it is the honest part. Nothing has routed anything:
+ * this is a straight line between two points divided by the same two speed constants the gate
+ * reasons with, so the fast end assumes a motorway that may not exist and the slow end assumes
+ * a crawl through town. A single figure would be a guess wearing the clothes of a measurement,
+ * and the owner deciding whether to accept a job is exactly the person who must not be given
+ * one of those.
+ *
+ * The straight line also means the true drive can exceed the slow end — a river, a ferry, a
+ * closed bridge. It is a sketch to inform a decision, never an input to one. Nothing in the
+ * gate reads this.
+ */
+export interface DriveEstimate {
+  /** Straight-line distance, rounded to the kilometre. */
+  km: number;
+  /** At the optimistic bound: nobody beats this on public roads. */
+  fastestMin: number;
+  /** At the pessimistic bound: the worst plausible crawl. */
+  slowestMin: number;
+}
+
+export function estimateDrive(from: GeoPoint, to: GeoPoint): DriveEstimate {
+  const km = haversineKm(from, to);
+  return {
+    km: Math.round(km),
+    fastestMin: Math.round((km / PREFILTER_MAX_KMH) * 60),
+    slowestMin: Math.round((km / PREFILTER_MIN_KMH) * 60),
+  };
 }
 
 /** Both sides at once, for a caller walking a list of candidate slots. */

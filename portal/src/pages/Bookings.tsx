@@ -29,6 +29,7 @@ import {
   useCancelBooking,
   useRescheduleBooking,
   useAcceptRequest,
+  useRequestTravelEstimate,
   useDeclineRequest,
   useBookingAvailability,
   useServices,
@@ -351,6 +352,10 @@ function BookingRow({
   onDecline: () => void;
 }) {
   const pill = statusPill(booking.status);
+  // Only for a request, because that is the only row anyone is about to override. Accepting is
+  // an owner override of a drive the gate could not clear; an override whose grounds nobody can
+  // see is a rubber stamp, which is the failure the design names in its own opening paragraph.
+  const { data: travel, isLoading: travelLoading } = useRequestTravelEstimate(booking.id, isRequest);
   return (
     <li className="flex items-start gap-4 px-4 py-4">
       <div className="min-w-0 flex-1">
@@ -423,6 +428,23 @@ function BookingRow({
             {isRequest
               ? 'Address could not be matched to your service area — worth checking before you confirm.'
               : 'Address could not be matched to your service area.'}
+          </div>
+        )}
+        {/*
+          What the owner is about to override. A RANGE, and wide on purpose: nothing has routed
+          anything, so this is a straight line at the two speed bounds the gate reasons with. A
+          single figure would be a guess wearing the clothes of a measurement, handed to the one
+          person who must not be given one.
+        */}
+        {isRequest && !travelLoading && travel && (
+          <div className="mt-1 text-xs text-text-secondary" data-testid="travel-estimate">
+            {[
+              travel.before && `${travel.before.km} km from the job before (${travel.before.fastestMin}-${travel.before.slowestMin} min)`,
+              travel.after && `${travel.after.km} km to the job after (${travel.after.fastestMin}-${travel.after.slowestMin} min)`,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
+            <span className="text-text-secondary/70"> · straight-line distance, not a measured drive</span>
           </div>
         )}
         {booking.notes && (

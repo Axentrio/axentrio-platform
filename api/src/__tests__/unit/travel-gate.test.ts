@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assessTravel,
   assessSlot,
+  estimateDrive,
   precedingNeighbour,
   followingNeighbour,
   type TravelNeighbour,
@@ -344,5 +345,34 @@ describe('assessSlot — both sides at once', () => {
       slackMin: 0,
     });
     expect(verdict).toBe('unreachable');
+  });
+});
+
+describe('estimateDrive — what the owner reads before overriding', () => {
+  it('gives a RANGE, because nothing has routed anything', () => {
+    const e = estimateDrive(BRUSSELS, GHENT);
+    // ~47 km: about 24 minutes at the optimistic bound, about 140 at the pessimistic one.
+    expect(e.km).toBeGreaterThan(45);
+    expect(e.km).toBeLessThanOrEqual(50);
+    expect(e.fastestMin).toBeLessThan(e.slowestMin);
+    expect(e.fastestMin).toBeGreaterThan(0);
+  });
+
+  it('is zero-ish for two doors on the same street', () => {
+    const e = estimateDrive(BRUSSELS, NEXT_DOOR);
+    expect(e.km).toBe(0);
+    expect(e.slowestMin).toBe(0);
+  });
+
+  it('is symmetric — a drive is the same length in both directions', () => {
+    expect(estimateDrive(BRUSSELS, LIEGE)).toEqual(estimateDrive(LIEGE, BRUSSELS));
+  });
+
+  it('never claims to be a measured drive: the slow end assumes a crawl, not a road', () => {
+    // Brussels→Liège is ~87 km. The real drive is about an hour; the range must CONTAIN that
+    // rather than pretend to be it, which is the whole reason it is a range.
+    const e = estimateDrive(BRUSSELS, LIEGE);
+    expect(e.fastestMin).toBeLessThan(60);
+    expect(e.slowestMin).toBeGreaterThan(60);
   });
 });

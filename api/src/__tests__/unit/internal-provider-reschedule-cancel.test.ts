@@ -516,6 +516,32 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(true);
   });
 
+  it('acceptRequest SKIPS the travel gate — the owner is not blocked by it', async () => {
+    // ADR-0015: a Request the travel gate captured would otherwise be refused by the same gate
+    // that captured it, and the owner could never clear it. The feature would have built a
+    // queue with no exit. Feasibility is a hard constraint against the BOT, never against the
+    // person who owns the diary.
+    bookingFindOne.mockResolvedValue(requestBooking());
+    await provider.acceptRequest(ctx, 'bk-1');
+    expect(loadStoredNeighbours).not.toHaveBeenCalled();
+  });
+
+  it('acceptRequest records the override FROM THE ROW, not from today s settings', async () => {
+    // The condition is the row's own travel_check = 'captured', evaluated by Postgres in the
+    // same statement that confirms. Between capture and acceptance a tenant can lose the
+    // entitlement or an owner can flip the toggle, and in every one of those the owner is still
+    // overriding a job travel captured — so live eligibility must not decide it.
+    bookingFindOne.mockResolvedValue(requestBooking());
+    resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'not_entitled' } as any);
+    await provider.acceptRequest(ctx, 'bk-1');
+    const update = managerQuery.mock.calls.find((c: any) =>
+      String(c[0]).includes('UPDATE chatbot_bookings')
+    ) as [string, unknown[]];
+    expect(update[0]).toContain("travel_check = CASE WHEN travel_check = 'captured' THEN 'overridden'");
+    // And it leaves anything else alone rather than stamping every accepted request.
+    expect(update[0]).toContain('ELSE travel_check END');
+  });
+
   it('acceptRequest rejects a non-request (confirmed) booking', async () => {
     bookingFindOne.mockResolvedValue(confirmedBooking());
     await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'NOT_A_REQUEST' });

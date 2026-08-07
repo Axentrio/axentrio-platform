@@ -156,6 +156,16 @@ export interface RescheduleResult {
 export interface CancelResult {
   success: boolean;
   cancelled: boolean;
+  /**
+   * The cancelled job was that day's first, and what it exposed cannot be reached from the
+   * premises. ADVICE, never a refusal — declining a cancellation because of a drive is absurd,
+   * and the owner has hours to act on it.
+   *
+   * Only ever set for the OWNER. A customer cancelling from their signed manage link cannot do
+   * anything about somebody else's morning, so they are told nothing and it becomes an
+   * operator log line instead.
+   */
+  travelWarning?: string;
 }
 
 /**

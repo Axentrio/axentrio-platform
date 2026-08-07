@@ -66,16 +66,21 @@ import {
 } from '../travel/booking-place';
 import type { GeoPoint } from '../../contracts/travel';
 import { resolveTravelEligibility, type ActiveTravelEligibility } from '../travel/travel-eligibility';
-import { loadTravelNeighbours, loadStoredNeighbours } from '../travel/travel-neighbours';
+import { loadTravelNeighbours, loadStoredNeighbours, NEIGHBOUR_MARGIN_MS } from '../travel/travel-neighbours';
 import {
   assessSlotRouted,
   recordingLookup,
   replayLookup,
   routeBudget,
+  withBaseNeighbour,
+  selectFirstJob,
+  type DriveLookup,
   type DriveRecords,
   type NeighbourLocation,
+  type TravelNeighbour,
   type TravelVerdict,
 } from '../travel/travel-gate';
+import { dayOpeningInstant, localDayBounds, type DayRule } from '../travel/travel-day';
 import { driveLookupFor } from '../travel/routes.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
@@ -650,6 +655,24 @@ function effectiveDurationForAvailability(service: ServiceType, requestedDuratio
   return min;
 }
 
+/**
+ * What the pre-lock travel pass measured, carried into the transaction.
+ *
+ * Every field here exists because the in-lock assert may not do the thing that produced it: it
+ * cannot route (a Google round-trip under an advisory lock is the pool-exhaustion pattern this
+ * file warns about), it cannot geocode, and so it cannot place a venue. Recomputing any of these
+ * inside the lock would be a second answer to a question already paid for, and the two answers
+ * would eventually differ. Named rather than inlined because it is now declared in two paths and
+ * a field added to one of them silently would be a snapshot that no longer matches.
+ */
+type TravelSnapshot = {
+  candidate: { point: GeoPoint; coarse: boolean };
+  venue: NeighbourLocation | null;
+  drives: DriveRecords;
+  base: { at: Date; location: NeighbourLocation } | null;
+  dayStart: Date;
+};
+
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
   private async loadRule(botId: string): Promise<AvailabilityRule> {
@@ -842,6 +865,7 @@ export class InternalProvider implements BookingProvider {
     const travel = await this.filterSlotsForTravel(ctx, {
       service,
       itineraryKey,
+      rule,
       slots,
       rangeStart,
       rangeEnd,
@@ -886,6 +910,8 @@ export class InternalProvider implements BookingProvider {
     input: {
       service: ResolvedService;
       itineraryKey: ItineraryKey;
+      /** For the per-day opening instant start-from-base departs at. */
+      rule: DayRule;
       slots: Array<{ start: string; end: string }>;
       rangeStart: string;
       rangeEnd: string;
@@ -936,7 +962,7 @@ export class InternalProvider implements BookingProvider {
       return unjudged(placement.applies && placement.outcome === 'not_placeable' ? 'not_placeable' : 'lookup_unavailable');
     }
     const candidate = travelCandidatePoint(placement);
-    const { neighbours } = await loadTravelNeighbours({
+    const { neighbours, venue } = await loadTravelNeighbours({
       eligibility,
       botId: ctx.bot.id,
       from: new Date(input.rangeStart),
@@ -960,13 +986,19 @@ export class InternalProvider implements BookingProvider {
     // actually enforced: fired concurrently, every slot would pass the check before any of
     // them decremented it.
     for (const slot of input.slots) {
+      const slotCandidate = {
+        ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
+        point: candidate.point,
+        coarse: candidate.coarse,
+      };
+      // PER SLOT, not once for the list. A single availability call spans a fortnight, and each
+      // day has its own opening instant — a Saturday's late start, a one-off closure, a
+      // date-override's custom hours. One base computed for the range would apply Monday's
+      // departure to every day in it.
+      const { base, dayStart } = this.travelBaseFor(eligibility, input.rule, venue, slotCandidate.blockedStart);
       const { verdict, degradedCauses } = await assessSlotRouted({
-        candidate: {
-          ...this.blockedRangeFor(service, new Date(slot.start), new Date(slot.end)),
-          point: candidate.point,
-          coarse: candidate.coarse,
-        },
-        neighbours,
+        candidate: slotCandidate,
+        neighbours: withBaseNeighbour(neighbours, slotCandidate, base, dayStart),
         slackMin: eligibility.slackMin,
         lookup,
         budget,
@@ -1087,6 +1119,146 @@ export class InternalProvider implements BookingProvider {
    * the Request lives. That is the same 409 a genuinely impossible drive gets, and the message
    * says what to do rather than what happened.
    */
+  /**
+   * The premises as a predecessor, for the day the candidate falls in.
+   *
+   * Returns `base: null` for the three situations that mean "no departure instant, so no
+   * constraint": the setting is off, the business is `always_open`, or the day has no opening
+   * window. `withBaseNeighbour` treats all three identically.
+   *
+   * A VENUE WE COULD NOT PLACE BECOMES `unresolved`, NEVER NULL. Null means "no constraint" and
+   * clears; `unresolved` means "we could not evaluate" and never clears. The base exists to
+   * constrain, so its failure has to fall to the safe side — the same side an at-premises
+   * neighbour already falls to when its venue will not geocode. The visible consequence is that
+   * an owner with this switch on and an unplaceable premises address gets every first job of the
+   * day captured as a Request, which is harsh, correct, and fixed by fixing the address.
+   */
+  private travelBaseFor(
+    eligibility: ActiveTravelEligibility,
+    rule: DayRule,
+    venue: NeighbourLocation | null,
+    candidateStart: Date
+  ): { base: { at: Date; location: NeighbourLocation } | null; dayStart: Date } {
+    const { localDay, dayStart } = localDayBounds(rule, candidateStart);
+    if (!eligibility.startFromBase) return { base: null, dayStart };
+    const at = dayOpeningInstant(rule, localDay);
+    if (!at) return { base: null, dayStart };
+    return { base: { at, location: venue ?? { kind: 'unresolved' } }, dayStart };
+  }
+
+  /**
+   * The premises leg of a day's first job, for a day some write has just disturbed.
+   *
+   * ONE FUNCTION, TWO DIRECTIONS, because the pre-lock and in-lock passes must select the same
+   * booking and measure the same legs. Pre-lock it runs over a PROJECTED diary with a recording
+   * lookup, filling the snapshot; in-lock it runs over committed rows with a replaying one. Any
+   * divergence between the two shows up as a replay miss, which refuses — so the failure mode of
+   * getting this wrong is a retry, never a wrong yes.
+   *
+   * `key` is a parameter rather than being read off the eligibility, because a reschedule can
+   * move a booking BETWEEN itineraries and the old one has to be asserted too.
+   */
+  /**
+   * Which `(itinerary, day)` pairs a move disturbs, and how to project it onto each.
+   *
+   * THE PROJECTION IS PAIR-RELATIVE, and that is the whole subtlety. The old pair only ever
+   * REMOVES the booking and the new pair only ever ADDS it. Applying both edits to both pairs
+   * would, on a move that changes itinerary without changing day, insert the booking into the
+   * old diary as well — hiding the very job whose exposure is being checked.
+   *
+   * Deduplicated on `(key, localDay)`, because the overwhelmingly common move is within one day
+   * on one itinerary, and asserting that day twice would evaluate it against a diary that has
+   * been half-projected.
+   */
+  private exposurePairs(input: {
+    oldKey: ItineraryKey;
+    oldDay: Date;
+    newKey: ItineraryKey;
+    newDay: Date;
+    rule: DayRule;
+    moved: TravelNeighbour;
+  }): Array<{ key: ItineraryKey; day: Date; project: { removeId?: string; add?: TravelNeighbour } }> {
+    const dayOf = (d: Date) => localDayBounds(input.rule, d).localDay.toISODate();
+    const oldPair = {
+      key: input.oldKey,
+      day: input.oldDay,
+      project: { removeId: input.moved.bookingId },
+    };
+    const newPair = { key: input.newKey, day: input.newDay, project: { add: input.moved } };
+    const same = input.oldKey === input.newKey && dayOf(input.oldDay) === dayOf(input.newDay);
+    // One pair carrying BOTH edits when they are the same pair — a same-day reorder still moves
+    // the booking, and the projection has to show it gone from where it was and present where
+    // it is going, or the exposed first job is read off a diary that never existed.
+    return same
+      ? [{ key: input.newKey, day: input.newDay, project: { removeId: input.moved.bookingId, add: input.moved } }]
+      : [oldPair, newPair];
+  }
+
+  private async assertExposedFirstJob(input: {
+    eligibility: ActiveTravelEligibility;
+    key: ItineraryKey;
+    rule: DayRule;
+    day: Date;
+    venue: NeighbourLocation | null;
+    lookup: DriveLookup;
+    /**
+     * How to read the diary, which DIFFERS between the two directions and must.
+     *
+     * Pre-lock the old day may never have been read by anything, so its bookings can still be
+     * unplaced — that pass therefore uses the geocoding loader, which writes coordinates back.
+     * In-lock nothing may touch the network, so that pass uses the stored loader and finds
+     * exactly what the pre-lock pass just persisted. Handing the loader in is what keeps a
+     * network call out of the transaction by construction rather than by remembering.
+     */
+    load: (from: Date, to: Date) => Promise<{ neighbours: TravelNeighbour[]; venue?: NeighbourLocation | null }>;
+    /** Rows to drop (the moved booking's old occurrence) and add (its new one). */
+    project?: { removeId?: string; add?: TravelNeighbour };
+  }): Promise<TravelVerdict> {
+    const { dayStart, dayEnd, localDay } = localDayBounds(input.rule, input.day);
+    const at = dayOpeningInstant(input.rule, localDay);
+    // No departure instant, no base, nothing this function can add. Every other constraint on
+    // the exposed booking was already checked when it was made.
+    if (!at) return 'clear';
+
+    // THE SAME SCOPE AS THE READ IT MUST MATCH. The gate has no day boundary — it picks
+    // predecessors and successors from the whole list — so a day-scoped read would omit
+    // yesterday's last job and tomorrow's first, and the two passes would measure different
+    // legs. A margin mismatch here is a replay miss on every ordinary write.
+    const loaded = await input.load(
+      new Date(dayStart.getTime() - NEIGHBOUR_MARGIN_MS),
+      new Date(dayEnd.getTime() + NEIGHBOUR_MARGIN_MS)
+    );
+    const stored = loaded.neighbours;
+    // The loader's venue wins when it has one, because only a loader free to reach Google can
+    // place a venue at all. The handed-in value is what the in-lock pass has instead, and
+    // `unresolved` is the floor: a base we could not place must constrain, never clear.
+    const venue = loaded.venue ?? input.venue ?? { kind: 'unresolved' as const };
+
+    // PAIR-RELATIVE projection. Remove only on the day the booking is leaving, add only on the
+    // day it is arriving. Doing both on both would insert the booking into the old diary as
+    // well on a cross-itinerary move, hiding the very job whose exposure is being checked.
+    const projected = input.project
+      ? [
+          ...stored.filter((n) => !input.project?.removeId || n.bookingId !== input.project.removeId),
+          ...(input.project.add ? [input.project.add] : []),
+        ]
+      : stored;
+
+    const selection = selectFirstJob(projected, dayStart, dayEnd);
+    if (selection.kind === 'none') return 'clear';
+    // A first job whose own location we could not obtain. We cannot show the owner can reach it
+    // and we must not pretend otherwise.
+    if (selection.kind === 'unplaced') return 'undecided';
+
+    const { verdict } = await assessSlotRouted({
+      candidate: selection.candidate,
+      neighbours: withBaseNeighbour(selection.others, selection.candidate, { at, location: venue }, dayStart),
+      slackMin: input.eligibility.slackMin,
+      lookup: input.lookup,
+    });
+    return verdict;
+  }
+
   private async assertTravelFeasible(
     manager: EntityManager,
     input: {
@@ -1099,16 +1271,29 @@ export class InternalProvider implements BookingProvider {
       excludeBookingId?: string;
       /** What the pre-lock pass paid Google for. Absent means nothing was routed. */
       drives?: DriveRecords;
+      /**
+       * The premises leg, carried from the pre-lock pass rather than recomputed.
+       *
+       * The day maths is deterministic, so recomputing it here would agree — but the VENUE
+       * cannot be re-placed inside a transaction, and a base assembled from a venue this pass
+       * does not have would differ from the one the pre-lock pass measured. Handing both halves
+       * down together is what makes "the same base" a fact rather than a hope.
+       */
+      base?: { at: Date; location: NeighbourLocation } | null;
+      dayStart?: Date;
     }
   ): Promise<void> {
     const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
-    const neighbours = await loadStoredNeighbours(manager, {
+    const stored = await loadStoredNeighbours(manager, {
       eligibility: input.eligibility,
       from: input.start,
       to: input.end,
       excludeBookingId: input.excludeBookingId,
       venue: input.venue,
     });
+    const neighbours = input.dayStart
+      ? withBaseNeighbour(stored, { blockedStart }, input.base ?? null, input.dayStart)
+      : stored;
     // Replayed, never routed. This runs inside the caller's transaction, and holding a pool
     // connection open across a Google round-trip is the pattern this file already warns
     // about. A leg the pre-lock pass did not record answers null, which reads as undecided
@@ -1140,6 +1325,8 @@ export class InternalProvider implements BookingProvider {
       eligibility: ActiveTravelEligibility;
       service: ResolvedService;
       placement: BookingPlacement;
+      /** For the day boundary and the opening instant start-from-base departs at. */
+      rule: DayRule;
       start: Date;
       end: Date;
       excludeBookingId?: string;
@@ -1154,19 +1341,26 @@ export class InternalProvider implements BookingProvider {
     hadConstrainingLeg: boolean;
     /** Carried into the transaction so the in-lock assert can replay rather than re-ask. */
     drives: DriveRecords;
+    /** The premises leg this pass measured, so the in-lock pass asserts the identical one. */
+    base: { at: Date; location: NeighbourLocation } | null;
+    dayStart: Date;
   }> {
     const candidate = travelCandidatePoint(input.placement);
     const { blockedStart, blockedEnd } = this.blockedRangeFor(input.service, input.start, input.end);
     // The candidate point and the venue are carried out of here so the in-lock assert can reuse
     // them: it may not geocode, and re-deriving either would be a second answer to a question
     // this pass already paid Google to answer once.
-    const { neighbours, venue } = await loadTravelNeighbours({
+    const { neighbours: stored, venue } = await loadTravelNeighbours({
       eligibility: input.eligibility,
       botId: ctx.bot.id,
       from: input.start,
       to: input.end,
       excludeBookingId: input.excludeBookingId,
     });
+    // The day's first job departs from the premises. Carried out of here with the venue, for
+    // the same reason the venue is: the in-lock pass may not place anything.
+    const { base, dayStart } = this.travelBaseFor(input.eligibility, input.rule, venue, blockedStart);
+    const neighbours = withBaseNeighbour(stored, { blockedStart }, base, dayStart);
     const drives: DriveRecords = {};
     const { verdict, fullyRouted, hadConstrainingLeg, degradedCauses } = await assessSlotRouted({
       candidate: { blockedStart, blockedEnd, point: candidate.point, coarse: candidate.coarse },
@@ -1184,7 +1378,7 @@ export class InternalProvider implements BookingProvider {
         causes: degradedCauses,
       });
     }
-    return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives };
+    return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives, base, dayStart };
   }
 
   /**
@@ -1447,9 +1641,7 @@ export class InternalProvider implements BookingProvider {
     let travelCheck: 'ok' | 'degraded' | 'captured' | null = null;
     // Non-null only when the gate ran AND cleared, which is the only path that reaches the
     // transaction. Everything else has already thrown or become a Request by then.
-    let travelSnapshot:
-      | { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null; drives: DriveRecords }
-      | null = null;
+    let travelSnapshot: TravelSnapshot | null = null;
     if (travelEligibility.active) {
       // An address we could not place at all still stops here, exactly as it did before there
       // was a drive to check: there is a postcode that would settle it and the prompt asks for
@@ -1461,6 +1653,7 @@ export class InternalProvider implements BookingProvider {
               eligibility: travelEligibility,
               service,
               placement,
+              rule,
               start,
               end,
             })
@@ -1473,7 +1666,13 @@ export class InternalProvider implements BookingProvider {
       // Carried into the transaction so the in-lock assert can re-reach this verdict without
       // geocoding anything: the candidate's point and the venue were both paid for above.
       travelSnapshot = checked && verdict === 'clear'
-        ? { candidate: checked.candidate, venue: checked.venue, drives: checked.drives }
+        ? {
+            candidate: checked.candidate,
+            venue: checked.venue,
+            drives: checked.drives,
+            base: checked.base,
+            dayStart: checked.dayStart,
+          }
         : null;
       if (verdict === 'unreachable') {
         logger.info('[Travel] refusing a booking the owner could not reach', {
@@ -1553,6 +1752,8 @@ export class InternalProvider implements BookingProvider {
             candidate: travelSnapshot.candidate,
             venue: travelSnapshot.venue,
             drives: travelSnapshot.drives,
+            base: travelSnapshot.base,
+            dayStart: travelSnapshot.dayStart,
             start,
             end,
           });
@@ -2725,9 +2926,7 @@ export class InternalProvider implements BookingProvider {
     const travelEligibility = service.customerAddressRequired
       ? await resolveTravelEligibility({ tenantId: ctx.tenant.id, botId: ctx.bot.id, itineraryKey })
       : { active: false as const, reason: 'bot_disabled' as const };
-    let travelSnapshot:
-      | { candidate: { point: GeoPoint; coarse: boolean }; venue: NeighbourLocation | null; drives: DriveRecords }
-      | null = null;
+    let travelSnapshot: TravelSnapshot | null = null;
     let travelCheck: 'ok' | 'degraded' | 'overridden' | null = null;
     if (travelEligibility.active && (booking.customerPlaceId || booking.customerAddress?.trim())) {
       const placement = await placeExistingBooking(booking, travelEligibility);
@@ -2741,6 +2940,7 @@ export class InternalProvider implements BookingProvider {
               eligibility: travelEligibility,
               service,
               placement,
+              rule,
               start,
               end,
               excludeBookingId: bookingId,
@@ -2764,7 +2964,13 @@ export class InternalProvider implements BookingProvider {
       }
       travelSnapshot =
         checked && verdict === 'clear'
-          ? { candidate: checked.candidate, venue: checked.venue, drives: checked.drives }
+          ? {
+              candidate: checked.candidate,
+              venue: checked.venue,
+              drives: checked.drives,
+              base: checked.base,
+              dayStart: checked.dayStart,
+            }
           : null;
       // The MOVE invalidates whatever the old time was checked against, so the column is
       // rewritten rather than left describing a journey nobody is making any more. `ok` when
@@ -2780,13 +2986,89 @@ export class InternalProvider implements BookingProvider {
               : 'degraded';
     }
 
+    // A MOVE IS A REMOVAL TOO, and the removal half is the one that gets forgotten.
+    //
+    // Moving the day's first job does not merely place it somewhere new — it EXPOSES the next
+    // booking on the old day as that day's new first, which now carries a premises leg nobody
+    // has ever checked. Moving it LATER on the same day does exactly that without leaving the
+    // day at all. Asserting only the moved booking at its new position would let a customer
+    // move themselves out of a morning and strand a confirmed appointment, with every check
+    // having passed.
+    //
+    // The unit is `(itineraryKey, localDay)` rather than the day alone, because the UPDATE below
+    // rewrites `calendar_key` and a move can therefore cross itineraries. Deduplicated, or a
+    // same-day move asserts one day twice.
+    // Narrowed once, so the two exposure passes below take a proven-active eligibility rather
+    // than a cast. Non-null exactly when there is a snapshot to replay from.
+    //
+    // GATED ON `startFromBase`, and that is not an optimisation. Exposing a day's first job only
+    // matters because that job acquires a PREMISES leg nobody checked; with the setting off there
+    // is no such leg, every other constraint on the exposed booking was already validated when it
+    // was made, and asserting anyway would refuse moves that have always been legal. "With the
+    // setting off, behaviour is byte-identical" is an acceptance criterion, and this line is it.
+    const exposureEligibility =
+      travelEligibility.active && travelEligibility.startFromBase && travelSnapshot
+        ? travelEligibility
+        : null;
+    const exposure = exposureEligibility && travelSnapshot
+      ? this.exposurePairs({
+          oldKey: (booking.calendarKey ?? itineraryKey) as ItineraryKey,
+          oldDay: booking.startUtc,
+          newKey: itineraryKey,
+          newDay: start,
+          rule,
+          moved: {
+            bookingId,
+            blockedStart,
+            blockedEnd,
+            location: travelSnapshot.candidate.coarse
+              ? { kind: 'coarse' as const, point: travelSnapshot.candidate.point }
+              : { kind: 'known' as const, point: travelSnapshot.candidate.point },
+          },
+        })
+      : [];
+
+    // PRE-LOCK, over the PROJECTED diary — the mutation applied in memory before it is applied
+    // in the database. Selecting from the diary as it stands would pick the booking that is
+    // LEAVING rather than the one exposed behind it, so the snapshot would hold the wrong legs
+    // and the in-lock replay would miss on every ordinary move. Routed here, replayed there.
+    for (const pair of exposure) {
+      await this.assertExposedFirstJob({
+        eligibility: exposureEligibility!,
+        key: pair.key,
+        rule,
+        day: pair.day,
+        venue: travelSnapshot?.venue ?? null,
+        project: pair.project,
+        lookup: recordingLookup(
+          driveLookupFor(exposureEligibility!, ctx.session?.id ?? null),
+          travelSnapshot!.drives
+        ),
+        load: (from, to) =>
+          loadTravelNeighbours({
+            eligibility: { ...exposureEligibility!, itineraryKey: pair.key },
+            botId: ctx.bot.id,
+            from,
+            to,
+          }),
+      });
+    }
+
     // Single atomic UPDATE under the itinerary lock: frees the old slot and
     // reserves the new one in one statement; the exclusion constraint validates
     // the new range against other bookings (the row is excluded from itself).
     let sequence: number;
     try {
       sequence = await AppDataSource.transaction(async (manager) => {
-        await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [itineraryKey]);
+        // BOTH KEYS, IN A DETERMINISTIC ORDER. A reschedule after a calendar change lifts the
+        // booking off one itinerary and lands it on another, and re-asserting the old diary
+        // while holding only the new key's lock would race the very write that exposed it.
+        // Sorted, so two concurrent reschedules moving in opposite directions take them in the
+        // same order and cannot deadlock. Postgres advisory locks are re-entrant within a
+        // transaction, so the equal-keys case is unchanged.
+        for (const key of [...new Set([itineraryKey, ...exposure.map((p) => p.key)])].sort()) {
+          await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [key]);
+        }
         // P5b: a reschedule into a DIFFERENT local day consumes capacity on the target
         // day — gate it (excluding this booking's own row). Same-day time moves don't.
         const oldDay = DateTime.fromJSDate(booking.startUtc).setZone(rule.timezone).toISODate();
@@ -2813,6 +3095,8 @@ export class InternalProvider implements BookingProvider {
             candidate: travelSnapshot.candidate,
             venue: travelSnapshot.venue,
             drives: travelSnapshot.drives,
+            base: travelSnapshot.base,
+            dayStart: travelSnapshot.dayStart,
             start,
             end,
             excludeBookingId: bookingId,
@@ -2856,6 +3140,56 @@ export class InternalProvider implements BookingProvider {
         ));
         if (!rows.length) {
           throw new BookingError('Booking is no longer reschedulable', 'BOOKING_NOT_RESCHEDULABLE', 409);
+        }
+
+        // AFTER the UPDATE, against committed rows. The projection above predicted this state;
+        // this is the assertion that it arrived. No projection is passed, because the database
+        // now IS the projection.
+        //
+        // A replay miss here means the diary genuinely moved under the lock — the leg reads
+        // undecided and the write refuses. That costs a retry and can never cost a wrong yes.
+        for (const pair of exposure) {
+          const verdict = await this.assertExposedFirstJob({
+            eligibility: exposureEligibility!,
+            key: pair.key,
+            rule,
+            day: pair.day,
+            venue: travelSnapshot?.venue ?? null,
+            lookup: replayLookup(travelSnapshot?.drives ?? {}),
+            load: async (from, to) => ({
+              neighbours: await loadStoredNeighbours(manager, {
+                eligibility: { ...exposureEligibility!, itineraryKey: pair.key },
+                from,
+                to,
+                venue: travelSnapshot?.venue ?? null,
+              }),
+            }),
+          });
+          if (verdict === 'clear') continue;
+          // FEASIBILITY, NOT EFFICIENCY, so the policy split that governs everything else here
+          // governs this too: the bot and a customer on a signed manage link may not strand a
+          // confirmed job behind an unreachable premises leg; the owner may, because it is their
+          // diary and their judgement. Annotating callers fall through and the move stands.
+          if (ctx.travelPolicy === 'annotate') {
+            logger.info('[Travel] owner moved a booking that leaves a first job unreachable', {
+              tenantId: ctx.tenant.id,
+              bookingId,
+              key: pair.key,
+              verdict,
+            });
+            continue;
+          }
+          logger.info('[Travel] refusing a move that would strand another booking', {
+            tenantId: ctx.tenant.id,
+            bookingId,
+            key: pair.key,
+            verdict,
+          });
+          throw new BookingError(
+            'Moving this appointment would leave another one that day too far from your starting point to reach. Check availability again and offer one of the times it returns.',
+            'TRAVEL_TIME_CONFLICT',
+            409
+          );
         }
         return rows[0].sequence;
       });
@@ -3022,7 +3356,52 @@ export class InternalProvider implements BookingProvider {
     // Delete the mirrored Google event (best-effort).
     await this.syncCalendarCancel(ctx, bookingId).catch(() => undefined);
 
-    return { success: true, cancelled: true };
+    return { success: true, cancelled: true, travelWarning: await this.cancelExposedWarning(ctx, booking) };
+  }
+
+  /**
+   * Did cancelling this booking strand the job behind it?
+   *
+   * AFTER THE COMMIT, OUTSIDE ANY TRANSACTION, AND DELIBERATELY BEST-EFFORT. Cancel never
+   * blocks, so this needs no lock, no rollback path and no place in the write: it may route
+   * live precisely because it is holding nothing. The cost is that another write can land
+   * between the commit and this read, so the warning can be stale — which is accepted, because
+   * it is advice about a drive the owner has hours to act on, and a lock held across a Google
+   * round-trip is the pool-exhaustion pattern this file exists to avoid.
+   *
+   * Never throws. A warning that could not be computed is simply absent; a cancellation that
+   * already succeeded must not be reported as a failure because of it.
+   */
+  private async cancelExposedWarning(ctx: BookingContext, booking: Booking): Promise<string | undefined> {
+    // Only the owner. A customer on a signed manage link cannot act on the owner's next drive,
+    // so telling them would be noise attached to somebody else's operational problem.
+    if (ctx.travelPolicy !== 'annotate') return undefined;
+    try {
+      const key = (booking.calendarKey ?? (await resolveItineraryKey(ctx.bot.id))) as ItineraryKey;
+      const eligibility = await resolveTravelEligibility({
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        itineraryKey: key,
+      });
+      if (!eligibility.active || !eligibility.startFromBase) return undefined;
+      const rule = await this.loadRule(ctx.bot.id);
+      const verdict = await this.assertExposedFirstJob({
+        eligibility,
+        key,
+        rule,
+        day: booking.startUtc,
+        // Placed by the loader below, which is free to reach Google here.
+        venue: null,
+        lookup: driveLookupFor(eligibility, ctx.session?.id ?? null),
+        load: (from, to) => loadTravelNeighbours({ eligibility, botId: ctx.bot.id, from, to }),
+      });
+      return verdict === 'clear'
+        ? undefined
+        : 'The next appointment that day now starts your journey from your business address. Check you can still reach it in time.';
+    } catch (error) {
+      logger.warn('[Travel] could not check what a cancellation exposed', { bookingId: booking.id, error });
+      return undefined;
+    }
   }
 
   private async writeLog(

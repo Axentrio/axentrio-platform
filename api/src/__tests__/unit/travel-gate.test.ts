@@ -8,6 +8,8 @@ import {
   assessSlotRouted,
   routeBudget,
   replayLookup,
+  withBaseNeighbour,
+  selectFirstJob,
   type RoutableLeg,
 } from '../../booking/travel/travel-gate';
 import type { GeoPoint } from '../../contracts/travel';
@@ -574,5 +576,109 @@ describe('assessSlotRouted — did anything actually constrain the verdict', () 
     ]);
     expect(verdict).toBe('undecided');
     expect(hadConstrainingLeg).toBe(true);
+  });
+});
+
+/**
+ * Start from base (#76): the day's first job departs from the premises.
+ *
+ * The base is not a new kind of thing — it is the venue standing where a preceding job would
+ * stand — so these tests are about WHEN it is inserted, which is the whole of the rule. Six
+ * review rounds on the plan found defects in this mechanism and nowhere else.
+ */
+describe('withBaseNeighbour — when the premises count as the predecessor', () => {
+  const DAY_START = at('2026-09-01T00:00:00Z');
+  const OPENING = { at: at('2026-09-01T08:00:00Z'), location: { kind: 'known' as const, point: BRUSSELS } };
+  const cand = candidate({ start: '2026-09-01T10:00:00Z', end: '2026-09-01T11:00:00Z' });
+
+  it('inserts the base on an empty morning', () => {
+    const out = withBaseNeighbour([], cand, OPENING, DAY_START);
+    expect(out).toHaveLength(1);
+    expect(out[0].blockedEnd).toEqual(OPENING.at);
+  });
+
+  it('adds nothing at all when there is no base — the off switch', () => {
+    const ns = [known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', GHENT)];
+    expect(withBaseNeighbour(ns, cand, null, DAY_START)).toBe(ns);
+  });
+
+  it.each([
+    ['a located job', known('2026-09-01T06:00:00Z', '2026-09-01T07:00:00Z', GHENT)],
+    ['a town-centre job', coarse('2026-09-01T06:00:00Z', '2026-09-01T07:00:00Z', GHENT)],
+    // THE ONE THAT MATTERS. An `unresolved` job is not LOCATED, so a rule written as "no
+    // preceding located neighbour" would insert the base behind it, make the base the nearer
+    // predecessor, and CLEAR a candidate whose real constraint we admitted we could not
+    // evaluate — inverting the entire meaning of `unresolved`.
+    ['a job we could not place', unresolved('2026-09-01T06:00:00Z', '2026-09-01T07:00:00Z')],
+  ])('is suppressed by %s earlier the same day', (_label, neighbour) => {
+    // The list comes back untouched: no base was added, and the real job stays the predecessor.
+    const out = withBaseNeighbour([neighbour], cand, OPENING, DAY_START);
+    expect(out).toEqual([neighbour]);
+    expect(precedingNeighbour(out, cand)).toEqual(neighbour);
+  });
+
+  it('is NOT suppressed by a phone job — that constrains nothing', () => {
+    const out = withBaseNeighbour([locationless('2026-09-01T06:00:00Z', '2026-09-01T07:00:00Z')], cand, OPENING, DAY_START);
+    expect(out).toHaveLength(2);
+  });
+
+  it('is NOT suppressed by YESTERDAY, however late it ran', () => {
+    // `precedingNeighbour` has no day boundary, so yesterday's 18:00 job is already the
+    // "predecessor" of this morning. Without the day bound it would suppress the base almost
+    // every day and the feature would do nothing whatsoever.
+    const out = withBaseNeighbour([known('2026-08-31T17:00:00Z', '2026-08-31T18:00:00Z', GHENT)], cand, OPENING, DAY_START);
+    expect(out).toHaveLength(2);
+    expect(precedingNeighbour(out, cand)?.blockedEnd).toEqual(OPENING.at);
+  });
+
+  it('is not the predecessor of a job that starts BEFORE opening', () => {
+    // An owner who took an 07:00 booking outside their own hours is not departing from the
+    // premises at 08:00. No special case is needed: the base simply ends after the candidate
+    // begins, and `precedingNeighbour` already skips those.
+    const early = candidate({ start: '2026-09-01T07:00:00Z', end: '2026-09-01T08:00:00Z' });
+    const out = withBaseNeighbour([], early, OPENING, DAY_START);
+    expect(precedingNeighbour(out, early)).toBeNull();
+  });
+});
+
+describe('selectFirstJob — what a write exposed', () => {
+  const DAY_START = at('2026-09-01T00:00:00Z');
+  const DAY_END = at('2026-09-02T00:00:00Z');
+
+  it('finds nothing on an empty day', () => {
+    expect(selectFirstJob([], DAY_START, DAY_END)).toEqual({ kind: 'none' });
+  });
+
+  it('picks the earliest STARTING job, not the earliest ending', () => {
+    const later = known('2026-09-01T11:00:00Z', '2026-09-01T12:00:00Z', GHENT);
+    const first = known('2026-09-01T09:00:00Z', '2026-09-01T13:00:00Z', LIEGE);
+    const sel = selectFirstJob([later, first], DAY_START, DAY_END);
+    expect(sel.kind).toBe('assessable');
+    if (sel.kind !== 'assessable') return;
+    expect(sel.candidate.blockedStart).toEqual(first.blockedStart);
+    // Excluded from its own neighbours, or it would measure a drive from itself to itself.
+    expect(sel.others).toEqual([later]);
+  });
+
+  it('ignores a phone job — it constrains nothing and cannot be first', () => {
+    const sel = selectFirstJob(
+      [locationless('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z'), known('2026-09-01T10:00:00Z', '2026-09-01T11:00:00Z', GHENT)],
+      DAY_START,
+      DAY_END
+    );
+    expect(sel.kind).toBe('assessable');
+    if (sel.kind !== 'assessable') return;
+    expect(sel.candidate.blockedStart).toEqual(at('2026-09-01T10:00:00Z'));
+  });
+
+  it('reports a first job we could not place as unplaced, never as absent', () => {
+    // Skipping it would let the day read as empty and clear a base leg nobody evaluated.
+    const sel = selectFirstJob([unresolved('2026-09-01T09:00:00Z', '2026-09-01T10:00:00Z')], DAY_START, DAY_END);
+    expect(sel).toEqual({ kind: 'unplaced' });
+  });
+
+  it('does not treat a job that STARTED yesterday as today’s first', () => {
+    const sel = selectFirstJob([known('2026-08-31T23:00:00Z', '2026-09-01T01:00:00Z', GHENT)], DAY_START, DAY_END);
+    expect(sel).toEqual({ kind: 'none' });
   });
 });

@@ -90,6 +90,14 @@ export type NeighbourLocation =
 /** A held job either side of the candidate, as far as travel is concerned. */
 export interface TravelNeighbour {
   /**
+   * Which booking this is, where one exists.
+   *
+   * Absent on a SYNTHETIC neighbour — the premises base has no row. Present so a write that
+   * projects a move can remove the old occurrence by identity: matching on timestamps would
+   * catch an unrelated booking that legitimately abuts it.
+   */
+  bookingId?: string;
+  /**
    * BUFFER-EXPANDED bounds, not the raw appointment. The gap is measured between blocked
    * ranges because a service's own before/after buffers already sit inside them, which is
    * what makes the flat gap and the buffers compose by addition while the drive and the flat
@@ -243,6 +251,128 @@ export function precedingNeighbour(
     if (!best || n.blockedEnd.getTime() > best.blockedEnd.getTime()) best = n;
   }
   return best;
+}
+
+/**
+ * The premises, as the predecessor of a day's first job.
+ *
+ * A BASE IS NOT A NEW KIND OF THING. It is the venue standing where a preceding job would
+ * stand, departing at the day's first opening instant, so every rule the gate already applies
+ * — the slack, the flat-gap floor, the coarse asymmetry, what `unresolved` may and may not do
+ * — applies to it unchanged. A separate "base leg" path would be a second implementation of
+ * the same arithmetic, and the two would drift.
+ *
+ * `base === null` covers three different situations that all mean the same thing: the setting
+ * is off, the business is `always_open`, or the day has no opening window. In none of them is
+ * there a departure instant, so in none of them is there a constraint to add.
+ *
+ * SUPPRESSED BY ANY CONSTRAINING PREDECESSOR THAT DAY, not merely by a located one. An
+ * `unresolved` job is not located, so a base inserted behind it would become the NEARER
+ * predecessor and clear a candidate whose real constraint we admitted we could not evaluate —
+ * inverting the whole meaning of `unresolved`. A job ending before opening, placed or not, is
+ * therefore always preferred to the venue, and the base can only ever apply to a genuinely
+ * empty morning.
+ *
+ * SCOPED TO THE LOCAL DAY, because `precedingNeighbour` has none. Yesterday's 18:00 job is
+ * already the "predecessor" of today's 08:00 candidate, so without the `dayStart` bound it
+ * would suppress the base nearly every day and the feature would do nothing. With it,
+ * yesterday's job falls out of scope and the base wins the scan on its own merits, its
+ * opening instant being the later of the two.
+ *
+ * A candidate starting BEFORE opening needs no special case: `precedingNeighbour` already
+ * skips a neighbour ending after the candidate starts, so a 09:00 base is simply not the
+ * predecessor of an 08:00 job. An owner who took a booking outside their own hours is not
+ * departing from the premises at opening.
+ */
+export function withBaseNeighbour(
+  neighbours: TravelNeighbour[],
+  candidate: Pick<TravelCandidate, 'blockedStart'>,
+  base: { at: Date; location: NeighbourLocation } | null,
+  dayStart: Date
+): TravelNeighbour[] {
+  if (!base) return neighbours;
+  const suppressed = neighbours.some(
+    (n) =>
+      constrains(n) &&
+      n.blockedEnd.getTime() >= dayStart.getTime() &&
+      n.blockedEnd.getTime() <= candidate.blockedStart.getTime()
+  );
+  if (suppressed) return neighbours;
+  return [...neighbours, { blockedStart: base.at, blockedEnd: base.at, location: base.location }];
+}
+
+/**
+ * Which held job is this day's first — the one a base leg would constrain.
+ *
+ * ORDERED BY `blockedStart`, NOT `blockedEnd`. Among held bookings the two orders coincide,
+ * because `EXCLUDE USING gist ("calendar_key" WITH =, "blocked_range" WITH &&) WHERE status IN
+ * ('pending','confirmed')` (migration `1784400000000`) makes overlap on one itinerary
+ * impossible. But "first" means starts first, that invariant is a property of the schema
+ * rather than of this function, and ordering by end would quietly pick the wrong job the day
+ * it is ever relaxed.
+ *
+ * A booking that STARTED yesterday and ends today is not today's first job — its start is
+ * outside the window. It still suppresses today's base in `withBaseNeighbour`, because its end
+ * lands in today ahead of the candidate. Both halves are deliberate.
+ */
+export function firstJobOfDay(
+  neighbours: TravelNeighbour[],
+  dayStart: Date,
+  dayEnd: Date
+): TravelNeighbour | null {
+  let best: TravelNeighbour | null = null;
+  for (const n of neighbours) {
+    if (!constrains(n)) continue;
+    const start = n.blockedStart.getTime();
+    if (start < dayStart.getTime() || start >= dayEnd.getTime()) continue;
+    if (!best || start < best.blockedStart.getTime()) best = n;
+  }
+  return best;
+}
+
+/**
+ * A day's first job, turned into something the gate can judge.
+ *
+ * WHY A WRITE NEEDS THIS AT ALL. A move is a removal too: rescheduling the day's first job
+ * exposes the NEXT booking as that day's new first, carrying a premises leg nobody has ever
+ * checked — and moving it later on the same day does that without leaving the day. So the
+ * write cannot only assert the booking it moved.
+ *
+ * The three answers are distinct because they mean genuinely different things to the caller:
+ * an empty day has nothing to assert, a first job we cannot place cannot be vouched for, and
+ * only the third can actually be measured.
+ */
+export type FirstJobSelection =
+  | { kind: 'none' }
+  | { kind: 'unplaced' }
+  | { kind: 'assessable'; candidate: TravelCandidate; others: TravelNeighbour[] };
+
+export function selectFirstJob(
+  neighbours: TravelNeighbour[],
+  dayStart: Date,
+  dayEnd: Date
+): FirstJobSelection {
+  const first = firstJobOfDay(neighbours, dayStart, dayEnd);
+  if (!first) return { kind: 'none' };
+  const loc = first.location;
+  // `unresolved` — a location we FAILED to obtain. It cannot be a candidate because it has no
+  // point, and it must not be silently skipped either: skipping would let the day's first job
+  // read as absent and clear a base leg nobody evaluated, which is the inversion `unresolved`
+  // exists to prevent.
+  if (loc.kind !== 'known' && loc.kind !== 'coarse') return { kind: 'unplaced' };
+  return {
+    kind: 'assessable',
+    candidate: {
+      blockedStart: first.blockedStart,
+      blockedEnd: first.blockedEnd,
+      point: loc.point,
+      coarse: loc.kind === 'coarse',
+    },
+    // Excluded from its own neighbour list by identity, not by timestamp: two bookings can
+    // legitimately abut, and a candidate left in its own neighbours would measure a drive
+    // from itself to itself.
+    others: neighbours.filter((n) => n !== first),
+  };
 }
 
 /** The nearest following job that has a location: the least `blockedStart` at or after the end. */

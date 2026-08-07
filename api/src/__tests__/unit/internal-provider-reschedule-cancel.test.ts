@@ -654,3 +654,111 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(logSave).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Start from base (#76): a move is a REMOVAL too.
+ *
+ * Rescheduling the day's first job does not merely place it somewhere new — it EXPOSES the next
+ * booking as that day's new first, carrying a premises leg nobody has ever checked. Asserting
+ * only the moved booking at its new position would let a customer move themselves out of a
+ * morning and strand a confirmed appointment, with every check having passed.
+ */
+describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
+  let provider: InternalProvider;
+  const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
+  const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
+  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true };
+  const GENT = { lat: 51.05, lng: 3.72 };
+  const LIEGE = { lat: 50.6326, lng: 5.5797 };
+  const VENUE = { kind: 'known' as const, point: GENT };
+
+  const held = (id: string, start: string, end: string, point: { lat: number; lng: number }) => ({
+    bookingId: id,
+    blockedStart: new Date(start),
+    blockedEnd: new Date(end),
+    location: { kind: 'known' as const, point },
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    bookingSettingsFindOne.mockResolvedValue(null as any);
+    resolveTravelEligibility.mockResolvedValue(BASED as any);
+    placeExistingBooking.mockResolvedValue({ applies: true, outcome: 'placed', place: PLACE });
+    loadTravelNeighbours.mockResolvedValue({ neighbours: [], venue: VENUE });
+    loadStoredNeighbours.mockResolvedValue([]);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-05T00:00:00Z'));
+    provider = new InternalProvider();
+    eventTypeFindOne.mockResolvedValue(MOBILE);
+    ruleFindOne.mockResolvedValue(RULE);
+    bookingFindOne.mockResolvedValue({ ...confirmedBooking(), customerAddress: 'Kerkstraat 12, 9000 Gent' });
+    bookingRefFind.mockResolvedValue([]);
+    chatSessionFindOne.mockResolvedValue(null);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('refuses a move that strands the booking left behind it', async () => {
+    // The exposed job is in Liège; the premises are in Gent, ~87 km away, and the day opens at
+    // 09:00 Brussels with that job starting 09:30. Nobody makes that drive in thirty minutes.
+    // The moved booking (bk-1) is projected OUT, which is what makes the Liège job first.
+    loadStoredNeighbours.mockResolvedValue([held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)]);
+    loadTravelNeighbours.mockResolvedValue({
+      neighbours: [held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)],
+      venue: VENUE,
+    });
+
+    await expect(provider.rescheduleBooking(ctx, 'bk-1', NEW_START)).rejects.toMatchObject({
+      code: 'TRAVEL_TIME_CONFLICT',
+    });
+  });
+
+  it('lets the OWNER make the same move, and does not throw', async () => {
+    // Feasibility is a hard constraint against the bot and a customer's manage link, never
+    // against the person who owns the diary. Their picker warns instead.
+    loadStoredNeighbours.mockResolvedValue([held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)]);
+    loadTravelNeighbours.mockResolvedValue({
+      neighbours: [held('bk-2', '2026-06-10T07:30:00Z', '2026-06-10T08:00:00Z', LIEGE)],
+      venue: VENUE,
+    });
+
+    await expect(
+      provider.rescheduleBooking({ ...ctx, isAdmin: true, travelPolicy: 'annotate' } as never, 'bk-1', NEW_START)
+    ).resolves.toBeTruthy();
+  });
+
+  it('does not assert exposure at all when start-from-base is OFF', async () => {
+    // "With the setting off, behaviour is byte-identical" is an acceptance criterion. With no
+    // base leg there is nothing a newly-exposed first job acquires, and every other constraint
+    // on it was validated when it was made.
+    //
+    // Asserted structurally rather than by outcome: a hostile diary would refuse through the
+    // ORDINARY gate too, which would let this pass while proving nothing about exposure.
+    resolveTravelEligibility.mockResolvedValue({ ...BASED, startFromBase: false } as any);
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    // Once, for the in-lock re-assert of the moved booking itself. No second read.
+    expect(loadStoredNeighbours).toHaveBeenCalledTimes(1);
+  });
+
+  it('DOES read the exposed day when start-from-base is on', async () => {
+    // The mirror of the test above — otherwise a mechanism that never ran would satisfy it.
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START);
+    expect(loadStoredNeighbours.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('takes both itinerary locks in sorted order when the move crosses diaries', async () => {
+    // A reschedule rewrites `calendar_key`, so a move can lift a booking off one itinerary onto
+    // another. Sorted, so two concurrent moves in opposite directions cannot deadlock.
+    bookingFindOne.mockResolvedValue({
+      ...confirmedBooking(),
+      customerAddress: 'Kerkstraat 12, 9000 Gent',
+      calendarKey: 'zzz:old-diary',
+    });
+    await provider.rescheduleBooking(ctx, 'bk-1', NEW_START).catch(() => undefined);
+
+    const locks = managerQuery.mock.calls
+      .filter((c: any) => String(c[0]).includes('pg_advisory_xact_lock'))
+      .map((c: any) => c[1][0]);
+    expect(locks.length).toBeGreaterThan(1);
+    expect(locks).toEqual([...locks].sort());
+  });
+});

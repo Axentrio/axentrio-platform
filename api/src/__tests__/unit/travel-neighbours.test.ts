@@ -325,3 +325,52 @@ describe('the lazy geocode budget', () => {
     vi.mocked(Date.now).mockRestore();
   });
 });
+
+/**
+ * Start from base (#76) forces the venue.
+ *
+ * The venue is otherwise placed through a memo invoked only when a neighbour classifies as an
+ * at-premises job. An EMPTY morning classifies none — and an empty morning is precisely the case
+ * the base exists for, since any constraining predecessor suppresses it. So the lazy path
+ * returned `venue: null` exactly when the base needed one, and the whole rule would have done
+ * nothing in production while passing every test that seeded a premises job.
+ */
+describe('the venue when start-from-base is on', () => {
+  const withBase = (): ReturnType<typeof loadTravelNeighbours> =>
+    loadTravelNeighbours({
+      eligibility: { ...ACTIVE, startFromBase: true },
+      botId: 'bot-1',
+      from: new Date('2026-09-01T00:00:00Z'),
+      to: new Date('2026-09-02T00:00:00Z'),
+    });
+
+  it('places the venue on an EMPTY day, where nothing else would ask for it', async () => {
+    findOne.mockResolvedValue({ venueStreet: 'Grote Markt 1', venuePostalCode: '9000', venueCity: 'Gent', venueCountry: 'BE' });
+    geocode.mockResolvedValue({ status: 'placed', place: PLACE });
+    query.mockResolvedValue([]);
+
+    const { venue } = await withBase();
+    expect(venue).toEqual({ kind: 'known', point: { lat: PLACE.lat, lng: PLACE.lng } });
+  });
+
+  it('reports a venue it could not place as UNRESOLVED, never as absent', async () => {
+    // `null` means "no constraint" and clears; `unresolved` means "we could not evaluate" and
+    // never clears. A base exists to constrain, so its failure has to fall to the safe side.
+    findOne.mockResolvedValue({ venueStreet: 'Grote Markt 1', venueCity: 'Gent' });
+    geocode.mockResolvedValue({ status: 'unavailable', cause: 'api_error' });
+    query.mockResolvedValue([]);
+
+    const { venue } = await withBase();
+    expect(venue).toEqual({ kind: 'unresolved' });
+  });
+
+  it('does NOT place the venue when the setting is off and nothing needs one', async () => {
+    // The guarantee that turning this on is the only thing that can change anybody's bill.
+    findOne.mockResolvedValue({ venueStreet: 'Grote Markt 1', venueCity: 'Gent' });
+    query.mockResolvedValue([]);
+
+    const { venue } = await load();
+    expect(venue).toBeNull();
+    expect(geocode).not.toHaveBeenCalled();
+  });
+});

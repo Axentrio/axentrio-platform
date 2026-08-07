@@ -10,6 +10,12 @@ vi.mock('../../services/bot-config.service', () => ({
 const requireFeature = vi.fn();
 vi.mock('../../billing/enforce', () => ({ requireFeature: (...a: any[]) => requireFeature(...a) }));
 
+// The config READ now answers "may travel time be switched on", which needs the entitlement.
+// Mocked at the seam rather than by teaching the DataSource stub about tenants: this file is
+// about the controller, and `getEntitlements` has its own tests.
+const getEntitlements = vi.fn(async (..._a: any[]) => ({ features: { travelTime: true } }));
+vi.mock('../../billing/entitlements', () => ({ getEntitlements: (...a: any[]) => getEntitlements(...a) }));
+
 const resolveItineraryKey = vi.fn(async () => 'gcal:owner@acme.com');
 const itineraryKeyIsShared = vi.fn(async () => false);
 vi.mock('../../scheduler/itinerary-key', () => ({
@@ -64,6 +70,60 @@ vi.mock('../../utils/logger', () => ({ logger: { info: vi.fn(), warn: vi.fn(), e
 
 import { updateSchedulerConfig, getSchedulerConfig, createService, updateService, listPresets, applyPreset, reorderServices } from '../../scheduler/scheduler.controller';
 import { serviceInputSchema, serviceUpdateSchema } from '../../schemas/scheduler.schema';
+
+/**
+ * The config READ tells the screen why travel cannot be switched on.
+ *
+ * The WRITE already refuses each of these with a 409, so this is not the enforcement — it is
+ * the difference between a screen that explains itself and one that lets an owner flip a
+ * switch, wait, and read an error. The shared-diary case matters most: it is the feature's one
+ * genuinely harmful state, it arrives months later when somebody connects a calendar, and the
+ * fix ("give each Agent its own calendar") is an action the owner can only take if told.
+ */
+describe('scheduler.controller — why travel time cannot be switched on', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1', name: 'Valyro' }, settings: { integrations: {} } });
+    etFindOne.mockResolvedValue(null);
+    etFind.mockResolvedValue([]);
+    ruleFindOne.mockResolvedValue(null);
+    bsFindOne.mockResolvedValue(null);
+    resolveItineraryKey.mockResolvedValue('gcal:owner@acme.com');
+  });
+
+  const read = async () => {
+    await getSchedulerConfig({ tenantId: 'ten-1' } as any, res);
+    return sendSuccess.mock.calls.at(-1)?.[1] as any;
+  };
+
+  it('is null when all four gates would pass', async () => {
+    itineraryKeyIsShared.mockResolvedValue(false);
+    getEntitlements.mockResolvedValue({ features: { travelTime: true } } as any);
+    expect((await read()).travel.blockedReason).toBeNull();
+  });
+
+  it('reports a shared diary, which is the one an owner can act on', async () => {
+    itineraryKeyIsShared.mockResolvedValue(true);
+    getEntitlements.mockResolvedValue({ features: { travelTime: true } } as any);
+    expect((await read()).travel.blockedReason).toBe('shared_itinerary');
+  });
+
+  it('reports the entitlement BEFORE asking about diaries', async () => {
+    // Cheapest-first, and it also stops an unentitled tenant being told to go and rearrange
+    // their calendars for a capability they have not bought.
+    itineraryKeyIsShared.mockClear();
+    getEntitlements.mockResolvedValue({ features: { travelTime: false } } as any);
+    expect((await read()).travel.blockedReason).toBe('not_entitled');
+    expect(itineraryKeyIsShared).not.toHaveBeenCalled();
+  });
+
+  it('names the Agent these settings belong to', async () => {
+    // Every field on that object is the DEFAULT Agent's, because that is the only row the
+    // endpoint can write (#86). An owner of several Agents edits one and cannot otherwise tell.
+    getEntitlements.mockResolvedValue({ features: { travelTime: true } } as any);
+    expect((await read()).agent).toMatchObject({ id: expect.any(String) });
+  });
+});
 
 const res: any = {};
 

@@ -13,6 +13,7 @@ import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
 import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
 import { requireFeature } from '../billing/enforce';
+import { getEntitlements } from '../billing/entitlements';
 import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
 import { config } from '../config/environment';
 import {
@@ -90,6 +91,28 @@ async function assertTravelEnableAllowed(tenantId: string, botId: string): Promi
       'TRAVEL_SHARED_ITINERARY'
     );
   }
+}
+
+/**
+ * The same four gates `assertTravelEnableAllowed` throws on, as a value the screen can read.
+ *
+ * DELIBERATELY A SECOND READING of the same conditions rather than a refactor of the thrower
+ * into a returner. The thrower is the enforcement and must stay a hard boundary on the write;
+ * this is advice on a read, and it runs on a settings page rather than the booking hot path.
+ * Collapsing them would put a `throw`/`return` mode flag through a security check.
+ *
+ * `null` means the switch is available — it does NOT mean travel is currently running, which
+ * is what `enabled` beside it says.
+ */
+async function travelBlockedReason(
+  tenantId: string,
+  botId: string
+): Promise<'platform' | 'not_entitled' | 'shared_itinerary' | null> {
+  if (!config.travel.googleMapsApiKey) return 'platform';
+  const entitlements = await getEntitlements(tenantId);
+  if (!entitlements.features.travelTime) return 'not_entitled';
+  const itineraryKey = await resolveItineraryKey(botId);
+  return (await itineraryKeyIsShared(tenantId, botId, itineraryKey)) ? 'shared_itinerary' : null;
 }
 
 /** Exported for the P4 preset CI invariant test (intra-preset slug-collision check). */
@@ -207,12 +230,30 @@ async function readConfig(tenantId: string) {
       city: bookingSettings?.venueCity ?? null,
       country: bookingSettings?.venueCountry ?? null,
     },
+    // WHICH AGENT THESE SETTINGS BELONG TO, said out loud.
+    //
+    // Every field on this object is the DEFAULT Agent's, because `getAnchorBotConfig` is the
+    // only write path to `chatbot_booking_settings` (#86). A tenant with several Agents is
+    // therefore editing one of them and cannot tell — so the screen names it. Returning the
+    // Agent rather than a boolean is what lets #86 extend this instead of replacing it.
+    agent: { id: bot.id, name: bot.name },
     // Cherry-picked like everything else here — a field on the entity but missing from this
     // object hydrates the editor blank and the owner's next Save writes the blank back.
     travel: {
       enabled: bookingSettings?.travelTimeEnabled === true,
       slackMin: bookingSettings?.travelSlackMin ?? null,
       startFromBase: bookingSettings?.travelStartFromBase === true,
+      /**
+       * Why the switch cannot be turned on, or null when it can.
+       *
+       * The WRITE path already refuses each of these with a clear 409, so this is not the
+       * enforcement — it is the difference between a screen that explains itself and one that
+       * lets an owner flip a switch, wait, and read an error. The shared-diary case especially:
+       * it is the feature's one genuinely harmful state, it arrives months later when somebody
+       * connects a calendar, and "give each Agent its own calendar" is an action the owner can
+       * only take if they are told to.
+       */
+      blockedReason: await travelBlockedReason(tenantId, bot.id),
     },
   };
 }

@@ -260,6 +260,70 @@ describe('Bookings — the out-of-area note matches the decision already taken',
  * unfiltered list with no marking silently regains the impossible times and shows them looking
  * exactly like the safe ones, which is worse than the filtering it replaced.
  */
+/**
+ * Google attribution (#67, ADR-0014).
+ *
+ * The Maps terms require attribution wherever their content is displayed, and the kilometres
+ * beside a Request are computed from coordinates Google placed. This is a licence obligation,
+ * so it is tested like one: not "does it look right" but "is it present, in the same container
+ * as the number it attributes".
+ */
+describe('Bookings — Google attribution rides with the drive estimate', () => {
+  const requestRow = {
+    id: 'bk-9',
+    serviceName: 'Boiler repair',
+    attendeeName: 'Ada',
+    startTime: '2099-06-10T08:00:00.000Z',
+    endTime: '2099-06-10T09:00:00.000Z',
+    status: 'request_created',
+    travelEstimate: {
+      before: { km: 12, fastestMin: 9, slowestMin: 36 },
+      after: null,
+      basis: 'distance' as const,
+    },
+  };
+
+  function renderWithBookings(scopeBookings: Record<string, unknown[]>) {
+    hasFeatureMock.mockReturnValue(true);
+    apiGet.mockImplementation(async (url: string) => {
+      if (url.includes('/scheduler/services')) {
+        return { services: [{ id: 's1', name: 'Intro call', durationMin: 30, active: true }] };
+      }
+      const scope = /scope=(\w+)/.exec(url)?.[1];
+      if (scope) return { bookings: scopeBookings[scope] ?? [], total: (scopeBookings[scope] ?? []).length };
+      return entitlementsPayload;
+    });
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <MemoryRouter>
+        <QueryClientProvider client={queryClient}>
+          <Bookings />
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  it('attributes Google beside a shown estimate', async () => {
+    renderWithBookings({ requests: [requestRow] });
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    const estimate = await screen.findByTestId('travel-estimate');
+    expect(estimate).toHaveTextContent(/12 km/);
+    // IN THE SAME CONTAINER. A page-footer attribution does not cover content rendered in a row.
+    expect(estimate).toHaveTextContent(/powered by google/i);
+  });
+
+  it('shows no attribution when there is no estimate to attribute', async () => {
+    // Nothing Google-derived is on screen, so the notice would be decoration — and a notice
+    // that appears when it need not is how the real one stops being read.
+    renderWithBookings({ requests: [{ ...requestRow, travelEstimate: null }] });
+    await userEvent.click(await screen.findByRole('tab', { name: /requests/i }));
+    await screen.findByText(/Boiler repair/);
+    expect(screen.queryByText(/powered by google/i)).not.toBeInTheDocument();
+  });
+});
+
 describe('Bookings — which reschedule slots carry a drive nobody vouched for', () => {
   const slot = (h: number) => ({ start: `2026-06-10T${String(h).padStart(2, '0')}:00:00.000Z` });
 

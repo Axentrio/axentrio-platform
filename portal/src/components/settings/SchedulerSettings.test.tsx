@@ -66,6 +66,13 @@ const AVAILABILITY = {
 
 const VENUE = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: 'BE' };
 
+const TRAVEL = {
+  enabled: true,
+  slackMin: 10,
+  startFromBase: true,
+  blockedReason: null as null | 'platform' | 'not_entitled' | 'shared_itinerary',
+};
+
 const CONFIG = {
   provider: 'internal',
   eventType: null,
@@ -75,6 +82,8 @@ const CONFIG = {
   bookingRules: RULES,
   venueAddress: VENUE,
   bookingsPaused: false,
+  agent: { id: 'bot-1', name: 'Valyro' },
+  travel: TRAVEL,
 };
 
 function renderUI() {
@@ -237,6 +246,56 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
  * rest of the intended closure stayed bookable and the pickers kept showing the range the
  * owner thought they had stored.
  */
+/**
+ * Travel time joins the round-trip, and it is the field most likely to break it.
+ *
+ * The editor sends the WHOLE travel object on every Save, so a switch the editor failed to
+ * hydrate arrives as its initial `false` and the owner's next Save silently turns travel time
+ * OFF for a business that had it on — and travel going quiet is exactly the failure mode that
+ * cannot be seen from the outside.
+ */
+describe('SchedulerSettings — travel time', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns every travel field unchanged when the owner saves without editing', async () => {
+    const payload = await saveUntouched(CONFIG);
+    expect(payload.travel).toEqual({ enabled: true, slackMin: 10, startFromBase: true });
+  });
+
+  it('does not send blockedReason back — that is the server answer, not an owner setting', async () => {
+    const payload = await saveUntouched(CONFIG);
+    expect(payload.travel).not.toHaveProperty('blockedReason');
+  });
+
+  it('explains a shared calendar instead of just disabling the switch', async () => {
+    // AC: the refusal is explained in the UI, not only enforced by the API. This is the
+    // feature's one genuinely harmful state and the fix lives in the calendar connection,
+    // so an owner who is merely refused has nowhere to go.
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/scheduler/config')) {
+        return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, enabled: false, blockedReason: 'shared_itinerary' } });
+      }
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      return Promise.resolve({});
+    });
+    renderUI();
+
+    expect(await screen.findByText(/books into the same calendar/i)).toBeInTheDocument();
+    expect(await screen.findByText(/give each agent its own calendar/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText(/only offer times i can reach/i)).toBeDisabled());
+  });
+
+  it('states the single-driver assumption', async () => {
+    apiGet.mockImplementation((url: string) => {
+      if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      return Promise.resolve({});
+    });
+    renderUI();
+    expect(await screen.findByText(/one person on the road/i)).toBeInTheDocument();
+  });
+});
+
 describe('SchedulerSettings — refuses to save what the API will reject', () => {
   beforeEach(() => vi.clearAllMocks());
 

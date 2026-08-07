@@ -37,6 +37,7 @@ import {
   useConnectOutlookCalendar,
   useDisconnectOutlookCalendar,
 } from '../../queries/useOutlookCalendarQueries';
+import { useBots } from '@/queries/useBotsQueries';
 import { ServicesSection } from './ServicesSection';
 import { ServiceAreaField } from './ServiceAreaField';
 
@@ -211,6 +212,17 @@ export const SchedulerSettings: React.FC = () => {
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
   const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
+  // Only to decide whether the "which Agent" notice is worth showing. A solo business does
+  // not need to be told which of its one Agent it is editing.
+  const { data: bots } = useBots();
+  const multiAgent = (bots?.bots?.length ?? 0) > 1;
+  // NOT state — it is the server's answer to "may this be switched on", refreshed with the
+  // config. Holding it in state would let a stale value keep the switch enabled after a
+  // calendar change made it harmful.
+  const travelBlockedReason = data?.travel?.blockedReason ?? null;
+  const [travelEnabled, setTravelEnabled] = useState(false);
+  const [travelSlack, setTravelSlack] = useState<number | null>(null);
+  const [travelStartFromBase, setTravelStartFromBase] = useState(false);
   const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
@@ -242,6 +254,9 @@ export const SchedulerSettings: React.FC = () => {
       city: data.venueAddress?.city ?? null,
       country: data.venueAddress?.country ?? null,
     });
+    setTravelEnabled(data.travel?.enabled === true);
+    setTravelSlack(data.travel?.slackMin ?? null);
+    setTravelStartFromBase(data.travel?.startFromBase === true);
     setRules({
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
@@ -316,6 +331,9 @@ export const SchedulerSettings: React.FC = () => {
       bookingRules: rules,
       // Same contract as the rules — always sent, so clearing a field really clears it.
       venueAddress: venue,
+      // Sent whole rather than as a diff: the endpoint treats an absent key as "leave alone",
+      // so a partial travel object would silently keep a stale switch on.
+      travel: { enabled: travelEnabled, slackMin: travelSlack, startFromBase: travelStartFromBase },
       bookingsPaused,
     });
   };
@@ -618,6 +636,22 @@ export const SchedulerSettings: React.FC = () => {
                   </div>
                 </div>
 
+                {/*
+                  WHICH Agent this edits. Shown only when the tenant has more than one, so a
+                  solo business is not handed a distinction it does not have — but shown
+                  plainly when they do, because the settings endpoint writes the DEFAULT
+                  Agent's row and nothing else (#86). Without this an owner of two Agents
+                  edits one and believes they edited both. The sentence comes out when #86
+                  lands and every Agent becomes editable.
+                */}
+                {multiAgent && data?.agent?.name && (
+                  <div className="rounded-md bg-surface-muted px-3 py-2 text-xs text-text-secondary">
+                    These booking settings apply only to your default Agent,{' '}
+                    <strong className="text-text-primary">{data.agent.name}</strong>. Settings for
+                    your other Agents cannot be changed here yet.
+                  </div>
+                )}
+
                 {/* Service area — where the business will travel */}
                 <ServiceAreaField
                   value={serviceArea}
@@ -707,6 +741,95 @@ export const SchedulerSettings: React.FC = () => {
                       />
                     </div>
                   </div>
+                </div>
+
+                {/*
+                  Travel time. AFTER the address deliberately: the day's first job is measured
+                  from it, so an owner who has not filled it in is looking at the field this
+                  section depends on.
+                */}
+                <div className="space-y-3 border-t border-edge pt-4">
+                  <div>
+                    <h3 className="text-sm font-medium text-text-primary">Travel time</h3>
+                    <p className="text-xs text-text-secondary mt-1">
+                      For jobs at the customer's address, only offer times you can actually drive
+                      between. Times you could not reach are held back rather than confirmed and
+                      then rearranged.
+                    </p>
+                    {/*
+                      The single-driver assumption, stated before the switch rather than after it.
+                      A two-person business that turns this on gets slots stripped for journeys
+                      neither of them makes — the one configuration where the feature makes a
+                      business worse off than not having it.
+                    */}
+                    <p className="text-xs text-text-muted mt-1">
+                      This assumes <strong>one person on the road</strong>. If two of you take jobs
+                      from the same diary, leave it off.
+                    </p>
+                  </div>
+
+                  {travelBlockedReason && (
+                    <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+                      {travelBlockedReason === 'shared_itinerary'
+                        ? 'Another Agent books into the same calendar, so this cannot be switched on. Their appointments would be read as one person’s day and times would be held back for journeys nobody makes. Give each Agent its own calendar first.'
+                        : travelBlockedReason === 'not_entitled'
+                          ? 'Travel time is not part of your current plan.'
+                          : 'Travel time is not available on this platform yet.'}
+                    </div>
+                  )}
+
+                  <label htmlFor="travel-enabled" className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      id="travel-enabled"
+                      checked={travelEnabled}
+                      disabled={!!travelBlockedReason}
+                      onCheckedChange={(c) => setTravelEnabled(c === true)}
+                    />
+                    <span className="text-sm text-text-secondary">
+                      Only offer times I can reach
+                      <span className="block text-xs text-text-muted">
+                        Uses the address the customer gives and the jobs either side of the time
+                        they want.
+                      </span>
+                    </span>
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor="travel-slack">Extra minutes per journey</Label>
+                      <Input
+                        id="travel-slack"
+                        type="number"
+                        min={0}
+                        max={120}
+                        value={travelSlack ?? ''}
+                        placeholder="0"
+                        disabled={!travelEnabled}
+                        onChange={(e) =>
+                          setTravelSlack(e.target.value === '' ? null : Number(e.target.value))
+                        }
+                      />
+                      <p className="text-xs text-text-muted mt-1">
+                        Parking, the doorstep, a job that runs over. Added to every drive.
+                      </p>
+                    </div>
+                  </div>
+
+                  <label htmlFor="travel-start-from-base" className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      id="travel-start-from-base"
+                      checked={travelStartFromBase}
+                      disabled={!travelEnabled}
+                      onCheckedChange={(c) => setTravelStartFromBase(c === true)}
+                    />
+                    <span className="text-sm text-text-secondary">
+                      I start the day from my own address
+                      <span className="block text-xs text-text-muted">
+                        The first job of each day is measured from the address above, leaving at
+                        opening time. Fill that address in, or this has nothing to measure from.
+                      </span>
+                    </span>
+                  </label>
                 </div>
 
                 {/* Date overrides — holidays / closures / one-off hours */}

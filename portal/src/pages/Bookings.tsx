@@ -41,6 +41,7 @@ import { useBotReadiness } from '../queries/useReadinessQueries';
 import { BookingReadinessCard } from '../components/bookings/BookingReadinessCard';
 import { BookingSetupBanner } from '../components/bookings/BookingSetupBanner';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../components/ui/tabs';
+import { GoogleAttribution } from '../components/bookings/GoogleAttribution';
 import { Button } from '../components/ui/button';
 import {
   Dialog,
@@ -480,6 +481,13 @@ function BookingRow({
               .filter(Boolean)
               .join(' · ')}
             <span className="text-text-secondary/70"> · straight-line distance, not a measured drive</span>
+            {/*
+              INSIDE the same container as the number it attributes, which is what the Maps
+              terms require — an attribution in a page footer does not cover content rendered
+              in a row. These kilometres are computed from coordinates Google placed, so they
+              carry the obligation even though nothing here came back from a routing call.
+            */}
+            <span className="ml-2"><GoogleAttribution /></span>
           </div>
         )}
         {booking.notes && (

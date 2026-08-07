@@ -140,6 +140,24 @@ export interface SchedulerConfig {
   serviceArea?: ServiceAreaEntry[];
   bookingRules?: BookingRules;
   venueAddress?: VenueAddress;
+  /**
+   * Which Agent these settings belong to.
+   *
+   * Always the tenant's DEFAULT Agent today, because that is the only one the settings
+   * endpoint can write (#86). Named rather than assumed, so an owner with several Agents can
+   * see which one they are editing — and so #86 extends this shape instead of replacing it.
+   */
+  agent?: { id: string; name: string };
+  travel?: {
+    enabled: boolean;
+    slackMin: number | null;
+    startFromBase: boolean;
+    /**
+     * Why the switch cannot be turned on, or null when it can. The API refuses each of these
+     * on write too; this is what lets the screen say so BEFORE the owner tries.
+     */
+    blockedReason: 'platform' | 'not_entitled' | 'shared_itinerary' | null;
+  };
   /** Owner has switched new online bookings off. Captures requests rather than refusing. */
   bookingsPaused?: boolean;
 }
@@ -153,6 +171,7 @@ export interface UpdateSchedulerPayload {
   bookingRules?: Partial<BookingRules>;
   /** `null` clears the whole venue; omitting the key leaves it untouched. */
   venueAddress?: Partial<VenueAddress> | null;
+  travel?: { enabled?: boolean; slackMin?: number | null; startFromBase?: boolean };
   bookingsPaused?: boolean;
 }
 
@@ -396,10 +415,15 @@ export function useCancelBooking() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
-      api.post(`/scheduler/bookings/${id}/cancel`, { reason }),
-    onSuccess: () => {
+      api.post<{ travelWarning?: string }>(`/scheduler/bookings/${id}/cancel`, { reason }),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: bookingsKey });
       toast.success('Booking cancelled');
+      // WHAT THE CANCELLATION LEFT BEHIND. The next appointment that day now starts from the
+      // business address, and its journey does not clear. A separate, longer-lived toast
+      // rather than a line inside the success one: it is a different fact about a different
+      // booking, and it asks the owner to go and look at something.
+      if (result?.travelWarning) toast.warning(result.travelWarning, { duration: 10000 });
     },
     onError: (err: Any) => {
       toast.error(extractApiErrorMessage(err) ?? 'Failed to cancel booking');
@@ -442,10 +466,14 @@ export function useRescheduleBooking() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, newStartTime }: { id: string; newStartTime: string }) =>
-      api.post(`/scheduler/bookings/${id}/reschedule`, { newStartTime }),
-    onSuccess: () => {
+      api.post<{ travelWarning?: string }>(`/scheduler/bookings/${id}/reschedule`, { newStartTime }),
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: bookingsKey });
       toast.success('Booking rescheduled');
+      // The owner was ALLOWED to make this move — feasibility is never enforced against the
+      // person who owns the diary — so this is the other half of that permission. Allowing
+      // silently would be the same defect as annotating a slot list without marking it.
+      if (result?.travelWarning) toast.warning(result.travelWarning, { duration: 10000 });
     },
     onError: (err: Any) => {
       toast.error(extractApiErrorMessage(err) ?? 'Failed to reschedule booking');

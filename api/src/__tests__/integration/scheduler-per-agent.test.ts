@@ -26,11 +26,13 @@ import { app } from '../../server';
 import { AppDataSource } from '../../database/data-source';
 import { Bot } from '../../database/entities/Bot';
 import { BookingSettings } from '../../database/entities/BookingSettings';
+import { ServiceType } from '../../database/entities/ServiceType';
 import { invalidateEntitlements } from '../../billing/entitlements';
 import { createTestTenant, createTestUser, createTestAnchorBot } from '../helpers/factories';
 import type { Tenant } from '../../database/entities/Tenant';
 
 const CONFIG_URL = '/api/v1/scheduler/config';
+const SERVICES_URL = '/api/v1/scheduler/services';
 
 let tenant: Tenant;
 let anchorId: string;
@@ -132,5 +134,86 @@ describe('scheduler config — an Agent that is not yours', () => {
 
     const row = await AppDataSource.getRepository(BookingSettings).findOne({ where: { botId: otherAnchor.id } });
     expect(row).toBeNull();
+  });
+});
+
+/**
+ * EVERY endpoint, not one representative.
+ *
+ * All eight resolve the Agent through the same `resolveTargetBot`, and the config route above
+ * already proves that helper answers 404 rather than 500 through the real stack. What these
+ * cover is different and is the reason the plan asked for them by name: that each of the other
+ * seven actually CALLS it. A call site that forgot would not be a coverage gap — it would be a
+ * cross-tenant read or write, on a route whose own tests were green.
+ */
+describe('every scheduler endpoint refuses an Agent outside the tenant', () => {
+  let foreignBotId: string;
+
+  beforeEach(async () => {
+    const other = await createTestTenant({ tier: 'pro' });
+    foreignBotId = (await createTestAnchorBot(other)).id;
+  });
+
+  const routes: Array<[string, () => Promise<{ status: number; body?: any }>]> = [
+    ['GET /config', () => request(app).get(`${CONFIG_URL}?botId=${foreignBotId}`)],
+    ['PUT /config', () => request(app).put(`${CONFIG_URL}?botId=${foreignBotId}`).send({ bookingsPaused: true })],
+    ['GET /services', () => request(app).get(`${SERVICES_URL}?botId=${foreignBotId}`)],
+    ['POST /services', () =>
+      request(app).post(`${SERVICES_URL}?botId=${foreignBotId}`).send({ name: 'Intrusion', durationMin: 30 })],
+    ['PUT /services/reorder', () =>
+      request(app).put(`${SERVICES_URL}/reorder?botId=${foreignBotId}`).send({ serviceIds: [] })],
+    ['PUT /services/:id', () =>
+      request(app)
+        .put(`${SERVICES_URL}/00000000-0000-4000-8000-000000000001?botId=${foreignBotId}`)
+        .send({ name: 'Intrusion' })],
+    ['DELETE /services/:id', () =>
+      request(app).delete(`${SERVICES_URL}/00000000-0000-4000-8000-000000000001?botId=${foreignBotId}`)],
+    // A REAL preset key. `applyPreset` resolves the preset before the Agent, so an invented key
+    // 404s as PRESET_NOT_FOUND and the test passes without ever reaching the check it exists to
+    // make — which is exactly what it did until the error-code assertion below caught it.
+    ['POST /presets/:key/apply', () =>
+      request(app).post(`/api/v1/scheduler/presets/barber/apply?botId=${foreignBotId}`).send({})],
+  ];
+
+  it.each(routes)('%s refuses another tenant’s Agent', async (_label, call) => {
+    const res = await call();
+    expect(res.status).toBe(404);
+    // THE CODE, not just the status. Two of these address a service id that does not exist, so
+    // a 404 alone would also be satisfied by `SERVICE_NOT_FOUND` — which is what they would
+    // answer if the Agent check were removed entirely, or moved after the service lookup. Only
+    // `NOT_FOUND` proves the refusal came from `resolveTargetBot`.
+    expect(res.body?.error?.code ?? res.body?.code).toBe('NOT_FOUND');
+  });
+
+  it('writes nothing to the foreign Agent while being refused', async () => {
+    await request(app).post(`${SERVICES_URL}?botId=${foreignBotId}`).send({ name: 'Intrusion', durationMin: 30 });
+    const leaked = await AppDataSource.getRepository(ServiceType).findOne({ where: { botId: foreignBotId } });
+    expect(leaked).toBeNull();
+  });
+});
+
+/**
+ * Two Agents, two catalogues.
+ *
+ * The end-to-end statement of what #86 is for, and the one the issue says the whole change is
+ * pointless without: a service added while Agent B is selected belongs to B and is absent from
+ * A. The portal missed passing the Agent here for a whole commit, so this is the assertion that
+ * would have caught it.
+ */
+describe('service catalogues are separate per Agent', () => {
+  it('keeps a service created for one Agent out of the other’s catalogue', async () => {
+    const created = await request(app)
+      .post(`${SERVICES_URL}?botId=${secondId}`)
+      .send({ name: 'Emergency call-out', durationMin: 60 });
+    expect(created.status).toBeGreaterThanOrEqual(200);
+    expect(created.status).toBeLessThan(300);
+
+    const second = await request(app).get(`${SERVICES_URL}?botId=${secondId}`);
+    const anchor = await request(app).get(SERVICES_URL);
+
+    const namesOf = (res: { body: { data?: { services?: Array<{ name: string }> } } }) =>
+      (res.body.data?.services ?? []).map((svc) => svc.name);
+    expect(namesOf(second)).toContain('Emergency call-out');
+    expect(namesOf(anchor)).not.toContain('Emergency call-out');
   });
 });

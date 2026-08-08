@@ -341,7 +341,13 @@ async function assertInServiceArea(
       ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
       : `This business only travels to ${describeServiceArea(entries)}, and that address could not be placed. Ask for a postcode or town.`,
     verdict === 'outside' ? 'OUT_OF_SERVICE_AREA' : 'ADDRESS_NOT_PLACEABLE',
-    400
+    400,
+    undefined,
+    // The out-of-area half is safe to show as-is - it names the area and blames nobody. The
+    // unplaceable half ends in an instruction to the bot, so it gets its own wording.
+    verdict === 'outside'
+      ? `That address is outside the area this business serves (${describeServiceArea(entries)}).`
+      : 'We could not find that address. Please contact the business directly to move this appointment.'
   );
 }
 
@@ -366,7 +372,11 @@ function assertPlaceableForTravel(placement: BookingPlacement): void {
   throw new BookingError(
     'That address could not be located precisely enough to plan the journey. Ask for a postcode or town.',
     'ADDRESS_NOT_PLACEABLE',
-    400
+    400,
+    undefined,
+    // "Ask for a postcode" is an instruction to the bot. A customer on the manage page cannot
+    // change the address on their existing booking, so they are told who can.
+    'We could not work out the journey to your address. Please contact the business directly to move this appointment.'
   );
 }
 
@@ -1319,7 +1329,12 @@ export class InternalProvider implements BookingProvider {
     throw new BookingError(
       'Another appointment was taken while this one was being confirmed, and this time can no longer be reached from it. Check availability again and offer one of the times it returns.',
       'TRAVEL_TIME_CONFLICT',
-      409
+      409,
+      undefined,
+      // #73: this one REACHES A CUSTOMER. The signed reschedule page enforces travel, so a
+      // customer who picks a time that stops being drivable between the page loading and their
+      // submitting lands here - and the message above tells the MODEL to offer other times.
+      'Someone else booked that slot while you were choosing. Please pick another time.'
     );
   }
 
@@ -1704,7 +1719,11 @@ export class InternalProvider implements BookingProvider {
         throw new BookingError(
           'That time cannot be reached from the appointments either side of it. Offer one of the other available times instead, and do not retry this one.',
           'TRAVEL_TIME_CONFLICT',
-          409
+          409,
+          undefined,
+          // Reachable from the customer's manage link, and phrased without blame or mechanism:
+          // the reason is the owner's other appointments, which is not the customer's business.
+          'That time is no longer available. Please pick another.'
         );
       }
       if (verdict === 'undecided') {
@@ -3075,7 +3094,14 @@ export class InternalProvider implements BookingProvider {
             ? 'That time cannot be reached from the appointments either side of it. Offer one of the other available times instead, and do not retry this one.'
             : 'The journey to that time could not be checked. Check availability again and offer one of the times it returns.',
           'TRAVEL_TIME_CONFLICT',
-          409
+          409,
+          undefined,
+          // #73: the customer's manage link reaches this. Both branches keep the difference the
+          // owner-facing wording is careful about - one is a refusal, the other is an unchecked
+          // journey - without the instruction to the model or a claim of proof.
+          verdict === 'unreachable'
+            ? 'That time is no longer available. Please pick another.'
+            : 'We could not check the journey to that time just now. Please pick another, or try again shortly.'
         );
       }
       travelSnapshot =
@@ -3355,7 +3381,12 @@ export class InternalProvider implements BookingProvider {
               ? 'Moving this appointment would leave another one that day too far from your starting point to reach. Check availability again and offer one of the times it returns.'
               : 'Moving this appointment would leave another one that day whose journey could not be checked. Check availability again and offer one of the times it returns.',
             'TRAVEL_TIME_CONFLICT',
-            409
+            409,
+            undefined,
+            // The most customer-reachable of the four: this fires while a customer is MOVING
+            // their own appointment through the signed link. The owner's other appointments are
+            // not the customer's business, so the reason is left out rather than paraphrased.
+            'That time is no longer available. Please pick another.'
           );
         }
         return rows[0].sequence;

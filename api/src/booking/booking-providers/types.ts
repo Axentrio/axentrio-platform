@@ -26,7 +26,29 @@ export class BookingError extends Error {
      * that was missing on the way there. Must stay free of anything a customer-facing surface
      * cannot show: `booking-public.controller.ts` renders errors to a browser.
      */
-    public details?: Record<string, unknown>
+    public details?: Record<string, unknown>,
+    /**
+     * What a CUSTOMER may read, when this error can reach one.
+     *
+     * `message` has two audiences and used to have one field. `booking.tool.ts` feeds it to the
+     * LLM verbatim, so it is written as stage directions - *"Do not offer specific times and do
+     * not say they are fully booked - capture it with `request_appointment`"*. The signed
+     * manage and reschedule pages render errors to a human being's browser. Those two facts met
+     * once already, and a customer clicking Reschedule at a business with no connected calendar
+     * would have read the bot's instructions.
+     *
+     * DECLARED AT THE THROW SITE, which is the point. The first fix was an allow-list in
+     * `booking-public.controller.ts`, and it kept the two audiences in sync by hand: a code
+     * added to the engine with no entry there degraded to "This link is invalid or has
+     * expired." - honest, and back to the uninformative message the whole exercise set out to
+     * remove. Here the choice is visible where the error is raised, by whoever knows what
+     * happened, instead of being reconciled in a controller that has to know every code in the
+     * engine.
+     *
+     * Absent still means the controller's allow-list decides, so nothing silently starts
+     * leaking; the list is now the fallback rather than the only mechanism.
+     */
+    public customerMessage?: string
   ) {
     super(message);
     this.name = 'BookingError';

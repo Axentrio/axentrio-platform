@@ -68,8 +68,18 @@ export const CUSTOMER_MESSAGE: Record<string, string> = {
   BOOKING_NOT_FOUND: 'This appointment could no longer be found.',
 };
 
+/**
+ * The one rule every public handler uses. Three sources, in order of who knows best:
+ *
+ * 1. **The throw site**, when it declared customer copy. Whoever raised the error knows what
+ *    happened; a controller reconciling codes by hand does not, and drifts.
+ * 2. **The allow-list below**, for the errors raised before this existed. Default-DENY: an
+ *    unlisted code cannot leak by simply not being thought about.
+ * 3. **A generic line**, which is honest and uninformative - the state this design is trying to
+ *    make rare rather than the one it settles for.
+ */
 export function customerMessage(err: BookingError): string {
-  return CUSTOMER_MESSAGE[err.code] ?? 'This link is invalid or has expired.';
+  return err.customerMessage ?? CUSTOMER_MESSAGE[err.code] ?? 'This link is invalid or has expired.';
 }
 
 function whenLabel(startIso: string, tz: string): string {
@@ -136,6 +146,11 @@ export async function getManagePage(req: Request, res: Response): Promise<void> 
     );
   } catch (err) {
     logger.warn('[BookingPublic] manage page error', { error: err instanceof Error ? err.message : String(err) });
+    // The same rule as the other three handlers (#73). This one was the odd one out: it went
+    // straight to the generic line, so a customer opening their manage link at a business whose
+    // calendar had been disconnected was told their LINK was broken - which is a lie about the
+    // one thing they can check, and sends them to look for a new email that does not exist.
+    if (err instanceof BookingError) return errorPage(res, customerMessage(err));
     errorPage(res, 'This link is invalid or has expired.');
   }
 }

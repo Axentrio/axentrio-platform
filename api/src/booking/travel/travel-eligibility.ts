@@ -32,6 +32,8 @@ import { getEntitlements } from '../../billing/entitlements';
 import { config } from '../../config/environment';
 import { logger } from '../../utils/logger';
 import { itineraryKeyIsShared, type ItineraryKey } from '../../scheduler/itinerary-key';
+import { Bot } from '../../database/entities/Bot';
+import { notifyItinerarySharedInert } from './degradation-notify';
 
 export type TravelInactiveReason = 'no_api_key' | 'not_entitled' | 'bot_disabled' | 'shared_itinerary';
 
@@ -136,6 +138,15 @@ export async function warnIfTravelItineraryNowShared(botId: string, newKey: Itin
       '[Travel] TRAVEL_SHARED_ITINERARY — travel time is enabled on an Agent that now shares a diary, and is inert until they are separated',
       { botId, tenantId: settings.tenantId, itineraryKey: newKey }
     );
+    // #68: the detector existed; the half that reaches a person did not. The owner is the only
+    // one who can act — nobody pays anyone here, they give each Agent its own calendar — so this
+    // goes to the tenant rather than to the operator's outage inbox.
+    const bot = await AppDataSource.getRepository(Bot).findOne({ where: { id: botId } });
+    await notifyItinerarySharedInert({
+      tenantId: settings.tenantId,
+      botId,
+      botName: bot?.name,
+    });
   } catch (error) {
     logger.warn('[Travel] shared-itinerary re-check failed after a rekey', { botId, error });
   }

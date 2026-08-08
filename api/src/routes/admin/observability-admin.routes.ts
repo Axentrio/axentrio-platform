@@ -196,6 +196,20 @@ router.get(
     for (const r of outputByTenant) row(r.tenantId).guardrailBlocks += Number(r.count);
     for (const r of handoffsByTenant) row(r.tenantId).handoffs += Number(r.count);
 
+    // Lazy, not a static import: `travel-health` pulls in the mail and Redis graph, and a new
+    // static edge from a route module has reordered module loading and broken unrelated unit
+    // tests in this repository before.
+    const travelSnapshot = await safe(
+      'travelHealth',
+      import('../../booking/travel/travel-health').then((m) => m.travelHealthSnapshot()),
+      {
+        lastProbe: null,
+        incidents: { probe: false, observed: false },
+        observedPlatformFailures: 0,
+        rates: {},
+      },
+    );
+
     // Top 20 tenants by TOTAL activity (so guardrail/handoff-only tenants aren't
     // dropped), then attach name/tier.
     const activity = (r: TenantRow) => r.sessions + r.messages + r.guardrailBlocks + r.handoffs;
@@ -244,6 +258,12 @@ router.get(
       },
       channelsDown: channelsDownDetail,
       byTenant: top,
+      // #68 §5c. `no_route` and `budget_spent` are watched but never mailed — one of either is
+      // ordinary, a sustained rate is a regression — so this is the only place they surface.
+      // Alongside them, the last PROBE result, which answers "is routing working" for an operator
+      // who would otherwise have to wait for an alert to find out. Read from the cached state, so
+      // opening the page never spends an element.
+      travel: travelSnapshot,
     });
   }),
 );

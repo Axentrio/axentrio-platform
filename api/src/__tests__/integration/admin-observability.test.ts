@@ -180,6 +180,23 @@ describe('admin observability (Rollout Health snapshot)', () => {
     const res = await request(app).get(`${BASE}?days=7`);
     expect(res.status).toBe(403);
   });
+
+  /**
+   * #68 §5c. `no_route` and `budget_spent` never send mail, so if they are not on this response
+   * they are recorded nowhere a person looks and the counting is pure ceremony. The probe state
+   * rides along for the same reason: an operator should be able to ask whether routing works
+   * rather than wait to be told it doesn't.
+   */
+  it('reports travel-routing health and the rates that are never mailed', async () => {
+    const res = await request(app).get(`${BASE}?days=7`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.travel).toMatchObject({
+      incidents: { probe: expect.any(Boolean), observed: expect.any(Boolean) },
+      observedPlatformFailures: expect.any(Number),
+    });
+    // Never probes on request — that would put a billed Google call behind a page load.
+    expect(res.body.data.travel.lastProbe).toBeNull();
+  });
 });
 
 /**

@@ -81,6 +81,8 @@ import {
   type TravelVerdict,
 } from '../travel/travel-gate';
 import { dayOpeningInstant, localDayBounds, type DayRule } from '../travel/travel-day';
+import { recordCause, recordRoutingSuccess } from '../travel/degradation-monitor';
+import { notifyTenantCapExhausted } from '../travel/degradation-notify';
 import { driveLookupFor } from '../travel/routes.service';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
@@ -1371,7 +1373,7 @@ export class InternalProvider implements BookingProvider {
       lookup: recordingLookup(driveLookupFor(input.eligibility, ctx.session?.id ?? null), drives),
     });
     // The only place a degradation CAUSE exists — the column records that a booking degraded,
-    // never why. #68 will consume it properly; until then it is at least diagnosable.
+    // never why.
     if (degradedCauses.length) {
       logger.info('[Travel] a leg went unmeasured', {
         tenantId: input.eligibility.tenantId,
@@ -1379,7 +1381,20 @@ export class InternalProvider implements BookingProvider {
         verdict,
         causes: degradedCauses,
       });
+      // #68: the causes stop being only diagnosable here. A platform cause seen by real
+      // bookings is a failure the synthetic probe's single journey may not reach, and a tenant
+      // whose cap is spent is a definite fact about that business's month. Fire-and-forget:
+      // a monitor that can break a booking is worse than the blindness it cures.
+      for (const cause of degradedCauses) {
+        void recordCause(cause).catch(() => undefined);
+      }
+      if (degradedCauses.includes('cap_exhausted')) {
+        void notifyTenantCapExhausted(input.eligibility.tenantId).catch(() => undefined);
+      }
     }
+    // A leg that ANSWERED is what a recovery claim needs behind it — see the monitor. Recorded
+    // whenever routing was actually consulted and came back, which `fullyRouted` is exactly.
+    if (fullyRouted && hadConstrainingLeg) void recordRoutingSuccess().catch(() => undefined);
     return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives, base, dayStart };
   }
 

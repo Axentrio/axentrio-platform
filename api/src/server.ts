@@ -659,6 +659,46 @@ async function startServer(): Promise<void> {
     };
     setInterval(sweepRetention, 24 * 60 * 60 * 1000); // Daily
 
+    // Travel-time health (#68). The feature degrades GRACEFULLY and therefore SILENTLY: when
+    // routing cannot answer, the gate falls back to distance bounds and the flat gap and keeps
+    // taking bookings, so a lapsed card and a Google outage look identical from outside. This is
+    // the watchdog that makes that failure announce itself.
+    //
+    // Unflagged and ungated, like the LLM provider probe it is modelled on — a watchdog that
+    // only runs when somebody remembers to enable it is not a watchdog. One run shortly after
+    // boot as well as on the interval, so a redeploy does not leave it silent until the first
+    // tick.
+    const travelHealth = async () => {
+      try {
+        const { runTravelHealthCheck, reconcileObservedDegradation } = await import(
+          './booking/travel/travel-health'
+        );
+        await runTravelHealthCheck();
+        await reconcileObservedDegradation();
+      } catch (err) {
+        logger.error('[travel-health] check failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    setTimeout(travelHealth, 90_000);
+    setInterval(travelHealth, 30 * 60 * 1000); // Every 30 minutes
+
+    // Agents already sharing a diary when this shipped never fire a rekey, so the event-driven
+    // detector alone would only ever catch the cases that arrive after it.
+    const sweepSharedItineraries = async () => {
+      try {
+        const { reconcileSharedItineraries } = await import('./booking/travel/travel-health');
+        await reconcileSharedItineraries();
+      } catch (err) {
+        logger.error('[travel-health] shared-itinerary reconciliation failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    };
+    setTimeout(sweepSharedItineraries, 120_000);
+    setInterval(sweepSharedItineraries, 24 * 60 * 60 * 1000); // Daily
+
     // Coordinate expiry, daily plus one run shortly after boot (ADR-0014). The Maps terms
     // permit a booking's latitude and longitude for 30 consecutive days and no longer;
     // `place_id` stays. Unflagged and ungated for the same reason as lead retention above —

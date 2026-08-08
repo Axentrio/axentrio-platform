@@ -8,13 +8,13 @@
  * later arrives as extra rows rather than as a schema change to everything travel
  * touches.
  *
- * It is currently EQUAL to the calendar conflict key, and derived from it rather than
- * computed a second way. `conflictKeyFor` already normalizes to the connected
- * calendar's account-unique identity, so two bots pointed at one real calendar share a
- * key — which is exactly the diary-scoped answer travel needs, and the same value the
- * advisory lock, `loadBusy` and the Minimum Gap check already use. The stored column
- * stays `calendar_key`: this names what that column means to travel, it is not a
- * second source of truth.
+ * It currently EQUALS the value the `calendar_key` column stores, and is produced by
+ * calling `conflictKeyFor` rather than by deriving the key a second way. That function
+ * already normalizes to the connected calendar's account-unique identity, so two bots
+ * pointed at one real calendar share a key - which is exactly the diary-scoped answer
+ * travel needs, and the same value the advisory lock, `loadBusy` and the Minimum Gap
+ * check already use. The column keeps its name: this names what it MEANS to travel, and
+ * is not a second source of truth.
  *
  * **Nothing may be stored against the key.** `rekeyBotBookings` rewrites it whenever a
  * calendar is connected, switched or disconnected, so anything hung off it is orphaned
@@ -39,8 +39,8 @@ export type ItineraryKey = string;
  * so a second driver is a different resolution here rather than an edit at each of them.
  *
  * Reads the DB-stored identity rather than calling the provider, so the key holds even
- * when calendar sync is entitlement-disabled — existing conflict records must never
- * silently weaken to a bot-scoped key. Falls back to `bot:<id>` when the identity is
+ * when calendar sync is entitlement-disabled - the key already written on existing
+ * Bookings must never silently weaken to a bot-scoped one. Falls back to `bot:<id>` when the identity is
  * unknown (no connection, or a legacy one) — never `gcal:primary`, which would collide
  * globally.
  */

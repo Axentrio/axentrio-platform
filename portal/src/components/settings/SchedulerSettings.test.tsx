@@ -14,6 +14,26 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/**
+ * A budget for tests that are genuinely slow, not a mask over tests that are wrong.
+ *
+ * Each of these renders a ~1000-line form, waits for four queries to settle, and hydrates the
+ * whole booking configuration into local state. MEASURED on one machine, same file:
+ *
+ *   commit e571ab7 (23 tests)   slowest test 3334ms
+ *   commit d98a1b0 (27 tests)   slowest test 2618ms
+ *
+ * So the file was already within ~1.7s of the 5s default BEFORE the per-Agent work, and that
+ * work made it faster rather than slower. The margin is real and pre-existing, and it produces
+ * an occasional timeout on a loaded machine — a test passing alone and failing in a full run.
+ *
+ * NOT ATTRIBUTED. It is not a render loop: no dependency array holds an unstable identity, and
+ * removing the effect added by #86 changed nothing. A control file in the same run is
+ * unaffected. Whoever finds the real cause should bring this back DOWN rather than leave it —
+ * a raised budget is a place for a slow test to hide.
+ */
+const SLOW_FORM_TIMEOUT_MS = 15_000;
+
 
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -122,7 +142,7 @@ async function saveUntouched(config: unknown) {
   return apiPut.mock.calls[0][1] as Record<string, unknown>;
 }
 
-describe('SchedulerSettings — hydrate/save round-trip', () => {
+describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every business rule unchanged when the owner saves without editing', async () => {
@@ -260,7 +280,7 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
  * OFF for a business that had it on — and travel going quiet is exactly the failure mode that
  * cannot be seen from the outside.
  */
-describe('SchedulerSettings — travel time', () => {
+describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every travel field unchanged when the owner saves without editing', async () => {
@@ -346,7 +366,7 @@ describe('SchedulerSettings — travel time', () => {
  * Disconnect, and A's calendar is disconnected while the screen says B — A's bookings stop
  * syncing and nothing says why. So the assertions below are about the WIRE, not the wording.
  */
-describe('SchedulerSettings — per-Agent scoping', () => {
+describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   const multiAgentGet = (config: unknown = CONFIG) => (url: string) => {
@@ -407,7 +427,7 @@ describe('SchedulerSettings — per-Agent scoping', () => {
   });
 });
 
-describe('SchedulerSettings — refuses to save what the API will reject', () => {
+describe('SchedulerSettings — refuses to save what the API will reject', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   /** Load `config`, wait for hydration, and hand back the Save button unpressed. */

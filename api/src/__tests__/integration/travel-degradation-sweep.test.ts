@@ -1,5 +1,5 @@
 /**
- * #68 AC-5 — the failure has to travel the whole way to somebody who can act.
+ * #68 AC-5 - the failure has to travel the whole way to somebody who can act.
  *
  * Calling the recorder and asserting a counter moved proves the detector and nothing else. The
  * defects live in the wiring: which Agents the sweep selects, whether the itinerary key resolves,
@@ -7,11 +7,10 @@
  * drives the REAL sweep against the REAL database and the REAL notification service, and asserts
  * on the row a tenant would see.
  *
- * WHAT IS DOUBLED, AND WHY IT HAS TO BE: Redis. This repository's test environment has no Redis
- * service — the one integration test that touches it mocks the client to `null` — so the plan's
- * "real Redis" is not available to assert against. The probe-side latches are covered in
- * `unit/travel-degradation.test.ts` against a faithful in-memory double instead. Naming the gap
- * beats implying it is covered.
+ * SCOPE: the sweep and the notification only. The cross-instance coordination this feature also
+ * depends on - the incident latch, the probe lease, the ordering of a success against a failure -
+ * is asserted against REAL REDIS in `travel-degradation-redis.test.ts`, because a double cannot
+ * establish it: the double is the part being trusted.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { randomBytes } from 'crypto';
@@ -102,7 +101,7 @@ describe('the sweep finds Agents that were ALREADY sharing a diary', () => {
     const notes = await notificationsOfType('travel_shared_itinerary');
     expect(notes).toHaveLength(1);
     expect(notes[0].message).toMatch(/Second driver/);
-    // The fix is a calendar, not a payment — the alert has to say which.
+    // The fix is a calendar, not a payment - the alert has to say which.
     expect(notes[0].message).toMatch(/own calendar/i);
   });
 
@@ -130,7 +129,7 @@ describe('the sweep finds Agents that were ALREADY sharing a diary', () => {
   });
 
   it('ignores an Agent that shares a diary with travel switched OFF', async () => {
-    // Nothing is degraded — the feature was never running for them. An alert here would be the
+    // Nothing is degraded - the feature was never running for them. An alert here would be the
     // noise that teaches an owner to ignore the real one.
     const second = await seedAgent(tenant, 'Second driver');
     await seedCredential(tenant, anchorId, 'shared-diary@example.com');
@@ -147,7 +146,7 @@ describe('the sweep finds Agents that were ALREADY sharing a diary', () => {
 });
 
 describe('a spent element cap belongs to the tenant', () => {
-  it('notifies on the FIRST occurrence — a cap is a fact, not a symptom', async () => {
+  it('notifies on the FIRST occurrence - a cap is a fact, not a symptom', async () => {
     // Deliberately not a burst threshold. The tenant is at their cap the moment they hit it, and
     // the platform threshold that governs outages would only delay telling them.
     await notifyTenantCapExhausted(tenant.id);

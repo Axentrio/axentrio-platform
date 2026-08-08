@@ -25,9 +25,22 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # The travel-degradation monitor coordinates across instances THROUGH Redis: the incident
+      # latch, the probe lease and the ordering of a success against a failure all live there. A
+      # double cannot test that, because the double is the part being trusted.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
       TEST_DATABASE_URL: postgresql://test:test@localhost:5432/chatbot_test
+      TEST_REDIS_URL: redis://localhost:6379
       DATABASE_URL: postgresql://test:test@localhost:5432/chatbot_test
       JWT_SECRET: test-jwt-secret-for-ci
       ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef

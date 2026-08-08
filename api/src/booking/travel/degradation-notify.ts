@@ -9,7 +9,7 @@
  * STATES rather than symptoms needing corroboration:
  *
  *   - a spent element cap is a fact about that tenant's month the moment it happens;
- *   - the shared-itinerary detector fires ONCE, on rekey — a rule of "N occurrences in a window"
+ *   - the shared-itinerary detector fires ONCE, on rekey - a rule of "N occurrences in a window"
  *     would mean the configuration alert could literally never fire, which is what an earlier
  *     draft of this would have shipped.
  *
@@ -26,7 +26,7 @@ const currentPeriod = (): string => new Date().toISOString().slice(0, 7);
  * This tenant has spent its monthly element budget, so travel checking has stopped verifying
  * drives for them and fallen back to distance bounds.
  *
- * Not a refusal and not an outage — ADR-0015's degraded branch working as designed. What makes
+ * Not a refusal and not an outage - ADR-0015's degraded branch working as designed. What makes
  * it worth saying is that the owner cannot otherwise tell: their bookings keep flowing, checked
  * less thoroughly than they believe.
  */
@@ -55,7 +55,7 @@ export async function notifyTenantCapExhausted(tenantId: string): Promise<void> 
  *
  * THE CAUSE THAT IS NOT A GOOGLE FAILURE AT ALL. Gate 4 makes the feature inert the moment two
  * Agents resolve to the same itinerary key, because their bookings would read as one person's
- * day and slots would be held back for journeys nobody makes. Nothing unsafe runs — and the
+ * day and slots would be held back for journeys nobody makes. Nothing unsafe runs - and the
  * owner is never told that protection they believe is applying has stopped.
  *
  * Nobody needs to pay anyone here. The fix is a calendar, which is why this reads differently

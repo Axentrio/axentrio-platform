@@ -664,10 +664,11 @@ async function startServer(): Promise<void> {
     // taking bookings, so a lapsed card and a Google outage look identical from outside. This is
     // the watchdog that makes that failure announce itself.
     //
-    // Unflagged and ungated, like the LLM provider probe it is modelled on — a watchdog that
-    // only runs when somebody remembers to enable it is not a watchdog. One run shortly after
-    // boot as well as on the interval, so a redeploy does not leave it silent until the first
-    // tick.
+    // Unflagged and ungated, for the same reason as lead retention below: a watchdog that only
+    // runs when somebody remembers to enable it is not a watchdog. (The LLM provider probe this
+    // borrows its SHAPE from does carry a kill switch, `PROVIDER_HEALTH_PROBE_ENABLED` - the
+    // shape is the precedent here, not the gating.) One run shortly after boot as well as on the
+    // interval, so a redeploy does not leave it silent until the first tick.
     const travelHealth = async () => {
       try {
         const { runTravelHealthCheck, reconcileObservedDegradation } = await import(

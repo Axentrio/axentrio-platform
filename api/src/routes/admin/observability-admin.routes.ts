@@ -203,10 +203,12 @@ router.get(
       'travelHealth',
       import('../../booking/travel/travel-health').then((m) => m.travelHealthSnapshot()),
       {
+        monitoring: 'unknown' as const,
         lastProbe: null,
         incidents: { probe: false, observed: false },
         observedPlatformFailures: 0,
         rates: {},
+        spread: { capExhaustedTenants: 0, sharedItineraryBots: 0 },
       },
     );
 
@@ -258,8 +260,8 @@ router.get(
       },
       channelsDown: channelsDownDetail,
       byTenant: top,
-      // #68 §5c. `no_route` and `budget_spent` are watched but never mailed — one of either is
-      // ordinary, a sustained rate is a regression — so this is the only place they surface.
+      // #68 §5c. `no_route` and `budget_spent` are watched but never mailed - one of either is
+      // ordinary, a sustained rate is a regression - so this is the only place they surface.
       // Alongside them, the last PROBE result, which answers "is routing working" for an operator
       // who would otherwise have to wait for an alert to find out. Read from the cached state, so
       // opening the page never spends an element.

@@ -129,7 +129,7 @@ What the travel gate actually did to one Booking, recorded on the row. `ok` mean
 
 **A sustained run of `degraded` is therefore NOT an outage signal**, and reading it as one would alert on every business whose jobs are close together. Whatever watches for silent degradation must key on the structured cause the gate returns (`no_route`, `cap_exhausted`, `api_error`, `budget_spent`, `settled_by_bounds`, …), never on this column. The column answers "was this verified"; only the cause answers "why not".
 
-What now watches is `booking/travel/travel-health.ts`, and it does not watch causes ALONE — the causes only arrive when somebody is booking, so with the feature inert or the night quiet they say the same thing whether routing is healthy or entirely broken. A synthetic traffic-aware probe answers that question independently, and the causes cover the failures one fixed journey cannot reach. Each source clears only the incident it raised: a healthy probe is not evidence that a failure real bookings are hitting has ended.
+What now watches is `booking/travel/travel-health.ts`, and it does not watch causes ALONE. The causes only arrive when somebody is booking, so with the feature inert or the night quiet they say the same thing whether routing is healthy or entirely broken. A synthetic traffic-aware probe answers that question independently, and the causes cover the failures one fixed journey cannot reach. Each source clears only the incident it raised: a healthy probe is not evidence that a failure real bookings are hitting has ended.
 _Avoid_: travel status, verified (that is one of four values, not the concept), unavailable (the old single fail-open state — ADR-0015 split it three ways by cause).
 
 **Placed Address**:

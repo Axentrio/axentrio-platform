@@ -1,5 +1,16 @@
 version: '3.8'
 services:
+  # The travel-degradation monitor coordinates across instances through Redis - an incident latch
+  # claimed with SET NX, a probe lease, and the sequence that orders a success against a failure.
+  # None of that can be asserted against a double: the double IS the thing being trusted. Tests
+  # that need it fail loudly when it is missing rather than skipping, so a green run means the
+  # coordination actually held.
+  test-redis:
+    image: redis:7-alpine
+    ports:
+      - '6380:6379'
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+
   test-db:
     image: pgvector/pgvector:pg15
     environment:

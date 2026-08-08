@@ -34,6 +34,7 @@ import { logger } from '../../utils/logger';
 import { itineraryKeyIsShared, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { Bot } from '../../database/entities/Bot';
 import { notifyItinerarySharedInert } from './degradation-notify';
+import { recordCause } from './degradation-monitor';
 
 export type TravelInactiveReason = 'no_api_key' | 'not_entitled' | 'bot_disabled' | 'shared_itinerary';
 
@@ -139,7 +140,7 @@ export async function warnIfTravelItineraryNowShared(botId: string, newKey: Itin
       { botId, tenantId: settings.tenantId, itineraryKey: newKey }
     );
     // #68: the detector existed; the half that reaches a person did not. The owner is the only
-    // one who can act — nobody pays anyone here, they give each Agent its own calendar — so this
+    // one who can act - nobody pays anyone here, they give each Agent its own calendar - so this
     // goes to the tenant rather than to the operator's outage inbox.
     const bot = await AppDataSource.getRepository(Bot).findOne({ where: { id: botId } });
     await notifyItinerarySharedInert({
@@ -147,6 +148,10 @@ export async function warnIfTravelItineraryNowShared(botId: string, newKey: Itin
       botId,
       botName: bot?.name,
     });
+    // And the operator half: how many DISTINCT Agents are in this state. One tenant reconnecting
+    // a calendar repeatedly must not look like a platform-wide misconfiguration, so the aggregate
+    // counts identities rather than events.
+    await recordCause('shared_itinerary', { tenantId: settings.tenantId, botId });
   } catch (error) {
     logger.warn('[Travel] shared-itinerary re-check failed after a rekey', { botId, error });
   }

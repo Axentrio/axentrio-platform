@@ -1386,13 +1386,17 @@ export class InternalProvider implements BookingProvider {
       // whose cap is spent is a definite fact about that business's month. Fire-and-forget:
       // a monitor that can break a booking is worse than the blindness it cures.
       for (const cause of degradedCauses) {
-        void recordCause(cause).catch(() => undefined);
+        // The identity travels with the cause: without it the operator aggregate cannot count
+        // DISTINCT affected tenants, and distinct tenants is the only count that separates a
+        // platform-wide pattern from one busy business at its cap. No Agent id, because the only
+        // Agent-scoped cause is the shared itinerary, and that is recorded where it is detected.
+        void recordCause(cause, { tenantId: input.eligibility.tenantId }).catch(() => undefined);
       }
       if (degradedCauses.includes('cap_exhausted')) {
         void notifyTenantCapExhausted(input.eligibility.tenantId).catch(() => undefined);
       }
     }
-    // A leg that ANSWERED is what a recovery claim needs behind it — see the monitor. Recorded
+    // A leg that ANSWERED is what a recovery claim needs behind it - see the monitor. Recorded
     // whenever routing was actually consulted and came back, which `fullyRouted` is exactly.
     if (fullyRouted && hadConstrainingLeg) void recordRoutingSuccess().catch(() => undefined);
     return { verdict, candidate, venue, fullyRouted, hadConstrainingLeg, drives, base, dayStart };

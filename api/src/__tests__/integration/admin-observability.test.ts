@@ -194,8 +194,11 @@ describe('admin observability (Rollout Health snapshot)', () => {
       incidents: { probe: expect.any(Boolean), observed: expect.any(Boolean) },
       observedPlatformFailures: expect.any(Number),
     });
-    // Never probes on request — that would put a billed Google call behind a page load.
+    // Never probes on request - that would put a billed Google call behind a page load.
     expect(res.body.data.travel.lastProbe).toBeNull();
+    // `unknown` here, and that is the right answer rather than a gap: this process has no Redis,
+    // so the monitor cannot see. Reporting zeros would say "quiet" where the truth is "blind".
+    expect(res.body.data.travel.monitoring).toBe('unknown');
   });
 });
 

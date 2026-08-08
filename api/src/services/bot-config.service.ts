@@ -116,6 +116,26 @@ export async function getAnchorBotConfig(
 }
 
 /**
+ * The same thing for a NAMED Agent, ownership checked.
+ *
+ * The pair to `getAnchorBotConfig`, for the endpoints that know which Agent they mean because
+ * they are holding one of its Bookings. Written as its own function rather than inlined at the
+ * call site so the settings fallback stays identical between the two - a caller that resolved
+ * the bot itself and then read `bot.settings` directly would quietly differ the day the
+ * fallback changes.
+ *
+ * Argument order matches `getOwnedBot`, which takes the bot first. That is the opposite of
+ * most helpers in this file, so both are named at every call site.
+ */
+export async function getOwnedBotConfig(
+  botId: string,
+  tenantId: string,
+): Promise<{ bot: Bot; settings: BotSettings }> {
+  const bot = await getOwnedBot(botId, tenantId);
+  return { bot, settings: bot.settings ?? ({} as BotSettings) };
+}
+
+/**
  * Resolve the bot config for a chat session. Primary path for the agent
  * runtime, prompt builder, tool registry, booking service, etc.
  *

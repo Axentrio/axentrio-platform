@@ -199,6 +199,10 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
   const accept = useAcceptRequest();
   const decline = useDeclineRequest();
   const bookings = data?.bookings ?? [];
+  // #87: the list covers every Agent now, so a page can hold appointments the owner cannot
+  // otherwise place. Naming them is only worth the pixels when there is something to tell
+  // apart - a tenant with one Agent gets exactly the row it had before, and is asked nothing.
+  const showAgent = new Set(bookings.map((b) => b.agentId)).size > 1;
 
   return (
     <div className="rounded-xl border border-edge bg-surface-1">
@@ -231,6 +235,7 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
                   canManage={scope === 'upcoming'}
                   isRequest={scope === 'requests'}
                   acting={accept.isPending || decline.isPending}
+                  showAgent={showAgent}
                   onCancel={() => setCancelTarget(b)}
                   onReschedule={() => setRescheduleTarget(b)}
                   onAccept={() => accept.mutate(b.id)}
@@ -340,11 +345,14 @@ function BookingRow({
   onReschedule,
   onAccept,
   onDecline,
+  showAgent,
 }: {
   booking: AdminBooking;
   timezone: string;
   canManage: boolean;
   isRequest: boolean;
+  /** True only when this page holds more than one Agent's appointments - see the call site. */
+  showAgent: boolean;
   acting: boolean;
   onCancel: () => void;
   onReschedule: () => void;
@@ -388,6 +396,7 @@ function BookingRow({
           {booking.attendeeEmail ? ` · ${booking.attendeeEmail}` : ''}
           {booking.serviceName ? ` · ${booking.serviceName}` : ''}
           {booking.sourceChannel ? ` · via ${booking.sourceChannel}` : ''}
+          {showAgent && booking.agentName ? ` · ${booking.agentName}` : ''}
         </div>
         {booking.calendarSync === 'failed' && (
           <div className="mt-1 text-xs text-red-400">

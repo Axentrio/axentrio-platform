@@ -183,7 +183,13 @@ export async function getReschedulePage(req: Request, res: Response): Promise<vo
       undefined,
       undefined,
       // Don't count this booking against its own reschedule.
-      bookingId
+      bookingId,
+      // THE AGENT THAT OWNS THIS BOOKING, not the tenant's default one. The mutations already
+      // resolved it from the booking through `buildAdminContext`; this read did not, so a
+      // customer moving a non-default Agent's appointment was offered slots computed against
+      // a different Agent's hours, services and travel settings, and the write then applied
+      // them to the right one.
+      booking.botId
     );
 
     // Group slots by day in the owner's timezone.

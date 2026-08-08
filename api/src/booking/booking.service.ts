@@ -17,8 +17,13 @@ import { Booking } from '../database/entities/Booking';
 import { BookingReference } from '../database/entities/BookingReference';
 import { ServiceType } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
-import type { BotSettings } from '../database/entities/Bot';
-import { getBotConfigForSession, getAnchorBotConfig, getOwnedBot } from '../services/bot-config.service';
+import { Bot, type BotSettings } from '../database/entities/Bot';
+import {
+  getBotConfigForSession,
+  getAnchorBotConfig,
+  getOwnedBot,
+  getOwnedBotConfig,
+} from '../services/bot-config.service';
 import { BookingError, BookingContext, BookingProvider, BookingExtras } from './booking-providers/types';
 import { InternalProvider } from './booking-providers/internal.provider';
 import { upsertLead } from '../leads/lead-capture.service';
@@ -276,6 +281,17 @@ export interface AdminBookingRow {
   travelCheck?: 'ok' | 'degraded' | 'captured' | 'overridden' | null;
   /** P5e: attached files (snapshot subset for display/download). */
   uploadedFiles?: Array<{ fileSessionId: string; fileName: string }> | null;
+  /**
+   * WHICH AGENT sold this appointment (#87).
+   *
+   * The list used to be one Agent's by construction, so saying whose it was would have been
+   * noise. Now that it is every Agent's, a page that mixes them without labelling them trades
+   * one confusion for another - the owner would see appointments they cannot place. The portal
+   * shows this only when a page actually holds more than one, so a single-Agent tenant sees no
+   * new column and is asked no new question.
+   */
+  agentId: string;
+  agentName: string | null;
 }
 
 
@@ -366,24 +382,85 @@ async function travelEstimatesForRequests(
   return out;
 }
 
-/** List the tenant anchor bot's internal bookings, upcoming or past. */
+/**
+ * A named Agent, or a 404 in this module's own error vocabulary.
+ *
+ * `getOwnedBot` throws `BotNotFoundConfigError`, which the global handler does not recognise
+ * and reports as a **500**. That turns "that Agent is not yours" into "the server broke", which
+ * is both wrong and less safe: a 500 invites a retry. Every booking-service failure is already
+ * a `BookingError` carrying its own status, so this converts at the one place it can happen.
+ */
+async function ownedBotOr404(botId: string, tenantId: string): Promise<Bot> {
+  return (await ownedBotConfigOr404(botId, tenantId)).bot;
+}
+
+/** The same, keeping the Agent's own settings — availability is computed from them. */
+async function ownedBotConfigOr404(
+  botId: string,
+  tenantId: string
+): Promise<{ bot: Bot; settings: BotSettings }> {
+  try {
+    return await getOwnedBotConfig(botId, tenantId);
+  } catch {
+    throw new BookingError('Agent not found', 'BOT_NOT_FOUND', 404);
+  }
+}
+
+/**
+ * The same estimates, for a page that may hold more than one Agent's requests.
+ *
+ * Splits by Agent and asks each question of the right diary. Merging is safe because a
+ * booking belongs to exactly one Agent, so no two passes can answer for the same row.
+ */
+async function travelEstimatesByAgent(
+  tenantId: string,
+  rows: Booking[],
+  services: ServiceType[]
+): Promise<Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>> {
+  const byAgent = new Map<string, Booking[]>();
+  for (const row of rows) {
+    const list = byAgent.get(row.botId) ?? [];
+    list.push(row);
+    byAgent.set(row.botId, list);
+  }
+  const merged = new Map<string, { before: DriveEstimate | null; after: DriveEstimate | null; basis: 'distance' }>();
+  for (const [botId, agentRows] of byAgent) {
+    const estimates = await travelEstimatesForRequests(tenantId, botId, agentRows, services);
+    for (const [bookingId, estimate] of estimates) merged.set(bookingId, estimate);
+  }
+  return merged;
+}
+
+/**
+ * List a tenant's internal bookings, upcoming or past.
+ *
+ * `botId` ABSENT MEANS EVERY AGENT, not the default one, and that is the fix for #87. This
+ * used to resolve the anchor unconditionally, so in a tenant with more than one Agent the
+ * second Agent's appointments were invisible in the portal: they existed, held time, sent
+ * confirmations and calendar invites, and the owner could not see, cancel, reschedule, accept
+ * or decline any of them. A tenant with one Agent is unaffected - "all of them" is that one -
+ * so nobody gains a choice they did not have a reason to make.
+ */
 export async function adminListBookings(
   caller: BookingCaller,
   tenantId: string,
   scope: BookingScope,
   limit: number,
-  offset: number
+  offset: number,
+  botId?: string
 ): Promise<{ bookings: AdminBookingRow[]; total: number }> {
   await enforceBookingsFeature(tenantId, caller);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  // Named, not just filtered on. A bare `WHERE bot_id = $1` would answer an empty list for
+  // another tenant's Agent id, which reads as "no appointments" rather than "not yours".
+  const bot = botId ? await ownedBotOr404(botId, tenantId) : null;
   const repo = AppDataSource.getRepository(Booking);
   const now = new Date();
 
   const qb = repo
     .createQueryBuilder('b')
     .where('b.tenantId = :tenantId', { tenantId })
-    .andWhere('b.botId = :botId', { botId: bot.id })
     .andWhere("b.provider = 'internal'");
+  if (bot) qb.andWhere('b.botId = :botId', { botId: bot.id });
 
   if (scope === 'upcoming') {
     qb.andWhere("b.status = 'confirmed'").andWhere('b.endUtc >= :now', { now }).orderBy('b.startUtc', 'ASC');
@@ -425,13 +502,29 @@ export async function adminListBookings(
 
   // Service-name lookup for display (requests have no Meet URL but do name the service).
   const serviceIds = [...new Set(rows.map((r) => r.eventTypeId).filter((v): v is string => !!v))];
-  const services = serviceIds.length
-    ? await AppDataSource.getRepository(ServiceType).find({
-        // Scope the name lookup to this tenant+bot so a stale/cross-linked event_type_id
-        // can never surface another tenant's service name.
-        where: { id: In(serviceIds), tenantId, botId: bot.id },
-      })
-    : [];
+  // Scoped to the tenant AND to the Agents these rows actually belong to, so a stale or
+  // cross-linked `event_type_id` can never surface another tenant's service name. Narrowing
+  // to a single Agent, as this did, would blank the service name on every row belonging to
+  // any other one.
+  const rowBotIds = [...new Set(rows.map((r) => r.botId))];
+  // One lookup for the whole page. Named from the Agents the rows actually reference, so a
+  // deleted Agent's historical bookings still list with a null name rather than vanishing.
+  const agentNameById = new Map(
+    rowBotIds.length
+      ? (
+          await AppDataSource.getRepository(Bot).find({
+            where: { id: In(rowBotIds), tenantId },
+            select: ['id', 'name'],
+          })
+        ).map((b) => [b.id, b.name])
+      : []
+  );
+  const services =
+    serviceIds.length && rowBotIds.length
+      ? await AppDataSource.getRepository(ServiceType).find({
+          where: { id: In(serviceIds), tenantId, botId: In(rowBotIds) },
+        })
+      : [];
   const nameByService = new Map(services.map((s) => [s.id, s.name]));
   // Reuse the already-loaded service rows for the per-row intake-answer labels (no extra query).
   const questionsByService = new Map(services.map((s) => [s.id, s.intakeQuestions]));
@@ -442,13 +535,20 @@ export async function adminListBookings(
   // version of that put a fetch INSIDE the row component, which turned "thirty requests" into
   // thirty HTTP calls to learn thirty times that travel is off. Same information, one query,
   // computed here where the whole page is already in hand.
+  // PER AGENT, because an itinerary is per Agent. Travel eligibility, the itinerary key and
+  // the neighbouring jobs are all that Agent's; computing one Agent's requests against
+  // another's diary would put a confident, wrong drive time beside an override button, which
+  // is worse than showing none. One pass per Agent that actually has rows on this page - in a
+  // single-Agent tenant that is exactly the one query it always was.
   const estimateByBooking =
-    scope === 'requests' ? await travelEstimatesForRequests(tenantId, bot.id, rows, services) : new Map();
+    scope === 'requests' ? await travelEstimatesByAgent(tenantId, rows, services) : new Map();
 
   return {
     total,
     bookings: rows.map((b) => ({
       id: b.id,
+      agentId: b.botId,
+      agentName: agentNameById.get(b.botId) ?? null,
       startTime: b.startUtc.toISOString(),
       endTime: b.endUtc.toISOString(),
       status: b.status,
@@ -514,12 +614,24 @@ export async function adminAvailability(
   serviceId?: string,
   durationMin?: number,
   /** Set by the reschedule flows so a booking is not counted against its own move. */
-  excludeBookingId?: string
+  excludeBookingId?: string,
+  /**
+   * WHOSE availability. Absent means the tenant's default Agent, which is the only sensible
+   * answer for a question asked without a booking in hand.
+   *
+   * Both reschedule pickers pass it, and #87 is what happens when they do not: availability
+   * was computed against the default Agent's diary, opening hours, services and travel
+   * settings while the customer was moving a different Agent's appointment. The offered times
+   * were answers to a question nobody asked.
+   */
+  botId?: string
 ) {
   // public-manage may reach this (slot lookup inside the token-verified
   // reschedule flow, scoped to the booking's service) — D8.
   await enforceBookingsFeature(tenantId, caller, { tokenVerifiedLookup: true });
-  const { bot, settings } = await getAnchorBotConfig(tenantId);
+  const { bot, settings } = botId
+    ? await ownedBotConfigOr404(botId, tenantId)
+    : await getAnchorBotConfig(tenantId);
   const tenant = await AppDataSource.getRepository(Tenant).findOne({ where: { id: tenantId } });
   if (!tenant) throw new BookingError('Tenant not found', 'TENANT_NOT_FOUND', 404);
   // checkAvailability only reads ctx.bot — the synthetic session is never used.

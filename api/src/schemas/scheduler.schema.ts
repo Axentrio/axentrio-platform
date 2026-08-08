@@ -320,6 +320,12 @@ export const listBookingsQuerySchema = z.object({
   scope: z.enum(['upcoming', 'past', 'requests']).default('upcoming'),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
+  /**
+   * Narrow the list to ONE Agent. Absent means every Agent the tenant has, which is the
+   * default because the owner's question is "what is in my diary" - #87 was this endpoint
+   * answering it for the default Agent only, so a second Agent's appointments were invisible.
+   */
+  botId: z.string().uuid().optional(),
 });
 
 export const availabilityQuerySchema = z.object({
@@ -331,6 +337,12 @@ export const availabilityQuerySchema = z.object({
   durationMin: z.coerce.number().int().positive().optional(),
   /** Reschedule picker: the booking being moved, so it isn't counted against itself. */
   excludeBookingId: z.string().uuid().optional(),
+  /**
+   * Whose availability. Usually redundant with `excludeBookingId` - the route resolves the
+   * Agent from the booking being moved, which is more reliable than trusting the caller to
+   * send a matching pair - and present for the case with no booking in hand.
+   */
+  botId: z.string().uuid().optional(),
 });
 
 export const cancelBookingBodySchema = z.object({

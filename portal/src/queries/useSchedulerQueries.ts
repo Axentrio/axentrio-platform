@@ -314,6 +314,16 @@ export type BookingScope = 'upcoming' | 'past' | 'requests';
 
 export interface AdminBooking {
   id: string;
+  /**
+   * Which Agent sold this appointment (#87).
+   *
+   * The list covers every Agent now, not just the tenant's default one - before that, a second
+   * Agent's appointments were invisible here while still holding time and sending invites.
+   * Shown only when a page actually holds more than one, so a single-Agent tenant sees nothing
+   * new.
+   */
+  agentId: string;
+  agentName: string | null;
   startTime: string;
   endTime: string;
   status: string;

@@ -11,6 +11,7 @@ import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
+import { Booking } from '../database/entities/Booking';
 import type { Bot, BotSettings } from '../database/entities/Bot';
 import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
 import { targetBotId } from '../utils/target-bot';
@@ -643,25 +644,58 @@ export async function applyPreset(req: Request, res: Response): Promise<void> {
 
 export async function listBookings(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const { scope, limit, offset } = listBookingsQuerySchema.parse(req.query);
+  const { scope, limit, offset, botId } = listBookingsQuerySchema.parse(req.query);
   try {
     // Server-side entitlement gate: this endpoint returns attendee PII (email, notes,
     // requests) — don't rely on the portal's client-side feature gate alone.
     await requireFeature(tenantId, 'bookings', 'plan_limit_bookings');
-    sendSuccess(res, await adminListBookings('scheduler-admin', tenantId, scope, limit, offset));
+    sendSuccess(res, await adminListBookings('scheduler-admin', tenantId, scope, limit, offset, botId));
   } catch (err) {
     asApiError(err);
   }
 }
 
+/**
+ * Which Agent owns this booking, if it is one of the tenant's.
+ *
+ * Answers `undefined` rather than throwing for an unknown id: the caller is choosing whose
+ * diary to read, and a bad `excludeBookingId` should fall back to the ordinary answer instead
+ * of failing the whole slot lookup. The tenant filter is what stops another tenant's booking
+ * id naming an Agent here.
+ */
+async function bookingAgent(tenantId: string, bookingId: string): Promise<string | undefined> {
+  const booking = await AppDataSource.getRepository(Booking).findOne({
+    where: { id: bookingId, tenantId },
+    select: ['id', 'botId'],
+  });
+  return booking?.botId;
+}
+
 export async function getBookingAvailability(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { startDate, endDate, serviceId, durationMin, excludeBookingId } = availabilityQuerySchema.parse(req.query);
+  const { startDate, endDate, serviceId, durationMin, excludeBookingId, botId } = availabilityQuerySchema.parse(
+    req.query
+  );
   try {
+    // THE BOOKING DECIDES, when there is one. The picker only ever opens against an existing
+    // appointment, and the Agent that owns it is a fact in the database - reading it here beats
+    // trusting the client to send a `botId` that matches the `excludeBookingId` beside it. A
+    // mismatched pair would compute one Agent's slots for another's appointment, which is #87
+    // wearing a query parameter.
+    const bookingAgentId = excludeBookingId ? await bookingAgent(tenantId, excludeBookingId) : undefined;
     sendSuccess(
       res,
-      await adminAvailability('scheduler-admin', tenantId, startDate, endDate, serviceId, durationMin, excludeBookingId)
+      await adminAvailability(
+        'scheduler-admin',
+        tenantId,
+        startDate,
+        endDate,
+        serviceId,
+        durationMin,
+        excludeBookingId,
+        bookingAgentId ?? botId
+      )
     );
   } catch (err) {
     asApiError(err);

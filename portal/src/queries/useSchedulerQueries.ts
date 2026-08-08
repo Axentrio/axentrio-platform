@@ -1,3 +1,4 @@
+import axios from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
@@ -453,16 +454,52 @@ export function useCancelBooking() {
   });
 }
 
+/**
+ * What the server said when it refused to create a second appointment for one customer (#72).
+ *
+ * Carried out of the error so the page can offer to MOVE the existing appointment instead. A
+ * refusal that only says no leaves the owner to go and find which one is in the way.
+ */
+export interface DuplicateRefusal {
+  existingBookingId: string;
+  existingStartTime: string;
+  /** Enough to open the picker against the EXISTING appointment, which is on another tab. */
+  existingServiceId: string | null;
+  existingDurationMin: number | null;
+}
+
+export function duplicateRefusalOf(err: unknown): DuplicateRefusal | undefined {
+  if (!axios.isAxiosError(err)) return undefined;
+  const body = err.response?.data as
+    | { error?: { code?: string; details?: Partial<DuplicateRefusal> } }
+    | undefined;
+  if (body?.error?.code !== 'REQUEST_WOULD_DUPLICATE') return undefined;
+  const d = body.error.details ?? {};
+  if (!d.existingBookingId || !d.existingStartTime) return undefined;
+  return {
+    existingBookingId: d.existingBookingId,
+    existingStartTime: d.existingStartTime,
+    existingServiceId: d.existingServiceId ?? null,
+    existingDurationMin: d.existingDurationMin ?? null,
+  };
+}
+
 /** Accept a request_created lead → confirm it (creates the calendar event + email). */
 export function useAcceptRequest() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.post(`/scheduler/bookings/${id}/accept`, {}),
+    // `allowDuplicate` is the owner's SECOND click, after being shown the appointment this
+    // would duplicate. Never a default — that is the whole guard.
+    mutationFn: ({ id, allowDuplicate }: { id: string; allowDuplicate?: boolean }) =>
+      api.post(`/scheduler/bookings/${id}/accept`, allowDuplicate ? { allowDuplicate: true } : {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: bookingsKey });
       toast.success('Request accepted — appointment confirmed');
     },
     onError: (err: Any) => {
+      // A duplicate refusal is handled by the page, which offers a choice. Toasting it here too
+      // would report a decision the owner has not been asked to make yet.
+      if (duplicateRefusalOf(err)) return;
       toast.error(extractApiErrorMessage(err) ?? 'Failed to accept request');
     },
   });

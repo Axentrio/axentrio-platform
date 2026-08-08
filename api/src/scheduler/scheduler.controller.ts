@@ -47,7 +47,7 @@ import { logger } from '../utils/logger';
 
 /** Surface a BookingError through the global handler with its real status/code. */
 function asApiError(err: unknown): never {
-  if (err instanceof BookingError) throw new ApiError(err.message, err.statusCode, err.code);
+  if (err instanceof BookingError) throw new ApiError(err.message, err.statusCode, err.code, err.details);
   throw err;
 }
 
@@ -729,7 +729,10 @@ export async function acceptRequest(req: Request, res: Response): Promise<void> 
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   try {
-    sendSuccess(res, await adminAcceptRequest('scheduler-admin', tenantId, req.params.id));
+    // #72: an explicit second click, never a default. The owner sees which appointment this
+    // would duplicate before they can send this.
+    const allowDuplicate = (req.body as { allowDuplicate?: unknown } | undefined)?.allowDuplicate === true;
+    sendSuccess(res, await adminAcceptRequest('scheduler-admin', tenantId, req.params.id, { allowDuplicate }));
   } catch (err) {
     asApiError(err);
   }

@@ -16,7 +16,17 @@ export class BookingError extends Error {
   constructor(
     message: string,
     public code: string,
-    public statusCode: number
+    public statusCode: number,
+    /**
+     * Structured facts a caller needs in order to OFFER SOMETHING BETTER than the refusal.
+     *
+     * Added for #72, where declining to create a duplicate appointment is only useful if the
+     * owner is told which existing one it would duplicate - a bare "cannot do that" leaves them
+     * to go and find it. `ApiError` already carries `details` to the client; this is the half
+     * that was missing on the way there. Must stay free of anything a customer-facing surface
+     * cannot show: `booking-public.controller.ts` renders errors to a browser.
+     */
+    public details?: Record<string, unknown>
   ) {
     super(message);
     this.name = 'BookingError';

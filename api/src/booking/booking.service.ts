@@ -684,13 +684,19 @@ export async function adminRescheduleBooking(caller: BookingCaller, tenantId: st
   return internalProvider.rescheduleBooking(ctx, bookingId, newStartTime);
 }
 
-export async function adminAcceptRequest(caller: BookingCaller, tenantId: string, bookingId: string) {
+export async function adminAcceptRequest(
+  caller: BookingCaller,
+  tenantId: string,
+  bookingId: string,
+  /** #72: the owner has been shown the appointment this would duplicate and wants it anyway. */
+  options?: { allowDuplicate?: boolean }
+) {
   // Owner action — never public-manage-exempt (D8 is cancel/reschedule only),
   // so no bookingId is passed to the gate.
   await enforceBookingsFeature(tenantId, caller);
   const booking = await loadAdminBooking(tenantId, bookingId);
   const ctx = await buildAdminContext(tenantId, booking);
-  return internalProvider.acceptRequest(ctx, bookingId);
+  return internalProvider.acceptRequest(ctx, bookingId, options);
 }
 
 export async function adminDeclineRequest(caller: BookingCaller, tenantId: string, bookingId: string, reason?: string) {

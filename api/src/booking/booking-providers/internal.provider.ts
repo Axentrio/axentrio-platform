@@ -8,7 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
-import { MoreThan } from 'typeorm';
+import { In, MoreThan } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
@@ -2598,11 +2598,25 @@ export class InternalProvider implements BookingProvider {
    * creates the calendar event, sends the confirmation, and schedules reminders. The
    * request's already-snapshotted uploaded_files ride along unchanged.
    */
-  async acceptRequest(ctx: BookingContext, bookingId: string): Promise<CreateBookingResult> {
+  async acceptRequest(
+    ctx: BookingContext,
+    bookingId: string,
+    /**
+     * The owner has SEEN the appointment this would duplicate and wants it anyway.
+     *
+     * Repeat business is real - a customer booking a second appointment of the same service is
+     * an ordinary thing - so the guard below refuses rather than forbids. Without this flag it
+     * would block the legitimate case; with it defaulting to false, the accidental case cannot
+     * happen in silence. Both halves are needed: refusing outright and allowing silently are
+     * each wrong in the other direction.
+     */
+    options?: { allowDuplicate?: boolean }
+  ): Promise<CreateBookingResult> {
     const booking = await this.loadOwned(ctx, bookingId);
     if (booking.provider !== 'internal' || booking.status !== 'request_created') {
       throw new BookingError('This booking is not a pending request', 'NOT_A_REQUEST', 409);
     }
+
     const start = booking.startUtc;
     const end = booking.endUtc;
     if (start.getTime() <= Date.now()) {
@@ -2637,6 +2651,39 @@ export class InternalProvider implements BookingProvider {
     }).some((s) => new Date(s.start).getTime() === start.getTime());
     if (!offered) {
       throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
+    }
+
+    // #72, and LAST of the checks on purpose. The request must first be a thing that could be
+    // confirmed at all - not expired, not already handled, its time still offered - because
+    // "this would duplicate an appointment" is the least specific reason to refuse, and saying
+    // it about a request whose time has simply passed sends the owner looking for the wrong
+    // problem. Checked at accept rather than at the write: a captured request is a question,
+    // not a commitment, and refusing to capture one would throw away what the customer said.
+    if (!options?.allowDuplicate) {
+      const duplicate = await this.liveDuplicateFor(booking);
+      if (duplicate) {
+        throw new BookingError(
+          'This customer already has a confirmed appointment for this service',
+          'REQUEST_WOULD_DUPLICATE',
+          409,
+          {
+            existingBookingId: duplicate.id,
+            existingStartTime: duplicate.startUtc.toISOString(),
+            // Enough to open the reschedule picker against the EXISTING appointment without
+            // going and finding it. The owner is looking at the Requests tab; the appointment
+            // in question is on Upcoming, so the client has no row to read these from - and
+            // guessing them from the request would silently use the wrong frozen duration the
+            // day a service's length changes.
+            existingServiceId: duplicate.eventTypeId ?? null,
+            existingDurationMin:
+              duplicate.bookedDurationMin ??
+              Math.round((duplicate.endUtc.getTime() - duplicate.startUtc.getTime()) / 60_000),
+            // What the owner should almost always do instead. A request captured during a
+            // pause is usually a reschedule wearing the wrong hat.
+            suggestion: 'reschedule',
+          }
+        );
+      }
     }
 
     // Flip request → confirmed under the lock (capacity + exclusion guard).
@@ -2867,6 +2914,54 @@ export class InternalProvider implements BookingProvider {
       throw new BookingError('Booking not found', 'BOOKING_NOT_FOUND', 404);
     }
     return booking;
+  }
+
+  /**
+   * A live appointment the SAME customer already holds for the SAME service (#72).
+   *
+   * The reason this exists is a pause. The pause gate is create-shaped: it tells the model to
+   * capture the customer's preferred time with `request_appointment`. Applied to a customer
+   * MOVING an existing appointment, that writes a second row while the original confirmed
+   * booking stands - and nothing links or dedups them, because `requestAppointment` dedups on
+   * the idempotency key or `(session, service, startUtc)`, and a reschedule differs in the time
+   * by definition. Accepting it then leaves the owner with two confirmed appointments, two
+   * calendar events, and a customer holding the old invite.
+   *
+   * The prompt now names the exception and tells the model to keep using `reschedule_booking`
+   * while paused. That is a prompt-level guard, and this codebase has repeatedly ruled those
+   * insufficient on their own: if the model ignores it, or a later prompt edit erodes it, the
+   * duplicate is written without complaint. This is the code-side half.
+   *
+   * Customer identity is the same rule `callerOwnsBooking` uses - the session, or an earlier
+   * session carrying the same stable visitor identity - so a channel customer who came back
+   * days later is still recognised as the same person.
+   */
+  private async liveDuplicateFor(request: Booking): Promise<Booking | null> {
+    if (!request.eventTypeId || !request.sessionId) return null;
+
+    const sessionIds = [request.sessionId];
+    const owning = await AppDataSource.getRepository(ChatSession).findOne({
+      where: { id: request.sessionId },
+      select: ['id', 'visitorId'],
+    });
+    if (owning?.visitorId) {
+      const siblings = await AppDataSource.getRepository(ChatSession).find({
+        where: { visitorId: owning.visitorId, botId: request.botId },
+        select: ['id'],
+      });
+      for (const s of siblings) if (!sessionIds.includes(s.id)) sessionIds.push(s.id);
+    }
+
+    return AppDataSource.getRepository(Booking).findOne({
+      where: {
+        botId: request.botId,
+        eventTypeId: request.eventTypeId,
+        sessionId: In(sessionIds),
+        status: 'confirmed',
+        endUtc: MoreThan(new Date()),
+      },
+      order: { startUtc: 'ASC' },
+    });
   }
 
   /** True when the customer caller owns this booking: their own session, or an

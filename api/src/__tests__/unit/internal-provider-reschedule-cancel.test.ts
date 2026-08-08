@@ -565,8 +565,21 @@ describe('InternalProvider reschedule / cancel / list', () => {
     ...over,
   });
 
+  /**
+   * `acceptRequest` makes TWO differently-shaped reads now: the request itself, and a probe for
+   * a live appointment the same customer already holds for the same service (#72). This file's
+   * repository double answers every `findOne` identically, so without telling them apart the
+   * probe finds the request itself and every accept below refuses as a duplicate.
+   *
+   * The probe is the one asking for a CONFIRMED booking ending in the future.
+   */
+  const answerAccept = (row: unknown, duplicate: unknown = null) =>
+    bookingFindOne.mockImplementation(async (opts: any) =>
+      opts?.where?.status === 'confirmed' && opts?.where?.endUtc ? duplicate : row
+    );
+
   it('acceptRequest confirms a request → calendar + email + log, returns success', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     const res = await provider.acceptRequest(ctx, 'bk-1');
     expect(res.success).toBe(true);
     expect(res.booking.startTime).toBe('2026-06-10T07:00:00.000Z');
@@ -577,12 +590,31 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(true);
   });
 
+  it('acceptRequest refuses when the customer already holds this appointment (#72)', async () => {
+    // The unit-level half of the duplicate guard. The integration file drives it through the
+    // route; this one proves the provider itself refuses, and that the refusal carries what the
+    // owner needs to move the existing appointment instead of hunting for it.
+    answerAccept(requestBooking(), { ...confirmedBooking(), id: 'bk-existing', bookedDurationMin: 45 });
+    await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({
+      code: 'REQUEST_WOULD_DUPLICATE',
+      details: { existingBookingId: 'bk-existing', existingDurationMin: 45, suggestion: 'reschedule' },
+    });
+    // Nothing was written: the guard runs before the confirm UPDATE, not after it.
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes("status='confirmed'"))).toBe(false);
+  });
+
+  it('acceptRequest confirms it anyway when the owner allows the duplicate', async () => {
+    answerAccept(requestBooking(), { ...confirmedBooking(), id: 'bk-existing' });
+    const res = await provider.acceptRequest(ctx, 'bk-1', { allowDuplicate: true });
+    expect(res.success).toBe(true);
+  });
+
   it('acceptRequest SKIPS the travel gate — the owner is not blocked by it', async () => {
     // ADR-0015: a Request the travel gate captured would otherwise be refused by the same gate
     // that captured it, and the owner could never clear it. The feature would have built a
     // queue with no exit. Feasibility is a hard constraint against the BOT, never against the
     // person who owns the diary.
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     await provider.acceptRequest(ctx, 'bk-1');
     expect(loadStoredNeighbours).not.toHaveBeenCalled();
   });
@@ -592,7 +624,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
     // same statement that confirms. Between capture and acceptance a tenant can lose the
     // entitlement or an owner can flip the toggle, and in every one of those the owner is still
     // overriding a job travel captured — so live eligibility must not decide it.
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     resolveTravelEligibility.mockResolvedValue({ active: false, reason: 'not_entitled' } as any);
     await provider.acceptRequest(ctx, 'bk-1');
     const update = managerQuery.mock.calls.find((c: any) =>
@@ -610,18 +642,18 @@ describe('InternalProvider reschedule / cancel / list', () => {
   });
 
   it('acceptRequest rejects a request whose time is in the past', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking({ startUtc: new Date('2026-06-04T07:00:00Z'), endUtc: new Date('2026-06-04T07:30:00Z') }));
+    answerAccept(requestBooking({ startUtc: new Date('2026-06-04T07:00:00Z'), endUtc: new Date('2026-06-04T07:30:00Z') }));
     await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'REQUEST_EXPIRED' });
   });
 
   it('acceptRequest rejects when the requested time is no longer offered', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking({ startUtc: new Date('2026-06-10T08:05:00Z'), endUtc: new Date('2026-06-10T08:35:00Z') }));
+    answerAccept(requestBooking({ startUtc: new Date('2026-06-10T08:05:00Z'), endUtc: new Date('2026-06-10T08:35:00Z') }));
     await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
     expect(transaction).not.toHaveBeenCalled();
   });
 
   it('acceptRequest → REQUEST_ALREADY_HANDLED when the conditional update matches no row', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     managerQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) return [];
       if (sql.includes('UPDATE chatbot_bookings')) return []; // already handled / raced
@@ -632,7 +664,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
   });
 
   it('acceptRequest maps an exclusion violation (23P01) to SLOT_UNAVAILABLE', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     managerQuery.mockImplementation(async (sql: string) => {
       if (sql.includes('pg_advisory_xact_lock')) return [];
       if (sql.includes('UPDATE chatbot_bookings')) throw Object.assign(new Error('excl'), { code: '23P01' });
@@ -642,7 +674,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
   });
 
   it('declineRequest closes a request (cancelled + log, no email/calendar)', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking());
+    answerAccept(requestBooking());
     const res = await provider.declineRequest(ctx, 'bk-1', 'cannot accommodate');
     expect(res).toEqual({ success: true, cancelled: true });
     expect(sendBookingEmail).not.toHaveBeenCalled();
@@ -655,7 +687,7 @@ describe('InternalProvider reschedule / cancel / list', () => {
   });
 
   it('declineRequest is idempotent for an already-cancelled row', async () => {
-    bookingFindOne.mockResolvedValue(requestBooking({ status: 'cancelled' }));
+    answerAccept(requestBooking({ status: 'cancelled' }));
     const res = await provider.declineRequest(ctx, 'bk-1');
     expect(res).toEqual({ success: true, cancelled: true });
     expect(logSave).not.toHaveBeenCalled();

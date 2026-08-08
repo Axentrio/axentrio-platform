@@ -32,8 +32,10 @@ import {
   useDeclineRequest,
   useBookingAvailability,
   useServices,
+  duplicateRefusalOf,
   type AdminBooking,
   type BookingScope,
+  type DuplicateRefusal,
 } from '../queries/useSchedulerQueries';
 import { SchedulerSettings } from '../components/settings/SchedulerSettings';
 import { CAPABILITY_READINESS_ENABLED } from '../config/featureFlags';
@@ -194,6 +196,15 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
   const [cancelTarget, setCancelTarget] = useState<AdminBooking | null>(null);
   const [rescheduleTarget, setRescheduleTarget] = useState<AdminBooking | null>(null);
   const [declineTarget, setDeclineTarget] = useState<AdminBooking | null>(null);
+  /**
+   * #72: the server refused to confirm a request because this customer already holds an
+   * appointment for the same service. Held here rather than toasted, because the useful
+   * response is a CHOICE - move the existing one, or knowingly create a second - and a toast
+   * cannot offer either.
+   */
+  const [duplicateTarget, setDuplicateTarget] = useState<
+    { request: AdminBooking; existing: DuplicateRefusal } | null
+  >(null);
 
   const cancel = useCancelBooking();
   const accept = useAcceptRequest();
@@ -238,7 +249,17 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
                   showAgent={showAgent}
                   onCancel={() => setCancelTarget(b)}
                   onReschedule={() => setRescheduleTarget(b)}
-                  onAccept={() => accept.mutate(b.id)}
+                  onAccept={() =>
+                    accept.mutate(
+                      { id: b.id },
+                      {
+                        onError: (err) => {
+                          const refusal = duplicateRefusalOf(err);
+                          if (refusal) setDuplicateTarget({ request: b, existing: refusal });
+                        },
+                      },
+                    )
+                  }
                   onDecline={() => setDeclineTarget(b)}
                 />
               ))}
@@ -273,6 +294,65 @@ function InternalBookingsDashboard({ timezone }: { timezone: string }) {
               }}
             >
               Cancel appointment
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* #72 — this customer already has an appointment for this service. Two real options, and
+          "create a second anyway" is deliberately the quieter one: a request captured while
+          bookings were paused is usually a reschedule that took the wrong path. */}
+      <AlertDialog open={!!duplicateTarget} onOpenChange={(o) => !o && setDuplicateTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This customer already has an appointment</AlertDialogTitle>
+            <AlertDialogDescription>
+              {duplicateTarget && (
+                <>
+                  {duplicateTarget.request.attendeeName || duplicateTarget.request.attendeeEmail} is already booked
+                  for {duplicateTarget.request.serviceName ?? 'this service'} on{' '}
+                  {dayLabel(duplicateTarget.existing.existingStartTime, timezone)} at{' '}
+                  {timeLabel(duplicateTarget.existing.existingStartTime, timezone)}.
+                  {' '}Accepting this request as well would give them two appointments, and put two events on your
+                  calendar. If they meant to move the one they have, reschedule it instead.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Leave it</AlertDialogCancel>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                if (duplicateTarget) {
+                  accept.mutate({ id: duplicateTarget.request.id, allowDuplicate: true });
+                }
+                setDuplicateTarget(null);
+              }}
+            >
+              Create a second appointment
+            </Button>
+            <AlertDialogAction
+              onClick={() => {
+                // Move the appointment they ALREADY hold, which is what a request captured
+                // during a pause almost always meant. That appointment is on the Upcoming tab
+                // and this is the Requests tab, so there is no row here to hand the picker -
+                // the server sent the four fields it reads, rather than the client guessing a
+                // frozen duration from the request beside it.
+                if (duplicateTarget) {
+                  const { existing, request } = duplicateTarget;
+                  setRescheduleTarget({
+                    ...request,
+                    id: existing.existingBookingId,
+                    startTime: existing.existingStartTime,
+                    serviceId: existing.existingServiceId,
+                    durationMin: existing.existingDurationMin,
+                  });
+                }
+                setDuplicateTarget(null);
+              }}
+            >
+              Reschedule the existing one
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

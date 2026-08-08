@@ -9,7 +9,8 @@
  */
 import { Request, Response } from 'express';
 import { config } from '../../config/environment';
-import { getAnchorBotConfig, getOwnedBot } from '../../services/bot-config.service';
+import { resolveTargetBot, getOwnedBot } from '../../services/bot-config.service';
+import { targetBotId } from '../../utils/target-bot';
 import { requireFeature } from '../../billing/enforce';
 import { sendSuccess } from '../../utils/response';
 import { ValidationError } from '../../middleware/error-handler';
@@ -40,7 +41,7 @@ function portalBase(): string {
 export async function getGoogleConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
 }
 
@@ -68,7 +69,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
 
 export async function getGoogleStatus(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const cred = await getActiveCredential(bot.id);
   // Actively verify the token so a dead link never shows as "Connected". A healthy
   // non-expired token returns instantly (no API call); an expired one is refreshed,
@@ -94,7 +95,7 @@ export async function getGoogleStatus(req: Request, res: Response): Promise<void
 
 export async function disconnectGoogle(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   await disconnect(bot.id);
   sendSuccess(res, { connected: false });
 }
@@ -104,7 +105,7 @@ export async function listGoogleCalendars(req: Request, res: Response): Promise<
   const tenantId = (req as { tenantId?: string }).tenantId!;
   // Calls the Google API — gated like every other external calendar call (D9).
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const calendars = await listWritableCalendars(bot.id);
   sendSuccess(res, { calendars });
 }
@@ -117,7 +118,7 @@ export async function setGoogleCalendar(req: Request, res: Response): Promise<vo
   if (!calendarId || typeof calendarId !== 'string') {
     throw new ValidationError('calendarId is required');
   }
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   try {
     const result = await setBotCalendar(bot.id, calendarId);
     sendSuccess(res, result);

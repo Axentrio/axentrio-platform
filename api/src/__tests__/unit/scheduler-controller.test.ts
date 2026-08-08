@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-const getAnchorBotConfig = vi.fn();
-const replaceAnchorBotSettingsSection = vi.fn();
+// Since #86 the controller resolves a NAMED Agent (defaulting to the anchor) rather than the
+// anchor by construction, so the seam these tests mock moved with it.
+const resolveTargetBot = vi.fn();
+const replaceBotSettingsSection = vi.fn();
 vi.mock('../../services/bot-config.service', () => ({
-  getAnchorBotConfig: (...a: any[]) => getAnchorBotConfig(...a),
-  replaceAnchorBotSettingsSection: (...a: any[]) => replaceAnchorBotSettingsSection(...a),
+  resolveTargetBot: (...a: any[]) => resolveTargetBot(...a),
+  replaceBotSettingsSection: (...a: any[]) => replaceBotSettingsSection(...a),
 }));
 
 const requireFeature = vi.fn();
@@ -83,7 +85,7 @@ import { serviceInputSchema, serviceUpdateSchema } from '../../schemas/scheduler
 describe('scheduler.controller — why travel time cannot be switched on', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1', name: 'Valyro' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', name: 'Valyro', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     etFind.mockResolvedValue([]);
     ruleFindOne.mockResolvedValue(null);
@@ -159,7 +161,7 @@ const res: any = {};
 describe('scheduler.controller', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
   });
@@ -176,7 +178,9 @@ describe('scheduler.controller', () => {
     await updateSchedulerConfig(req, res);
 
     expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
-    expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
+    // Bot id FIRST since #86: the provider used to be written onto the anchor's settings
+    // whatever Agent was being edited, so editing Agent B mutated Agent A.
+    expect(replaceBotSettingsSection).toHaveBeenCalledWith('bot-1', 'ten-1', 'integrations', { provider: 'internal' });
     // Event type saved with a derived slug. The inheritable timing fields are NOT stamped
     // with schema defaults any more — an unsent maxHorizonDays stays undefined so the
     // service inherits the business default, which is the whole point of making them
@@ -195,7 +199,9 @@ describe('scheduler.controller', () => {
     const req: any = { tenantId: 'ten-1', body: { provider: 'calcom' } };
     await updateSchedulerConfig(req, res);
     expect(requireFeature).toHaveBeenCalledWith('ten-1', 'bookings', expect.any(String));
-    expect(replaceAnchorBotSettingsSection).toHaveBeenCalledWith('ten-1', 'integrations', { provider: 'internal' });
+    // Bot id FIRST since #86: the provider used to be written onto the anchor's settings
+    // whatever Agent was being edited, so editing Agent B mutated Agent A.
+    expect(replaceBotSettingsSection).toHaveBeenCalledWith('bot-1', 'ten-1', 'integrations', { provider: 'internal' });
   });
 
   it('rejects an empty update', async () => {
@@ -206,7 +212,7 @@ describe('scheduler.controller', () => {
   it('reads the current config shape', async () => {
     etFindOne.mockResolvedValue({ id: 'et-1', name: 'Intro call' });
     ruleFindOne.mockResolvedValue({ id: 'r-1', timezone: 'Europe/Brussels' });
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: { provider: 'internal' } } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: { provider: 'internal' } } });
     const req: any = { tenantId: 'ten-1' };
     await getSchedulerConfig(req, res);
     expect(sendSuccess.mock.calls[0][1]).toMatchObject({
@@ -250,7 +256,7 @@ describe('intake questions schema (P3a)', () => {
 describe('intake questions id reconciliation (P3a)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
     etFindOne.mockResolvedValue(null);
   });
 
@@ -376,7 +382,7 @@ describe('presets endpoints (P4a)', () => {
   const res: any = {};
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
     etFindOne.mockResolvedValue(null); // uniqueSlug → base slug first try
     etCount.mockResolvedValue(0); // empty catalog
     etFind.mockResolvedValue([]); // re-read
@@ -440,7 +446,7 @@ describe('presets endpoints (P4a)', () => {
 describe('scheduler.controller · booking settings upsert', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
     bsFindOne.mockResolvedValue(null);
@@ -540,7 +546,7 @@ describe('scheduler.controller · booking settings upsert', () => {
 describe('scheduler.controller · venue address upsert', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
     bsFindOne.mockResolvedValue(null);
@@ -611,7 +617,7 @@ describe('scheduler.controller · venue address upsert', () => {
 describe('scheduler.controller · pause switch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
     bsFindOne.mockResolvedValue(null);
@@ -670,7 +676,7 @@ describe('scheduler.controller · pause switch', () => {
 describe('scheduler.controller · travel time switch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: { integrations: {} } });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: { integrations: {} } });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
     bsFindOne.mockResolvedValue(null);
@@ -818,7 +824,7 @@ describe('scheduler.controller · reorder services', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
     etFindOne.mockResolvedValue(null);
     ruleFindOne.mockResolvedValue(null);
     bsFindOne.mockResolvedValue(null);
@@ -877,7 +883,7 @@ describe('scheduler.controller · reorder services', () => {
 describe('scheduler.controller · clearing optional service fields', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    getAnchorBotConfig.mockResolvedValue({ bot: { id: 'bot-1' }, settings: {} });
+    resolveTargetBot.mockResolvedValue({ id: 'bot-1', settings: {} });
   });
 
   it('accepts null for every clearable field', () => {

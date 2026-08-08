@@ -11,7 +11,9 @@ import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
 import { BookingSettings } from '../database/entities/BookingSettings';
-import { getAnchorBotConfig, replaceAnchorBotSettingsSection } from '../services/bot-config.service';
+import type { Bot, BotSettings } from '../database/entities/Bot';
+import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
+import { targetBotId } from '../utils/target-bot';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
@@ -189,8 +191,7 @@ function reconcileIntakeQuestions(
   return out.length ? out : null;
 }
 
-async function readConfig(tenantId: string) {
-  const { bot } = await getAnchorBotConfig(tenantId);
+async function readConfig(tenantId: string, bot: Bot) {
   const repo = AppDataSource.getRepository(ServiceType);
   const [eventType, services, availability, bookingSettings] = await Promise.all([
     repo.findOne({ where: { botId: bot.id, isActive: true }, order: { sortOrder: 'ASC' } }),
@@ -234,12 +235,11 @@ async function readConfig(tenantId: string) {
       city: bookingSettings?.venueCity ?? null,
       country: bookingSettings?.venueCountry ?? null,
     },
-    // WHICH AGENT THESE SETTINGS BELONG TO, said out loud.
+    // WHICH AGENT THESE SETTINGS BELONG TO.
     //
-    // Every field on this object is the DEFAULT Agent's, because `getAnchorBotConfig` is the
-    // only write path to `chatbot_booking_settings` (#86). A tenant with several Agents is
-    // therefore editing one of them and cannot tell — so the screen names it. Returning the
-    // Agent rather than a boolean is what lets #86 extend this instead of replacing it.
+    // Since #86 this is whichever Agent the caller named, defaulting to the anchor — so it is
+    // no longer a disclaimer about a limitation but the identity of the thing being edited.
+    // The portal echoes it back on write, and renders it in the Agent picker.
     agent: { id: bot.id, name: bot.name },
     // Cherry-picked like everything else here — a field on the entity but missing from this
     // object hydrates the editor blank and the owner's next Save writes the blank back.
@@ -265,7 +265,8 @@ async function readConfig(tenantId: string) {
 export async function getSchedulerConfig(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  sendSuccess(res, await readConfig(tenantId));
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  sendSuccess(res, await readConfig(tenantId, bot));
 }
 
 export async function updateSchedulerConfig(req: Request, res: Response): Promise<void> {
@@ -276,11 +277,12 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // bookings feature. Closes the path where an unentitled tenant could persist
   // scheduler config by omitting `provider` from the payload.
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { bot, settings } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const settings = bot.settings ?? ({} as BotSettings);
 
   if (data.provider) {
     // Ignore any legacy 'calcom' input — the provider is always internal now.
-    await replaceAnchorBotSettingsSection(tenantId, 'integrations', {
+    await replaceBotSettingsSection(bot.id, tenantId, 'integrations', {
       ...(settings.integrations ?? {}),
       provider: 'internal',
     });
@@ -435,7 +437,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   }
 
   logger.info('[Scheduler] config updated', { tenantId, botId: bot.id, keys: Object.keys(data) });
-  sendSuccess(res, await readConfig(tenantId));
+  sendSuccess(res, await readConfig(tenantId, bot));
 }
 
 // --- Services CRUD (multi-service catalog, K3) ---
@@ -443,7 +445,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 export async function listServices(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const services = await AppDataSource.getRepository(ServiceType).find({
     where: { botId: bot.id },
     order: { sortOrder: 'ASC', createdAt: 'ASC' },
@@ -485,7 +487,7 @@ export async function createService(req: Request, res: Response): Promise<void> 
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceCreateSchema.parse(req.body);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const { intakeQuestions, ...rest } = data;
   // Reconcile intake ids before the shared insert (manual path only; presets carry none).
   const reconciled = intakeQuestions !== undefined ? reconcileIntakeQuestions(intakeQuestions, null) : undefined;
@@ -501,7 +503,7 @@ export async function updateService(req: Request, res: Response): Promise<void> 
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceUpdateSchema.parse(req.body);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
@@ -536,7 +538,7 @@ export async function updateService(req: Request, res: Response): Promise<void> 
 export async function reorderServices(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const { serviceIds } = reorderServicesSchema.parse(req.body);
 
   await AppDataSource.transaction(async (manager) => {
@@ -555,13 +557,13 @@ export async function reorderServices(req: Request, res: Response): Promise<void
   });
 
   logger.info('[Scheduler] services reordered', { tenantId, botId: bot.id, count: serviceIds.length });
-  sendSuccess(res, await readConfig(tenantId));
+  sendSuccess(res, await readConfig(tenantId, bot));
 }
 
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
@@ -590,7 +592,7 @@ export async function applyPreset(req: Request, res: Response): Promise<void> {
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const preset = findPreset(req.params.key);
   if (!preset) throw new ApiError('Preset not found', 404, 'PRESET_NOT_FOUND');
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   const botId = bot.id;
 
   await AppDataSource.transaction(async (manager) => {

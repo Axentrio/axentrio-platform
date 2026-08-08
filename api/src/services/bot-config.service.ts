@@ -29,6 +29,7 @@ import { ChatSession } from '../database/entities/ChatSession';
 import { Tenant } from '../database/entities/Tenant';
 import { AppDataSource } from '../database/data-source';
 import { logger } from '../utils/logger';
+import { NotFoundError } from '../middleware/error-handler';
 
 export class BotConfigResolutionError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
@@ -223,6 +224,35 @@ export async function replaceAnchorBotSettingsSection<K extends keyof BotSetting
   const bot = await ds().getRepository(Bot).findOne({ where: { tenantId, isDefault: true } });
   if (!bot) throw new AnchorBotMissingError(tenantId);
   return saveReplacedSection(bot, section, value);
+}
+
+/**
+ * The Agent an admin endpoint is acting on: the one named, or the tenant's anchor.
+ *
+ * ONE HELPER FOR EIGHTEEN CALL SITES, so "which Agent is this?" is answered the same way by the
+ * booking settings, the service catalogue, the presets and both calendar connections. They sit
+ * on one screen; answering it differently in any of them is how an owner edits Agent B and
+ * changes Agent A.
+ *
+ * OMITTED MEANS THE ANCHOR, and that is what keeps a single-Agent tenant untouched: their
+ * portal sends no id, this resolves what it always resolved, and every byte of behaviour is
+ * what it was.
+ *
+ * THE TRANSLATION IS NOT OPTIONAL. `getOwnedBot` throws `BotNotFoundConfigError`, which the
+ * global handler does not recognise and reports as a 500 — so a cross-tenant or deleted id
+ * would look like a server fault rather than a refusal, and the authorisation would be
+ * untestable through the real stack. Four controllers already translate it by hand
+ * (`bot-template.controller.ts`, `bot-ai-settings.controller.ts`, `skill-readiness.routes.ts`,
+ * `bots.routes.ts`); this is that translation, in the one place the new callers share.
+ */
+export async function resolveTargetBot(tenantId: string, botId?: string): Promise<Bot> {
+  if (!botId) return (await getAnchorBotConfig(tenantId)).bot;
+  try {
+    return await getOwnedBot(botId, tenantId);
+  } catch (err) {
+    if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Agent not found');
+    throw err;
+  }
 }
 
 /**

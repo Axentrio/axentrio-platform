@@ -12,7 +12,8 @@
  */
 import { Request, Response } from 'express';
 import { config } from '../../config/environment';
-import { getAnchorBotConfig, getOwnedBot } from '../../services/bot-config.service';
+import { resolveTargetBot, getOwnedBot } from '../../services/bot-config.service';
+import { targetBotId } from '../../utils/target-bot';
 import { requireFeature } from '../../billing/enforce';
 import { sendSuccess } from '../../utils/response';
 import { ValidationError } from '../../middleware/error-handler';
@@ -39,7 +40,7 @@ function portalBase(): string {
 export async function getOutlookConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   try {
     sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
   } catch (err) {
@@ -74,13 +75,13 @@ export async function outlookCallback(req: Request, res: Response): Promise<void
 
 export async function getOutlookStatus(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   sendSuccess(res, await getStatus(bot.id));
 }
 
 export async function disconnectOutlook(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const { bot } = await getAnchorBotConfig(tenantId);
+  const bot = await resolveTargetBot(tenantId, targetBotId(req));
   await disconnect(bot.id);
   sendSuccess(res, { connected: false });
 }

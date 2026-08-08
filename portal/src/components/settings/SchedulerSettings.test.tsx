@@ -13,6 +13,20 @@
  * component is asserted here — this is the one property that cannot be checked by reading it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+/**
+ * These are integration-shaped: each test renders a ~1000-line form, waits for four queries to
+ * settle, and hydrates the whole booking configuration into local state. At 27 of them the
+ * default 5s per-test budget became marginal and produced intermittent timeouts — the same test
+ * passing alone and failing in the file.
+ *
+ * HONESTLY: I could not attribute the slowdown. It is not a render loop (no dependency array
+ * holds an unstable identity, and disabling the effect I added changed nothing), and a control
+ * file in the same run is unaffected. Raising the budget is a response to tests that are slow,
+ * not a mask over tests that are wrong — but if someone finds the real cause, this should come
+ * back down rather than stay.
+ */
+const SLOW_FORM_TIMEOUT_MS = 20_000;
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -98,6 +112,10 @@ function renderUI() {
 /** Load `config`, wait for hydration, press Save, return the PUT payload. */
 async function saveUntouched(config: unknown) {
   apiGet.mockImplementation((url: string) => {
+    // The editor now asks who the tenant's Agents are, to decide whether an Agent picker is
+    // worth showing. Answered deterministically: an unhandled URL left that query resolving
+    // by luck and added seconds to every test in this file.
+    if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
     if (url.includes('/scheduler/config')) return Promise.resolve(config);
     if (url.includes('/services')) return Promise.resolve({ services: [] });
     if (url.includes('/availability')) return Promise.resolve({ slots: [], timezone: 'Europe/Brussels' });
@@ -116,7 +134,7 @@ async function saveUntouched(config: unknown) {
   return apiPut.mock.calls[0][1] as Record<string, unknown>;
 }
 
-describe('SchedulerSettings — hydrate/save round-trip', () => {
+describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every business rule unchanged when the owner saves without editing', async () => {
@@ -254,7 +272,7 @@ describe('SchedulerSettings — hydrate/save round-trip', () => {
  * OFF for a business that had it on — and travel going quiet is exactly the failure mode that
  * cannot be seen from the outside.
  */
-describe('SchedulerSettings — travel time', () => {
+describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every travel field unchanged when the owner saves without editing', async () => {
@@ -272,6 +290,7 @@ describe('SchedulerSettings — travel time', () => {
     // feature's one genuinely harmful state and the fix lives in the calendar connection,
     // so an owner who is merely refused has nowhere to go.
     apiGet.mockImplementation((url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) {
         return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, enabled: false, blockedReason: 'shared_itinerary' } });
       }
@@ -291,6 +310,7 @@ describe('SchedulerSettings — travel time', () => {
     // meant the owner could not clear the one field making their whole settings page
     // unsaveable — venue, opening hours and pause along with it.
     apiGet.mockImplementation((url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) {
         return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, enabled: true, blockedReason: 'shared_itinerary' } });
       }
@@ -306,6 +326,7 @@ describe('SchedulerSettings — travel time', () => {
 
   it('refuses a slack value the API would reject, before the Save', async () => {
     apiGet.mockImplementation((url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) {
         return Promise.resolve({ ...CONFIG, travel: { ...TRAVEL, slackMin: 500 } });
       }
@@ -318,6 +339,7 @@ describe('SchedulerSettings — travel time', () => {
 
   it('states the single-driver assumption', async () => {
     apiGet.mockImplementation((url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
       if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
       if (url.includes('/services')) return Promise.resolve({ services: [] });
       return Promise.resolve({});
@@ -327,13 +349,89 @@ describe('SchedulerSettings — travel time', () => {
   });
 });
 
-describe('SchedulerSettings — refuses to save what the API will reject', () => {
+/**
+ * #86 — which Agent is being edited.
+ *
+ * The dangerous half of this ticket is not the settings: it is that the calendar CONNECT and
+ * DISCONNECT controls live on this same screen. An Agent picker over endpoints that resolve the
+ * tenant's default Agent means an owner selects Agent B, is shown Agent A's connection, presses
+ * Disconnect, and A's calendar is disconnected while the screen says B — A's bookings stop
+ * syncing and nothing says why. So the assertions below are about the WIRE, not the wording.
+ */
+describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const multiAgentGet = (config: unknown = CONFIG) => (url: string) => {
+    if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }, { id: 'bot-2', name: 'Second driver', isDefault: false }] });
+    if (url.includes('/scheduler/config')) return Promise.resolve(config);
+    if (url.includes('/services')) return Promise.resolve({ services: [] });
+    return Promise.resolve({});
+  };
+
+  it('offers no Agent choice to a tenant with one Agent', async () => {
+    apiGet.mockImplementation(multiAgentGet2Single());
+    renderUI();
+    await screen.findByRole('button', { name: /^save$/i });
+    expect(screen.queryByLabelText(/^agent$/i)).not.toBeInTheDocument();
+  });
+
+  function multiAgentGet2Single() {
+    return (url: string) => {
+      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
+      if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
+      if (url.includes('/services')) return Promise.resolve({ services: [] });
+      return Promise.resolve({});
+    };
+  }
+
+  it('sends NO botId for the default Agent, so a solo tenant is on the wire it always was', async () => {
+    apiGet.mockImplementation(multiAgentGet());
+    renderUI();
+    await screen.findByLabelText(/^agent$/i);
+    const configCalls = apiGet.mock.calls.map((c: unknown[]) => String(c[0])).filter((u) => u.includes('/scheduler/config'));
+    expect(configCalls.every((u) => !u.includes('botId'))).toBe(true);
+  });
+
+  it('addresses the CALENDAR endpoints at the selected Agent, not the default one', async () => {
+    // The destructive path. Disconnect is on this screen; if its request omits the Agent, it
+    // disconnects whichever calendar the server resolves — the default one.
+    apiGet.mockImplementation(multiAgentGet());
+    renderUI();
+    const picker = await screen.findByLabelText(/^agent$/i);
+    fireEvent.change(picker, { target: { value: 'bot-2' } });
+
+    await waitFor(() => {
+      const statusCalls = apiGet.mock.calls
+        .map((c: unknown[]) => String(c[0]))
+        .filter((u) => u.includes('/integrations/google/status'));
+      expect(statusCalls.some((u) => u.includes('botId=bot-2'))).toBe(true);
+    });
+  });
+
+  it('re-reads the selected Agent’s configuration', async () => {
+    apiGet.mockImplementation(multiAgentGet());
+    renderUI();
+    const picker = await screen.findByLabelText(/^agent$/i);
+    fireEvent.change(picker, { target: { value: 'bot-2' } });
+
+    await waitFor(() => {
+      const calls = apiGet.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(calls.some((u) => u.includes('/scheduler/config') && u.includes('botId=bot-2'))).toBe(true);
+    });
+  });
+});
+
+describe('SchedulerSettings — refuses to save what the API will reject', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
   beforeEach(() => vi.clearAllMocks());
 
   /** Load `config`, wait for hydration, and hand back the Save button unpressed. */
   async function hydrate(config: unknown) {
     apiGet.mockImplementation((url: string) => {
-      if (url.includes('/scheduler/config')) return Promise.resolve(config);
+      // The editor now asks who the tenant's Agents are, to decide whether an Agent picker is
+    // worth showing. Answered deterministically: an unhandled URL left that query resolving
+    // by luck and added seconds to every test in this file.
+    if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
+    if (url.includes('/scheduler/config')) return Promise.resolve(config);
       if (url.includes('/services')) return Promise.resolve({ services: [] });
       if (url.includes('/availability')) return Promise.resolve({ slots: [], timezone: 'Europe/Brussels' });
       return Promise.resolve({});

@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
 import type { ServiceAreaEntry } from '@contracts/service-area';
+import { agentSegment, withAgent } from './agentScope';
 
 export type { ServiceAreaEntry };
 
@@ -175,12 +176,13 @@ export interface UpdateSchedulerPayload {
   bookingsPaused?: boolean;
 }
 
-const schedulerKey = ['scheduler', 'config', 'default-agent'] as const;
+/** Keyed by Agent — see `agentScope`. `undefined` is the tenant's default Agent. */
+const schedulerKey = (agentId?: string) => ['scheduler', 'config', agentSegment(agentId)] as const;
 
-export function useSchedulerConfig(enabled = true) {
+export function useSchedulerConfig(enabled = true, agentId?: string) {
   return useQuery({
-    queryKey: schedulerKey,
-    queryFn: async () => (await api.get<Any>('/scheduler/config')) as SchedulerConfig,
+    queryKey: schedulerKey(agentId),
+    queryFn: async () => (await api.get<Any>(withAgent('/scheduler/config', agentId))) as SchedulerConfig,
     // Locked tenants render a preview without firing the (now feature-gated)
     // endpoint — otherwise the mount fires a guaranteed 402 before the
     // LockedPreview early-return.
@@ -188,12 +190,13 @@ export function useSchedulerConfig(enabled = true) {
   });
 }
 
-export function useUpdateSchedulerConfig() {
+export function useUpdateSchedulerConfig(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: UpdateSchedulerPayload) => api.put<SchedulerConfig>('/scheduler/config', payload),
+    mutationFn: (payload: UpdateSchedulerPayload) =>
+      api.put<SchedulerConfig>(withAgent('/scheduler/config', agentId), payload),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: schedulerKey });
+      queryClient.invalidateQueries({ queryKey: schedulerKey(agentId) });
       toast.success('Booking settings saved');
     },
     onError: (err: Any) => {
@@ -206,40 +209,41 @@ export function useUpdateSchedulerConfig() {
 
 // --- Services catalog (multi-service) ---
 
-const servicesKey = ['scheduler', 'services'] as const;
+const servicesKey = (agentId?: string) => ['scheduler', 'services', agentSegment(agentId)] as const;
 
-export function useServices(enabled = true) {
+export function useServices(enabled = true, agentId?: string) {
   return useQuery({
-    queryKey: servicesKey,
-    queryFn: async () => (await api.get<Any>('/scheduler/services')) as { services: Service[] },
+    queryKey: servicesKey(agentId),
+    queryFn: async () =>
+      (await api.get<Any>(withAgent('/scheduler/services', agentId))) as { services: Service[] },
     enabled,
   });
 }
 
-function invalidateServices(queryClient: ReturnType<typeof useQueryClient>) {
-  queryClient.invalidateQueries({ queryKey: servicesKey });
-  queryClient.invalidateQueries({ queryKey: schedulerKey });
+function invalidateServices(queryClient: ReturnType<typeof useQueryClient>, agentId?: string) {
+  queryClient.invalidateQueries({ queryKey: servicesKey(agentId) });
+  queryClient.invalidateQueries({ queryKey: schedulerKey(agentId) });
 }
 
-export function useCreateService() {
+export function useCreateService(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (input: ServiceInput) => api.post<Service>('/scheduler/services', input),
+    mutationFn: (input: ServiceInput) => api.post<Service>(withAgent('/scheduler/services', agentId), input),
     onSuccess: () => {
-      invalidateServices(queryClient);
+      invalidateServices(queryClient, agentId);
       toast.success('Service added');
     },
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to add service'),
   });
 }
 
-export function useUpdateService() {
+export function useUpdateService(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }: { id: string; input: Partial<ServiceInput> }) =>
-      api.put<Service>(`/scheduler/services/${id}`, input),
+      api.put<Service>(withAgent(`/scheduler/services/${id}`, agentId), input),
     onSuccess: () => {
-      invalidateServices(queryClient);
+      invalidateServices(queryClient, agentId);
       toast.success('Service saved');
     },
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to save service'),
@@ -252,21 +256,22 @@ export function useUpdateService() {
  * The full ordered id list, not a move-this-one instruction: reordering renumbers several
  * rows, and N separate PUTs can half-apply and leave the catalog in an order nobody chose.
  */
-export function useReorderServices() {
+export function useReorderServices(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (serviceIds: string[]) => api.put<SchedulerConfig>('/scheduler/services/reorder', { serviceIds }),
-    onSuccess: () => invalidateServices(queryClient),
+    mutationFn: (serviceIds: string[]) =>
+      api.put<SchedulerConfig>(withAgent('/scheduler/services/reorder', agentId), { serviceIds }),
+    onSuccess: () => invalidateServices(queryClient, agentId),
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to reorder services'),
   });
 }
 
-export function useDeleteService() {
+export function useDeleteService(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => api.delete(`/scheduler/services/${id}`),
+    mutationFn: (id: string) => api.delete(withAgent(`/scheduler/services/${id}`, agentId)),
     onSuccess: () => {
-      invalidateServices(queryClient);
+      invalidateServices(queryClient, agentId);
       toast.success('Service deleted');
     },
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to delete service'),
@@ -290,12 +295,13 @@ export function usePresets(enabled: boolean) {
   });
 }
 
-export function useApplyPreset() {
+export function useApplyPreset(agentId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (key: string) => api.post<{ services: Service[] }>(`/scheduler/presets/${key}/apply`, {}),
+    mutationFn: (key: string) =>
+      api.post<{ services: Service[] }>(withAgent(`/scheduler/presets/${key}/apply`, agentId), {}),
     onSuccess: () => {
-      invalidateServices(queryClient);
+      invalidateServices(queryClient, agentId);
       toast.success('Services added from preset');
     },
     onError: (err: Any) => toast.error(extractApiErrorMessage(err) ?? 'Failed to apply preset'),

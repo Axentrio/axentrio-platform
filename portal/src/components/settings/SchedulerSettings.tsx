@@ -3,7 +3,7 @@
  * Calendar connection, the event type, and weekly availability. (Cal.com is
  * shelved; the built-in scheduler is the only provider.)
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarClock, Save, Check, Plus, Trash2, Eye, Loader2, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -24,6 +24,7 @@ import {
   type TimeWindow,
   type ServiceAreaEntry,
   type VenueAddress,
+  type UpdateSchedulerPayload,
   type BookingRules,
   type AvailabilityMode,
 } from '../../queries/useSchedulerQueries';
@@ -169,15 +170,32 @@ const WindowList: React.FC<{
 );
 
 export const SchedulerSettings: React.FC = () => {
-  const { data, isLoading, refetch } = useSchedulerConfig();
-  const update = useUpdateSchedulerConfig();
+  const { data: bots } = useBots();
+  const agents = bots?.bots ?? [];
+  const multiAgent = agents.length > 1;
+
+  /**
+   * Which Agent is being edited. `undefined` means the tenant's default.
+   *
+   * Undefined rather than "the anchor's id" on purpose: a single-Agent tenant then sends
+   * exactly the requests it always sent, which is what makes "no change for them" a fact
+   * about the wire rather than a claim about the UI.
+   */
+  const [agentId, setAgentId] = useState<string | undefined>(undefined);
+  /** The serialised payload as hydration left it — `null` until the next hydration lands. */
+  const hydratedPayload = useRef<string | null>(null);
+
+  const { data, isLoading, refetch } = useSchedulerConfig(true, agentId);
+  const update = useUpdateSchedulerConfig(agentId);
   const queryClient = useQueryClient();
-  const googleStatus = useGoogleCalendarStatus();
-  const connectGoogle = useConnectGoogleCalendar();
-  const disconnectGoogle = useDisconnectGoogleCalendar();
-  const outlookStatus = useOutlookCalendarStatus();
-  const connectOutlook = useConnectOutlookCalendar();
-  const disconnectOutlook = useDisconnectOutlookCalendar();
+  // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
+  // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
+  const googleStatus = useGoogleCalendarStatus(agentId);
+  const connectGoogle = useConnectGoogleCalendar(agentId);
+  const disconnectGoogle = useDisconnectGoogleCalendar(agentId);
+  const outlookStatus = useOutlookCalendarStatus(agentId);
+  const connectOutlook = useConnectOutlookCalendar(agentId);
+  const disconnectOutlook = useDisconnectOutlookCalendar(agentId);
 
   // Toast + refresh after a calendar OAuth callback redirects back with
   // ?google=connected|error or ?outlook=connected|error.
@@ -193,6 +211,9 @@ export const SchedulerSettings: React.FC = () => {
       if (!v) continue;
       if (v === 'connected') {
         toast.success(`${label} connected`);
+        // The Agent segment matters: invalidating the tenant-global prefix would refresh
+        // every Agent's cached status, and miss none — but naming the prefix keeps that
+        // explicit rather than accidental.
         queryClient.invalidateQueries({ queryKey: [key, 'status'] });
       } else if (v === 'error') {
         toast.error(`${label} connection failed`);
@@ -212,10 +233,6 @@ export const SchedulerSettings: React.FC = () => {
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
   const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
-  // Only to decide whether the "which Agent" notice is worth showing. A solo business does
-  // not need to be told which of its one Agent it is editing.
-  const { data: bots } = useBots();
-  const multiAgent = (bots?.bots?.length ?? 0) > 1;
   // NOT state — it is the server's answer to "may this be switched on", refreshed with the
   // config. Holding it in state would let a stale value keep the switch enabled after a
   // calendar change made it harmful.
@@ -269,11 +286,49 @@ export const SchedulerSettings: React.FC = () => {
     setHydrated(true);
   }, [data, hydrated]);
 
+  /**
+   * What "unchanged" means for the Agent currently loaded.
+   *
+   * Taken in a SEPARATE effect, after hydration has flipped, because the payload is built from
+   * state the hydrating effect is still in the middle of setting — snapshotting inside it would
+   * capture the previous Agent's values and call every form clean.
+   */
+  useEffect(() => {
+    if (hydrated && hydratedPayload.current === null) {
+      hydratedPayload.current = JSON.stringify(buildPayload());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- snapshot once per hydration
+  }, [hydrated]);
+
   const setDay = (key: Weekday, patch: Partial<DayRow>) =>
     setDays((prev) => ({ ...prev, [key]: { ...prev[key], ...patch } }));
 
   // Inline validation for the availability section (per-service rules live in
   // the service editor). Blocks an invalid availability save.
+  /**
+   * Change which Agent is being edited, without carrying one Agent's edits onto another.
+   *
+   * THE EDITOR HOLDS THE WHOLE CONFIGURATION IN LOCAL STATE and writes it back wholesale, so
+   * switching mid-edit would leave Agent A's opening hours sitting in the form and the next
+   * Save would write them onto Agent B. That is the same wholesale-write trap the hydrate/save
+   * tests exist for, arriving through a control that did not exist when they were written.
+   *
+   * Hydration is keyed on the loaded config, so the switch itself only has to clear the
+   * decision: confirm, then let the new Agent's data land.
+   */
+  const switchAgent = (next: string | undefined) => {
+    if (next === agentId) return;
+    const dirty = hydratedPayload.current !== null && hydratedPayload.current !== JSON.stringify(buildPayload());
+    if (dirty && !window.confirm('You have unsaved changes. Switching Agent will discard them.')) return;
+    // Cleared so the next Agent's hydration is what defines "unchanged" from here.
+    hydratedPayload.current = null;
+    // AND re-armed, or the new Agent's config never lands: hydration is gated on this flag, so
+    // leaving it true would show Agent A's form under Agent B's name — the exact confusion the
+    // picker exists to remove.
+    setHydrated(false);
+    setAgentId(next);
+  };
+
   const errors = useMemo<string[]>(() => {
     const e: string[] = [];
     const check = (label: string, windows: TimeWindow[]) => {
@@ -313,7 +368,15 @@ export const SchedulerSettings: React.FC = () => {
     return [...new Set(e)];
   }, [days, overrides, availabilityMode, venue, travelSlack]);
 
-  const handleSave = () => {
+  /**
+   * The payload this form would send right now.
+   *
+   * Extracted from `handleSave` so "has the owner changed anything?" can be answered by
+   * comparing it to what hydration loaded, rather than by threading a dirty flag through
+   * fifteen setters — where the one that got forgotten would silently discard their work on an
+   * Agent switch.
+   */
+  const buildPayload = (): UpdateSchedulerPayload => {
     const weeklyHours: WeeklyHours = {};
     for (const { key } of DAYS) {
       const row = days[key];
@@ -327,7 +390,7 @@ export const SchedulerSettings: React.FC = () => {
       const span = o.endDate && o.endDate > o.date ? { endDate: o.endDate } : {};
       return [o.closed ? { date: o.date, ...span, closed: true } : { date: o.date, ...span, windows: o.windows }];
     });
-    update.mutate({
+    return {
       provider: 'internal',
       availability: { timezone, availabilityMode, weeklyHours, dateOverrides, slotGranularityMin },
       // Always sent, including when empty — [] is how the owner clears their area.
@@ -341,8 +404,10 @@ export const SchedulerSettings: React.FC = () => {
       // so a partial travel object would silently keep a stale switch on.
       travel: { enabled: travelEnabled, slackMin: travelSlack, startFromBase: travelStartFromBase },
       bookingsPaused,
-    });
+    };
   };
+
+  const handleSave = () => update.mutate(buildPayload());
 
   return (
     <Card variant="glass">
@@ -650,11 +715,33 @@ export const SchedulerSettings: React.FC = () => {
                   edits one and believes they edited both. The sentence comes out when #86
                   lands and every Agent becomes editable.
                 */}
-                {multiAgent && data?.agent?.name && (
-                  <div className="rounded-md bg-surface-muted px-3 py-2 text-xs text-text-secondary">
-                    These booking settings apply only to your default Agent,{' '}
-                    <strong className="text-text-primary">{data.agent.name}</strong>. Settings for
-                    your other Agents cannot be changed here yet.
+                {/*
+                  WHICH AGENT. Replaces #67's "you can only edit the default one" notice, which
+                  was a disclaimer about a limitation this ticket removes.
+                  Rendered only for a tenant that HAS more than one Agent — a solo business is
+                  not handed a choice it does not have, which is also what keeps their screen
+                  byte-identical.
+                */}
+                {multiAgent && (
+                  <div className="space-y-1 rounded-md bg-surface-muted px-3 py-2">
+                    <Label htmlFor="settings-agent">Agent</Label>
+                    <select
+                      id="settings-agent"
+                      className="w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
+                      value={agentId ?? ''}
+                      onChange={(e) => switchAgent(e.target.value || undefined)}
+                    >
+                      {agents.map((a) => (
+                        <option key={a.id} value={a.isDefault ? '' : a.id}>
+                          {a.name}
+                          {a.isDefault ? ' (default)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-text-secondary">
+                      Opening hours, services, capacity, your address and the calendar below all
+                      belong to this Agent.
+                    </p>
                   </div>
                 )}
 

@@ -7,11 +7,27 @@
  * connection, press Disconnect, and lose A's calendar while the screen said B — A's bookings
  * stop syncing to a calendar and nothing anywhere says why.
  *
- * It is also the most security-sensitive surface here: a calendar credential is an OAuth grant
- * over somebody's diary. So the cross-tenant refusal is asserted through the real router and
- * error handler rather than against a controller mock, for the same reason the scheduler
- * authorisation is — a 404 that is really a 500 passes every mock-level assertion.
+ * WHAT THESE GUARD, EXACTLY: which Agent a disconnect acts on, and who is allowed to name one.
+ * The cross-tenant refusal goes through the real router and error handler rather than a
+ * controller mock, because a 404 that is really a 500 passes every mock-level assertion.
+ *
+ * WHAT THEY DO NOT GUARD, AND CANNOT HERE: that `rekeyBotBookings` moves the right Agent's
+ * bookings. Disconnecting rewrites `calendar_key` on that Agent's future bookings, and a rekey
+ * aimed at the wrong Agent is #86's failure in its most damaging form. It is unassertable in
+ * this environment: the rekey selects on `upper(blocked_range) > now()`, the `Booking` entity
+ * does not map that column, and the test schema is built by `synchronize()` — so the column
+ * does not exist, the SELECT errors, and `disconnect` swallows it in the `.catch()` that makes
+ * the rekey non-fatal. **The rekey therefore no-ops in every test in this repository**, which is
+ * worth knowing well beyond this file. An attempted assertion here would have passed against a
+ * rekey that never ran, which is worse than the gap.
+ *
+ * WHAT THEY DO NOT GUARD: that the OAuth grant is actually revoked at Google. `disconnect`
+ * catches a failed revoke and continues by design, and the fixture below carries an
+ * undecryptable token, so a disconnect that never reached Google would still pass here. That is
+ * a real gap and it belongs to whoever owns the revoke path — naming it beats implying these
+ * tests cover it.
  */
+import { randomBytes } from 'crypto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
@@ -44,7 +60,7 @@ async function seedSecondAgent(t: Tenant): Promise<string> {
     repo.create({
       tenantId: t.id,
       name: 'Second driver',
-      publicKey: `pk-${Math.random().toString(36).slice(2, 10)}`,
+      publicKey: `pk-${randomBytes(4).toString('hex')}`,
       status: 'active',
       isDefault: false,
       settings: {} as Bot['settings'],
@@ -67,7 +83,7 @@ async function seedCredential(t: Tenant, botId: string) {
       refreshTokenEnc: 'enc:test',
       calendarId: 'primary',
       tokenExpiry: new Date(Date.now() + 3_600_000),
-    } as Partial<CalendarCredential>)
+    })
   );
 }
 
@@ -91,7 +107,7 @@ describe('calendar disconnect — one Agent at a time', () => {
     await seedCredential(tenant, secondId);
 
     const res = await request(app).delete(`${DISCONNECT}?botId=${secondId}`);
-    expect(res.status).toBeLessThan(400);
+    expect(res.status).toBe(200);
 
     expect(await activeFor(secondId)).toBeNull();
     // The whole point. Before #86 this assertion would have failed the other way round: the
@@ -105,7 +121,7 @@ describe('calendar disconnect — one Agent at a time', () => {
     await seedCredential(tenant, secondId);
 
     const res = await request(app).delete(DISCONNECT);
-    expect(res.status).toBeLessThan(400);
+    expect(res.status).toBe(200);
 
     expect(await activeFor(anchorId)).toBeNull();
     expect(await activeFor(secondId)).not.toBeNull();

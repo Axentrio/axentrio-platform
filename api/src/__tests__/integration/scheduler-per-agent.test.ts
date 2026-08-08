@@ -10,6 +10,7 @@
  * The other half is quieter and matters just as much: a tenant with ONE Agent sends no id, and
  * every one of these endpoints has to behave exactly as it did before this existed.
  */
+import { randomBytes } from 'crypto';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthMocks, configureMockAuth } from '../helpers/auth';
 
@@ -42,7 +43,7 @@ async function seedSecondAgent(t: Tenant): Promise<string> {
     repo.create({
       tenantId: t.id,
       name: 'Second driver',
-      publicKey: `pk-${Math.random().toString(36).slice(2, 10)}`,
+      publicKey: `pk-${randomBytes(4).toString('hex')}`,
       status: 'active',
       isDefault: false,
       settings: {} as Bot['settings'],

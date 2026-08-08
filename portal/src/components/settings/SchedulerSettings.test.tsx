@@ -414,6 +414,26 @@ describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT
     });
   });
 
+  it('returns from a calendar connect on the Agent it was connected FOR', async () => {
+    // The OAuth callback appends the Agent from its signed state. Reading it back is the whole
+    // point: without it an owner who connects Agent B's calendar lands on the DEFAULT Agent's
+    // editor and is toasted "connected" over the anchor's disconnected status.
+    const original = window.location.search;
+    window.history.replaceState({}, '', '/bookings?google=connected&botId=bot-2');
+    try {
+      apiGet.mockImplementation(multiAgentGet());
+      renderUI();
+      await waitFor(() => {
+        const calls = apiGet.mock.calls.map((c: unknown[]) => String(c[0]));
+        expect(calls.some((u) => u.includes('/scheduler/config') && u.includes('botId=bot-2'))).toBe(true);
+      });
+      // And the parameter is cleared, or a later navigation silently reselects that Agent.
+      await waitFor(() => expect(window.location.search).not.toContain('botId'));
+    } finally {
+      window.history.replaceState({}, '', `/bookings${original}`);
+    }
+  });
+
   it('re-reads the selected Agent’s configuration', async () => {
     apiGet.mockImplementation(multiAgentGet());
     renderUI();

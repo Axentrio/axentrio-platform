@@ -241,16 +241,16 @@ function priceLabel(s: Service): string {
 export const ServicesSection: React.FC<{ onApplied?: () => void; botId?: string }> = ({
   onApplied,
   /**
-   * Which Agent's catalogue this is (#86). `undefined` means the tenant's default.
+   * Which Agent's catalogue this is (#86). `undefined` is a real value meaning the tenant's
+   * default — see `botScope` — and is what the editor holds on first render.
    *
-   * REQUIRED, even though it is optional in the type: every hook below already takes it, and
-   * a caller that forgets to pass it gets a catalogue that silently belongs to the anchor. That
-   * is the failure the ticket calls worse than fixing nothing — an owner picks Agent B, sees
+   * PASS IT ANYWAY when you have one. This prop was missing for a whole commit, and the result
+   * was the failure the ticket calls worse than fixing nothing: an owner picks Agent B, sees
    * B's settings, adds a service, and the service lands on Agent A.
    */
   botId,
 }) => {
-  const { data, isLoading, isSuccess } = useServices(true, botId);
+  const { data, isLoading, isSuccess } = useServices(true /* enabled */, botId);
   const create = useCreateService(botId);
   const update = useUpdateService(botId);
   const remove = useDeleteService(botId);

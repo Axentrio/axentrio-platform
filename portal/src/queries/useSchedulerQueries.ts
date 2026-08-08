@@ -176,7 +176,7 @@ export interface UpdateSchedulerPayload {
   bookingsPaused?: boolean;
 }
 
-/** Keyed by Agent — see `agentScope`. `undefined` is the tenant's default Agent. */
+/** Keyed by Agent — see `botScope`. `undefined` is the tenant's default Agent. */
 const schedulerKey = (botId?: string) => ['scheduler', 'config', botSegment(botId)] as const;
 
 export function useSchedulerConfig(enabled = true, botId?: string) {

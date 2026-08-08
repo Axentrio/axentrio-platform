@@ -181,7 +181,15 @@ export const SchedulerSettings: React.FC = () => {
    * exactly the requests it always sent, which is what makes "no change for them" a fact
    * about the wire rather than a claim about the UI.
    */
-  const [botId, setAgentId] = useState<string | undefined>(undefined);
+  const [botId, setBotId] = useState<string | undefined>(
+    // SEEDED FROM THE URL, because the calendar connect flow leaves the page and comes back.
+    // The OAuth callback appends the Agent it connected FOR, taken from its signed state — so
+    // without reading it here an owner who connects Agent B's calendar returns to the DEFAULT
+    // Agent's editor and is toasted "connected" over the anchor's disconnected status. An id
+    // that is not theirs simply 404s on the next read, which is the same refusal any other
+    // route takes.
+    () => new URLSearchParams(window.location.search).get('botId') ?? undefined
+  );
   /** The serialised payload as hydration left it — `null` until the next hydration lands. */
   const hydratedPayload = useRef<string | null>(null);
 
@@ -219,6 +227,9 @@ export const SchedulerSettings: React.FC = () => {
         toast.error(`${label} connection failed`);
       }
       params.delete(key);
+      // The Agent came in on the same redirect and has been read into state above; leaving it
+      // in the address bar would survive a later navigation and silently reselect it.
+      params.delete('botId');
       changed = true;
     }
     if (!changed) return;
@@ -326,7 +337,7 @@ export const SchedulerSettings: React.FC = () => {
     // leaving it true would show Agent A's form under Agent B's name — the exact confusion the
     // picker exists to remove.
     setHydrated(false);
-    setAgentId(next);
+    setBotId(next);
   };
 
   const errors = useMemo<string[]>(() => {

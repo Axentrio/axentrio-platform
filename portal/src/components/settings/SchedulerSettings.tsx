@@ -181,21 +181,21 @@ export const SchedulerSettings: React.FC = () => {
    * exactly the requests it always sent, which is what makes "no change for them" a fact
    * about the wire rather than a claim about the UI.
    */
-  const [agentId, setAgentId] = useState<string | undefined>(undefined);
+  const [botId, setAgentId] = useState<string | undefined>(undefined);
   /** The serialised payload as hydration left it — `null` until the next hydration lands. */
   const hydratedPayload = useRef<string | null>(null);
 
-  const { data, isLoading, refetch } = useSchedulerConfig(true, agentId);
-  const update = useUpdateSchedulerConfig(agentId);
+  const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
+  const update = useUpdateSchedulerConfig(botId);
   const queryClient = useQueryClient();
   // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
   // the Disconnect button beside Agent B's name disconnecting Agent A's calendar.
-  const googleStatus = useGoogleCalendarStatus(agentId);
-  const connectGoogle = useConnectGoogleCalendar(agentId);
-  const disconnectGoogle = useDisconnectGoogleCalendar(agentId);
-  const outlookStatus = useOutlookCalendarStatus(agentId);
-  const connectOutlook = useConnectOutlookCalendar(agentId);
-  const disconnectOutlook = useDisconnectOutlookCalendar(agentId);
+  const googleStatus = useGoogleCalendarStatus(botId);
+  const connectGoogle = useConnectGoogleCalendar(botId);
+  const disconnectGoogle = useDisconnectGoogleCalendar(botId);
+  const outlookStatus = useOutlookCalendarStatus(botId);
+  const connectOutlook = useConnectOutlookCalendar(botId);
+  const disconnectOutlook = useDisconnectOutlookCalendar(botId);
 
   // Toast + refresh after a calendar OAuth callback redirects back with
   // ?google=connected|error or ?outlook=connected|error.
@@ -317,7 +317,7 @@ export const SchedulerSettings: React.FC = () => {
    * decision: confirm, then let the new Agent's data land.
    */
   const switchAgent = (next: string | undefined) => {
-    if (next === agentId) return;
+    if (next === botId) return;
     const dirty = hydratedPayload.current !== null && hydratedPayload.current !== JSON.stringify(buildPayload());
     if (dirty && !window.confirm('You have unsaved changes. Switching Agent will discard them.')) return;
     // Cleared so the next Agent's hydration is what defines "unchanged" from here.
@@ -539,6 +539,7 @@ export const SchedulerSettings: React.FC = () => {
 
                 {/* Services catalog (multi-service) */}
                 <ServicesSection
+                  botId={botId}
                   onApplied={async () => {
                     // Re-hydrate the availability form from the POST-apply config: refetch
                     // FIRST, then flip `hydrated` so the hydrate effect sees fresh data
@@ -728,7 +729,7 @@ export const SchedulerSettings: React.FC = () => {
                     <select
                       id="settings-agent"
                       className="w-full rounded-md border border-edge bg-surface-1 px-2 py-1.5 text-sm text-text-primary"
-                      value={agentId ?? ''}
+                      value={botId ?? ''}
                       onChange={(e) => switchAgent(e.target.value || undefined)}
                     >
                       {agents.map((a) => (

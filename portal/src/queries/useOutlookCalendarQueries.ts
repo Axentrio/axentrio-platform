@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
-import { agentSegment, withAgent } from './agentScope';
+import { botSegment, withBot } from './botScope';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -26,20 +26,20 @@ export interface OutlookCalendarStatus {
  * and the Disconnect button beside it would look like it belonged to B. Scoping the request
  * without the key is worse than scoping neither.
  */
-const statusKey = (agentId?: string) => ['outlook', 'status', agentSegment(agentId)] as const;
+const statusKey = (botId?: string) => ['outlook', 'status', botSegment(botId)] as const;
 
-export function useOutlookCalendarStatus(agentId?: string) {
+export function useOutlookCalendarStatus(botId?: string) {
   return useQuery({
-    queryKey: statusKey(agentId),
-    queryFn: async () => (await api.get<Any>(withAgent('/integrations/outlook/status', agentId))) as OutlookCalendarStatus,
+    queryKey: statusKey(botId),
+    queryFn: async () => (await api.get<Any>(withBot('/integrations/outlook/status', botId))) as OutlookCalendarStatus,
   });
 }
 
 /** Fetches the consent URL and redirects the browser to Microsoft. */
-export function useConnectOutlookCalendar(agentId?: string) {
+export function useConnectOutlookCalendar(botId?: string) {
   return useMutation({
     mutationFn: async () => {
-      const { url } = (await api.get<{ url: string }>(withAgent('/integrations/outlook/connect-url', agentId))) as { url: string };
+      const { url } = (await api.get<{ url: string }>(withBot('/integrations/outlook/connect-url', botId))) as { url: string };
       window.location.href = url;
     },
     onError: (err: Any) => {
@@ -50,12 +50,12 @@ export function useConnectOutlookCalendar(agentId?: string) {
   });
 }
 
-export function useDisconnectOutlookCalendar(agentId?: string) {
+export function useDisconnectOutlookCalendar(botId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.delete(withAgent('/integrations/outlook/disconnect', agentId)),
+    mutationFn: () => api.delete(withBot('/integrations/outlook/disconnect', botId)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: statusKey(agentId) });
+      queryClient.invalidateQueries({ queryKey: statusKey(botId) });
       toast.success('Outlook Calendar disconnected');
     },
     onError: (err: Any) => {

@@ -40,7 +40,7 @@ function portalBase(): string {
 export async function getOutlookConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   try {
     sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
   } catch (err) {
@@ -64,7 +64,12 @@ export async function outlookCallback(req: Request, res: Response): Promise<void
     await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
     await exchangeAndStore(tenantId, botId, code);
-    return void res.redirect(`${portal}/bookings?outlook=connected`);
+    // CARRY THE AGENT BACK. The connect flow leaves the page and returns here, and the
+    // settings editor reads the Agent from the URL — without it an owner who connected a
+    // calendar for a non-default Agent lands on the DEFAULT one's editor and is toasted
+    // about a connection they cannot see. The id is the signed state's, not the caller's,
+    // so it is as trustworthy as the exchange itself.
+    return void res.redirect(`${portal}/bookings?outlook=connected&botId=${botId}`);
   } catch (err) {
     logger.error('[Outlook] OAuth callback failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -75,13 +80,13 @@ export async function outlookCallback(req: Request, res: Response): Promise<void
 
 export async function getOutlookStatus(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   sendSuccess(res, await getStatus(bot.id));
 }
 
 export async function disconnectOutlook(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   await disconnect(bot.id);
   sendSuccess(res, { connected: false });
 }

@@ -16,13 +16,21 @@
  * single-Agent tenant sending exactly the requests it always sent.
  */
 
+/**
+ * IDENTIFIERS SAY `botId`, PROSE SAYS AGENT. `docs/agents/domain.md` splits these deliberately:
+ * prose follows the glossary, code identifiers follow the code — and the column, the entity and
+ * the whole existing API surface are `bot_id`/`botId`. A glossary-named identifier layer over a
+ * code-named wire would be a private convention invented in one directory, which that document
+ * says needs an ADR rather than a preference.
+ */
+
 /** The cache-key segment for an Agent. Stable for the default so keys do not churn. */
-export function agentSegment(agentId?: string): string {
-  return agentId ?? 'default-agent';
+export function botSegment(botId?: string): string {
+  return botId ?? 'default-agent';
 }
 
 /** The same URL, addressed at an Agent. Unchanged when none is named. */
-export function withAgent(url: string, agentId?: string): string {
-  if (!agentId) return url;
-  return `${url}${url.includes('?') ? '&' : '?'}botId=${encodeURIComponent(agentId)}`;
+export function withBot(url: string, botId?: string): string {
+  if (!botId) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}botId=${encodeURIComponent(botId)}`;
 }

@@ -41,7 +41,7 @@ function portalBase(): string {
 export async function getGoogleConnectUrl(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   sendSuccess(res, { url: buildConnectUrl(tenantId, bot.id) });
 }
 
@@ -58,7 +58,12 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
     await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
     await getOwnedBot(botId, tenantId);
     await exchangeAndStore(tenantId, botId, code);
-    return void res.redirect(`${portal}/bookings?google=connected`);
+    // CARRY THE AGENT BACK. The connect flow leaves the page and returns here, and the
+    // settings editor reads the Agent from the URL — without it an owner who connected a
+    // calendar for a non-default Agent lands on the DEFAULT one's editor and is toasted
+    // about a connection they cannot see. The id is the signed state's, not the caller's,
+    // so it is as trustworthy as the exchange itself.
+    return void res.redirect(`${portal}/bookings?google=connected&botId=${botId}`);
   } catch (err) {
     logger.error('[Google] OAuth callback failed', {
       error: err instanceof Error ? err.message : String(err),
@@ -69,7 +74,7 @@ export async function googleCallback(req: Request, res: Response): Promise<void>
 
 export async function getGoogleStatus(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const cred = await getActiveCredential(bot.id);
   // Actively verify the token so a dead link never shows as "Connected". A healthy
   // non-expired token returns instantly (no API call); an expired one is refreshed,
@@ -95,7 +100,7 @@ export async function getGoogleStatus(req: Request, res: Response): Promise<void
 
 export async function disconnectGoogle(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   await disconnect(bot.id);
   sendSuccess(res, { connected: false });
 }
@@ -105,7 +110,7 @@ export async function listGoogleCalendars(req: Request, res: Response): Promise<
   const tenantId = (req as { tenantId?: string }).tenantId!;
   // Calls the Google API — gated like every other external calendar call (D9).
   await requireFeature(tenantId, 'calendarSync', CALENDAR_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const calendars = await listWritableCalendars(bot.id);
   sendSuccess(res, { calendars });
 }
@@ -118,7 +123,7 @@ export async function setGoogleCalendar(req: Request, res: Response): Promise<vo
   if (!calendarId || typeof calendarId !== 'string') {
     throw new ValidationError('calendarId is required');
   }
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   try {
     const result = await setBotCalendar(bot.id, calendarId);
     sendSuccess(res, result);

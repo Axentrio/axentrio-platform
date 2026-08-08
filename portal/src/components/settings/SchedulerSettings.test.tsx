@@ -14,19 +14,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/**
- * These are integration-shaped: each test renders a ~1000-line form, waits for four queries to
- * settle, and hydrates the whole booking configuration into local state. At 27 of them the
- * default 5s per-test budget became marginal and produced intermittent timeouts — the same test
- * passing alone and failing in the file.
- *
- * HONESTLY: I could not attribute the slowdown. It is not a render loop (no dependency array
- * holds an unstable identity, and disabling the effect I added changed nothing), and a control
- * file in the same run is unaffected. Raising the budget is a response to tests that are slow,
- * not a mask over tests that are wrong — but if someone finds the real cause, this should come
- * back down rather than stay.
- */
-const SLOW_FORM_TIMEOUT_MS = 20_000;
+
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -134,7 +122,7 @@ async function saveUntouched(config: unknown) {
   return apiPut.mock.calls[0][1] as Record<string, unknown>;
 }
 
-describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+describe('SchedulerSettings — hydrate/save round-trip', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every business rule unchanged when the owner saves without editing', async () => {
@@ -272,7 +260,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
  * OFF for a business that had it on — and travel going quiet is exactly the failure mode that
  * cannot be seen from the outside.
  */
-describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+describe('SchedulerSettings — travel time', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns every travel field unchanged when the owner saves without editing', async () => {
@@ -358,7 +346,7 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
  * Disconnect, and A's calendar is disconnected while the screen says B — A's bookings stop
  * syncing and nothing says why. So the assertions below are about the WIRE, not the wording.
  */
-describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+describe('SchedulerSettings — per-Agent scoping', () => {
   beforeEach(() => vi.clearAllMocks());
 
   const multiAgentGet = (config: unknown = CONFIG) => (url: string) => {
@@ -368,21 +356,19 @@ describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT
     return Promise.resolve({});
   };
 
+  const soloTenantGet = () => (url: string) => {
+    if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
+    if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
+    if (url.includes('/services')) return Promise.resolve({ services: [] });
+    return Promise.resolve({});
+  };
+
   it('offers no Agent choice to a tenant with one Agent', async () => {
-    apiGet.mockImplementation(multiAgentGet2Single());
+    apiGet.mockImplementation(soloTenantGet());
     renderUI();
     await screen.findByRole('button', { name: /^save$/i });
     expect(screen.queryByLabelText(/^agent$/i)).not.toBeInTheDocument();
   });
-
-  function multiAgentGet2Single() {
-    return (url: string) => {
-      if (url.includes('/bots')) return Promise.resolve({ bots: [{ id: 'bot-1', name: 'Valyro', isDefault: true }] });
-      if (url.includes('/scheduler/config')) return Promise.resolve(CONFIG);
-      if (url.includes('/services')) return Promise.resolve({ services: [] });
-      return Promise.resolve({});
-    };
-  }
 
   it('sends NO botId for the default Agent, so a solo tenant is on the wire it always was', async () => {
     apiGet.mockImplementation(multiAgentGet());
@@ -421,7 +407,7 @@ describe('SchedulerSettings — per-Agent scoping', { timeout: SLOW_FORM_TIMEOUT
   });
 });
 
-describe('SchedulerSettings — refuses to save what the API will reject', { timeout: SLOW_FORM_TIMEOUT_MS }, () => {
+describe('SchedulerSettings — refuses to save what the API will reject', () => {
   beforeEach(() => vi.clearAllMocks());
 
   /** Load `config`, wait for hydration, and hand back the Save button unpressed. */

@@ -245,12 +245,13 @@ export async function replaceAnchorBotSettingsSection<K extends keyof BotSetting
  * (`bot-template.controller.ts`, `bot-ai-settings.controller.ts`, `skill-readiness.routes.ts`,
  * `bots.routes.ts`); this is that translation, in the one place the new callers share.
  */
-export async function resolveTargetBot(tenantId: string, botId?: string): Promise<Bot> {
+export async function resolveTargetBot(input: { tenantId: string; botId?: string }): Promise<Bot> {
+  const { tenantId, botId } = input;
   if (!botId) return (await getAnchorBotConfig(tenantId)).bot;
   try {
     return await getOwnedBot(botId, tenantId);
   } catch (err) {
-    if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Agent not found');
+    if (err instanceof BotNotFoundConfigError) throw new NotFoundError('Bot not found');
     throw err;
   }
 }

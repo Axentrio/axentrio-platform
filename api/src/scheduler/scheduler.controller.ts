@@ -265,7 +265,7 @@ async function readConfig(tenantId: string, bot: Bot) {
 export async function getSchedulerConfig(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   sendSuccess(res, await readConfig(tenantId, bot));
 }
 
@@ -277,7 +277,9 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
   // bookings feature. Closes the path where an unentitled tenant could persist
   // scheduler config by omitting `provider` from the payload.
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
+  // Same fallback `getAnchorBotConfig` applies to its own `settings` — a bot row can predate
+  // the column. Kept here rather than in the resolver so the resolver answers one question.
   const settings = bot.settings ?? ({} as BotSettings);
 
   if (data.provider) {
@@ -445,7 +447,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
 export async function listServices(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const services = await AppDataSource.getRepository(ServiceType).find({
     where: { botId: bot.id },
     order: { sortOrder: 'ASC', createdAt: 'ASC' },
@@ -487,7 +489,7 @@ export async function createService(req: Request, res: Response): Promise<void> 
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceCreateSchema.parse(req.body);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const { intakeQuestions, ...rest } = data;
   // Reconcile intake ids before the shared insert (manual path only; presets carry none).
   const reconciled = intakeQuestions !== undefined ? reconcileIntakeQuestions(intakeQuestions, null) : undefined;
@@ -503,7 +505,7 @@ export async function updateService(req: Request, res: Response): Promise<void> 
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const data = serviceUpdateSchema.parse(req.body);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
@@ -538,7 +540,7 @@ export async function updateService(req: Request, res: Response): Promise<void> 
 export async function reorderServices(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const { serviceIds } = reorderServicesSchema.parse(req.body);
 
   await AppDataSource.transaction(async (manager) => {
@@ -563,7 +565,7 @@ export async function reorderServices(req: Request, res: Response): Promise<void
 export async function deleteService(req: Request, res: Response): Promise<void> {
   const tenantId = (req as { tenantId?: string }).tenantId!;
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const repo = AppDataSource.getRepository(ServiceType);
   const svc = await repo.findOne({ where: { id: req.params.id, botId: bot.id } });
   if (!svc) throw new ApiError('Service not found', 404, 'SERVICE_NOT_FOUND');
@@ -592,7 +594,7 @@ export async function applyPreset(req: Request, res: Response): Promise<void> {
   await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
   const preset = findPreset(req.params.key);
   if (!preset) throw new ApiError('Preset not found', 404, 'PRESET_NOT_FOUND');
-  const bot = await resolveTargetBot(tenantId, targetBotId(req));
+  const bot = await resolveTargetBot({ tenantId, botId: targetBotId(req) });
   const botId = bot.id;
 
   await AppDataSource.transaction(async (manager) => {

@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, extractApiErrorMessage } from '../services/apiClient';
 import { toast } from 'sonner';
-import { agentSegment, withAgent } from './agentScope';
+import { botSegment, withBot } from './botScope';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
@@ -23,20 +23,20 @@ export interface GoogleCalendarStatus {
  * and the Disconnect button beside it would look like it belonged to B. Scoping the request
  * without the key is worse than scoping neither.
  */
-const statusKey = (agentId?: string) => ['google', 'status', agentSegment(agentId)] as const;
+const statusKey = (botId?: string) => ['google', 'status', botSegment(botId)] as const;
 
-export function useGoogleCalendarStatus(agentId?: string) {
+export function useGoogleCalendarStatus(botId?: string) {
   return useQuery({
-    queryKey: statusKey(agentId),
-    queryFn: async () => (await api.get<Any>(withAgent('/integrations/google/status', agentId))) as GoogleCalendarStatus,
+    queryKey: statusKey(botId),
+    queryFn: async () => (await api.get<Any>(withBot('/integrations/google/status', botId))) as GoogleCalendarStatus,
   });
 }
 
 /** Fetches the consent URL and redirects the browser to Google. */
-export function useConnectGoogleCalendar(agentId?: string) {
+export function useConnectGoogleCalendar(botId?: string) {
   return useMutation({
     mutationFn: async () => {
-      const { url } = (await api.get<{ url: string }>(withAgent('/integrations/google/connect-url', agentId))) as { url: string };
+      const { url } = (await api.get<{ url: string }>(withBot('/integrations/google/connect-url', botId))) as { url: string };
       window.location.href = url;
     },
     onError: (err: Any) => {
@@ -47,12 +47,12 @@ export function useConnectGoogleCalendar(agentId?: string) {
   });
 }
 
-export function useDisconnectGoogleCalendar(agentId?: string) {
+export function useDisconnectGoogleCalendar(botId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: () => api.delete(withAgent('/integrations/google/disconnect', agentId)),
+    mutationFn: () => api.delete(withBot('/integrations/google/disconnect', botId)),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: statusKey(agentId) });
+      queryClient.invalidateQueries({ queryKey: statusKey(botId) });
       toast.success('Google Calendar disconnected');
     },
     onError: (err: Any) => {

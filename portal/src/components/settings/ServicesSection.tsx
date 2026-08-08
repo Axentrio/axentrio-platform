@@ -238,12 +238,23 @@ function priceLabel(s: Service): string {
 }
 
 /** `onApplied` lets the parent (SchedulerSettings) re-hydrate seeded availability after a preset. */
-export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplied }) => {
-  const { data, isLoading, isSuccess } = useServices();
-  const create = useCreateService();
-  const update = useUpdateService();
-  const remove = useDeleteService();
-  const reorder = useReorderServices();
+export const ServicesSection: React.FC<{ onApplied?: () => void; botId?: string }> = ({
+  onApplied,
+  /**
+   * Which Agent's catalogue this is (#86). `undefined` means the tenant's default.
+   *
+   * REQUIRED, even though it is optional in the type: every hook below already takes it, and
+   * a caller that forgets to pass it gets a catalogue that silently belongs to the anchor. That
+   * is the failure the ticket calls worse than fixing nothing — an owner picks Agent B, sees
+   * B's settings, adds a service, and the service lands on Agent A.
+   */
+  botId,
+}) => {
+  const { data, isLoading, isSuccess } = useServices(true, botId);
+  const create = useCreateService(botId);
+  const update = useUpdateService(botId);
+  const remove = useDeleteService(botId);
+  const reorder = useReorderServices(botId);
   /**
    * Move a service one place. Sends the WHOLE resulting order, because the server assigns
    * positions from the array — the client never invents sortOrder numbers, so what is
@@ -461,6 +472,7 @@ export const ServicesSection: React.FC<{ onApplied?: () => void }> = ({ onApplie
         open={showPresets}
         onClose={() => setShowPresets(false)}
         onApplied={onApplied}
+        botId={botId}
       />
     </div>
   );
@@ -733,14 +745,25 @@ const ServiceEditorDialog: React.FC<{
   );
 };
 
-/** Preset picker — lists presets and applies the chosen one (empty-catalog seeding). */
-const PresetDialog: React.FC<{ open: boolean; onClose: () => void; onApplied?: () => void }> = ({
+/**
+ * Preset picker — lists presets and applies the chosen one (empty-catalog seeding).
+ *
+ * Takes the Agent for the same reason everything else here does: applying a preset writes a
+ * whole service catalogue, so an unscoped one lands every service on the anchor.
+ */
+const PresetDialog: React.FC<{
+  open: boolean;
+  onClose: () => void;
+  onApplied?: () => void;
+  botId?: string;
+}> = ({
   open,
   onClose,
   onApplied,
+  botId,
 }) => {
   const { data, isLoading, isError } = usePresets(open);
-  const apply = useApplyPreset();
+  const apply = useApplyPreset(botId);
   const presets = data?.presets ?? [];
 
   const onApply = (key: string) =>

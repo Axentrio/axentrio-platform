@@ -119,6 +119,50 @@ describe('alerting', () => {
     expect(sendEmail.mock.calls[1][0].subject).toMatch(/recovered/i);
   });
 
+  it('does not spend the transition on an alert that was never delivered (#89)', async () => {
+    // The trap: `EmailService.send` reports a failed delivery by RETURNING `{success:false}` -
+    // an unconfigured Resend key does exactly this - rather than by throwing. A `try`/`catch`
+    // alone reads that as sent, `lastAlertedState` advances, and every later tick matches the
+    // stored state and stays quiet. The outage would be recorded as announced with nobody told,
+    // which is the 2026-08-03 failure rebuilt inside the probe written to prevent it.
+    sendEmail.mockResolvedValueOnce({ success: false, error: 'not configured' });
+    chat.mockRejectedValue(quotaError());
+
+    await runProviderHealthCheck();
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+
+    // The next tick tries again rather than treating the outage as already reported.
+    await runProviderHealthCheck();
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    expect(sendEmail.mock.calls[1][0].subject).toMatch(/URGENT/i);
+  });
+
+  it('a mail that THREW is retried too, not only one that reported failure', async () => {
+    sendEmail.mockRejectedValueOnce(new Error('SMTP refused'));
+    chat.mockRejectedValue(quotaError());
+
+    await runProviderHealthCheck();
+    await runProviderHealthCheck();
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+  });
+
+  it('an undelivered RECOVERY notice still lets the next outage alert', async () => {
+    // The asymmetry, and it is deliberate. Holding the state at the old bad value to retry an
+    // all-clear would mean a NEW outage matches it and is silent - trading a missed recovery
+    // notice for a missed outage, which is the wrong way round.
+    chat.mockRejectedValue(quotaError());
+    await runProviderHealthCheck();
+    chat.mockResolvedValue({ content: 'ok', usage: {}, finishReason: 'stop' });
+    sendEmail.mockResolvedValueOnce({ success: false, error: 'not configured' });
+    await runProviderHealthCheck();
+    sendEmail.mockClear();
+
+    chat.mockRejectedValue(quotaError());
+    await runProviderHealthCheck();
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(sendEmail.mock.calls[0][0].subject).toMatch(/URGENT/i);
+  });
+
   it('never alerts on transient throttling', async () => {
     // Ordinary busyness under load is not an outage.
     chat.mockRejectedValue(rateLimitError());

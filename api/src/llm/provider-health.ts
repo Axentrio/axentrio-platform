@@ -86,15 +86,31 @@ export function __resetProviderHealthAlertState(): void {
   loggedFirstResult = false;
 }
 
-async function alert(subject: string, body: string): Promise<void> {
+/**
+ * Send one alert, and answer whether it actually went.
+ *
+ * THE RETURN VALUE IS LOAD-BEARING. `EmailService.send` does NOT throw when delivery fails - an
+ * unconfigured Resend key comes back as `{ success: false, error: 'not configured' }` and a
+ * provider error the same way. A `try`/`catch` alone therefore treats the two LIKELIEST delivery
+ * failures as successes, and the caller then advances `lastAlertedState` as though the outage had
+ * been announced. Nobody was told, and the transition is spent: this probe would never mention it
+ * again. That is the 2026-08-03 outage rebuilt inside the thing written to prevent it.
+ */
+async function alert(subject: string, body: string): Promise<boolean> {
   try {
-    await getEmailService().send({ to: alertInbox(), subject, body });
+    const result = await getEmailService().send({ to: alertInbox(), subject, body });
+    if (result?.success === false) {
+      // An alert that cannot be delivered must still be findable in the logs.
+      logger.error('[provider-health] ALERT DELIVERY FAILED', { subject, error: result.error });
+      return false;
+    }
+    return true;
   } catch (err) {
-    // An alert that cannot be delivered must still be findable in the logs.
     logger.error('[provider-health] ALERT DELIVERY FAILED', {
       subject,
       error: err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
 }
 
@@ -116,17 +132,23 @@ export async function runProviderHealthCheck(): Promise<ProviderHealth> {
 
   if (health.state === lastAlertedState) return health;
 
+  let delivered = true;
+
   if (health.state === 'ok') {
     logger.info('[provider-health] provider recovered', { previous: lastAlertedState });
     await alert(
       'Axentrio: AI provider recovered',
       `The platform LLM provider is answering again (was: ${lastAlertedState}).`,
     );
+    // Deliberately NOT gated on delivery, unlike the failure branches below. Holding the state at
+    // the old bad value to retry an all-clear would mean the NEXT outage matches it and is
+    // silent - trading a missed recovery notice for a missed outage, which is the wrong way
+    // round. The log line above is the record that it did not go.
   } else if (health.state === 'quota_exhausted') {
     logger.error('[provider-health] PLATFORM LLM OUT OF CREDIT — every tenant is down', {
       detail: health.detail,
     });
-    await alert(
+    delivered = await alert(
       'Axentrio URGENT: AI is down — platform key out of credit',
       [
         'The platform OpenAI key is out of credit or over its quota.',
@@ -142,12 +164,15 @@ export async function runProviderHealthCheck(): Promise<ProviderHealth> {
     );
   } else {
     logger.error('[provider-health] platform LLM unreachable', { detail: health.detail });
-    await alert(
+    delivered = await alert(
       'Axentrio: AI provider unreachable',
       `The platform LLM provider is not answering.\n\nProvider said: ${health.detail}`,
     );
   }
 
-  lastAlertedState = health.state;
+  // Only a DELIVERED alert spends the transition. Advancing after a failed send would record the
+  // outage as announced while nobody had been told, and this probe would never raise it again -
+  // the state would match on every subsequent tick. Left unadvanced, the next tick retries.
+  if (delivered) lastAlertedState = health.state;
   return health;
 }

@@ -13,6 +13,7 @@ if (!process.env.TEST_DATABASE_URL) {
 import { DataSource } from 'typeorm';
 import { AppDataSource } from '../database/data-source';
 import { INSTALL_TRANSCRIPT_REVISION_TRIGGER } from '../database/sql/transcript-revision.sql';
+import { INSTALL_BOOKING_BLOCKED_RANGE } from '../database/sql/booking-blocked-range.sql';
 import { beforeAll, afterEach } from 'vitest';
 
 // Worker DB name derived the same way env-setup.ts did.
@@ -55,6 +56,14 @@ beforeAll(async () => {
   // like prod: without this the transcript revision would never bump under test and
   // every enrichment compare-and-swap assertion would pass while proving nothing.
   for (const stmt of INSTALL_TRANSCRIPT_REVISION_TRIGGER) {
+    await AppDataSource.query(stmt);
+  }
+
+  // Same reasoning, one table over. `chatbot_bookings.blocked_range` is a range type the
+  // `Booking` entity deliberately does not map, so synchronize() never creates it - and
+  // `rekeyBotBookings`, whose query filters on it, therefore errored and was swallowed by
+  // the non-fatal catch in every caller. The rekey did nothing under test (#88).
+  for (const stmt of INSTALL_BOOKING_BLOCKED_RANGE) {
     await AppDataSource.query(stmt);
   }
 });

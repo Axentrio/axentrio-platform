@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { DateTime } from 'luxon';
+import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
 import { PromptBuilder } from './prompt-builder';
 import { MeteringService } from './metering.service';
@@ -43,7 +44,19 @@ export interface QuickReply {
 }
 
 export type AgentResult =
-  | { type: 'response'; content: string; quickReplies?: QuickReply[] }
+  | {
+      type: 'response';
+      content: string;
+      quickReplies?: QuickReply[];
+      /**
+       * #80 (LP3) measurement, carried to whoever delivers this reply.
+       *
+       * Not part of the answer - nothing renders it. It exists because the offer can only be
+       * recorded where BOTH halves are known: the delivering path knows what the channel kept,
+       * and only the agent knows the canonical instants behind the natural-language chips.
+       */
+      offer?: OfferMeasurement;
+    }
   | { type: 'awaiting_confirmation'; toolCallId: string; toolName: string; preview: Record<string, unknown>; message: string }
   | { type: 'max_iterations'; fallbackMessage: string }
   | { type: 'budget_exceeded'; fallbackMessage: string }

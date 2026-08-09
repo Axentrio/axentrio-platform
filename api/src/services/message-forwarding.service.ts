@@ -644,6 +644,28 @@ async function platformAgentPath(
             handedOff = true;
           } else {
             await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
+            // #80 (LP3): the WIDGET's delivery boundary, which is here and not in
+            // `routeOutboundMessage` - this path emits over the socket directly and never calls
+            // it, so the recording wired into that function's widget branch never ran. Found by
+            // smoke-testing production: three availability calls recorded, zero offers, ever.
+            //
+            // No channel truncation on this path: the widget renders the chips as composed, so
+            // what the agent produced is what was delivered. `widget_assumed` because nothing
+            // here acknowledges arrival.
+            if (result.offer?.slotStarts.length && result.quickReplies?.length) {
+              void import('../booking/offer-record.service')
+                .then((m) =>
+                  m.recordDeliveredOffer({
+                    tenantId: session.tenantId,
+                    sessionId: session.id,
+                    channel: session.channel ?? 'widget',
+                    offer: result.offer!,
+                    deliveredTitles: result.quickReplies!.map((qr) => qr.title),
+                    deliveryBasis: 'widget_assumed',
+                  })
+                )
+                .catch(() => undefined);
+            }
           }
           break;
         }

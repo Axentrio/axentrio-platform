@@ -22,6 +22,7 @@ import { composeSystemPrompt } from '../llm/compose-system-prompt';
 import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.types';
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
+import type { OfferMeasurement } from '../channels/response.types';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -643,29 +644,7 @@ async function platformAgentPath(
             await handleBotHandoff(session, botParticipant.id, 'bot_error');
             handedOff = true;
           } else {
-            await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies);
-            // #80 (LP3): the WIDGET's delivery boundary, which is here and not in
-            // `routeOutboundMessage` - this path emits over the socket directly and never calls
-            // it, so the recording wired into that function's widget branch never ran. Found by
-            // smoke-testing production: three availability calls recorded, zero offers, ever.
-            //
-            // No channel truncation on this path: the widget renders the chips as composed, so
-            // what the agent produced is what was delivered. `widget_assumed` because nothing
-            // here acknowledges arrival.
-            if (result.offer?.slotStarts.length && result.quickReplies?.length) {
-              void import('../booking/offer-record.service')
-                .then((m) =>
-                  m.recordDeliveredOffer({
-                    tenantId: session.tenantId,
-                    sessionId: session.id,
-                    channel: session.channel ?? 'widget',
-                    offer: result.offer!,
-                    deliveredTitles: result.quickReplies!.map((qr) => qr.title),
-                    deliveryBasis: 'widget_assumed',
-                  })
-                )
-                .catch(() => undefined);
-            }
+            await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies, result.offer);
           }
           break;
         }
@@ -1108,10 +1087,18 @@ async function routeBotMessageOutbound(
   savedId: string,
   content: string,
   quickReplies?: Array<{ title: string; value: string }>,
+  /**
+   * #80 measurement, forwarded rather than acted on.
+   *
+   * It has to reach `routeOutboundMessage`, where BOTH reply paths converge and where the offer
+   * is recorded. Every caller used to build a fresh payload literal and drop it, which is why the
+   * recording sat in exactly the right function and never fired once in production.
+   */
+  offer?: OfferMeasurement,
 ): Promise<void> {
   const metadata = quickReplies?.length ? { quickReplies } : undefined;
   const result = await routeOutboundMessage(
-    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}) },
+    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}), ...(offer ? { offer } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: savedId },
     {
       event: 'message:receive',
@@ -1329,7 +1316,7 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
   const fin = await finalizeReply(session, botParticipant.id, content, quickReplies, pending.id, staleGuard);
   if (fin.status === 'stale') return 'stale';
 
-  await routeBotMessageOutbound(session, fin.savedId, content, quickReplies);
+  await routeBotMessageOutbound(session, fin.savedId, content, quickReplies, result.type === 'response' ? result.offer : undefined);
 
   if (handoffReason) await handleBotHandoff(session, botParticipant.id, handoffReason);
 
@@ -1424,7 +1411,9 @@ async function sendBotMessage(
   session: ChatSession,
   botParticipantId: string,
   content: string,
-  quickReplies?: Array<{ title: string; value: string }>
+  quickReplies?: Array<{ title: string; value: string }>,
+  /** #80: forwarded to `routeOutboundMessage`, where both reply paths converge. */
+  offer?: OfferMeasurement
 ): Promise<Message> {
   const metadata = quickReplies?.length ? { quickReplies } : undefined;
   const botMsg = messageRepository.create({
@@ -1450,7 +1439,7 @@ async function sendBotMessage(
   // gates on its own supportsQuickReplies/maxQuickReplies, so unsupported
   // channels simply send the text.
   await routeOutboundMessage(
-    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}) },
+    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}), ...(offer ? { offer } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
     {
       event: 'message:receive',

@@ -65,6 +65,34 @@ describe('reserveTravelElements', () => {
     expect(dsQuery).not.toHaveBeenCalled();
   });
 
+  it('holds an OPTIONAL caller to a fraction of the cap (#81)', async () => {
+    // The guarantee that grouping cannot starve feasibility. Both draw on one counter, and they
+    // are not equals: feasibility decides whether a booking is possible, grouping only makes a
+    // correct answer nicer. Reserving against a share means the optional caller is refused while
+    // feasibility still has room, by arithmetic rather than by care.
+    //
+    // Cap is 5000, so a 0.3 share is 1500. This asks for 1501 and must be refused WITHOUT a
+    // query - the same short-circuit the whole-cap check uses, for the same reason.
+    expect(await reserveTravelElements('ten-1', 1501, 0.3)).toBe(false);
+    expect(dsQuery).not.toHaveBeenCalled();
+  });
+
+  it('passes the smaller ceiling down to the SQL, not just the pre-check', async () => {
+    // The pre-check only catches a single oversized claim. What stops grouping creeping past its
+    // share one small reservation at a time is the ceiling in the ON CONFLICT clause.
+    dsQuery.mockResolvedValue([{ ok: true }]);
+    await reserveTravelElements('ten-1', 10, 0.3);
+    const params = dsQuery.mock.calls[0][1] as unknown[];
+    expect(params).toContain(1500);
+    expect(params).not.toContain(5000);
+  });
+
+  it('is arithmetically unchanged for the ordinary caller', async () => {
+    dsQuery.mockResolvedValue([{ ok: true }]);
+    await reserveTravelElements('ten-1', 10);
+    expect(dsQuery.mock.calls[0][1] as unknown[]).toContain(5000);
+  });
+
   it('treats a cap of zero as uncapped, never as nothing-allowed', async () => {
     travelConfig.monthlyElementCapPerTenant = 0;
     expect(await reserveTravelElements('ten-1', 999_999)).toBe(true);

@@ -48,6 +48,20 @@ export interface OfferedSlot {
   start: string;
   /** The chip label as rendered. Evidence, never parsed. */
   title: string;
+  /**
+   * What the grouping scorer thought of this slot (#81), when it ran.
+   *
+   * Carried ON the slot rather than in a parallel array, because the pairing between a time and
+   * its cost is the thing that must not drift - an array indexed by position is one truncation
+   * away from attributing a cost to the wrong time.
+   *
+   * Absent means the scorer did not run for this offer at all. `costMinutes: null` WITH a reason
+   * means it ran and declined to have an opinion, which is a different and useful fact.
+   */
+  costMinutes?: number | null;
+  preferred?: boolean | null;
+  neutralReason?: string | null;
+  period?: 'morning' | 'afternoon' | null;
 }
 
 @Entity('chatbot_booking_offers')
@@ -99,6 +113,34 @@ export class BookingOffer {
 
   @Column({ type: 'varchar', length: 32, name: 'delivery_basis' })
   deliveryBasis!: OfferDeliveryBasis;
+
+  /**
+   * Which scorer produced the numbers on this row.
+   *
+   * Two versions disagreeing is not instability, and without this the gate could not tell them
+   * apart - which would make "is the ranking stable" unfalsifiable the first time the scorer
+   * changed.
+   */
+  @Column({ type: 'varchar', length: 32, name: 'scorer_version', nullable: true })
+  scorerVersion?: string | null;
+
+  /** Billable elements this scoring spent. Null when it did not run. */
+  @Column({ type: 'int', name: 'scoring_elements', nullable: true })
+  scoringElements?: number | null;
+
+  @Column({ type: 'int', name: 'scoring_ms', nullable: true })
+  scoringMs?: number | null;
+
+  /**
+   * The order the scorer WOULD have offered, as ISO instants.
+   *
+   * The counterfactual is the whole of LP4: nothing was reordered, so this is the only record of
+   * what steering would have done, and LP5's comparison is against it. Stored explicitly rather
+   * than recomputed from the costs later, because a recomputation would use whatever the ordering
+   * rules had become by then.
+   */
+  @Column({ type: 'jsonb', name: 'counterfactual_order', nullable: true })
+  counterfactualOrder?: string[] | null;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;

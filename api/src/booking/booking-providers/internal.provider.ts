@@ -54,6 +54,7 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
+import { resolveServiceLocationMode } from '../service-location';
 import {
   placeBookingAddress,
   placeAddressFor,
@@ -889,6 +890,10 @@ export class InternalProvider implements BookingProvider {
       timezone: rule.timezone,
       serviceId: service.id,
       serviceName: service.name,
+      // #80 (LP3): WHO TRAVELS for this service, as it stood when the slots were offered.
+      // Resolved here rather than joined later, because a Service's mode can change and the
+      // baseline is about what was true at the moment of the offer.
+      locationMode: resolveServiceLocationMode(service),
       travel: travel.summary,
     };
   }

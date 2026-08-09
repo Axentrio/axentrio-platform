@@ -56,6 +56,30 @@ export async function routeOutboundMessage(
 
   // Widget channel — WebSocket emission above is sufficient
   if (session.channel === 'widget' || !session.channelConnectionId) {
+    // #80 (LP3): the widget has NO durable delivery acknowledgement - the reply goes out over a
+    // socket or in the HTTP response and nothing records whether it arrived. So it is recorded as
+    // `widget_assumed` rather than as an acknowledged delivery, and any analysis can exclude it.
+    // The canonical baseline includes it, because excluding most of the traffic would be a worse
+    // distortion than admitting the weaker evidence.
+    //
+    // No truncation here either: the widget renders the chips as composed, so what the agent
+    // produced IS what was delivered. That is why the titles are rebuilt from the same instants
+    // rather than read off a channel-formatted payload that this path never builds.
+    if (response.offer?.slotStarts.length && response.quickReplies?.length) {
+      const titles = response.quickReplies.map((qr) => (typeof qr === 'string' ? qr : qr.title));
+      void import('../booking/offer-record.service')
+        .then((m) =>
+          m.recordDeliveredOffer({
+            tenantId: context.tenantId,
+            sessionId: context.sessionId,
+            channel: session.channel ?? 'widget',
+            offer: response.offer!,
+            deliveredTitles: titles,
+            deliveryBasis: 'widget_assumed',
+          })
+        )
+        .catch(() => undefined);
+    }
     return { success: true };
   }
 

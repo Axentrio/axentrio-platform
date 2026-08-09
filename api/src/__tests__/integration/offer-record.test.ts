@@ -18,6 +18,7 @@ import { AppDataSource } from '../../database/data-source';
 import { AvailabilityCall } from '../../database/entities/AvailabilityCall';
 import { BookingOffer } from '../../database/entities/BookingOffer';
 import { OfferSelection } from '../../database/entities/OfferSelection';
+import { baselineSummary } from '../../booking/offer-baseline.queries';
 import {
   recordAvailabilityCall,
   recordBookingOffer,
@@ -242,5 +243,63 @@ describe('measurement never breaks a booking', () => {
         sessionId: 'not-a-uuid', bookingId: 'also-not', startUtc: at(SLOT_A), selectionType: 'booking',
       })
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('the canonical baseline, computed once so LP4 and LP5 cannot disagree', () => {
+  const since = new Date(Date.now() - 3600_000);
+
+  it('counts ordinal-1 BOOKINGS over attributed bookings', async () => {
+    await offer([SLOT_A, SLOT_B]);
+    await recordOfferSelection({ sessionId, serviceId, bookingId: randomUUID(), startUtc: at(SLOT_A), selectionType: 'booking' });
+
+    const other = randomUUID();
+    sessionId = other;
+    await offer([SLOT_A, SLOT_B]);
+    await recordOfferSelection({ sessionId, serviceId, bookingId: randomUUID(), startUtc: at(SLOT_B), selectionType: 'booking' });
+
+    const summary = await baselineSummary({ since });
+    expect(summary.firstOfferAcceptance).toMatchObject({ numerator: 1, denominator: 2, share: 0.5 });
+  });
+
+  it('leaves a REQUEST out of the booking metric but in conversion', async () => {
+    // Expressed choice is not conversion. Folding them together would flatter LP5's comparison.
+    await offer([SLOT_A]);
+    await recordOfferSelection({ sessionId, serviceId, bookingId: randomUUID(), startUtc: at(SLOT_A), selectionType: 'request' });
+
+    const summary = await baselineSummary({ since });
+    expect(summary.firstOfferAcceptance.denominator).toBe(0);
+    expect(summary.offerConversion.numerator).toBe(1);
+  });
+
+  it('excludes a REJECTED delivery from the conversion denominator, and counts it separately', async () => {
+    // A message the transport refused is not an offer a customer could have taken. Counted, so a
+    // shrinking population is visible rather than quietly making the ratio mean less.
+    await offer([SLOT_A], { deliveryBasis: 'provider_rejected' });
+    const summary = await baselineSummary({ since });
+    expect(summary.offerConversion.denominator).toBe(0);
+    expect(summary.excluded.rejectedOffers).toBe(1);
+  });
+
+  it('INCLUDES widget_assumed, because dropping it would omit most of the traffic', async () => {
+    await offer([SLOT_A], { deliveryBasis: 'widget_assumed' });
+    expect((await baselineSummary({ since })).offerConversion.denominator).toBe(1);
+  });
+
+  it('answers null rather than zero when nothing has happened yet', async () => {
+    // No data is not the same as no uptake, and a 0% baseline would be read as the latter.
+    const summary = await baselineSummary({ since: new Date(Date.now() + 3600_000) });
+    expect(summary.firstOfferAcceptance.share).toBeNull();
+    expect(summary.multiDayShare.share).toBeNull();
+  });
+
+  it('counts multi-day over PARSEABLE calls only, and reports the rest', async () => {
+    await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: '2026-09-01', endDate: '2026-09-03', slotCount: 2 });
+    await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: '2026-09-01', endDate: '2026-09-01', slotCount: 2 });
+    await recordAvailabilityCall({ tenantId, botId, sessionId, startDate: 'soon', endDate: 'later', slotCount: 0 });
+
+    const summary = await baselineSummary({ since });
+    expect(summary.multiDayShare).toMatchObject({ numerator: 1, denominator: 2 });
+    expect(summary.excluded.unparseableRanges).toBe(1);
   });
 });

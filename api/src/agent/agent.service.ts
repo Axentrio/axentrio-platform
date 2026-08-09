@@ -85,6 +85,9 @@ const BOOKING_MUTATION_TOOLS = ['create_booking', 'request_appointment', 'resche
 interface PendingAvailability {
   slots: Array<{ start: string; end: string }>;
   timezone: string;
+  /** #80: carried so the offer record can name the service and its mode without a later join. */
+  serviceId?: string;
+  locationMode?: string;
   /** The service the slots are for — embedded in the chip so a tap books the
    *  right service when the bot offers more than one. */
   serviceName?: string;
@@ -514,9 +517,9 @@ export class AgentService {
               ? {
                   offer: {
                     botId: bot.id,
-                    serviceId: null,
+                    serviceId: pendingAvailability.serviceId ?? null,
                     availabilityCallId: pendingAvailabilityCallId,
-                    locationMode: null,
+                    locationMode: pendingAvailability.locationMode ?? null,
                     slotStarts: pendingAvailability.slots.slice(0, slotChips.length).map((s) => s.start),
                   },
                 }
@@ -585,9 +588,17 @@ export class AgentService {
                 slots?: Array<{ start: string; end: string }>;
                 timezone?: string;
                 serviceName?: string;
+                serviceId?: string;
+                locationMode?: string;
               };
               if (Array.isArray(d.slots)) {
-                pendingAvailability = { slots: d.slots, timezone: d.timezone ?? 'UTC', serviceName: d.serviceName };
+                pendingAvailability = {
+                  slots: d.slots,
+                  timezone: d.timezone ?? 'UTC',
+                  serviceName: d.serviceName,
+                  serviceId: d.serviceId,
+                  locationMode: d.locationMode,
+                };
                 // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
                 // and it exists separately from the offer because a call the model never surfaces
                 // still counts in "how often do customers ask across several days" - the number
@@ -599,7 +610,10 @@ export class AgentService {
                       tenantId: session.tenantId,
                       botId: bot.id,
                       sessionId: session.id,
-                      serviceId: callArgs?.serviceId ?? null,
+                      // The RESOLVED service, not the one the caller named: `check_availability`
+                      // picks the sole bookable service when the argument is omitted, and the
+                      // record should say which service was actually offered.
+                      serviceId: d.serviceId ?? callArgs?.serviceId ?? null,
                       startDate: callArgs?.startDate,
                       endDate: callArgs?.endDate,
                       slotCount: d.slots?.length ?? 0,

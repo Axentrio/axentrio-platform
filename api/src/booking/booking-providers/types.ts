@@ -147,6 +147,14 @@ export interface AvailabilityResult {
   /** The service these slots are for (so the agent can book the right one). */
   serviceId?: string;
   serviceName?: string;
+  /**
+   * WHO TRAVELS for this service (#79's resolver), as it stood when these slots were offered.
+   *
+   * Carried for LP3's baseline (#80) so the offer record can be filtered by location without
+   * joining a Service whose mode may have changed since. Measurement only - nothing in the
+   * booking path reads it.
+   */
+  locationMode?: string;
   /** Absent unless travel time actually ran — which is every bot on the platform today. */
   travel?: TravelFilterSummary;
 }

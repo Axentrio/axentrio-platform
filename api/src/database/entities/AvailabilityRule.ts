@@ -96,6 +96,56 @@ export function isRangedOverride(o: DateOverride): boolean {
   return end !== null && end > o.date;
 }
 
+/**
+ * The last day this override has any effect on - its end date, or its own date.
+ *
+ * `effectiveEndDate` answers "does this row span?" and returns `null` for a single day, which
+ * is right for that question and wrong as a date. Three callers wrote `effectiveEndDate(o) ??
+ * o.date` to turn one into the other, and that coalesce IS the concept: the day the row stops
+ * mattering.
+ */
+export function overrideLastDay(o: DateOverride): string {
+  return effectiveEndDate(o) ?? o.date;
+}
+
+/**
+ * Is this override still worth stating on `today`?
+ *
+ * A RANGE STAYS RELEVANT UNTIL ITS LAST DAY, and getting that wrong is not hypothetical: the
+ * readiness check tested `o.date >= today` while the engine did a containment test, so a
+ * business in the middle of a two-week closure was told its hours were missing from day two
+ * while the engine went on closing every remaining day. The rule now exists once.
+ *
+ * Distinct from `overrideCoversDate`, which asks whether a row applies ON a specific date. This
+ * asks whether it is still ahead of us at all - a row covering next month is not relevant TODAY
+ * but is very much worth telling a customer about.
+ */
+export function isRelevantOn(o: DateOverride, today: string): boolean {
+  if (!o?.date) return false;
+  return overrideLastDay(o) >= today;
+}
+
+/**
+ * The span to STATE for this row, or `null` when there is nothing to add.
+ *
+ * A single-day row needs no end date on the line - "closed on 3 May" is complete, and "closed
+ * from 3 May to 3 May" is worse. Two prompt surfaces computed this the same way, and a third
+ * that forgot would either lose a fortnight's closure or state a one-day one twice.
+ */
+export function overrideSpanEnd(o: DateOverride): string | null {
+  return isRangedOverride(o) ? effectiveEndDate(o) : null;
+}
+
+/**
+ * Does this override apply ON `dateStr`? EXPORTED DELIBERATELY, with no caller outside this
+ * module today.
+ *
+ * Two reasons to keep it out of `pickOverrideForDate` rather than folding it in. It is the
+ * containment predicate this file's whole vocabulary rests on - `isRelevantOn` is defined
+ * against it, and a reader who cannot see one of the pair has to infer it from a loop. And it
+ * is directly unit-tested: the malformed-`endDate` and backwards-range cases are cheap to state
+ * here and awkward to reach through the narrowest-wins selection that wraps it.
+ */
 export function overrideCoversDate(o: DateOverride, dateStr: string): boolean {
   if (!o?.date) return false;
   if (o.date === dateStr) return true;

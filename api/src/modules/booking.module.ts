@@ -14,8 +14,8 @@ import { AppDataSource } from '../database/data-source';
 import { ServiceType, type IntakeQuestion } from '../database/entities/ServiceType';
 import {
   AvailabilityRule,
-  effectiveEndDate,
-  isRangedOverride,
+  isRelevantOn,
+  overrideSpanEnd,
   type Weekday,
   type TimeWindow,
 } from '../database/entities/AvailabilityRule';
@@ -151,8 +151,7 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
     // yesterday must still be stated, or the bot books the remaining thirteen days.
     .filter((o) => {
       if (!o || typeof o.date !== 'string') return false;
-      const end = effectiveEndDate(o) ?? o.date;
-      return end >= today;
+      return isRelevantOn(o, today);
     })
     .sort((a, b) => a.date.localeCompare(b.date));
   if (!upcoming.length) return [];
@@ -163,7 +162,7 @@ function upcomingOverrideLines(rule: AvailabilityRule, now: Date): string[] {
   };
 
   const lines = upcoming.slice(0, MAX_OVERRIDE_LINES).map((o) => {
-    const end = isRangedOverride(o) ? effectiveEndDate(o) : null;
+    const end = overrideSpanEnd(o);
     // One line for the whole span. Enumerating a fortnight day by day would consume the
     // entire line budget and push every later closure out of the prompt — which is exactly
     // how a long holiday used to go unmentioned from its ninth day onwards.
@@ -253,15 +252,12 @@ export function formatHoursForPlaceholder(rule: AvailabilityRule | null, now: Da
   const closures = (Array.isArray(rule.dateOverrides) ? rule.dateOverrides : [])
     .filter((o) => {
       if (!o || typeof o.date !== 'string' || !o.closed) return false;
-      // A RANGE stays relevant until its LAST day — a fortnight's closure that began
-      // yesterday still has thirteen days to go.
-      const end = effectiveEndDate(o) ?? o.date;
-      return end >= today;
+      return isRelevantOn(o, today);
     })
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 3)
     .map((o) => {
-      const end = isRangedOverride(o) ? effectiveEndDate(o) : null;
+      const end = overrideSpanEnd(o);
       return end ? `${o.date} to ${end}` : o.date;
     });
 

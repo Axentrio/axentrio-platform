@@ -14,7 +14,7 @@ import { AppDataSource } from '../../database/data-source';
 import { ServiceType } from '../../database/entities/ServiceType';
 import {
   AvailabilityRule,
-  effectiveEndDate,
+  isRelevantOn,
   type WeeklyHours,
   type TimeWindow,
 } from '../../database/entities/AvailabilityRule';
@@ -71,7 +71,7 @@ export function hasUpcomingOpenOverride(rule: AvailabilityRule, today: string): 
     // business running on an in-progress open range that its hours were missing from day two,
     // while the engine kept opening every remaining day of that range.
     (o) =>
-      (effectiveEndDate(o) ?? o.date) >= today &&
+      isRelevantOn(o, today) &&
       !o.closed &&
       Array.isArray(o.windows) &&
       o.windows.some(isValidWindow),

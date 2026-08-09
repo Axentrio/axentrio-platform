@@ -2515,16 +2515,20 @@ export class InternalProvider implements BookingProvider {
     end: Date,
     timezone: string,
     /**
-     * Only the RECREATE branches use these — a plain update deliberately PATCHes times alone
-     * so the owner's own edits to the event survive. But a recreate builds the event from
-     * nothing, so anything omitted here is gone for good: the recreate succeeds, so
-     * `markSyncPending` never fires and the reconciler (which claims `sync_pending` rows only)
-     * never revisits it. Omitting them cost the venue AND nulled the stored Meet URL, which
-     * then blanked the join link on every later reschedule and in the portal's booking list.
+     * What a RECREATE needs, and an update does not.
+     *
+     * Grouped rather than trailing positionally, because the difference is the whole point and
+     * a signature should not need a paragraph to say which arguments apply when. A plain update
+     * deliberately PATCHes times alone so the owner's own edits to the event survive. A recreate
+     * builds the event from nothing, so anything omitted here is gone for good: the recreate
+     * SUCCEEDS, so `markSyncPending` never fires and the reconciler - which claims
+     * `sync_pending` rows only - never revisits it. Omitting them cost the venue AND nulled the
+     * stored Meet URL, which then blanked the join link on every later reschedule and in the
+     * portal's booking list.
      */
-    location?: string,
-    conferencing?: boolean
+    recreate?: { location?: string; conferencing?: boolean }
   ): Promise<void> {
+    const { location, conferencing } = recreate ?? {};
     // Plan D9: no external calendar calls when sync is entitlement-disabled.
     // The booking itself is already updated internally; the mirror is
     // intentionally suspended (re-enables with the entitlement).
@@ -3481,14 +3485,16 @@ export class InternalProvider implements BookingProvider {
       // Same derivation as the create path — a recreate has to rebuild the whole event, so it
       // needs the venue, and `meetUrl: null` because a conference is a RESULT of creating the
       // event: Google mints a fresh one from `conferencing` and we store what comes back.
-      resolveEventLocation({
-        locationType: service.locationType,
-        customerAddressRequired: service.customerAddressRequired,
-        meetUrl: null,
-        customerAddress: booking.customerAddress,
-        venue,
-      }),
-      service.locationType === 'google_meet'
+      {
+        location: resolveEventLocation({
+          locationType: service.locationType,
+          customerAddressRequired: service.customerAddressRequired,
+          meetUrl: null,
+          customerAddress: booking.customerAddress,
+          venue,
+        }),
+        conferencing: service.locationType === 'google_meet',
+      }
     ).catch(() => undefined);
 
     return {

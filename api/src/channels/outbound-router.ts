@@ -145,6 +145,29 @@ export async function routeOutboundMessage(
     });
     await deliveryRepository.save(delivery);
 
+    // #80 (LP3): the baseline records what the CHANNEL sent, which is why this is here and not
+    // where the slots were composed. `msg.quickReplies` has already been through
+    // `capabilities.maxQuickReplies` and the supports-quick-replies gate, so it is the delivered
+    // truth; `response.offer.slotStarts` carries the canonical instants the rendered chips lost.
+    // Fire-and-forget and never awaited: a measurement row must not delay or fail a reply.
+    if (response.offer && msg.quickReplies?.length) {
+      const titles = msg.quickReplies.map((qr) => qr.title);
+      void import('../booking/offer-record.service')
+        .then((m) =>
+          m.recordDeliveredOffer({
+            tenantId: context.tenantId,
+            sessionId: context.sessionId,
+            channel: connection.channel,
+            offer: response.offer!,
+            deliveredTitles: titles,
+            // What the transport actually said, rather than an assumption. A rejected send is
+            // recorded as such and excluded from every delivered denominator.
+            deliveryBasis: result.success ? 'provider_accepted' : 'provider_rejected',
+          })
+        )
+        .catch(() => undefined);
+    }
+
     if (!result.success) {
       logger.error(`Channel delivery failed for message ${context.messageId}`, {
         channel: connection.channel,

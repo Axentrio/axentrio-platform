@@ -109,6 +109,38 @@ async function resolveContext(sessionId: string): Promise<BookingContext> {
   return { session, tenant, bot, botSettings };
 }
 
+/**
+ * Link a Booking or Request back to the offer it came from (#80, LP3).
+ *
+ * Fire-and-forget, and deliberately AFTER the booking has already succeeded: this is the
+ * measurement half of the pre-steering baseline, and a statistics row is never worth a booking.
+ * An unattributable booking is left unattributed rather than guessed at - an owner adding an
+ * appointment by hand was never steered and cannot evidence steering, so putting it in the
+ * denominator would understate first-offer acceptance for free.
+ */
+function attributeToOffer(
+  ctx: BookingContext,
+  bookingId: string | undefined,
+  startTime: string,
+  serviceId: string | undefined,
+  selectionType: 'booking' | 'request'
+): void {
+  if (!bookingId) return;
+  const startUtc = new Date(startTime);
+  if (Number.isNaN(startUtc.getTime())) return;
+  void import('./offer-record.service')
+    .then((m) =>
+      m.recordOfferSelection({
+        sessionId: ctx.session.id,
+        serviceId: serviceId ?? null,
+        bookingId,
+        startUtc,
+        selectionType,
+      })
+    )
+    .catch(() => undefined);
+}
+
 export async function listBookings(caller: BookingCaller, sessionId: string, attendeeEmail: string) {
   const ctx = await resolveContext(sessionId);
   await enforceBookingsFeature(ctx.tenant.id, caller);
@@ -151,6 +183,7 @@ export async function createBooking(
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await selectProvider().createBooking(ctx, idempotencyKey, startTime, attendee, notes, serviceId, intakeAnswers, extras);
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
+  attributeToOffer(ctx, result.booking?.id, startTime, serviceId, 'booking');
   return result;
 }
 
@@ -175,6 +208,10 @@ export async function requestBooking(
   await enforceBookingsFeature(ctx.tenant.id, caller);
   const result = await internalProvider.requestAppointment(ctx, idempotencyKey, preferredTime, attendee, notes, serviceId, aiSummary, intakeAnswers, extras);
   captureLeadFromBooking(ctx, attendee, extras, result.booking?.id);
+  // Recorded as a REQUEST, not a booking. The customer expressed a choice and the gate declined
+  // to confirm it - that is expressed choice, not conversion, and folding the two together would
+  // flatter LP5's comparison later.
+  attributeToOffer(ctx, result.booking?.id, preferredTime, serviceId, 'request');
   return result;
 }
 

@@ -432,6 +432,9 @@ export class AgentService {
       // Latest availability offered this run — surfaced as slot chips on the
       // reply, unless a booking mutation later consumes/invalidates the offer.
       let pendingAvailability: PendingAvailability | null = null;
+      /** #80: the availability call these slots came from, so a surfaced call can be told from a
+       *  discarded one. Null when the row could not be written - a missing link, never a fault. */
+      let pendingAvailabilityCallId: string | null = null;
       // Egress guard state: was a booking/request actually recorded this run, and
       // have we already nudged the model once for claiming one that wasn't?
       let bookingRecorded = false;
@@ -499,10 +502,25 @@ export class AgentService {
           }
           trace.finishReason = 'completed';
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
+          const slotChips = buildSlotQuickReplies(pendingAvailability);
           return {
             type: 'response',
             content: finalContent,
-            quickReplies: buildSlotQuickReplies(pendingAvailability),
+            quickReplies: slotChips,
+            // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
+            // delivered. It cannot be measured here - channels truncate quick replies and drop
+            // them where unsupported - and dispatch knows none of this context on its own.
+            ...(slotChips?.length && pendingAvailability
+              ? {
+                  offer: {
+                    botId: bot.id,
+                    serviceId: null,
+                    availabilityCallId: pendingAvailabilityCallId,
+                    locationMode: null,
+                    slotStarts: pendingAvailability.slots.slice(0, slotChips.length).map((s) => s.start),
+                  },
+                }
+              : {}),
           };
         }
 
@@ -570,6 +588,27 @@ export class AgentService {
               };
               if (Array.isArray(d.slots)) {
                 pendingAvailability = { slots: d.slots, timezone: d.timezone ?? 'UTC', serviceName: d.serviceName };
+                // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
+                // and it exists separately from the offer because a call the model never surfaces
+                // still counts in "how often do customers ask across several days" - the number
+                // #84's gate turns on. Fire-and-forget: a measurement row is never worth a turn.
+                const callArgs = toolCall.arguments as { startDate?: string; endDate?: string; serviceId?: string };
+                void import('../booking/offer-record.service')
+                  .then((m) =>
+                    m.recordAvailabilityCall({
+                      tenantId: session.tenantId,
+                      botId: bot.id,
+                      sessionId: session.id,
+                      serviceId: callArgs?.serviceId ?? null,
+                      startDate: callArgs?.startDate,
+                      endDate: callArgs?.endDate,
+                      slotCount: d.slots?.length ?? 0,
+                    })
+                  )
+                  .then((id) => {
+                    pendingAvailabilityCallId = id;
+                  })
+                  .catch(() => undefined);
               }
             } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
               pendingAvailability = null;

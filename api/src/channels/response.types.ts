@@ -51,10 +51,34 @@ export interface ResponseAttachment {
   size?: number;
 }
 
+/**
+ * What the LP3 baseline needs to know about an offer, carried WITH the response (#80).
+ *
+ * The measurement has to happen at DISPATCH, not where the slots were composed: channels
+ * truncate quick replies by `capabilities.maxQuickReplies` and drop them where unsupported, so
+ * recording at composition would credit the baseline with slots nobody received. But dispatch
+ * knows none of this - `routeOutboundMessage` receives a session and a tenant, not the
+ * availability call, the service or the location mode.
+ *
+ * So it rides along. The canonical instants are here because the rendered chips are
+ * natural-language text ("Wed 2:00 PM") with no recoverable timestamp, and a Booking has to be
+ * matchable against what was offered.
+ */
+export interface OfferMeasurement {
+  botId: string;
+  serviceId?: string | null;
+  availabilityCallId?: string | null;
+  locationMode?: string | null;
+  /** Canonical instants in presentation order, BEFORE any channel truncation. */
+  slotStarts: string[];
+}
+
 export interface ResponsePayload {
   type?: ResponseType;
   content?: string | Record<string, unknown>;
   quickReplies?: (string | QuickReply)[];
+  /** Measurement only. Never rendered, never sent to a customer. */
+  offer?: OfferMeasurement;
   buttons?: ResponseButton[];
   attachments?: ResponseAttachment[];
   metadata?: Record<string, unknown>;

@@ -1,0 +1,105 @@
+import { Entity, PrimaryGeneratedColumn, Column, Index, CreateDateColumn } from 'typeorm';
+
+/**
+ * WHAT WAS ACTUALLY PUT IN FRONT OF A CUSTOMER, and what they did about it (#80, LP3).
+ *
+ * The pre-steering baseline. LP5 has to prove that reordering slots helps, which means knowing
+ * how often a customer took the FIRST slot offered before anything reordered them - and that
+ * number cannot be reconstructed afterwards. Every booking taken before these tables exist is a
+ * booking nothing can ever be compared against, which is why this ships before the pilot rather
+ * than with it.
+ *
+ * MEASUREMENT ONLY. Nothing here changes what a customer sees, spends a Google element, or
+ * reorders anything. LP4 populates the ranking columns in shadow; LP5 is the first phase that
+ * acts.
+ *
+ * APPEND-ONLY, and every cohort is a query rather than a stored verdict. `selected`, `superseded`
+ * and `expired unselected` are derived at read time, so nothing ever writes "abandoned" about a
+ * customer who then books on day five. See `docs/specs/lp3-offer-record.md`.
+ */
+
+/**
+ * How much is known about whether the message arrived.
+ *
+ * NOT a link to `MessageDelivery`, whose successful rows are deleted after 7 days
+ * (`server.ts` channel-log sweep) - a foreign key here would dangle within a week. A static enum
+ * captured at write time survives.
+ */
+export type OfferDeliveryBasis =
+  /** An external channel transport reported success. A real acknowledgement. */
+  | 'provider_accepted'
+  /** The transport reported failure. The slots were composed but not delivered. */
+  | 'provider_rejected'
+  /** The widget path, which has no durable delivery record at all. Assumed, and labelled so. */
+  | 'widget_assumed';
+
+/**
+ * One slot as the customer received it.
+ *
+ * BOTH the canonical instant and the presented text, and the reason is the finding that resized
+ * this ticket. The record has to store what the customer SAW - channels truncate quick replies by
+ * `capabilities.maxQuickReplies` and drop them where unsupported - but what they saw is
+ * natural-language ("Wed 2:00 PM"), and `buildSlotQuickReplies` discards the ISO instant one line
+ * after computing it. Storing only the presentation makes a Booking unmatchable; storing only the
+ * instant records slots nobody was shown.
+ */
+export interface OfferedSlot {
+  /** ISO instant, the join key back to `Booking.startUtc`. */
+  start: string;
+  /** The chip label as rendered. Evidence, never parsed. */
+  title: string;
+}
+
+@Entity('chatbot_booking_offers')
+// The attribution lookup: latest offer for this session and service before a given moment.
+@Index('ix_booking_offers_attribution', ['sessionId', 'serviceId', 'createdAt'])
+@Index('ix_booking_offers_created', ['createdAt'])
+export class BookingOffer {
+  @PrimaryGeneratedColumn('uuid')
+  id!: string;
+
+  @Column({ type: 'uuid', name: 'tenant_id' })
+  tenantId!: string;
+
+  @Column({ type: 'uuid', name: 'bot_id' })
+  botId!: string;
+
+  /** No foreign key: a purged session must not be held alive by a measurement row. */
+  @Column({ type: 'uuid', name: 'session_id' })
+  sessionId!: string;
+
+  @Column({ type: 'uuid', name: 'service_id', nullable: true })
+  serviceId?: string | null;
+
+  /** The call these slots came from, so a surfaced call can be told from a discarded one. */
+  @Column({ type: 'uuid', name: 'availability_call_id', nullable: true })
+  availabilityCallId?: string | null;
+
+  /**
+   * The LP1 resolver's answer at the time of the offer (#79).
+   *
+   * Stored rather than joined, because a Service's mode can change and the baseline is about what
+   * was true when the offer went out. Also what the location-scoped questions filter on, which is
+   * how this table serves both the location-dependent and location-independent metrics without
+   * needing a narrower table.
+   */
+  @Column({ type: 'varchar', length: 32, name: 'location_mode', nullable: true })
+  locationMode?: string | null;
+
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  channel?: string | null;
+
+  /** Ordered, exactly as delivered, already truncated to what the channel actually sent. */
+  @Column({ type: 'jsonb', name: 'offered_slots' })
+  offeredSlots!: OfferedSlot[];
+
+  /** Redundant with the array on purpose: the cheap check that a later reader parsed it right. */
+  @Column({ type: 'int', name: 'offered_count' })
+  offeredCount!: number;
+
+  @Column({ type: 'varchar', length: 32, name: 'delivery_basis' })
+  deliveryBasis!: OfferDeliveryBasis;
+
+  @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
+  createdAt!: Date;
+}

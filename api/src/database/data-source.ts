@@ -52,6 +52,9 @@ import { Booking } from './entities/Booking';
 import { TravelUsage } from './entities/TravelUsage';
 import { TenantModule } from './entities/TenantModule';
 import { CalendarCredential } from './entities/CalendarCredential';
+import { AvailabilityCall } from './entities/AvailabilityCall';
+import { BookingOffer } from './entities/BookingOffer';
+import { OfferSelection } from './entities/OfferSelection';
 import { BookingReference } from './entities/BookingReference';
 import { Notification } from './entities/Notification';
 import { MobileDevice } from './entities/MobileDevice';
@@ -128,6 +131,9 @@ export const AppDataSource = new DataSource({
     TenantModule,
     CalendarCredential,
     BookingReference,
+    AvailabilityCall,
+    BookingOffer,
+    OfferSelection,
     Notification,
     MobileDevice,
     NotificationDelivery,

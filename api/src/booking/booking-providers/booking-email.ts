@@ -19,6 +19,51 @@ function getEmailService(): EmailService {
   return emailService;
 }
 
+/**
+ * Send one booking email, and report a failure HOWEVER it arrives.
+ *
+ * `EmailService.send` does not throw when delivery fails. An unconfigured Resend key comes back
+ * as `{ success: false, error: 'not configured' }` and a provider error the same way - the two
+ * likeliest failures. Each site below wrapped its send in a `try`/`catch` and nothing else, so
+ * for those two the `catch` never ran and the log line never fired. Booking emails could stop
+ * going out entirely and the logs would be clean: the bookings are created, the calendar events
+ * exist, and the only signal that customers are receiving nothing was the line that could not
+ * run (#90).
+ *
+ * Written once rather than checked at four call sites, because four is how one gets missed.
+ *
+ * Still NON-FATAL, which is the design and stays the design: a booking must not fail because
+ * mail is down. This reports and returns; it never throws.
+ */
+async function sendOrReport(
+  what: string,
+  /** Optional because the reminder and request-notification params carry no `uid`, and their
+   *  log lines never did either. Omitted rather than faked. */
+  params: { uid?: string },
+  options: Parameters<EmailService['send']>[0],
+  context: Record<string, unknown> = {}
+): Promise<boolean> {
+  try {
+    const result = await getEmailService().send(options);
+    if (result?.success === false) {
+      logger.error(`[Booking] ${what} failed (non-fatal)`, {
+        ...(params.uid ? { uid: params.uid } : {}),
+        ...context,
+        error: result.error ?? 'delivery reported failure',
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.error(`[Booking] ${what} failed (non-fatal)`, {
+      ...(params.uid ? { uid: params.uid } : {}),
+      ...context,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
+
 export interface BookingEmailParams {
   method: IcsMethod;
   uid: string;
@@ -124,8 +169,7 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
     (customerWasInvited
       ? ''
       : `<p>They booked through a messaging channel and gave no email address, so no invite was sent to them.</p>`);
-  try {
-    await getEmailService().send({
+  await sendOrReport('owner notification', params, {
       to: [params.ownerEmail as string],
       from: senderFrom(params),
       subject,
@@ -136,13 +180,7 @@ async function notifyOwner(params: BookingEmailParams, customerWasInvited: boole
       // no-customer-email case so keys already issued for in-flight sends keep their
       // meaning; the accompanied case is a genuinely new message and gets a new key.
       idempotencyKey: inviteIdempotencyKey(params, customerWasInvited ? 'owner' : 'owner-only'),
-    });
-  } catch (err) {
-    logger.warn('[Booking] owner notification failed (non-fatal)', {
-      uid: params.uid,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  });
 }
 
 export async function sendBookingEmail(params: BookingEmailParams): Promise<void> {
@@ -202,8 +240,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
       ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel this appointment</a></p>`
       : '');
 
-  try {
-    await getEmailService().send({
+  await sendOrReport('invite email', params, {
       to,
       from: senderFrom(params),
       subject,
@@ -223,14 +260,7 @@ export async function sendBookingEmail(params: BookingEmailParams): Promise<void
           contentType: `text/calendar; method=${params.method}; charset=utf-8`,
         },
       ],
-    });
-  } catch (err) {
-    logger.error('[Booking] invite email failed (non-fatal)', {
-      uid: params.uid,
-      method: params.method,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  }, { method: params.method });
 
   // Owner's own copy, sent whether or not the customer's invite succeeded — a failed
   // customer send is precisely when the owner most needs to know a booking exists.
@@ -262,17 +292,11 @@ export async function sendReminderEmail(params: ReminderEmailParams): Promise<vo
     `<p>Reminder: your appointment is ${esc(params.leadLabel)}.</p>` +
     `<p><strong>${esc(params.summary)}</strong><br/>${esc(formatWhen(params.start, params.timezone))}</p>` +
     (params.manageUrl ? `<p><a href="${esc(params.manageUrl)}">Reschedule or cancel</a></p>` : '');
-  try {
-    await getEmailService().send({
+  await sendOrReport('reminder email', {}, {
       to: params.attendeeEmail,
       subject: `Reminder: ${params.summary}`,
       body,
-    });
-  } catch (err) {
-    logger.error('[Booking] reminder email failed (non-fatal)', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  });
 }
 
 export interface RequestNotificationParams {
@@ -300,17 +324,11 @@ export async function sendRequestNotificationEmail(params: RequestNotificationPa
     (params.aiSummary ? `<p>Summary: ${esc(params.aiSummary)}</p>` : '') +
     (params.notes ? `<p>Notes: ${esc(params.notes)}</p>` : '') +
     `<p>Follow up with the customer to confirm or decline.</p>`;
-  try {
-    await getEmailService().send({
+  await sendOrReport('request notification email', {}, {
       to: params.ownerEmail,
       subject: `New appointment request: ${params.serviceName}`,
       body,
-    });
-  } catch (err) {
-    logger.error('[Booking] request notification email failed (non-fatal)', {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+  });
 }
 
 /** Test seam — reset the memoized EmailService. */

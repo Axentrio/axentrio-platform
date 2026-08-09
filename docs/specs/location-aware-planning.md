@@ -203,6 +203,13 @@ Deliberately not the midpoint of elapsed open time across the union of windows: 
 
 ## The offer record
 
+> **SUPERSEDED by [`lp3-offer-record.md`](./lp3-offer-record.md)** (approved after five review
+> rounds, #80). The section below is kept because the reasoning is still sound, but five of its
+> statements are wrong in detail - most importantly "one record per availability call", "retention
+> follows the Booking", and the assumption that the slots a customer receives are the slots the
+> agent produced. Build from the companion document.
+
+
 The weakest surface to specify loosely, because two teams can build incompatible versions and both
 believe they are done.
 

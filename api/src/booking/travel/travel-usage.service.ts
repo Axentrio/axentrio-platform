@@ -58,7 +58,23 @@ export function currentTravelPeriod(now: Date = new Date()): string {
  *
  * Returns `true` when the units are yours to spend.
  */
-export async function reserveTravelElements(tenantId: string, elements: number): Promise<boolean> {
+export async function reserveTravelElements(
+  tenantId: string,
+  elements: number,
+  /**
+   * The fraction of the monthly cap this caller may spend up to, `1` for all of it.
+   *
+   * FEASIBILITY MUST NEVER BE STARVED BY ANYTHING OPTIONAL, and this is what guarantees it.
+   * Grouping (#81) is a preference: it improves an answer that is already correct without it. It
+   * shares one counter with feasibility, so an unbounded scorer could spend the month's elements
+   * and leave the gate unable to measure a drive - which turns confirmable slots into Requests,
+   * exactly what ADR-0017 forbids grouping from causing.
+   *
+   * Reserving against a fraction means the optional caller stops first, by construction, and the
+   * remainder is untouchable by it. Feasibility passes `1` and is unaffected.
+   */
+  capShare = 1
+): Promise<boolean> {
   // A genuine zero is a caller that wants nothing, and it proceeds having claimed nothing.
   if (elements === 0) return true;
   // EVERYTHING ELSE MUST BE A POSITIVE WHOLE NUMBER. A caller that cannot say how much it
@@ -71,7 +87,15 @@ export async function reserveTravelElements(tenantId: string, elements: number):
   }
   const n = elements;
 
-  const cap = config.travel.monthlyElementCapPerTenant;
+  const fullCap = config.travel.monthlyElementCapPerTenant;
+  // The caller's own ceiling. An optional caller sees a smaller cap than the real one and so
+  // gives up while feasibility still has room; `capShare = 1` is the ordinary path and is
+  // arithmetically unchanged. Floored, because a fractional ceiling would let a reservation
+  // through on a rounding artefact.
+  const cap =
+    Number.isFinite(fullCap) && fullCap > 0 && capShare > 0 && capShare < 1
+      ? Math.floor(fullCap * capShare)
+      : fullCap;
   // A malformed or absent limit reads as "no limit", matching every other ceiling on this
   // platform — a bad env var must never quietly disable travel for every tenant at once.
   const uncapped = !Number.isFinite(cap) || cap <= 0;

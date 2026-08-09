@@ -54,6 +54,15 @@ interface ScriptedStep {
   throwError?: Error;
   /** Delay (ms) before the FIRST event of this iteration — lets tests trigger abort mid-stream. */
   delayMs?: number;
+  /**
+   * Called the instant the stream is entered, BEFORE any delay.
+   *
+   * The deterministic way to abort mid-stream. A test that aborts on its own timer is racing the
+   * turn: if the timer fires before `runCopilotTurn` attaches its listener, the abort is missed
+   * entirely, the stream runs to completion and the outcome is `success`. Firing from in here
+   * cannot lose that race, because the turn is provably running - it is the thing that called us.
+   */
+  onStreamStart?: () => void;
 }
 
 /**
@@ -69,6 +78,7 @@ function makeScriptedLlm(steps: ScriptedStep[]): CopilotLlmStream {
         yield { type: 'finalize', finishReason: 'stop', usage: { promptTokens: 0, completionTokens: 0 } };
         return;
       }
+      step.onStreamStart?.();
       if (step.throwError) throw step.throwError;
       if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
       for (const text of step.tokens ?? []) {
@@ -308,15 +318,22 @@ describe('runCopilotTurn', () => {
   it('abort mid-stream → outcome=aborted, partial content persisted, error event emitted', async () => {
     const ac = new AbortController();
     const llm = makeScriptedLlm([
-      // 1s pre-token delay gives a huge margin: the abort timer below fires
-      // (after runCopilotTurn attaches its listener) long before the stream
-      // would yield, so the abort reliably wins regardless of CI load.
-      // Replaces the old flaky 5ms-vs-20ms race.
-      { tokens: ['p', 'a', 'r', 't', 'i', 'a', 'l'], delayMs: 1000, finishReason: 'stop' },
+      // NO TIMER, and that is the fix. Two previous versions raced the turn - first 5ms vs 20ms,
+      // then a 20ms abort against a 1s stream - and both assumed the abort listener was already
+      // attached when the timer fired. Under CI load it sometimes was not: the abort was missed,
+      // the stream ran to completion, and the outcome came back `success`. This blocked two
+      // deploys in one day.
+      //
+      // Aborting from INSIDE the stream cannot lose that race. The turn is provably running,
+      // because it is the thing that entered the generator. The delay that follows is then just
+      // room for the abort to be observed, not a window something has to win.
+      {
+        tokens: ['p', 'a', 'r', 't', 'i', 'a', 'l'],
+        onStreamStart: () => ac.abort(),
+        delayMs: 50,
+        finishReason: 'stop',
+      },
     ]);
-    // Fire after the turn starts (so the abort listener catches it), but well
-    // within the 1s stream window.
-    setTimeout(() => ac.abort(), 20);
     const sink = new BufferedSSESink();
     const result = await runCopilotTurn({
       dataSource: AppDataSource,

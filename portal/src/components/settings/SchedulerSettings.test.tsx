@@ -240,6 +240,47 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     expect(body.serviceArea).toEqual(AREA);
   });
 
+  /**
+   * #71: an `unset` service puts the owner's address on its invites, and until now the only
+   * prompt lived inside that service's own editor - which an owner typing their address has no
+   * reason to open. The warning exists for the moment those two facts meet.
+   */
+  it('warns, by name, when a stored address will go on a never-asked service (#71)', async () => {
+    const withUnset = {
+      ...CONFIG,
+      services: [{ id: 's1', isActive: true, locationType: 'unset', customerAddressRequired: false, name: 'Online intro call' }],
+      workLocation: 'at_one_location',
+    };
+    await saveUntouched(withUnset);
+
+    // Named, not counted: "1 service" would send the owner hunting for which.
+    expect(document.body.textContent).toMatch(/Online intro call/);
+    expect(document.body.textContent).toMatch(/nobody has chosen/i);
+  });
+
+  it('stays silent when there is no address to leak (#71)', async () => {
+    // No venue means nothing goes on any invite, so the warning would be pure noise - and noise
+    // is what stops the real one being read.
+    const noVenue = {
+      ...CONFIG,
+      services: [{ id: 's1', isActive: true, locationType: 'unset', customerAddressRequired: false, name: 'Online intro call' }],
+      workLocation: 'at_one_location',
+      venueAddress: { street: null, postalCode: null, city: null, country: null },
+    };
+    await saveUntouched(noVenue);
+    expect(document.body.textContent).not.toMatch(/nobody has chosen/i);
+  });
+
+  it('stays silent when every service has been settled (#71)', async () => {
+    const settled = {
+      ...CONFIG,
+      services: [{ id: 's1', isActive: true, locationType: 'google_meet', customerAddressRequired: false, name: 'Online intro call' }],
+      workLocation: 'at_one_location',
+    };
+    await saveUntouched(settled);
+    expect(document.body.textContent).not.toMatch(/nobody has chosen/i);
+  });
+
   it('hides both controls when they neither apply nor hold anything (#79)', async () => {
     const nothingToShow = {
       ...CONFIG,

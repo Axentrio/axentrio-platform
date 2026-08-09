@@ -273,6 +273,21 @@ export const SchedulerSettings: React.FC = () => {
    */
   const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
   const showVenue = workLocation !== 'no_location' || hasStoredVenue;
+  /**
+   * Services nobody was ever asked about, on a business that HAS an address (#71).
+   *
+   * `unset` resolves to the premises, so those services put this address on their invites. That
+   * was the right default - between two wrong invites, an address the owner can remove beats a
+   * customer who does not know where to go - but it is only right until the owner has an address
+   * and one of those services turns out to be a phone or video call.
+   *
+   * Shown only when BOTH are true, because that is exactly when the risk becomes real. With no
+   * address there is nothing to leak; with nothing unset there is nothing to decide. Until now
+   * the only prompt lived inside each service's own editor, which an owner setting their address
+   * has no reason to open.
+   */
+  const neverAsked = (data?.services ?? []).filter((s) => s.isActive && s.locationType === 'unset');
+  const showNeverAskedWarning = hasStoredVenue && neverAsked.length > 0;
   const hasAddressService = (data?.services ?? []).some((svc) => svc.isActive && svc.customerAddressRequired);
   const showServiceArea = hasAddressService || serviceArea.length > 0;
   // NOT state — it is the server's answer to "may this be switched on", refreshed with the
@@ -912,6 +927,23 @@ export const SchedulerSettings: React.FC = () => {
                       />
                     </div>
                   </div>
+
+                  {/* #71: this address is going on invites for services nobody was ever asked
+                      about. Named, not counted - "2 services" sends the owner hunting, and the
+                      whole point is that they can settle it in the time it takes to read this. */}
+                  {showNeverAskedWarning && (
+                    <p className="flex gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-text-secondary">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
+                      <span>
+                        This address is going on the invite for{' '}
+                        {neverAsked.map((s) => s.name).join(', ')} — {neverAsked.length === 1 ? 'that service was' : 'those services were'}{' '}
+                        created before we asked where each one happens, so nobody has chosen. If{' '}
+                        {neverAsked.length === 1 ? 'it is' : 'any of them are'} a phone or video
+                        call, open {neverAsked.length === 1 ? 'it' : 'them'} above and pick the
+                        right answer.
+                      </span>
+                    </p>
+                  )}
                 </div>
                 )}
 

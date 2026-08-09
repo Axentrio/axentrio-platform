@@ -344,6 +344,69 @@ are the point: the ranking work is the last thing built, not the first.
 | **LP6b** | Full Day | LP6a and LP4 both show cross-day value beyond Half Day |
 | **LP7** | Prefer Nearer / Farther Earlier | Owners want them and they beat Auto for a recognisable segment |
 
+## The gates, as numbers (#85 Decision 2)
+
+The gates above are adjectives - "enough", "acceptable", "often enough", "improve" - and #85 is
+right that those become post-hoc arguments the moment results are visible: whoever wants to ship
+will find the number acceptable.
+
+**PRE-REGISTERED, WHICH MEANS NOW.** #85 guessed these wanted LP2's data first. They do not, and
+waiting for it is the failure it was trying to avoid - a bar set after the results are in is
+exactly the post-hoc argument the complaint is about. Every number below is derived from
+something that already exists: Google's pricing, a timeout in the code, or the arithmetic of
+statistical power. None of them needs an outcome to be known.
+
+Two are deliberately left as FORM rather than value, and the reason is stated with them.
+
+### LP2 - feasibility
+
+| Gate | Threshold | Where the number comes from |
+|---|---|---|
+| Routes success rate | **≥ 98%** of routing attempts return a route, over 14 consecutive days | Below this, ADR-0015's degraded branch is the normal path rather than the exception - and per ADR-0015's own amendment, degraded mode in Belgium is close to capture-everything-as-a-Request. A feature that captures 1 booking in 50 as a Request has not shipped |
+| Element spend | **≤ 3,500 elements/month** platform-wide | The Routes Pro free tier is 5,000/month and `travel-health`'s probe takes ~1,440 of it at a 30-minute cadence. 3,500 leaves the probe intact with ~60 to spare, so feasibility never silently starts costing money |
+| Availability latency | **p95 ≤ 8s** added to the availability call | `LAZY_GEOCODE_DEADLINE_MS` is already 8,000 in `travel-neighbours.ts`. The gate is that the existing deadline is respected at p95, not a new budget invented for the occasion |
+| Placed bookings | **≥ 100** bookings with a known position | Below this the success rate above has a confidence interval wider than the 2% it is measuring |
+| One-driver assumption | **Zero** Agents with travel on and a shared itinerary key, for the whole window | Already detected and alerted (#68). It is a boolean, not a rate: one sharing tenant makes the feature actively worse for that business |
+
+### LP3 - the baseline
+
+| Gate | Threshold | Where the number comes from |
+|---|---|---|
+| Baseline size | **≥ 135 attributed bookings** | The power calculation below. This is the number LP5 needs per arm, so collecting less means LP5 cannot conclude anything whatever it shows |
+
+### LP4 - the scorer in shadow
+
+| Gate | Threshold | Where the number comes from |
+|---|---|---|
+| Ranking stability | **100%** - scoring the same diary twice produces the same order | Determinism is a property, not a rate. A scorer that reorders on a re-run cannot be reasoned about at all |
+| Element cost | **≤ 1.5 elements per scored offer**, mean over a full month | The spec notes one exact marginal-insertion cost can need three directional lookups. 1.5 means the cache and the bounds are doing most of the work; at 3 the feature costs its whole budget on shadow scoring that changes nothing |
+| Added latency | **p95 ≤ 2s** on top of LP2's measured availability latency | `routes.service.ts` already times out a matrix at 5,000ms. Two seconds at p95 means the common case is cached or bounded rather than reaching Google |
+| Cheaper alternatives exist | **≥ 20%** of scored offers contain a slot at least 10 minutes cheaper than the one ranked first today | Below one offer in five, steering changes almost nothing and the pilot cannot move the numbers in LP5 whatever it does. The 10-minute floor is the smallest saving worth a customer being nudged |
+
+### LP5 - the pilot
+
+| Gate | Threshold | Where the number comes from |
+|---|---|---|
+| First-offer acceptance | **+15 percentage points absolute**, one-sided, α = 0.05, power 0.80, **n ≥ 135 attributed bookings per arm** | Two-proportion power: n ≈ (z<sub>α</sub> + z<sub>β</sub>)² · [p₁(1−p₁) + p₂(1−p₂)] / (p₁−p₂)². With z = 1.645 and 0.84, a 40% → 55% shift needs ~134 per arm. A 10-point effect would need ~303, which this platform's volume cannot supply, so 15 points is the smallest effect that is actually detectable here rather than the smallest worth having |
+| Recovered capacity | **Form, not value**: bookable minutes per working day must rise, measured against the same tenant's own pre-pilot fortnight, with the direction and the window fixed here and the magnitude read from LP3 | The magnitude genuinely cannot be pre-set - "how much capacity is recoverable" depends on the diary density LP3 is measuring. What IS pre-set is that the comparison is within-tenant, against a fixed prior window, and that ordering alone does not count |
+
+### LP6a and beyond
+
+| Gate | Threshold | Where the number comes from |
+|---|---|---|
+| Multi-day share (#84) | **≥ 25%** of well-formed availability calls span more than one day, AND those calls convert at no worse than 0.8× the single-day rate | Below a quarter, structured flexibility is collection nobody uses. The conversion clause stops a high share of window-shopping being read as demand |
+| LP7 segment | **Form, not value**: a named segment must beat Auto on first-offer acceptance by the same test as LP5 | There is no segment to size yet |
+
+**Why two are left as form.** A pre-registered number that nobody can derive is worse than an
+adjective, because it looks rigorous. Recovered capacity depends on diary density and the LP7
+segment does not exist yet; for both, what is fixed now is the comparison, the window and the
+direction, which is what stops the argument being had after the fact.
+
+**These bind.** Missing a gate means the phase does not ship, and the epic having cost one ticket
+rather than a live feature is the outcome the phasing was designed for.
+
+---
+
 **LP4 cannot prove capacity, and its gate no longer claims to.** A scorer that changes nothing
 visible can prove what the scores look like, that ranking is stable and deterministic, what it costs
 in elements and latency, and how often a cheaper alternative was available. It cannot prove

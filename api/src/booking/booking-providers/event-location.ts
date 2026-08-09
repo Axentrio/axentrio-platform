@@ -30,8 +30,14 @@
 import type { VenueAddress } from '../../contracts/venue-address';
 import { formatVenueLine } from '../../contracts/venue-address';
 
-/** Mirrors `ServiceType['locationType']` without importing the entity. */
-export type EventLocationType = 'google_meet' | 'phone' | 'in_person' | 'custom';
+/**
+ * Mirrors `ServiceType['locationType']` without importing the entity.
+ *
+ * Kept in sync by the compiler rather than by memory: every call site passes a `LocationType`
+ * straight in, so a value added there and forgotten here fails to typecheck at each of them.
+ * That is how `unset` (#71) was caught, and it is the reason this duplication is tolerable.
+ */
+export type EventLocationType = 'google_meet' | 'phone' | 'in_person' | 'custom' | 'unset';
 
 export interface EventLocationInput {
   locationType: EventLocationType;
@@ -67,10 +73,17 @@ export function resolveEventLocation(input: EventLocationInput): string | undefi
     return customer ? customer : undefined;
   }
 
-  // Past here the location is the business's own premises, which only `in_person` means.
-  // `custom` stays deliberately empty: the dropdown tells the owner it puts no location on
-  // the invite, so an owner who picked it has asked for exactly that.
-  if (input.locationType !== 'in_person') return undefined;
+  // Past here the location is the business's own premises.
+  //
+  // `in_person` says so. `unset` is a row created before the dropdown existed (#71), so nobody
+  // ever chose - and between two wrong invites, the venue is the recoverable one: an owner who
+  // sees an address they did not want removes it, while a customer with no address does not
+  // know where to go, and the Availability card promised them one.
+  //
+  // `custom` stays deliberately empty, and that is the whole reason `unset` had to exist as its
+  // own value. The dropdown tells an owner picking `custom` that it puts no location on the
+  // invite, so treating the two the same would overwrite a deliberate blank.
+  if (input.locationType !== 'in_person' && input.locationType !== 'unset') return undefined;
 
   return formatVenueLine(input.venue) ?? undefined;
 }

@@ -21,7 +21,22 @@ import {
 import { Tenant } from './Tenant';
 import { Bot } from './Bot';
 
-export type LocationType = 'google_meet' | 'phone' | 'in_person' | 'custom';
+/**
+ * Where a Service happens, as far as the calendar invite is concerned.
+ *
+ * `unset` is the state the column was MISSING, and #71 is what its absence cost. The column
+ * shipped defaulting to `custom`, which means "put no location on the invite", and no migration
+ * ever backfilled it - so every Service created by hand before the dropdown existed silently
+ * said "no location", and a venue the owner had typed into Settings reached nothing: not the
+ * calendar event, not the ICS `LOCATION`, not the "Where:" line in the customer's email. The
+ * Availability card promised the opposite, unconditionally.
+ *
+ * A migration could not tell those rows from deliberate ones, because both said `custom` and
+ * both are legitimate. Rather than guess, the two are now spelled differently: `unset` means
+ * NOBODY WAS EVER ASKED, `custom` means somebody was asked and chose none. The dropdown never
+ * offers `unset`, so it is a state rows arrive in and leave, not one an owner can select.
+ */
+export type LocationType = 'google_meet' | 'phone' | 'in_person' | 'custom' | 'unset';
 export type BookingMode = 'auto' | 'request';
 export type DurationMode = 'fixed' | 'range' | 'ai';
 export type PriceDisplayType = 'none' | 'fixed' | 'from' | 'range' | 'on_request';

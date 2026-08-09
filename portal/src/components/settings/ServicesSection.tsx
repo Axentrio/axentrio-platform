@@ -651,19 +651,28 @@ const ServiceEditorDialog: React.FC<{
                   value={form.locationType}
                   onChange={(e) => set('locationType', e.target.value)}
                 >
+                  {/* `unset` is not offered. It is the state a Service created before this
+                      control existed arrives in (#71), so it must be SELECTABLE to leave and
+                      never selectable to enter - otherwise saving the form would silently move
+                      a settled Service back into "never asked". */}
+                  {form.locationType === 'unset' && (
+                    <option value="unset">Not set yet — please choose</option>
+                  )}
                   <option value="in_person">In person</option>
                   <option value="google_meet">Video call (a meeting link is created)</option>
                   <option value="phone">Phone call</option>
                   <option value="custom">Something else</option>
                 </select>
                 <p className="text-xs text-text-muted">
-                  {form.locationType === 'google_meet'
-                    ? 'A video link is generated and sent with the invite.'
-                    : form.locationType === 'in_person'
-                      ? form.customerAddressRequired
-                        ? 'You travel to the customer — their address goes on the invite.'
-                        : 'The customer comes to you — your address goes on the invite, once you have set one under Availability.'
-                      : 'No location is put on the invite.'}
+                  {form.locationType === 'unset'
+                    ? 'This service was created before this setting existed, so nobody has chosen. Your address is going on the invite for now — pick the right answer to settle it.'
+                    : form.locationType === 'google_meet'
+                      ? 'A video link is generated and sent with the invite.'
+                      : form.locationType === 'in_person'
+                        ? form.customerAddressRequired
+                          ? 'You travel to the customer — their address goes on the invite.'
+                          : 'The customer comes to you — your address goes on the invite, once you have set one under Availability.'
+                        : 'No location is put on the invite.'}
                 </p>
               </div>
               <label htmlFor="svc-addr-req" className="flex items-center gap-2 cursor-pointer">

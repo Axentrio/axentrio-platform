@@ -101,6 +101,37 @@ describe('resolveEventLocation', () => {
     ).toBe('https://meet.google.com/abc-defg-hij');
   });
 
+  it('puts the venue on a service NOBODY WAS EVER ASKED about (#71)', () => {
+    // `unset` is a Service created before the dropdown existed. The column defaulted to
+    // `custom`, which means "no location", so a venue the owner had typed into Settings reached
+    // nothing - while the Availability card promised unconditionally that it would.
+    expect(
+      resolveEventLocation({ locationType: 'unset', customerAddressRequired: false, venue }),
+    ).toBe('Grote Markt 1, 9300 Aalst');
+  });
+
+  it('still puts NOTHING on a service whose owner chose `custom`', () => {
+    // The distinction the whole change exists for. Both used to be spelled `custom`, so a
+    // migration could not tell them apart; treating them the same now would put an address on
+    // invites an owner deliberately left blank.
+    expect(
+      resolveEventLocation({ locationType: 'custom', customerAddressRequired: false, venue }),
+    ).toBeUndefined();
+  });
+
+  it('leaves an unset TRAVEL service on the customer address, not the venue', () => {
+    // `customerAddressRequired` is the stronger statement and is read first, so marking a row
+    // never-asked must not redirect a job at the customer's address to the owner's premises.
+    expect(
+      resolveEventLocation({
+        locationType: 'unset',
+        customerAddressRequired: true,
+        customerAddress: 'Kerkstraat 12, 9000 Gent',
+        venue,
+      }),
+    ).toBe('Kerkstraat 12, 9000 Gent');
+  });
+
   it('sends the CUSTOMER’s address when the owner travels to them', () => {
     // Their own address in their own invite discloses nothing to them, and it is the
     // genuinely useful value on the owner's copy.

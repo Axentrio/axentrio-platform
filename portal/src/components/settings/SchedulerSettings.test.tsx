@@ -215,6 +215,48 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     });
   });
 
+  /**
+   * #79 (LP1): the location controls are shown only where they apply.
+   *
+   * Two halves, and the first is the safety rule. The editor sends `venueAddress` and
+   * `serviceArea` on EVERY save - `[]` is how an owner clears their area, a null line is how they
+   * clear an address - so hiding a control that holds something is one refactor away from
+   * deleting it. The component's rule is therefore "hide only when there is nothing stored to
+   * hide", which makes a populated-but-hidden control impossible rather than merely handled.
+   */
+  it('never hides a control that holds something, even where it does not apply (#79)', async () => {
+    const remoteOnly = {
+      ...CONFIG,
+      services: [{ id: 's1', isActive: true, locationType: 'google_meet', customerAddressRequired: false }],
+      workLocation: 'no_location',
+    };
+    const body = await saveUntouched(remoteOnly);
+
+    // Still on screen, because it holds an address. This is the assertion that makes the
+    // round-trip below mean something: a test that only checked the payload would pass just as
+    // happily against a hidden control whose state happened to survive.
+    expect(document.getElementById('venue-street')).not.toBeNull();
+    expect(body.venueAddress).toEqual(VENUE);
+    expect(body.serviceArea).toEqual(AREA);
+  });
+
+  it('hides both controls when they neither apply nor hold anything (#79)', async () => {
+    const nothingToShow = {
+      ...CONFIG,
+      services: [{ id: 's1', isActive: true, locationType: 'google_meet', customerAddressRequired: false }],
+      workLocation: 'no_location',
+      venueAddress: { street: null, postalCode: null, city: null, country: null },
+      serviceArea: [],
+    };
+    const body = await saveUntouched(nothingToShow);
+
+    // Gone, because there is nothing to answer: no customer comes here and nobody travels.
+    expect(document.getElementById('venue-street')).toBeNull();
+    // And an absent control still sends its empty value, so nothing about the save changes.
+    expect(body.venueAddress).toEqual({ street: null, postalCode: null, city: null, country: null });
+    expect(body.serviceArea).toEqual([]);
+  });
+
   it('returns the venue address unchanged when the owner saves without editing', async () => {
     // Same hazard as the rules: a component the editor fails to hydrate arrives as null and
     // Save writes the blank over a real address the owner set weeks ago.

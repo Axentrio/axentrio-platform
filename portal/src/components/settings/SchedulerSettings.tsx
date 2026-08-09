@@ -204,6 +204,7 @@ export const SchedulerSettings: React.FC = () => {
    * not send the field yet changes nothing.
    */
   const workLocation = data?.workLocation ?? 'at_one_location';
+
   const update = useUpdateSchedulerConfig(botId);
   const queryClient = useQueryClient();
   // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
@@ -253,7 +254,27 @@ export const SchedulerSettings: React.FC = () => {
   const [days, setDays] = useState<DayState>(() => rowsFromWeeklyHours(undefined));
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
+
   const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
+
+  /**
+   * Show a location control only where it applies - and NEVER hide one that holds something
+   * (#79, LP1).
+   *
+   * The rule is "hide only when there is nothing stored to hide", and the second half is the
+   * load-bearing one. This form sends `venueAddress` and `serviceArea` on every save, by design:
+   * `[]` is how an owner clears their area and a null field is how they clear an address line. So
+   * a control hidden while its value was non-empty would still round-trip that value today, and
+   * would silently delete it the first time anyone made hiding also reset the state. Refusing to
+   * hide a populated control means that mistake has nowhere to land.
+   *
+   * An empty control on a business the setting cannot apply to is just a question nobody needs to
+   * answer.
+   */
+  const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
+  const showVenue = workLocation !== 'no_location' || hasStoredVenue;
+  const hasAddressService = (data?.services ?? []).some((svc) => svc.isActive && svc.customerAddressRequired);
+  const showServiceArea = hasAddressService || serviceArea.length > 0;
   // NOT state — it is the server's answer to "may this be switched on", refreshed with the
   // config. Holding it in state would let a stale value keep the switch enabled after a
   // calendar change made it harmful.
@@ -767,15 +788,17 @@ export const SchedulerSettings: React.FC = () => {
                   </div>
                 )}
 
-                {/* Service area — where the business will travel */}
-                <ServiceAreaField
-                  value={serviceArea}
-                  onChange={setServiceArea}
-                  // The area is only enforceable against services that collect an address.
-                  hasAddressService={(data?.services ?? []).some(
-                    (svc) => svc.isActive && svc.customerAddressRequired,
-                  )}
-                />
+                {/* Service area — where the business will travel. Hidden only when it is both
+                    inapplicable AND empty; a stored area always stays visible, with the field's
+                    own note explaining that nothing is being enforced against it. */}
+                {showServiceArea && (
+                  <ServiceAreaField
+                    value={serviceArea}
+                    onChange={setServiceArea}
+                    // The area is only enforceable against services that collect an address.
+                    hasAddressService={hasAddressService}
+                  />
+                )}
 
                 {/*
                   Pause. Deliberately at the TOP of this card: it is the thing an owner
@@ -802,7 +825,10 @@ export const SchedulerSettings: React.FC = () => {
                   </label>
                 </div>
 
-                {/* Venue — where customers come TO. Never the VAT/legal address. */}
+                {/* Venue — where customers come TO, and where the van sets out FROM. Never the
+                    VAT/legal address. Hidden only when no Service is physical AND nothing is
+                    stored; a stored address always stays visible and editable. */}
+                {showVenue && (
                 <div className="space-y-3 border-t border-edge pt-4">
                   <div>
                     <h3 className="text-sm font-medium text-text-primary">Your address</h3>
@@ -887,6 +913,7 @@ export const SchedulerSettings: React.FC = () => {
                     </div>
                   </div>
                 </div>
+                )}
 
                 {/*
                   Travel time. AFTER the address deliberately: the day's first job is measured

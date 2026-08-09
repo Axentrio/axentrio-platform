@@ -194,6 +194,16 @@ export const SchedulerSettings: React.FC = () => {
   const hydratedPayload = useRef<string | null>(null);
 
   const { data, isLoading, refetch } = useSchedulerConfig(true, botId);
+  /**
+   * Which roles this owner's address actually plays (#79, LP1).
+   *
+   * Derived server-side from the Service catalog and read here rather than re-derived: the
+   * precedence between `locationType` and `customerAddressRequired` is subtle, and two
+   * implementations of it would eventually disagree about which copy to show. Defaults to
+   * `at_one_location`, which is the wording this screen has always used - an older API that does
+   * not send the field yet changes nothing.
+   */
+  const workLocation = data?.workLocation ?? 'at_one_location';
   const update = useUpdateSchedulerConfig(botId);
   const queryClient = useQueryClient();
   // EVERY calendar hook takes the Agent too. Scoping the settings without these would leave
@@ -796,10 +806,40 @@ export const SchedulerSettings: React.FC = () => {
                 <div className="space-y-3 border-t border-edge pt-4">
                   <div>
                     <h3 className="text-sm font-medium text-text-primary">Your address</h3>
+                    {/* #79 (LP1): this copy used to end "It is not used for jobs where you travel
+                        to the customer", which is exactly what Home Base needs it to be. One
+                        address, two roles - where customers come TO, and where the van sets out
+                        FROM - so what it says now depends on which roles are actually in play.
+                        Derived from the catalog rather than asked as a second question: the
+                        services already say which kinds of work exist. */}
                     <p className="text-xs text-text-secondary mt-1">
-                      Where customers come to you. This goes on the calendar invite so they can find
-                      you — leave it empty and the invite simply won't mention a place. It is not used
-                      for jobs where you travel to the customer; those use their address instead.
+                      {workLocation === 'on_the_road' ? (
+                        <>
+                          Where your working day starts. Travel time measures the first job of a day
+                          from here, so an early job an hour away is not offered against a start you
+                          could not make — leave it empty and the day's first job is not measured
+                          from anywhere.
+                        </>
+                      ) : workLocation === 'both' ? (
+                        <>
+                          Two jobs for one address: customers come here for the services you do on
+                          site, and it is where your working day starts for the ones you travel to.
+                          It goes on the calendar invite for the first kind — leave it empty and the
+                          invite simply won't mention a place.
+                        </>
+                      ) : (
+                        <>
+                          Where customers come to you. This goes on the calendar invite so they can
+                          find you — leave it empty and the invite simply won't mention a place.
+                        </>
+                      )}
+                    </p>
+                    {/* Never the VAT or registered address, and never backfilled from one. Said out
+                        loud rather than only enforced in the schema, because an owner filling this
+                        in has no way to know it is a separate field unless it says so. */}
+                    <p className="text-xs text-text-muted mt-1">
+                      This is yours to choose. It is not your registered or VAT address, and nothing
+                      fills it in from one.
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

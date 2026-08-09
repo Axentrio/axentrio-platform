@@ -133,10 +133,20 @@ export interface VenueAddress {
   country: string | null;
 }
 
+/**
+ * What kind of business this is, derived by the server from the Service catalog (#79, LP1).
+ *
+ * A projection, never a stored setting - the Services are where the facts live. The portal reads
+ * it rather than re-deriving it, because the precedence between `locationType` and
+ * `customerAddressRequired` is subtle enough that two implementations would eventually disagree.
+ */
+export type WorkLocation = 'no_location' | 'at_one_location' | 'on_the_road' | 'both';
+
 export interface SchedulerConfig {
   provider: 'calcom' | 'internal';
   eventType: SchedulerEventType | null;
   services?: Service[];
+  workLocation?: WorkLocation;
   availability: SchedulerAvailability | null;
   /** Places the business travels to. Always an array — [] means none configured. */
   serviceArea?: ServiceAreaEntry[];

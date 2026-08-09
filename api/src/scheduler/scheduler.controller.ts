@@ -15,6 +15,7 @@ import { Booking } from '../database/entities/Booking';
 import type { Bot, BotSettings } from '../database/entities/Bot';
 import { resolveTargetBot, replaceBotSettingsSection } from '../services/bot-config.service';
 import { targetBotId } from '../utils/target-bot';
+import { resolveWorkLocation } from '../booking/service-location';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
 import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
@@ -208,6 +209,15 @@ async function readConfig(tenantId: string, bot: Bot) {
     // `services` is the full catalog (K3).
     eventType: eventType ?? null,
     services,
+    /**
+     * What kind of business this is, DERIVED from the catalog above (#79, LP1).
+     *
+     * A projection, never a stored column: `ServiceType` is where the facts live, and a second
+     * enum deciding behaviour independently would drift the first time an owner edited a Service
+     * without it noticing. Computed here because this endpoint already has the whole catalog in
+     * hand, so it costs nothing and no screen has to re-derive it and get the precedence wrong.
+     */
+    workLocation: resolveWorkLocation(services),
     availability: availability ?? null,
     // No settings row (or a hand-edited non-array) reads as "no area configured", which
     // never blocks a booking.

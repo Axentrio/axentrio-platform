@@ -75,10 +75,12 @@ async function seedBooking(input: {
   const start = new Date(Date.now() + input.hoursFromNow * 3_600_000);
   start.setUTCMinutes(0, 0, 0);
   const end = new Date(start.getTime() + 3_600_000);
-  // A captured Request holds no time, so it has no blocked range - that is the whole reason a
-  // request and a confirmed booking for the same customer can coexist without the exclusion
-  // constraint noticing, which is the bug.
-  const range = input.status === 'request_created' ? null : `[${start.toISOString()},${end.toISOString()})`;
+  // A Request carries a range like any other row - `requestAppointment` writes
+  // `tstzrange($5,$6,'[)')` for it, and the column is NOT NULL. What makes a Request able to sit
+  // beside a confirmed booking for the same customer is the exclusion constraint's own predicate,
+  // `WHERE status IN ('pending','confirmed')`, which skips it. An earlier version of this fixture
+  // wrote NULL and only passed because the test schema was laxer than production's.
+  const range = `[${start.toISOString()},${end.toISOString()})`;
   await AppDataSource.query(
     `INSERT INTO chatbot_bookings
        (id, tenant_id, bot_id, provider, status, start_utc, end_utc, calendar_key, blocked_range,

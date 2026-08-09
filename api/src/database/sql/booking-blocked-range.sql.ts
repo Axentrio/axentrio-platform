@@ -28,12 +28,23 @@
 /**
  * Bring a synchronize()-built `chatbot_bookings` up to the migration's shape.
  *
- * NULLABLE, where the migration has `NOT NULL`. The migration creates the table with
- * the column present, so every insert supplies it; here the column arrives after test
- * factories already exist, and `NOT NULL` would break every one of them that has no
- * reason to care about a range. A test that needs the range writes it explicitly - and
- * `upper(NULL) > now()` is NULL, so a booking without one is simply not selected, which
- * is the same answer as a booking in the past.
+ * NULLABLE, where the migration has `NOT NULL`, and that difference is a DECISION rather than an
+ * oversight - the second time round.
+ *
+ * Parity was tried and measured. Making this `NOT NULL` fails 37 tests across 8 files, all of
+ * which seed bookings through `repo.save(repo.create(...))`; the `Booking` entity deliberately
+ * does not map a range type, so those inserts CANNOT supply one. Real parity therefore means
+ * rewriting eight fixtures to raw SQL, in files about leads and retention that have no interest
+ * in ranges.
+ *
+ * It would also buy less than it looks. The hazard is a PRODUCTION insert that omits the column,
+ * and schema strictness only catches that if some test happens to exercise that exact path.
+ * `booking-insert-invariants.test.ts` asserts it directly instead: every production
+ * `INSERT INTO chatbot_bookings` names `blocked_range`, and production never inserts a Booking
+ * through the repository - which it currently never does, all writes being raw SQL.
+ *
+ * So: the schemas differ, the difference is bounded to what fixtures may leave unset, and the
+ * thing the difference could have hidden is checked at the source instead.
  */
 export const INSTALL_BOOKING_BLOCKED_RANGE: readonly string[] = [
   // btree_gist is what lets a `=` on text sit beside a `&&` on a range in one index.

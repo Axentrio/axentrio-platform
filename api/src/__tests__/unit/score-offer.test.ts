@@ -402,6 +402,56 @@ describe('what comes back', () => {
     expect(lastReadAt - startedAt).toBeLessThanOrEqual(GROUPING_DEADLINE_MS + 400);
   }, 20_000);
 
+  it('estimates an adjacent leg the gate never routed, which is the CHEAP side', async () => {
+    // The gap this closes bites in exactly the wrong place. A leg the gate did not route is
+    // usually one it did not need to - the bounds cleared the slot on their own - and that happens
+    // when the two points are CLOSE. So the unmeasured legs are the short, cheap insertions, which
+    // are the whole reason to prefer a slot. Measured live: a customer beside an existing job
+    // scored `leg_unmeasured` while the expensive alternative across the province scored fine.
+    driveLookupFor.mockReturnValue(async () => ({ minutes: null, cause: 'not_cached' }));
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: [slot(MON, '10:00')],
+      requestable: [],
+      neighbours: [neighbour(MON, '09:00', 51.49)],
+    });
+
+    const scored = result!.scores[utc(MON, '10:00').toISOString()];
+    expect(scored.neutralReason).toBeNull();
+    expect(scored.costMinutes).not.toBeNull();
+    // ...and the offer says how much of itself rests on an estimate rather than a measurement.
+    expect(result!.estimatedLegs).toBeGreaterThan(0);
+  });
+
+  it('never estimates a BASELINE leg, only the ones beside the candidate', async () => {
+    // The baseline is the counterfactual the whole cost is measured against. Estimating it would
+    // subtract a guess from two real numbers and call the difference a cost.
+    let baselineAsked = 0;
+    driveLookupFor.mockImplementation(() => async (leg: { from: { lat: number }; to: { lat: number } }) => {
+      const isBaseline = leg.from.lat !== 51.5 && leg.to.lat !== 51.5;
+      if (isBaseline) baselineAsked += 1;
+      return { minutes: null, cause: 'not_cached' };
+    });
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
+      requestable: [],
+      neighbours: [neighbour(MON, '13:00', 51.49), neighbour(MON, '16:30', 51.48)],
+    });
+
+    expect(baselineAsked).toBeGreaterThan(0);
+    // The baseline came back null and was NOT estimated, so the candidate carries no opinion.
+    const scored = result!.scores[utc(MON, '14:00').toISOString()];
+    expect(scored.costMinutes).toBeNull();
+    expect(scored.neutralReason).toBe('leg_unmeasured');
+  });
+
   it('answers null for an empty list rather than an empty scoring', async () => {
     // An offer with no slots has nothing to prefer, and a row saying "scored, nothing found" would
     // be counted in the denominator of every LP4 question.

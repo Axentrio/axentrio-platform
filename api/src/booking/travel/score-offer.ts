@@ -22,6 +22,7 @@ import { scoreCandidates, type LegLookup, type RouteNode, type ScoredCandidate }
 import { counterfactualOrder, hasCheaperAlternative, SCORER_VERSION } from './slot-ordering';
 import { GROUPING_DEADLINE_MS, GROUPING_LEG_BUDGET, GROUPING_PAID_LEG_BUDGET } from './grouping-budget';
 import { driveLookupFor } from './routes.service';
+import { estimateDrive } from './travel-gate';
 import type { NeighbourLocation, TravelNeighbour } from './travel-gate';
 import type { ActiveTravelEligibility } from './travel-eligibility';
 import type { GeoPoint } from '../../contracts/travel';
@@ -68,6 +69,13 @@ export interface OfferScoring {
    * back requestable), and buying it would be grouping paying to redo the gate's own work.
    */
   adjacentMisses: number;
+  /**
+   * How many legs in this scoring came from the haversine estimate rather than a real drive.
+   *
+   * LP4 needs to know how much of a cost rests on an estimate, because the two are not the same
+   * evidence. Zero means every leg behind these numbers was measured.
+   */
+  estimatedLegs: number;
   ms: number;
 }
 
@@ -113,6 +121,7 @@ export async function scoreOfferedSlots(input: {
   const tenantId = input.eligibility.tenantId;
   let elementsSpent = 0;
   let adjacentMisses = 0;
+  let estimatedLegs = 0;
   // EVERY leg the pass actually reaches a lookup for - hits, misses and purchases alike. A cache
   // hit is free in money and not free in time, and `GROUPING_LEG_BUDGET` is a bound on the
   // customer's wait. Counted out here because `scoreCandidates` counts within ONE call and the
@@ -191,7 +200,28 @@ export async function scoreOfferedSlots(input: {
         budgetMin: Number.POSITIVE_INFINITY,
       });
       if (key !== null) baselineMemo.set(key, answer.minutes);
-      return answer.minutes;
+      if (answer.minutes !== null) return answer.minutes;
+
+      // ESTIMATE the legs beside a candidate rather than leave them unknown, and only those.
+      //
+      // The gap this closes is the opposite of the one the baseline purchase closed, and it bites
+      // in exactly the wrong place. A leg the gate did not route is usually a leg it did not NEED
+      // to route - `certainlyReachableWithin` cleared the slot from the bounds alone - and that
+      // happens when the two points are CLOSE. So the unmeasured legs are the short ones, which
+      // are the cheap insertions, which are the whole reason to prefer a slot. Measured live: a
+      // customer beside an existing job scored `leg_unmeasured` while the expensive alternative
+      // across the province scored fine.
+      //
+      // A preference may rest on an estimate where a refusal may not. Nothing here can turn a
+      // confirmable Slot into a Request, so ADR-0015's "uncertainty splits three ways" is about a
+      // different decision than this one.
+      //
+      // The SLOW end deliberately. It is the honest figure for a short urban hop, and where it is
+      // wrong it overstates the cost - which understates the preference, and can only ever make
+      // grouping quieter than the truth rather than louder.
+      if (purpose !== 'adjacent') return null;
+      estimatedLegs += 1;
+      return estimateDrive(from, to).slowestMin;
     };
 
     // Grouped by LOCAL day: a period is a property of one date, and the slot list spans many.
@@ -341,6 +371,7 @@ export async function scoreOfferedSlots(input: {
       ),
       elementsSpent,
       adjacentMisses,
+      estimatedLegs,
       ms: Date.now() - startedAt,
     };
   } catch (error) {

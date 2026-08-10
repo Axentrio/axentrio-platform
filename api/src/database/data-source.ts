@@ -6,6 +6,7 @@
 import { DataSource } from 'typeorm';
 import { config } from '../config/environment';
 import { logger } from '../utils/logger';
+import { RedactingQueryLogger } from './query-logger';
 
 // Import entities
 import { Tenant } from './entities/Tenant';
@@ -168,7 +169,9 @@ export const AppDataSource = new DataSource({
 
   // Logging
   logging: ['error'],
-  logger: 'advanced-console',
+  // NOT `advanced-console`, which prints every bound parameter on a failed query — and every
+  // value a customer typed is a bound parameter. See `RedactingQueryLogger`.
+  logger: new RedactingQueryLogger(),
 
   // Off in prod (use migrations). Opt-in for local dev via DB_SYNCHRONIZE=true,
   // which builds the schema from entities (extensions must pre-exist).

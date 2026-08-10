@@ -22,6 +22,15 @@ workerUrl.pathname = `/${baseDbName}_${workerId}`;
 process.env.DATABASE_URL = workerUrl.toString();
 process.env.TEST_DATABASE_URL = workerUrl.toString();
 
+// The DATABASE is per worker; REDIS was not. Four workers shared one unprefixed keyspace, so a
+// cache, lock or counter written by one was read by another — against a DIFFERENT database. Any
+// key that is not tenant-scoped collides outright, and the symptom is a failure in whichever file
+// happened to be running, which reads as flake and moves every run.
+//
+// Same worker id as the database above, so a worker's two stores always agree about whose data
+// they hold.
+process.env.REDIS_KEY_PREFIX = `test${workerId}:`;
+
 // Integration tests fire many requests per file through the global IP rate
 // limiter (default 100/window) — raise it far past any single file so tests
 // aren't throttled with spurious 429s. Must be set before config is imported.

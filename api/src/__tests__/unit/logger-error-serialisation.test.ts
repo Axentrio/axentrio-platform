@@ -13,6 +13,8 @@
  * its own stream, so asserting on stdout tests the plumbing and not the transform that was fixed.
  */
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { readableErrors } from '../../utils/logger';
 
 /** Apply the format exactly as winston would, and hand back what a transport would serialise. */
@@ -52,5 +54,25 @@ describe('an Error logged inside metadata', () => {
     expect(out.tenantId).toBe('ten-1');
     expect(out.count).toBe(3);
     expect(out.nested).toBe(nested);
+  });
+});
+
+describe('the format is actually wired in', () => {
+  // The transform tests above prove it WORKS. They do not prove it RUNS: an unused format is a
+  // passing test suite and an unchanged production log, which is exactly the state this file
+  // exists to leave behind.
+  const src = readFileSync(join(__dirname, '..', '..', 'utils', 'logger.ts'), 'utf8');
+
+  it('runs in production, where the blind logs were', () => {
+    expect(src).toMatch(/const prodFormat = winston\.format\.combine\(\s*\n\s*readableErrors\(\),/);
+  });
+
+  it('runs in development too, so the two do not disagree about what an error looks like', () => {
+    expect(src).toMatch(/const devFormat = winston\.format\.combine\(\s*\n\s*readableErrors\(\),/);
+  });
+
+  it('runs BEFORE json(), or the Error is already flattened by the time it arrives', () => {
+    const prod = src.slice(src.indexOf('const prodFormat'), src.indexOf('// Colorized console format'));
+    expect(prod.indexOf('readableErrors()')).toBeLessThan(prod.indexOf('winston.format.json()'));
   });
 });

@@ -52,11 +52,26 @@ export interface ScoredCandidate {
   period: HalfDayPeriod | null;
 }
 
+/**
+ * WHICH leg is being asked for, because the two kinds cost differently.
+ *
+ * `adjacent` is `prev→candidate` or `candidate→next` - exactly the pairs the feasibility gate
+ * routes for this same candidate, so they are already in the conversation's drive cache and cost
+ * nothing to read.
+ *
+ * `baseline` is `prev→next`, the leg that says what the day cost WITHOUT this candidate. Nothing
+ * else in the system ever needs it, so it is never cached and somebody has to buy it. It is also
+ * per-GAP rather than per-candidate: the same two anchors and the same departure instant, so
+ * every candidate in that gap reads one purchase.
+ */
+export type LegPurpose = 'adjacent' | 'baseline';
+
 /** Measures one leg, or answers null when it cannot. Never throws, never estimates. */
 export type LegLookup = (
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
-  departAt: Date
+  departAt: Date,
+  purpose: LegPurpose
 ) => Promise<number | null>;
 
 export interface ScoreInput {
@@ -165,11 +180,14 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
       // DEPARTURE TIMES ARE FIXED, not chosen. Traffic-aware answers are departure-bucketed, so a
       // scorer free to pick its own departure would score one itinerary differently run to run -
       // and LP4's whole gate is whether the ranking is stable.
-      const toCandidate = prev ? await input.lookup(prev.point, candidate.point, prev.departAt) : 0;
+      const toCandidate = prev ? await input.lookup(prev.point, candidate.point, prev.departAt, 'adjacent') : 0;
       const fromCandidate = nextAnchor
-        ? await input.lookup(candidate.point, nextAnchor.point, candidate.blockedEnd)
+        ? await input.lookup(candidate.point, nextAnchor.point, candidate.blockedEnd, 'adjacent')
         : 0;
-      const baseline = prev && nextAnchor ? await input.lookup(prev.point, nextAnchor.point, prev.departAt) : 0;
+      // The counterfactual: what the two anchors cost each other with nobody between them. Not a
+      // leg feasibility ever measures, so it is the one the caller may have to pay for.
+      const baseline =
+        prev && nextAnchor ? await input.lookup(prev.point, nextAnchor.point, prev.departAt, 'baseline') : 0;
       legsUsed += legsNeeded;
 
       if (toCandidate === null || fromCandidate === null || baseline === null) {

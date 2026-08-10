@@ -142,28 +142,44 @@ describe('what comes back', () => {
     expect(roundTripped.counterfactualOrder).toEqual([utc(MON, '10:00').toISOString()]);
   });
 
-  it('asks for a cache-only lookup, which is what makes this shadow rather than merely cheap', async () => {
-    // Not a cheaper lookup - a lookup that CANNOT spend. Grouping shares one monthly counter with
-    // the feasibility gate, so any spend at all can push a tenant into an exhaustion they would
-    // not otherwise have reached, and an exhausted gate turns confirmable slots into Requests.
+  it('buys the baseline leg and refuses to buy the ones beside the candidate', async () => {
+    // THE fix. Adjacent legs are the pairs feasibility just routed, so they are free or not had at
+    // all - buying one would be grouping paying to redo the gate's own work. The baseline is the
+    // leg nothing else ever asks for, so it is never cached and somebody has to buy it.
+    const asked: Array<{ cacheOnly: boolean; from: number }> = [];
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean }) => {
+      return async (leg: { from: { lat: number } }) => {
+        asked.push({ cacheOnly: opts?.cacheOnly === true, from: leg.from.lat });
+        return { minutes: 20 };
+      };
+    });
+
     await scoreOfferedSlots({
       ...base,
       ...noBase,
-      slots: [slot(MON, '10:00')],
+      // Sandwiched: a job before AND after, which is what needs a baseline at all.
+      slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
       requestable: [],
-      neighbours: [neighbour(MON, '09:00', 1)],
+      neighbours: [neighbour(MON, '13:00', 1), neighbour(MON, '16:00', 2)],
     });
 
-    expect(driveLookupFor).toHaveBeenCalledWith(eligibility, 'sess-1', expect.objectContaining({ cacheOnly: true }));
+    // Three legs: two adjacent on the free lookup, one baseline on the paying one.
+    expect(asked.filter((a) => a.cacheOnly)).toHaveLength(2);
+    const bought = asked.filter((a) => !a.cacheOnly);
+    expect(bought).toHaveLength(1);
+    // ...and the bought one is anchor-to-anchor, never anything touching the candidate.
+    expect(bought[0].from).toBe(1);
   });
 
-  it('counts the legs it declined to buy, which is the cost question answered for free', async () => {
-    let onWouldSpend: (() => void) | undefined;
-    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { onWouldSpend?: () => void }) => {
-      onWouldSpend = opts?.onWouldSpend;
+  it('scores a candidate with a job on BOTH sides, which is the case it used to be blind to', async () => {
+    // The regression this fix exists for. Spending nothing at all left every sandwiched candidate
+    // on `leg_unmeasured`, measured live: 10 offers, 63 slots, and not one scored slot had
+    // neighbours on both sides. The blind spot was precisely the mid-day insertion grouping is for.
+    // The real router fires `onBilled` at the reservation, so a mock that skips it would leave
+    // the spend counter at zero and the budget guard permanently open.
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
       return async () => {
-        // One leg was in this conversation's cache and one was not. Only the second is a cost.
-        onWouldSpend?.();
+        if (opts?.cacheOnly !== true) opts?.onBilled?.();
         return { minutes: 20 };
       };
     });
@@ -171,13 +187,220 @@ describe('what comes back', () => {
     const result = await scoreOfferedSlots({
       ...base,
       ...noBase,
-      slots: [slot(MON, '10:00')],
+      slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
       requestable: [],
-      neighbours: [neighbour(MON, '09:00', 1)],
+      neighbours: [neighbour(MON, '13:00', 1), neighbour(MON, '16:00', 2)],
     });
 
-    expect(result!.elementsWouldSpend).toBe(1);
+    const scored = result!.scores[utc(MON, '14:00').toISOString()];
+    // 20 there + 20 onward - 20 the anchors already cost each other = 20 added.
+    expect(scored.costMinutes).toBe(20);
+    expect(scored.neutralReason).toBeNull();
+    expect(result!.elementsSpent).toBe(1);
   });
+
+  it('buys a gap ONCE however many candidates sit in it, with no drive cache at all', async () => {
+    // The magnitude this whole design is justified by. The drive cache would usually collapse
+    // these, but only usually: it is skipped when the session id is null, unavailable when Redis
+    // is down, never holds a failed answer, and `trafficAware` flips at the 24-hour horizon and
+    // makes two keys for one instant. Under any of those every candidate in the gap would re-buy
+    // the identical leg, and "about one element per gap" would quietly become per-candidate.
+    let bought = 0;
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
+      return async (leg: { from: { lat: number }; to: { lat: number } }) => {
+        const touchesCandidate = leg.from.lat === 51.5 || leg.to.lat === 51.5;
+        // A cache that answers NOTHING, which is what a null session or a dead Redis looks like.
+        if (opts?.cacheOnly === true) return touchesCandidate ? { minutes: 20 } : { minutes: null };
+        bought += 1;
+        opts?.onBilled?.();
+        return { minutes: 20 };
+      };
+    });
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      // Four candidates, all in the SAME gap between the same two jobs.
+      slots: ['14:00', '14:30', '15:00', '15:30'].map((t) => ({
+        start: utc(MON, t).toISOString(),
+        end: utc(MON, t === '15:30' ? '16:00' : '15:00').toISOString(),
+      })),
+      requestable: [],
+      neighbours: [neighbour(MON, '13:00', 1), neighbour(MON, '16:30', 2)],
+    });
+
+    expect(bought).toBe(1);
+    expect(result!.elementsSpent).toBe(1);
+  });
+
+  it('does not re-buy a baseline that already FAILED this pass', async () => {
+    // A failed answer is deliberately never written to the drive cache, so without an in-pass memo
+    // every candidate in the gap would pay again for the same failure.
+    let bought = 0;
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
+      return async (leg: { from: { lat: number }; to: { lat: number } }) => {
+        const touchesCandidate = leg.from.lat === 51.5 || leg.to.lat === 51.5;
+        if (opts?.cacheOnly === true) return touchesCandidate ? { minutes: 20 } : { minutes: null };
+        bought += 1;
+        opts?.onBilled?.();
+        return { minutes: null, cause: 'no_route' };
+      };
+    });
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: ['14:00', '14:30', '15:00'].map((t) => ({
+        start: utc(MON, t).toISOString(),
+        end: utc(MON, t === '15:00' ? '16:00' : '15:00').toISOString(),
+      })),
+      requestable: [],
+      neighbours: [neighbour(MON, '13:00', 1), neighbour(MON, '16:30', 2)],
+    });
+
+    expect(bought).toBe(1);
+    // Every candidate is neutral rather than refused, which is ADR-0017 holding on a failure.
+    expect(Object.values(result!.scores).every((x) => x.costMinutes === null)).toBe(true);
+  });
+
+  it('stops buying at the paid budget and goes neutral rather than stopping the pass', async () => {
+    // A hard per-pass count, not a share of the tenant's month. Past it the remaining candidates
+    // carry no preference, which refuses nothing - ADR-0017's rule holds whatever the budget does.
+    const { GROUPING_PAID_LEG_BUDGET } = await import('../../booking/travel/grouping-budget');
+    let bought = 0;
+    // The cache mirrors reality: it holds the legs feasibility routed, which always touch the
+    // candidate, and never anchor-to-anchor. A mock that answers everything would let a candidate
+    // score past the budget and hide the very degradation being tested.
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
+      return async (leg: { from: { lat: number }; to: { lat: number } }) => {
+        const touchesCandidate = leg.from.lat === 51.5 || leg.to.lat === 51.5;
+        if (opts?.cacheOnly === true) return touchesCandidate ? { minutes: 20 } : { minutes: null };
+        bought += 1;
+        opts?.onBilled?.();
+        return { minutes: 20 };
+      };
+    });
+
+    // One gap per day, so more days than the budget allows is the cheapest way to exceed it.
+    const days = ['2026-09-07', '2026-09-08', '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-14'];
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      slots: days.map((d) => ({ start: utc(d, '14:00').toISOString(), end: utc(d, '15:00').toISOString() })),
+      requestable: [],
+      neighbours: days.flatMap((d) => [neighbour(d, '13:00', 1), neighbour(d, '16:00', 2)]),
+    });
+
+    expect(bought).toBe(GROUPING_PAID_LEG_BUDGET);
+    expect(result!.elementsSpent).toBe(GROUPING_PAID_LEG_BUDGET);
+    // The days past the budget are neutral, not missing and not refused.
+    const neutral = Object.values(result!.scores).filter((s) => s.neutralReason === 'leg_unmeasured');
+    expect(neutral.length).toBe(days.length - GROUPING_PAID_LEG_BUDGET);
+  });
+
+  it('bounds the legs it READS across the whole pass, not per day', async () => {
+    // A cache hit costs no money and does cost time, and the leg budget is a bound on the customer
+    // waiting behind a live availability call. `scoreCandidates` counts within ONE call and the
+    // pass makes one call per day, so without an outer counter a fortnight of days would each
+    // start with a full budget and the advertised bound would mean nothing.
+    const { GROUPING_LEG_BUDGET } = await import('../../booking/travel/grouping-budget');
+    let reads = 0;
+    driveLookupFor.mockImplementation((_e: unknown, _s: unknown, opts: { cacheOnly?: boolean; onBilled?: () => void }) => {
+      return async () => {
+        reads += 1;
+        if (opts?.cacheOnly !== true) opts?.onBilled?.();
+        return { minutes: 20 };
+      };
+    });
+
+    // WEEKDAYS only and SANDWICHED candidates, and both matter. A weekend has no windows, so its
+    // candidates never reach a lookup and pad the day count without adding a read. A candidate
+    // with one neighbour reads one leg; one with a job either side reads three. Twelve weekdays at
+    // three legs is 36 uncapped, comfortably over the budget of 24 — if the arrangement cannot
+    // exceed the bound, the assertion proves nothing about whether the bound is enforced.
+    const days = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-07', '2026-09-08',
+                  '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-14', '2026-09-15', '2026-09-16'];
+    await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: days.map((d) => ({ start: utc(d, '14:00').toISOString(), end: utc(d, '15:00').toISOString() })),
+      requestable: [],
+      neighbours: days.flatMap((d) => [neighbour(d, '13:00', 1), neighbour(d, '16:30', 2)]),
+    });
+
+    expect(reads).toBeGreaterThan(0);
+
+    expect(reads).toBeLessThanOrEqual(GROUPING_LEG_BUDGET);
+  });
+
+  it('holds the read bound even when every leg THROWS', async () => {
+    // `scoreCandidates` debits its own leg counter only AFTER the three lookups return, so a leg
+    // that throws leaves it undebited and waves the next candidate through. The bound has to live
+    // at the lookup itself or it is a hope rather than a fact.
+    const { GROUPING_LEG_BUDGET } = await import('../../booking/travel/grouping-budget');
+    let reads = 0;
+    // Throws on the LAST leg of each candidate, not the first. Throwing immediately means only
+    // one leg is read per candidate and the arrangement never approaches the bound; the case that
+    // matters is a candidate that reads all three and then leaves the counter undebited.
+    driveLookupFor.mockImplementation(() => async (leg: { from: { lat: number }; to: { lat: number } }) => {
+      reads += 1;
+      const isBaseline = leg.from.lat !== 51.5 && leg.to.lat !== 51.5;
+      if (isBaseline) throw new Error('router down');
+      return { minutes: 20 };
+    });
+
+    // TWENTY candidates on ONE day, all sandwiched, so the undebited counter is what decides.
+    // Spread across days it would not discriminate: one candidate per day never gives the
+    // within-day counter a second candidate to wave through, and the per-day budget shrinks on
+    // its own. Sixty legs uncapped against a budget of 24.
+    const day = '2026-09-01';
+    const starts = Array.from({ length: 20 }, (_, i) => 14 * 60 + i);
+    const at = (mins: number) => new Date(Date.UTC(2026, 8, 1, Math.floor(mins / 60), mins % 60)).toISOString();
+
+    await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: starts.map((m) => ({ start: at(m), end: at(m + 30) })),
+      requestable: [],
+      neighbours: [neighbour(day, '13:00', 1), neighbour(day, '16:30', 2)],
+    });
+
+    expect(reads).toBeGreaterThan(0);
+    expect(reads).toBeLessThanOrEqual(GROUPING_LEG_BUDGET);
+  });
+
+  it('stops READING at the deadline, not merely stops waiting', async () => {
+    // The race resolves the caller; it does not stop `runPass`, which carries on reading and
+    // BUYING behind a customer who has already been answered. Money spent after the answer went
+    // out is the worst version of an optional feature.
+    const { GROUPING_DEADLINE_MS } = await import('../../booking/travel/grouping-budget');
+    const startedAt = Date.now();
+    let lastReadAt = 0;
+    driveLookupFor.mockImplementation(() => async () => {
+      lastReadAt = Date.now();
+      await new Promise((r) => setTimeout(r, 300));
+      return { minutes: 20 };
+    });
+
+    const days = ['2026-09-01', '2026-09-02', '2026-09-03', '2026-09-04', '2026-09-07', '2026-09-08',
+                  '2026-09-09', '2026-09-10', '2026-09-11', '2026-09-14', '2026-09-15', '2026-09-16'];
+    await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      sessionId: null,
+      slots: days.map((d) => ({ start: utc(d, '14:00').toISOString(), end: utc(d, '15:00').toISOString() })),
+      requestable: [],
+      neighbours: days.flatMap((d) => [neighbour(d, '13:00', 1), neighbour(d, '16:30', 2)]),
+    });
+
+    // Let the abandoned pass run on. Nothing more may be read once the deadline has gone by.
+    await new Promise((r) => setTimeout(r, 1_200));
+    expect(lastReadAt - startedAt).toBeLessThanOrEqual(GROUPING_DEADLINE_MS + 400);
+  }, 20_000);
 
   it('answers null for an empty list rather than an empty scoring', async () => {
     // An offer with no slots has nothing to prefer, and a row saying "scored, nothing found" would

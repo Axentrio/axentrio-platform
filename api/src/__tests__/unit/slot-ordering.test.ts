@@ -147,6 +147,30 @@ describe('grouping cannot starve feasibility', () => {
     expect(onWouldSpend).toHaveBeenCalledTimes(1);
   });
 
+  it('refuses to SPEND once the deadline has passed, even having started before it', async () => {
+    // A race abandons the wait, not the work. A leg that starts at 1,999 ms of a 2,000 ms budget
+    // would otherwise reserve an element and call Google long after the customer was answered -
+    // money spent on an answer nobody will ever read. The check sits at the last moment where not
+    // spending is still free: immediately before the reservation, after the cache read.
+    const { driveLookupFor } = await import('../../booking/travel/routes.service');
+
+    const answer = await driveLookupFor(eligibility, 'sess-1', { notAfter: Date.now() - 1 })(leg);
+
+    expect(reserveTravelElements).not.toHaveBeenCalled();
+    expect(answer.minutes).toBeNull();
+  });
+
+  it('still spends when the deadline is ahead of it', async () => {
+    // The guard must not be permanently closed by a wrong comparison — that would silently turn
+    // paid scoring back into the cache-only version this ticket exists to move away from.
+    const { driveLookupFor } = await import('../../booking/travel/routes.service');
+    reserveTravelElements.mockResolvedValue(false);
+
+    await driveLookupFor(eligibility, 'sess-1', { notAfter: Date.now() + 60_000 })(leg);
+
+    expect(reserveTravelElements).toHaveBeenCalledWith('tenant-1', 1);
+  });
+
   it('leaves the feasibility caller buying legs exactly as before', async () => {
     // The whole mechanism must be invisible to the gate, or the fix costs more than the bug.
     const { driveLookupFor } = await import('../../booking/travel/routes.service');

@@ -67,3 +67,66 @@ conclude something is broken.
 weaker in a way no amount of implementation effort fixes. It also cannot see external calendar
 events, which block time but carry no location by design, so it optimises the Axentrio-held part of
 a day and must never be described to an owner as optimising their agenda.
+
+---
+
+## Amendment, 2026-08-10: grouping spends, and "never refuses" now has one exception
+
+"Grouping may prefer a Slot and may never refuse one" was written about the SLOT LIST, and there
+it still holds absolutely: nothing in the scorer reorders the returned list, changes a Slot's
+feasibility class, or removes a time. That part is not weakened.
+
+What is weakened is a second-order claim the original wording implied. The scorer buys Google
+Distance Matrix elements from the same monthly per-Tenant counter the feasibility gate draws on.
+So grouping can bring a Tenant to exhaustion sooner than they would otherwise reach it, and an
+exhausted gate turns confirmable Slots into Requests. **A booking customer later that month can
+therefore be offered a Request where they would have been offered a Slot, because grouping spent
+first.** That is a refusal grouping caused, at one remove, and this ADR must say so rather than let
+the code contradict it.
+
+### Why the spend is not optional
+
+The scorer needs three legs per candidate: the two beside it, and the baseline `prev→next` that
+says what the two surrounding jobs cost each other with nobody between them. The feasibility gate
+routes the first two and never the baseline, because it never needs it. A strictly free scorer was
+built first and measured live: 10 offers, 63 Slots, and every Slot it managed to score had a job on
+ONE side only. Every candidate BETWEEN two jobs missed the baseline and went neutral - so the
+scorer was blind to precisely the mid-day insertion the feature exists to find, and its headline
+measurement read "no cheaper alternative ever existed" for a structural reason rather than a real
+one. Spending nothing does not make the feature safe; it makes it useless and dishonest about it.
+
+### What bounds it
+
+- **Only the baseline is ever bought.** The two legs beside a candidate are read from the
+  conversation's drive cache or not had at all, because buying one is grouping paying to redo the
+  gate's own work.
+- **One purchase per gap, by construction.** The leg is per-gap rather than per-candidate, and the
+  pass memoises it locally - so a null session, an unavailable Redis, a failed answer or a
+  departure crossing the traffic horizon cannot turn the magnitude into per-candidate.
+- **Four purchases per pass, hard.** Past that the pass reads cache-only: a baseline already in
+  the cache still scores, and only a MISS leaves that candidate neutral. No further element is
+  bought either way, and neutral refuses nothing.
+- **No purchase is BEGUN after the customer has been answered.** The pass is raced against a
+  deadline, and a race abandons the wait rather than the work - so the deadline is carried down to
+  the reservation itself, not just to the decision to look. A reservation already awaiting, or a
+  request already in flight, still completes: a check-then-act cannot promise otherwise. Those
+  finish bounded by the router's own timeout and their answers go to the drive cache.
+
+Single figures per conversation, shaped by how many jobs are in the diary rather than by how long
+the Slot list is.
+
+### The alternative that was rejected, and why it stays rejected
+
+A fractional share of the monthly cap - grouping may spend up to 30%, feasibility keeps 70%. It was
+built, reviewed and removed. It bounds the harm without removing it: a Tenant who would have used
+80 of a 100-element cap and never exhausted it is refused after 70 once grouping has taken 30. A
+ceiling cannot make fungible spend un-fungible, so a share buys a guarantee it cannot deliver while
+reading like one that can. A small explicit magnitude, written down here, is the honest version of
+the same trade.
+
+### What would retire the exception
+
+A `prev→next` duration the platform already holds. The gate could route the baseline itself
+whenever it is cheap to do so, or a per-day route cache scoped to the itinerary would make the leg
+free on the second conversation of the day. Either removes the spend without removing the
+capability. Neither is built.

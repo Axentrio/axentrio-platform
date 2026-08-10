@@ -20,7 +20,7 @@ import { windowsForDay } from '../booking-providers/slot-engine';
 import { resolveDayPeriods } from './half-day';
 import { scoreCandidates, type LegLookup, type RouteNode, type ScoredCandidate } from './insertion-scorer';
 import { counterfactualOrder, hasCheaperAlternative, SCORER_VERSION } from './slot-ordering';
-import { GROUPING_DEADLINE_MS, GROUPING_LEG_BUDGET } from './grouping-budget';
+import { GROUPING_DEADLINE_MS, GROUPING_LEG_BUDGET, GROUPING_PAID_LEG_BUDGET } from './grouping-budget';
 import { driveLookupFor } from './routes.service';
 import type { NeighbourLocation, TravelNeighbour } from './travel-gate';
 import type { ActiveTravelEligibility } from './travel-eligibility';
@@ -53,23 +53,21 @@ export interface OfferScoring {
   counterfactualOrder: string[];
   cheaperAlternativeExisted: boolean;
   /**
-   * What this scoring WOULD have cost in elements, having cost nothing.
+   * Elements this scoring actually billed - baseline legs, and nothing else.
    *
-   * Grouping never buys a leg, so the honest number is not what it spent - it spent zero - but
-   * how many legs it had to decline. That answers LP4's cost question without the spending that
-   * would make the answer worth having.
-   *
-   * WHAT IT IS AND IS NOT, because LP5's go/no-go turns on it:
-   *
-   *   - Not censored by early exit. `scoreCandidates` awaits all three of a candidate's legs
-   *     before it looks at any of them, so a missed first leg does not hide the other two.
-   *   - Bounded by `GROUPING_LEG_BUDGET` and the deadline, so a very long list stops being
-   *     counted at the same point a paid pass would stop being spent. Same bound either way.
-   *   - Slightly HIGH, not low, and only slightly: a paid pass would warm the cache with its own
-   *     answers, so a later leg between the same pair would hit for free where this one counts a
-   *     miss. Erring upward is the safe direction for a spending decision.
+   * The two legs beside a candidate are read from the conversation's cache, where the feasibility
+   * gate just put them, so they never appear here. Only `prev→next` is ever bought, once per gap,
+   * and `GROUPING_PAID_LEG_BUDGET` is the hard stop.
    */
-  elementsWouldSpend: number;
+  elementsSpent: number;
+  /**
+   * Adjacent legs the cache could not answer, which grouping declined to buy.
+   *
+   * Not a cost - it is the size of the coverage gap. An adjacent leg missing means feasibility did
+   * not route that pair for this candidate (it settled on the haversine bounds, or the slot came
+   * back requestable), and buying it would be grouping paying to redo the gate's own work.
+   */
+  adjacentMisses: number;
   ms: number;
 }
 
@@ -113,32 +111,86 @@ export async function scoreOfferedSlots(input: {
   const startedAt = Date.now();
   const deadline = startedAt + GROUPING_DEADLINE_MS;
   const tenantId = input.eligibility.tenantId;
-  let elementsWouldSpend = 0;
+  let elementsSpent = 0;
+  let adjacentMisses = 0;
+  // EVERY leg the pass actually reaches a lookup for - hits, misses and purchases alike. A cache
+  // hit is free in money and not free in time, and `GROUPING_LEG_BUDGET` is a bound on the
+  // customer's wait. Counted out here because `scoreCandidates` counts within ONE call and the
+  // pass makes one call per day, so a fortnight of days would each start with a full budget.
+  let legsRead = 0;
   // Declared OUT here so a pass that runs out of time still hands back the candidates it finished.
   // A candidate is scored whole or not at all, so a short set is a smaller truth rather than a
   // different one - which is not the case for a partially-measured single candidate.
   const byStart = new Map<string, ScoredCandidate>();
 
   try {
-    // CACHE-ONLY, which is what makes this a shadow feature rather than a cheap one. Grouping and
-    // the feasibility gate share one monthly element counter, so a scorer that spends ANY of it
-    // can bring a tenant to an exhaustion they would not otherwise have reached - and an
-    // exhausted gate turns confirmable slots into Requests, which is precisely what ADR-0017
-    // forbids grouping from causing. A capped share bounds that harm; it does not remove it.
+    // TWO LOOKUPS, because the two kinds of leg have different rights.
     //
-    // The legs this conversation's feasibility pass already measured are here for nothing, and
-    // those are the same prev/next legs the scorer wants. What it cannot answer for free it
-    // declines and counts, which is LP4's cost question answered without paying it.
-    const drive = driveLookupFor(input.eligibility, input.sessionId, {
+    // Adjacent legs are free or not had at all. They are the same pairs the feasibility gate just
+    // routed for this candidate, so a hit is the norm and a miss means the gate did not route them
+    // either - buying one would be grouping paying to redo the gate's own work.
+    const cached = driveLookupFor(input.eligibility, input.sessionId, {
       cacheOnly: true,
       onWouldSpend: () => {
-        elementsWouldSpend += 1;
+        adjacentMisses += 1;
       },
     });
-    const metered: LegLookup = async (from, to, departAt) => {
+    // The baseline is bought, because nothing else in the system ever asks for `prev→next` and it
+    // is therefore never in the cache. Spending here is a real decision and not a convenience: an
+    // earlier cut spent nothing and was measured blind to every candidate with a job on both
+    // sides, which is the mid-day insertion grouping exists to find. It stays small because the
+    // leg is per-GAP - same anchors, same departure instant, so the first candidate in a gap pays
+    // and the rest read the answer.
+    const paying = driveLookupFor(input.eligibility, input.sessionId, {
+      // The deadline reaches the RESERVATION, not just the decision to look. The guard below runs
+      // before the lookup starts, but a leg that starts at 1,999 ms of a 2,000 ms budget would
+      // otherwise reserve an element and call Google well after the customer was answered.
+      notAfter: deadline,
+      onBilled: () => {
+        elementsSpent += 1;
+      },
+    });
+
+    // ONE PURCHASE PER GAP, made true here rather than hoped for downstream. The drive cache would
+    // usually collapse these - same anchors, same departure instant, same key - but only usually:
+    // it is skipped entirely when the session id is null, it is unavailable when Redis is down, a
+    // failed answer is deliberately never cached, and `trafficAware` flips at the 24-hour horizon
+    // and produces two keys for one instant. Under any of those, every candidate in a gap would
+    // re-buy the identical leg until the budget ran out, and the per-gap magnitude this design is
+    // justified by would quietly become per-candidate.
+    const baselineMemo = new Map<string, number | null>();
+    const memoKey = (from: { lat: number; lng: number }, to: { lat: number; lng: number }, departAt: Date) =>
+      `${from.lat},${from.lng}:${to.lat},${to.lng}:${departAt.getTime()}`;
+
+    const metered: LegLookup = async (from, to, departAt, purpose) => {
+      const key = purpose === 'baseline' ? memoKey(from, to, departAt) : null;
+      // A repeat of a leg already answered this pass, including a repeat of a FAILURE. Re-buying
+      // something that just failed is the same waste as re-buying something that just succeeded.
+      if (key !== null && baselineMemo.has(key)) return baselineMemo.get(key) ?? null;
+
+      // BOTH BOUNDS ARE ENFORCED HERE, at the one point every leg passes through, and not only in
+      // `scoreCandidates`' pre-check. That check debits its own counter AFTER the three lookups
+      // return, so a leg that throws leaves it undebited and the next candidate is waved through;
+      // and the deadline race resolves the caller without stopping `runPass`, which carries on
+      // reading and buying behind it. Both make an advertised bound a hope rather than a fact.
+      //
+      // Refusing here returns null, which is a neutral candidate - the ordinary "no opinion"
+      // outcome that refuses nothing.
+      if (legsRead >= GROUPING_LEG_BUDGET || Date.now() > deadline) return null;
+      legsRead += 1;
+
+      // Cache-only once the paid budget is gone. The pass degrades rather than stopping: a
+      // baseline already in the cache still scores, and only a MISS leaves the candidate neutral.
+      const mayBuy = purpose === 'baseline' && elementsSpent < GROUPING_PAID_LEG_BUDGET;
       // `budgetMin` is the gate's own comparison, not the router's, and scoring is not budgeting a
       // gap: it wants the duration whatever it turns out to be. `Infinity` is that, said out loud.
-      const answer = await drive({ from, to, departAt, budgetMin: Number.POSITIVE_INFINITY });
+      const answer = await (mayBuy ? paying : cached)({
+        from,
+        to,
+        departAt,
+        budgetMin: Number.POSITIVE_INFINITY,
+      });
+      if (key !== null) baselineMemo.set(key, answer.minutes);
       return answer.minutes;
     };
 
@@ -189,7 +241,7 @@ export async function scoreOfferedSlots(input: {
           lookup: metered,
           // Spent legs come off the budget, so a fortnight of days cannot each start with a full
           // one. The cap is on the PASS, and a pass is every day in the list.
-          legBudget: GROUPING_LEG_BUDGET - elementsWouldSpend,
+          legBudget: Math.max(0, GROUPING_LEG_BUDGET - legsRead),
           deadline,
         });
 
@@ -258,7 +310,7 @@ export async function scoreOfferedSlots(input: {
       logger.warn('[grouping] scoring hit its deadline; recording no scoring for this offer', {
         tenantId,
         slots: input.slots.length,
-        elementsWouldSpend,
+        elementsSpent,
         ms: Date.now() - startedAt,
       });
       return null;
@@ -287,7 +339,8 @@ export async function scoreOfferedSlots(input: {
         new Date(input.slots[0].start),
         MIN_SAVING_MINUTES
       ),
-      elementsWouldSpend,
+      elementsSpent,
+      adjacentMisses,
       ms: Date.now() - startedAt,
     };
   } catch (error) {

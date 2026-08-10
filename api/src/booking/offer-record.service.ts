@@ -104,9 +104,9 @@ export async function recordBookingOffer(input: {
         // #81 (LP4). Null throughout when the scorer did not run, which is a different fact from
         // a run that had no opinion - that one is a present row with null costs and a reason.
         scorerVersion: input.scoring?.scorerVersion ?? null,
-        // What the scoring WOULD have cost. Grouping buys nothing (`cacheOnly`), so its real
-        // spend is always zero and the useful number is the legs it had to decline.
-        scoringElements: input.scoring?.elementsWouldSpend ?? null,
+        // Elements this scoring actually billed: baseline legs only, one per gap. The two legs
+        // beside a candidate come from the cache the feasibility gate just filled.
+        scoringElements: input.scoring?.elementsSpent ?? null,
         scoringMs: input.scoring?.ms ?? null,
         counterfactualOrder: input.scoring?.counterfactualOrder ?? null,
         // #85's pre-registered gate, stored rather than derived. It is a statement about the FULL

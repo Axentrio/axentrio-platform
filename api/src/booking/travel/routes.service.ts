@@ -214,10 +214,32 @@ export async function driveMinutes(
     /**
      * Called on a `cacheOnly` MISS: the leg this caller declined to buy.
      *
-     * The cost question asked without paying it. LP4 has to answer "what would scoring cost in
-     * elements", and counting the misses answers it exactly while spending nothing.
+     * The size of a caller's coverage gap, not a cost. #81 counts adjacent misses with it to see
+     * how often the feasibility gate had not already routed the pair the scorer wanted.
      */
     onWouldSpend?: () => void;
+    /**
+     * Refuse to SPEND once this instant has passed. Epoch milliseconds.
+     *
+     * Checked immediately before the reservation, which is the last moment at which not spending
+     * is still free. An optional caller races a whole pass against a deadline, but a race
+     * abandons the wait rather than the work: a leg that starts at 1,999 ms of a 2,000 ms budget
+     * goes on to reserve an element and call Google long after the customer was answered. The
+     * read is already free by then; the purchase is not.
+     *
+     * WHAT IT GUARANTEES, exactly: no reservation is BEGUN once the deadline has passed. A
+     * reservation already awaiting, or a request already in flight, still completes - a
+     * check-then-act cannot promise otherwise, and nothing here can cancel either.
+     */
+    notAfter?: number;
+    /**
+     * Called exactly when an element is spent. Never for a cache hit, never under `cacheOnly`.
+     *
+     * Fires at the RESERVATION, before the request, and that is the honest moment rather than an
+     * early one: Google bills the request and not the answer, so a timeout costs what a hit costs.
+     * Waiting for a successful response would undercount every failure.
+     */
+    onBilled?: () => void;
   }
 ): Promise<DriveResult> {
   const apiKey = config.travel.googleMapsApiKey;
@@ -248,12 +270,18 @@ export async function driveMinutes(
     input.onWouldSpend?.();
     return { status: 'unavailable', cause: 'not_cached' };
   }
+  // The last point at which not spending is still free. `>=` rather than `>`, so the deadline
+  // instant itself is already too late - an off-by-one here buys an element for nobody.
+  if (input.notAfter !== undefined && Date.now() >= input.notAfter) {
+    return { status: 'unavailable', cause: 'not_cached' };
+  }
 
   // Claimed BEFORE the request. Google bills the request rather than the answer, so a
   // timeout costs exactly what a hit costs. One origin by one destination is one element.
   if (!(await reserveTravelElements(eligibility.tenantId, 1))) {
     return { status: 'unavailable', cause: 'cap_exhausted' };
   }
+  input.onBilled?.();
 
   const body: Record<string, unknown> = {
     origins: [{ waypoint: { location: { latLng: { latitude: input.from.lat, longitude: input.from.lng } } } }],
@@ -335,7 +363,7 @@ export function driveLookupFor(
   eligibility: ActiveTravelEligibility,
   sessionId: string | null,
   /** Only an OPTIONAL caller passes these. Feasibility buys what it needs and counts nothing. */
-  opts?: { cacheOnly?: boolean; onWouldSpend?: () => void }
+  opts?: { cacheOnly?: boolean; onWouldSpend?: () => void; onBilled?: () => void; notAfter?: number }
 ): DriveLookup {
   return async (leg) => {
     const result = await driveMinutes(eligibility, {
@@ -345,6 +373,8 @@ export function driveLookupFor(
       sessionId,
       cacheOnly: opts?.cacheOnly,
       onWouldSpend: opts?.onWouldSpend,
+      onBilled: opts?.onBilled,
+      notAfter: opts?.notAfter,
     });
     if (result.status === 'routed') return { minutes: result.minutes };
     // NOT a refusal. `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with

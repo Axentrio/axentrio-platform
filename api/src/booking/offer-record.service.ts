@@ -10,6 +10,7 @@
  * Contract: `docs/specs/lp3-offer-record.md`.
  */
 import { AppDataSource } from '../database/data-source';
+import type { OfferScoring } from './travel/score-offer';
 import { AvailabilityCall } from '../database/entities/AvailabilityCall';
 import { BookingOffer, type OfferDeliveryBasis, type OfferedSlot } from '../database/entities/BookingOffer';
 import { OfferSelection, type OfferSelectionType } from '../database/entities/OfferSelection';
@@ -83,6 +84,7 @@ export async function recordBookingOffer(input: {
   channel?: string | null;
   slots: OfferedSlot[];
   deliveryBasis: OfferDeliveryBasis;
+  scoring?: OfferScoring;
 }): Promise<string | null> {
   if (!input.slots.length) return null;
   try {
@@ -99,6 +101,18 @@ export async function recordBookingOffer(input: {
         offeredSlots: input.slots,
         offeredCount: input.slots.length,
         deliveryBasis: input.deliveryBasis,
+        // #81 (LP4). Null throughout when the scorer did not run, which is a different fact from
+        // a run that had no opinion - that one is a present row with null costs and a reason.
+        scorerVersion: input.scoring?.scorerVersion ?? null,
+        // What the scoring WOULD have cost. Grouping buys nothing (`cacheOnly`), so its real
+        // spend is always zero and the useful number is the legs it had to decline.
+        scoringElements: input.scoring?.elementsWouldSpend ?? null,
+        scoringMs: input.scoring?.ms ?? null,
+        counterfactualOrder: input.scoring?.counterfactualOrder ?? null,
+        // #85's pre-registered gate, stored rather than derived. It is a statement about the FULL
+        // scored list, and the row keeps only the slots the channel delivered - so a later reader
+        // could not recompute it from this row without inventing the slots that were truncated.
+        cheaperAlternativeExisted: input.scoring?.cheaperAlternativeExisted ?? null,
       })
     );
     return row.id;
@@ -179,13 +193,33 @@ export async function recordDeliveredOffer(input: {
   tenantId: string;
   sessionId: string;
   channel?: string | null;
-  offer: { botId: string; serviceId?: string | null; availabilityCallId?: string | null; locationMode?: string | null; slotStarts: string[] };
+  offer: {
+    botId: string;
+    serviceId?: string | null;
+    availabilityCallId?: string | null;
+    locationMode?: string | null;
+    slotStarts: string[];
+    scoring?: OfferScoring;
+  };
   deliveredTitles: string[];
   deliveryBasis: OfferDeliveryBasis;
 }): Promise<string | null> {
+  const scoring = input.offer.scoring;
   const paired: OfferedSlot[] = input.deliveredTitles
     .slice(0, input.offer.slotStarts.length)
-    .map((title, i) => ({ start: input.offer.slotStarts[i], title }));
+    .map((title, i) => {
+      const start = input.offer.slotStarts[i];
+      // BY INSTANT, never by position. The titles are a prefix of the slots, but the scores are
+      // keyed by time precisely so a truncated delivery cannot attribute one slot's cost to
+      // another's - which is the failure an index-paired array makes silently.
+      //
+      // NORMALISED on the way in, because "by instant" and "by string" are not the same lookup:
+      // `2026-09-07T10:00:00+00:00` and `...Z` are one moment and two keys, and the mismatch does
+      // not throw - it just quietly records no score.
+      const key = Number.isNaN(Date.parse(start)) ? start : new Date(start).toISOString();
+      const score = scoring?.scores[key];
+      return score ? { start, title, ...score } : { start, title };
+    });
   return recordBookingOffer({
     tenantId: input.tenantId,
     botId: input.offer.botId,
@@ -196,5 +230,6 @@ export async function recordDeliveredOffer(input: {
     channel: input.channel,
     slots: paired,
     deliveryBasis: input.deliveryBasis,
+    scoring,
   });
 }

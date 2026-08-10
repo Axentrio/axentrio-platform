@@ -23,6 +23,15 @@ export interface ToolResult {
    *  sanitized to a generic message before it reaches the model — the raw text is
    *  kept in logs/trace only. Secure-by-default: omit ⇒ sanitized. */
   errorSafeForModel?: boolean;
+  /**
+   * Measurement that must NEVER reach the model.
+   *
+   * `data` is serialised straight into the tool message, and that message is truncated at 4000
+   * characters - so a measurement blob on `data` does not merely waste tokens, it can cut the
+   * payload the model actually needs. It would also put vocabulary like "preferred" and "cost"
+   * in front of a model that is meant to be unaware any scoring happened (#81 is shadow).
+   */
+  measurement?: unknown;
 }
 
 export interface ToolAdapter {

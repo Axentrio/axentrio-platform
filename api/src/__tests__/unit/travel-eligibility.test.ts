@@ -51,7 +51,18 @@ describe('resolveTravelEligibility', () => {
       itineraryKey: 'gcal:owner@acme.com',
       slackMin: 10,
       startFromBase: true,
+      maxDetourMin: null,
     });
+  });
+
+  it('reads a zero detour threshold as no threshold, not as "nothing qualifies"', async () => {
+    // A preference that silently marks every slot unpreferred is indistinguishable from one that
+    // is switched off, and the second is overwhelmingly what an owner who typed 0 meant.
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelMaxDetourMin: 0 });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxDetourMin: null });
+
+    bsFindOne.mockResolvedValue({ travelTimeEnabled: true, travelSlackMin: 10, travelMaxDetourMin: 25 });
+    expect(await resolveTravelEligibility(ARGS)).toMatchObject({ active: true, maxDetourMin: 25 });
   });
 
   it('stops at the missing API key WITHOUT consulting the entitlement resolver', async () => {

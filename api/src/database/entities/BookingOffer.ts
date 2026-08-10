@@ -142,6 +142,20 @@ export class BookingOffer {
   @Column({ type: 'jsonb', name: 'counterfactual_order', nullable: true })
   counterfactualOrder?: string[] | null;
 
+  /**
+   * Did the scorer have anywhere better to point than the slot offered first?
+   *
+   * LP4's most decision-shaped number: if steering rarely has a cheaper alternative, the pilot
+   * cannot move any metric whatever it does, and the epic stops here having cost one ticket
+   * rather than a live feature.
+   *
+   * A COLUMN rather than a derivation, because it is a statement about every slot the scorer saw
+   * and this row keeps only the ones the channel delivered. Recomputing it later would silently
+   * answer a smaller question.
+   */
+  @Column({ type: 'boolean', name: 'cheaper_alternative_existed', nullable: true })
+  cheaperAlternativeExisted?: boolean | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 }

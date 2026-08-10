@@ -1,3 +1,4 @@
+import type { OfferScoring } from '../travel/score-offer';
 /**
  * Booking provider seam.
  *
@@ -157,6 +158,14 @@ export interface AvailabilityResult {
   locationMode?: string;
   /** Absent unless travel time actually ran — which is every bot on the platform today. */
   travel?: TravelFilterSummary;
+  /**
+   * What the grouping scorer thought of these slots (#81, LP4).
+   *
+   * SHADOW. Nothing reads it to decide anything: the list above is already in its final order and
+   * every slot's class is already settled. It exists to be recorded, so LP5 can be measured
+   * against a counterfactual that was written down at the time rather than reconstructed later.
+   */
+  grouping?: OfferScoring;
 }
 
 export interface CreateBookingResult {

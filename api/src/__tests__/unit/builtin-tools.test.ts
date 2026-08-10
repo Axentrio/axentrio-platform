@@ -207,6 +207,32 @@ describe('CheckAvailabilityTool', () => {
     expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'sess-1', '2026-04-01', '2026-04-07', undefined, undefined, undefined);
   });
 
+  it('#81: moves shadow scoring off `data`, which is what the model reads', async () => {
+    // `data` is serialised into the tool message verbatim and truncated at 4000 characters. Left
+    // there, the scoring both teaches a model that is meant to be unaware of any ranking AND
+    // competes with the slot list for the budget - a shadow feature able to break the real one.
+    const tool = new CheckAvailabilityTool();
+    const grouping = { scorerVersion: 'lp4-1', scores: {}, counterfactualOrder: [], cheaperAlternativeExisted: false, elementsSpent: 1, ms: 5 };
+    mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'UTC', grouping });
+
+    const result = await tool.execute({ startDate: '2026-04-01', endDate: '2026-04-07' }, makeCtx());
+
+    expect(JSON.stringify(result.data)).not.toContain('lp4-1');
+    // ...and moved, not dropped: the offer record is written from it at the dispatch boundary.
+    expect(result.measurement).toEqual({ grouping });
+  });
+
+  it('#81: adds no measurement key at all when the scorer did not run', async () => {
+    // A present-but-empty measurement would read as "scored, found nothing", which is a different
+    // fact from "never ran" and would land in the denominator of every LP4 question.
+    const tool = new CheckAvailabilityTool();
+    mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'UTC' });
+
+    const result = await tool.execute({ startDate: '2026-04-01', endDate: '2026-04-07' }, makeCtx());
+
+    expect(result.measurement).toBeUndefined();
+  });
+
   it('execute returns success=false with error on failure', async () => {
     const tool = new CheckAvailabilityTool();
     mockCheckAvailability.mockRejectedValue(new Error('Cal.com unavailable'));

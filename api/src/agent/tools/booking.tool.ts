@@ -63,7 +63,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      const result = await checkAvailability(
+      const full = await checkAvailability(
         'agent',
         ctx.sessionId,
         args.startDate as string,
@@ -72,6 +72,13 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.durationMin as number | undefined,
         args.customerAddress as string | undefined
       );
+      // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
+      // is serialised into the tool message the model reads and truncated at 4000 characters, so
+      // scoring left on it teaches a model that is meant to be unaware of any ranking AND competes
+      // with the slot list for that budget - a shadow feature able to break the real one. Splitting
+      // at the single early return instead would leak through the two branches that return sooner.
+      const { grouping, ...result } = full;
+      const measurement = grouping ? { measurement: { grouping } } : {};
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
       // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
       // empty-slots branch below it would be read out as "no times in this range", which turns
@@ -80,6 +87,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       if (travel && travel.requestableSlots.length > 0) {
         return {
           success: true,
+          ...measurement,
           data: {
             ...result,
             suggestedAction: 'request_appointment',
@@ -97,6 +105,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       if (Array.isArray(result?.slots) && result.slots.length === 0) {
         return {
           success: true,
+          ...measurement,
           data: {
             ...result,
             noSlotsInRange: true,
@@ -106,7 +115,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           },
         };
       }
-      return { success: true, data: result };
+      return { success: true, data: result, ...measurement };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }

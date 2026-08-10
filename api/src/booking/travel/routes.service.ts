@@ -51,8 +51,17 @@ export type DriveResult =
    * Request the owner can see rather than turning a customer away on it.
    */
   | { status: 'no_route' }
-  /** A fact about Google, or about a tenant that has spent its month. Degrade, never refuse. */
-  | { status: 'unavailable'; cause: 'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' };
+  /**
+   * A fact about Google, or about a tenant that has spent its month. Degrade, never refuse.
+   *
+   * `not_cached` is the odd one and is not a fault at all: a `cacheOnly` caller asked for a leg
+   * this conversation had not already measured, and declined to buy it. `classifyCause` reads it
+   * as `none` for exactly that reason.
+   */
+  | {
+      status: 'unavailable';
+      cause: 'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' | 'not_cached';
+    };
 
 const ROUTES_URL = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';
 
@@ -186,7 +195,30 @@ async function writeCache(key: string, result: DriveResult): Promise<void> {
  */
 export async function driveMinutes(
   eligibility: ActiveTravelEligibility,
-  input: { from: GeoPoint; to: GeoPoint; departAt: Date; sessionId: string | null }
+  input: {
+    from: GeoPoint;
+    to: GeoPoint;
+    departAt: Date;
+    sessionId: string | null;
+    /**
+     * Answer from this conversation's cache or not at all. NEVER spends an element.
+     *
+     * For a caller that must be unable to affect what anybody else can afford. Grouping (#81) is
+     * the case: it is a preference that improves an answer already correct without it, and it
+     * shares one monthly counter with the feasibility gate. Any spend at all - however small a
+     * fraction it is capped to - can bring a tenant to exhaustion they would not otherwise have
+     * reached, and an exhausted gate turns confirmable slots into Requests. ADR-0017 forbids
+     * grouping from causing that, so the guarantee has to be structural rather than a ceiling.
+     */
+    cacheOnly?: boolean;
+    /**
+     * Called on a `cacheOnly` MISS: the leg this caller declined to buy.
+     *
+     * The cost question asked without paying it. LP4 has to answer "what would scoring cost in
+     * elements", and counting the misses answers it exactly while spending nothing.
+     */
+    onWouldSpend?: () => void;
+  }
 ): Promise<DriveResult> {
   const apiKey = config.travel.googleMapsApiKey;
   if (!apiKey) return { status: 'unavailable', cause: 'no_api_key' };
@@ -208,6 +240,13 @@ export async function driveMinutes(
   if (cacheKey) {
     const hit = await readCache(cacheKey);
     if (hit) return hit;
+  }
+
+  // BELOW THIS LINE COSTS MONEY, which is the whole reason the check sits exactly here: after the
+  // cache and before the reservation.
+  if (input.cacheOnly) {
+    input.onWouldSpend?.();
+    return { status: 'unavailable', cause: 'not_cached' };
   }
 
   // Claimed BEFORE the request. Google bills the request rather than the answer, so a
@@ -294,7 +333,9 @@ function interpret(elements: MatrixElement[], tenantId: string): DriveResult {
  */
 export function driveLookupFor(
   eligibility: ActiveTravelEligibility,
-  sessionId: string | null
+  sessionId: string | null,
+  /** Only an OPTIONAL caller passes these. Feasibility buys what it needs and counts nothing. */
+  opts?: { cacheOnly?: boolean; onWouldSpend?: () => void }
 ): DriveLookup {
   return async (leg) => {
     const result = await driveMinutes(eligibility, {
@@ -302,6 +343,8 @@ export function driveLookupFor(
       to: leg.to,
       departAt: leg.departAt,
       sessionId,
+      cacheOnly: opts?.cacheOnly,
+      onWouldSpend: opts?.onWouldSpend,
     });
     if (result.status === 'routed') return { minutes: result.minutes };
     // NOT a refusal. `ROUTE_NOT_FOUND` says Google found no route for THESE coordinates with

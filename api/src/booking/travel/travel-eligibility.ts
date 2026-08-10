@@ -60,6 +60,14 @@ export interface ActiveTravelEligibility {
   slackMin: number;
   /** Gate the day's first job against the venue. */
   startFromBase: boolean;
+  /**
+   * Minutes of detour the owner is willing to call good (#81), or null for no threshold.
+   *
+   * A PREFERENCE, and it never refuses anything. It reads a slot the gate has already cleared and
+   * says only whether grouping likes it, so nothing here can turn a confirmable time into a
+   * Request - which is ADR-0017's rule.
+   */
+  maxDetourMin: number | null;
 }
 
 /**
@@ -105,6 +113,10 @@ export async function resolveTravelEligibility(input: {
     itineraryKey: input.itineraryKey,
     slackMin: Math.max(0, settings.travelSlackMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,
+    // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
+    // that silently marks every slot unpreferred is indistinguishable from one that is off, and
+    // the second is overwhelmingly what an owner who typed 0 meant.
+    maxDetourMin: (settings.travelMaxDetourMin ?? 0) > 0 ? (settings.travelMaxDetourMin as number) : null,
   };
 }
 

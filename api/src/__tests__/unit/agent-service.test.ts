@@ -374,6 +374,58 @@ describe('AgentService', () => {
     }
   });
 
+  it('#81: keeps shadow scoring out of the model message and on the offer instead', async () => {
+    // TWO failures guarded at once, and both are silent. Scoring vocabulary in the tool message
+    // teaches a model that is meant to be unaware any ranking happened - it can start telling a
+    // customer a time is "preferred". And the tool message is truncated at 4000 characters, so a
+    // measurement blob on `data` can cut the slot list itself: a shadow feature breaking the real
+    // one. It must ride on `measurement`, which never reaches the prompt.
+    const scoring = {
+      scorerVersion: 'lp4-1',
+      scores: { '2026-06-10T08:00:00.000Z': { costMinutes: 12, preferred: true, neutralReason: null, period: 'morning' } },
+      counterfactualOrder: ['2026-06-10T08:00:00.000Z'],
+      cheaperAlternativeExisted: true,
+      elementsSpent: 2,
+      ms: 40,
+    };
+    const checkAvailability: ToolAdapter = {
+      name: 'check_availability',
+      description: 'Check slots',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [{ start: '2026-06-10T08:00:00.000Z', end: '2026-06-10T08:30:00.000Z' }], timezone: 'UTC' },
+        measurement: { grouping: scoring },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValueOnce([checkAvailability]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({ content: 'Here are some times:', usage: { promptTokens: 1, completionTokens: 1 }, finishReason: 'stop' });
+
+    const result = await agent.run(
+      'when can I book?',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true, provider: 'openai', model: 'gpt-4o' } } } as any,
+      [],
+    );
+
+    const toolMsg = (mockProvider.chat as any).mock.calls[1][0].find((m: any) => m.role === 'tool');
+    expect(toolMsg.content).not.toContain('preferred');
+    expect(toolMsg.content).not.toContain('costMinutes');
+    expect(toolMsg.content).not.toContain('lp4-1');
+    // ...and it is not merely dropped. The offer record needs it at the dispatch boundary.
+    if (result.type === 'response') {
+      expect(result.offer?.scoring).toEqual(scoring);
+    }
+  });
+
   it('embeds the service name in slot chips when check_availability returns one', async () => {
     const checkAvailability: ToolAdapter = {
       name: 'check_availability',

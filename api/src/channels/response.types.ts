@@ -1,3 +1,4 @@
+import type { OfferScoring } from '../booking/travel/score-offer';
 /**
  * Channel response + AI-config types.
  *
@@ -71,6 +72,13 @@ export interface OfferMeasurement {
   locationMode?: string | null;
   /** Canonical instants in presentation order, BEFORE any channel truncation. */
   slotStarts: string[];
+  /**
+   * What the grouping scorer thought (#81, LP4), when it ran.
+   *
+   * Absent means it did not run for this offer - a different fact from "it ran and had no
+   * opinion", which is a present entry with a null cost and a reason.
+   */
+  scoring?: OfferScoring;
 }
 
 export interface ResponsePayload {

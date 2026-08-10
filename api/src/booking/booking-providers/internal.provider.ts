@@ -55,6 +55,7 @@ import { buildManageUrl } from '../../scheduler/booking-token';
 import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { resolveServiceLocationMode } from '../service-location';
+import { scoreOfferedSlots, type OfferScoring } from '../travel/score-offer';
 import {
   placeBookingAddress,
   placeAddressFor,
@@ -895,6 +896,7 @@ export class InternalProvider implements BookingProvider {
       // baseline is about what was true at the moment of the offer.
       locationMode: resolveServiceLocationMode(service),
       travel: travel.summary,
+      ...(travel.grouping ? { grouping: travel.grouping } : {}),
     };
   }
 
@@ -935,7 +937,12 @@ export class InternalProvider implements BookingProvider {
       customerAddress?: string;
       excludeBookingId?: string;
     }
-  ): Promise<{ slots: Array<{ start: string; end: string }>; summary?: TravelFilterSummary }> {
+  ): Promise<{
+    slots: Array<{ start: string; end: string }>;
+    summary?: TravelFilterSummary;
+    /** #81, shadow. Never read by anything that decides a slot's fate — see `AvailabilityResult`. */
+    grouping?: OfferScoring;
+  }> {
     const { service } = input;
     // A phone consultation is not a travel job however the Agent is configured — the cheapest
     // gate, and a fact about the SERVICE rather than about the owner.
@@ -1050,6 +1057,28 @@ export class InternalProvider implements BookingProvider {
       });
     }
 
+    // #81 GROUPING, in shadow. Runs AFTER feasibility has decided and changes nothing it decided:
+    // the returned list, the arrays below and every slot's class are exactly what they were. It
+    // scores what is already confirmable so LP4's gate can be measured, and LP5 is the separate
+    // decision to act on it.
+    //
+    // Only the ENFORCING path. An annotating caller is the owner's own picker, which keeps the
+    // whole list including times travel refused, so "the confirmable slots" is not a set that
+    // exists there to be scored.
+    const grouping = annotating
+      ? null
+      : await scoreOfferedSlots({
+          eligibility,
+          sessionId: ctx.session?.id ?? null,
+          rule: input.rule,
+          slots: cleared,
+          requestable: requestableSlots,
+          // Coarse is not a position for this purpose. ADR-0014's rule reaches preference too.
+          candidatePoint: candidate.coarse ? null : candidate.point,
+          neighbours,
+          baseFor: (at) => this.travelBaseFor(eligibility, input.rule, venue, at),
+        });
+
     return {
       // The one line the policy decides. An annotating caller keeps the whole list and marks it
       // up from the two arrays below; an enforcing one is handed only what was proven.
@@ -1059,6 +1088,7 @@ export class InternalProvider implements BookingProvider {
         unreachableSlots,
         ...(candidate.coarse ? { addressTooVague: true as const } : {}),
       },
+      ...(grouping ? { grouping } : {}),
     };
   }
 

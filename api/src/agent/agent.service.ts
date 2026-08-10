@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import type { OfferScoring } from '../booking/travel/score-offer';
 import { DateTime } from 'luxon';
 import type { OfferMeasurement } from '../channels/response.types';
 import { ToolRegistry } from './tool-registry';
@@ -104,6 +105,8 @@ interface PendingAvailability {
   /** The service the slots are for — embedded in the chip so a tap books the
    *  right service when the bot offers more than one. */
   serviceName?: string;
+  /** #81: shadow scoring, carried to dispatch to be recorded. Never shown to model or customer. */
+  grouping?: OfferScoring;
 }
 
 /**
@@ -534,6 +537,10 @@ export class AgentService {
                     availabilityCallId: pendingAvailabilityCallId,
                     locationMode: pendingAvailability.locationMode ?? null,
                     slotStarts: pendingAvailability.slots.slice(0, slotChips.length).map((s) => s.start),
+                    // #81 (LP4): the whole scoring, not the delivered prefix of it. What was
+                    // truncated is decided at dispatch, and the counterfactual order is a
+                    // statement about the list the scorer saw.
+                    ...(pendingAvailability.grouping ? { scoring: pendingAvailability.grouping } : {}),
                   },
                 }
               : {}),
@@ -611,6 +618,9 @@ export class AgentService {
                   serviceName: d.serviceName,
                   serviceId: d.serviceId,
                   locationMode: d.locationMode,
+                  // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
+                  // shown, and this is deliberately invisible to it.
+                  grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,
                 };
                 // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
                 // and it exists separately from the offer because a call the model never surfaces

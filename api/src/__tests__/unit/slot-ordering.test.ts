@@ -92,30 +92,69 @@ describe('whether steering had anywhere better to point', () => {
 });
 
 describe('grouping cannot starve feasibility', () => {
-  const reserve = vi.fn();
-  beforeEach(() => vi.resetModules());
+  // The guarantee is STRUCTURAL, not a ceiling, and the difference decides whether it holds.
+  // Grouping and the feasibility gate share one monthly element counter, so a scorer capped to
+  // some fraction of it still brings a tenant closer to exhaustion - and a tenant who would have
+  // finished the month inside the cap can be pushed past it purely because scoring ran. An
+  // exhausted gate turns confirmable slots into Requests, which ADR-0017 forbids grouping from
+  // causing. So grouping buys nothing at all: it reads the conversation's cache or goes neutral.
+  const reserveTravelElements = vi.fn();
 
-  it('reserves against a FRACTION of the cap, so the optional caller stops first', async () => {
-    vi.doMock('../../booking/travel/travel-usage.service', () => ({ reserveTravelElements: reserve }));
-    reserve.mockResolvedValue(true);
-    const { reserveGroupingElements, GROUPING_CAP_SHARE } = await import('../../booking/travel/grouping-budget');
-
-    await reserveGroupingElements('tenant-1', 3);
-
-    // The third argument is the whole guarantee: feasibility passes 1 and is unaffected, while
-    // grouping is refused once total spend passes its share - whoever spent it.
-    expect(reserve).toHaveBeenCalledWith('tenant-1', 3, GROUPING_CAP_SHARE);
-    expect(GROUPING_CAP_SHARE).toBeLessThan(1);
+  beforeEach(() => {
+    vi.resetModules();
+    reserveTravelElements.mockReset().mockResolvedValue(true);
+    vi.doMock('../../booking/travel/travel-usage.service', () => ({ reserveTravelElements }));
+    vi.doMock('../../config/environment', async () => {
+      const actual = await vi.importActual<typeof import('../../config/environment')>('../../config/environment');
+      // A key must be present or `driveMinutes` returns before it ever reaches the cache or the
+      // reservation, and every one of these would pass without testing anything.
+      return { ...actual, config: { ...actual.config, travel: { ...actual.config.travel, googleMapsApiKey: 'k' } } };
+    });
   });
 
-  it('says no rather than throwing when the ledger itself fails', async () => {
-    // Failing closed is right here and is the opposite of the feasibility path's instinct.
-    // Feasibility that cannot check must decide something about a customer; grouping that cannot
-    // check simply has no opinion, and silence costs nothing.
-    vi.doMock('../../booking/travel/travel-usage.service', () => ({
-      reserveTravelElements: vi.fn().mockRejectedValue(new Error('ledger down')),
-    }));
-    const { reserveGroupingElements } = await import('../../booking/travel/grouping-budget');
-    await expect(reserveGroupingElements('tenant-1', 3)).resolves.toBe(false);
+  const eligibility = {
+    active: true as const,
+    tenantId: 'tenant-1',
+    itineraryKey: 'bot:1',
+    slackMin: 0,
+    startFromBase: false,
+    maxDetourMin: null,
+  };
+  const leg = {
+    from: { lat: 1, lng: 1 },
+    to: { lat: 2, lng: 2 },
+    budgetMin: 60,
+    departAt: new Date(Date.now() + 3_600_000),
+  };
+
+  it('never reserves an element, so it cannot move anyone closer to their cap', async () => {
+    const { driveLookupFor } = await import('../../booking/travel/routes.service');
+
+    const answer = await driveLookupFor(eligibility, 'sess-1', { cacheOnly: true })(leg);
+
+    expect(reserveTravelElements).not.toHaveBeenCalled();
+    // A leg it declined to buy is not an answer. The candidate simply carries no preference.
+    expect(answer.minutes).toBeNull();
+    expect(answer.cause).toBe('not_cached');
+  });
+
+  it('counts the leg it declined, which is the cost question answered without paying it', async () => {
+    const { driveLookupFor } = await import('../../booking/travel/routes.service');
+    const onWouldSpend = vi.fn();
+
+    await driveLookupFor(eligibility, 'sess-1', { cacheOnly: true, onWouldSpend })(leg);
+
+    expect(onWouldSpend).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the feasibility caller buying legs exactly as before', async () => {
+    // The whole mechanism must be invisible to the gate, or the fix costs more than the bug.
+    const { driveLookupFor } = await import('../../booking/travel/routes.service');
+    reserveTravelElements.mockResolvedValue(false);
+
+    const answer = await driveLookupFor(eligibility, 'sess-1')(leg);
+
+    expect(reserveTravelElements).toHaveBeenCalledWith('tenant-1', 1);
+    expect(answer.cause).toBe('cap_exhausted');
   });
 });

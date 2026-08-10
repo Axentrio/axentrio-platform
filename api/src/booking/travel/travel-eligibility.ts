@@ -73,6 +73,14 @@ export interface ActiveTravelEligibility {
    * Request - which is ADR-0017's rule.
    */
   maxDetourMin: number | null;
+  /**
+   * LP5: may grouping actually REORDER what a customer is offered (#82)?
+   *
+   * Off everywhere until an owner opts in. With it off the scorer still runs and still records
+   * what it WOULD have done - which is LP4, and is what makes flipping this a measurement rather
+   * than a guess.
+   */
+  preferClusters: boolean;
 }
 
 /**
@@ -145,6 +153,7 @@ export async function resolveTravelEligibility(input: {
     slackMin: Math.max(0, settings.travelSlackMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,
     baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
+    preferClusters: settings.travelPreferClusters === true,
     // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
     // that silently marks every slot unpreferred is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.

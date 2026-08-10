@@ -283,6 +283,8 @@ export const travelSettingsSchema = z.object({
   // rather than a head start, and 0 is both the default and "the van leaves at opening".
   // NOT nullable: the column is NOT NULL and zero already expresses "no head start".
   baseDepartOffsetMin: z.number().int().min(0).max(240).optional(),
+  // #82 (LP5): may grouping reorder what a customer is offered. Off unless the owner opts in.
+  preferClusters: z.boolean().optional(),
 });
 
 export const updateSchedulerSchema = z

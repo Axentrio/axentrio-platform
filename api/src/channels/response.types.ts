@@ -79,6 +79,12 @@ export interface OfferMeasurement {
    * opinion", which is a present entry with a null cost and a reason.
    */
   scoring?: OfferScoring;
+  /** #82: the pilot was ON for this offer, whatever it then decided. */
+  groupingPilot?: boolean;
+  /** #82: the order was actually changed before this went out, and by how much. */
+  grouped?: { savedMinutes: number } | null;
+  /** #82: the pre-reorder order, so dispatch can tell whether the DELIVERED prefix changed. */
+  groupingPreviousOrder?: string[];
 }
 
 export interface ResponsePayload {

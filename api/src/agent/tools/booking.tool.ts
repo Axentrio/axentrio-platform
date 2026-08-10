@@ -79,6 +79,13 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // at the single early return instead would leak through the two branches that return sooner.
       const { grouping, ...result } = full;
       const measurement = grouping ? { measurement: { grouping } } : {};
+      // #82: computed here, beside `measurement`, and for the same reason - the branches below
+      // return before the final one, so anything attached only at the end silently never ships.
+      const groupedNote = result?.travel?.grouped?.customerReason
+        ? {
+            groupingNote: `The times in "slots" are already in the best order for this business. Offer them in the order given and do not re-sort them. If the customer asks why the first one is suggested, you may say: "${result.travel.grouped.customerReason}" Never invent a different reason, and never mention other customers or their addresses.`,
+          }
+        : {};
       // TRAVEL TIME FIRST, because a result can be entirely requestable — every candidate time
       // needs a drive nobody has measured — and that is NOT an empty range. Handled after the
       // empty-slots branch below it would be read out as "no times in this range", which turns
@@ -90,6 +97,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           ...measurement,
           data: {
             ...result,
+            ...groupedNote,
             suggestedAction: 'request_appointment',
             guidance: travel.addressTooVague
               ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
@@ -108,6 +116,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           ...measurement,
           data: {
             ...result,
+            ...groupedNote,
             noSlotsInRange: true,
             suggestedAction: 'request_appointment',
             guidance:
@@ -115,7 +124,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           },
         };
       }
-      return { success: true, data: result, ...measurement };
+      return { success: true, data: { ...result, ...groupedNote }, ...measurement };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }

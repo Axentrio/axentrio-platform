@@ -140,6 +140,41 @@ export interface TravelFilterSummary {
    * precisely when an owner most needs telling they are on their own judgement.
    */
   unavailableReason?: 'no_address' | 'not_placeable' | 'lookup_unavailable';
+  /**
+   * The slot order was CHANGED by grouping (#82), and this is what to say about it.
+   *
+   * Absent whenever the order is the one the engine produced, which is every Agent until an owner
+   * turns the pilot on. Present means `slots` is a reordering of the same times - never a
+   * different set, never a different feasibility class.
+   */
+  /**
+   * The LP5 pilot was ON for this offer (#82), whatever it then decided.
+   *
+   * Separate from `grouped` on purpose. `grouped` says the order changed; this says the feature
+   * was allowed to change it. Without both, an offer that the pilot looked at and left alone is
+   * indistinguishable from one the pilot never saw - and those are the two populations the whole
+   * comparison is between.
+   */
+  groupingPilot?: true;
+  /**
+   * What order these slots were in before grouping touched them.
+   *
+   * The customer sees a PREFIX of `slots`, so whether they experienced a reorder can only be
+   * decided once the delivered length is known - at dispatch. This is what that decision is made
+   * against. See `recordDeliveredOffer`.
+   */
+  groupingPreviousOrder?: string[];
+  grouped?: {
+    reasonCode: string;
+    /**
+     * Safe to show a customer, and ABSENT when the saving was too small to be worth a sentence.
+     *
+     * The owner is told about every reorder; the customer only about ones worth mentioning. Says
+     * nothing about another customer - not their name, not their address, and not that they exist.
+     */
+    customerReason?: string;
+    savedMinutes: number;
+  };
 }
 
 export interface AvailabilityResult {

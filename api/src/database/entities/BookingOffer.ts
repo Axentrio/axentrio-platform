@@ -156,6 +156,22 @@ export class BookingOffer {
   @Column({ type: 'boolean', name: 'cheaper_alternative_existed', nullable: true })
   cheaperAlternativeExisted?: boolean | null;
 
+  /**
+   * The order was actually CHANGED before this offer went out (#82, LP5).
+   *
+   * The owner's half of "both parties are told", in a form they can be shown and a query can
+   * count. It is also what separates the pilot cohort from the shadow one: LP4 records what the
+   * scorer would have done, and without this there is no way to tell the offers where it did.
+   *
+   * Null means the pilot was off for this offer; `false` would claim it looked and declined.
+   */
+  @Column({ type: 'boolean', name: 'grouping_applied', nullable: true })
+  groupingApplied?: boolean | null;
+
+  /** Minutes of driving the promoted slot saves over the one that would have been first. */
+  @Column({ type: 'int', name: 'grouping_saved_minutes', nullable: true })
+  groupingSavedMinutes?: number | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 }

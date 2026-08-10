@@ -298,6 +298,7 @@ export const SchedulerSettings: React.FC = () => {
   const [travelSlack, setTravelSlack] = useState<number | null>(null);
   const [travelStartFromBase, setTravelStartFromBase] = useState(false);
   const [travelBaseDepart, setTravelBaseDepart] = useState(0);
+  const [travelPreferClusters, setTravelPreferClusters] = useState(false);
   const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
@@ -333,6 +334,7 @@ export const SchedulerSettings: React.FC = () => {
     setTravelSlack(data.travel?.slackMin ?? null);
     setTravelStartFromBase(data.travel?.startFromBase === true);
     setTravelBaseDepart(data.travel?.baseDepartOffsetMin ?? 0);
+    setTravelPreferClusters(data.travel?.preferClusters === true);
     setRules({
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
@@ -472,6 +474,7 @@ export const SchedulerSettings: React.FC = () => {
         slackMin: travelSlack,
         startFromBase: travelStartFromBase,
         baseDepartOffsetMin: travelBaseDepart,
+        preferClusters: travelPreferClusters,
       },
       bookingsPaused,
     };
@@ -1050,6 +1053,23 @@ export const SchedulerSettings: React.FC = () => {
                       <span className="block text-xs text-text-muted">
                         The first job of each day is measured from the address above. Fill that
                         address in, or this has nothing to measure from.
+                      </span>
+                    </span>
+                  </label>
+
+                  <label htmlFor="travel-prefer-clusters" className="flex items-start gap-2 cursor-pointer">
+                    <Checkbox
+                      id="travel-prefer-clusters"
+                      checked={travelPreferClusters}
+                      disabled={!travelEnabled}
+                      onCheckedChange={(c) => setTravelPreferClusters(c === true)}
+                    />
+                    <span className="text-sm text-text-secondary">
+                      Suggest times that group with nearby work
+                      <span className="block text-xs text-text-muted">
+                        Customers still see every time they could have had, in the same list. Only
+                        the order changes, so the one that saves you the most driving is offered
+                        first. Nothing about your other customers is ever mentioned.
                       </span>
                     </span>
                   </label>

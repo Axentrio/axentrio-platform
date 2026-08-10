@@ -85,6 +85,9 @@ export async function recordBookingOffer(input: {
   slots: OfferedSlot[];
   deliveryBasis: OfferDeliveryBasis;
   scoring?: OfferScoring;
+  /** The LP5 pilot was ON for this offer, whatever it then decided. */
+  groupingPilot?: boolean;
+  grouped?: { savedMinutes: number } | null;
 }): Promise<string | null> {
   if (!input.slots.length) return null;
   try {
@@ -113,6 +116,12 @@ export async function recordBookingOffer(input: {
         // scored list, and the row keeps only the slots the channel delivered - so a later reader
         // could not recompute it from this row without inventing the slots that were truncated.
         cheaperAlternativeExisted: input.scoring?.cheaperAlternativeExisted ?? null,
+        // #82, and the three states are the point. NULL means the pilot was off for this offer,
+        // FALSE means it was on and left the order alone, TRUE means it reordered. Keying this on
+        // whether the SCORER ran would collapse the first two - every shadow offer would read
+        // `false` and land in the pilot's control group by accident.
+        groupingApplied: input.groupingPilot ? Boolean(input.grouped) : null,
+        groupingSavedMinutes: input.grouped?.savedMinutes ?? null,
       })
     );
     return row.id;
@@ -200,6 +209,9 @@ export async function recordDeliveredOffer(input: {
     locationMode?: string | null;
     slotStarts: string[];
     scoring?: OfferScoring;
+    groupingPilot?: boolean;
+    grouped?: { savedMinutes: number } | null;
+    groupingPreviousOrder?: string[];
   };
   deliveredTitles: string[];
   deliveryBasis: OfferDeliveryBasis;
@@ -220,6 +232,15 @@ export async function recordDeliveredOffer(input: {
       const score = scoring?.scores[key];
       return score ? { start, title, ...score } : { start, title };
     });
+  // DID THE CUSTOMER ACTUALLY EXPERIENCE A REORDER? Not the same question as "was the list
+  // reordered". They see a prefix - channels cap quick replies as low as three - so a reorder
+  // that happens entirely below the cap changes nothing anybody received, and recording it as
+  // delivered steering would put an untreated offer in the pilot's treatment group.
+  const previous = input.offer.groupingPreviousOrder;
+  const deliveredChanged = previous
+    ? paired.some((slot, i) => slot.start !== previous[i])
+    : false;
+
   return recordBookingOffer({
     tenantId: input.tenantId,
     botId: input.offer.botId,
@@ -231,5 +252,7 @@ export async function recordDeliveredOffer(input: {
     slots: paired,
     deliveryBasis: input.deliveryBasis,
     scoring,
+    groupingPilot: input.offer.groupingPilot === true,
+    grouped: deliveredChanged ? (input.offer.grouped ?? { savedMinutes: 0 }) : null,
   });
 }

@@ -48,7 +48,7 @@ const ACTIVE: ActiveTravelEligibility = {
   tenantId: 'ten-1',
   itineraryKey: 'cal:abc' as ActiveTravelEligibility['itineraryKey'],
   slackMin: 5,
-  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0,
+  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, preferClusters: false,
 };
 const PLACE = {
   placeId: 'ChIJ_place',

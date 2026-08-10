@@ -107,6 +107,12 @@ interface PendingAvailability {
   serviceName?: string;
   /** #81: shadow scoring, carried to dispatch to be recorded. Never shown to model or customer. */
   grouping?: OfferScoring;
+  /** #82: the pilot was on for this call, which is the cohort rather than the outcome. */
+  groupingPilot?: boolean;
+  /** #82: whether the order was actually changed, for the owner's durable audit trail. */
+  grouped?: { savedMinutes: number };
+  /** #82: the pre-reorder order, so dispatch can tell whether the DELIVERED prefix changed. */
+  groupingPreviousOrder?: string[];
 }
 
 /**
@@ -541,6 +547,11 @@ export class AgentService {
                     // truncated is decided at dispatch, and the counterfactual order is a
                     // statement about the list the scorer saw.
                     ...(pendingAvailability.grouping ? { scoring: pendingAvailability.grouping } : {}),
+                    ...(pendingAvailability.groupingPilot ? { groupingPilot: true } : {}),
+                    ...(pendingAvailability.grouped ? { grouped: pendingAvailability.grouped } : {}),
+                    ...(pendingAvailability.groupingPreviousOrder
+                      ? { groupingPreviousOrder: pendingAvailability.groupingPreviousOrder }
+                      : {}),
                   },
                 }
               : {}),
@@ -610,6 +621,11 @@ export class AgentService {
                 serviceName?: string;
                 serviceId?: string;
                 locationMode?: string;
+                travel?: {
+                  groupingPilot?: boolean;
+                  grouped?: { savedMinutes: number };
+                  groupingPreviousOrder?: string[];
+                };
               };
               if (Array.isArray(d.slots)) {
                 pendingAvailability = {
@@ -621,6 +637,10 @@ export class AgentService {
                   // #81 (LP4): off `measurement`, never off `data` - `data` is what the model is
                   // shown, and this is deliberately invisible to it.
                   grouping: (result.measurement as { grouping?: OfferScoring } | undefined)?.grouping,
+                  groupingPilot: (d.travel as { groupingPilot?: boolean } | undefined)?.groupingPilot === true,
+                  grouped: (d.travel as { grouped?: { savedMinutes: number } } | undefined)?.grouped,
+                  groupingPreviousOrder: (d.travel as { groupingPreviousOrder?: string[] } | undefined)
+                    ?.groupingPreviousOrder,
                 };
                 // #80 (LP3): every call is recorded, surfaced or not. This is the CALL-level unit,
                 // and it exists separately from the offer because a call the model never surfaces

@@ -122,6 +122,73 @@ describe('what was actually delivered', () => {
     ]);
   });
 
+  it('#82: counts as steered only when the DELIVERED prefix actually changed', async () => {
+    // The pilot's treatment group has to be offers a customer experienced a reorder in. Channels
+    // cap quick replies as low as three, so a reorder happening entirely below the cap changes
+    // nothing anybody received - recording it as delivered steering would put an untreated offer
+    // in the treatment group and quietly dilute the comparison the pilot exists to make.
+    await recordDeliveredOffer({
+      tenantId,
+      sessionId,
+      channel: 'whatsapp',
+      offer: {
+        botId,
+        serviceId,
+        slotStarts: [SLOT_A, SLOT_B, SLOT_C],
+        groupingPilot: true,
+        grouped: { savedMinutes: 40 },
+        // Only C and B swapped, and the channel kept just the first two - so what went out is
+        // byte-for-byte the order that would have gone out anyway.
+        groupingPreviousOrder: [SLOT_A, SLOT_B, SLOT_C],
+      },
+      deliveredTitles: ['Tue 9:00 AM', 'Tue 10:00 AM'],
+      deliveryBasis: 'provider_accepted',
+    });
+
+    const [row] = await AppDataSource.getRepository(BookingOffer).find({ where: { sessionId } });
+    // Pilot ON, so not null; nothing reached the customer differently, so not true either.
+    expect(row.groupingApplied).toBe(false);
+    expect(row.groupingSavedMinutes).toBeNull();
+  });
+
+  it('#82: records the steering when the delivered prefix DID change', async () => {
+    await recordDeliveredOffer({
+      tenantId,
+      sessionId,
+      channel: 'whatsapp',
+      offer: {
+        botId,
+        serviceId,
+        slotStarts: [SLOT_C, SLOT_A, SLOT_B],
+        groupingPilot: true,
+        grouped: { savedMinutes: 40 },
+        groupingPreviousOrder: [SLOT_A, SLOT_B, SLOT_C],
+      },
+      deliveredTitles: ['Tue 11:00 AM', 'Tue 9:00 AM'],
+      deliveryBasis: 'provider_accepted',
+    });
+
+    const [row] = await AppDataSource.getRepository(BookingOffer).find({ where: { sessionId } });
+    expect(row.groupingApplied).toBe(true);
+    expect(row.groupingSavedMinutes).toBe(40);
+  });
+
+  it('#82: leaves the cohort NULL when the pilot was off, never false', async () => {
+    // Three states, and conflating the first two is what makes the pilot unanswerable: null means
+    // the feature was off for this offer, false means it was on and left the order alone.
+    await recordDeliveredOffer({
+      tenantId,
+      sessionId,
+      channel: 'whatsapp',
+      offer: { botId, serviceId, slotStarts: [SLOT_A, SLOT_B] },
+      deliveredTitles: ['Tue 9:00 AM', 'Tue 10:00 AM'],
+      deliveryBasis: 'provider_accepted',
+    });
+
+    const [row] = await AppDataSource.getRepository(BookingOffer).find({ where: { sessionId } });
+    expect(row.groupingApplied).toBeNull();
+  });
+
   it('records nothing when the channel dropped the chips entirely', async () => {
     // There was no offer, whatever the agent composed. Recording one would credit the baseline
     // with slots nobody saw.

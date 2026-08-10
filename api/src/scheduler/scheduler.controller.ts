@@ -259,6 +259,7 @@ async function readConfig(tenantId: string, bot: Bot) {
       slackMin: bookingSettings?.travelSlackMin ?? null,
       startFromBase: bookingSettings?.travelStartFromBase === true,
       baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
+      preferClusters: bookingSettings?.travelPreferClusters === true,
       /**
        * Why the switch cannot be turned on, or null when it can.
        *
@@ -415,6 +416,7 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       [data.bookingsPaused, 'bookings_paused'],
       [data.travel?.enabled, 'travel_time_enabled'],
       [data.travel?.startFromBase, 'travel_start_from_base'],
+      [data.travel?.preferClusters, 'travel_prefer_clusters'],
     ];
     for (const [submitted, column] of BOOLEAN_COLUMNS) {
       const valueParam = `$${params.length + 1}`;

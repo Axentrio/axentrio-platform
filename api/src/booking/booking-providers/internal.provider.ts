@@ -56,6 +56,7 @@ import { returningRows } from '../../utils/raw-sql';
 import { resolveItineraryKey, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { resolveServiceLocationMode } from '../service-location';
 import { scoreOfferedSlots, type OfferScoring } from '../travel/score-offer';
+import { applyGrouping } from '../travel/apply-grouping';
 import {
   placeBookingAddress,
   placeAddressFor,
@@ -1079,14 +1080,52 @@ export class InternalProvider implements BookingProvider {
           baseFor: (at) => this.travelBaseFor(eligibility, input.rule, venue, at),
         });
 
+    // #82 (LP5) THE ONE PLACE A CUSTOMER-VISIBLE ORDER CHANGES. Off for everyone until an owner
+    // opts in; with the flag off this is the identity function and the epic stays measurement.
+    //
+    // An annotating caller is excluded on purpose: that is the owner's own picker, which shows
+    // every time including the ones travel refused, in the order the day runs. Reordering somebody
+    // reading their own diary would be nonsense.
+    const pilotOn = !annotating && eligibility.preferClusters;
+    const ranked = applyGrouping({
+      slots: cleared,
+      scoring: grouping ?? null,
+      enabled: pilotOn,
+      // ONE local day. The dates came from the model, not the customer, so a wide range is not
+      // evidence anybody is free across it - see `applyGrouping`. #84 collects the real thing.
+      //
+      // `rangeEnd` is EXCLUSIVE: `normalizeDateRange` turns a date-only end into the following
+      // local midnight so the end day is included. Comparing it directly puts a plain same-day
+      // request on two different local days and switches the pilot off for exactly the call shape
+      // it exists for. One millisecond back lands on the last instant that is actually in range.
+      singleDay:
+        localDayBounds(input.rule, new Date(input.rangeStart)).localDay.toISODate() ===
+        localDayBounds(input.rule, new Date(new Date(input.rangeEnd).getTime() - 1)).localDay.toISODate(),
+    });
+
+    if (ranked.applied) {
+      // The owner's audit trail. #82's first decision is that both parties are told, and the
+      // owner's half is a log line they can be shown rather than a sentence in a chat.
+      logger.info('[grouping] offered a grouped order', {
+        tenantId: ctx.tenant.id,
+        botId: ctx.bot.id,
+        reasonCode: ranked.applied.reasonCode,
+        savedMinutes: ranked.applied.savedMinutes,
+        slots: ranked.slots.length,
+      });
+    }
+
     return {
       // The one line the policy decides. An annotating caller keeps the whole list and marks it
       // up from the two arrays below; an enforcing one is handed only what was proven.
-      slots: annotating ? input.slots : cleared,
+      slots: annotating ? input.slots : ranked.slots,
       summary: {
         requestableSlots,
         unreachableSlots,
         ...(candidate.coarse ? { addressTooVague: true as const } : {}),
+        ...(pilotOn ? { groupingPilot: true as const } : {}),
+        ...(ranked.previousOrder ? { groupingPreviousOrder: ranked.previousOrder } : {}),
+        ...(ranked.applied ? { grouped: ranked.applied } : {}),
       },
       ...(grouping ? { grouping } : {}),
     };

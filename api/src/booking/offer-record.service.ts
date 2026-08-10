@@ -90,6 +90,7 @@ export async function recordBookingOffer(input: {
   grouped?: { savedMinutes: number } | null;
 }): Promise<string | null> {
   if (!input.slots.length) return null;
+  const steered = input.groupingPilot ? Boolean(input.grouped) : null;
   try {
     const repo = AppDataSource.getRepository(BookingOffer);
     const row = await repo.save(
@@ -120,8 +121,12 @@ export async function recordBookingOffer(input: {
         // FALSE means it was on and left the order alone, TRUE means it reordered. Keying this on
         // whether the SCORER ran would collapse the first two - every shadow offer would read
         // `false` and land in the pilot's control group by accident.
-        groupingApplied: input.groupingPilot ? Boolean(input.grouped) : null,
-        groupingSavedMinutes: input.grouped?.savedMinutes ?? null,
+        //
+        // The two columns are derived from ONE decision so they cannot disagree. Written apart,
+        // an offer could carry a saving with a null verdict, or a verdict with no saving, and a
+        // later reader would have to guess which of the two to believe.
+        groupingApplied: steered,
+        groupingSavedMinutes: steered === true ? (input.grouped?.savedMinutes ?? 0) : null,
       })
     );
     return row.id;
@@ -236,9 +241,14 @@ export async function recordDeliveredOffer(input: {
   // reordered". They see a prefix - channels cap quick replies as low as three - so a reorder
   // that happens entirely below the cap changes nothing anybody received, and recording it as
   // delivered steering would put an untreated offer in the pilot's treatment group.
-  const previous = input.offer.groupingPreviousOrder;
+  // NORMALISED on both sides. `previousOrder` is built from canonical ISO instants while
+  // `slotStarts` is whatever the provider emitted, so `2026-09-07T10:00:00+00:00` and `...Z` are
+  // one moment and two strings - and comparing them raw reports a reorder that never happened,
+  // putting an untouched offer in the pilot's treatment group.
+  const canonical = (v: string) => (Number.isNaN(Date.parse(v)) ? v : new Date(v).toISOString());
+  const previous = input.offer.groupingPreviousOrder?.map(canonical);
   const deliveredChanged = previous
-    ? paired.some((slot, i) => slot.start !== previous[i])
+    ? paired.some((slot, i) => canonical(slot.start) !== previous[i])
     : false;
 
   return recordBookingOffer({

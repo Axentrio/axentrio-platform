@@ -173,6 +173,53 @@ describe('what was actually delivered', () => {
     expect(row.groupingSavedMinutes).toBe(40);
   });
 
+  it('#82: compares instants, not strings, when deciding the delivered order changed', async () => {
+    // `previousOrder` is canonical ISO; `slotStarts` is whatever the provider emitted. The same
+    // moment written two ways would report a reorder that never happened and put an untouched
+    // offer in the treatment group.
+    const offsetForm = SLOT_A.replace('Z', '+00:00');
+    await recordDeliveredOffer({
+      tenantId,
+      sessionId,
+      channel: 'whatsapp',
+      offer: {
+        botId,
+        serviceId,
+        slotStarts: [offsetForm, SLOT_B],
+        groupingPilot: true,
+        grouped: { savedMinutes: 40 },
+        groupingPreviousOrder: [SLOT_A, SLOT_B],
+      },
+      deliveredTitles: ['Tue 9:00 AM', 'Tue 10:00 AM'],
+      deliveryBasis: 'provider_accepted',
+    });
+
+    const [row] = await AppDataSource.getRepository(BookingOffer).find({ where: { sessionId } });
+    expect(row.groupingApplied).toBe(false);
+  });
+
+  it('#82: never records a saving without a verdict, or a verdict without one', async () => {
+    // Written against the WRITER, not the dispatch helper. The helper nulls `grouped` on its own
+    // before it gets here, so a test routed through it cannot see whether these two columns are
+    // decided together — which is the thing that must hold for any caller, now or later.
+    await recordBookingOffer({
+      tenantId,
+      botId,
+      sessionId,
+      serviceId,
+      // Pilot OFF, but a saving present: the shape a stale or mistaken caller produces.
+      groupingPilot: false,
+      grouped: { savedMinutes: 40 },
+      slots: [{ start: SLOT_A, title: 'Tue 9:00 AM' }],
+      deliveryBasis: 'provider_accepted',
+    });
+
+    const [row] = await AppDataSource.getRepository(BookingOffer).find({ where: { sessionId } });
+    // A saving with a null verdict would leave a later reader guessing which to believe.
+    expect(row.groupingApplied).toBeNull();
+    expect(row.groupingSavedMinutes).toBeNull();
+  });
+
   it('#82: leaves the cohort NULL when the pilot was off, never false', async () => {
     // Three states, and conflating the first two is what makes the pilot unanswerable: null means
     // the feature was off for this offer, false means it was on and left the order alone.

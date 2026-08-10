@@ -560,6 +560,21 @@ async function platformAgentPath(
     const fallbackMessage =
       aiSettings?.guardrails?.fallbackMessage || "We're connecting you to an agent. Please hold on.";
 
+    /**
+     * The owner's canned wording, said in the language the customer is writing in.
+     *
+     * The fallback is a tenant setting, so it is written once in the business's own language and
+     * then posted verbatim to everybody. Observed in production: an English customer asked about a
+     * Sunday and was answered `Laat me je verbinden met ons team`. The off-hours message already
+     * goes through this exact helper for the same reason; these three exits were simply missed.
+     *
+     * Fail-open by construction - `localizeMessage` returns the original when the languages match
+     * or when anything at all goes wrong, so a translation outage costs the old behaviour and
+     * never a missing reply.
+     */
+    const inCustomerLanguage = (message: string, customerText: string) =>
+      localizeMessage(message, customerText, session);
+
     // Debounce: wait a quiet-window so a burst of messages typed in quick
     // succession settles before we run, and is answered as ONE coherent turn
     // instead of replying only to the first message.
@@ -651,21 +666,21 @@ async function platformAgentPath(
 
         case 'error':
           logger.error(`Platform agent error for session ${session.id}`, { error: result.error });
-          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
           await handleBotHandoff(session, botParticipant.id, 'bot_error');
           handedOff = true;
           break;
 
         case 'budget_exceeded':
           logger.warn(`Platform agent budget exceeded for tenant ${tenant.id}`);
-          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
           await handleBotHandoff(session, botParticipant.id, 'bot_error');
           handedOff = true;
           break;
 
         case 'max_iterations':
           logger.warn(`Platform agent max iterations for session ${session.id}`);
-          await sendBotMessage(session, botParticipant.id, result.fallbackMessage);
+          await sendBotMessage(session, botParticipant.id, await inCustomerLanguage(result.fallbackMessage, messageContent));
           await handleBotHandoff(session, botParticipant.id, 'bot_error');
           handedOff = true;
           break;

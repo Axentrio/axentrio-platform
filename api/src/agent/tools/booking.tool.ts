@@ -65,11 +65,13 @@ export class CheckAvailabilityTool implements ToolAdapter {
     properties: {
       startDate: {
         type: 'string',
-        description: 'Start date in ISO 8601 format (e.g. 2026-04-01).',
+        description:
+          'Start date in ISO 8601 format (e.g. 2026-04-01). Ask for the day the customer actually named. If they said a specific date, set startDate and endDate to THAT date - do not widen it into a week around it.',
       },
       endDate: {
         type: 'string',
-        description: 'End date in ISO 8601 format (e.g. 2026-04-07).',
+        description:
+          'End date in ISO 8601 format (e.g. 2026-04-07). Same as startDate whenever the customer named one day. Only widen the range when they were genuinely open about when - "sometime next week", "any day that suits" - and never past seven days.',
       },
       serviceId: {
         type: 'string',

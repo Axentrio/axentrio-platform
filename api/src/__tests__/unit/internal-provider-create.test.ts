@@ -184,7 +184,13 @@ vi.mock('../../booking/travel/routes.service', async (importOriginal) => {
 });
 
 import type { BookingPlacement } from '../../booking/travel/booking-place';
-import { InternalProvider } from '../../booking/booking-providers/internal.provider';
+import {
+  InternalProvider,
+  SLOT_NOT_OFFERABLE,
+  SLOT_NOT_OFFERABLE_ON_RESCHEDULE,
+  SLOT_TAKEN_ON_CREATE,
+  SLOT_TAKEN_ON_RESCHEDULE,
+} from '../../booking/booking-providers/internal.provider';
 import { BookingError } from '../../booking/booking-providers/types';
 
 const ctx: any = {
@@ -408,6 +414,28 @@ describe('InternalProvider.createBooking', () => {
     expect(transaction).not.toHaveBeenCalled();
   });
 
+  it('never says "just taken" about a time that was never offerable', () => {
+    // Two different noes that lead a customer to two different places. An occupied slot is bad
+    // luck and the answer is another time. A slot the rules never allowed — outside hours, a
+    // closed day, sooner than the notice the owner needs, past the horizon, or a full day — is a
+    // misunderstanding, and "just taken" sends them to a Request when picking a valid time would
+    // have booked them in. Observed on a min-notice refusal, where that is exactly what happened.
+    // Asserted on the VALUES, not the source text. These messages are built by concatenation, so
+    // a phrase like "do NOT say it was just taken" is split across two string literals and a
+    // source scan cannot see it — the first version of this test failed for exactly that reason.
+    for (const body of [SLOT_NOT_OFFERABLE, SLOT_NOT_OFFERABLE_ON_RESCHEDULE]) {
+      expect(body).toMatch(/opening hours/i);
+      expect(body).toMatch(/notice/i);
+      expect(body).toMatch(/check_availability/);
+      expect(body).toMatch(/do NOT say it was just taken/i);
+    }
+
+    // And the never-offerable path must be REACHABLE — chosen by whether anything occupies the
+    // time, not defined and left unused.
+    const src = readFileSync(join(__dirname, '..', '..', 'booking', 'booking-providers', 'internal.provider.ts'), 'utf8');
+    expect(src).toMatch(/occupied \? SLOT_TAKEN_ON_CREATE : SLOT_NOT_OFFERABLE/);
+  });
+
   it('tells the model what to DO about a taken slot, not merely that it is taken', async () => {
     // Seen in production. Two customers raced for one slot; the loser's tool returned
     // `This time slot is no longer available` — correct, safe for the model, and useless. The
@@ -416,23 +444,24 @@ describe('InternalProvider.createBooking', () => {
     //
     // Every booking error in this file that produces a good reply carries its next step. This one
     // did not, and a bare statement of fact does not survive contact with the model.
-    // Every site must use one of the two shared directives — never a bare string. Checking the
-    // constant NAME rather than the text is what makes adding a seventh site fail here.
+    // Every site must use one of the shared directives — never a bare string. Checking the
+    // constant NAME rather than the text is what makes adding another site fail here.
     for (const thrown of slotUnavailableThrows()) {
-      expect(thrown).toMatch(/^SLOT_TAKEN_ON_(CREATE|RESCHEDULE)$/);
+      expect(thrown).toMatch(/^(SLOT_TAKEN_ON_(CREATE|RESCHEDULE)|occupied \? SLOT_TAKEN_ON_(CREATE|RESCHEDULE) : SLOT_NOT_OFFERABLE(_ON_RESCHEDULE)?)$/);
     }
 
     // ...and both directives say what to do, and name the two moves that were actually observed.
-    const src = readFileSync(join(__dirname, '..', '..', 'booking', 'booking-providers', 'internal.provider.ts'), 'utf8');
-    for (const constant of ['SLOT_TAKEN_ON_CREATE', 'SLOT_TAKEN_ON_RESCHEDULE']) {
-      const body = src.slice(src.indexOf(`const ${constant} =`), src.indexOf(';', src.indexOf(`const ${constant} =`)));
+    for (const body of [SLOT_TAKEN_ON_CREATE, SLOT_TAKEN_ON_RESCHEDULE]) {
       expect(body).toMatch(/check_availability/);
       expect(body).toMatch(/no longer available/i);
-      expect(body).toMatch(/do NOT[\s\S]*hand the conversation to a human/i);
+      expect(body).toMatch(/do NOT hand the conversation to a human/i);
       expect(body).toMatch(/do NOT use the fallback message/i);
     }
-    // A move that failed must also say the original appointment still stands.
-    expect(src.slice(src.indexOf('const SLOT_TAKEN_ON_RESCHEDULE ='), src.indexOf(';', src.indexOf('const SLOT_TAKEN_ON_RESCHEDULE =')))).toMatch(/has NOT been changed/);
+    // A move that failed must also say the original appointment still stands — in BOTH of its
+    // messages, because a customer told their time is gone assumes the old one went with it.
+    for (const body of [SLOT_TAKEN_ON_RESCHEDULE, SLOT_NOT_OFFERABLE_ON_RESCHEDULE]) {
+      expect(body).toMatch(/has NOT been changed/);
+    }
   });
 
   it('maps a concurrent exclusion violation (23P01) to SLOT_UNAVAILABLE', async () => {

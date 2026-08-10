@@ -92,6 +92,9 @@ const TRAVEL = {
   enabled: true,
   slackMin: 10,
   startFromBase: true,
+  // NON-ZERO deliberately (#91). Zero is the field's default, so a fixture carrying zero would
+  // pass the round-trip below even if the editor never hydrated the value at all.
+  baseDepartOffsetMin: 30,
   blockedReason: null as null | 'no_maps_key' | 'not_entitled' | 'shared_itinerary',
 };
 
@@ -368,7 +371,7 @@ describe('SchedulerSettings — travel time', { timeout: SLOW_FORM_TIMEOUT_MS },
 
   it('returns every travel field unchanged when the owner saves without editing', async () => {
     const payload = await saveUntouched(CONFIG);
-    expect(payload.travel).toEqual({ enabled: true, slackMin: 10, startFromBase: true });
+    expect(payload.travel).toEqual({ enabled: true, slackMin: 10, startFromBase: true, baseDepartOffsetMin: 30 });
   });
 
   it('does not send blockedReason back — that is the server answer, not an owner setting', async () => {

@@ -278,6 +278,11 @@ export const travelSettingsSchema = z.object({
   // working day. Nullable so an owner can clear it back to "no margin".
   slackMin: z.number().int().min(0).max(120).nullable().optional(),
   startFromBase: z.boolean().optional(),
+  // #91: how early the van leaves the premises, in minutes before the day's first opening.
+  // Capped at four hours because past that the owner is describing a different working day
+  // rather than a head start, and 0 is both the default and "the van leaves at opening".
+  // NOT nullable: the column is NOT NULL and zero already expresses "no head start".
+  baseDepartOffsetMin: z.number().int().min(0).max(240).optional(),
 });
 
 export const updateSchedulerSchema = z

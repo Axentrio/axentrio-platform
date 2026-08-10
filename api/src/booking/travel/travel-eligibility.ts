@@ -61,6 +61,11 @@ export interface ActiveTravelEligibility {
   /** Gate the day's first job against the venue. */
   startFromBase: boolean;
   /**
+   * Minutes before opening that the van leaves the premises (#91). Only meaningful with
+   * `startFromBase`, and `0` reproduces the behaviour that shipped with #76.
+   */
+  baseDepartOffsetMin: number;
+  /**
    * Minutes of detour the owner is willing to call good (#81), or null for no threshold.
    *
    * A PREFERENCE, and it never refuses anything. It reads a slot the gate has already cleared and
@@ -68,6 +73,32 @@ export interface ActiveTravelEligibility {
    * Request - which is ADR-0017's rule.
    */
   maxDetourMin: number | null;
+}
+
+/**
+ * The most head start an owner may claim, in minutes.
+ *
+ * Four hours. Past that they are describing a different working day rather than leaving early,
+ * and every minute of it buys reach that could clear a job nobody can actually make.
+ */
+export const MAX_BASE_DEPART_OFFSET_MIN = 240;
+
+/**
+ * How early the van may leave, from a stored value that cannot be trusted.
+ *
+ * BOUNDED AT BOTH ENDS, and neither end is decorative. A negative would push the departure LATER
+ * than opening and quietly TIGHTEN the rule the owner was trying to relax. An unbounded positive
+ * is the dangerous one: it moves the departure arbitrarily early and can CLEAR a first job nobody
+ * can reach, which is the one thing a feasibility gate must never do. The API refuses out-of-range
+ * input and the column carries a CHECK, but this is the read path and it does not get to assume
+ * either of them ran - a row predating the constraint, or written by a future caller, still
+ * arrives here.
+ *
+ * Absent reads as zero, which is the behaviour #76 shipped.
+ */
+export function clampBaseDepartOffset(stored: number | null | undefined): number {
+  if (typeof stored !== 'number' || !Number.isFinite(stored)) return 0;
+  return Math.min(MAX_BASE_DEPART_OFFSET_MIN, Math.max(0, Math.trunc(stored)));
 }
 
 /**
@@ -113,6 +144,7 @@ export async function resolveTravelEligibility(input: {
     itineraryKey: input.itineraryKey,
     slackMin: Math.max(0, settings.travelSlackMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,
+    baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
     // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
     // that silently marks every slot unpreferred is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.

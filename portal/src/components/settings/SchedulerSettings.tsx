@@ -297,6 +297,7 @@ export const SchedulerSettings: React.FC = () => {
   const [travelEnabled, setTravelEnabled] = useState(false);
   const [travelSlack, setTravelSlack] = useState<number | null>(null);
   const [travelStartFromBase, setTravelStartFromBase] = useState(false);
+  const [travelBaseDepart, setTravelBaseDepart] = useState(0);
   const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
@@ -331,6 +332,7 @@ export const SchedulerSettings: React.FC = () => {
     setTravelEnabled(data.travel?.enabled === true);
     setTravelSlack(data.travel?.slackMin ?? null);
     setTravelStartFromBase(data.travel?.startFromBase === true);
+    setTravelBaseDepart(data.travel?.baseDepartOffsetMin ?? 0);
     setRules({
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
@@ -416,6 +418,12 @@ export const SchedulerSettings: React.FC = () => {
     if (venue.country && !/^[A-Za-z]{2}$/.test(venue.country)) {
       e.push('Venue address: country must be a 2-letter code, like BE.');
     }
+    // Mirrors `travelSettingsSchema`: an integer 0-240. Past four hours the owner is describing
+    // a different working day rather than a head start, and the API refuses it — this is the
+    // difference between being told before the Save and after it.
+    if (!Number.isInteger(travelBaseDepart) || travelBaseDepart < 0 || travelBaseDepart > 240) {
+      e.push('Travel time: leaving early must be a whole number of minutes between 0 and 240.');
+    }
     // Mirrors `travelSettingsSchema`: an integer 0-120. Slack PADS every drive, so an hour is
     // already generous and a fat-fingered 500 would swallow the working day — the API refuses
     // it, and this is the difference between being told before the Save and after it.
@@ -423,7 +431,7 @@ export const SchedulerSettings: React.FC = () => {
       e.push('Travel time: extra minutes must be a whole number between 0 and 120.');
     }
     return [...new Set(e)];
-  }, [days, overrides, availabilityMode, venue, travelSlack]);
+  }, [days, overrides, availabilityMode, venue, travelSlack, travelBaseDepart]);
 
   /**
    * The payload this form would send right now.
@@ -459,7 +467,12 @@ export const SchedulerSettings: React.FC = () => {
       venueAddress: venue,
       // Sent whole rather than as a diff: the endpoint treats an absent key as "leave alone",
       // so a partial travel object would silently keep a stale switch on.
-      travel: { enabled: travelEnabled, slackMin: travelSlack, startFromBase: travelStartFromBase },
+      travel: {
+        enabled: travelEnabled,
+        slackMin: travelSlack,
+        startFromBase: travelStartFromBase,
+        baseDepartOffsetMin: travelBaseDepart,
+      },
       bookingsPaused,
     };
   };
@@ -1035,11 +1048,31 @@ export const SchedulerSettings: React.FC = () => {
                     <span className="text-sm text-text-secondary">
                       I start the day from my own address
                       <span className="block text-xs text-text-muted">
-                        The first job of each day is measured from the address above, leaving at
-                        opening time. Fill that address in, or this has nothing to measure from.
+                        The first job of each day is measured from the address above. Fill that
+                        address in, or this has nothing to measure from.
                       </span>
                     </span>
                   </label>
+
+                  {travelStartFromBase && (
+                    <div className="pl-6">
+                      <Label htmlFor="travel-base-depart">Minutes I leave before opening</Label>
+                      <Input
+                        id="travel-base-depart"
+                        type="number"
+                        min={0}
+                        max={240}
+                        value={travelBaseDepart}
+                        disabled={!travelEnabled}
+                        onChange={(e) => setTravelBaseDepart(e.target.value === '' ? 0 : Number(e.target.value))}
+                      />
+                      <p className="text-xs text-text-muted mt-1">
+                        At 0 the van leaves exactly when you open, so a job at opening time is only
+                        bookable if it is next door. Put in how long before opening you actually set
+                        off and the first slot of the day comes back.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Date overrides — holidays / closures / one-off hours */}

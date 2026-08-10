@@ -167,6 +167,19 @@ export class BookingSettings {
    * venue→(the job that was dropped). Reschedule and cancel must re-check rather than
    * assume that removing work can only create slack.
    */
+  /**
+   * How many minutes before the day's first opening the van leaves the premises (#91).
+   *
+   * ONLY read when `travelStartFromBase` is on. It exists because the opening instant answers
+   * "when may a customer be booked", not "when does the van move", and gating the day's first
+   * job on a departure at opening rules out a job at opening for any positive drive - costing
+   * the owner the first slot of every day.
+   *
+   * Zero is the honest default and reproduces the original behaviour exactly.
+   */
+  @Column({ type: 'int', name: 'travel_base_depart_offset_min', default: 0 })
+  travelBaseDepartOffsetMin!: number;
+
   @Column({ type: 'boolean', name: 'travel_start_from_base', default: false })
   travelStartFromBase!: boolean;
 

@@ -164,6 +164,7 @@ export interface SchedulerConfig {
     enabled: boolean;
     slackMin: number | null;
     startFromBase: boolean;
+    baseDepartOffsetMin: number;
     /**
      * Why the switch cannot be turned on, or null when it can. The API refuses each of these
      * on write too; this is what lets the screen say so BEFORE the owner tries.
@@ -183,7 +184,7 @@ export interface UpdateSchedulerPayload {
   bookingRules?: Partial<BookingRules>;
   /** `null` clears the whole venue; omitting the key leaves it untouched. */
   venueAddress?: Partial<VenueAddress> | null;
-  travel?: { enabled?: boolean; slackMin?: number | null; startFromBase?: boolean };
+  travel?: { enabled?: boolean; slackMin?: number | null; startFromBase?: boolean; baseDepartOffsetMin?: number };
   bookingsPaused?: boolean;
 }
 

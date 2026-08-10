@@ -258,6 +258,7 @@ async function readConfig(tenantId: string, bot: Bot) {
       enabled: bookingSettings?.travelTimeEnabled === true,
       slackMin: bookingSettings?.travelSlackMin ?? null,
       startFromBase: bookingSettings?.travelStartFromBase === true,
+      baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
       /**
        * Why the switch cannot be turned on, or null when it can.
        *
@@ -436,6 +437,19 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `travel_slack_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_slack_min END`
+      );
+    }
+
+    // NOT NULL with a default, so the INSERT arm must bind a real integer — it cannot ride the
+    // nullable-int contract above, which would write null on a first save and violate the column.
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(data.travel?.baseDepartOffsetMin ?? 0, data.travel?.baseDepartOffsetMin !== undefined);
+      insertCols.push('travel_base_depart_offset_min');
+      insertVals.push(valueParam);
+      updates.push(
+        `travel_base_depart_offset_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_base_depart_offset_min END`
       );
     }
 

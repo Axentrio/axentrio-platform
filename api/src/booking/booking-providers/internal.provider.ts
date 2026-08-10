@@ -82,7 +82,7 @@ import {
   type TravelNeighbour,
   type TravelVerdict,
 } from '../travel/travel-gate';
-import { dayOpeningInstant, localDayBounds, type DayRule } from '../travel/travel-day';
+import { baseDepartureInstant, localDayBounds, type DayRule } from '../travel/travel-day';
 import { recordCause, recordRoutingSuccess } from '../travel/degradation-monitor';
 import { notifyTenantCapExhausted } from '../travel/degradation-notify';
 import { driveLookupFor } from '../travel/routes.service';
@@ -1166,7 +1166,10 @@ export class InternalProvider implements BookingProvider {
   ): { base: { at: Date; location: NeighbourLocation } | null; dayStart: Date } {
     const { localDay, dayStart } = localDayBounds(rule, candidateStart);
     if (!eligibility.startFromBase) return { base: null, dayStart };
-    const at = dayOpeningInstant(rule, localDay);
+    // #91: the van leaves BEFORE opening when the owner says it does. Opening answers "when may a
+    // customer be booked", which is not "when does the van move" - and equating them ruled out a
+    // job at opening for any positive drive, costing the owner the first slot of every day.
+    const at = baseDepartureInstant(rule, localDay, eligibility.baseDepartOffsetMin);
     if (!at) return { base: null, dayStart };
     return { base: { at, location: venue ?? { kind: 'unresolved' } }, dayStart };
   }
@@ -1238,7 +1241,12 @@ export class InternalProvider implements BookingProvider {
     captureVenue?: (v: NeighbourLocation) => void;
   }): Promise<{ verdict: TravelVerdict; bookingId?: string }> {
     const { dayStart, dayEnd, localDay } = localDayBounds(input.rule, input.day);
-    const at = dayOpeningInstant(input.rule, localDay);
+    // THE SAME DEPARTURE THE READ PATH USED (#91). `travelBaseFor` applies the owner's offset, so
+    // reading the bare opening here would make the two passes disagree: availability offers a job
+    // at opening that the owner can reach by leaving early, and this rejects it on a departure
+    // the van never makes. A read that offers what the write refuses is the failure mode this
+    // whole re-assertion exists to prevent, not one to introduce.
+    const at = baseDepartureInstant(input.rule, localDay, input.eligibility.baseDepartOffsetMin);
     // No departure instant, no base, nothing this function can add. Every other constraint on
     // the exposed booking was already checked when it was made.
     if (!at) return { verdict: 'clear' };

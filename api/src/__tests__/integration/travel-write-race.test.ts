@@ -37,7 +37,7 @@ const eligibility = (): ActiveTravelEligibility => ({
   tenantId: tenant.id,
   itineraryKey: key as ActiveTravelEligibility['itineraryKey'],
   slackMin: 0,
-  startFromBase: false, maxDetourMin: null,
+  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0,
 });
 
 /** Write a held booking straight in, already placed, as the pre-lock pass would have left it. */

@@ -178,7 +178,7 @@ describe('InternalProvider.rescheduleBooking — travel', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false };
+  const ACTIVE = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0 };
   const neighbour = (start: string, end: string, point: { lat: number; lng: number }) => ({
     blockedStart: new Date(start), blockedEnd: new Date(end), location: { kind: 'known', point },
   });
@@ -706,7 +706,7 @@ describe('InternalProvider.rescheduleBooking — what the move exposed', () => {
   let provider: InternalProvider;
   const MOBILE = { ...EVENT_TYPE, customerAddressRequired: true };
   const PLACE = { placeId: 'ChIJ_p', lat: 51.05, lng: 3.72, precision: 'rooftop' as const, formattedAddress: 'Kerkstraat 12, 9000 Gent, Belgium' };
-  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true };
+  const BASED = { active: true as const, tenantId: 'ten-1', itineraryKey: 'bot:bot-1', slackMin: 0, startFromBase: true, maxDetourMin: null, baseDepartOffsetMin: 0 };
   const GENT = { lat: 51.05, lng: 3.72 };
   const LIEGE = { lat: 50.6326, lng: 5.5797 };
   const VENUE = { kind: 'known' as const, point: GENT };

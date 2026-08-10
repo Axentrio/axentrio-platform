@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // ── Mocks ───────────────────────────────────────────────────────────────────
@@ -257,6 +259,20 @@ function insertParam(call: [string, unknown[]], column: string): unknown {
   return (call[1] as unknown[])[Number(slot[1]) - 1];
 }
 
+/**
+ * Every SLOT_UNAVAILABLE throw site, read from the source.
+ *
+ * Source-scanned rather than exercised one path at a time: there are six of them across create,
+ * reschedule and accept, and the failure being guarded is somebody adding a seventh with a bare
+ * message. A test that calls three of them would not notice.
+ */
+function slotUnavailableThrows(): string[] {
+  const src = readFileSync(join(__dirname, '..', '..', 'booking', 'booking-providers', 'internal.provider.ts'), 'utf8');
+  const out = [...src.matchAll(/new BookingError\(\s*([\s\S]{0,80}?),\s*'SLOT_UNAVAILABLE'/g)].map((m) => m[1].trim());
+  if (out.length < 6) throw new Error(`expected every throw site, found ${out.length}`);
+  return out;
+}
+
 describe('InternalProvider.createBooking', () => {
   let provider: InternalProvider;
 
@@ -390,6 +406,33 @@ describe('InternalProvider.createBooking', () => {
       provider.createBooking(ctx, 'idem-2', '2026-06-10T07:05:00Z', { name: 'Ada', email: 'ada@example.com' })
     ).rejects.toMatchObject({ code: 'SLOT_UNAVAILABLE' });
     expect(transaction).not.toHaveBeenCalled();
+  });
+
+  it('tells the model what to DO about a taken slot, not merely that it is taken', async () => {
+    // Seen in production. Two customers raced for one slot; the loser's tool returned
+    // `This time slot is no longer available` — correct, safe for the model, and useless. The
+    // model answered an English customer with the tenant's Dutch handoff string and gave up, on a
+    // race it could have recovered from in one turn by re-checking the day.
+    //
+    // Every booking error in this file that produces a good reply carries its next step. This one
+    // did not, and a bare statement of fact does not survive contact with the model.
+    // Every site must use one of the two shared directives — never a bare string. Checking the
+    // constant NAME rather than the text is what makes adding a seventh site fail here.
+    for (const thrown of slotUnavailableThrows()) {
+      expect(thrown).toMatch(/^SLOT_TAKEN_ON_(CREATE|RESCHEDULE)$/);
+    }
+
+    // ...and both directives say what to do, and name the two moves that were actually observed.
+    const src = readFileSync(join(__dirname, '..', '..', 'booking', 'booking-providers', 'internal.provider.ts'), 'utf8');
+    for (const constant of ['SLOT_TAKEN_ON_CREATE', 'SLOT_TAKEN_ON_RESCHEDULE']) {
+      const body = src.slice(src.indexOf(`const ${constant} =`), src.indexOf(';', src.indexOf(`const ${constant} =`)));
+      expect(body).toMatch(/check_availability/);
+      expect(body).toMatch(/no longer available/i);
+      expect(body).toMatch(/do NOT[\s\S]*hand the conversation to a human/i);
+      expect(body).toMatch(/do NOT use the fallback message/i);
+    }
+    // A move that failed must also say the original appointment still stands.
+    expect(src.slice(src.indexOf('const SLOT_TAKEN_ON_RESCHEDULE ='), src.indexOf(';', src.indexOf('const SLOT_TAKEN_ON_RESCHEDULE =')))).toMatch(/has NOT been changed/);
   });
 
   it('maps a concurrent exclusion violation (23P01) to SLOT_UNAVAILABLE', async () => {

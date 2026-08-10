@@ -152,6 +152,30 @@ export function normalizeIntakeAnswers(service: ServiceType, raw: unknown): Reco
  * their instant; zoneless datetimes are read as business-local. Output is RFC3339
  * UTC (Google events.list 400s on date-only values).
  */
+/**
+ * What to tell the model when the time it asked for has gone.
+ *
+ * THE MESSAGE CARRIES THE NEXT STEP, because a bare statement of fact does not survive contact
+ * with the model. Observed in production: two customers raced for one slot, and the loser's tool
+ * returned `This time slot is no longer available` - correct, safe to show, and useless. The model
+ * answered an English customer with the tenant's Dutch handoff string and gave up, on a race it
+ * could have recovered from in one turn by re-checking the day.
+ *
+ * Every booking error in this file that produces a good reply says what to do next. These did not.
+ * The two forbidden moves are named explicitly because both were what it actually did.
+ */
+const SLOT_TAKEN_ON_CREATE =
+  'That time is no longer available. Tell the customer plainly that it has just gone, apologise ' +
+  'briefly, then call check_availability again for the same day and offer what is left. Do NOT ' +
+  'hand the conversation to a human and do NOT use the fallback message: a taken slot is an ' +
+  'ordinary thing that happens and you can fix it yourself.';
+
+/** The same, for a move. The customer keeps their existing appointment until one succeeds. */
+const SLOT_TAKEN_ON_RESCHEDULE =
+  'That time is no longer available, and the existing appointment has NOT been changed. Say both ' +
+  'of those things, then call check_availability again for the day the customer wants and offer ' +
+  'what is left. Do NOT hand the conversation to a human and do NOT use the fallback message.';
+
 export function normalizeDateRange(
   startDate: string,
   endDate: string,
@@ -1733,7 +1757,7 @@ export class InternalProvider implements BookingProvider {
       busy,
     }).some((s) => new Date(s.start).getTime() === start.getTime());
     if (!offered) {
-      throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
+      throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
     }
 
     // Travel time: place the address, LAST of the pre-transaction checks and deliberately so.
@@ -1935,7 +1959,7 @@ export class InternalProvider implements BookingProvider {
     } catch (err) {
       const code = (err as { code?: string })?.code;
       if (code === '23P01') {
-        throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
+        throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
       }
       if (code === '23505') {
         // Idempotency race: a concurrent create inserted the same key.
@@ -1943,7 +1967,7 @@ export class InternalProvider implements BookingProvider {
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
         });
         if (dup) return this.toResult(dup, true, rule.timezone, service.name);
-        throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
+        throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
     }
@@ -2755,7 +2779,7 @@ export class InternalProvider implements BookingProvider {
       busy,
     }).some((s) => new Date(s.start).getTime() === start.getTime());
     if (!offered) {
-      throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
+      throw new BookingError(SLOT_TAKEN_ON_RESCHEDULE, 'SLOT_UNAVAILABLE', 409);
     }
 
     // #72, and LAST of the checks on purpose. The request must first be a thing that could be
@@ -2836,7 +2860,7 @@ export class InternalProvider implements BookingProvider {
       }));
     } catch (err) {
       if ((err as { code?: string })?.code === '23P01') {
-        throw new BookingError('That time is no longer available', 'SLOT_UNAVAILABLE', 409);
+        throw new BookingError(SLOT_TAKEN_ON_RESCHEDULE, 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
     }
@@ -3126,7 +3150,7 @@ export class InternalProvider implements BookingProvider {
       busy,
     }).some((s) => new Date(s.start).getTime() === start.getTime());
     if (!offered) {
-      throw new BookingError('Selected time is not available', 'SLOT_UNAVAILABLE', 409);
+      throw new BookingError(SLOT_TAKEN_ON_RESCHEDULE, 'SLOT_UNAVAILABLE', 409);
     }
 
     // CAN THE OWNER STILL GET THERE, at the new time? A reschedule is a booking being made
@@ -3480,7 +3504,7 @@ export class InternalProvider implements BookingProvider {
     } catch (err) {
       if (err instanceof BookingError) throw err;
       if ((err as { code?: string })?.code === '23P01') {
-        throw new BookingError('This time slot is no longer available', 'SLOT_UNAVAILABLE', 409);
+        throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
     }

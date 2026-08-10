@@ -13,6 +13,36 @@ import { ChatSession } from '../../database/entities/ChatSession';
 import type { AppointmentBookedEvent } from '../../webhooks/webhook.types';
 import type { CreateBookingResult } from '../../booking/booking-providers/types';
 import { logger } from '../../utils/logger';
+import { XSSProtectionService } from '../../security/xss-protection';
+
+/**
+ * The platform's own address check, reused rather than re-invented.
+ *
+ * Two other call sites already have this regex; a third copy is a third thing to keep in step.
+ */
+const emails = new XSSProtectionService();
+
+/**
+ * An address the confirmation can actually reach, or an error the model can fix.
+ *
+ * REJECTED AT THE TOOL, not stored and hoped for. Found by testing: `not-an-email` was accepted
+ * and the booking confirmed, so the customer was told they were booked, the confirmation had
+ * nowhere to go, and their manage link was unreachable. Nothing downstream fails loudly enough to
+ * notice - `EmailService.send` returns `{ success: false }` rather than throwing.
+ *
+ * Returns null when there is nothing to check: email is optional on some paths, and absent is a
+ * different thing from wrong.
+ */
+function rejectBadEmail(email: unknown): ToolResult | null {
+  if (typeof email !== 'string' || !email.trim()) return null;
+  if (emails.sanitizeEmail(email)) return null;
+  return {
+    success: false,
+    error:
+      'That email address is not valid, so the confirmation could not reach the customer. Ask them to check it and repeat it back, then try again. Do not book with it as given.',
+    errorSafeForModel: true,
+  };
+}
 
 /**
  * Surface a BookingError's machine-readable code to the LLM (e.g. "ADDRESS_REQUIRED:
@@ -200,6 +230,8 @@ export class CreateBookingTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      const badEmail = rejectBadEmail(args.attendeeEmail);
+      if (badEmail) return badEmail;
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same booking instead of inserting a duplicate (#35).
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}`;
@@ -360,6 +392,8 @@ export class RequestAppointmentTool implements ToolAdapter {
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same request instead of inserting a duplicate (#35).
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
+      const badEmail = rejectBadEmail(args.attendeeEmail);
+      if (badEmail) return badEmail;
       const result = await requestBooking(
         'agent',
         ctx.sessionId,

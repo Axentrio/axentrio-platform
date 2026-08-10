@@ -48,6 +48,7 @@ import { KbSearchTool } from '../../agent/tools/kb-search.tool';
 import {
   CheckAvailabilityTool,
   CreateBookingTool,
+  RequestAppointmentTool,
   ListBookingsTool,
   RescheduleBookingTool,
   CancelBookingTool,
@@ -180,6 +181,63 @@ describe('KbSearchTool', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('DB connection failed');
+  });
+});
+
+describe('an email the confirmation cannot reach', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('refuses to book with a malformed address', async () => {
+    // Found by testing production, not by review: `not-an-email` was accepted and the booking
+    // confirmed. The customer was told they were booked, the confirmation had nowhere to go, and
+    // their manage link was unreachable — and nothing failed loudly, because `EmailService.send`
+    // returns `{ success: false }` rather than throwing.
+    const tool = new CreateBookingTool();
+
+    const result = await tool.execute(
+      { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Edge Nine', attendeeEmail: 'not-an-email' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+    // Safe for the model AND actionable: it can ask the customer to repeat the address.
+    expect(result.errorSafeForModel).toBe(true);
+    expect(result.error).toMatch(/not valid/i);
+  });
+
+  it('refuses on the REQUEST path too, where the owner is the one who cannot reply', async () => {
+    const tool = new RequestAppointmentTool();
+
+    const result = await tool.execute(
+      { preferredTime: 'next Tuesday', attendeeName: 'Edge Nine', attendeeEmail: 'bob@@example', aiSummary: 'x' },
+      makeCtx(),
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.errorSafeForModel).toBe(true);
+  });
+
+  it('still allows a booking with NO email, which is a different thing from a wrong one', async () => {
+    // Email is optional on this path. Absent must not be treated as invalid, or a phone-only
+    // customer stops being bookable.
+    //
+    // BOTH shapes of absent, because they arrive by different routes: the model omits the
+    // argument, and the tool schema's own default fills an empty string. An empty string reaching
+    // the validator as "invalid" would refuse every phone-only booking with a nonsense message
+    // about checking the address.
+    mockCreateBooking.mockResolvedValue({ success: true, bookingId: 'b1' });
+    const tool = new CreateBookingTool();
+
+    for (const attendeeEmail of [undefined, '', '   ']) {
+      mockCreateBooking.mockClear();
+      const result = await tool.execute(
+        { startTime: '2026-04-01T10:00:00Z', attendeeName: 'No Email', ...(attendeeEmail === undefined ? {} : { attendeeEmail }) },
+        makeCtx(),
+      );
+      expect(result.success).toBe(true);
+      expect(mockCreateBooking).toHaveBeenCalled();
+    }
   });
 });
 

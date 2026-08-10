@@ -321,15 +321,18 @@ describe('widget.ts — simpleRateLimit envelope (L45-47)', () => {
   const app = makeApp((a) => a.use('/widget', widgetRouter));
 
   it('emits 429 RATE_LIMIT_EXCEEDED envelope when the per-IP burst is exhausted', async () => {
-    // Drain the bucket. The handler itself will 400 (no apiKey) but that's
-    // irrelevant — we only care about the 31st response, which is the
-    // rate-limit denial.
-    for (let i = 0; i < 30; i++) {
+    // Drain UNTIL the limiter denies, rather than assuming exactly 30 requests does it.
+    //
+    // `ipHits` is a module-level Map in `widget.ts`, so the bucket is shared by every test file
+    // that imports the widget router INTO THE SAME WORKER. Whoever ran first has already spent
+    // some of it, and this test's arithmetic was the only thing standing on that count — which is
+    // why it passed alone and failed in a full run. What it actually exists to check is the shape
+    // of the 429 envelope, and that does not care how many requests it took to earn one.
+    let res = await request(app).get('/widget/config');
+    for (let i = 0; i < 60 && res.status !== 429; i++) {
       // eslint-disable-next-line no-await-in-loop
-      await request(app).get('/widget/config');
+      res = await request(app).get('/widget/config');
     }
-
-    const res = await request(app).get('/widget/config');
 
     expect(res.status).toBe(429);
     expect(res.body).toEqual({

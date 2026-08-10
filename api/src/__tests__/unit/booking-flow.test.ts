@@ -199,10 +199,14 @@ describe('Booking Flow — Full Agent Loop', () => {
 
     // Turn 2: User says "next Tuesday". LLM calls check_availability.
     mockCheckAvailability.mockResolvedValueOnce({
+      // EXPLICIT UTC, as the provider always emits. Written without an offset these parsed in
+      // the running machine's zone, so the same fixture produced 9:00 AM chips in Amsterdam and
+      // 3:00 AM chips in Kuala Lumpur while the prose below claimed 9:00 either way.
+      // 07:00Z is 09:00 in Amsterdam on 7 April 2026 (CEST).
       slots: [
-        { start: '2026-04-07T09:00:00', end: '2026-04-07T09:30:00' },
-        { start: '2026-04-07T10:00:00', end: '2026-04-07T10:30:00' },
-        { start: '2026-04-07T14:00:00', end: '2026-04-07T14:30:00' },
+        { start: '2026-04-07T07:00:00.000Z', end: '2026-04-07T07:30:00.000Z' },
+        { start: '2026-04-07T08:00:00.000Z', end: '2026-04-07T08:30:00.000Z' },
+        { start: '2026-04-07T12:00:00.000Z', end: '2026-04-07T12:30:00.000Z' },
       ],
       timezone: 'Europe/Amsterdam',
     });
@@ -231,6 +235,15 @@ describe('Booking Flow — Full Agent Loop', () => {
 
     expect(turn2.type).toBe('response');
     expect((turn2 as any).content).toContain('9:00 AM');
+    // The chips and the prose must name the SAME times. They disagreed here for as long as this
+    // test existed - the fixture's slots carried no UTC offset, so they rendered in whatever zone
+    // the machine ran in while the prose claimed 9:00 regardless - and nothing compared them.
+    // A customer reads the words; they can only tap the chips.
+    expect((turn2 as any).quickReplies?.map((q: { title: string }) => q.title)).toEqual([
+      'Tue 9:00 AM',
+      'Tue 10:00 AM',
+      'Tue 2:00 PM',
+    ]);
     // The trailing undefined is `customerAddress` — collected only by a business that
     // travels to its customers, and passed straight through when it is.
     expect(mockCheckAvailability).toHaveBeenCalledWith('agent', 'session-booking-test', '2026-04-07', '2026-04-08', undefined, undefined, undefined);
@@ -304,6 +317,49 @@ describe('Booking Flow — Full Agent Loop', () => {
       undefined,
       { customerAddress: undefined, customerPhone: undefined, durationMin: undefined },
     );
+  });
+
+  it('replaces a reply that names times the customer cannot actually book', async () => {
+    // Seen in production: the chips carried 9:00, 9:30, 12:30, 13:00, 13:30, 14:00, 14:30, 15:00
+    // while the sentence above them read "09:30, 11:30, 12:00, 12:30, 13:00, 13:30, and 14:00".
+    // Two times nobody could book, three real ones missing. A tap was safe; reading the words and
+    // replying "11:30 then" asked for a slot that never existed. The prompt already forbids
+    // listing slots in prose — the model does it anyway, which is why this is enforced on the way
+    // out rather than asked for on the way in.
+    mockCheckAvailability.mockResolvedValueOnce({
+      slots: [
+        { start: '2026-04-07T07:00:00.000Z', end: '2026-04-07T07:30:00.000Z' },
+        { start: '2026-04-07T08:00:00.000Z', end: '2026-04-07T08:30:00.000Z' },
+      ],
+      timezone: 'Europe/Amsterdam',
+    });
+
+    mockChat
+      .mockResolvedValueOnce(
+        llmToolCallResponse([
+          { id: 'call_avail_x', name: 'check_availability', arguments: { startDate: '2026-04-07', endDate: '2026-04-08' } },
+        ]),
+      )
+      // 11:30 was never offered; 9:00 and 10:00 were.
+      .mockResolvedValueOnce(llmTextResponse('I have 9:00 AM, 10:00 AM and 11:30 AM free. Which suits?'));
+
+    const turn = await agent.run(
+      'Next Tuesday please',
+      session as ChatSession,
+      tenant as Tenant,
+      [],
+    );
+
+    expect(turn.type).toBe('response');
+    // Replaced wholesale rather than edited: removing the time leaves grammar nobody wrote, and
+    // correcting it means guessing which offered slot was meant.
+    expect((turn as any).content).not.toContain('11:30');
+    expect((turn as any).content).toBe('Here are the times I have available — let me know which one suits you.');
+    // ...and the real times still reach the customer, because the chips were never the problem.
+    expect((turn as any).quickReplies?.map((q: { title: string }) => q.title)).toEqual([
+      'Tue 9:00 AM',
+      'Tue 10:00 AM',
+    ]);
   });
 
   it('allows create_booking directly (precondition removed, handled by skill instructions)', async () => {

@@ -611,7 +611,7 @@ You cannot book, reschedule, cancel, or check availability for appointments — 
     );
   }
   fmtRules.push(
-    "LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, or the language of these instructions — unless the customer switches first.",
+    "LANGUAGE: reply in the same language as the customer's latest message. Re-detect it every turn and never switch languages — not to the greeting's language, the slot/booking data, the wording of any ready-made message you have been given (fallback, off-hours, escalation), or the language of these instructions — unless the customer switches first. A ready-made message is a MEANING to convey, never a sentence to copy: say it in the customer's language.",
     'Never reveal internal system details.'
   );
   sections.push(

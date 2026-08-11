@@ -79,6 +79,19 @@ export interface ScoreInput {
   /** `confirmed` bookings with a trusted position, in this day, chronological. */
   anchors: RouteNode[];
   periods: DayPeriods | null;
+  /**
+   * Compare a candidate against the WHOLE day's jobs rather than its half of it.
+   *
+   * The half-day period is the default and the only one that shipped first: a morning candidate is
+   * priced against the morning's jobs, an afternoon one against the afternoon's. Full day widens
+   * the comparison to every job of that local day, so an afternoon slot can be preferred because
+   * of where the van already is in the morning.
+   *
+   * It changes ONE thing - which anchors a candidate is compared against - and deliberately not
+   * the `period` recorded on the result, which stays the half the slot actually falls in. That
+   * label answers "when is this slot", and widening the comparison does not move the slot.
+   */
+  groupWholeDay?: boolean;
   /** The premises, when start-from-base is on. Only ever a `prev`, and only for the day's first. */
   base: { point: { lat: number; lng: number }; departAt: Date } | null;
   /** Minutes one candidate may add. Null means no threshold. */
@@ -126,7 +139,13 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
    * second, and nothing at all about going home - so the Base is never a `next`, and never a
    * `prev` for anything but the earliest booking of the whole local day.
    */
-  const earliestAnchor = [...byPeriod.morning, ...byPeriod.afternoon].reduce<RouteNode | null>(
+  // Both halves in one chronological list. Used as the anchor set for full-day grouping, and to
+  // find the day's first job - which is the same question either way, so it is computed once.
+  const allDayAnchors = [...byPeriod.morning, ...byPeriod.afternoon].sort(
+    (a, b) => a.blockedStart.getTime() - b.blockedStart.getTime()
+  );
+
+  const earliestAnchor = allDayAnchors.reduce<RouteNode | null>(
     (min, a) => (!min || a.blockedStart < min.blockedStart ? a : min),
     null
   );
@@ -148,7 +167,10 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
       continue;
     }
 
-    const anchors = byPeriod[period];
+    // Full day compares against every job of the local day; half day against this half only.
+    // `period` above is still the candidate's own half, because it labels the SLOT rather than
+    // the comparison, and an afternoon slot is an afternoon slot however widely it was scored.
+    const anchors = input.groupWholeDay ? allDayAnchors : byPeriod[period];
     const prevAnchor = [...anchors].reverse().find((a) => a.blockedEnd <= candidate.blockedStart) ?? null;
     const nextAnchor = anchors.find((a) => a.blockedStart >= candidate.blockedEnd) ?? null;
 

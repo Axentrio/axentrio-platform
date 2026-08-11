@@ -292,14 +292,8 @@ export const travelSettingsSchema = z.object({
   // rather than a head start, and 0 is both the default and "the van leaves at opening".
   // NOT nullable: the column is NOT NULL and zero already expresses "no head start".
   baseDepartOffsetMin: z.number().int().min(0).max(240).optional(),
-  /**
-   * Over what stretch grouping looks for nearby work: `none` or `half_day`.
-   *
-   * `full_day` is specified and deliberately not accepted yet - the scorer buckets anchors per
-   * half day, so it would be stored and silently ignored. It is added here in the change that
-   * implements it, and the column's CHECK constraint is the belt to this brace.
-   */
-  groupingPeriod: z.enum(['none', 'half_day']).optional(),
+  /** Over what stretch grouping looks for nearby work. See `GroupingPeriod`. */
+  groupingPeriod: z.enum(['none', 'half_day', 'full_day']).optional(),
   /**
    * The most extra driving one appointment may ADD before it stops being preferred.
    *

@@ -279,6 +279,7 @@ export async function scoreOfferedSlots(input: {
           periods,
           base: base && basePoint ? { point: basePoint, departAt: base.at } : null,
           maxDetourMin: input.eligibility.maxDetourMin,
+          groupWholeDay: input.eligibility.groupingPeriod === 'full_day',
           lookup: metered,
           // Spent legs come off the budget, so a fortnight of days cannot each start with a full
           // one. The cap is on the PASS, and a pass is every day in the list.

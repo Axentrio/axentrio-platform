@@ -246,13 +246,16 @@ export function travelCacheKey(from: GeoPoint, to: GeoPoint, mode: string): stri
 /**
  * Over what stretch of the diary grouping looks for nearby work.
  *
- * `none` and `half_day` are the shipped values. `full_day` is specified and NOT yet listed,
- * because the anchor bucketing in `insertion-scorer` produces one bucket per half day and would
- * silently treat a full-day choice as no grouping at all - an owner would pick it and be told the
- * platform was doing something it was not. It joins this union in the change that implements it,
- * and the database CHECK constraint refuses it until then.
+ * `half_day` prices a candidate against its own half of the day; `full_day` against every job of
+ * that local day, so an afternoon slot can be preferred for where the van already is in the
+ * morning. `none` switches grouping off.
+ *
+ * A value is added here only in the change that implements it - `full_day` sat outside this union
+ * and outside the column's CHECK constraint until `insertion-scorer` could actually produce it,
+ * because a stored value the engine silently ignores is worse than an absent option: the owner
+ * picks it and is told the platform is doing something it is not.
  */
-export type GroupingPeriod = 'none' | 'half_day';
+export type GroupingPeriod = 'none' | 'half_day' | 'full_day';
 
-/** Every value the column accepts today, for validation that cannot drift from the type. */
-export const GROUPING_PERIODS: readonly GroupingPeriod[] = ['none', 'half_day'] as const;
+/** Every value the column accepts, for validation that cannot drift from the type. */
+export const GROUPING_PERIODS: readonly GroupingPeriod[] = ['none', 'half_day', 'full_day'] as const;

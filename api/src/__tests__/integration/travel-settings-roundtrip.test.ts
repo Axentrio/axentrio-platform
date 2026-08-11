@@ -101,14 +101,22 @@ describe('grouping period', () => {
     expect((await read()).body.data.travel.groupingPeriod).toBe('half_day');
   });
 
-  it('REFUSES full_day, which is specified but not yet implemented', async () => {
-    // The scorer buckets anchors per HALF day, so a stored `full_day` would be a value the engine
-    // silently treats as no grouping at all - an owner would pick it and be told the platform was
-    // doing something it was not. It joins the enum in the change that implements it, and this
-    // test is what stops it reaching the picker a release early.
+  it('accepts full_day now that the scorer can produce it', async () => {
+    // This test asserted the OPPOSITE one commit ago, deliberately: the value was refused at three
+    // layers while `insertion-scorer` could only bucket anchors per half day, because a stored
+    // value the engine silently ignores is worse than an absent option. The scorer now takes
+    // `groupWholeDay`, so the option and its behaviour arrive together.
     const res = await save({ groupingPeriod: 'full_day' });
+    expect(res.status).toBe(200);
+    expect((await stored())?.travelGroupingPeriod).toBe('full_day');
+    expect((await read()).body.data.travel.groupingPeriod).toBe('full_day');
+  });
+
+  it('still refuses a period nobody has implemented', async () => {
+    // The guard itself must survive: `week` was in the partner's original spec and was removed,
+    // so it is exactly the kind of value that could arrive from an old client or a stale doc.
+    const res = await save({ groupingPeriod: 'week' });
     expect(res.status).toBe(422);
-    expect((await stored())?.travelGroupingPeriod ?? 'none').toBe('none');
   });
 
   it('is left alone by a save that does not mention it', async () => {

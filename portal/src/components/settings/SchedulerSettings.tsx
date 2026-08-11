@@ -310,7 +310,9 @@ export const SchedulerSettings: React.FC = () => {
   const [travelSlack, setTravelSlack] = useState<number | null>(null);
   const [travelStartFromBase, setTravelStartFromBase] = useState(false);
   const [travelBaseDepart, setTravelBaseDepart] = useState(0);
-  const [travelGroupingPeriod, setTravelGroupingPeriod] = useState<'none' | 'half_day'>('none');
+  const [travelGroupingPeriod, setTravelGroupingPeriod] = useState<
+    'none' | 'half_day' | 'full_day'
+  >('none');
   const [travelMaxDetourMin, setTravelMaxDetourMin] = useState<string>('');
   const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
@@ -1103,10 +1105,13 @@ export const SchedulerSettings: React.FC = () => {
                       className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
                       value={travelGroupingPeriod}
                       disabled={!travelEnabled || !travelsToCustomers}
-                      onChange={(e) => setTravelGroupingPeriod(e.target.value as 'none' | 'half_day')}
+                      onChange={(e) =>
+                        setTravelGroupingPeriod(e.target.value as 'none' | 'half_day' | 'full_day')
+                      }
                     >
                       <option value="none">No grouping</option>
                       <option value="half_day">Group by half day</option>
+                      <option value="full_day">Group by full day</option>
                     </select>
                     <p className="text-xs text-text-muted mt-1">
                       Customers still see every time they could have had, in the same list. Only the

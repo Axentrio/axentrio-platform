@@ -383,3 +383,63 @@ describe('the half-day boundary itself', () => {
     expect(periodOf({ start: new Date(p.boundary.getTime() - 1800_000), end: p.boundary }, p)).toBe('morning');
   });
 });
+
+describe('full-day grouping widens what a candidate is compared against', () => {
+  /**
+   * The difference in one sentence: an AFTERNOON candidate priced against a MORNING job.
+   *
+   * Under half-day grouping the morning's jobs are simply not in the afternoon's anchor list, so
+   * an afternoon slot next to a morning job scores `unanchored` - the van's position at 11:00
+   * tells you nothing about a 14:00 slot, as far as the half-day view is concerned. Full day says
+   * it does, and that is the whole of the feature.
+   */
+  const DAY = '2026-09-07';
+  const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00.000Z`);
+
+  const periods = resolveDayPeriods({
+    localDay: DAY,
+    timezone: 'UTC',
+    windows: [{ start: '08:00', end: '18:00' }],
+    alwaysOpen: false,
+  })!;
+
+  // One job, in the MORNING. The candidate sits in the afternoon.
+  const anchors = [
+    { blockedStart: at('09:00'), blockedEnd: at('10:00'), point: { lat: 51.2, lng: 4.4 } },
+  ];
+  const candidates = [
+    { blockedStart: at('14:00'), blockedEnd: at('15:00'), point: { lat: 51.25, lng: 4.45 } },
+  ];
+
+  const run = (groupWholeDay: boolean) =>
+    scoreCandidates({
+      candidates,
+      anchors,
+      periods,
+      base: null,
+      maxDetourMin: null,
+      lookup: async () => 20,
+      legBudget: 99,
+      deadline: Date.now() + 60_000,
+      groupWholeDay,
+    });
+
+  it('half day: an afternoon candidate cannot see a morning job', async () => {
+    const [scored] = await run(false);
+    expect(scored.costMinutes).toBeNull();
+    expect(scored.neutralReason).toBe('unanchored');
+  });
+
+  it('full day: the same candidate IS priced against that morning job', async () => {
+    const [scored] = await run(true);
+    expect(scored.costMinutes).toBe(20);
+  });
+
+  it('still records the slot’s own half, because widening the comparison does not move the slot', async () => {
+    // `period` labels WHEN the slot is, not what it was compared against. An afternoon slot is an
+    // afternoon slot however widely it was scored, and the offer record means the same thing in
+    // both modes.
+    const [scored] = await run(true);
+    expect(scored.period).toBe('afternoon');
+  });
+});

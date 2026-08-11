@@ -142,12 +142,24 @@ export class BookingSettings {
    * switches or disconnects a calendar, so anything hung off the key is orphaned by an
    * ordinary settings change. The key scopes *enforcement*; the bot owns *configuration*.
    *
-   * Default off for every existing bot, and the platform refuses to switch it on while a
-   * second bot shares this bot's itinerary key — under a shared key the two bots' bookings
-   * read as one person's day, so a two-plumber business would find slots stripped for
-   * journeys neither of them makes, which is worse than not having the feature.
+   * DEFAULT ON since the rollout gates closed and travel became a Pro/Enterprise tier
+   * default. It was default off while the feature was unproven and entitlement was granted
+   * one tenant at a time; leaving it off then meant every owner had to find a switch for
+   * something they had already paid for.
+   *
+   * Default-on is safe because it cannot act where it should not. A Service that collects no
+   * customer address skips the travel gate outright (`internal.provider.ts`), so a business
+   * that does not travel to its customers is untouched and spends nothing at Google.
+   *
+   * The platform still refuses to switch it on while a second bot shares this bot's itinerary
+   * key — under a shared key the two bots' bookings read as one person's day, so a two-plumber
+   * business would find slots stripped for journeys neither of them makes, which is worse than
+   * not having the feature. That guard lives on the WRITE path (`assertTravelEnableAllowed`)
+   * and again at runtime (`resolveTravelEligibility` returns `shared_itinerary`), so a row
+   * that is on while the key is shared reads as on and does nothing, which the settings screen
+   * shows as `enabled` beside a `blockedReason`. The default cannot route around it.
    */
-  @Column({ type: 'boolean', name: 'travel_time_enabled', default: false })
+  @Column({ type: 'boolean', name: 'travel_time_enabled', default: true })
   travelTimeEnabled!: boolean;
 
   /**

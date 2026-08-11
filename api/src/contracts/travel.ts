@@ -206,6 +206,24 @@ export interface TravelGapInput {
  *
  * Slack is added only when there IS a drive to pad. Adding it to the null case would
  * quietly tighten every business that never uses this feature.
+ *
+ * ## NOTHING CALLS THIS, AND THAT IS CORRECT
+ *
+ * This states the invariant; it does not enforce it. The enforcement is split across two
+ * mechanisms that never meet, and folding them into one call would double-apply the gap:
+ *
+ *   - `min_gap_min` is a Capacity Ceiling, applied when SLOTS ARE GENERATED, so a slot list
+ *     already has the owner's flat gap between its entries before travel sees it.
+ *   - the drive is applied by the FEASIBILITY GATE, which asks whether the drive fits in the
+ *     free time that is actually there: `budgetMin = gapMin - slackMin` (`travel-gate.ts:158`),
+ *     i.e. `drive + slack <= gap`.
+ *
+ * Compose those and a slot survives exactly when `gap >= max(minGap, drive + slack)`, which is
+ * this function. So it is a SPECIFICATION, kept and tested because the rule is easy to get wrong
+ * and hard to read off two files - and it must stay uncalled, because calling it in either place
+ * would charge the owner twice for one cushion.
+ *
+ * If you are here because you want to use it: you almost certainly want `travel-gate.ts` instead.
  */
 export function travelGapMinutes(input: TravelGapInput): number {
   const floor = Math.max(0, input.minGapMin);

@@ -1118,6 +1118,13 @@ export const SchedulerSettings: React.FC = () => {
                       Customers still see every time they could have had, in the same list. Only the
                       order changes, so the one that saves you the most driving is offered first.
                       Nothing about your other customers is ever mentioned.
+                      {!travelsToCustomers && travelGroupingPeriod !== 'none' && (
+                        <>
+                          {' '}
+                          Your setting is kept but does nothing right now, because none of your
+                          services send you to a customer. It starts working again if you add one.
+                        </>
+                      )}
                     </p>
                   </div>
 

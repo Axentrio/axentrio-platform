@@ -33,57 +33,70 @@ interface Props {
   disabled?: boolean;
 }
 
-/** What each answer means, in the owner's words rather than the schema's. */
-const OPTIONS: Array<{ value: WorkLocation; label: string; hint: string }> = [
+/**
+ * The four answers, each in one place.
+ *
+ * These began as three parallel records keyed by the same union - options, starter services and
+ * read-only descriptions - which meant adding a fifth work location was three edits in three
+ * shapes, and the wording drifted between two of them on the first day.
+ *
+ * `starters` are shapes rather than products; the owner renames and prices them.
+ * `customerAddressRequired` is the field that actually decides the answer, because it gates
+ * address collection, the travel gate, service-area checks and the calendar invite - so it is what
+ * these set, and `locationType` follows it rather than the other way round.
+ */
+const ANSWERS: Array<{
+  value: WorkLocation;
+  label: string;
+  /** Shown beside the button while choosing. */
+  hint: string;
+  /** Shown afterwards, when the services have taken over the answer. */
+  settled: string;
+  starters: ServiceInput[];
+}> = [
   {
     value: 'no_location',
     label: 'No location',
     hint: 'Online only — nothing happens anywhere in particular.',
+    settled: 'None of your services happen anywhere in particular.',
+    // Nothing. There is no service shape meaning "we do not go anywhere", so inventing a
+    // placeholder the owner then has to delete would be worse than an empty catalog.
+    starters: [],
   },
   {
     value: 'at_one_location',
     label: 'At one location',
     hint: 'Customers come to you.',
+    settled: 'Your customers come to you.',
+    starters: [
+      { name: 'Appointment', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
+    ],
   },
   {
     value: 'on_the_road',
     label: 'On the road',
     hint: 'You go to customers. Travel time plans your day around the driving.',
+    settled: 'You travel to your customers.',
+    starters: [
+      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
+    ],
   },
   {
     value: 'both',
     label: 'Both',
     hint: 'Some work happens at your place, some at theirs.',
+    settled: 'Some services happen at your place, some at the customer’s.',
+    // TWO services, one of each kind, because that is the only configuration that actually
+    // derives to `both`. A picker that said Both and quietly made one would show a different
+    // answer than the one that was clicked.
+    starters: [
+      { name: 'Appointment at our place', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
+      { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
+    ],
   },
 ];
 
-/**
- * The services each answer creates. Shapes, not products - the owner renames and prices them.
- *
- * `customerAddressRequired` is the field that actually decides everything downstream: it gates
- * address collection, the travel gate, service-area checks and the calendar invite's location. So
- * it is what these starters set, and `locationType` follows it rather than the other way round.
- */
-const STARTERS: Record<WorkLocation, ServiceInput[]> = {
-  no_location: [],
-  at_one_location: [
-    { name: 'Appointment', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
-  ],
-  on_the_road: [
-    { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
-  ],
-  both: [
-    { name: 'Appointment at our place', durationMin: 60, customerAddressRequired: false, locationType: 'in_person' },
-    { name: 'On-site visit', durationMin: 60, customerAddressRequired: true, locationType: 'in_person' },
-  ],
-};
-
-const DESCRIBED: Record<WorkLocation, string> = {
-  no_location: 'None of your services happen anywhere in particular.',
-  at_one_location: 'Your customers come to you.',
-  on_the_road: 'You travel to your customers.',
-  both: 'Some services happen at your place, some at the customer’s.',
-};
+const answerFor = (value: WorkLocation) => ANSWERS.find((a) => a.value === value) ?? ANSWERS[1];
 
 export function WorkLocationPicker({ workLocation, services, onCreateService, disabled }: Props) {
   const [busy, setBusy] = useState<WorkLocation | null>(null);
@@ -95,10 +108,11 @@ export function WorkLocationPicker({ workLocation, services, onCreateService, di
     try {
       // Sequentially, not in parallel: "Both" creates two services and they are ordered on screen
       // by creation. Racing them would sort the owner's catalog at random.
-      for (const starter of STARTERS[value]) await onCreateService(starter);
-      if (STARTERS[value].length) {
+      const { starters } = answerFor(value);
+      for (const starter of starters) await onCreateService(starter);
+      if (starters.length) {
         toast.success(
-          STARTERS[value].length > 1
+          starters.length > 1
             ? 'Two services created — rename and price them below.'
             : 'A service was created — rename and price it below.'
         );
@@ -116,7 +130,7 @@ export function WorkLocationPicker({ workLocation, services, onCreateService, di
     return (
       <div>
         <Label>Where do you work?</Label>
-        <p className="text-sm text-text-secondary mt-1">{DESCRIBED[workLocation]}</p>
+        <p className="text-sm text-text-secondary mt-1">{answerFor(workLocation).settled}</p>
         <p className="text-xs text-text-muted mt-1">
           This follows your services rather than being set on its own, so it can never disagree
           with them. To change it, change whether a service needs the customer’s address.
@@ -132,7 +146,7 @@ export function WorkLocationPicker({ workLocation, services, onCreateService, di
         This sets up your first service. You can change everything about it afterwards.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {OPTIONS.map((o) => (
+        {ANSWERS.map((o) => (
           <button
             key={o.value}
             type="button"

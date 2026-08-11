@@ -256,10 +256,8 @@ export async function scoreOfferedSlots(input: {
         // because grouping is a claim that the owner is already working near there, and a booking
         // nobody has agreed to is not evidence that anybody is going anywhere.
         //
-        // The confirmed-only rule was stated in `CONTEXT.md`, in ADR-0017 and in
-        // `insertion-scorer.ts`'s own doc comment, and enforced in none of them: this function
-        // received the feasibility list verbatim. It was correct only because no path writes a
-        // `pending` row today, which is an accident rather than a guarantee.
+        // Why confirmed-only, and why it was unenforced until recently: `TravelNeighbour.status`
+        // in `travel-gate.ts` carries the reasoning. Stated once, there.
         const anchors: RouteNode[] = input.neighbours
           // FAIL CLOSED on an absent status. `status` is optional on the type because the
           // synthetic premises neighbour has no row, and `!== 'pending'` would have let anything

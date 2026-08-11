@@ -378,9 +378,8 @@ async function readNeighbours(
     // and resolving in parallel would let every row read the same remaining count.
     neighbours.push({
       bookingId: row.id,
-      // Anything the query did not recognise reads as `pending`, which is the CAUTIOUS default:
-      // a mislabelled row then still blocks time through feasibility but cannot anchor grouping,
-      // so an unknown status can never make the platform claim the owner is working somewhere.
+      // Anything unrecognised reads as `pending` - the cautious default. See
+      // `TravelNeighbour.status` for what the distinction is for.
       status: row.status === 'confirmed' ? 'confirmed' : 'pending',
       blockedStart: new Date(row.blocked_start),
       blockedEnd: new Date(row.blocked_end),

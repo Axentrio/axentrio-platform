@@ -18,7 +18,7 @@ import { AppDataSource } from '../../database/data-source';
 import { AvailabilityCall } from '../../database/entities/AvailabilityCall';
 import { BookingOffer } from '../../database/entities/BookingOffer';
 import { OfferSelection } from '../../database/entities/OfferSelection';
-import { baselineSummary } from '../../booking/offer-baseline.queries';
+import { baselineSummary, pilotCohorts, scorerGate } from '../../booking/offer-baseline.queries';
 import {
   recordAvailabilityCall,
   recordBookingOffer,
@@ -415,5 +415,92 @@ describe('the canonical baseline, computed once so LP4 and LP5 cannot disagree',
     const summary = await baselineSummary({ since });
     expect(summary.multiDayShare).toMatchObject({ numerator: 1, denominator: 2 });
     expect(summary.excluded.unparseableRanges).toBe(1);
+  });
+});
+
+/**
+ * #81's gate, and #82's cohorts, as queries.
+ *
+ * Seven measurement columns were written across LP4 and LP5 and NOTHING read them. A measurement
+ * nobody can ask a question of is not a measurement — and by the time the data exists, the person
+ * who knew which question to ask has moved on. These tests pin the arithmetic while that is still
+ * fresh, on rows shaped exactly like the ones production writes.
+ */
+describe('the scorer gate (#81) and the pilot cohorts (#82)', () => {
+  const since = new Date('2026-01-01T00:00:00.000Z');
+
+  /** One offer row, with only the fields a given case is about. */
+  const offer = (over: Partial<BookingOffer>) =>
+    AppDataSource.getRepository(BookingOffer).save(
+      AppDataSource.getRepository(BookingOffer).create({
+        tenantId,
+        botId,
+        sessionId: randomUUID(),
+        offeredSlots: [{ start: SLOT_A, title: '9:00 AM' }],
+        offeredCount: 1,
+        deliveryBasis: 'widget_assumed',
+        ...over,
+      } as BookingOffer)
+    );
+
+  it('measures the gate over SCORED offers only', async () => {
+    // An offer made while the scorer did not run is not evidence either way. Folding it in would
+    // drag every ratio toward zero and make the gate read as answered when it is not.
+    await offer({ scorerVersion: 'lp4-1', cheaperAlternativeExisted: true, scoringElements: 1, scoringMs: 40 });
+    await offer({ scorerVersion: 'lp4-1', cheaperAlternativeExisted: false, scoringElements: 0, scoringMs: 20 });
+    await offer({}); // scorer never ran — must not appear in any denominator
+
+    const gate = await scorerGate({ since });
+
+    expect(gate.scoredOffers).toBe(2);
+    expect(gate.cheaperAlternative).toMatchObject({ numerator: 1, denominator: 2, share: 0.5 });
+    expect(gate.elements.total).toBe(1);
+    expect(gate.latency.maxMs).toBe(40);
+    expect(gate.versions).toEqual(['lp4-1']);
+  });
+
+  it('measures coverage per SLOT, not per offer', async () => {
+    // An offer where one slot of three scored is not fully covered, and counting offers says it is.
+    await offer({
+      scorerVersion: 'lp4-1',
+      offeredSlots: [
+        { start: SLOT_A, title: 'a', costMinutes: 12 },
+        { start: SLOT_B, title: 'b', costMinutes: null, neutralReason: 'unanchored' },
+        { start: SLOT_C, title: 'c', costMinutes: null, neutralReason: 'straddles_boundary' },
+      ],
+      offeredCount: 3,
+    });
+
+    const gate = await scorerGate({ since });
+    expect(gate.slotCoverage).toMatchObject({ numerator: 1, denominator: 3 });
+  });
+
+  it('keeps the three pilot cohorts apart', async () => {
+    // Conflating any two makes the comparison meaningless: `pilotHeld` belongs with `shadow` for a
+    // naive before/after and with `steered` for intention-to-treat, which is why they are separate.
+    await offer({ scorerVersion: 'lp4-1', groupingApplied: true, groupingSavedMinutes: 63 });
+    await offer({ scorerVersion: 'lp4-1', groupingApplied: false });
+    await offer({ scorerVersion: 'lp4-1' }); // pilot off — shadow
+
+    const cohorts = await pilotCohorts({ since });
+
+    expect(cohorts).toMatchObject({ steered: 1, pilotHeld: 1, shadow: 1, minutesSaved: 63 });
+  });
+
+  it('answers null rather than zero when nothing was scored', async () => {
+    // No data is not the same as no uptake, and a gate that reports 0% on an empty window would be
+    // read as "steering never helps" by whoever glances at it first.
+    const gate = await scorerGate({ since });
+    expect(gate.scoredOffers).toBe(0);
+    expect(gate.cheaperAlternative.share).toBeNull();
+    expect(gate.elements.perOffer).toBeNull();
+    expect(gate.latency.meanMs).toBeNull();
+  });
+
+  it('ignores an offer the transport rejected', async () => {
+    // Same rule the baseline already applies: a message the channel refused is not an offer a
+    // customer could have taken, so it cannot evidence whether steering would have helped.
+    await offer({ scorerVersion: 'lp4-1', cheaperAlternativeExisted: true, deliveryBasis: 'provider_rejected' });
+    expect((await scorerGate({ since })).scoredOffers).toBe(0);
   });
 });

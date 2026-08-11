@@ -23,12 +23,21 @@ const grant: FeatureOverride = {
 };
 
 describe('travelTime entitlement', () => {
-  it('is off at every tier, including the ones that sell bookings', () => {
-    // Not timidity about an unfinished feature: rollout gate 5 requires the Google billing
-    // account off its free trial before ANY tenant is entitled, and a tier default would
-    // entitle every Pro tenant the moment this deployed.
+  it('is entitled by exactly the tiers that sell bookings', () => {
+    // This used to assert the opposite - off at EVERY tier - because during rollout a tier
+    // default would have entitled every Pro tenant the moment it deployed, before the gates
+    // were closed. They are closed now (#63, #66, #67, #68, #77, and the Google billing
+    // account is off its free trial), so the grant moved from a per-tenant override to the
+    // catalog.
+    //
+    // Asserting the pairing rather than two literals is what makes this survive: `travelTime`
+    // declares `requires: 'bookings'`, so a tier that entitles travel without bookings would
+    // have the dependency pass silently strip it back off and look entitled in the catalog
+    // while being off everywhere that matters.
     for (const plan of Object.values(PLANS)) {
-      expect(plan.features.travelTime, `${plan.id} must not entitle travelTime by tier`).toBe(false);
+      expect(plan.features.travelTime, `${plan.id}: travelTime must track bookings`).toBe(
+        plan.features.bookings,
+      );
     }
   });
 

@@ -38,11 +38,19 @@ export const FEATURE_TAXONOMY: Record<FeatureKey, FeatureMeta> = {
     group: 'bookings',
     requires: 'bookings',
   },
-  // Off at every tier in the catalog, so granting it is always a deliberate per-tenant
-  // override. That is not timidity about an unfinished feature: it spends real money at
-  // Google on every use, and rollout gate 5 requires the billing account to be off its
-  // free trial before ANY tenant is entitled — a tier default would entitle every Pro
-  // tenant the moment it deployed, and a lapsed trial degrades silently.
+  // A tier default on Pro and Enterprise. It was deliberately off at every tier during
+  // rollout, granted only by per-tenant override, because a tier default would have
+  // entitled every Pro tenant the moment it deployed and the gates were not yet closed.
+  // All of them now are: #63 (unreachable slots are not offered), #66 (coordinate
+  // expiry), #67 (portal settings + Google attribution), #68 (degradation is loud), #77
+  // (a captured Request says why), and the Google billing account is off its free trial.
+  //
+  // Entitling a tenant still spends nothing on its own. `travel_time_enabled` on
+  // BookingSettings defaults false, so an owner must switch it on per Agent before a
+  // single Google element is bought. The ceiling is commercial; that toggle is the tap.
+  //
+  // `requires: bookings` keeps it off Free and Essential whatever the catalog says, so
+  // "every tier that can book" is exactly Pro and Enterprise.
   travelTime: {
     label: 'Travel-time aware scheduling',
     group: 'bookings',

@@ -275,6 +275,10 @@ export class CreateBookingTool implements ToolAdapter {
         args.intakeAnswers,
         {
           customerAddress: booked.address,
+          // The identity the customer PICKED, so the booking is placed by resolving it rather
+          // than by geocoding the words again. Server-injected - it is deliberately absent from
+          // this tool's schema, because an identity the model can write is one it can invent.
+          customerPlaceId: booked.placeId,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,
@@ -449,6 +453,7 @@ export class RequestAppointmentTool implements ToolAdapter {
         args.intakeAnswers,
         {
           customerAddress: requested.address,
+          customerPlaceId: requested.placeId,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,

@@ -1809,7 +1809,7 @@ export class InternalProvider implements BookingProvider {
       : { active: false as const, reason: 'bot_disabled' as const };
     const placement: BookingPlacement =
       travelEligibility.active && contact.address?.trim()
-        ? await placeAddressFor(travelEligibility, contact.address)
+        ? await placeAddressFor(travelEligibility, contact.address, extras?.customerPlaceId)
         : { applies: false };
     const place = bookingPlaceColumns(placement);
 
@@ -2187,6 +2187,7 @@ export class InternalProvider implements BookingProvider {
         itineraryKey,
         service,
         address: contact.address,
+        placeId: extras?.customerPlaceId,
       }));
     const place = bookingPlaceColumns(placement);
     // The row records THAT the gate had nothing to work with; only this line records WHY.

@@ -269,6 +269,15 @@ export interface CancelResult {
 export interface BookingExtras {
   /** P5a — required when service.customerAddressRequired. */
   customerAddress?: string;
+  /**
+   * Google's identity for that address, when the Booking Customer PICKED it rather than typed it.
+   *
+   * Server-injected from the session's address binding, never a tool parameter the model fills:
+   * an identity the model could write is one it could invent. Present it and the placement skips
+   * forward-geocoding entirely and resolves by identity, which is both exact and one element
+   * cheaper. Absent - every booking today - and nothing changes.
+   */
+  customerPlaceId?: string;
   /** P5a — required when service.customerLocationRequired (a callback phone). */
   customerPhone?: string;
   /** P5c — chosen/estimated length for a range/ai service (ignored for fixed). */

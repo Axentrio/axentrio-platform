@@ -33,6 +33,7 @@ import type { ServiceType } from '../../database/entities/ServiceType';
 import type { ActiveTravelEligibility } from '../../booking/travel/travel-eligibility';
 import {
   placeBookingAddress,
+  placeAddressFor,
   bookingPlaceColumns,
   placementIsTrusted,
   placementIsCoarse,
@@ -131,6 +132,27 @@ describe('placeBookingAddress - who is allowed to spend', () => {
     // The one thing standing between a runaway caller and a Google bill is that this
     // argument cannot be produced without passing all four gates.
     expect(geocode).toHaveBeenCalledWith(ACTIVE, 'Kerkstraat 12, 9000 Gent');
+  });
+});
+
+describe('placing by identity when the customer picked one', () => {
+  it('resolves the place id instead of geocoding the words again', async () => {
+    // The headline criterion of this whole feature: the slot that was checked and the booking
+    // that was made are about ONE place by construction, rather than about two strings that
+    // happen to agree. Forward-geocoding a string Google itself produced gets the same answer at
+    // best - resolving the identity is exact, and one element cheaper.
+    byPlaceId.mockResolvedValue({ status: 'placed', place: PLACE });
+    await placeAddressFor(ACTIVE, 'Kerkstraat 12, 9000 Gent', 'ChIJ_picked');
+
+    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE.tenantId, 'ChIJ_picked');
+    expect(geocode).not.toHaveBeenCalled();
+  });
+
+  it('still geocodes the text when nothing was picked', async () => {
+    // Every booking on the platform today, and the path that must not change.
+    await placeAddressFor(ACTIVE, 'Kerkstraat 12, 9000 Gent');
+    expect(geocode).toHaveBeenCalledWith(ACTIVE, 'Kerkstraat 12, 9000 Gent');
+    expect(byPlaceId).not.toHaveBeenCalled();
   });
 });
 

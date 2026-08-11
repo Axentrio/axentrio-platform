@@ -71,6 +71,8 @@ export async function placeBookingAddress(input: {
   itineraryKey: ItineraryKey;
   service: Pick<ServiceType, 'customerAddressRequired'>;
   address: string | null;
+  /** Set when the Booking Customer picked the address rather than typing it. */
+  placeId?: string | null;
 }): Promise<BookingPlacement> {
   // Cheapest gate of all, and it is not in `resolveTravelEligibility` because it is a fact
   // about the SERVICE rather than about the Agent: an online consultation is never a travel
@@ -86,7 +88,7 @@ export async function placeBookingAddress(input: {
   });
   if (!eligibility.active) return { applies: false };
 
-  return placeAddressFor(eligibility, input.address);
+  return placeAddressFor(eligibility, input.address, input.placeId);
 }
 
 /**
@@ -99,9 +101,16 @@ export async function placeBookingAddress(input: {
  */
 export async function placeAddressFor(
   eligibility: ActiveTravelEligibility,
-  address: string
+  address: string,
+  placeId?: string | null
 ): Promise<BookingPlacement> {
-  const result = await geocodeAddress(eligibility, address);
+  // BY IDENTITY WHEN THE CUSTOMER PICKED ONE. Forward-geocoding a string Google itself produced
+  // gets the same answer at best, so resolving the id instead is exact rather than equivalent -
+  // and it is the difference between the slot that was checked and the booking that was made
+  // being about one place by construction, rather than about two strings that happen to agree.
+  const result = placeId?.trim()
+    ? await resolvePlaceId(eligibility.tenantId, placeId)
+    : await geocodeAddress(eligibility, address);
   return result.status === 'placed'
     ? { applies: true, outcome: 'placed', place: result.place }
     : { applies: true, outcome: result.status };

@@ -446,3 +446,54 @@ early, let it run, and the "before" number exists.
 
 LP2 is mostly existing tickets. LP6b and LP7 are deliberately unticketed: creating tickets for
 work gated on evidence nobody has collected invites someone to start it.
+
+---
+
+## Settled with the partner, 2026-08-11
+
+The partner reviewed the shipped behaviour and answered six open questions. Their answers **removed
+more than they added**, so this section exists to stop a later reader of the original spec
+rebuilding what was deliberately dropped.
+
+### Removed at their request
+
+- **Group by Week.** Their own Full Day and Week examples described the same behaviour, so Week
+  supplied no different invariant, no different scoring horizon and no different outcome. The
+  shipped values are `none`, `half_day`, `full_day`.
+- **Nearest First and Farthest First.** Both made sense when they pictured planning an entire route
+  at once. This system never sequences a day - confirmed appointments are never moved and bookings
+  arrive one at a time - so the options would have been controls over something that does not
+  happen. **Auto Optimize is the only mode**, and it is marginal insertion cost: minimise the extra
+  travel a new booking ADDS, rather than find the nearest customer.
+- **A customer-flexibility question.** They were explicit that the assistant must not start asking
+  "are you flexible?". Full Day therefore optimises WITHIN a requested day, and steering a customer
+  toward a different DAY is not in scope.
+
+### Confirmed as already correct
+
+Their descriptions matched the shipped engine closely enough to be worth recording: Home Base to
+first client then travel time between each job after that; the half-day boundary as the clock
+midpoint of the working day; first-come-first-served with a single atomic final check rather than
+provisional holds; and confirmed appointments never rearranged.
+
+### The override invariant (their answer on AC10)
+
+**The travel limit binds the assistant, never the owner.** An automatic booking is not offered or
+confirmed when the drive does not fit; the owner may always accept it manually, because they know
+things the platform does not - a cancellation, a job finishing early, already being nearby.
+
+This is why `acceptRequest` runs no travel assert. A Request the gate captured would otherwise be
+refused by the same gate that captured it, leaving a queue with no exit. Pinned by a BEHAVIOURAL
+test - an owner can accept a Request travel found unreachable - rather than by asserting the
+absence of a call at one line, which would fail the first honest refactor while permitting a
+rewrite that reintroduced the refusal elsewhere.
+
+### Still open
+
+- **Traffic beyond 24 hours.** `TRAFFIC_HORIZON_MS` is OUR threshold, not a Google limit: past
+  roughly a day the model weights historical averages more heavily, and the Pro SKU was judged not
+  worth paying for an average. The partner considers traffic the main reason for the feature, and
+  most bookings are days ahead - so this is a live pricing decision rather than a settled one.
+- **"Customer Can Choose"** as a per-service value. Every consumer branches on the service-level
+  address flag BEFORE a slot is offered, so it is a new axis resolved per booking rather than a
+  third enum value. Two explicit services express it today.

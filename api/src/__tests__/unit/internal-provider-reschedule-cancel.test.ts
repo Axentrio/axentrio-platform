@@ -635,6 +635,39 @@ describe('InternalProvider reschedule / cancel / list', () => {
     expect(update[0]).toContain('ELSE travel_check END');
   });
 
+  it('acceptRequest SUCCEEDS on a job travel captured, with travel fully active', async () => {
+    // THE INVARIANT, stated as behaviour rather than as the absence of a call.
+    //
+    // Travel feasibility is a hard constraint against the ASSISTANT and never against the person
+    // who owns the diary. A Request the gate captured as unreachable would otherwise be refused by
+    // the same gate that captured it, and the owner could never clear it - the feature would have
+    // built a queue with no exit.
+    //
+    // Deliberately NOT written as "no travel assert is called at line N". That version fails the
+    // first honest refactor while permitting a rewrite that reintroduces the refusal somewhere
+    // else. What must stay true is that the owner can accept; how that is achieved is free to
+    // change.
+    resolveTravelEligibility.mockResolvedValue({
+      active: true,
+      tenantId: 'ten-1',
+      itineraryKey: 'bot:1',
+      slackMin: 0,
+      startFromBase: false,
+      baseDepartOffsetMin: 0,
+      maxDetourMin: null,
+      groupingPeriod: 'none',
+    } as any);
+    answerAccept(requestBooking());
+
+    await expect(provider.acceptRequest(ctx, 'bk-1')).resolves.toBeDefined();
+
+    // And it really confirmed, rather than resolving to some softer outcome.
+    const update = managerQuery.mock.calls.find((c: any) =>
+      String(c[0]).includes('UPDATE chatbot_bookings')
+    ) as [string, unknown[]];
+    expect(update[0]).toContain("status='confirmed'");
+  });
+
   it('acceptRequest rejects a non-request (confirmed) booking', async () => {
     bookingFindOne.mockResolvedValue(confirmedBooking());
     await expect(provider.acceptRequest(ctx, 'bk-1')).rejects.toMatchObject({ code: 'NOT_A_REQUEST' });

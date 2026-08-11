@@ -637,6 +637,7 @@ export const SchedulerSettings: React.FC = () => {
                 {/* Services catalog (multi-service) */}
                 <ServicesSection
                   botId={botId}
+                  workLocation={workLocation}
                   onApplied={async () => {
                     // Re-hydrate the availability form from the POST-apply config: refetch
                     // FIRST, then flip `hydrated` so the hydrate effect sees fresh data

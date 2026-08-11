@@ -36,6 +36,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { WorkLocationPicker } from './WorkLocationPicker';
+import type { WorkLocation } from '@/queries/useSchedulerQueries';
 import {
   useServices,
   useCreateService,
@@ -238,7 +240,17 @@ function priceLabel(s: Service): string {
 }
 
 /** `onApplied` lets the parent (SchedulerSettings) re-hydrate seeded availability after a preset. */
-export const ServicesSection: React.FC<{ onApplied?: () => void; botId?: string }> = ({
+export const ServicesSection: React.FC<{
+  onApplied?: () => void;
+  botId?: string;
+  /**
+   * The DERIVED work location, passed down rather than re-fetched.
+   *
+   * `SchedulerSettings` already holds the scheduler config; asking for it again here would be a
+   * second read of one fact, and the two could disagree mid-render while a save is in flight.
+   */
+  workLocation?: WorkLocation;
+}> = ({
   onApplied,
   /**
    * Which Agent's catalogue this is (#86). `undefined` is a real value meaning the tenant's
@@ -249,6 +261,7 @@ export const ServicesSection: React.FC<{ onApplied?: () => void; botId?: string 
    * B's settings, adds a service, and the service lands on Agent A.
    */
   botId,
+  workLocation = 'at_one_location',
 }) => {
   const { data, isLoading, isSuccess } = useServices(true /* enabled */, botId);
   const create = useCreateService(botId);
@@ -311,6 +324,20 @@ export const ServicesSection: React.FC<{ onApplied?: () => void; botId?: string 
 
   return (
     <div className="space-y-3 border-t border-edge pt-4">
+      {/*
+        Asked BEFORE the catalog exists, because that is the only moment it can be answered without
+        contradicting something. Once a service exists this collapses to the derived answer - see
+        WorkLocationPicker for why it is never stored.
+      */}
+      {!isLoading && (
+        <WorkLocationPicker
+          workLocation={workLocation}
+          services={services}
+          disabled={saving}
+          onCreateService={(input: ServiceInput) => create.mutateAsync(input)}
+        />
+      )}
+
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-text-primary">Services</h3>
         <Button variant="outline" size="sm" type="button" onClick={openNew}>

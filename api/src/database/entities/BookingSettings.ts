@@ -118,6 +118,26 @@ export class BookingSettings {
   venueCountry?: string | null;
 
   /**
+   * Google's durable identity for the venue, when the owner PICKED it rather than typed it.
+   *
+   * Null means typed, which is every row that existed before address suggestions, and travel
+   * falls back to geocoding the four fields joined into a line exactly as it always has.
+   *
+   * AN IDENTITY, NOT A POSITION. `venue_lat`/`venue_lng` sit unused a few lines from here for a
+   * reason: they carry no timestamp, so ADR-0014's 30-day coordinate licence could not be
+   * enforced on them. A place id may be kept indefinitely, so this is the one thing about a
+   * venue worth persisting - the point is re-derived from it on demand.
+   *
+   * IT MUST NEVER OUTLIVE THE TEXT IT CAME FROM. An owner who edits any venue field by hand has
+   * described somewhere else, and an id left behind would silently keep routing from the old
+   * address while the screen showed the new one. The write path clears it whenever the fields
+   * change without a fresh selection; the client clearing it too is a convenience, not the
+   * guarantee.
+   */
+  @Column({ type: 'text', name: 'venue_place_id', nullable: true })
+  venuePlaceId?: string | null;
+
+  /**
    * "Stop taking new bookings", without dismantling anything.
    *
    * An owner who is ill, away, or simply full had only two options: delete their weekly

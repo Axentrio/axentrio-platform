@@ -11,6 +11,7 @@ import { Card, CardHeader, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { AddressAutocomplete } from './AddressAutocomplete';
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { TimeSelect } from '@/components/ui/time-select';
@@ -255,7 +256,16 @@ export const SchedulerSettings: React.FC = () => {
   const [overrides, setOverrides] = useState<OverrideRow[]>([]);
   const [serviceArea, setServiceArea] = useState<ServiceAreaEntry[]>([]);
 
-  const [venue, setVenue] = useState<VenueAddress>({ street: null, postalCode: null, city: null, country: null });
+  const [venue, setVenue] = useState<VenueAddress>({
+    street: null, postalCode: null, city: null, country: null, placeId: null,
+  });
+  /**
+   * Any hand-edit invalidates a selection, so every field goes through here rather than calling
+   * `setVenue` directly. Four call sites each remembering to null the id is three chances to
+   * forget, and forgetting means the base routes from an address the owner has replaced.
+   */
+  const editVenue = (patch: Partial<VenueAddress>) =>
+    setVenue((v) => ({ ...v, ...patch, placeId: null }));
 
   /**
    * Show a location control only where it applies - and NEVER hide one that holds something
@@ -325,6 +335,7 @@ export const SchedulerSettings: React.FC = () => {
     setServiceArea(Array.isArray(data.serviceArea) ? data.serviceArea : []);
     setBookingsPaused(data.bookingsPaused === true);
     setVenue({
+      placeId: data.venueAddress?.placeId ?? null,
       street: data.venueAddress?.street ?? null,
       postalCode: data.venueAddress?.postalCode ?? null,
       city: data.venueAddress?.city ?? null,
@@ -900,6 +911,19 @@ export const SchedulerSettings: React.FC = () => {
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <AddressAutocomplete
+                      onSelect={(picked) =>
+                        // Straight to `setVenue`, deliberately NOT `editVenue`: this is the one
+                        // change that CREATES the identity rather than invalidating it.
+                        setVenue({
+                          placeId: picked.placeId,
+                          street: picked.components?.street ?? null,
+                          postalCode: picked.components?.postalCode ?? null,
+                          city: picked.components?.city ?? null,
+                          country: picked.components?.country ?? null,
+                        })
+                      }
+                    />
                     <div className="sm:col-span-2">
                       <Label htmlFor="venue-street">Street and number</Label>
                       <Input
@@ -907,7 +931,7 @@ export const SchedulerSettings: React.FC = () => {
                         value={venue.street ?? ''}
                         maxLength={200}
                         placeholder="Grote Markt 1"
-                        onChange={(e) => setVenue((v) => ({ ...v, street: e.target.value || null }))}
+                        onChange={(e) => editVenue({ street: e.target.value || null })}
                       />
                     </div>
                     <div>
@@ -917,7 +941,7 @@ export const SchedulerSettings: React.FC = () => {
                         value={venue.postalCode ?? ''}
                         maxLength={200}
                         placeholder="9300"
-                        onChange={(e) => setVenue((v) => ({ ...v, postalCode: e.target.value || null }))}
+                        onChange={(e) => editVenue({ postalCode: e.target.value || null })}
                       />
                     </div>
                     <div>
@@ -927,7 +951,7 @@ export const SchedulerSettings: React.FC = () => {
                         value={venue.city ?? ''}
                         maxLength={200}
                         placeholder="Aalst"
-                        onChange={(e) => setVenue((v) => ({ ...v, city: e.target.value || null }))}
+                        onChange={(e) => editVenue({ city: e.target.value || null })}
                       />
                     </div>
                     <div>
@@ -937,9 +961,7 @@ export const SchedulerSettings: React.FC = () => {
                         value={venue.country ?? ''}
                         maxLength={2}
                         placeholder="BE"
-                        onChange={(e) =>
-                          setVenue((v) => ({ ...v, country: e.target.value.toUpperCase() || null }))
-                        }
+                        onChange={(e) => editVenue({ country: e.target.value.toUpperCase() || null })}
                       />
                     </div>
                   </div>

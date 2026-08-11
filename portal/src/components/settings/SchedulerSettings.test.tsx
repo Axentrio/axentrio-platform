@@ -86,7 +86,7 @@ const AVAILABILITY = {
   ],
 };
 
-const VENUE = { street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: 'BE' };
+const VENUE = { placeId: null, street: 'Grote Markt 1', postalCode: '9300', city: 'Aalst', country: 'BE' };
 
 const TRAVEL = {
   enabled: true,
@@ -271,7 +271,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
       ...CONFIG,
       services: [{ id: 's1', isActive: true, locationType: 'unset', customerAddressRequired: false, name: 'Online intro call' }],
       workLocation: 'at_one_location',
-      venueAddress: { street: null, postalCode: null, city: null, country: null },
+      venueAddress: { placeId: null, street: null, postalCode: null, city: null, country: null },
     };
     await saveUntouched(noVenue);
     expect(document.body.textContent).not.toMatch(/nobody has chosen/i);
@@ -292,7 +292,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
       ...CONFIG,
       services: [{ id: 's1', isActive: true, locationType: 'google_meet', customerAddressRequired: false }],
       workLocation: 'no_location',
-      venueAddress: { street: null, postalCode: null, city: null, country: null },
+      venueAddress: { placeId: null, street: null, postalCode: null, city: null, country: null },
       serviceArea: [],
     };
     const body = await saveUntouched(nothingToShow);
@@ -300,7 +300,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     // Gone, because there is nothing to answer: no customer comes here and nobody travels.
     expect(document.getElementById('venue-street')).toBeNull();
     // And an absent control still sends its empty value, so nothing about the save changes.
-    expect(body.venueAddress).toEqual({ street: null, postalCode: null, city: null, country: null });
+    expect(body.venueAddress).toEqual({ placeId: null, street: null, postalCode: null, city: null, country: null });
     expect(body.serviceArea).toEqual([]);
   });
 
@@ -314,7 +314,7 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
   it('sends every venue key even when the business has entered none', async () => {
     // The grandfathered state for every existing tenant. It must save without inventing an
     // address, and without dropping the key (which would mean "leave it alone" forever).
-    const empty = { street: null, postalCode: null, city: null, country: null };
+    const empty = { placeId: null, street: null, postalCode: null, city: null, country: null };
     const payload = await saveUntouched({ ...CONFIG, venueAddress: empty });
     expect(payload).toHaveProperty('venueAddress');
     expect(payload.venueAddress).toEqual(empty);
@@ -325,10 +325,10 @@ describe('SchedulerSettings — hydrate/save round-trip', { timeout: SLOW_FORM_T
     // click past is not the individual's intervention. It must stay empty.
     const payload = await saveUntouched({
       ...CONFIG,
-      venueAddress: { street: null, postalCode: null, city: null, country: null },
+      venueAddress: { placeId: null, street: null, postalCode: null, city: null, country: null },
       company: { street: 'Woonstraat 9', postalCode: '1000', city: 'Brussel' },
     });
-    expect(payload.venueAddress).toEqual({ street: null, postalCode: null, city: null, country: null });
+    expect(payload.venueAddress).toEqual({ placeId: null, street: null, postalCode: null, city: null, country: null });
     expect(JSON.stringify(payload)).not.toContain('Woonstraat');
   });
 

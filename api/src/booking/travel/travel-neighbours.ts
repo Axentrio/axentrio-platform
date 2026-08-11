@@ -29,7 +29,7 @@ import { formatVenueLine, normalizeVenue } from '../../contracts/venue-address';
 import { logger } from '../../utils/logger';
 import type { ActiveTravelEligibility } from './travel-eligibility';
 import { ensureBookingPlace, storedPlace } from './booking-place';
-import { geocodeAddress, type PlacedAddress } from './geocoding.service';
+import { geocodeAddress, resolvePlaceId, type PlacedAddress } from './geocoding.service';
 import type { NeighbourLocation, TravelNeighbour } from './travel-gate';
 
 /**
@@ -135,7 +135,17 @@ async function venueLocation(
   if (budget.remaining <= 0 || Date.now() >= budget.deadline) return { kind: 'unresolved' };
   budget.remaining -= 1;
 
-  const result = await geocodeAddress(eligibility, line);
+  // BY IDENTITY WHEN THERE IS ONE. An owner who picked their venue from suggestions gave us a
+  // durable handle, and re-deriving the point from it is what makes the base stable: the same
+  // four fields typed slightly differently, or a Google data change months later, no longer move
+  // where the day starts from. `resolvePlaceId` caches under the id and returns the same
+  // precision the gate weighs, so nothing downstream can tell which branch produced the place.
+  //
+  // Falling back to the text is not a lesser path - it is the ONLY path for every venue entered
+  // before suggestions existed, and it stays exactly as it was.
+  const result = row?.venuePlaceId?.trim()
+    ? await resolvePlaceId(eligibility.tenantId, row.venuePlaceId)
+    : await geocodeAddress(eligibility, line);
   return result.status === 'placed' ? locationFromPlace(result.place) : { kind: 'unresolved' };
 }
 

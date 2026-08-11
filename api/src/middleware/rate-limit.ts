@@ -166,6 +166,23 @@ export const widgetRateLimiter = createRedisRateLimiter({
 });
 
 /**
+ * Address suggestions, which fire WHILE SOMEONE TYPES and cost money per request.
+ *
+ * Sized for a human filling in one address, not for a page of them: with a three-character
+ * minimum and a debounce in the client, entering a full Belgian address costs a handful of
+ * requests. Forty a minute leaves a fast typist and a couple of corrections comfortable while
+ * bounding what a stuck client or a hostile session can spend.
+ *
+ * Redis-backed rather than in-memory, because in-memory counts per replica: two containers would
+ * silently permit twice the limit, and neither would know.
+ */
+export const placesRateLimiter = createRedisRateLimiter({
+  windowMs: 60000,
+  maxRequests: 40,
+  keyPrefix: 'places',
+});
+
+/**
  * WebSocket connection rate limiter
  */
 export const wsConnectionRateLimiter = createRedisRateLimiter({

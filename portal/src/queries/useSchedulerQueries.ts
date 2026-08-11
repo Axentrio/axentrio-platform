@@ -131,6 +131,16 @@ export interface VenueAddress {
   city: string | null;
   /** ISO 3166-1 alpha-2. */
   country: string | null;
+  /**
+   * Google's identity for this venue, when the owner picked it rather than typed it.
+   *
+   * Sending it on Save is a CLAIM that the four fields above are that place. The server does not
+   * take the claim on trust - it re-resolves the id and writes Google's own components - so the
+   * only way to keep it is to leave the fields as the selection filled them. Editing any of them
+   * by hand must drop it to null, which is what stops a verified id outliving the address it
+   * described.
+   */
+  placeId?: string | null;
 }
 
 /**

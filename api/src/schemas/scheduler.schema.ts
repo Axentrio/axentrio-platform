@@ -66,6 +66,15 @@ export const venueAddressSchema = z.object({
   city: z.string().max(200).nullable().optional(),
   // ISO 3166-1 alpha-2. Anything else is a typo, not a country.
   country: z.string().regex(/^[A-Za-z]{2}$/, 'Use a 2-letter country code').nullable().optional(),
+  /**
+   * Google's identity for the venue, when the owner picked it from suggestions.
+   *
+   * Sending it is a CLAIM that these four fields came from that place, and the controller does
+   * not take the claim on trust - it re-resolves the id and writes Google's own components, so a
+   * stored pairing is verified by construction rather than by validation. Omitting it means the
+   * owner typed the address, which is always allowed.
+   */
+  placeId: z.string().max(512).nullable().optional(),
 });
 
 export const bookingRulesSchema = z.object({
@@ -358,4 +367,14 @@ export const cancelBookingBodySchema = z.object({
 
 export const rescheduleBookingBodySchema = z.object({
   newStartTime: z.string().datetime(),
+});
+
+/** What a customer or an owner has typed so far. Bounded because a query is not a document. */
+export const placesQuerySchema = z.object({
+  query: z.string().min(1).max(200),
+});
+
+/** A place id from our own suggestion list. */
+export const placesSelectSchema = z.object({
+  placeId: z.string().min(1).max(512),
 });

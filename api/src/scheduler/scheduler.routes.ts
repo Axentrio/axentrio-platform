@@ -3,6 +3,7 @@ import { asyncHandler } from '../middleware/error-handler';
 import { requireClerkAuth, autoProvision } from '../middleware/clerk.middleware';
 import { resolveTenantContext } from '../middleware/super-admin.middleware';
 import { requireRole } from '../middleware/auth.middleware';
+import { placesRateLimiter } from '../middleware/rate-limit';
 import * as ctrl from './scheduler.controller';
 
 const router = Router();
@@ -14,6 +15,12 @@ router.get('/config', requireRole('admin', 'supervisor', 'agent'), asyncHandler(
 
 // Write: admin only.
 router.put('/config', requireRole('admin'), asyncHandler(ctrl.updateSchedulerConfig));
+
+// Address suggestions for the venue form. POST, not GET, so a partially-typed address never
+// lands in a query string, an access log or a referrer header. Rate-limited because each call
+// spends a billable element and they fire while somebody types.
+router.post('/places/autocomplete', requireRole('admin'), placesRateLimiter, asyncHandler(ctrl.autocompleteVenueAddress));
+router.post('/places/select', requireRole('admin'), placesRateLimiter, asyncHandler(ctrl.selectVenueAddress));
 
 // Services catalog (multi-service). Reads for admin/supervisor/agent; mutations admin-only.
 router.get('/services', requireRole('admin', 'supervisor', 'agent'), asyncHandler(ctrl.listServices));

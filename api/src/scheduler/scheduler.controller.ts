@@ -18,6 +18,8 @@ import { targetBotId } from '../utils/target-bot';
 import { resolveWorkLocation } from '../booking/service-location';
 import { requireFeature } from '../billing/enforce';
 import { getEntitlements } from '../billing/entitlements';
+import { resolvePlaceId } from '../booking/travel/geocoding.service';
+import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolveItineraryKey, itineraryKeyIsShared } from './itinerary-key';
 import { config } from '../config/environment';
 import {
@@ -30,6 +32,8 @@ import {
   reorderServicesSchema,
   cancelBookingBodySchema,
   rescheduleBookingBodySchema,
+  placesQuerySchema,
+  placesSelectSchema,
 } from '../schemas/scheduler.schema';
 import type { Repository, EntityManager } from 'typeorm';
 import {
@@ -241,6 +245,9 @@ async function readConfig(tenantId: string, bot: Bot) {
     // here reads as undefined, the editor hydrates it blank, and the next Save writes the
     // blank back over a real venue.
     venueAddress: {
+      // Cherry-picked like every sibling: a field on the entity but missing here hydrates the
+      // editor blank, and the owner's next Save writes that blank back over a real value.
+      placeId: bookingSettings?.venuePlaceId ?? null,
       street: bookingSettings?.venueStreet ?? null,
       postalCode: bookingSettings?.venuePostalCode ?? null,
       city: bookingSettings?.venueCity ?? null,
@@ -352,6 +359,34 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
     // the rules' value+provided pairing means one mechanism, not two.
     const va = (data.venueAddress ?? {}) as Record<string, string | null | undefined>;
     const venueProvided = data.venueAddress !== undefined;
+    // A place id NEVER outlives the text it came from, and this is where that is guaranteed
+    // rather than hoped for. An id arriving with the venue is a claim that these four fields are
+    // that place; we settle it by resolving the id and writing GOOGLE's components, so the stored
+    // pair cannot disagree. An owner who hand-edits a field sends no id, and the id clears.
+    //
+    // FAILS OPEN. If the id will not resolve - Google down, cap spent, id retired - the venue
+    // still saves exactly as typed, with no id. An owner must always be able to record their own
+    // address; being unable to VERIFY it is not a reason to refuse to STORE it.
+    let venuePlaceId: string | null = null;
+    if (venueProvided && typeof va.placeId === 'string' && va.placeId.trim()) {
+      const resolved = await resolvePlaceId(tenantId, va.placeId.trim());
+      if (resolved.status === 'placed') {
+        venuePlaceId = resolved.place.placeId;
+        const c = resolved.place.components;
+        if (c) {
+          va.street = c.street ?? null;
+          va.postalCode = c.postalCode ?? null;
+          va.city = c.city ?? null;
+          va.country = c.country ?? null;
+        }
+      } else {
+        logger.info('[Travel] venue place id did not resolve; storing the address as typed', {
+          tenantId,
+          botId: bot.id,
+          cause: resolved.status === 'unavailable' ? resolved.cause : resolved.status,
+        });
+      }
+    }
     // Generated rather than hand-written: seven nullable int columns, each needing a value
     // AND a "was it provided" flag so an untouched rule keeps its stored value while an
     // explicit null clears it. Hand-maintaining fourteen positional params is how a column
@@ -406,6 +441,20 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `${column} = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.${column} END`
+      );
+    }
+
+    // Rides the venue's own `provided` flag, so the identity and the text it describes are
+    // written in ONE statement. Two statements would leave a window in which the row claimed a
+    // verified address it no longer had.
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(venuePlaceId, venueProvided);
+      insertCols.push('venue_place_id');
+      insertVals.push(valueParam);
+      updates.push(
+        `venue_place_id = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.venue_place_id END`
       );
     }
 
@@ -774,4 +823,60 @@ export async function declineRequest(req: Request, res: Response): Promise<void>
   } catch (err) {
     asApiError(err);
   }
+}
+
+/**
+ * Address suggestions for the venue form.
+ *
+ * A THIN PASS-THROUGH ON PURPOSE. It exists so the Maps key never reaches a browser, and so the
+ * spend it causes is attributed to the tenant that caused it. Everything about what a suggestion
+ * IS lives in `places.service`.
+ *
+ * Not gated on the `travelTime` entitlement. This is the owner's own address; it improves the
+ * calendar invite and the venue shown to customers whether or not travel is on, and gating it
+ * would make the same field behave differently for a reason no owner could see.
+ */
+export async function autocompleteVenueAddress(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  const { query } = placesQuerySchema.parse(req.body ?? {});
+
+  const result = await autocompleteAddress(tenantId, query);
+  // An unavailable Google is not an error the owner should see as a failure - the form still
+  // takes a typed address. Empty list, 200, and the field behaves as it always has.
+  sendSuccess(res, { suggestions: result.status === 'ok' ? result.suggestions : [] });
+}
+
+/**
+ * Turn a chosen suggestion into a verified address the form can display.
+ *
+ * SELECTION IS WHAT CREATES IDENTITY, not autocomplete: this is the only place a `place_id`
+ * becomes something the platform will act on, and it does so through the same `resolvePlaceId`
+ * every other placement goes through, so the trust boundary has exactly one door.
+ *
+ * The components come back so the four fields fill themselves. The id comes back so the next
+ * Save can claim them - and `updateSchedulerConfig` re-resolves that claim rather than believing
+ * it, which is what stops a hand-edited address keeping a verified id.
+ */
+export async function selectVenueAddress(req: Request, res: Response): Promise<void> {
+  const tenantId = (req as { tenantId?: string }).tenantId!;
+  await requireFeature(tenantId, 'bookings', BOOKINGS_FEATURE_ERROR);
+  const { placeId } = placesSelectSchema.parse(req.body ?? {});
+
+  const resolved = await resolvePlaceId(tenantId, placeId);
+  if (resolved.status !== 'placed') {
+    // 503 rather than 400: the id came from our own suggestion list, so a failure here is about
+    // Google or the tenant's cap, not about what the owner clicked.
+    throw new ApiError(
+      'That address could not be verified right now. You can still type it in.',
+      503,
+      'PLACE_UNAVAILABLE'
+    );
+  }
+
+  sendSuccess(res, {
+    placeId: resolved.place.placeId,
+    formattedAddress: resolved.place.formattedAddress,
+    components: resolved.place.components ?? null,
+  });
 }

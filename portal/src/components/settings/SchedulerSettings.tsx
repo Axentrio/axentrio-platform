@@ -1129,7 +1129,11 @@ export const SchedulerSettings: React.FC = () => {
                       min={0}
                       max={120}
                       value={travelMaxDetourMin}
-                      disabled={!travelEnabled}
+                      // Gated on GROUPING, not merely on travel. The threshold decides which times
+                      // are suggested FIRST, and that ordering only reaches a customer when
+                      // grouping is on - so offering the field beside "No grouping" would take a
+                      // number and quietly consume nothing.
+                      disabled={!travelEnabled || travelGroupingPeriod === 'none'}
                       placeholder="No limit"
                       onChange={(e) => setTravelMaxDetourMin(e.target.value)}
                     />
@@ -1137,7 +1141,8 @@ export const SchedulerSettings: React.FC = () => {
                       How much EXTRA driving one appointment may add to your day — not how far away
                       it is, so a customer an hour away is still offered if you are already going
                       past. Over this, the time is still bookable; it simply stops being the one
-                      suggested first. Leave it empty for no limit.
+                      suggested first, so it needs grouping switched on to have any effect. Leave
+                      it empty for no limit.
                     </p>
                   </div>
 

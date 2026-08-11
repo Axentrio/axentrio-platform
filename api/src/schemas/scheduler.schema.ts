@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { GROUPING_PERIODS, type GroupingPeriod } from '../contracts/travel';
 import { MAX_SERVICE_AREA_ENTRIES } from '../contracts/service-area';
 
 const hhmm = z.string().regex(/^([01]?\d|2[0-4]):[0-5]\d$/, 'Expected HH:MM');
@@ -293,7 +294,10 @@ export const travelSettingsSchema = z.object({
   // NOT nullable: the column is NOT NULL and zero already expresses "no head start".
   baseDepartOffsetMin: z.number().int().min(0).max(240).optional(),
   /** Over what stretch grouping looks for nearby work. See `GroupingPeriod`. */
-  groupingPeriod: z.enum(['none', 'half_day', 'full_day']).optional(),
+  // Derived from GROUPING_PERIODS rather than restating it. The literal list lived here, in the
+  // portal type, in the portal state, in two `as` casts and in a CHECK constraint - six copies of
+  // one fact, and the artefact built to stop them drifting was the only one nothing used.
+  groupingPeriod: z.enum(GROUPING_PERIODS as unknown as [GroupingPeriod, ...GroupingPeriod[]]).optional(),
   /**
    * The most extra driving one appointment may ADD before it stops being preferred.
    *

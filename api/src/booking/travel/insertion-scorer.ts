@@ -117,13 +117,23 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
     period: HalfDayPeriod | null = null
   ): ScoredCandidate => ({ start, costMinutes: null, preferred: null, neutralReason, period });
 
-  if (!periods) return input.candidates.map((c) => neutral(c.blockedStart, 'no_periods'));
+  // NO PERIODS IS ONLY FATAL TO HALF-DAY GROUPING. `resolveDayPeriods` returns null for an
+  // always-open diary, because a day with no opening hours has no clock midpoint to split on -
+  // but a WHOLE day needs no split, so full-day grouping works there and half-day cannot.
+  //
+  // This short-circuit used to run before `groupWholeDay` was read, which made a stored
+  // `full_day` silently inert on exactly the diary shape the feature was meant to answer for.
+  if (!periods && !input.groupWholeDay) {
+    return input.candidates.map((c) => neutral(c.blockedStart, 'no_periods'));
+  }
 
   // Anchors bucketed once. Chronological within a period is what makes `prev`/`next` meaningful,
   // and the input order is not guaranteed to be.
   const byPeriod: Record<HalfDayPeriod, RouteNode[]> = { morning: [], afternoon: [] };
   for (const a of input.anchors) {
-    const p = periodOf({ start: a.blockedStart, end: a.blockedEnd }, periods);
+    // With no periods every anchor is simply "in the day", which is the only bucket full-day
+    // grouping uses. The morning list is that bucket; nothing reads it by name in this mode.
+    const p = periods ? periodOf({ start: a.blockedStart, end: a.blockedEnd }, periods) : 'morning';
     // An anchor that straddles the boundary anchors NEITHER period. It is a real job and it still
     // blocks time through feasibility; it simply cannot be said to belong to a half-day.
     if (p) byPeriod[p].push(a);
@@ -145,10 +155,9 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
     (a, b) => a.blockedStart.getTime() - b.blockedStart.getTime()
   );
 
-  const earliestAnchor = allDayAnchors.reduce<RouteNode | null>(
-    (min, a) => (!min || a.blockedStart < min.blockedStart ? a : min),
-    null
-  );
+  // The list is already chronological, so the day's first job is its head. This used to re-derive
+  // the same value with a `reduce` directly under a comment claiming it was computed once.
+  const earliestAnchor: RouteNode | null = allDayAnchors[0] ?? null;
 
   let legsUsed = 0;
   const out: ScoredCandidate[] = [];
@@ -161,8 +170,12 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
       continue;
     }
 
-    const period = periodOf({ start: candidate.blockedStart, end: candidate.blockedEnd }, periods);
-    if (!period) {
+    // `null` here means the day has no halves to belong to, which is a true statement about an
+    // always-open diary rather than a reason to refuse. Only a day WITH a boundary can straddle it.
+    const period = periods
+      ? periodOf({ start: candidate.blockedStart, end: candidate.blockedEnd }, periods)
+      : null;
+    if (periods && !period) {
       out.push(neutral(candidate.blockedStart, 'straddles_boundary'));
       continue;
     }
@@ -170,7 +183,7 @@ export async function scoreCandidates(input: ScoreInput): Promise<ScoredCandidat
     // Full day compares against every job of the local day; half day against this half only.
     // `period` above is still the candidate's own half, because it labels the SLOT rather than
     // the comparison, and an afternoon slot is an afternoon slot however widely it was scored.
-    const anchors = input.groupWholeDay ? allDayAnchors : byPeriod[period];
+    const anchors = input.groupWholeDay ? allDayAnchors : byPeriod[period as HalfDayPeriod];
     const prevAnchor = [...anchors].reverse().find((a) => a.blockedEnd <= candidate.blockedStart) ?? null;
     const nextAnchor = anchors.find((a) => a.blockedStart >= candidate.blockedEnd) ?? null;
 

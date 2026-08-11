@@ -245,9 +245,10 @@ export class BookingSettings {
    * The boolean's two states were two of them - on meant "group within the half day", the only
    * period ever implemented - so the migration mapped them exactly rather than guessing.
    *
-   * A CHECK constraint on the column permits `none` and `half_day` only. `full_day` is specified
-   * and refused until the engine can produce it, which is what stops a stored value the scorer
-   * would silently ignore.
+   * A CHECK constraint on the column permits exactly the values `GroupingPeriod` names. They are
+   * widened together, in the change that makes the engine able to produce the new one - `full_day`
+   * was refused by both until `insertion-scorer` could group a whole day - because a stored value
+   * the scorer silently ignores is worse than an absent option.
    */
   @Column({ type: 'text', name: 'travel_grouping_period', default: 'none' })
   travelGroupingPeriod!: GroupingPeriod;

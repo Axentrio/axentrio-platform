@@ -261,7 +261,11 @@ export async function scoreOfferedSlots(input: {
         // received the feasibility list verbatim. It was correct only because no path writes a
         // `pending` row today, which is an accident rather than a guarantee.
         const anchors: RouteNode[] = input.neighbours
-          .filter((n) => n.status !== 'pending')
+          // FAIL CLOSED on an absent status. `status` is optional on the type because the
+          // synthetic premises neighbour has no row, and `!== 'pending'` would have let anything
+          // unset anchor grouping as though it were confirmed - the exact accident this filter
+          // exists to stop. Only an explicit `confirmed` may anchor.
+          .filter((n) => n.status === 'confirmed')
           .filter((n) => localDayBounds(input.rule, n.blockedStart).localDay.toFormat('yyyy-MM-dd') === localDay)
           .map((n) => ({ blockedStart: n.blockedStart, blockedEnd: n.blockedEnd, point: trustedPoint(n.location) }))
           .filter((n): n is RouteNode => n.point !== null);

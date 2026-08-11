@@ -332,7 +332,7 @@ export const ServicesSection: React.FC<{
       {!isLoading && (
         <WorkLocationPicker
           workLocation={workLocation}
-          services={services}
+          services={services.filter((s) => s.isActive)}
           disabled={saving}
           onCreateService={(input: ServiceInput) => create.mutateAsync(input)}
         />

@@ -443,3 +443,57 @@ describe('full-day grouping widens what a candidate is compared against', () => 
     expect(scored.period).toBe('afternoon');
   });
 });
+
+describe('an always-open diary has no halves, which only stops HALF-day grouping', () => {
+  /**
+   * `resolveDayPeriods` returns null when a business is always open, because a day with no
+   * opening hours has no clock midpoint to split on. Half-day grouping genuinely cannot work
+   * there. A WHOLE day needs no split, so full-day grouping can - and the plan said so.
+   *
+   * It did not, until this test. The `no_periods` short-circuit ran BEFORE `groupWholeDay` was
+   * read, so a stored `full_day` was silently ignored on exactly the diary shape it was meant to
+   * answer for: the owner picks the option, nothing changes, and the platform is doing something
+   * other than what it says.
+   */
+  const DAY = '2026-09-07';
+  const at = (hhmm: string) => new Date(`${DAY}T${hhmm}:00.000Z`);
+
+  const anchors = [
+    { blockedStart: at('09:00'), blockedEnd: at('10:00'), point: { lat: 51.2, lng: 4.4 } },
+  ];
+  const candidates = [
+    { blockedStart: at('14:00'), blockedEnd: at('15:00'), point: { lat: 51.25, lng: 4.45 } },
+  ];
+
+  const run = (groupWholeDay: boolean) =>
+    scoreCandidates({
+      candidates,
+      anchors,
+      // What an always-open business produces.
+      periods: null,
+      base: null,
+      maxDetourMin: null,
+      lookup: async () => 20,
+      legBudget: 99,
+      deadline: Date.now() + 60_000,
+      groupWholeDay,
+    });
+
+  it('half day still cannot score it, and says why', async () => {
+    const [scored] = await run(false);
+    expect(scored.costMinutes).toBeNull();
+    expect(scored.neutralReason).toBe('no_periods');
+  });
+
+  it('full day DOES score it', async () => {
+    const [scored] = await run(true);
+    expect(scored.costMinutes).toBe(20);
+  });
+
+  it('records no period, because there genuinely is not one', async () => {
+    // Not 'morning' by default: an always-open day has no halves, and claiming one would put a
+    // fiction on the offer record.
+    const [scored] = await run(true);
+    expect(scored.period).toBeNull();
+  });
+});

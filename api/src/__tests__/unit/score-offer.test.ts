@@ -42,7 +42,7 @@ const eligibility = {
   itineraryKey: 'bot:1',
   slackMin: 0,
   startFromBase: false,
-  maxDetourMin: null, baseDepartOffsetMin: 0, preferClusters: false,
+  maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
 };
 
 /** Monday 8 Sep 2026 and Tuesday 9 Sep 2026, both inside the London working day. */

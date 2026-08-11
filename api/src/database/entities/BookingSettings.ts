@@ -22,6 +22,7 @@ import {
   Index,
 } from 'typeorm';
 import type { ServiceAreaEntry } from '../../contracts/service-area';
+import type { GroupingPeriod } from '../../contracts/travel';
 import { Tenant } from './Tenant';
 import { Bot } from './Bot';
 
@@ -237,8 +238,19 @@ export class BookingSettings {
   @Column({ type: 'int', name: 'travel_max_detour_min', nullable: true })
   travelMaxDetourMin?: number | null;
 
-  @Column({ type: 'boolean', name: 'travel_prefer_clusters', default: false })
-  travelPreferClusters!: boolean;
+  /**
+   * Over what stretch of the diary grouping looks for nearby work.
+   *
+   * Replaced `travel_prefer_clusters`, a boolean, when the partner spec asked for three options.
+   * The boolean's two states were two of them - on meant "group within the half day", the only
+   * period ever implemented - so the migration mapped them exactly rather than guessing.
+   *
+   * A CHECK constraint on the column permits `none` and `half_day` only. `full_day` is specified
+   * and refused until the engine can produce it, which is what stops a stored value the scorer
+   * would silently ignore.
+   */
+  @Column({ type: 'text', name: 'travel_grouping_period', default: 'none' })
+  travelGroupingPeriod!: GroupingPeriod;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;

@@ -242,3 +242,17 @@ export function travelCacheKey(from: GeoPoint, to: GeoPoint, mode: string): stri
   const r = (n: number): string => n.toFixed(5);
   return `travel:${mode}:${r(from.lat)},${r(from.lng)}:${r(to.lat)},${r(to.lng)}`;
 }
+
+/**
+ * Over what stretch of the diary grouping looks for nearby work.
+ *
+ * `none` and `half_day` are the shipped values. `full_day` is specified and NOT yet listed,
+ * because the anchor bucketing in `insertion-scorer` produces one bucket per half day and would
+ * silently treat a full-day choice as no grouping at all - an owner would pick it and be told the
+ * platform was doing something it was not. It joins this union in the change that implements it,
+ * and the database CHECK constraint refuses it until then.
+ */
+export type GroupingPeriod = 'none' | 'half_day';
+
+/** Every value the column accepts today, for validation that cannot drift from the type. */
+export const GROUPING_PERIODS: readonly GroupingPeriod[] = ['none', 'half_day'] as const;

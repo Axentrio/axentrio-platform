@@ -30,7 +30,7 @@ const ELIGIBLE: ActiveTravelEligibility = {
   tenantId: 'ten-1',
   itineraryKey: 'gcal:owner@acme.com',
   slackMin: 0,
-  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, preferClusters: false,
+  startFromBase: false, maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
 };
 
 const ANTWERP = { lat: 51.2194, lng: 4.4025 };

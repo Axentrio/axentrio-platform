@@ -92,3 +92,28 @@ describe('maximum travel time', () => {
     expect((await stored())?.travelMaxDetourMin).toBe(0);
   });
 });
+
+describe('grouping period', () => {
+  it('persists and reads back, having replaced the old boolean', async () => {
+    const res = await save({ groupingPeriod: 'half_day' });
+    expect(res.status).toBe(200);
+    expect((await stored())?.travelGroupingPeriod).toBe('half_day');
+    expect((await read()).body.data.travel.groupingPeriod).toBe('half_day');
+  });
+
+  it('REFUSES full_day, which is specified but not yet implemented', async () => {
+    // The scorer buckets anchors per HALF day, so a stored `full_day` would be a value the engine
+    // silently treats as no grouping at all - an owner would pick it and be told the platform was
+    // doing something it was not. It joins the enum in the change that implements it, and this
+    // test is what stops it reaching the picker a release early.
+    const res = await save({ groupingPeriod: 'full_day' });
+    expect(res.status).toBe(422);
+    expect((await stored())?.travelGroupingPeriod ?? 'none').toBe('none');
+  });
+
+  it('is left alone by a save that does not mention it', async () => {
+    await save({ groupingPeriod: 'half_day' });
+    await save({ startFromBase: true });
+    expect((await stored())?.travelGroupingPeriod).toBe('half_day');
+  });
+});

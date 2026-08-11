@@ -1141,7 +1141,8 @@ export class InternalProvider implements BookingProvider {
     // An annotating caller is excluded on purpose: that is the owner's own picker, which shows
     // every time including the ones travel refused, in the order the day runs. Reordering somebody
     // reading their own diary would be nonsense.
-    const pilotOn = !annotating && eligibility.preferClusters;
+    // `none` is off; anything else is a period to group within.
+    const pilotOn = !annotating && eligibility.groupingPeriod !== 'none';
     const ranked = applyGrouping({
       slots: cleared,
       scoring: grouping ?? null,

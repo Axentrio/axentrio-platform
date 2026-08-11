@@ -270,7 +270,7 @@ async function readConfig(tenantId: string, bot: Bot) {
       slackMin: bookingSettings?.travelSlackMin ?? null,
       startFromBase: bookingSettings?.travelStartFromBase === true,
       baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
-      preferClusters: bookingSettings?.travelPreferClusters === true,
+      groupingPeriod: bookingSettings?.travelGroupingPeriod ?? 'none',
       maxDetourMin: bookingSettings?.travelMaxDetourMin ?? null,
       /**
        * Why the switch cannot be turned on, or null when it can.
@@ -470,7 +470,6 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       [data.bookingsPaused, 'bookings_paused'],
       [data.travel?.enabled, 'travel_time_enabled'],
       [data.travel?.startFromBase, 'travel_start_from_base'],
-      [data.travel?.preferClusters, 'travel_prefer_clusters'],
     ];
     for (const [submitted, column] of BOOLEAN_COLUMNS) {
       const valueParam = `$${params.length + 1}`;
@@ -493,6 +492,19 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `travel_slack_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_slack_min END`
+      );
+    }
+
+    // TEXT with a NOT NULL default, so it follows the boolean contract rather than the nullable-int
+    // one: undefined leaves the stored value alone, and there is no "clear it" - `none` is off.
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(data.travel?.groupingPeriod ?? 'none', data.travel?.groupingPeriod !== undefined);
+      insertCols.push('travel_grouping_period');
+      insertVals.push(valueParam);
+      updates.push(
+        `travel_grouping_period = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_grouping_period END`
       );
     }
 

@@ -30,6 +30,7 @@ import { AppDataSource } from '../../database/data-source';
 import { BookingSettings } from '../../database/entities/BookingSettings';
 import { getEntitlements } from '../../billing/entitlements';
 import { config } from '../../config/environment';
+import type { GroupingPeriod } from '../../contracts/travel';
 import { logger } from '../../utils/logger';
 import { itineraryKeyIsShared, type ItineraryKey } from '../../scheduler/itinerary-key';
 import { Bot } from '../../database/entities/Bot';
@@ -80,7 +81,8 @@ export interface ActiveTravelEligibility {
    * what it WOULD have done - which is LP4, and is what makes flipping this a measurement rather
    * than a guess.
    */
-  preferClusters: boolean;
+  /** Over what stretch grouping looks for nearby work. `none` switches it off entirely. */
+  groupingPeriod: GroupingPeriod;
 }
 
 /**
@@ -153,7 +155,7 @@ export async function resolveTravelEligibility(input: {
     slackMin: Math.max(0, settings.travelSlackMin ?? 0),
     startFromBase: settings.travelStartFromBase === true,
     baseDepartOffsetMin: clampBaseDepartOffset(settings.travelBaseDepartOffsetMin),
-    preferClusters: settings.travelPreferClusters === true,
+    groupingPeriod: settings.travelGroupingPeriod ?? 'none',
     // Zero and negative are read as "no threshold" rather than "nothing qualifies": a preference
     // that silently marks every slot unpreferred is indistinguishable from one that is off, and
     // the second is overwhelmingly what an owner who typed 0 meant.

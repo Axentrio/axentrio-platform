@@ -118,7 +118,7 @@ describe('grouping cannot starve feasibility', () => {
     itineraryKey: 'bot:1',
     slackMin: 0,
     startFromBase: false,
-    maxDetourMin: null, baseDepartOffsetMin: 0, preferClusters: false,
+    maxDetourMin: null, baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
   };
   const leg = {
     from: { lat: 1, lng: 1 },

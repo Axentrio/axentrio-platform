@@ -52,7 +52,7 @@ describe('resolveTravelEligibility', () => {
       slackMin: 10,
       startFromBase: true,
       maxDetourMin: null,
-      baseDepartOffsetMin: 0, preferClusters: false,
+      baseDepartOffsetMin: 0, groupingPeriod: 'none' as const,
     });
   });
 

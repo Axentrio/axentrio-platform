@@ -310,7 +310,8 @@ export const SchedulerSettings: React.FC = () => {
   const [travelSlack, setTravelSlack] = useState<number | null>(null);
   const [travelStartFromBase, setTravelStartFromBase] = useState(false);
   const [travelBaseDepart, setTravelBaseDepart] = useState(0);
-  const [travelPreferClusters, setTravelPreferClusters] = useState(false);
+  const [travelGroupingPeriod, setTravelGroupingPeriod] = useState<'none' | 'half_day'>('none');
+  const [travelMaxDetourMin, setTravelMaxDetourMin] = useState<string>('');
   const [bookingsPaused, setBookingsPaused] = useState(false);
   const [rules, setRules] = useState<BookingRules>({
     maxBookingsPerDay: null,
@@ -347,7 +348,12 @@ export const SchedulerSettings: React.FC = () => {
     setTravelSlack(data.travel?.slackMin ?? null);
     setTravelStartFromBase(data.travel?.startFromBase === true);
     setTravelBaseDepart(data.travel?.baseDepartOffsetMin ?? 0);
-    setTravelPreferClusters(data.travel?.preferClusters === true);
+    setTravelGroupingPeriod(data.travel?.groupingPeriod ?? 'none');
+    setTravelMaxDetourMin(
+      data.travel?.maxDetourMin === null || data.travel?.maxDetourMin === undefined
+        ? ''
+        : String(data.travel.maxDetourMin)
+    );
     setRules({
       maxBookingsPerDay: data.bookingRules?.maxBookingsPerDay ?? null,
       maxBookedMinutesPerDay: data.bookingRules?.maxBookedMinutesPerDay ?? null,
@@ -487,7 +493,10 @@ export const SchedulerSettings: React.FC = () => {
         slackMin: travelSlack,
         startFromBase: travelStartFromBase,
         baseDepartOffsetMin: travelBaseDepart,
-        preferClusters: travelPreferClusters,
+        groupingPeriod: travelGroupingPeriod,
+        // Empty means "no threshold", which the API takes as null rather than 0 - zero is a value
+        // an owner can type and it means the same thing, but blank is absence, not a number.
+        maxDetourMin: travelMaxDetourMin.trim() === '' ? null : Number(travelMaxDetourMin),
       },
       bookingsPaused,
     };
@@ -1087,27 +1096,44 @@ export const SchedulerSettings: React.FC = () => {
                     </span>
                   </label>
 
-                  <label htmlFor="travel-prefer-clusters" className="flex items-start gap-2 cursor-pointer">
-                    <Checkbox
-                      id="travel-prefer-clusters"
-                      checked={travelPreferClusters}
-                      // Grouping only ever touches appointments AT THE CUSTOMER, so a business
-                      // whose customers all come to it has nothing to group. Offering the switch
-                      // there is not harmful - it is inert at runtime - but it promises something
-                      // that cannot happen, and an owner who ticks it and sees no change has been
-                      // told the feature is broken rather than inapplicable.
+                  <div>
+                    <Label htmlFor="travel-grouping-period">Geographic grouping</Label>
+                    <select
+                      id="travel-grouping-period"
+                      className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm disabled:opacity-50"
+                      value={travelGroupingPeriod}
                       disabled={!travelEnabled || !travelsToCustomers}
-                      onCheckedChange={(c) => setTravelPreferClusters(c === true)}
+                      onChange={(e) => setTravelGroupingPeriod(e.target.value as 'none' | 'half_day')}
+                    >
+                      <option value="none">No grouping</option>
+                      <option value="half_day">Group by half day</option>
+                    </select>
+                    <p className="text-xs text-text-muted mt-1">
+                      Customers still see every time they could have had, in the same list. Only the
+                      order changes, so the one that saves you the most driving is offered first.
+                      Nothing about your other customers is ever mentioned.
+                    </p>
+                  </div>
+
+                  <div>
+                    <Label htmlFor="travel-max-detour">Maximum extra travel per appointment (min)</Label>
+                    <Input
+                      id="travel-max-detour"
+                      type="number"
+                      min={0}
+                      max={120}
+                      value={travelMaxDetourMin}
+                      disabled={!travelEnabled}
+                      placeholder="No limit"
+                      onChange={(e) => setTravelMaxDetourMin(e.target.value)}
                     />
-                    <span className="text-sm text-text-secondary">
-                      Suggest times that group with nearby work
-                      <span className="block text-xs text-text-muted">
-                        Customers still see every time they could have had, in the same list. Only
-                        the order changes, so the one that saves you the most driving is offered
-                        first. Nothing about your other customers is ever mentioned.
-                      </span>
-                    </span>
-                  </label>
+                    <p className="text-xs text-text-muted mt-1">
+                      How much EXTRA driving one appointment may add to your day — not how far away
+                      it is, so a customer an hour away is still offered if you are already going
+                      past. Over this, the time is still bookable; it simply stops being the one
+                      suggested first. Leave it empty for no limit.
+                    </p>
+                  </div>
 
                   {travelStartFromBase && (
                     <div className="pl-6">

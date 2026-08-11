@@ -292,7 +292,7 @@ describe('ensureBookingPlace - lazy, on read, with write-back', () => {
     expect(await ensureBookingPlace(resolved({ customerCoordsAt }), ACTIVE)).toEqual(PLACE);
     // BY IDENTITY, never by re-reading the customer's typed address: the same words can
     // resolve somewhere else months later, silently moving a confirmed appointment.
-    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE.tenantId, 'ChIJ_place');
     expect(geocode).not.toHaveBeenCalled();
   });
 
@@ -368,7 +368,7 @@ describe('ensureBookingPlace - lazy, on read, with write-back', () => {
         outcome: 'placed',
         place: PLACE,
       });
-      expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+      expect(byPlaceId).toHaveBeenCalledWith(ACTIVE.tenantId, 'ChIJ_place');
       expect(geocode).not.toHaveBeenCalled();
     });
 

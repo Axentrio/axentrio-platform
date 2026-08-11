@@ -203,9 +203,19 @@ describe('geocodeAddress', () => {
   });
 
   describe('resolvePlaceId', () => {
+    it('takes a tenant rather than an eligibility, so a verified address does not need travel on', async () => {
+      // The whole reason the signature narrowed. Picking an address is how one gets verified at
+      // all; it is not a travel decision, and it has to work on a bot with travel switched off,
+      // on an unentitled tenant, and on one whose itinerary key is shared. The spend cap still
+      // applies, which is why a tenant is still required.
+      axiosGet.mockResolvedValue(ok(ROOFTOP));
+      expect(await resolvePlaceId('ten-no-travel', 'ChIJ_place')).toMatchObject({ status: 'placed' });
+      expect(reserve).toHaveBeenCalledWith('ten-no-travel', 1);
+    });
+
     it('refreshes by identity, with no country filter to partially match against', async () => {
       axiosGet.mockResolvedValue(ok(ROOFTOP));
-      expect(await resolvePlaceId(ELIGIBLE, 'ChIJ_place')).toMatchObject({ status: 'placed' });
+      expect(await resolvePlaceId(ELIGIBLE.tenantId, 'ChIJ_place')).toMatchObject({ status: 'placed' });
       const [, opts] = axiosGet.mock.calls[0] as [string, { params: Record<string, string> }];
       expect(opts.params.place_id).toBe('ChIJ_place');
       expect(opts.params.address).toBeUndefined();
@@ -214,14 +224,14 @@ describe('geocodeAddress', () => {
 
     it('claims an element like any other lookup', async () => {
       axiosGet.mockResolvedValue(ok(ROOFTOP));
-      await resolvePlaceId(ELIGIBLE, 'ChIJ_place');
+      await resolvePlaceId(ELIGIBLE.tenantId, 'ChIJ_place');
       expect(reserve).toHaveBeenCalledWith('ten-1', 1);
     });
 
     it('caches under the place id, not the address', async () => {
       redis.client = { get: vi.fn(async () => null), set: vi.fn(async () => 'OK') };
       axiosGet.mockResolvedValue(ok(ROOFTOP));
-      await resolvePlaceId(ELIGIBLE, 'ChIJ_place');
+      await resolvePlaceId(ELIGIBLE.tenantId, 'ChIJ_place');
       expect(redis.client.set.mock.calls[0][0]).toBe('geocode:v1:place:ChIJ_place');
     });
   });

@@ -156,7 +156,7 @@ describe('classifying a row', () => {
       row({ customer_coords_at: new Date(Date.now() - 31 * 24 * 3600_000).toISOString() }),
     ]);
     const [n] = (await load()).neighbours;
-    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE.tenantId, 'ChIJ_place');
     expect(n.location.kind).toBe('known');
   });
 
@@ -170,7 +170,7 @@ describe('classifying a row', () => {
       row({ customer_lat: null, customer_lng: null, customer_coords_at: null }),
     ]);
     const [n] = (await load()).neighbours;
-    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE, 'ChIJ_place');
+    expect(byPlaceId).toHaveBeenCalledWith(ACTIVE.tenantId, 'ChIJ_place');
     expect(n.location).toEqual({ kind: 'unresolved' });
   });
 

@@ -45,6 +45,13 @@ export interface PlacedAddress {
    * different string than the one that was checked.
    */
   formattedAddress: string;
+  /**
+   * The same address broken into fields, when Google gave them. Optional and PURELY additive:
+   * nothing that routes reads it, `isUsablePlace` does not require it, and a cache entry written
+   * before this existed stays valid. It is here so a form with four boxes can be filled from the
+   * one lookup that already happened.
+   */
+  components?: AddressComponents;
 }
 
 export type GeocodeResult =
@@ -152,7 +159,51 @@ interface GeocodeResponse {
     formatted_address?: string;
     partial_match?: boolean;
     geometry?: { location?: { lat?: number; lng?: number }; location_type?: string };
+    address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>;
   }>;
+}
+
+/**
+ * The pieces of an address, for a form that has a field per piece.
+ *
+ * Geocoding v3 has always returned these and we have always thrown them away, because travel
+ * only ever needed a point. The portal's venue form needs four separate fields, and inferring
+ * them by splitting `formattedAddress` on commas is guesswork that breaks on the first address
+ * whose city contains one.
+ *
+ * Every field is optional. Google omits components it has no answer for, and a venue that is
+ * missing a house number is still a usable venue.
+ */
+export interface AddressComponents {
+  street?: string;
+  postalCode?: string;
+  city?: string;
+  /** ISO 3166-1 alpha-2, which is what `VenueAddress.country` stores. */
+  country?: string;
+}
+
+/** `types` is an array, so a component is claimed by membership rather than by position. */
+function componentsFrom(
+  raw: Array<{ long_name?: string; short_name?: string; types?: string[] }> | undefined
+): AddressComponents | undefined {
+  if (!raw?.length) return undefined;
+  const find = (type: string) => raw.find((c) => c.types?.includes(type));
+  const number = find('street_number')?.long_name?.trim();
+  const route = find('route')?.long_name?.trim();
+  const out: AddressComponents = {
+    // "Grote Markt 1", the order Belgian and Dutch addresses are written in. Either half may be
+    // absent, so the pieces are joined rather than templated.
+    street: [route, number].filter(Boolean).join(' ') || undefined,
+    postalCode: find('postal_code')?.long_name?.trim() || undefined,
+    // `locality` is the town. Brussels-region addresses often carry only the commune, so
+    // `postal_town` and the level-2 area stand in rather than leaving the field blank.
+    city:
+      (find('locality') ?? find('postal_town') ?? find('administrative_area_level_2'))?.long_name?.trim() ||
+      undefined,
+    // SHORT name deliberately: the column holds ISO 3166-1 alpha-2, and `long_name` is "Belgium".
+    country: find('country')?.short_name?.trim() || undefined,
+  };
+  return Object.values(out).some(Boolean) ? out : undefined;
 }
 
 /**
@@ -264,16 +315,25 @@ export async function geocodeAddress(
  *
  * No `components` filter: a place id is an exact identity, so there is nothing to restrict
  * and nothing to partially match.
+ *
+ * TAKES A TENANT, NOT AN ELIGIBILITY, and the difference is the point. Resolving an id the
+ * customer or the owner PICKED is not a travel decision - it is how an address gets verified at
+ * all - so it has to work on a bot with travel switched off, on an unentitled tenant, and on one
+ * whose itinerary key is shared. Demanding an `ActiveTravelEligibility` made verified addresses
+ * available precisely where travel already worked and nowhere else, which is backwards.
+ *
+ * The tenant is still required, because the spend cap is not optional: `lookup` reserves an
+ * element against it before calling Google. Callers holding an eligibility pass its `tenantId`.
  */
 export async function resolvePlaceId(
-  eligibility: ActiveTravelEligibility,
+  tenantId: string,
   placeId: string
 ): Promise<GeocodeResult> {
   const apiKey = config.travel.googleMapsApiKey;
   if (!apiKey) return { status: 'unavailable', cause: 'no_api_key' };
   if (!placeId.trim()) return { status: 'unavailable', cause: 'malformed_response' };
 
-  return lookup(eligibility.tenantId, `geocode:${CACHE_VERSION}:place:${placeId}`, {
+  return lookup(tenantId, `geocode:${CACHE_VERSION}:place:${placeId}`, {
     place_id: placeId,
     key: apiKey,
   });
@@ -373,6 +433,7 @@ function interpret(body: GeocodeResponse, tenantId: string): GeocodeResult {
     lng: lng as number,
     precision: precisionFromLocationType(top.geometry?.location_type) as GeocodePrecision,
     formattedAddress,
+    components: componentsFrom(top.address_components),
   };
 
   // NOT TRUNCATED TO FIT. The verified address is bounded inside `isUsablePlace` rather than

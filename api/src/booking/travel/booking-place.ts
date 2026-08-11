@@ -139,7 +139,7 @@ export async function placeExistingBooking(
   // confirmed appointment. Forward geocoding is the fallback for rows that never had a
   // place id at all, which is every row written before this feature existed.
   const result = booking.customerPlaceId
-    ? await resolvePlaceId(eligibility, booking.customerPlaceId)
+    ? await resolvePlaceId(eligibility.tenantId, booking.customerPlaceId)
     : booking.customerAddress?.trim()
       ? await geocodeAddress(eligibility, booking.customerAddress)
       : null;

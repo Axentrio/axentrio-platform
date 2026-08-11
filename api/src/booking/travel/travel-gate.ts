@@ -551,6 +551,22 @@ export interface RoutedLeg {
    * to key on but a count.
    */
   cause?: string;
+  /**
+   * Is this duration MEASURED, or estimated?
+   *
+   * Absent or false means measured - a real routing engine answered, and the number may decide a
+   * slot either way. True means it came from geometry rather than roads, and it may RANK but never
+   * REFUSE.
+   *
+   * The distinction has to exist on the leg because it cannot be recovered later. A verdict of
+   * `unreachable` looks identical whether a road network produced it or a straight line did, and
+   * the measured error on the estimate is 16% overall with one leg in fourteen still 22% short -
+   * enough to prefer the nearer of two jobs, nowhere near enough to turn a real customer away.
+   *
+   * Fail-open, like every other travel gate: an estimated leg that does not fit degrades into a
+   * Request the owner confirms, rather than a refusal nobody can appeal.
+   */
+  estimated?: boolean;
 }
 
 export interface RoutedAssessment {
@@ -648,8 +664,30 @@ export async function assessSlotRouted(input: {
       resolved.push(outcome);
       continue;
     }
+    const fits = answer.minutes <= outcome.leg.budgetMin;
+
+    // AN ESTIMATE MAY CLEAR A SLOT BUT MAY NEVER REFUSE ONE.
+    //
+    // Both directions of the asymmetry are deliberate. Clearing on an estimate is safe because the
+    // estimate errs long: it over-states nine legs in fourteen, so a journey it says fits almost
+    // certainly fits. Refusing on one is not, because the same measurement found a leg it
+    // under-stated by 22% - a 67 minute drive called 52 - and refusing there turns away a customer
+    // over arithmetic no road network was consulted for.
+    //
+    // So a non-fitting estimate degrades rather than refuses, and `routedEvery` goes false with
+    // it, which is what stops the row claiming `travel_check = 'ok'` for a journey nobody measured.
+    if (answer.estimated && !fits) {
+      routedEvery = false;
+      causes.add(answer.cause ?? 'estimated');
+      resolved.push(outcome);
+      continue;
+    }
+
+    // An estimate that CLEARS still did not verify anything, so the stamp has to know.
+    if (answer.estimated) routedEvery = false;
+
     resolved.push({
-      verdict: answer.minutes <= outcome.leg.budgetMin ? 'clear' : 'unreachable',
+      verdict: fits ? 'clear' : 'unreachable',
       constraining: true,
     });
   }

@@ -4,6 +4,7 @@ import {
   couldReachWithin,
   certainlyReachableWithin,
   travelGapMinutes,
+  drivePlausible,
   travelCacheKey,
   isTrustedForTravel,
   PREFILTER_MAX_KMH,
@@ -193,5 +194,63 @@ describe('travelCacheKey', () => {
     // Direction matters: one-way systems make A→B and B→A genuinely different drives.
     expect(travelCacheKey(BRUSSELS, GHENT, 'driving')).not.toBe(travelCacheKey(GHENT, BRUSSELS, 'driving'));
     expect(travelCacheKey(BRUSSELS, GHENT, 'driving')).not.toBe(travelCacheKey(BRUSSELS, GHENT, 'bicycle'));
+  });
+});
+
+describe('drivePlausible — is an answer Google returned physically possible', () => {
+  // Antwerp cathedral to Ghent belfry: ~47 km apart in a straight line.
+  const antwerp = { lat: 51.2211, lng: 4.3997 };
+  const ghent = { lat: 51.0536, lng: 3.7253 };
+  // The measured pathological pair: 550 m apart, 16.7 minutes, because the Scheldt is between
+  // them and you drive under it. 2.0 km/h effective. This must NEVER be called implausible.
+  const sintJansvliet = { lat: 51.2187, lng: 4.3958 };
+  const frederikVanEeden = { lat: 51.2226, lng: 4.3906 };
+
+  it('accepts an ordinary intercity drive', () => {
+    // ~47 km in 50 minutes is about 56 km/h. Unremarkable.
+    expect(drivePlausible(antwerp, ghent, 50)).toBe(true);
+  });
+
+  it('REFUSES a duration no car could achieve', () => {
+    // The failure this exists for. 47 km in 5 minutes is 564 km/h, and the real road is never
+    // shorter than the straight line - so this is conclusive rather than a judgement.
+    expect(drivePlausible(antwerp, ghent, 5)).toBe(false);
+  });
+
+  it('accepts the 550 m drive that really does take 16.7 minutes', () => {
+    // The case that falsified an earlier constant. A river in the way makes effective speed
+    // meaningless over short distances, and second-guessing it would refuse a real drive.
+    expect(drivePlausible(sintJansvliet, frederikVanEeden, 17)).toBe(true);
+  });
+
+  it('accepts an absurdly slow SHORT hop, because topology dominates under a kilometre', () => {
+    // 550 m in two hours is nonsense as an average speed and entirely possible as a drive
+    // through a closed pedestrian core. Short hops are exempt on purpose.
+    expect(drivePlausible(sintJansvliet, frederikVanEeden, 120)).toBe(true);
+  });
+
+  it('REFUSES the sixty-fold unit slip, which is the realistic corruption', () => {
+    // A duration read as minutes when it was seconds. The real drive is about 50 minutes, so the
+    // slip gives 3000 - which is 1.01 km/h over 50 km. That is why the threshold is 2 and not
+    // PREFILTER_MIN_KMH: at 1 this exact case sails through.
+    expect(drivePlausible(antwerp, ghent, 3000)).toBe(false);
+  });
+
+  it('still accepts a genuinely slow long drive', () => {
+    // 50 km in three hours is about 17 km/h - heavy traffic, not corruption. The threshold sits
+    // twelve times below the slowest intercity drive measured, so this has to pass.
+    expect(drivePlausible(antwerp, ghent, 180)).toBe(true);
+  });
+
+  it('accepts zero minutes only for the same point', () => {
+    expect(drivePlausible(antwerp, antwerp, 0)).toBe(true);
+    expect(drivePlausible(antwerp, ghent, 0)).toBe(false);
+  });
+
+  it('REFUSES a non-finite or negative duration rather than coercing it', () => {
+    // A NaN sailing into the gap arithmetic reads as "no constraint", which is the silent
+    // direction. Same reasoning as the malformed-duration guard in routes.service.
+    expect(drivePlausible(antwerp, ghent, Number.NaN)).toBe(false);
+    expect(drivePlausible(antwerp, ghent, -5)).toBe(false);
   });
 });

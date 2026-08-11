@@ -692,3 +692,65 @@ describe('selectFirstJob — what a write exposed', () => {
     expect(sel).toEqual({ kind: 'none' });
   });
 });
+
+describe('an estimated leg may clear a slot but may never refuse one', () => {
+  /**
+   * The asymmetry that makes a Google-free fallback safe.
+   *
+   * `haversine-lookup` produces a duration from geometry rather than roads. Measured against live
+   * Google over fourteen Belgian pairs it errs LONG on nine of them, so a journey it says fits
+   * almost certainly fits - but one leg came back 22% short, a 67 minute drive called 52. Refusing
+   * on that turns a real customer away over arithmetic no road network was consulted for.
+   *
+   * Without the `estimated` flag the gate cannot tell the two apart: a duration is a duration once
+   * it is a number, and line 652 would refuse on either.
+   */
+  // Brussels at 09:00, then a Ghent candidate at 10:00 - a 60 minute gap for a ~47 km drive.
+  const gap = {
+    candidate: candidate({
+      start: '2026-09-01T10:00:00Z',
+      end: '2026-09-01T11:00:00Z',
+      point: GHENT,
+    }),
+    neighbours: [known('2026-09-01T08:00:00Z', '2026-09-01T09:00:00Z', BRUSSELS)],
+    slackMin: 0,
+  };
+
+  it('CLEARS on an estimate that fits', async () => {
+    // Erring long is safe in this direction: if the estimate says it fits, it very likely fits.
+    const { verdict } = await assessSlotRouted({
+      ...gap,
+      lookup: async () => ({ minutes: 20, estimated: true, cause: 'estimated' }),
+    });
+    expect(verdict).toBe('clear');
+  });
+
+  it('DEGRADES rather than refusing on an estimate that does not fit', async () => {
+    // The load-bearing case. A measured 200 minutes would refuse; an estimated 200 must not.
+    const { verdict } = await assessSlotRouted({
+      ...gap,
+      lookup: async () => ({ minutes: 200, estimated: true, cause: 'estimated' }),
+    });
+    expect(verdict).not.toBe('unreachable');
+  });
+
+  it('still REFUSES on a MEASURED duration that does not fit', async () => {
+    // The control. Google saying 200 minutes is a real constraint and must still bind, or the
+    // change above would have quietly disabled the whole gate.
+    const { verdict } = await assessSlotRouted({
+      ...gap,
+      lookup: async () => ({ minutes: 200 }),
+    });
+    expect(verdict).toBe('unreachable');
+  });
+
+  it('never claims the slot was VERIFIED, even when the estimate cleared it', async () => {
+    // `travel_check = 'ok'` means routing measured every constraining leg. A straight line did
+    // not, so the stamp must not survive - CONTEXT.md defines `ok` as a claim about provenance.
+    const assessment = await assessSlotRouted({
+      ...gap,
+      lookup: async () => ({ minutes: 20, estimated: true, cause: 'estimated' }),
+    });
+    expect(assessment.fullyRouted).toBe(false);
+  });
+});

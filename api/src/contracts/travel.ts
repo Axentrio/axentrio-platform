@@ -126,6 +126,96 @@ export const PREFILTER_MAX_KMH = 120;
 export const PREFILTER_MIN_KMH = 1;
 
 /**
+ * Is a duration Google just returned physically possible for this pair of points?
+ *
+ * ## Why a routing answer needs checking at all
+ *
+ * Every gate in this system defends against Google being UNAVAILABLE, and none against Google
+ * being WRONG. Those are different failures and only one of them announces itself. An outage
+ * returns 5xx and the whole design already degrades to Requests; a wrong answer returns HTTP 200
+ * with a plausible-looking number, and nothing downstream can tell it from a right one.
+ *
+ * That is not a theoretical worry. Google Maps Platform's own incident history for the products
+ * this system depends on includes multi-hour windows of exactly this shape - one 21.5 hour
+ * incident where Directions and Routes returned "significantly longer routes and distances", one
+ * where road closures were reported incorrectly, one where Geocoding returned the wrong
+ * administrative area. Roughly two fifths of the declared incident-hours on this dependency path
+ * were confidently wrong answers rather than errors.
+ *
+ * The SLA does not help. It counts only HTTP 5xx, so a wrong 200 is not a failure by its
+ * definition, and the remedy is capped at a fraction of one month's bill either way.
+ *
+ * ## What this can and cannot catch
+ *
+ * It catches the IMPOSSIBLE, not the merely wrong. `PREFILTER_MAX_KMH` is one-sided and
+ * conclusive - nobody covers a straight-line kilometre faster than that on public roads - so a
+ * duration under that bound is a duration no car could achieve, whatever route it took. A drive
+ * that is genuinely 40 minutes and comes back as 55 is invisible here and always will be.
+ *
+ * The floor is the weaker half and is treated as such: `PREFILTER_MIN_KMH` is a MEASURED
+ * calibration rather than a theorem, so an implausibly slow answer is flagged only when it is
+ * absurd by a wide margin. A 550 metre drive really can take 16.7 minutes when a river is in the
+ * way, and this must never second-guess that.
+ *
+ * ## What a caller should do with a `false`
+ *
+ * Treat it as "not measured", never as "unreachable". A refusal built on a number we have just
+ * decided not to believe would be the same silent wrongness pointed the other way. The honest
+ * response is to fall back to the geometric bounds, record the cause, and let the ordinary
+ * degraded path capture a Request.
+ */
+/**
+ * Below this, a drive of real distance is a broken number rather than a slow journey.
+ *
+ * Deliberately NOT `PREFILTER_MIN_KMH`. That constant is a safety floor for the opposite
+ * question - can this leg POSSIBLY be made - where being too generous costs an API call and being
+ * too strict authorises an impossible booking. This one asks whether an answer already in hand is
+ * believable, and it only has to sit between the worst real drive (24 km/h intercity) and the
+ * worst plausible corruption (0.85 km/h, a sixty-fold unit slip).
+ */
+export const IMPLAUSIBLY_SLOW_KMH = 2;
+
+export function drivePlausible(from: GeoPoint, to: GeoPoint, minutes: number): boolean {
+  if (!Number.isFinite(minutes) || minutes < 0) return false;
+  const km = haversineKm(from, to);
+
+  // Zero minutes is only honest for the same point. Anything else claims teleportation.
+  if (minutes === 0) return km === 0;
+
+  const kmh = (km / minutes) * 60;
+
+  // TOO FAST is conclusive: the straight line alone could not be covered in the time, and the
+  // real road is never shorter than the straight line.
+  if (kmh > PREFILTER_MAX_KMH) return false;
+
+  // TOO SLOW is a judgement rather than a theorem, so it applies only where the judgement is safe.
+  //
+  // Under 5 km, effective speed means nothing: the measured worst case is 550 metres taking 16.7
+  // minutes because the Scheldt is in the way, which is 2.0 km/h, and a closed pedestrian core can
+  // be worse. Short hops are therefore exempt entirely.
+  //
+  // Over 5 km the picture inverts. Ten measured intercity pairs came in between 24 and 51 km/h, so
+  // `PREFILTER_MIN_KMH` at 1 sits twenty-four times under the slowest real drive seen - wide enough
+  // that anything failing it is a broken number rather than a slow journey. The realistic bug it
+  // catches is a unit slip: a duration read as minutes when it was seconds is sixty times too
+  // large. The measured intercity range of 24 to 51 km/h divided by sixty is 0.4 to 0.85 km/h, so
+  // the line has to sit above that and far below 24. Two is the number - twelve times under the
+  // slowest real drive seen, and more than double the worst unit slip.
+  //
+  // `PREFILTER_MIN_KMH` was the obvious candidate and is WRONG here: at 1 km/h a sixty-fold slip
+  // on a fifty-minute drive computes to 1.01 km/h and sails through. Checked with the arithmetic
+  // rather than assumed, after the first version of this comment claimed a catch it did not make.
+  //
+  // WHAT IT DOES NOT CATCH, stated so nobody mistakes it for cover: an answer that is merely too
+  // long. The 21.5 hour incident that returned "significantly longer routes" would have returned
+  // durations of maybe double reality, and doubling passes every bound here. The fast half of this
+  // function is conclusive; this half only catches absurdity.
+  if (km >= 5 && kmh < IMPLAUSIBLY_SLOW_KMH) return false;
+
+  return true;
+}
+
+/**
  * The slow end of a drive estimate SHOWN TO A PERSON — deliberately not the safety floor.
  *
  * These were one constant until the floor had to drop to 1, and that exposed them as two

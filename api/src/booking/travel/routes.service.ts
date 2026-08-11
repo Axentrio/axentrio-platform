@@ -33,7 +33,7 @@ import axios from 'axios';
 import { config } from '../../config/environment';
 import { getRedisClient } from '../../config/redis';
 import { logger } from '../../utils/logger';
-import type { GeoPoint } from '../../contracts/travel';
+import { drivePlausible, haversineKm, type GeoPoint } from '../../contracts/travel';
 import type { ActiveTravelEligibility } from './travel-eligibility';
 import type { DriveLookup } from './travel-gate';
 import { reserveTravelElements } from './travel-usage.service';
@@ -310,7 +310,7 @@ export async function driveMinutes(
     return { status: 'unavailable', cause: 'api_error' };
   }
 
-  const result = interpret(elements, eligibility.tenantId);
+  const result = interpret(elements, eligibility.tenantId, input.from, input.to);
   if (cacheKey) await writeCache(cacheKey, result);
   return result;
 }
@@ -322,7 +322,12 @@ export async function driveMinutes(
  * itself succeeded, and it is not the same as no route existing — so it degrades rather than
  * refusing. Only an explicit `ROUTE_NOT_FOUND` is allowed to say no.
  */
-function interpret(elements: MatrixElement[], tenantId: string): DriveResult {
+function interpret(
+  elements: MatrixElement[],
+  tenantId: string,
+  from: GeoPoint,
+  to: GeoPoint
+): DriveResult {
   const el = elements[0];
   if (!el) {
     logger.warn('[Travel] routes returned no elements', { tenantId });
@@ -347,7 +352,29 @@ function interpret(elements: MatrixElement[], tenantId: string): DriveResult {
 
   // Rounded UP to the minute. The gap arithmetic works in whole minutes, and rounding a
   // drive down is the direction that authorises a booking the owner cannot make.
-  return { status: 'routed', minutes: Math.ceil(seconds / 60) };
+  const minutes = Math.ceil(seconds / 60);
+
+  // IS THIS ANSWER PHYSICALLY POSSIBLE? Every other check in this file defends against Google
+  // being UNAVAILABLE; this one defends against Google being WRONG, which is a different failure
+  // and the only one that arrives looking like success. Its own incident history includes a 21.5
+  // hour window of "significantly longer routes and distances returned" - HTTP 200 throughout,
+  // and invisible to an SLA that counts only 5xx.
+  //
+  // Degrades rather than refuses, and that distinction is the whole point: a refusal built on a
+  // number we have just decided not to believe would be the same silent wrongness pointed the
+  // other way. `unavailable` puts the caller on the geometric bounds, which is exactly where an
+  // unmeasured leg belongs.
+  if (!drivePlausible(from, to, minutes)) {
+    logger.warn('[Travel] routes returned an implausible duration for the distance', {
+      tenantId,
+      minutes,
+      // The DISTANCE, never the coordinates: those are a customer's home.
+      km: Math.round(haversineKm(from, to) * 10) / 10,
+    });
+    return { status: 'unavailable', cause: 'malformed_response' };
+  }
+
+  return { status: 'routed', minutes };
 }
 
 /**

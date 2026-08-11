@@ -79,3 +79,42 @@ describe('haversineDriveLookup', () => {
     expect(leg.minutes).not.toBeNull();
   });
 });
+
+describe('padding, and why the fallback is deliberately pessimistic', () => {
+  it('inflates by default, because a fallback answer is the least-checked answer', async () => {
+    const raw = estimateDriveMinutes(antwerp, ghent);
+    const padded = await haversineDriveLookup()({
+      from: antwerp,
+      to: ghent,
+      departAt: new Date(),
+      budgetMin: 999,
+    } as never);
+    expect(padded.minutes!).toBeGreaterThan(raw);
+  });
+
+  it('covers the worst under-estimate the measurement actually found', async () => {
+    // Antwerp -> Brussels: Google says 67, the raw model says 52, which is 22% short. Padding has
+    // to close that gap or the fallback would clear a journey the owner cannot make.
+    const brussels = { lat: 50.8467, lng: 4.3525 };
+    const padded = await haversineDriveLookup()({
+      from: antwerp,
+      to: brussels,
+      departAt: new Date(),
+      budgetMin: 999,
+    } as never);
+    expect(padded.minutes!).toBeGreaterThanOrEqual(67);
+  });
+
+  it('can be asked NOT to pad, for ranking where both sides inflate equally', async () => {
+    // Grouping compares two candidates. Inflating both changes nothing about which is nearer, and
+    // padding there would only make the numbers less like the drives they describe.
+    const raw = estimateDriveMinutes(antwerp, ghent);
+    const unpadded = await haversineDriveLookup({ padded: false })({
+      from: antwerp,
+      to: ghent,
+      departAt: new Date(),
+      budgetMin: 999,
+    } as never);
+    expect(unpadded.minutes).toBe(raw);
+  });
+});

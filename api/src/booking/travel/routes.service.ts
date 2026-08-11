@@ -411,8 +411,30 @@ export function driveLookupFor(
     // and turning a customer away on it silently is the outcome this product least wants. It
     // degrades to a Request, where the owner sees the job and decides.
     if (result.status === 'no_route') return { minutes: null, cause: 'no_route' };
-    // The cause rides along: the gate does not branch on it, but #68 has to tell a spent cap
-    // (one tenant's problem) from a revoked key (everybody's), and this is where it exists.
-    return { minutes: null, cause: result.cause };
+
+    // FALL BACK ONLY WHEN GOOGLE WAS ASKED AND BROKE - never when we declined to ask.
+    //
+    // The distinction is the whole safety of this feature, and it is not obvious until stated:
+    //
+    //   asked, it broke        `api_error`, `malformed_response` - an outage or a bad answer, and
+    //                          exactly what the estimate exists to survive.
+    //   declined to ask        a cache-only read, a passed deadline, a spent cap, a missing key.
+    //                          These are POLICY. Substituting an estimate would quietly undo the
+    //                          decision that declined, which is how grouping starts scoring slots
+    //                          it was deliberately forbidden to price (ADR-0017) and how a spent
+    //                          cap stops meaning anything.
+    //
+    // Both slot-ordering tests caught this within one run of getting it wrong, first for the
+    // cache-only reader and then for the deadline. The invariant they defend is that grouping can
+    // never consume the budget feasibility depends on - and an estimate that arrives for free
+    // still changes what grouping does, which is enough to break it.
+    const askedAndBroke = result.cause === 'api_error' || result.cause === 'malformed_response';
+    if (!askedAndBroke) return { minutes: null, cause: result.cause };
+
+    // LAZY, not a static import. A new static edge from this module has broken unrelated unit
+    // suites in this repository before, and the failures land nowhere near the change.
+    const { haversineDriveLookup } = await import('./haversine-lookup');
+    const fallback = await haversineDriveLookup()(leg);
+    return { ...fallback, cause: result.cause };
   };
 }

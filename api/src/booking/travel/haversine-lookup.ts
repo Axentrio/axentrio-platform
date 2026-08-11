@@ -77,6 +77,25 @@ export const FIXED_OVERHEAD_MIN = 17;
  */
 export const ESTIMATED_KMH = 95;
 
+/**
+ * How much to inflate an estimate before letting it decide whether a slot is reachable.
+ *
+ * The measurement is the whole justification. Against live Google over fourteen Belgian journeys
+ * the tuned model came in 16% out on average and erred LONG on nine of them - but one leg came
+ * back 22% SHORT, a 67 minute drive it called 52. Under-stating is the direction that authorises a
+ * booking the owner cannot make, so the padding has to cover the worst under-statement seen, with
+ * something in hand.
+ *
+ * 1.3 covers that 22% and leaves margin for a route worse than any in the sample. It is not free:
+ * a padded estimate refuses to clear slots the owner could genuinely have made, and those become
+ * Requests they confirm by hand. That is the correct direction to be wrong in - a Request costs a
+ * click, a missed appointment costs a customer.
+ *
+ * Applied ONLY when an estimate decides reachability. Ranking uses the raw number, because
+ * inflating both sides of a comparison changes nothing about which is nearer.
+ */
+export const FEASIBILITY_PADDING = 1.3;
+
 /** Minutes for one leg, from geometry alone. Exported so a comparison can call it directly. */
 export function estimateDriveMinutes(from: GeoPoint, to: GeoPoint): number {
   const km = haversineKm(from, to) * DETOUR_FACTOR;
@@ -102,9 +121,13 @@ export function estimateDriveMinutes(from: GeoPoint, to: GeoPoint): number {
  * multiplies. This exists so an outage, a spent cap or a missing key degrades the platform instead
  * of stopping it.
  */
-export function haversineDriveLookup(): DriveLookup {
+export function haversineDriveLookup(opts?: { padded?: boolean }): DriveLookup {
   return async (leg) => ({
-    minutes: estimateDriveMinutes(leg.from, leg.to),
+    // Padded by default: this lookup is reached when Google could not answer, which is exactly
+    // when a wrong answer is least likely to be caught by anything else.
+    minutes: Math.ceil(
+      estimateDriveMinutes(leg.from, leg.to) * (opts?.padded === false ? 1 : FEASIBILITY_PADDING)
+    ),
     estimated: true,
     // Distinct from the failure causes so the health monitor can tell "we chose not to ask" from
     // "we asked and could not get an answer". #68 keys on these.

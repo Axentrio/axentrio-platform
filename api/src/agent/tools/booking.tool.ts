@@ -1,4 +1,5 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
+import { addressForTurn } from '../../booking/travel/address-for-turn';
 import {
   checkAvailability,
   createBooking,
@@ -95,6 +96,14 @@ export class CheckAvailabilityTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      // The customer's own choice beats the model's reconstruction of it. This is the path that
+      // MATTERS for travel: slots are filtered here, before any booking exists, so an address
+      // that differs between checking and creating would clear a slot against one place and
+      // confirm it against another.
+      const chosen = await addressForTurn(
+        ctx.sessionId,
+        args.customerAddress as string | undefined
+      );
       const full = await checkAvailability(
         'agent',
         ctx.sessionId,
@@ -102,7 +111,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         args.endDate as string,
         args.serviceId as string | undefined,
         args.durationMin as number | undefined,
-        args.customerAddress as string | undefined
+        chosen.address
       );
       // #81 (LP4) SPLIT FIRST, before any branch below can spread `result` into a payload. `data`
       // is serialised into the tool message the model reads and truncated at 4000 characters, so
@@ -236,6 +245,23 @@ export class CreateBookingTool implements ToolAdapter {
       if (badEmail) return badEmail;
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same booking instead of inserting a duplicate (#35).
+      // Settled BEFORE anything is written. A contested address is the one case where guessing
+      // is unacceptable: confirming sends a van to a door, and the customer finds out it was the
+      // wrong one when nobody arrives.
+      const booked = await addressForTurn(
+        ctx.sessionId,
+        args.customerAddress as string | undefined
+      );
+      if (booked.correctionPending) {
+        return {
+          success: false,
+          error:
+            `The address for this appointment is not settled. Ask the customer to confirm ` +
+            `whether it should be ${booked.address}, then try again.`,
+          // A DOMAIN error, not an exception: the model should read it and ask the customer.
+          errorSafeForModel: true,
+        };
+      }
       const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}`;
       const result = await createBooking(
         'agent',
@@ -247,7 +273,7 @@ export class CreateBookingTool implements ToolAdapter {
         args.serviceId as string | undefined,
         args.intakeAnswers,
         {
-          customerAddress: args.customerAddress as string | undefined,
+          customerAddress: booked.address,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,
@@ -391,6 +417,21 @@ export class RequestAppointmentTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
+      // A Request is an address the OWNER will act on - they drive to it. Same rule as create.
+      const requested = await addressForTurn(
+        ctx.sessionId,
+        args.customerAddress as string | undefined
+      );
+      if (requested.correctionPending) {
+        return {
+          success: false,
+          error:
+            `The address for this request is not settled. Ask the customer to confirm whether ` +
+            `it should be ${requested.address}, then try again.`,
+          // A DOMAIN error, not an exception: the model should read it and ask the customer.
+          errorSafeForModel: true,
+        };
+      }
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same request instead of inserting a duplicate (#35).
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
@@ -407,7 +448,7 @@ export class RequestAppointmentTool implements ToolAdapter {
         args.aiSummary as string | undefined,
         args.intakeAnswers,
         {
-          customerAddress: args.customerAddress as string | undefined,
+          customerAddress: requested.address,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,

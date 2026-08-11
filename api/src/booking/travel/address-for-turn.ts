@@ -1,0 +1,109 @@
+/**
+ * Which address a booking tool should actually use, given what the model passed it.
+ *
+ * The model is not the customer. Its `customerAddress` argument is a reconstruction from the
+ * conversation, and it can reformat, abbreviate, hallucinate, or silently omit. When a customer
+ * has PICKED an address, that choice is a better source than any of that - so this decides
+ * between them, in one place, for all three booking tools.
+ *
+ * The rule, in order:
+ *
+ *   no binding                  use whatever the model passed. This is every conversation today.
+ *   binding, no argument        use the binding. Omission is not a customer changing their mind.
+ *   binding, same place         use the binding. A reformat is not a change.
+ *   binding, different place    use the binding, and RECORD A PROPOSAL. Something suggested a
+ *                               different address; only the customer can settle that.
+ *
+ * The last line is the one worth defending. Treating a differing argument as a change would let a
+ * hallucinated-but-plausible address silently replace a real choice, and the customer would find
+ * out when somebody knocked on the wrong door. Treating it as a proposal costs one confirmation
+ * and cannot be wrong.
+ */
+import { createHash } from 'node:crypto';
+import { getBoundAddress, proposeCorrection } from './address-binding';
+import { logger } from '../../utils/logger';
+
+export interface TurnAddress {
+  /** What the tool should book or check against. */
+  address: string | undefined;
+  /** Google's identity for it, when the customer chose it. */
+  placeId?: string;
+  /** True when the model's argument named a DIFFERENT place and is waiting on the customer. */
+  correctionPending: boolean;
+}
+
+/** Case, punctuation and spacing carry no meaning in an address comparison. */
+const normalise = (value: string) =>
+  value.trim().toLowerCase().replace(/[.,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** Exactly equal once normalised. */
+const sameText = (a: string, b: string) => normalise(a) === normalise(b);
+
+/**
+ * The parts a model rewrites without meaning anything by it: a trailing country, a postcode, the
+ * order of town and code. Stripping them leaves street and town, which is what actually decides
+ * whether two strings are the same doorway.
+ */
+const CO_INCIDENTAL = /\b(belgium|belgie|belgië|be)\b|\b\d{4}\b/g;
+
+const looksLikeSameAddress = (a: string, b: string) => {
+  if (sameText(a, b)) return true;
+  const core = (v: string) => normalise(v).replace(CO_INCIDENTAL, ' ').replace(/\s+/g, ' ').trim();
+  const [x, y] = [core(a), core(b)];
+  if (!x || !y) return false;
+  // Containment rather than equality: "Grote Markt 1 Antwerpen" against "Grote Markt 1" is the
+  // model dropping the town, not the customer moving.
+  return x === y || x.includes(y) || y.includes(x);
+};
+
+export async function addressForTurn(
+  sessionId: string,
+  modelArgument: string | undefined
+): Promise<TurnAddress> {
+  const bound = await getBoundAddress(sessionId);
+
+  // No choice has been made, so there is nothing to protect and nothing to second-guess.
+  if (!bound) return { address: modelArgument, correctionPending: false };
+
+  const typed = modelArgument?.trim();
+  if (!typed || sameText(typed, bound.formattedAddress)) {
+    return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
+  }
+
+  // Different TEXT is not necessarily a different PLACE, and this cannot tell them apart with
+  // certainty. Resolving the argument would say for sure - but `geocodeAddress` deliberately
+  // demands an `ActiveTravelEligibility`, because that argument being unforgeable is the one
+  // thing standing between a runaway caller and a Google bill. Weakening that gate to sharpen a
+  // comparison would trade a real protection for a nicety.
+  //
+  // So the comparison is textual, and it is normalised hard: case, punctuation, the country
+  // suffix and the postcode all come off, because those are exactly what a model rewrites when
+  // it is NOT changing the address. What survives is street and town.
+  //
+  // The asymmetry justifies the imprecision. A false proposal costs one confirmation question. A
+  // missed one sends a van to the wrong door and nobody finds out until it arrives.
+  if (looksLikeSameAddress(typed, bound.formattedAddress)) {
+    return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
+  }
+
+  await proposeCorrection(sessionId, {
+    // Derived from the text, so the same suggestion twice is the same proposal - and a stale
+    // confirmation stops matching the moment the customer proposes something else.
+    proposalId: createHash('sha256').update(normalise(typed)).digest('hex').slice(0, 16),
+    // NO PLACE ID. Nothing has been verified yet; that happens if and when the customer confirms
+    // through `/places/select`, which resolves properly. A proposal is a question, not a place.
+    placeId: '',
+    formattedAddress: typed,
+  });
+  logger.info('[Travel] a booking tool named a different address than the customer chose', {
+    sessionId,
+    // The identity only. Both sides of this comparison are somebody's home address.
+    chosen: bound.placeId,
+  });
+
+  return {
+    address: bound.formattedAddress,
+    placeId: bound.placeId,
+    correctionPending: true,
+  };
+}

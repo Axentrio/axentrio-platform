@@ -31,6 +31,7 @@ vi.mock('../../services/bot-resolution.service', () => ({
 }));
 
 vi.mock('../../middleware/rate-limit', () => ({
+  placesRateLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
   widgetRateLimiter: (_req: any, _res: any, next: any) => next(),
   simpleRateLimit: () => (_req: any, _res: any, next: any) => next(),
 }));

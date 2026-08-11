@@ -17,7 +17,11 @@ import { MAX_MESSAGE_CONTENT_CHARS } from '../guardrails/classify';
 import { ApiError } from '../middleware/error-handler';
 import { widgetRateLimiter } from '../middleware/rate-limit';
 import { emitToSession } from '../websocket/socket.handler';
-import { scheduleTurn } from '../services/turn-coalescer';
+import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
+import { autocompleteAddress } from '../booking/travel/places.service';
+import { resolvePlaceId } from '../booking/travel/geocoding.service';
+import { bindAddress } from '../booking/travel/address-binding';
+import { placesRateLimiter } from '../middleware/rate-limit';
 import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
@@ -427,8 +431,6 @@ router.post(
     }
 
     const sessionRepository = AppDataSource.getRepository(ChatSession);
-    const messageRepository = AppDataSource.getRepository(Message);
-    const participantRepository = AppDataSource.getRepository(Participant);
 
     // Verify session
     const session = await sessionRepository.findOne({
@@ -443,64 +445,94 @@ router.post(
       throw new ValidationError('Session is closed');
     }
 
-    // Get or create participant
-    let participant = await participantRepository.findOne({
-      where: { sessionId, type: 'user', isDeleted: false },
-    });
-
-    if (!participant) {
-      participant = participantRepository.create({
-        sessionId,
-        type: 'user',
-        name: 'Visitor',
-        isAnonymous: true,
-        joinedAt: new Date(),
-      });
-      await participantRepository.save(participant);
-    }
-
-    // Create message
-    const message = messageRepository.create({
-      sessionId,
-      tenantId,
-      participantId: participant.id,
-      type,
-      content: encrypt(content),
-      contentEncrypted: true,
-      metadata: metadata || {},
-      status: 'sent',
-      sentAt: new Date(),
-    });
-
-    await messageRepository.save(message);
-
-    // Update session
-    session.incrementMessageCount();
-    await sessionRepository.save(session);
-
-    // Emit to WebSocket — use original plaintext content
-    emitToSession(tenantId, sessionId, 'message:receive', {
-      id: message.id,
-      sessionId: message.sessionId,
-      participantId: message.participantId,
-      participantType: 'user',
-      type: message.type,
-      content,
-      metadata: message.metadata,
-      timestamp: message.createdAt.toISOString(),
-    });
-
-    scheduleTurn(session, message).catch((err) => {
-      logger.error('Error scheduling turn (widget):', err);
-    });
+    const ingested = await ingestWidgetCustomerMessage(session, content, { type, metadata });
 
     sendCreated(res, {
       message: {
-        id: message.id,
-        content,
-        type: message.type,
-        createdAt: message.createdAt,
+        id: ingested.id,
+        content: ingested.content,
+        type: ingested.type,
+        createdAt: ingested.createdAt,
       },
+    });
+  })
+);
+
+/**
+ * Address suggestions while a customer types.
+ *
+ * POST, not GET: the body is a partly-typed home address, and a GET would put it in the URL,
+ * the access log and the referrer header of anything the page loads next.
+ *
+ * Rate-limited because it costs a billable element per call and fires on a debounce. An
+ * unavailable Google returns an empty list and a 200 - the customer types their address exactly
+ * as they do today, which is the same fail-open every travel gate keeps.
+ */
+router.post(
+  '/places/autocomplete',
+  authenticateWidget,
+  placesRateLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.widget!.tenantId;
+    const query = typeof req.body?.query === 'string' ? req.body.query : '';
+    if (query.length > 200) throw new ValidationError('Query too long');
+
+    const result = await autocompleteAddress(tenantId, query);
+    sendSuccess(res, { suggestions: result.status === 'ok' ? result.suggestions : [] });
+  })
+);
+
+/**
+ * The customer picked one. THIS is where an address becomes the address.
+ *
+ * Two things happen, and both are necessary. The place is bound to the session, so every later
+ * tool call is about it rather than about whatever text the model reconstructs. And the choice is
+ * spoken INTO THE CONVERSATION through the same ingestion path a typed message takes - because a
+ * selection that only updated server state would leave the model believing no address was ever
+ * given, and it would ask again.
+ */
+router.post(
+  '/places/select',
+  authenticateWidget,
+  placesRateLimiter,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.widget!.tenantId;
+    const sessionId = req.widget!.sessionId;
+    if (!sessionId) throw new ValidationError('Session not initialized');
+
+    const placeId = typeof req.body?.placeId === 'string' ? req.body.placeId.trim() : '';
+    if (!placeId) throw new ValidationError('placeId is required');
+
+    const resolved = await resolvePlaceId(tenantId, placeId);
+    if (resolved.status !== 'placed') {
+      // The id came from our own suggestion list, so this is Google or the tenant's cap - never
+      // something the customer did wrong. 503 keeps that distinction, and the widget falls back
+      // to letting them type.
+      throw new ApiError(
+        'That address could not be confirmed right now. Please type it instead.',
+        503,
+        'PLACE_UNAVAILABLE'
+      );
+    }
+
+    const session = await AppDataSource.getRepository(ChatSession).findOne({
+      where: { id: sessionId, tenantId },
+    });
+    if (!session) throw new NotFoundError('Session not found');
+    if (session.status === 'closed') throw new ValidationError('Session is closed');
+
+    await bindAddress(sessionId, {
+      placeId: resolved.place.placeId,
+      formattedAddress: resolved.place.formattedAddress,
+    });
+
+    // Google's canonical spelling, not the customer's half-typed query: the transcript should
+    // show what was actually chosen, and the model should read the address the platform will use.
+    await ingestWidgetCustomerMessage(session, `My address is ${resolved.place.formattedAddress}`);
+
+    sendSuccess(res, {
+      placeId: resolved.place.placeId,
+      formattedAddress: resolved.place.formattedAddress,
     });
   })
 );

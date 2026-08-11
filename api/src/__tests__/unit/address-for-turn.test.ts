@@ -29,6 +29,8 @@ const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Grote Markt 1, 2000 
 beforeEach(() => {
   vi.clearAllMocks();
   getBound.mockResolvedValue(null);
+  // A first-time proposal, which is when the question may be raised.
+  propose.mockResolvedValue({ isNew: true });
 });
 
 describe('addressForTurn', () => {
@@ -69,6 +71,29 @@ describe('addressForTurn', () => {
     expect(propose).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['a neighbouring door', 'Grote Markt 12, 2000 Antwerpen'],
+    ['a four-digit door number', 'Grote Markt 1234, 2000 Antwerpen'],
+  ])('treats %s as a DIFFERENT address', async (_label, typed) => {
+    // The wrong-door bug, pinned. Containment is blind to house numbers - "kerkstraat 12"
+    // contains "kerkstraat 1" - so a neighbour's door passed as a harmless reformat and the
+    // proposal never fired. The four-digit case is nastier still: the postcode strip that
+    // forgives a dropped "2000" cannot tell a postcode from a four-digit house number, so both
+    // sides collapsed to the street name alone.
+    getBound.mockResolvedValue(CHOSEN);
+    const out = await addressForTurn('s1', typed);
+    expect(out.correctionPending).toBe(true);
+    expect(propose).toHaveBeenCalledTimes(1);
+  });
+
+  it('still forgives a model that drops the house number entirely', async () => {
+    // Saying LESS is not saying something different, and the guard only fires when both sides
+    // actually state a number.
+    getBound.mockResolvedValue(CHOSEN);
+    const out = await addressForTurn('s1', 'Grote Markt, Antwerpen');
+    expect(out.correctionPending).toBe(false);
+  });
+
   it('PROPOSES, and does not replace, when the model names a different address', async () => {
     getBound.mockResolvedValue(CHOSEN);
     const out = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
@@ -100,6 +125,25 @@ describe('addressForTurn', () => {
 
     const ids = propose.mock.calls.map((c) => (c[1] as { proposalId: string }).proposalId);
     expect(ids[0]).toBe(ids[1]);
+  });
+
+  it('asks ONCE, then proceeds with the address the customer chose', async () => {
+    // The wedge, closed. A customer whose address Google cannot suggest - a new build, a renamed
+    // street - can never answer this question, because the picker was the only way to answer it.
+    // Asking forever would mean they can never book at all, which is a customer defeated by a
+    // safety feature rather than protected by one.
+    getBound.mockResolvedValue(CHOSEN);
+
+    propose.mockResolvedValue({ isNew: true });
+    const first = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
+    expect(first.correctionPending).toBe(true);
+
+    // Same address again - a repeat, or a coalescer replay of the very same message.
+    propose.mockResolvedValue({ isNew: false });
+    const second = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
+    expect(second.correctionPending).toBe(false);
+    // And it proceeds against what they actually chose, not the contested one.
+    expect(second.address).toBe(CHOSEN.formattedAddress);
   });
 
   it('never logs either address', async () => {

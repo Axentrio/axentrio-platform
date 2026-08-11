@@ -22,6 +22,7 @@ import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
 import { bindAddress } from '../booking/travel/address-binding';
 import { placesRateLimiter } from '../middleware/rate-limit';
+import { placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
 import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
@@ -474,8 +475,9 @@ router.post(
   placesRateLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const tenantId = req.widget!.tenantId;
-    const query = typeof req.body?.query === 'string' ? req.body.query : '';
-    if (query.length > 200) throw new ValidationError('Query too long');
+    // The same schema the portal route parses with. Hand-rolling the bound here is how the two
+    // surfaces come to disagree about what a valid query is.
+    const { query } = placesQuerySchema.parse(req.body ?? {});
 
     const result = await autocompleteAddress(tenantId, query);
     sendSuccess(res, { suggestions: result.status === 'ok' ? result.suggestions : [] });
@@ -500,8 +502,7 @@ router.post(
     const sessionId = req.widget!.sessionId;
     if (!sessionId) throw new ValidationError('Session not initialized');
 
-    const placeId = typeof req.body?.placeId === 'string' ? req.body.placeId.trim() : '';
-    if (!placeId) throw new ValidationError('placeId is required');
+    const { placeId } = placesSelectSchema.parse(req.body ?? {});
 
     const resolved = await resolvePlaceId(tenantId, placeId);
     if (resolved.status !== 'placed') {
@@ -526,9 +527,17 @@ router.post(
       formattedAddress: resolved.place.formattedAddress,
     });
 
-    // Google's canonical spelling, not the customer's half-typed query: the transcript should
-    // show what was actually chosen, and the model should read the address the platform will use.
-    await ingestWidgetCustomerMessage(session, `My address is ${resolved.place.formattedAddress}`);
+    // THE ADDRESS ALONE, with no sentence wrapped around it.
+    //
+    // The obvious version is `My address is ${...}`, and it is a trap: this conversation may be
+    // in Dutch, French or German, and an English sentence appearing as something the CUSTOMER
+    // said is exactly the kind of thing that has made this platform's model answer in the wrong
+    // language before. Translating it is worse - a canned string round-tripped through a
+    // translator is how the off-hours message once reached a customer mistranslated.
+    //
+    // An address on its own needs no language. It is also what a customer typing one usually
+    // sends, so the model reads the same shape either way.
+    await ingestWidgetCustomerMessage(session, resolved.place.formattedAddress);
 
     sendSuccess(res, {
       placeId: resolved.place.placeId,

@@ -13,7 +13,7 @@
  * before it - the participant the message is attributed to, the session's own message count, and
  * the socket event every open dashboard is waiting on. A second producer that skipped those would
  * put the customer's address in the transcript while the operator's inbox showed nothing, the
- * counts drifted, and - because the turn still ran - the bot answered a message no human could
+ * counts drifted, and - because the turn still ran - the Agent answered a message no human could
  * see arriving.
  *
  * So there is one path, and both callers take it.
@@ -26,6 +26,7 @@ import { encrypt } from '../utils/encryption';
 import { emitToSession } from '../websocket/socket.handler';
 import { scheduleTurn } from './turn-coalescer';
 import { logger } from '../utils/logger';
+import { touchAddressBinding } from '../booking/travel/address-binding';
 
 export interface IngestedMessage {
   id: string;
@@ -35,7 +36,7 @@ export interface IngestedMessage {
 }
 
 /**
- * Record a customer message and set the bot answering it.
+ * Record a customer message and set the Agent answering it.
  *
  * `content` is PLAINTEXT. It is encrypted on the way into the column and emitted in the clear on
  * the socket, which is the split the existing handler already made: the database is at rest, the
@@ -96,8 +97,14 @@ export async function ingestWidgetCustomerMessage(
     timestamp: message.createdAt.toISOString(),
   });
 
+  // The address binding's window measures SILENCE, not the age of the choice - a customer forty
+  // minutes into a booking has not lost the address they picked. This is the only place that can
+  // honestly say "the customer is still here", so it is the only place the refresh belongs.
+  // Detached: a Redis hiccup must not fail a message that is already saved.
+  void touchAddressBinding(session.id);
+
   // Detached deliberately, as it always was: the customer's message is saved and acknowledged
-  // whatever the bot does next, and a scheduling failure must not read to them as a lost message.
+  // whatever the Agent does next, and a scheduling failure must not read to them as a lost message.
   scheduleTurn(session, message).catch((err) => {
     logger.error('Error scheduling turn (widget):', err);
   });

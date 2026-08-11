@@ -88,6 +88,25 @@ describe('the address a conversation is about', () => {
     expect(await getPendingCorrection('s1')).toMatchObject({ placeId: 'ChIJ_third' });
   });
 
+  it('reports a proposal as NEW once, then as a repeat', async () => {
+    // What caps the question at one. Keyed on the proposal rather than counted, because the turn
+    // coalescer re-runs the same customer message after a processor error - a counter would spend
+    // the single question on a retry nobody saw.
+    await bindAddress('s1', CHOSEN);
+
+    const first = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
+    expect(first.isNew).toBe(true);
+
+    const replay = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
+    expect(replay.isNew).toBe(false);
+
+    // A genuinely different address is a new question and may be asked.
+    const third = await proposeCorrection('s1', {
+      placeId: 'ChIJ_third', formattedAddress: 'Meir 1', proposalId: 'ChIJ_third',
+    });
+    expect(third.isNew).toBe(true);
+  });
+
   it('keeps the original when the customer rejects', async () => {
     await bindAddress('s1', CHOSEN);
     await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });

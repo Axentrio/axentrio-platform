@@ -46,9 +46,43 @@ const sameText = (a: string, b: string) => normalise(a) === normalise(b);
  */
 const CO_INCIDENTAL = /\b(belgium|belgie|belgië|be)\b|\b\d{4}\b/g;
 
+/**
+ * The door number, which is the one token forgiveness may never touch.
+ *
+ * Taken as the FIRST number in the string, which covers both the Belgian order ("Kerkstraat 12")
+ * and the anglophone one ("12 Church Street"). Read off the normalised text rather than the
+ * stripped `core`, because `CO_INCIDENTAL` deletes any four-digit token to forgive a dropped
+ * postcode - and a four-digit HOUSE number is indistinguishable from one. Reading it first is
+ * what stops "Straatweg 1234" and "Straatweg 5678" from both collapsing to "straatweg".
+ */
+const doorNumber = (value: string): string | null =>
+  normalise(value).match(/\b\d{1,4}[a-z]?\b/)?.[0] ?? null;
+
 const looksLikeSameAddress = (a: string, b: string) => {
   if (sameText(a, b)) return true;
-  const core = (v: string) => normalise(v).replace(CO_INCIDENTAL, ' ').replace(/\s+/g, ' ').trim();
+
+  // TWO DIFFERENT DOORS ARE NEVER THE SAME ADDRESS, whatever the rest of the string does.
+  //
+  // This guard runs before any forgiveness because containment is blind to it: "kerkstraat 12"
+  // contains "kerkstraat 1", so a neighbour's door passed as a harmless reformat and the whole
+  // proposal mechanism never fired. That is the exact wrong-door failure this file exists to
+  // prevent, produced by the code meant to prevent it.
+  //
+  // Only when BOTH sides state a number. A model that drops it entirely has said less, not
+  // something different, and that case is what the containment below is for.
+  const [da, db] = [doorNumber(a), doorNumber(b)];
+  if (da && db && da !== db) return false;
+
+  // When only ONE side names a door, drop it from both before comparing. "Grote Markt, Antwerpen"
+  // against "Grote Markt 1, Antwerpen" is the model being vaguer, not the customer moving - and
+  // forgiving it keeps the BOUND address, which is the precise one. Proposing instead would ask a
+  // customer to confirm an address they never touched, and answer it with the vaguer of the two.
+  const dropDoor = !da || !db;
+  const core = (v: string) => {
+    let out = normalise(v).replace(CO_INCIDENTAL, ' ');
+    if (dropDoor) out = out.replace(/\b\d{1,4}[a-z]?\b/, ' ');
+    return out.replace(/\s+/g, ' ').trim();
+  };
   const [x, y] = [core(a), core(b)];
   if (!x || !y) return false;
   // Containment rather than equality: "Grote Markt 1 Antwerpen" against "Grote Markt 1" is the
@@ -86,7 +120,7 @@ export async function addressForTurn(
     return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
   }
 
-  await proposeCorrection(sessionId, {
+  const { isNew } = await proposeCorrection(sessionId, {
     // Derived from the text, so the same suggestion twice is the same proposal - and a stale
     // confirmation stops matching the moment the customer proposes something else.
     proposalId: createHash('sha256').update(normalise(typed)).digest('hex').slice(0, 16),
@@ -104,6 +138,14 @@ export async function addressForTurn(
   return {
     address: bound.formattedAddress,
     placeId: bound.placeId,
-    correctionPending: true,
+    // ASKED ONCE, THEN WE GET ON WITH IT.
+    //
+    // The first time a given address is proposed, the caller may raise it with the customer. On
+    // every repeat this is false, so the booking proceeds against the address they actually
+    // chose. Without the cap, a customer whose address Google cannot suggest - a new build, a
+    // renamed street - could never answer the question and could never book: they cannot use the
+    // picker, and the picker was the only way out. That is a customer wedged by a safety feature,
+    // which is worse than the thing it was guarding against.
+    correctionPending: isNew,
   };
 }

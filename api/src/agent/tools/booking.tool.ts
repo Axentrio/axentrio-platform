@@ -1,5 +1,6 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { addressForTurn } from '../../booking/travel/address-for-turn';
+import { clearAddressBinding } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
   createBooking,
@@ -343,6 +344,11 @@ export class CreateBookingTool implements ToolAdapter {
         }
       })();
 
+      // The booking is made, so the address this conversation was about is settled and finished
+      // with. Clearing it is what stops a SECOND booking in the same session silently inheriting
+      // the first one's address - a customer booking two jobs at two addresses is ordinary, and
+      // the second would otherwise be sent to the first's door.
+      void clearAddressBinding(ctx.sessionId);
       return { success: true, data: result };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to create booking') };
@@ -417,21 +423,15 @@ export class RequestAppointmentTool implements ToolAdapter {
 
   async execute(args: Record<string, unknown>, ctx: ToolContext): Promise<ToolResult> {
     try {
-      // A Request is an address the OWNER will act on - they drive to it. Same rule as create.
+      // A REQUEST NEVER REFUSES OVER A CONTESTED ADDRESS, and that is the difference between it
+      // and create. Capturing a Request commits nobody to a journey: the owner reads it and
+      // confirms before anyone drives anywhere, so an address still under discussion costs them
+      // one glance, while refusing to capture costs the customer the booking entirely. Capturing
+      // is this platform's universal degrade - refusing to do it is the house-rule violation.
       const requested = await addressForTurn(
         ctx.sessionId,
         args.customerAddress as string | undefined
       );
-      if (requested.correctionPending) {
-        return {
-          success: false,
-          error:
-            `The address for this request is not settled. Ask the customer to confirm whether ` +
-            `it should be ${requested.address}, then try again.`,
-          // A DOMAIN error, not an exception: the model should read it and ask the customer.
-          errorSafeForModel: true,
-        };
-      }
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
       // to the same request instead of inserting a duplicate (#35).
       const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
@@ -454,6 +454,9 @@ export class RequestAppointmentTool implements ToolAdapter {
           fileSessionIds: args.fileSessionIds as string[] | undefined,
         }
       );
+      // Same reasoning as create: the address is settled, so a second Request in this session
+      // starts from nothing rather than from the first one's address.
+      void clearAddressBinding(ctx.sessionId);
       return { success: true, data: result };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to capture request') };

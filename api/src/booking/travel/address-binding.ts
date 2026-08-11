@@ -122,13 +122,25 @@ export async function bindAddress(sessionId: string, address: BoundAddress): Pro
  *
  * Supersedes any previous proposal atomically, so exactly one is ever outstanding and a stale
  * `proposalId` stops matching the moment a newer one exists.
+ *
+ * RETURNS WHETHER THIS PROPOSAL IS NEW, and that return value is what caps the question at one.
+ * Asking a customer to confirm an address is reasonable once; asking on every turn until they
+ * happen to use a picker they may not even have is a customer who can never book. So the caller
+ * raises the question the first time a given address is proposed and proceeds on every repeat.
+ *
+ * Keyed on the proposal rather than counted, because counting is not retry-safe: the turn
+ * coalescer re-runs the SAME customer message after a processor error, and a counter would spend
+ * the single question on a retry nobody saw. The same message yields the same `proposalId`, so a
+ * replay is indistinguishable from a repeat - which is exactly the behaviour wanted.
  */
 export async function proposeCorrection(
   sessionId: string,
   proposal: PendingCorrection
-): Promise<void> {
+): Promise<{ isNew: boolean }> {
   const current = await read(sessionId);
+  const isNew = current.pending?.proposalId !== proposal.proposalId;
   await write(sessionId, { active: current.active, pending: proposal });
+  return { isNew };
 }
 
 /**
@@ -161,7 +173,13 @@ export async function rejectCorrection(sessionId: string, proposalId: string): P
  * Forget this conversation's address entirely.
  *
  * Called when a booking or a Request completes, so a second booking in the same session cannot
- * silently inherit the first one's address, and when the session closes.
+ * silently inherit the first one's address - a customer booking two jobs at two addresses is
+ * ordinary, and the second would otherwise be sent to the first one's door.
+ *
+ * NOT called on session close, deliberately. The auto-close sweep in `server.ts` is raw SQL that
+ * bypasses the entity layer, so a hook there would be a fifth thing to remember rather than a
+ * guarantee - and the TTL below already outlives the close by five minutes. Saying so beats
+ * wiring a call that looks load-bearing and is not.
  */
 export async function clearAddressBinding(sessionId: string): Promise<void> {
   const redis = getRedisClient();

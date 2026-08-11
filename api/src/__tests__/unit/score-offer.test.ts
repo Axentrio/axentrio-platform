@@ -54,10 +54,16 @@ const slot = (day: string, hhmm: string) => ({
   end: utc(day, hhmm === '10:00' ? '11:00' : '15:00').toISOString(),
 });
 
-const neighbour = (day: string, hhmm: string, lat: number): TravelNeighbour => ({
+const neighbour = (
+  day: string,
+  hhmm: string,
+  lat: number,
+  status: 'confirmed' | 'pending' = 'confirmed'
+): TravelNeighbour => ({
   blockedStart: utc(day, hhmm),
   blockedEnd: new Date(utc(day, hhmm).getTime() + 3_600_000),
   location: { kind: 'known', point: { lat, lng: 0 } },
+  status,
 });
 
 const base = { eligibility, sessionId: 'sess-1', rule: rule as DayRule, candidatePoint: { lat: 51.5, lng: -0.1 } };
@@ -538,5 +544,43 @@ describe('when scoring itself breaks', () => {
         neighbours: [neighbour(MON, '09:00', 1)],
       })
     ).resolves.toBeNull();
+  });
+});
+
+describe('grouping anchors on confirmed bookings alone', () => {
+  it('does NOT let a pending booking anchor a group', async () => {
+    // Feasibility counts a pending booking: it occupies the day, and offering a slot on top of it
+    // would double-book. Grouping must NOT, because grouping claims the owner is ALREADY working
+    // near there, and a booking nobody has agreed to is not evidence anybody is going anywhere.
+    //
+    // Stated in CONTEXT.md, in ADR-0017 and in insertion-scorer's own doc comment, and enforced
+    // nowhere until now. It read as correct only because no code path writes a `pending` row - so
+    // the suite could never have caught it, which is precisely why this test constructs one.
+    driveLookupFor.mockReturnValue(async () => ({ minutes: 20 }));
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
+      requestable: [],
+      neighbours: [neighbour(MON, '13:00', 1, 'pending')],
+    });
+
+    expect(result!.scores[utc(MON, '14:00').toISOString()].costMinutes).toBeNull();
+  });
+
+  it('DOES let a confirmed booking anchor a group', async () => {
+    // The control: the same diary, the same times, one word different.
+    driveLookupFor.mockReturnValue(async () => ({ minutes: 20 }));
+
+    const result = await scoreOfferedSlots({
+      ...base,
+      ...noBase,
+      slots: [{ start: utc(MON, '14:00').toISOString(), end: utc(MON, '15:00').toISOString() }],
+      requestable: [],
+      neighbours: [neighbour(MON, '13:00', 1, 'confirmed')],
+    });
+
+    expect(result!.scores[utc(MON, '14:00').toISOString()].costMinutes).toBe(20);
   });
 });

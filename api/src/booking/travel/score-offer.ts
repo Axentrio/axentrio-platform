@@ -248,9 +248,20 @@ export async function scoreOfferedSlots(input: {
           boundaryOverride: input.boundaryOverride ?? null,
         });
 
-        // Anchors for THIS day only, and only those with a trusted position. A neighbour whose
-        // address never placed still blocks time through feasibility; it simply cannot be a node.
+        // Anchors for THIS day only, CONFIRMED only, and only those with a trusted position.
+        //
+        // Two independent exclusions and they are not the same rule. A neighbour whose address
+        // never placed still blocks time through feasibility; it simply cannot be a node in a
+        // route. A PENDING neighbour also still blocks time - but it must not anchor grouping,
+        // because grouping is a claim that the owner is already working near there, and a booking
+        // nobody has agreed to is not evidence that anybody is going anywhere.
+        //
+        // The confirmed-only rule was stated in `CONTEXT.md`, in ADR-0017 and in
+        // `insertion-scorer.ts`'s own doc comment, and enforced in none of them: this function
+        // received the feasibility list verbatim. It was correct only because no path writes a
+        // `pending` row today, which is an accident rather than a guarantee.
         const anchors: RouteNode[] = input.neighbours
+          .filter((n) => n.status !== 'pending')
           .filter((n) => localDayBounds(input.rule, n.blockedStart).localDay.toFormat('yyyy-MM-dd') === localDay)
           .map((n) => ({ blockedStart: n.blockedStart, blockedEnd: n.blockedEnd, point: trustedPoint(n.location) }))
           .filter((n): n is RouteNode => n.point !== null);

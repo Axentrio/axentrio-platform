@@ -106,6 +106,23 @@ export interface TravelNeighbour {
   blockedStart: Date;
   blockedEnd: Date;
   location: NeighbourLocation;
+  /**
+   * `confirmed` or `pending`, and the distinction matters to exactly ONE reader.
+   *
+   * FEASIBILITY counts both: a pending booking occupies the owner's day exactly as a confirmed one
+   * does, and offering a slot on top of it would double-book. GROUPING counts confirmed alone,
+   * because grouping claims the owner is ALREADY working near there, and a pending row is not yet
+   * evidence that anybody is going anywhere.
+   *
+   * That rule is stated in `CONTEXT.md`, in ADR-0017 and in `insertion-scorer.ts`'s own doc comment,
+   * and until this field existed it was enforced in none of them - the scorer received the
+   * feasibility list verbatim. It was correct only by accident, because no path writes a `pending`
+   * row today. The first one that did would have silently let grouping anchor on appointments
+   * nobody had agreed to.
+   *
+   * Optional so the SYNTHETIC premises neighbour, which has no row and no status, needs no answer.
+   */
+  status?: 'pending' | 'confirmed';
 }
 
 /** The slot being judged. `coarse` when the CUSTOMER's own address placed only to a town. */

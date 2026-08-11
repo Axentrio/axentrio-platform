@@ -73,6 +73,7 @@ const LAZY_GEOCODE_DEADLINE_MS = 8_000;
 /** One held booking, as the neighbour query returns it. */
 interface NeighbourRow {
   id: string;
+  status: string;
   blocked_start: string;
   blocked_end: string;
   customer_address: string | null;
@@ -347,6 +348,7 @@ async function readNeighbours(
             upper(b.blocked_range) AS blocked_end,
             b.customer_address, b.customer_place_id, b.customer_lat, b.customer_lng,
             b.customer_coords_at, b.customer_address_verified, b.geocode_precision,
+            b.status,
             s.customer_address_required, s.location_type,
             (s.id IS NOT NULL) AS has_service
        FROM chatbot_bookings b
@@ -376,6 +378,10 @@ async function readNeighbours(
     // and resolving in parallel would let every row read the same remaining count.
     neighbours.push({
       bookingId: row.id,
+      // Anything the query did not recognise reads as `pending`, which is the CAUTIOUS default:
+      // a mislabelled row then still blocks time through feasibility but cannot anchor grouping,
+      // so an unknown status can never make the platform claim the owner is working somewhere.
+      status: row.status === 'confirmed' ? 'confirmed' : 'pending',
       blockedStart: new Date(row.blocked_start),
       blockedEnd: new Date(row.blocked_end),
       location: await classify(row, input.eligibility, opts.budget, opts.venue, opts.allowLookups),

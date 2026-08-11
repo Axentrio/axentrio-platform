@@ -283,6 +283,8 @@ export const SchedulerSettings: React.FC = () => {
    */
   const hasStoredVenue = Object.values(venue ?? {}).some((v) => typeof v === 'string' && v.trim());
   const showVenue = workLocation !== 'no_location' || hasStoredVenue;
+  /** Does this business go TO its customers? The only shape geographic grouping applies to. */
+  const travelsToCustomers = workLocation === 'on_the_road' || workLocation === 'both';
   /**
    * Services nobody was ever asked about, on a business that HAS an address (#71).
    *
@@ -895,6 +897,12 @@ export const SchedulerSettings: React.FC = () => {
                           It goes on the calendar invite for the first kind — leave it empty and the
                           invite simply won't mention a place.
                         </>
+                      ) : workLocation === 'no_location' ? (
+                        <>
+                          None of your services happen anywhere in particular, so nothing here is
+                          used. It is still shown because you have an address stored — clear the
+                          fields if you would rather it went away.
+                        </>
                       ) : (
                         <>
                           Where customers come to you. This goes on the calendar invite so they can
@@ -1083,7 +1091,12 @@ export const SchedulerSettings: React.FC = () => {
                     <Checkbox
                       id="travel-prefer-clusters"
                       checked={travelPreferClusters}
-                      disabled={!travelEnabled}
+                      // Grouping only ever touches appointments AT THE CUSTOMER, so a business
+                      // whose customers all come to it has nothing to group. Offering the switch
+                      // there is not harmful - it is inert at runtime - but it promises something
+                      // that cannot happen, and an owner who ticks it and sees no change has been
+                      // told the feature is broken rather than inapplicable.
+                      disabled={!travelEnabled || !travelsToCustomers}
                       onCheckedChange={(c) => setTravelPreferClusters(c === true)}
                     />
                     <span className="text-sm text-text-secondary">

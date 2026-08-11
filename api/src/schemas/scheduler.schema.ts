@@ -294,6 +294,20 @@ export const travelSettingsSchema = z.object({
   baseDepartOffsetMin: z.number().int().min(0).max(240).optional(),
   // #82 (LP5): may grouping reorder what a customer is offered. Off unless the owner opts in.
   preferClusters: z.boolean().optional(),
+  /**
+   * The most extra driving one appointment may ADD before it stops being preferred.
+   *
+   * The reader has existed since #81 (`travel-eligibility` -> `insertion-scorer`) with nothing
+   * able to write it, so every business has run on "no threshold" whether or not that suited them.
+   *
+   * It bounds the MARGINAL minutes a candidate adds - not the length of the drive - so a plumber
+   * whose customers are all forty minutes away is not left with an empty calendar. Two hours is
+   * the ceiling because beyond that an owner is describing a different business rather than a
+   * detour. Nullable and zero both mean "no threshold": a value that silently marked every slot
+   * unpreferred would be indistinguishable from the feature being off, and the second is
+   * overwhelmingly what an owner who typed 0 meant.
+   */
+  maxDetourMin: z.number().int().min(0).max(120).nullable().optional(),
 });
 
 export const updateSchedulerSchema = z

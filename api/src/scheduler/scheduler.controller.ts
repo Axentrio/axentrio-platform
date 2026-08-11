@@ -221,7 +221,11 @@ async function readConfig(tenantId: string, bot: Bot) {
      * without it noticing. Computed here because this endpoint already has the whole catalog in
      * hand, so it costs nothing and no screen has to re-derive it and get the precedence wrong.
      */
-    workLocation: resolveWorkLocation(services),
+    // ACTIVE Services only. `services` above is the whole catalog because the editor has to show
+    // deactivated ones, but a Service the owner switched off is not work the business does - and
+    // the portal's sibling derivations (`neverAsked`, `hasAddressService`) already filter, so
+    // leaving this one unfiltered made the same screen answer the same question two ways.
+    workLocation: resolveWorkLocation(services.filter((s) => s.isActive)),
     availability: availability ?? null,
     // No settings row (or a hand-edited non-array) reads as "no area configured", which
     // never blocks a booking.
@@ -267,6 +271,7 @@ async function readConfig(tenantId: string, bot: Bot) {
       startFromBase: bookingSettings?.travelStartFromBase === true,
       baseDepartOffsetMin: bookingSettings?.travelBaseDepartOffsetMin ?? 0,
       preferClusters: bookingSettings?.travelPreferClusters === true,
+      maxDetourMin: bookingSettings?.travelMaxDetourMin ?? null,
       /**
        * Why the switch cannot be turned on, or null when it can.
        *
@@ -488,6 +493,19 @@ export async function updateSchedulerConfig(req: Request, res: Response): Promis
       insertVals.push(valueParam);
       updates.push(
         `travel_slack_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_slack_min END`
+      );
+    }
+
+    // Same nullable-int contract as slack: undefined leaves the stored value alone, an explicit
+    // null clears it back to "no threshold".
+    {
+      const valueParam = `$${params.length + 1}`;
+      const providedParam = `$${params.length + 2}`;
+      params.push(data.travel?.maxDetourMin ?? null, data.travel?.maxDetourMin !== undefined);
+      insertCols.push('travel_max_detour_min');
+      insertVals.push(valueParam);
+      updates.push(
+        `travel_max_detour_min = CASE WHEN ${providedParam} THEN ${valueParam} ELSE chatbot_booking_settings.travel_max_detour_min END`
       );
     }
 

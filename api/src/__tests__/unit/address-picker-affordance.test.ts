@@ -42,20 +42,31 @@ vi.mock('../../config/redis', () => ({
 }));
 
 const mockCheckAvailability = vi.fn();
+const mockCreateBooking = vi.fn();
 vi.mock('../../booking/booking.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../booking/booking.service')>();
-  return { ...actual, checkAvailability: (...a: unknown[]) => mockCheckAvailability(...a) };
+  return {
+    ...actual,
+    checkAvailability: (...a: unknown[]) => mockCheckAvailability(...a),
+    createBooking: (...a: unknown[]) => mockCreateBooking(...a),
+  };
 });
+vi.mock('../../webhooks/webhook.emitter', () => ({
+  emitWebhookEvent: vi.fn(),
+  buildEventBase: vi.fn(() => ({})),
+}));
 vi.mock('../../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
-import { CheckAvailabilityTool } from '../../agent/tools/booking.tool';
+import { CheckAvailabilityTool, CreateBookingTool } from '../../agent/tools/booking.tool';
 import { bindAddress } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
 
 const SESSION = 'sess-picker';
 const TYPED = 'Kerkstraat 12, Antwerpen';
+/** What the customer actually picked, so the model's argument is a genuine second option. */
+const BOUND = 'Turnhoutsebaan 100, 2140 Antwerpen';
 
 const ctx = (): ToolContext => ({
   tenantId: 'tenant-1',
@@ -132,6 +143,38 @@ describe('offering to verify the address', () => {
     const res = await check();
 
     expect(res.affordance).toMatchObject({ kind: 'address_picker', reason: 'too_vague' });
+  });
+
+  it('offers the CONFIRM control when it asks which address is right', async () => {
+    // #95 itself. The question has been askable since the presentation split landed, but the
+    // answer had nowhere to go: only a server-observed event may move an Address Binding, and
+    // typing "yes" is not one. This is the control that produces one.
+    //
+    // It carries BOTH addresses and the proposalId. Both, because a question is a choice between
+    // two and a client handed one option has to invent the other - which is the model defining the
+    // options again, the thing the whole design refuses. The proposalId, because a late answer
+    // must not settle a question the customer has already moved past.
+    await bindAddress(SESSION, { placeId: 'ChIJ_chosen', formattedAddress: BOUND });
+    mockCheckAvailability.mockResolvedValue(TRAVELS);
+    mockCreateBooking.mockResolvedValue({ id: 'bk-1' });
+
+    const res = await new CreateBookingTool().execute(
+      {
+        startTime: '2026-09-01T09:00:00Z',
+        attendeeName: 'A Customer',
+        attendeeEmail: 'customer@example.com',
+        customerAddress: TYPED,
+      },
+      ctx()
+    );
+
+    expect(res.success).toBe(false); // it refused, which is how it asks
+    expect(res.affordance).toMatchObject({
+      kind: 'address_confirm',
+      proposed: TYPED,
+      bound: BOUND,
+    });
+    expect((res.affordance as { proposalId?: string }).proposalId).toBeTruthy();
   });
 
   it('never rides on `data`, which the model reads', async () => {

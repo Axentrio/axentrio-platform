@@ -227,29 +227,106 @@ export async function claimPresentation(
 }
 
 /**
+ * What a transition did, and enough for the caller to act without reading again.
+ *
+ * A boolean was not enough for either branch. On success the caller needs the address that was
+ * COMMITTED - the widget route used to ingest a value it had read before the transition, so what
+ * the model was told could differ from what was stored. On failure the client needs to re-render,
+ * and "no longer outstanding" names neither the current question nor either address, so a client
+ * handed only that can either show nothing or show the stale choice.
+ */
+export type TransitionResult =
+  | { applied: false; current: { active: BoundAddress | null; pending: PendingCorrection | null } }
+  | { applied: true; address: string | null };
+
+/**
+ * Read, compare and write in ONE round trip, because three steps against one key is not a
+ * transition - it is a race with a good success rate.
+ *
+ * The window is real and the loser is always the customer. `confirmCorrection` used to GET the
+ * record, check the proposal id, and SET the result. A `proposeCorrection` or a `bindAddress`
+ * landing in between was then overwritten by a decision made before it existed: the confirmation
+ * promoted a proposal the customer had already moved past, and their newer question vanished with
+ * no error anywhere. That is precisely the failure `proposalId` exists to prevent, reintroduced one
+ * layer underneath it.
+ *
+ * `EVAL` is the smallest thing that fixes it. Redis runs the script atomically, so no write can
+ * land between the read and the write - there is no between.
+ *
+ * NOT applied to `proposeCorrection` or `claimPresentation`, deliberately. Their worst case is a
+ * duplicate question or a proposal recorded twice, which costs the customer one extra tap; the
+ * transitions' worst case is losing the answer they gave. Extending it there is worth doing and is
+ * not worth blocking this on.
+ *
+ * `cjson.null` rather than absent keys throughout: an empty Lua table encodes ambiguously, and
+ * indexing a null would error, so both fields are always present and always compared explicitly.
+ */
+const TRANSITION_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return cjson.encode({ applied = false, current = { active = cjson.null, pending = cjson.null } })
+end
+local rec = cjson.decode(raw)
+local active = rec.active
+local pending = rec.pending
+if active == nil then active = cjson.null end
+if pending == nil then pending = cjson.null end
+if pending == cjson.null or pending.proposalId ~= ARGV[1] then
+  return cjson.encode({ applied = false, current = { active = active, pending = pending } })
+end
+local newActive = active
+if ARGV[2] == '1' then
+  newActive = { placeId = pending.placeId, formattedAddress = pending.formattedAddress }
+end
+redis.call('SET', KEYS[1], cjson.encode({ active = newActive, pending = cjson.null }), 'EX', ARGV[3])
+local addr = cjson.null
+if newActive ~= cjson.null then addr = newActive.formattedAddress end
+return cjson.encode({ applied = true, address = addr })
+`;
+
+async function transition(
+  sessionId: string,
+  proposalId: string,
+  confirmed: boolean
+): Promise<TransitionResult> {
+  const redis = getRedisClient();
+  // No store is no binding, which is the same fail-open every read here takes: the booking falls
+  // back to the free-text path that has always existed.
+  if (!redis) return { applied: false, current: { active: null, pending: null } };
+  try {
+    const raw = (await redis.eval(
+      TRANSITION_LUA,
+      1,
+      key(sessionId),
+      proposalId,
+      confirmed ? '1' : '0',
+      String(TTL_SECONDS)
+    )) as string;
+    return JSON.parse(raw) as TransitionResult;
+  } catch (error) {
+    // Reported as "nothing outstanding" rather than thrown. The customer's tap did nothing, which
+    // is what they will be told - and telling them that is honest, where an error page about a
+    // question they answered correctly is not.
+    logger.warn('[Travel] address transition failed', { sessionId, error });
+    return { applied: false, current: { active: null, pending: null } };
+  }
+}
+
+/**
  * The customer said yes to a specific proposal.
  *
- * Returns false when the id does not match what is outstanding, which is exactly the stale case:
- * the answer arrived after the customer proposed something else, or after the record expired.
- * Promotion REPLACES the active binding in one write and never deletes the record - deleting
- * would throw away the binding this call exists to install.
+ * Not applied when the id does not match what is outstanding, which is exactly the stale case: the
+ * answer arrived after the customer proposed something else, or after the record expired. Promotion
+ * REPLACES the active binding and never deletes the record - deleting would throw away the binding
+ * this call exists to install.
  */
-export async function confirmCorrection(sessionId: string, proposalId: string): Promise<boolean> {
-  const current = await read(sessionId);
-  if (!current.pending || current.pending.proposalId !== proposalId) return false;
-  await write(sessionId, {
-    active: { placeId: current.pending.placeId, formattedAddress: current.pending.formattedAddress },
-    pending: null,
-  });
-  return true;
+export function confirmCorrection(sessionId: string, proposalId: string): Promise<TransitionResult> {
+  return transition(sessionId, proposalId, true);
 }
 
 /** The customer said no. The address they already chose stands. */
-export async function rejectCorrection(sessionId: string, proposalId: string): Promise<boolean> {
-  const current = await read(sessionId);
-  if (!current.pending || current.pending.proposalId !== proposalId) return false;
-  await write(sessionId, { active: current.active, pending: null });
-  return true;
+export function rejectCorrection(sessionId: string, proposalId: string): Promise<TransitionResult> {
+  return transition(sessionId, proposalId, false);
 }
 
 /**

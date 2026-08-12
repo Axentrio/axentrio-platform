@@ -22,7 +22,6 @@ import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
 import {
   bindAddress,
-  getPendingCorrection,
   confirmCorrection,
   rejectCorrection,
 } from '../booking/travel/address-binding';
@@ -587,23 +586,41 @@ router.post(
     if (!session) throw new NotFoundError('Session not found');
     if (session.status === 'closed') throw new ValidationError('Session is closed');
 
-    const pending = await getPendingCorrection(sessionId);
-    // Not an error the customer caused: the question may have been superseded or expired while
-    // the button sat on their screen. Saying so beats pretending the press did something.
-    if (!pending || pending.proposalId !== proposalId) {
-      sendSuccess(res, { applied: false, reason: 'no_longer_outstanding' });
-      return;
-    }
-
-    const applied = confirmed
+    // ONE call, and no pre-read. There used to be a `getPendingCorrection` here whose value was
+    // then ingested below - a value read BEFORE the transition, so under contention the model
+    // could be told an address the store had not committed. The transition returns what it
+    // actually wrote, which is the only answer that cannot disagree with the record.
+    const result = confirmed
       ? await confirmCorrection(sessionId, proposalId)
       : await rejectCorrection(sessionId, proposalId);
 
+    // Not an error the customer caused: the question may have been superseded or have expired
+    // while the button sat on their screen. `current` carries BOTH addresses so the client can
+    // re-render the question that IS outstanding rather than the one that is not - handed only a
+    // reason, it could show nothing or show the stale choice, and the stale choice is worse.
+    if (!result.applied) {
+      sendSuccess(res, {
+        applied: false,
+        reason: 'no_longer_outstanding',
+        current: {
+          bound: result.current.active?.formattedAddress ?? null,
+          proposed: result.current.pending?.formattedAddress ?? null,
+          proposalId: result.current.pending?.proposalId ?? null,
+        },
+      });
+      return;
+    }
+
     // The address the conversation is now about, spoken INTO it the same way a picked address is.
     // A state change the model never hears about is one it will contradict in its next sentence.
-    if (applied && confirmed) await ingestWidgetCustomerMessage(session, pending.formattedAddress);
+    //
+    // BOTH outcomes ingest, which a rejection did not used to do - so a customer who said "no" got
+    // silence, and the model, never told, would ask again or carry on against the wrong address.
+    // `address` is null only when a booking cleared the binding between the question and the tap;
+    // there is nothing true to say then, so nothing is said.
+    if (result.address) await ingestWidgetCustomerMessage(session, result.address);
 
-    sendSuccess(res, { applied, confirmed, address: confirmed ? pending.formattedAddress : undefined });
+    sendSuccess(res, { applied: true, confirmed, address: result.address });
   })
 );
 

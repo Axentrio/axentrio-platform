@@ -293,11 +293,29 @@ export class CreateBookingTool implements ToolAdapter {
         && (await claimPresentation(ctx.sessionId, booked.proposalId, ctx.runId))) {
         return {
           success: false,
+          // The model INTRODUCES the question; it does not define the options. So the instruction
+          // stops at "ask" and names neither address - the two are stated by the control below,
+          // from what the server stored. A model that words the options itself can offer an
+          // address nobody proposed, and a tap on that is trusted evidence for a choice the
+          // customer was never given.
           error:
-            `The address for this appointment is not settled. Ask the customer to confirm ` +
-            `whether it should be ${booked.address}, then try again.`,
+            `The address for this appointment is not settled. Ask the customer which address is ` +
+            `right - they have been shown the two options - and do not name either one yourself.`,
           // A DOMAIN error, not an exception: the model should read it and ask the customer.
           errorSafeForModel: true,
+          // #95. The answer needs somewhere to go, and a typed "yes" is not somewhere: it reaches
+          // the server through the model, which is the one source `address-binding` refuses. This
+          // is the control that turns the answer into a server-observed event.
+          ...(booked.proposedAddress && booked.address
+            ? {
+                affordance: {
+                  kind: 'address_confirm' as const,
+                  proposalId: booked.proposalId!,
+                  proposed: booked.proposedAddress,
+                  bound: booked.address,
+                },
+              }
+            : {}),
         };
       }
       // The address is in the key for the same reason it is in `request_appointment`'s: two calls

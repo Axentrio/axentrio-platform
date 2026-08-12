@@ -2293,6 +2293,23 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           </div>`;
       }
 
+      // The correction question (#95). TWO buttons, both labelled by the server from the two
+      // stored addresses.
+      //
+      // The customer's answer used to be typed, which meant it reached the server through the
+      // model - and a model can report agreement after silence or after a refusal. That is why
+      // "yes, Kerkstraat 12 is correct" changed nothing and the booking went to the other address.
+      // A tap posts the proposalId the SERVER issued, which is evidence the server observed.
+      if (!isUser && message.affordance && message.affordance.kind === 'address_confirm') {
+        const a = message.affordance;
+        pickerHtml = `
+          <div class="cb-addr" data-addr-confirm="${utils.escapeHtml(a.proposalId)}">
+            <p class="cb-addr__label">Which address should we use?</p>
+            <button type="button" class="cb-addr__row" data-confirm="1">Use ${utils.escapeHtml(a.proposed)}</button>
+            <button type="button" class="cb-addr__row" data-confirm="0">Keep ${utils.escapeHtml(a.bound)}</button>
+          </div>`;
+      }
+
       return `
         <div class="cb-message cb-message--${message.sender}" data-id="${message.id}">
           <div class="cb-message__avatar">${isUser ? ICONS.user : botAvatarHtml(this.appearance.avatarUrl)}</div>
@@ -2380,6 +2397,53 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       }
     }
 
+    /**
+     * The customer answered "which address is right?" (#95).
+     *
+     * Sends the proposalId the server issued and a boolean, and NOTHING ELSE - deliberately no
+     * address. The server already knows what it asked, and a client naming a place here would be
+     * an unverified claim wearing the customer's authority, which is the whole thing the binding
+     * refuses.
+     *
+     * `applied: false` is not an error and is not the customer's fault: the question may have been
+     * superseded or expired while the buttons sat on their screen. The response carries whatever
+     * IS outstanding, so the stale control is replaced by the live one rather than by nothing -
+     * and never re-rendered as it was, which would invite a second tap on a dead question.
+     */
+    async answerAddressQuestion(box, proposalId, confirmed) {
+      if (!box || !proposalId || !this.token) return;
+      try {
+        const res = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/address/confirm`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.token },
+          body: JSON.stringify({ proposalId, confirmed }),
+        }, 10000);
+        if (!res.ok) return;
+        const body = await res.json();
+        const data = (body && body.data) || {};
+
+        if (data.applied) {
+          // The server speaks the resulting address into the conversation itself, so this says
+          // only what was settled and sends no message of its own.
+          box.innerHTML = `<p class="cb-addr__chosen">${utils.escapeHtml(data.address || 'Address confirmed')}</p>`;
+          return;
+        }
+
+        const current = data.current || {};
+        if (!current.proposalId) {
+          box.innerHTML = '<p class="cb-addr__chosen">That question is no longer open.</p>';
+          return;
+        }
+        box.setAttribute('data-addr-confirm', current.proposalId);
+        box.innerHTML =
+          '<p class="cb-addr__label">Which address should we use?</p>' +
+          `<button type="button" class="cb-addr__row" data-confirm="1">Use ${utils.escapeHtml(current.proposed || '')}</button>` +
+          `<button type="button" class="cb-addr__row" data-confirm="0">Keep ${utils.escapeHtml(current.bound || '')}</button>`;
+      } catch (err) {
+        this.log('Address answer failed:', err && err.message);
+      }
+    }
+
     attachEventListeners() {
       // Launcher click
       this.launcher.addEventListener('click', () => this.toggle());
@@ -2432,12 +2496,18 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           this._addrDebounce = setTimeout(() => this.lookupAddress(picker, query), 400);
         });
 
-        // Picking one. THIS is where an address becomes the address.
+        // Picking one, or answering the correction question. Both are the same gesture from the
+        // customer's side and the same kind of evidence from the server's: an event it observed.
         this.messagesContainer.addEventListener('click', (e) => {
           const row = e.target.closest && e.target.closest('.cb-addr__row');
           if (!row) return;
-          const picker = row.closest('.cb-addr');
-          this.selectAddress(picker, row.getAttribute('data-place-id'), row.textContent);
+          const box = row.closest('.cb-addr');
+          const proposalId = box && box.getAttribute('data-addr-confirm');
+          if (proposalId) {
+            this.answerAddressQuestion(box, proposalId, row.getAttribute('data-confirm') === '1');
+            return;
+          }
+          this.selectAddress(box, row.getAttribute('data-place-id'), row.textContent);
         });
       }
 

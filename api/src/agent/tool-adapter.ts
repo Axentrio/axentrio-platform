@@ -73,7 +73,29 @@ export interface AddressPickerAffordance {
   query?: string;
 }
 
-export type Affordance = AddressPickerAffordance;
+/**
+ * Ask which of two addresses is right, and let the answer be a server-observed event.
+ *
+ * The whole of #95. `address-binding.ts` opens by refusing to let a tool argument move the
+ * binding, because a model can report agreement after silence or after an explicit rejection -
+ * provenance is not agreement. A typed "yes" is the same claim in the customer's voice, arriving
+ * through the model, and it is why the customer's answer has never changed anything.
+ *
+ * So the SERVER states both options and issues the id, and the answer comes back through an
+ * endpoint rather than through a sentence. The model may introduce the question; it may not define
+ * the choices.
+ */
+export interface AddressConfirmAffordance {
+  kind: 'address_confirm';
+  /** Which question is being answered. A late "yes" must not settle one already left behind. */
+  proposalId: string;
+  /** The address something suggested instead. */
+  proposed: string;
+  /** The address the customer actually chose, which stands unless they say otherwise. */
+  bound: string;
+}
+
+export type Affordance = AddressPickerAffordance | AddressConfirmAffordance;
 
 export interface ToolAdapter {
   name: string;

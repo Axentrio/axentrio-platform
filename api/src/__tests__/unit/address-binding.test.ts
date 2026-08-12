@@ -31,8 +31,6 @@ import {
   getBoundAddress,
   getPendingCorrection,
   proposeCorrection,
-  confirmCorrection,
-  rejectCorrection,
   clearAddressBinding,
 } from '../../booking/travel/address-binding';
 
@@ -59,34 +57,21 @@ describe('the address a conversation is about', () => {
     expect(await getPendingCorrection('s1')).toMatchObject({ placeId: OTHER.placeId });
   });
 
-  it('IS changed when the customer confirms that exact proposal', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
 
-    expect(await confirmCorrection('s1', OTHER.placeId)).toBe(true);
-    expect(await getBoundAddress('s1')).toEqual(OTHER);
-    // Promotion must clear the proposal, or a replayed confirmation promotes it twice.
-    expect(await getPendingCorrection('s1')).toBeNull();
-  });
 
-  it('REFUSES a confirmation for a proposal that is no longer outstanding', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
-    // The customer proposed something else in the meantime.
-    await proposeCorrection('s1', { placeId: 'ChIJ_third', formattedAddress: 'Meir 1', proposalId: 'ChIJ_third' });
 
-    expect(await confirmCorrection('s1', OTHER.placeId)).toBe(false);
-    expect(await getBoundAddress('s1')).toEqual(CHOSEN);
-  });
-
-  it('REFUSES a stale rejection, so it cannot discard a newer proposal', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
-    await proposeCorrection('s1', { placeId: 'ChIJ_third', formattedAddress: 'Meir 1', proposalId: 'ChIJ_third' });
-
-    expect(await rejectCorrection('s1', OTHER.placeId)).toBe(false);
-    expect(await getPendingCorrection('s1')).toMatchObject({ placeId: 'ChIJ_third' });
-  });
+  /**
+   * The confirm/reject transitions used to be tested here and now live in
+   * `integration/address-binding-atomicity.test.ts`.
+   *
+   * They became a Lua script, so the STORE executes them. A test against the Map below would have
+   * to reimplement that script and would then assert only that the reimplementation agrees with
+   * itself - which is the definition of a test that cannot fail for the right reason. The same
+   * argument the #95 endpoint suite already makes for refusing to run without a real Redis.
+   *
+   * What stays here is everything the transitions do not decide: what `bindAddress` and
+   * `proposeCorrection` write, what the record may never contain, and how a proposal is counted.
+   */
 
   it('reports a proposal as NEW once, then as a repeat', async () => {
     // What caps the question at one. Keyed on the proposal rather than counted, because the turn
@@ -107,33 +92,8 @@ describe('the address a conversation is about', () => {
     expect(third.isNew).toBe(true);
   });
 
-  it('keeps the original when the customer rejects', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
 
-    expect(await rejectCorrection('s1', OTHER.placeId)).toBe(true);
-    expect(await getBoundAddress('s1')).toEqual(CHOSEN);
-    expect(await getPendingCorrection('s1')).toBeNull();
-  });
 
-  it('lets a fresh selection supersede an outstanding proposal outright', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
-    await bindAddress('s1', OTHER);
-
-    // Picking again ANSWERS the question, so a late confirmation must not resurrect anything.
-    expect(await getPendingCorrection('s1')).toBeNull();
-    expect(await confirmCorrection('s1', OTHER.placeId)).toBe(false);
-  });
-
-  it('promotes in ONE write, so a crash cannot leave it both active and pending', async () => {
-    await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
-    redis.set.mockClear();
-
-    await confirmCorrection('s1', OTHER.placeId);
-    expect(redis.set).toHaveBeenCalledTimes(1);
-  });
 
   it('NEVER stores coordinates — only an identity and its spelling', async () => {
     // ADR-0014 caps lat/lng at 30 days and `coordinate-retention.service` sweeps the columns

@@ -43,6 +43,15 @@ export interface TurnAddress {
    * question, or a late answer settles one they have already left behind.
    */
   proposalId?: string;
+  /**
+   * The address being proposed, when one is.
+   *
+   * Carried because a question is a CHOICE between two, and whoever renders it needs both. Handed
+   * only the bound address, a client has to reconstruct the other option from the conversation -
+   * which is the model defining the options again, and the entire binding design exists to refuse
+   * exactly that.
+   */
+  proposedAddress?: string;
 }
 
 /** Case, punctuation and spacing carry no meaning in an address comparison. */
@@ -199,5 +208,6 @@ export async function addressForTurn(
     // happens rather than where the proposing happens.
     correctionPending: true,
     proposalId,
+    proposedAddress: typed,
   };
 }

@@ -8,7 +8,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { DateTime } from 'luxon';
 import type { EntityManager } from 'typeorm';
-import { In, MoreThan } from 'typeorm';
+import { In, MoreThan, Raw } from 'typeorm';
 import { AppDataSource } from '../../database/data-source';
 import { notificationService } from '../../services/notification.service';
 import { ServiceType } from '../../database/entities/ServiceType';
@@ -805,6 +805,27 @@ function callDedupIdentity(addressRequired: boolean, extras?: BookingExtras): st
     placeIdIsPicked: true,
   });
 }
+
+/**
+ * "Created recently enough to count as a duplicate", asked of the DATABASE rather than of us.
+ *
+ * `createdAt: MoreThan(new Date(Date.now() - WINDOW))` looks equivalent and is not.
+ * `chatbot_bookings.created_at` is `timestamp WITHOUT time zone` - `@CreateDateColumn` carries no
+ * explicit type, unlike `start_utc` which is explicitly `timestamptz` - so comparing it against a
+ * timezone-aware instant is off by the client's UTC offset. On a developer machine at UTC+8 the
+ * cutoff lands eight hours in the future and a row created seventeen milliseconds ago is judged
+ * too old, so the lookup finds nothing and BOTH dedup gates silently stop deduping.
+ *
+ * It fails OPEN, into duplicate bookings, and it is invisible: no error, just a query that never
+ * matches. Anyone developing outside UTC has been running without request deduplication without
+ * knowing. Production runs UTC, where the two coincide, which is why this never surfaced there.
+ *
+ * Letting Postgres compare its own clock to its own column removes the client's timezone from the
+ * question entirely. Preferred over migrating the column to `timestamptz`, which would rewrite a
+ * large table under an ACCESS EXCLUSIVE lock to fix something that only bites developers.
+ */
+const createdWithinDedupWindow = () =>
+  Raw((alias) => `${alias} > now() - interval '${BOOKING_DEDUP_WINDOW_MS} milliseconds'`);
 
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
@@ -1762,7 +1783,7 @@ export class InternalProvider implements BookingProvider {
 
     // 1. Idempotency: a live (non-failed) booking with this key → return it.
     const existing = await bookingRepo.findOne({
-      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
+      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
     });
     // Any existing row for this idempotency key is a duplicate. (This used to exclude
     // 'failed', a status nothing ever wrote.)
@@ -1788,7 +1809,7 @@ export class InternalProvider implements BookingProvider {
       where: {
         tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
         eventTypeId: service.id, startUtc: start,
-        createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)),
+        createdAt: createdWithinDedupWindow(),
       },
       order: { createdAt: 'DESC' },
     });
@@ -2074,7 +2095,7 @@ export class InternalProvider implements BookingProvider {
       if (code === '23505') {
         // Idempotency race: a concurrent create inserted the same key.
         const dup = await bookingRepo.findOne({
-          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
+          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
         });
         if (dup) return this.toResult(dup, true, rule.timezone, service.name);
         throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
@@ -2333,7 +2354,7 @@ export class InternalProvider implements BookingProvider {
     } catch (err) {
       if ((err as { code?: string })?.code === '23505') {
         const dup = await bookingRepo.findOne({
-          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
+          where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
         });
         if (dup) return this.toResult(dup, true);
       }
@@ -2412,7 +2433,7 @@ export class InternalProvider implements BookingProvider {
     // before resolving the service — a catalog change must not turn a retry into an error.
     const bookingRepo = AppDataSource.getRepository(Booking);
     const existing = await bookingRepo.findOne({
-      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)) },
+      where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
     });
     // Any existing row for this idempotency key is a duplicate. (This used to exclude
     // 'failed', a status nothing ever wrote.)
@@ -2444,7 +2465,7 @@ export class InternalProvider implements BookingProvider {
       where: {
         tenantId: ctx.tenant.id, botId: ctx.bot.id, sessionId: ctx.session.id,
         eventTypeId: service.id, startUtc: start,
-        createdAt: MoreThan(new Date(Date.now() - BOOKING_DEDUP_WINDOW_MS)),
+        createdAt: createdWithinDedupWindow(),
       },
       order: { createdAt: 'DESC' },
     });

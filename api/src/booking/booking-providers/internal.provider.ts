@@ -87,6 +87,7 @@ import { baseDepartureInstant, localDayBounds, type DayRule } from '../travel/tr
 import { recordCause, recordRoutingSuccess } from '../travel/degradation-monitor';
 import { notifyTenantCapExhausted } from '../travel/degradation-notify';
 import { driveLookupFor } from '../travel/routes.service';
+import { addressToken } from '../travel/address-for-turn';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -742,6 +743,31 @@ type TravelSnapshot = {
   base: { at: Date; location: NeighbourLocation } | null;
   dayStart: Date;
 };
+
+/**
+ * Is this candidate duplicate about the SAME DOOR as the call that found it?
+ *
+ * The `(session, service, startUtc)` dedup exists because the model can express one instant as two
+ * different strings (#35), so a re-confirm can slip past the idempotency key. That reasoning is
+ * about the TIME. It says nothing about the address, and the predicate carries no address at all -
+ * so a customer correcting where they live at an unchanged time looked exactly like a re-confirm,
+ * and their correction was answered with the original row.
+ *
+ * This is the bug the idempotency key was fixed for, surviving one gate further down. Putting the
+ * address in the key was necessary and not sufficient: this check runs afterwards and collapsed the
+ * two rows anyway. Verified on production after that fix deployed - three tool calls, one row, and
+ * the customer told their appointment was at an address the database had never held.
+ *
+ * Compared through `addressToken`, so this is the same notion of "same address" the key uses. A
+ * service that takes no address yields a constant on both sides, so those bookings dedup exactly as
+ * they always have.
+ */
+export function dedupIsSameDoor(row: Booking, extras?: BookingExtras): boolean {
+  return (
+    addressToken({ address: row.customerAddress ?? undefined, placeId: row.customerPlaceId ?? undefined }) ===
+    addressToken({ address: extras?.customerAddress, placeId: extras?.customerPlaceId })
+  );
+}
 
 export class InternalProvider implements BookingProvider {
   /** Business availability for the bot (shared by all services). */
@@ -1732,7 +1758,7 @@ export class InternalProvider implements BookingProvider {
     // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
     // slot. 'failed' and 'declined' were also listed here; neither is ever written
     // (declining a request writes 'cancelled').
-    if (recentDup && recentDup.status !== 'cancelled') {
+    if (recentDup && recentDup.status !== 'cancelled' && dedupIsSameDoor(recentDup, extras)) {
       return this.toResult(recentDup, true, rule.timezone, service.name);
     }
 
@@ -2383,7 +2409,7 @@ export class InternalProvider implements BookingProvider {
     // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
     // slot. 'failed' and 'declined' were also listed here; neither is ever written
     // (declining a request writes 'cancelled').
-    if (recentDup && recentDup.status !== 'cancelled') {
+    if (recentDup && recentDup.status !== 'cancelled' && dedupIsSameDoor(recentDup, extras)) {
       return this.toResult(recentDup, true);
     }
 

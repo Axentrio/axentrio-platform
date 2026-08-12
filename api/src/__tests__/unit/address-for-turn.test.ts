@@ -127,21 +127,34 @@ describe('addressForTurn', () => {
     expect(ids[0]).toBe(ids[1]);
   });
 
-  it('asks ONCE, then proceeds with the address the customer chose', async () => {
-    // The wedge, closed. A customer whose address Google cannot suggest - a new build, a renamed
-    // street - can never answer this question, because the picker was the only way to answer it.
-    // Asking forever would mean they can never book at all, which is a customer defeated by a
-    // safety feature rather than protected by one.
+  it('reports the address as contested for as long as it IS contested', async () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and asserting the opposite was the bug.
+    //
+    // It read `correctionPending` as "you may ask now" and expected the second call to say no -
+    // the one-shot cap, enforced here by passing `isNew` straight out. That works only while every
+    // caller of this function can ask. All three booking tools call it, and only `create_booking`
+    // can: so `check_availability` took the single `true`, said nothing, and by the time
+    // `create_booking` ran the proposal was no longer new and the customer was never asked. The
+    // cap was spent on silence in the ordinary flow, and the green assertion below was what made
+    // it look correct.
+    //
+    // So this is now a fact about STATE - the address is contested until it is answered - and the
+    // one-shot promise moved to `claimPresentation`, which the tool that actually asks owns.
+    // `address-question-once.test.ts` holds that half, including the wedge it exists to prevent:
+    // a customer whose address Google cannot suggest is asked once and still books.
     getBound.mockResolvedValue(CHOSEN);
 
     propose.mockResolvedValue({ isNew: true });
     const first = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
     expect(first.correctionPending).toBe(true);
 
-    // Same address again - a repeat, or a coalescer replay of the very same message.
+    // Same address again - a repeat, or a coalescer replay of the very same message. Still
+    // contested, because nobody has answered anything.
     propose.mockResolvedValue({ isNew: false });
     const second = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
-    expect(second.correctionPending).toBe(false);
+    expect(second.correctionPending).toBe(true);
+    // Both turns carry the id of the question, so whoever asks can be answered.
+    expect(second.proposalId).toBe(first.proposalId);
     // And it proceeds against what they actually chose, not the contested one.
     expect(second.address).toBe(CHOSEN.formattedAddress);
   });

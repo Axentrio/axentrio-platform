@@ -28,8 +28,21 @@ export interface TurnAddress {
   address: string | undefined;
   /** Google's identity for it, when the customer chose it. */
   placeId?: string;
-  /** True when the model's argument named a DIFFERENT place and is waiting on the customer. */
+  /**
+   * True when the model's argument named a DIFFERENT place and is waiting on the customer.
+   *
+   * A statement about the STATE - this turn's address is contested - and not an instruction to
+   * ask. Whether asking is allowed is a separate question with a separate owner
+   * (`claimPresentation`), because three tools reach this code and only one of them can ask.
+   */
   correctionPending: boolean;
+  /**
+   * Which proposal is outstanding, when one is.
+   *
+   * Needed by whoever asks: a question the customer can answer has to carry the id of the
+   * question, or a late answer settles one they have already left behind.
+   */
+  proposalId?: string;
 }
 
 /** Case, punctuation and spacing carry no meaning in an address comparison. */
@@ -152,10 +165,11 @@ export async function addressForTurn(
     return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
   }
 
-  const { isNew } = await proposeCorrection(sessionId, {
-    // Derived from the text, so the same suggestion twice is the same proposal - and a stale
-    // confirmation stops matching the moment the customer proposes something else.
-    proposalId: createHash('sha256').update(normalise(typed)).digest('hex').slice(0, 16),
+  // Derived from the text, so the same suggestion twice is the same proposal - and a stale
+  // confirmation stops matching the moment the customer proposes something else.
+  const proposalId = createHash('sha256').update(normalise(typed)).digest('hex').slice(0, 16);
+  await proposeCorrection(sessionId, {
+    proposalId,
     // NO PLACE ID. Nothing has been verified yet; that happens if and when the customer confirms
     // through `/places/select`, which resolves properly. A proposal is a question, not a place.
     placeId: '',
@@ -170,14 +184,20 @@ export async function addressForTurn(
   return {
     address: bound.formattedAddress,
     placeId: bound.placeId,
-    // ASKED ONCE, THEN WE GET ON WITH IT.
+    // CONTESTED, WHICH IS NOT THE SAME AS "ASK NOW".
     //
-    // The first time a given address is proposed, the caller may raise it with the customer. On
-    // every repeat this is false, so the booking proceeds against the address they actually
-    // chose. Without the cap, a customer whose address Google cannot suggest - a new build, a
-    // renamed street - could never answer the question and could never book: they cannot use the
-    // picker, and the picker was the only way out. That is a customer wedged by a safety feature,
-    // which is worse than the thing it was guarding against.
-    correctionPending: isNew,
+    // This used to report `isNew` from `proposeCorrection` - whether the PROPOSAL was new - and
+    // callers read it as permission to ask. That works only while every proposer also asks, and it
+    // stopped being true the moment a second tool called this function. All three booking tools do,
+    // so `check_availability` proposed first, took the `true`, said nothing, and `create_booking`
+    // then found the proposal already outstanding and booked without asking. The one question the
+    // design allows was spent on silence, every single time a model checked times before booking.
+    //
+    // So this is now a fact about the STATE, true for as long as the question is unanswered, and
+    // the cap moved to `claimPresentation` - which is owned by the one tool that can actually ask.
+    // "Asked once, then we get on with it" is still the rule; it is just counted where the asking
+    // happens rather than where the proposing happens.
+    correctionPending: true,
+    proposalId,
   };
 }

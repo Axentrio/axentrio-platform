@@ -60,6 +60,31 @@ export interface PendingCorrection extends BoundAddress {
    * rejection: a stale "no" would discard a newer proposal.
    */
   proposalId: string;
+  /**
+   * Has the customer actually been ASKED about this proposal?
+   *
+   * The one-shot cap is a promise about questions, not about proposals, and conflating them is
+   * what made the question unaskable. Every booking tool calls `addressForTurn` and therefore
+   * proposes, but only one of them can ask - so counting proposals spent the single question on a
+   * tool that says nothing, and the customer was never asked at all.
+   *
+   * Set by `claimPresentation`, which is the only thing entitled to spend it.
+   */
+  presented?: boolean;
+  /**
+   * WHICH agent run asked, which is the only way to know whether the customer has seen it.
+   *
+   * A run is one customer message. The model may emit several tool calls inside it and they are
+   * executed back to back with no customer in between, so "we already asked" is not true yet -
+   * the question is sitting in a tool result nobody has read. Without this, a `create_booking`
+   * queued behind the one that just asked finds the question already spent and books immediately,
+   * which is the original defect wearing the fix's clothes.
+   *
+   * So the refusal stands for as long as the presentation belongs to THIS run, and lifts on the
+   * next one - by which time the customer has genuinely been shown the question and had their
+   * turn to answer it.
+   */
+  presentedByRun?: string;
 }
 
 interface Record_ {
@@ -139,8 +164,66 @@ export async function proposeCorrection(
 ): Promise<{ isNew: boolean }> {
   const current = await read(sessionId);
   const isNew = current.pending?.proposalId !== proposal.proposalId;
+
+  // A QUESTION THE CUSTOMER IS LOOKING AT MAY NOT BE REPLACED BEHIND THEIR BACK.
+  //
+  // Superseding is right for a proposal nobody has seen - it is how a customer restating their
+  // address stops an older suggestion from mattering. It is wrong the moment they have been ASKED,
+  // because the buttons are already on their screen: replacing the proposal underneath them turns
+  // their next tap into "that question no longer exists", for a question they were asked seconds
+  // ago and never got to answer.
+  //
+  // `check_availability` is why this is not hypothetical. It is read-only and the model may call
+  // it speculatively, with an address it reconstructed - so without this guard, a speculative call
+  // naming a third address would quietly invalidate a live question.
+  //
+  // A presented proposal is released by an ANSWER, by the customer picking again (`bindAddress`),
+  // or by expiry. Nothing else, and never as a side effect of the model calling a tool.
+  // `isNew: false` in both cases, and deliberately: nothing new was recorded, whether the caller
+  // named the same address or a different one. A caller reading this as "go ahead and ask" would
+  // be asking about a proposal that was not stored.
+  if (current.pending?.presented) return { isNew: false };
+
   await write(sessionId, { active: current.active, pending: proposal });
   return { isNew };
+}
+
+/**
+ * May this caller ask the customer about this proposal? Spends the question if so.
+ *
+ * True while the question is unasked, or was asked by THIS run and therefore has not reached the
+ * customer yet. False once a different run has asked - which is the moment the customer has had
+ * their turn, and from then on the booking proceeds against the address they chose.
+ *
+ * That is what keeps the promise that a Pending Correction "never blocks them from booking":
+ * asking is one refusal, not a wall. A customer whose address Google cannot suggest - a new build,
+ * a renamed street - is asked once, cannot usefully answer, and still gets their appointment.
+ *
+ * Two things had to be separated to make this work, and they are separated by design rather than
+ * by accident:
+ *
+ *   proposing    every booking tool does it, because every one resolves an address.
+ *   asking       exactly one tool can, because the other two must not refuse.
+ *
+ * Counting proposals instead of questions is what let `check_availability` spend the customer's
+ * only question by saying nothing.
+ */
+export async function claimPresentation(
+  sessionId: string,
+  proposalId: string,
+  runId: string
+): Promise<boolean> {
+  const current = await read(sessionId);
+  if (!current.pending || current.pending.proposalId !== proposalId) return false;
+  // Already asked, and the customer has since had a turn. Get on with it.
+  if (current.pending.presented && current.pending.presentedByRun !== runId) return false;
+  // Either nobody has asked, or this same run did - and a run is one customer message, so they
+  // have not seen it yet. Keep refusing until they have.
+  await write(sessionId, {
+    active: current.active,
+    pending: { ...current.pending, presented: true, presentedByRun: runId },
+  });
+  return true;
 }
 
 /**

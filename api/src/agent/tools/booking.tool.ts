@@ -1,6 +1,6 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
-import { clearAddressBinding } from '../../booking/travel/address-binding';
+import { clearAddressBinding, claimPresentation } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
   createBooking,
@@ -253,7 +253,20 @@ export class CreateBookingTool implements ToolAdapter {
         ctx.sessionId,
         args.customerAddress as string | undefined
       );
-      if (booked.correctionPending) {
+      // THE ONE TOOL THAT MAY ASK, and it has to claim the right to before it does.
+      //
+      // `correctionPending` says the address is contested; it does not say asking is allowed.
+      // `claimPresentation` returns true exactly once per proposal, so a second attempt at the
+      // same booking proceeds rather than refusing again - which is what keeps the promise that a
+      // Pending Correction never blocks the customer from booking. A customer whose address Google
+      // cannot suggest is asked once, says nothing useful, and still gets their appointment at the
+      // address they chose.
+      //
+      // The claim lives here rather than in `addressForTurn` because the other two tools call that
+      // too, and neither of them can ask: `check_availability` is read-only and may be called
+      // speculatively, and `request_appointment` never refuses over a contested address at all.
+      if (booked.correctionPending && booked.proposalId
+        && (await claimPresentation(ctx.sessionId, booked.proposalId, ctx.runId))) {
         return {
           success: false,
           error:

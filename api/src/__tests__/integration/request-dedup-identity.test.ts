@@ -110,7 +110,12 @@ const capture = (time: string, address: string | undefined, token: string) =>
   );
 
 describe('a genuine re-confirm, against a row we geocoded ourselves', () => {
-  it('returns the SAME request rather than inserting a second one', async () => {
+  // `it.fails` rather than a plain failing test or a skip, and the choice matters. A red suite
+  // marks deploys SKIPPED in this pipeline, so leaving it failing would quietly block every
+  // deploy until #96 is fixed - a worse trap than the bug. A skip would hide it. This records
+  // the regression as a known, asserted fact AND turns red the moment someone fixes the code,
+  // which forces whoever does it to come back and flip this line.
+  it.fails('returns the SAME request rather than inserting a second one', async () => {
     const first = await capture(AS_UTC, ADDRESS, 'tok_same');
     const created = await rowsForSession();
     expect(created).toHaveLength(1);

@@ -77,11 +77,16 @@ export function AddressAutocomplete({ onSelect, label = 'Search for your address
     const timer = setTimeout(async () => {
       setBusy(true);
       try {
-        const { data } = await api.post<{ data: { suggestions: AddressSuggestion[] } }>(
+        // `api.post` resolves to the BODY, not an axios response: the wrapper does
+        // `.then(res => res.data)` and the interceptor has already stripped the `{ success, data }`
+        // envelope. Destructuring `{ data }` here made `data` undefined, so reading `.suggestions`
+        // threw and the catch below turned it into an empty list - a working search that showed
+        // nothing, with the error visible only in the console.
+        const body = await api.post<{ suggestions: AddressSuggestion[] }>(
           '/scheduler/places/autocomplete',
           { query: trimmed }
         );
-        if (mine === sequence.current) setSuggestions(data.suggestions ?? []);
+        if (mine === sequence.current) setSuggestions(body?.suggestions ?? []);
       } catch {
         // Suggestions are a convenience. Losing them must never look like a broken form, so the
         // list simply empties and the four fields below carry on taking typed input.
@@ -98,10 +103,12 @@ export function AddressAutocomplete({ onSelect, label = 'Search for your address
     setSuggestions([]);
     setQuery(suggestion.text);
     try {
-      const { data } = await api.post<{ data: SelectedAddress }>('/scheduler/places/select', {
+      // Same unwrap. This one was worse: `onSelect(undefined)` meant picking a suggestion filled
+      // the four fields below with nothing, so the shortcut silently did the opposite of its job.
+      const selected = await api.post<SelectedAddress>('/scheduler/places/select', {
         placeId: suggestion.placeId,
       });
-      onSelect(data);
+      onSelect(selected);
     } catch {
       // The id came from our own list, so a failure here is Google or the tenant's cap - not
       // something the owner did. The text they picked stays in the box and the fields below stay

@@ -74,8 +74,3 @@ portal/.env
 docs/Axentrio-App-Review-Submission-Packet.pdf
 docs/meta-google-review-packet.md
 docs/handoff-composable-templates-enablement.md
-
-# Written by the deploy (ci.yml) so GET /health can report the running commit. NEVER committed:
-# a checked-in value would ship a stale sha in every build, which is the exact lie the marker
-# exists to prevent. See api/src/utils/build-info.ts.
-api/public/commit.txt

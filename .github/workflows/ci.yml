@@ -138,6 +138,13 @@ jobs:
       # new commit — a lie told in exactly the stale-build case this exists to catch. See
       # `api/src/utils/build-info.ts`.
       #
+      # OVERWRITES a tracked placeholder rather than creating an ignored file. The first attempt
+      # gitignored it, on the reasoning that a checked-in sha would ship stale in every build —
+      # and `railway up` ignores paths from .gitignore, so the file never reached the image and
+      # /health reported "unknown" from a deploy that had otherwise worked perfectly. The tracked
+      # content is always the literal `unknown`, which `build-info` rejects as not-a-sha, so a
+      # stale value cannot ship and an accidental commit of a real one shows up in the diff.
+      #
       # NEVER fatal. A diagnostic that can stop a deploy is worse than no diagnostic. A failed
       # write leaves `commit: "unknown"` on /health, which is honest, and the deploy proceeds.
       - name: Stamp the commit into the build

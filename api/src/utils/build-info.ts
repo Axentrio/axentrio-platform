@@ -25,6 +25,17 @@
  * Written into the image instead, the sha is physically part of the build. It cannot drift from
  * the code beside it, because it IS beside it.
  *
+ * ## Why the file is TRACKED, holding the literal `unknown`
+ *
+ * The first attempt gitignored it, reasoning that a checked-in sha would ship stale in every
+ * build. `railway up` ignores paths from `.gitignore`, so the file never reached the image and
+ * `/health` reported `unknown` from a deploy that had otherwise worked. The rule written to
+ * prevent a stale value prevented any value.
+ *
+ * So a placeholder is committed and CI overwrites it before the upload. The tracked content is
+ * always `unknown`, which the check below rejects as not-a-sha, so the stale-value case is closed
+ * by validation rather than by absence.
+ *
  * ## Why it fails soft
  *
  * The file is written by the deploy, so it is legitimately absent in local development, in tests,

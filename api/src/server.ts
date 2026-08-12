@@ -16,6 +16,7 @@ import { clerkMiddleware } from '@clerk/express';
 import { config } from './config/environment';
 import { logger } from './utils/logger';
 import { returningRows } from './utils/raw-sql';
+import { BUILD_COMMIT } from './utils/build-info';
 import { AppDataSource, checkDatabaseHealth } from './database/data-source';
 import { initializeRedis, closeRedis, isRedisAvailable, getRedisClient } from './config/redis';
 import { initializeSocketIO } from './websocket/socket.handler';
@@ -251,6 +252,10 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
+    // WHICH COMMIT IS THIS, which nothing could answer until now. See `utils/build-info` for why
+    // it is baked into the image rather than injected as a variable - the short version is that a
+    // variable can outlive a failed build and report a commit the container is not running.
+    commit: BUILD_COMMIT,
   });
 });
 

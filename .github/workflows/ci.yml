@@ -127,6 +127,23 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
+      # Stamp the commit onto the service BEFORE deploying, so `GET /health` can say what it is
+      # running. Railway builds asynchronously and lags this workflow, so a green CI run is not a
+      # statement about what is serving traffic — two live-test rounds on 2026-08-12 were spent
+      # against a stale build, undetectably. `--skip-deploys` because the deploy is the next step;
+      # without it this would trigger a second, redundant one.
+      # Bake the commit into the image so `GET /health` can say what it is running. Written into
+      # the SOURCE that `railway up` uploads, not set as a service variable: a variable is read
+      # when a container starts, so it can outlive a failed build and make an old image report a
+      # new commit — a lie told in exactly the stale-build case this exists to catch. See
+      # `api/src/utils/build-info.ts`.
+      #
+      # NEVER fatal. A diagnostic that can stop a deploy is worse than no diagnostic. A failed
+      # write leaves `commit: "unknown"` on /health, which is honest, and the deploy proceeds.
+      - name: Stamp the commit into the build
+        continue-on-error: true
+        run: echo "$GITHUB_SHA" > api/public/commit.txt
+
       - name: Deploy to Railway
         working-directory: .
         run: railway up --service chatbot-api --detach

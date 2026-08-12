@@ -80,6 +80,7 @@ vi.mock('../../config/redis', () => ({
 import {
   bindAddress,
   proposeCorrection,
+  claimPresentation,
   confirmCorrection,
   rejectCorrection,
   getBoundAddress,
@@ -117,6 +118,9 @@ beforeEach(async () => {
   await real.del(`addrbind:${SESSION}`);
   await bindAddress(SESSION, CHOSEN);
   await proposeCorrection(SESSION, P1);
+  // PRESENTED, because a transition may only answer a question that was actually asked. Every
+  // test below that expects `applied: true` depends on this line, which is the point.
+  await claimPresentation(SESSION, P1.proposalId, 'run-fixture');
 });
 
 describe('a confirmation racing a new proposal', () => {
@@ -151,7 +155,12 @@ describe('a confirmation racing a new proposal', () => {
 
   it('still refuses a proposal that is simply stale', async () => {
     // The ordinary case, uncontended, so the fix cannot pass the race by refusing everything.
+    // A PRESENTED proposal cannot be superseded behind the customer's back, so the only way to
+    // reach a newer question is the way production reaches it: they pick again, which releases the
+    // old one, and the next contested turn asks afresh.
+    await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
+    await claimPresentation(SESSION, P2.proposalId, 'run-2');
 
     const applied = await confirmCorrection(SESSION, P1.proposalId);
 
@@ -179,6 +188,26 @@ describe('a confirmation racing a new proposal', () => {
  * endpoint suite already gives for refusing to run without a real Redis.
  */
 describe('the transitions themselves', () => {
+  it('REFUSES to answer a question that was never asked', async () => {
+    // Verified failing against production on 2026-08-13. `proposalId` is
+    // sha256(normalise(proposedText)) - derivable from the address text alone, identical in every
+    // session - so possessing one is not evidence of anything. With the transition keyed on the id
+    // alone, an authenticated caller could confirm a proposal that had only ever been RECORDED,
+    // moving the binding for a question the customer was never shown.
+    //
+    // That defeats the rule the whole feature rests on: only an event the SERVER observed may move
+    // a binding. `presented` is what the server observed; the id is just the subject line.
+    await real.del(`addrbind:${SESSION}`);
+    await bindAddress(SESSION, CHOSEN);
+    await proposeCorrection(SESSION, P1);   // proposed, never presented
+
+    const result = await confirmCorrection(SESSION, P1.proposalId);
+
+    expect(result.applied).toBe(false);
+    expect((await getBoundAddress(SESSION))?.formattedAddress).toBe(CHOSEN.formattedAddress);
+    expect((await getPendingCorrection(SESSION))?.proposalId).toBe(P1.proposalId);
+  });
+
   it('keeps the original address when the customer rejects', async () => {
     const result = await rejectCorrection(SESSION, P1.proposalId);
 
@@ -189,7 +218,9 @@ describe('the transitions themselves', () => {
   });
 
   it('refuses a stale rejection, so it cannot discard a NEWER proposal', async () => {
+    await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
+    await claimPresentation(SESSION, P2.proposalId, 'run-2');
 
     const result = await rejectCorrection(SESSION, P1.proposalId);
 
@@ -200,7 +231,9 @@ describe('the transitions themselves', () => {
   it('reports BOTH addresses when it refuses, so the client can re-render', async () => {
     // A question is a choice between two. Handed only "no longer outstanding", a client can show
     // nothing or show the stale choice - and the stale choice is the worse of the two.
+    await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
+    await claimPresentation(SESSION, P2.proposalId, 'run-2');
 
     const result = await rejectCorrection(SESSION, P1.proposalId);
 
@@ -225,7 +258,15 @@ describe('the transitions themselves', () => {
     // `clearAddressBinding` runs on every completed booking, so a customer tapping "keep mine"
     // just after one has nothing left to keep. The route must ingest nothing rather than the
     // string "undefined", which is what a boolean return made easy to get wrong.
-    await real.set(`addrbind:${SESSION}`, JSON.stringify({ active: null, pending: P1 }), 'EX', 600);
+    // `presented: true` because the customer can only tap a control that was rendered, and only a
+    // presentation renders one. A record with an unpresented proposal is not a state this scenario
+    // can reach in production.
+    await real.set(
+      `addrbind:${SESSION}`,
+      JSON.stringify({ active: null, pending: { ...P1, presented: true, presentedByRun: 'run-x' } }),
+      'EX',
+      600
+    );
 
     const result = await rejectCorrection(SESSION, P1.proposalId);
 

@@ -174,9 +174,26 @@ export async function addressForTurn(
     return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
   }
 
-  // Derived from the text, so the same suggestion twice is the same proposal - and a stale
-  // confirmation stops matching the moment the customer proposes something else.
-  const proposalId = createHash('sha256').update(normalise(typed)).digest('hex').slice(0, 16);
+  // THE ID NAMES THE QUESTION, AND A QUESTION IS A PAIR.
+  //
+  // It used to hash the proposed text alone, which made "is it A or B?" and "is it C or B?" the
+  // same id. Verified failing against production on 2026-08-13: the customer picked C, the model
+  // proposed B again, and a control left on screen from the FIRST question answered the second -
+  // moving the binding to an address they had not been asked about since changing their mind. The
+  // design promised the opposite: a superseded proposal was supposed to match nothing.
+  //
+  // Both sides go in, so a different bound address is a different question. The bound identity is
+  // preferred over its spelling because that is what the customer actually picked and it survives
+  // reformatting.
+  //
+  // STILL DETERMINISTIC, and that is not incidental. A random id would close this and reopen
+  // something worse: the turn coalescer re-runs the same customer message after a processor error,
+  // and the design relies on that replay producing the SAME proposal rather than a fresh question
+  // nobody saw. Determinism over the pair keeps both properties.
+  const proposalId = createHash('sha256')
+    .update(`${bound.placeId || normalise(bound.formattedAddress)}|${normalise(typed)}`)
+    .digest('hex')
+    .slice(0, 16);
   await proposeCorrection(sessionId, {
     proposalId,
     // NO PLACE ID. Nothing has been verified yet; that happens if and when the customer confirms

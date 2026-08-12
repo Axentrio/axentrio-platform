@@ -40,6 +40,7 @@ import { createTestTenant, createTestAnchorBot, createTestSession } from '../hel
 import {
   bindAddress,
   proposeCorrection,
+  claimPresentation,
   getBoundAddress,
   getPendingCorrection,
 } from '../../booking/travel/address-binding';
@@ -90,6 +91,10 @@ beforeEach(async () => {
 
   await bindAddress(sessionId, CHOSEN);
   await proposeCorrection(sessionId, PROPOSED);
+  // ASKED, not merely recorded. The transition now requires it, because a proposal the customer
+  // was never shown is not a question they can have answered - and `proposalId` alone was
+  // derivable from the address, so it proved nothing. Verified against production 2026-08-13.
+  await claimPresentation(sessionId, PROPOSED.proposalId, 'run-fixture');
 });
 
 describe('POST /widget/address/confirm', () => {
@@ -120,8 +125,12 @@ describe('POST /widget/address/confirm', () => {
   });
 
   it('refuses an answer to a question the customer has already moved past', async () => {
-    // The customer proposed something else while the button sat on their screen.
+    // The customer moved on while the button sat on their screen. A PRESENTED proposal cannot be
+    // superseded behind their back, so the route production takes is the one taken here: they pick
+    // again (which releases the question), and the next contested turn asks afresh.
+    await bindAddress(sessionId, CHOSEN);
     await proposeCorrection(sessionId, { ...PROPOSED, proposalId: 'prop-2', formattedAddress: 'Meir 78, 2000 Antwerpen' });
+    await claimPresentation(sessionId, 'prop-2', 'run-2');
 
     const res = await post({ proposalId: 'prop-1', confirmed: true });
 

@@ -159,6 +159,35 @@ describe('addressForTurn', () => {
     expect(second.address).toBe(CHOSEN.formattedAddress);
   });
 
+  it('asks a DIFFERENT question when the bound address differs', async () => {
+    // Verified failing against production on 2026-08-13. `proposalId` hashed only the PROPOSED
+    // text, so "is it A or B?" and "is it C or B?" carried the same id. A control rendered for the
+    // first silently answered the second: the customer picked C, the model proposed B again, and
+    // the stale button from the earlier question moved the binding to B.
+    //
+    // The id has to name the QUESTION, and a question is a pair. Both sides go into the hash.
+    getBound.mockResolvedValue(CHOSEN);
+    const first = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
+
+    getBound.mockResolvedValue({ placeId: 'ChIJ_other', formattedAddress: 'Meir 78, 2000 Antwerpen' });
+    const second = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
+
+    expect(first.proposalId).not.toBe(second.proposalId);
+  });
+
+  it('asks the SAME question on a replay, so a retry is not a new question', async () => {
+    // The other half, and the one a random id would break. The turn coalescer re-runs the same
+    // customer message after a processor error; the design relies on that replay yielding the same
+    // proposal rather than a fresh one nobody saw. Determinism is load-bearing - it just has to be
+    // determinism over the pair, not over one side of it.
+    getBound.mockResolvedValue(CHOSEN);
+
+    const a = await addressForTurn('s1', 'Korenmarkt 1, 9000 Gent');
+    const b = await addressForTurn('s1', 'Korenmarkt 1,  9000  Gent.');
+
+    expect(a.proposalId).toBe(b.proposalId);
+  });
+
   it('never logs either address', async () => {
     // Both sides of this comparison are somebody's home.
     const { logger } = await import('../../utils/logger');

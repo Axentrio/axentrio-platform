@@ -271,7 +271,18 @@ local active = rec.active
 local pending = rec.pending
 if active == nil then active = cjson.null end
 if pending == nil then pending = cjson.null end
-if pending == cjson.null or pending.proposalId ~= ARGV[1] then
+-- THE ID NAMES THE QUESTION; presented IS THE EVIDENCE IT WAS ASKED.
+--
+-- Keyed on the id alone, this answered questions nobody had been shown. Verified against
+-- production on 2026-08-13: a proposal that check_availability had merely RECORDED was confirmed
+-- by a caller who derived its id, and the binding moved. proposalId is a hash of the addresses,
+-- so it is reproducible by anyone who knows them - it identifies WHICH question, and identifies
+-- nothing about whether it was ever put to the customer.
+--
+-- Only claimPresentation sets this, and only create_booking calls that. So the flag is the
+-- server's own record that it asked, which is the evidence this design requires and the id never
+-- was. (No backticks in here: this is a JS template literal.)
+if pending == cjson.null or pending.proposalId ~= ARGV[1] or pending.presented ~= true then
   return cjson.encode({ applied = false, current = { active = active, pending = pending } })
 end
 local newActive = active

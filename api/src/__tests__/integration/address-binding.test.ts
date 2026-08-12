@@ -10,20 +10,43 @@
  * So: a differing argument PROPOSES, and only a server-observed event replaces. These tests are
  * the difference between that sentence being true and it being a comment.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 
-const store = new Map<string, string>();
-const redis = {
-  get: vi.fn(async (k: string) => store.get(k) ?? null),
-  set: vi.fn(async (k: string, v: string) => {
-    store.set(k, v);
-    return 'OK';
-  }),
-  del: vi.fn(async (k: string) => (store.delete(k) ? 1 : 0)),
-  expire: vi.fn(async () => 1),
-};
+import Redis from 'ioredis';
 
-vi.mock('../../config/redis', () => ({ getRedisClient: () => redis }));
+/**
+ * REAL Redis, because the binding's guarantees are now the store's.
+ *
+ * `proposeCorrection` and the transitions are Lua scripts, so a Map standing in for Redis would
+ * have to reimplement them and the tests would assert only that the reimplementation agrees with
+ * itself. The one case that still needs a fake - a store that cannot be read - fakes exactly that
+ * and nothing else.
+ */
+const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
+let client: Redis;
+let broken = false;
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () =>
+    broken
+      ? ({ get: async () => { throw new Error('down'); } } as unknown as Redis)
+      : client,
+  isRedisAvailable: () => true,
+}));
+
+beforeAll(async () => {
+  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
+  try {
+    await client.connect();
+    await client.ping();
+  } catch (err) {
+    throw new Error(
+      `Needs the real Redis the address binding lives in. Start it with ` +
+        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+afterAll(async () => { await client?.quit(); });
 vi.mock('../../utils/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn() } }));
 
 import {
@@ -37,8 +60,10 @@ import {
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Grote Markt 1, 2000 Antwerpen' };
 const OTHER = { placeId: 'ChIJ_other', formattedAddress: 'Korenmarkt 1, 9000 Gent' };
 
-beforeEach(() => {
-  store.clear();
+beforeEach(async () => {
+  broken = false;
+  await client.del('addrbind:s1');
+  await client.del('addrbind:s2');
   vi.clearAllMocks();
 });
 
@@ -100,7 +125,7 @@ describe('the address a conversation is about', () => {
     // that hold them. A Redis value carrying a point would be a fourth home for them, with no
     // timestamp and no sweep.
     await bindAddress('s1', CHOSEN);
-    const raw = store.get('addrbind:s1')!;
+    const raw = (await client.get('addrbind:s1'))!;
     expect(raw).not.toMatch(/lat|lng/i);
     expect(Object.keys(JSON.parse(raw).active).sort()).toEqual(['formattedAddress', 'placeId']);
   });
@@ -118,7 +143,8 @@ describe('the address a conversation is about', () => {
 
   it('degrades to no binding when Redis cannot be read', async () => {
     // Fail-open: a booking without a binding is the free-text path that has always existed.
-    redis.get.mockRejectedValueOnce(new Error('down'));
+    broken = true;
     expect(await getBoundAddress('s1')).toBeNull();
+    broken = false;
   });
 });

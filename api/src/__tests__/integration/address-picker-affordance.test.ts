@@ -22,24 +22,38 @@
  * this job happens at the customer's address. Paired with "no verified place is bound yet", that
  * is precisely the moment a picker helps and the only moment it is worth paying for.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 
-const store = new Map<string, string>();
+import Redis from 'ioredis';
+
+/**
+ * REAL Redis, because the binding's guarantees are now the store's.
+ *
+ * `proposeCorrection` and the transitions are Lua scripts, so a Map standing in for Redis would
+ * have to reimplement them - and would then assert only that the reimplementation agrees with
+ * itself. Same reasoning that moved the transition tests here.
+ */
+const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
+let client: Redis;
 vi.mock('../../config/redis', () => ({
-  getRedisClient: () => ({
-    get: async (k: string) => store.get(k) ?? null,
-    set: async (k: string, v: string) => {
-      store.set(k, v);
-      return 'OK';
-    },
-    del: async (k: string) => {
-      store.delete(k);
-      return 1;
-    },
-    expire: async () => 1,
-  }),
+  getRedisClient: () => client,
   isRedisAvailable: () => true,
 }));
+
+beforeAll(async () => {
+  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
+  try {
+    await client.connect();
+    await client.ping();
+  } catch (err) {
+    throw new Error(
+      `Needs the real Redis the address binding lives in. Start it with ` +
+        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+afterAll(async () => { await client?.quit(); });
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
@@ -92,9 +106,9 @@ const TRAVELS = {
 /** A service the customer comes to. No `travel`, so no address is needed and none is offered. */
 const NO_TRAVEL = { slots: [{ start: '2026-09-01T09:00:00Z' }], timezone: 'Europe/Brussels' };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
-  store.clear();
+  await client.del(`addrbind:${SESSION}`);
 });
 
 describe('offering to verify the address', () => {

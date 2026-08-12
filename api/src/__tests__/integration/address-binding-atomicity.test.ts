@@ -80,7 +80,7 @@ vi.mock('../../config/redis', () => ({
 import {
   bindAddress,
   proposeCorrection,
-  claimPresentation,
+  markQuestionDelivered,
   confirmCorrection,
   rejectCorrection,
   getBoundAddress,
@@ -120,7 +120,7 @@ beforeEach(async () => {
   await proposeCorrection(SESSION, P1);
   // PRESENTED, because a transition may only answer a question that was actually asked. Every
   // test below that expects `applied: true` depends on this line, which is the point.
-  await claimPresentation(SESSION, P1.proposalId);
+  await markQuestionDelivered(SESSION, P1.proposalId);
 });
 
 describe('a confirmation racing a new proposal', () => {
@@ -160,7 +160,7 @@ describe('a confirmation racing a new proposal', () => {
     // old one, and the next contested turn asks afresh.
     await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
-    await claimPresentation(SESSION, P2.proposalId);
+    await markQuestionDelivered(SESSION, P2.proposalId);
 
     const applied = await confirmCorrection(SESSION, P1.proposalId);
 
@@ -220,7 +220,7 @@ describe('the transitions themselves', () => {
   it('refuses a stale rejection, so it cannot discard a NEWER proposal', async () => {
     await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
-    await claimPresentation(SESSION, P2.proposalId);
+    await markQuestionDelivered(SESSION, P2.proposalId);
 
     const result = await rejectCorrection(SESSION, P1.proposalId);
 
@@ -233,7 +233,7 @@ describe('the transitions themselves', () => {
     // nothing or show the stale choice - and the stale choice is the worse of the two.
     await bindAddress(SESSION, CHOSEN);
     await proposeCorrection(SESSION, P2);
-    await claimPresentation(SESSION, P2.proposalId);
+    await markQuestionDelivered(SESSION, P2.proposalId);
 
     const result = await rejectCorrection(SESSION, P1.proposalId);
 

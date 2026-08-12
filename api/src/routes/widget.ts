@@ -25,7 +25,6 @@ import {
   confirmCorrection,
   rejectCorrection,
 } from '../booking/travel/address-binding';
-import { questionWasAsked } from '../booking/travel/question-delivery';
 import { placesRateLimiter } from '../middleware/rate-limit';
 import { addressConfirmSchema, placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
 import { decrypt, encrypt } from '../utils/encryption';
@@ -586,22 +585,6 @@ router.post(
     });
     if (!session) throw new NotFoundError('Session not found');
     if (session.status === 'closed') throw new ValidationError('Session is closed');
-
-    // THE QUESTION MUST HAVE REACHED THEM, not merely been claimed.
-    //
-    // `presented` is set when the tool decides to ask, and the reply carrying the control is
-    // written later - so a run that dies in between leaves the flag set with nothing on screen.
-    // The Lua transition only sees the flag, and the proposalId is a hash of two addresses the
-    // customer knows, so without this an answer could be posted for a question that was never
-    // shown. Checking the persisted bot reply is what makes the flag mean what it says.
-    //
-    // `null` is "cannot tell" and proceeds, matching the tool's own fallback: an unavailable check
-    // must not strand a customer holding a button that legitimately exists.
-    const asked = await questionWasAsked(AppDataSource, sessionId, proposalId);
-    if (asked === false) {
-      sendSuccess(res, { applied: false, reason: 'no_longer_outstanding', current: { bound: null, proposed: null, proposalId: null } });
-      return;
-    }
 
     // ONE call, and no pre-read. There used to be a `getPendingCorrection` here whose value was
     // then ingested below - a value read BEFORE the transition, so under contention the model

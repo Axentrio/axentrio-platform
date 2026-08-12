@@ -1,7 +1,6 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
-import { clearAddressBinding, claimPresentation, getPendingCorrection } from '../../booking/travel/address-binding';
-import { questionWasAsked } from '../../booking/travel/question-delivery';
+import { clearAddressBinding, getPendingCorrection } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
   createBooking,
@@ -320,26 +319,20 @@ export class CreateBookingTool implements ToolAdapter {
       // The claim lives here rather than in `addressForTurn` because the other two tools call that
       // too, and neither of them can ask: `check_availability` is read-only and may be called
       // speculatively, and `request_appointment` never refuses over a contested address at all.
-      // ASK ONLY IF THE LAST ATTEMPT NEVER REACHED THEM.
+      // ASK ONLY IF THE QUESTION HAS NOT ALREADY REACHED THEM.
       //
-      // Three earlier guards each counted something adjacent to the question: proposals, claims,
-      // then agent runs. The run was the closest and still wrong - the coalescer re-runs the same
-      // customer message after a processor error with a fresh id, so the refusal lifted and the
-      // booking went through for a question whose reply was never written.
+      // Four guards have stood here, each counting something adjacent: proposals (three tools
+      // propose, one asks), claims (a second call in the same batch booked past an unread tool
+      // result), agent runs (the coalescer re-runs one message with a fresh id), and finally a SQL
+      // lookup for the reply - which was forgeable, because `/widget/message` stores
+      // customer-supplied metadata verbatim.
       //
-      // Whether the customer saw it is observable: the reply carrying the control is a row in
-      // `messages` with the proposal id in its metadata. `null` means the check could not run, and
-      // then this falls back to the older, weaker signal rather than guessing - guessing "not
-      // asked" would re-ask every turn and wedge a customer whose address Google cannot suggest,
-      // which is the outcome the one-shot cap exists to prevent.
-      const alreadyAsked = booked.proposalId
-        ? await questionWasAsked(ctx.dataSource, ctx.sessionId, booked.proposalId)
-        : null;
-      const pendingRecord = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
-      const mayAsk = alreadyAsked === null ? !pendingRecord?.presented : !alreadyAsked;
+      // `presented` is now set where the reply is PERSISTED, so the flag means what the SQL was
+      // asked to find out, in the same store as everything else it guards. Nothing claims; delivery
+      // decides. Two concurrent asks are harmless: both refuse, and only one reply is delivered.
+      const pendingNow = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
 
-      if (booked.correctionPending && booked.proposalId && mayAsk
-        && (await claimPresentation(ctx.sessionId, booked.proposalId))) {
+      if (booked.correctionPending && booked.proposalId && !pendingNow?.presented) {
         return {
           success: false,
           // NAMES BOTH, because on most channels the prose is the only thing the customer gets.

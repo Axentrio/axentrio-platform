@@ -25,26 +25,40 @@
  * `never blocks them from booking` (CONTEXT.md, Pending Correction) is the other half and is
  * asserted here too: asking is one refusal, not a wall. The next attempt goes through.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 
 // The binding is the real state machine over a fake store - these tests are about WHICH TOOL
 // spends the question, so the transitions underneath must behave, not be stubbed into agreement.
-const store = new Map<string, string>();
+import Redis from 'ioredis';
+
+/**
+ * REAL Redis, because the binding's guarantees are now the store's.
+ *
+ * `proposeCorrection` and the transitions are Lua scripts, so a Map standing in for Redis would
+ * have to reimplement them - and would then assert only that the reimplementation agrees with
+ * itself. Same reasoning that moved the transition tests here.
+ */
+const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
+let client: Redis;
 vi.mock('../../config/redis', () => ({
-  getRedisClient: () => ({
-    get: async (k: string) => store.get(k) ?? null,
-    set: async (k: string, v: string) => {
-      store.set(k, v);
-      return 'OK';
-    },
-    del: async (k: string) => {
-      store.delete(k);
-      return 1;
-    },
-    expire: async () => 1,
-  }),
+  getRedisClient: () => client,
   isRedisAvailable: () => true,
 }));
+
+beforeAll(async () => {
+  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
+  try {
+    await client.connect();
+    await client.ping();
+  } catch (err) {
+    throw new Error(
+      `Needs the real Redis the address binding lives in. Start it with ` +
+        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+afterAll(async () => { await client?.quit(); });
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
@@ -57,11 +71,6 @@ vi.mock('../../booking/booking.service', async (importOriginal) => {
   };
 });
 
-// The delivery check is the new signal, so it is the thing to control in these tests.
-const asked = vi.fn();
-vi.mock('../../booking/travel/question-delivery', () => ({
-  questionWasAsked: (...a: unknown[]) => asked(...(a as [])),
-}));
 
 vi.mock('../../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -72,7 +81,7 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
 }));
 
 import { CheckAvailabilityTool, CreateBookingTool } from '../../agent/tools/booking.tool';
-import { bindAddress, getBoundAddress, getPendingCorrection } from '../../booking/travel/address-binding';
+import { bindAddress, getBoundAddress, getPendingCorrection, markQuestionDelivered } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
 
 /** What the Booking Customer picked. Authoritative; only they may move it. */
@@ -108,16 +117,20 @@ const ctx = (runId: string): ToolContext => ({
 });
 
 /** True when a tool result is the "address is not settled" refusal that raises the question. */
+/** What `finalizeReply` does when it persists a reply carrying the control. */
+const deliverTheQuestion = async () => {
+  const pending = await getPendingCorrection(SESSION);
+  if (pending) await markQuestionDelivered(SESSION, pending.proposalId);
+};
+
 const raisesTheQuestion = (r: { success: boolean; error?: string }) =>
   r.success === false && /address for this appointment is not settled/i.test(r.error ?? '');
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  store.clear();
+  await client.del(`addrbind:${SESSION}`);
   mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'Europe/Brussels' });
   mockCreateBooking.mockResolvedValue({ id: 'bk-1', status: 'confirmed' });
-  // Nothing has been shown yet, which is the state every test starts from.
-  asked.mockResolvedValue(false);
   await bindAddress(SESSION, CHOSEN);
 });
 
@@ -159,7 +172,7 @@ describe('the address question survives a preceding availability check', () => {
     // reply was never persisted, so the customer had seen nothing at all. Keyed on whether the
     // reply EXISTS, the replay correctly asks again.
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));   // asks; reply never persisted
-    asked.mockResolvedValue(false);                              // ...so no message carries it
+    // ...and nothing marked it delivered, so the customer saw nothing.
 
     const replay = await new CreateBookingTool().execute(BOOK, ctx('run-2-replay'));
 
@@ -177,8 +190,8 @@ describe('the address question survives a preceding availability check', () => {
       ctx('run-1')
     );
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));
-    // The reply landed, so the customer has genuinely been shown the question.
-    asked.mockResolvedValue(true);
+    // The reply landed, which is what marks the question delivered in production.
+    await deliverTheQuestion();
 
     const nextTurn = await new CreateBookingTool().execute(BOOK, ctx('run-2'));
 
@@ -196,6 +209,10 @@ describe('the address question survives a preceding availability check', () => {
     // tap into "that question no longer exists" - for a question they were asked seconds ago and
     // never got to answer.
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));
+    // ON SCREEN means DELIVERED. A question still sitting in an unread tool result may be
+    // superseded - nothing is showing, so nothing is pulled out from under anyone. The rule only
+    // binds once the reply carrying the control has been persisted.
+    await deliverTheQuestion();
 
     await new CheckAvailabilityTool().execute(
       { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: 'Meir 78, 2000 Antwerpen' },
@@ -243,7 +260,7 @@ describe('the address question survives a preceding availability check', () => {
     // This is the rule #92 produced and nobody implemented: a tool result should echo the RESOLVED
     // inputs it acted on, not only the outcome.
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));      // asks
-    asked.mockResolvedValue(true);                                   // the reply landed
+    await deliverTheQuestion();                                      // the reply landed
     const booked = await new CreateBookingTool().execute(BOOK, ctx('run-2')); // books
 
     expect(booked.success).toBe(true);

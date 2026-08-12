@@ -144,70 +144,84 @@ export async function bindAddress(sessionId: string, address: BoundAddress): Pro
  * the single question on a retry nobody saw. The same message yields the same `proposalId`, so a
  * replay is indistinguishable from a repeat - which is exactly the behaviour wanted.
  */
+const PROPOSE_LUA = `
+local raw = redis.call('GET', KEYS[1])
+local rec = { active = cjson.null, pending = cjson.null }
+if raw then rec = cjson.decode(raw) end
+local active = rec.active
+local pending = rec.pending
+if active == nil then active = cjson.null end
+if pending == nil then pending = cjson.null end
+if pending ~= cjson.null and pending.presented == true then
+  return '0'
+end
+local isNew = '1'
+if pending ~= cjson.null and pending.proposalId == ARGV[1] then isNew = '0' end
+redis.call('SET', KEYS[1], cjson.encode({
+  active = active,
+  pending = { proposalId = ARGV[1], placeId = ARGV[2], formattedAddress = ARGV[3] }
+}), 'EX', ARGV[4])
+return isNew
+`;
+
 export async function proposeCorrection(
   sessionId: string,
   proposal: PendingCorrection
 ): Promise<{ isNew: boolean }> {
-  const current = await read(sessionId);
-  const isNew = current.pending?.proposalId !== proposal.proposalId;
-
-  // A QUESTION THE CUSTOMER IS LOOKING AT MAY NOT BE REPLACED BEHIND THEIR BACK.
-  //
-  // Superseding is right for a proposal nobody has seen - it is how a customer restating their
-  // address stops an older suggestion from mattering. It is wrong the moment they have been ASKED,
-  // because the buttons are already on their screen: replacing the proposal underneath them turns
-  // their next tap into "that question no longer exists", for a question they were asked seconds
-  // ago and never got to answer.
-  //
-  // `check_availability` is why this is not hypothetical. It is read-only and the model may call
-  // it speculatively, with an address it reconstructed - so without this guard, a speculative call
-  // naming a third address would quietly invalidate a live question.
-  //
-  // A presented proposal is released by an ANSWER, by the customer picking again (`bindAddress`),
-  // or by expiry. Nothing else, and never as a side effect of the model calling a tool.
-  // `isNew: false` in both cases, and deliberately: nothing new was recorded, whether the caller
-  // named the same address or a different one. A caller reading this as "go ahead and ask" would
-  // be asking about a proposal that was not stored.
-  if (current.pending?.presented) return { isNew: false };
-
-  await write(sessionId, { active: current.active, pending: proposal });
-  return { isNew };
+  const redis = getRedisClient();
+  if (!redis) return { isNew: false };
+  try {
+    // ATOMIC, like the transitions, and for the same reason. Read-then-write here could overwrite
+    // an answer committed in between: it reads {A, P}, the customer confirms and the transition
+    // commits {B, null}, and the delayed write puts {A, P} back - the answer lost and a settled
+    // question restored. The script also keeps the rule that a DELIVERED question is not replaced
+    // behind the customer's back, which the JS version enforced separately.
+    const out = (await redis.eval(
+      PROPOSE_LUA, 1, key(sessionId),
+      proposal.proposalId, proposal.placeId, proposal.formattedAddress, String(TTL_SECONDS)
+    )) as string;
+    return { isNew: out === '1' };
+  } catch (error) {
+    logger.warn('[Travel] address proposal failed', { sessionId, error });
+    return { isNew: false };
+  }
 }
 
 /**
- * Mark this proposal as ASKED, so the transition will accept an answer to it.
+ * The question actually REACHED the customer.
  *
- * Records only that the server put the question; it does NOT decide whether asking is allowed.
- * That decision needs to know whether the customer ever saw the last attempt, which is a fact
- * about persisted replies rather than about this record - see `question-delivery.ts`, and the list
- * of three guards that each named something adjacent to it.
+ * Called when the reply carrying the control is persisted, which is the only moment anything can
+ * honestly claim they were asked. This used to be set when the tool DECIDED to ask, and the two are
+ * different events: a run that dies in between leaves the flag set with nothing on screen, and the
+ * transition - which trusts the flag - would then accept an answer to a question nobody saw.
  *
- * `presented` is what the confirm/reject transition requires. Without it the transition keyed on
- * `proposalId` alone, and that id is a hash of the two addresses - reproducible by anyone who knows
- * them, so it proved nothing about whether a question was ever put.
+ * Moving it here also removed the need to ask Postgres the same question, and with it a fail-open
+ * SQL path whose two possible guesses were "re-ask every turn and wedge them" or "book in silence".
+ * One fact, one store, one failure mode.
  */
-/**
- * KNOWN, AND TRACKED WITH ITS TWO SIBLINGS: read-then-write, like `proposeCorrection` and
- * `bindAddress`. A write committed in between is lost - a claim that reads {A, P} while the
- * customer's confirmation commits {B, null} puts {A, P} back, discarding the answer and restoring
- * a question they have already settled.
- *
- * Briefly converted to a Lua CAS and reverted. Converting ONE of the three writers does not close
- * the class, and every unit test of the booking tools holds its binding state in a Map standing in
- * for Redis - which has no `eval`, so the conversion silently disabled the question in eight of
- * them. The three want doing together, against real Redis, as one piece of work rather than as a
- * side effect of an unrelated fix.
- *
- * The TRANSITIONS are already atomic, which is the half that decides where a van goes.
- */
-export async function claimPresentation(sessionId: string, proposalId: string): Promise<boolean> {
-  const current = await read(sessionId);
-  if (!current.pending || current.pending.proposalId !== proposalId) return false;
-  await write(sessionId, {
-    active: current.active,
-    pending: { ...current.pending, presented: true },
-  });
-  return true;
+const DELIVERED_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then return '0' end
+local rec = cjson.decode(raw)
+local pending = rec.pending
+if pending == nil or pending == cjson.null or pending.proposalId ~= ARGV[1] then return '0' end
+pending.presented = true
+local active = rec.active
+if active == nil then active = cjson.null end
+redis.call('SET', KEYS[1], cjson.encode({ active = active, pending = pending }), 'EX', ARGV[2])
+return '1'
+`;
+
+export async function markQuestionDelivered(sessionId: string, proposalId: string): Promise<void> {
+  const redis = getRedisClient();
+  if (!redis) return;
+  try {
+    await redis.eval(DELIVERED_LUA, 1, key(sessionId), proposalId, String(TTL_SECONDS));
+  } catch (error) {
+    // Unmarked reads as "not asked yet", so the next turn asks again. One extra question, never a
+    // silent booking - the safe direction of the two.
+    logger.warn('[Travel] could not mark the address question delivered', { sessionId, error });
+  }
 }
 
 /**

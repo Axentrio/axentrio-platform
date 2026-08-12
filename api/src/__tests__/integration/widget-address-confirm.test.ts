@@ -40,7 +40,7 @@ import { createTestTenant, createTestAnchorBot, createTestSession } from '../hel
 import {
   bindAddress,
   proposeCorrection,
-  claimPresentation,
+  markQuestionDelivered,
   getBoundAddress,
   getPendingCorrection,
 } from '../../booking/travel/address-binding';
@@ -97,7 +97,7 @@ beforeEach(async () => {
   // ASKED, not merely recorded. The transition now requires it, because a proposal the customer
   // was never shown is not a question they can have answered - and `proposalId` alone was
   // derivable from the address, so it proved nothing. Verified against production 2026-08-13.
-  await claimPresentation(sessionId, PROPOSED.proposalId);
+  await markQuestionDelivered(sessionId, PROPOSED.proposalId);
   // AND THE REPLY THAT CARRIED THE CONTROL. The route now requires it: `presented` is set when the
   // tool decides to ask, and the reply is written afterwards, so the flag alone cannot distinguish
   // "asked" from "was about to ask and died". Without this row the fixture describes a question
@@ -152,7 +152,7 @@ describe('POST /widget/address/confirm', () => {
     // again (which releases the question), and the next contested turn asks afresh.
     await bindAddress(sessionId, CHOSEN);
     await proposeCorrection(sessionId, { ...PROPOSED, proposalId: 'prop-2', formattedAddress: 'Meir 78, 2000 Antwerpen' });
-    await claimPresentation(sessionId, 'prop-2');
+    await markQuestionDelivered(sessionId, 'prop-2');
 
     const res = await post({ proposalId: 'prop-1', confirmed: true });
 

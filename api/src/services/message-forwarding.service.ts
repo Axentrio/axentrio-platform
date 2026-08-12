@@ -24,6 +24,7 @@ import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
 import type { Affordance } from '../agent/tool-adapter';
+import { markQuestionDelivered } from '../booking/travel/address-binding';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -1021,6 +1022,22 @@ export interface ReplyExtras {
  * Returns `undefined` rather than `{}` when there is nothing to say, because an empty object is
  * still a metadata column write and reads downstream as "this reply had metadata".
  */
+export /**
+ * The reply carrying an address question has been PERSISTED, so the customer has now been asked.
+ *
+ * Marked here rather than where the tool decides to ask, because those are different events and
+ * only this one is evidence. A run that dies between deciding and writing leaves nothing on screen,
+ * and a flag set at the decision would let the transition accept an answer to a question nobody
+ * saw - and would let the next attempt book without asking again.
+ *
+ * Fire-and-forget: a marker that can fail a reply is worse than one that occasionally re-asks.
+ */
+function markAddressQuestionDelivered(sessionId: string, extras?: ReplyExtras): void {
+  const a = extras?.affordance;
+  if (a?.kind !== 'address_confirm') return;
+  void markQuestionDelivered(sessionId, a.proposalId).catch(() => undefined);
+}
+
 export function replyMetadata(parts: {
   quickReplies?: Array<{ title: string; value: string }>;
   affordance?: Affordance;
@@ -1068,6 +1085,7 @@ async function finalizeReply(
       }
 
       const metadata = replyMetadata(extras ?? {});
+      markAddressQuestionDelivered(session.id, extras);
       const repo = manager.getRepository(Message);
       const saved = await repo.save(
         repo.create({
@@ -1487,6 +1505,7 @@ async function sendBotMessage(
   offer?: OfferMeasurement
 ): Promise<Message> {
   const metadata = replyMetadata(extras ?? {});
+  markAddressQuestionDelivered(session.id, extras);
   const botMsg = messageRepository.create({
     sessionId: session.id,
     tenantId: session.tenantId,

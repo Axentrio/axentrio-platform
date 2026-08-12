@@ -59,6 +59,34 @@ function toolError(err: unknown, fallback: string): { error: string; errorSafeFo
   return { error: err instanceof Error ? err.message : fallback, errorSafeForModel: false };
 }
 
+/**
+ * What the tool ACTUALLY booked against, said back to the model.
+ *
+ * Observed live on production, twice, on two different tools: the customer was told "your
+ * appointment at Kerkstraat 12 is confirmed" while the row held Grote Markt 1 - the BOUND address,
+ * which is the correct one to use. The data was right and the customer was misinformed, so they
+ * would wait at one door while the business drove to another. The same outcome as #95, reached
+ * from the opposite direction.
+ *
+ * The model was not being careless. It was UNINFORMED: `addressForTurn` silently replaces the
+ * model's `customerAddress` argument with the customer's own choice, the result carried no address
+ * at all, and so the only address the model knew was the one it had asked for. Reporting that was
+ * the only thing it could do.
+ *
+ * This is the rule #92 produced and nobody implemented - a tool result should echo the RESOLVED
+ * inputs it acted on, not only the outcome. It rides on `data` deliberately, unlike an affordance:
+ * this one IS for the model, because the sentence it writes is the thing being corrected.
+ */
+function addressEcho(resolved: string | undefined): Record<string, string> {
+  if (!resolved) return {};
+  return {
+    customerAddress: resolved,
+    addressNote:
+      `This appointment is at ${resolved}. Use THIS address when you tell the customer, ` +
+      `even if they or you named a different one earlier.`,
+  };
+}
+
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
   description = 'Check available appointment slots for a given date range and service.';
@@ -163,6 +191,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           data: {
             ...result,
             ...groupedNote,
+            ...addressEcho(chosen.address),
             suggestedAction: 'request_appointment',
             guidance: travel.addressTooVague
               ? 'That address was only located to the town, so no time here can be confirmed automatically. Ask the customer for their postcode and call check_availability again — with a precise address most of these times can be confirmed outright. If they cannot give one, offer the times in travel.requestableSlots and capture the one they choose with request_appointment, saying plainly it is a request the business will confirm.'
@@ -183,6 +212,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           data: {
             ...result,
             ...groupedNote,
+            ...addressEcho(chosen.address),
             noSlotsInRange: true,
             suggestedAction: 'request_appointment',
             guidance:
@@ -190,7 +220,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           },
         };
       }
-      return { success: true, data: { ...result, ...groupedNote }, ...measurement, ...affordance };
+      return { success: true, data: { ...result, ...groupedNote, ...addressEcho(chosen.address) }, ...measurement, ...affordance };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }
@@ -414,7 +444,7 @@ export class CreateBookingTool implements ToolAdapter {
       // the first one's address - a customer booking two jobs at two addresses is ordinary, and
       // the second would otherwise be sent to the first's door.
       void clearAddressBinding(ctx.sessionId);
-      return { success: true, data: result };
+      return { success: true, data: { ...result, ...addressEcho(booked.address) } };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to create booking') };
     }
@@ -527,7 +557,10 @@ export class RequestAppointmentTool implements ToolAdapter {
       // Same reasoning as create: the address is settled, so a second Request in this session
       // starts from nothing rather than from the first one's address.
       void clearAddressBinding(ctx.sessionId);
-      return { success: true, data: result };
+      // This tool produced the SECOND live instance of the wrong-address sentence: the row said
+      // Grote Markt 1 and the customer was told Kerkstraat 12. A Request is the one a customer is
+      // most likely to act on wrongly, because nobody confirms it back to them afterwards.
+      return { success: true, data: { ...result, ...addressEcho(requested.address) } };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to capture request') };
     }

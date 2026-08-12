@@ -182,6 +182,26 @@ describe('the address question survives a preceding availability check', () => {
     expect(pending?.formattedAddress).toBe(PROPOSED);
   });
 
+  it('tells the model WHICH address it actually used', async () => {
+    // Observed live on production, twice, on two different tools. The customer was told
+    // "your appointment at Kerkstraat 12 is confirmed" while the row said Grote Markt 1 - the
+    // BOUND address, which is the correct one to book. The data was right and the customer was
+    // misinformed, so they would wait at one door while the business drove to another. Identical
+    // outcome to #95, reached from the opposite direction.
+    //
+    // The model was not being careless; it was uninformed. `CreateBookingResult` carried no
+    // address at all, so the tool silently replaced the model's argument and never said so, and
+    // the model reported the only address it knew - the one it had asked for.
+    //
+    // This is the rule #92 produced and nobody implemented: a tool result should echo the RESOLVED
+    // inputs it acted on, not only the outcome.
+    await new CreateBookingTool().execute(BOOK, ctx('run-1'));      // asks
+    const booked = await new CreateBookingTool().execute(BOOK, ctx('run-2')); // books
+
+    expect(booked.success).toBe(true);
+    expect((booked.data as { customerAddress?: string }).customerAddress).toBe(CHOSEN.formattedAddress);
+  });
+
   it('leaves the binding alone whatever the tools proposed', async () => {
     // A proposal is a question, not a change. Stated separately because it is the invariant the
     // whole file exists to protect, and a fix that moved the binding would still pass the tests

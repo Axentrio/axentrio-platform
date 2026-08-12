@@ -1673,6 +1673,9 @@ export class InternalProvider implements BookingProvider {
           name: booking.attendeeName ?? undefined,
           email: booking.attendeeEmail ?? undefined,
         },
+        // Read off the ROW, never off the arguments that produced it. On a deduped write those
+        // two differ, and the row is the one that is true.
+        customerAddress: booking.customerAddress ?? undefined,
       },
     };
   }

@@ -22,7 +22,7 @@ vi.mock('../../booking/travel/address-binding', () => ({
 }));
 vi.mock('../../utils/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn() } }));
 
-import { addressForTurn } from '../../booking/travel/address-for-turn';
+import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
 
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Grote Markt 1, 2000 Antwerpen, Belgium' };
 
@@ -155,5 +155,51 @@ describe('addressForTurn', () => {
     const logged = JSON.stringify((logger.info as ReturnType<typeof vi.fn>).mock.calls);
     expect(logged).not.toContain('Korenmarkt');
     expect(logged).not.toContain('Grote Markt');
+  });
+});
+
+describe('addressToken — the field the idempotency key was missing', () => {
+  // Live on production, a customer gave a Liège address, corrected it to Antwerp for the SAME
+  // slot, and was told the Antwerp booking was confirmed. It was not: the key omitted the
+  // address, so the correction deduped into the original row and was discarded. These pin the
+  // property that closes it — a different door is a different key.
+  it('gives two different addresses two different tokens', () => {
+    const a = addressToken({ address: 'Place Saint-Lambert 1, 4000 Liege' });
+    const b = addressToken({ address: 'Turnhoutsebaan 100, 2140 Antwerpen' });
+    expect(a).not.toBe(b);
+  });
+
+  it('is unmoved by the rewriting a model does without meaning anything by it', () => {
+    // Same doorway, three spellings. If these differed, every re-confirm would insert a
+    // duplicate request and #35 would be back.
+    const canonical = addressToken({ address: 'Meir 78, 2000 Antwerpen' });
+    expect(addressToken({ address: '  meir 78,  2000   antwerpen ' })).toBe(canonical);
+    expect(addressToken({ address: 'Meir 78. 2000 Antwerpen' })).toBe(canonical);
+  });
+
+  it('separates two doors on one street, which is the wrong-door case', () => {
+    expect(addressToken({ address: 'Kerkstraat 1, 2060 Antwerpen' })).not.toBe(
+      addressToken({ address: 'Kerkstraat 12, 2060 Antwerpen' })
+    );
+  });
+
+  it('prefers the identity the customer PICKED over the words around it', () => {
+    // A place id survives reformatting, so two spellings of one chosen place stay one key.
+    const one = addressToken({ address: 'Grote Markt 1, Antwerpen', placeId: 'ChIJ_chosen' });
+    const two = addressToken({ address: 'Grote Markt 1, 2000 Antwerpen, Belgium', placeId: 'ChIJ_chosen' });
+    expect(one).toBe(two);
+    // ...and a different pick is a different key even when the text is identical.
+    expect(addressToken({ address: 'Grote Markt 1, Antwerpen', placeId: 'ChIJ_other' })).not.toBe(one);
+  });
+
+  it('is a constant when there is no address, so nothing changes for services that need none', () => {
+    expect(addressToken({ address: undefined })).toBe('noaddr');
+    expect(addressToken({ address: '   ' })).toBe(addressToken({ address: undefined }));
+  });
+
+  it('stays short enough that a long address cannot overflow idempotency_key', () => {
+    // The column is varchar(255) and the key already spends ~120 on session, service and time.
+    const long = addressToken({ address: 'A'.repeat(400) });
+    expect(long.length).toBeLessThanOrEqual(12);
   });
 });

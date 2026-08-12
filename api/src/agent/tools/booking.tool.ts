@@ -1,5 +1,5 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
-import { addressForTurn } from '../../booking/travel/address-for-turn';
+import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
 import { clearAddressBinding } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
@@ -263,7 +263,13 @@ export class CreateBookingTool implements ToolAdapter {
           errorSafeForModel: true,
         };
       }
-      const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}`;
+      // The address is in the key for the same reason it is in `request_appointment`'s: two calls
+      // that differ only in where the van goes are not the same booking. The `correctionPending`
+      // guard above is the first line of defence and a better one - it asks the customer - but it
+      // only fires when a BINDING exists, and a binding is written in exactly one place
+      // (`/places/select`). Wherever address suggestions are unavailable, that guard never runs
+      // and this key is all that is left.
+      const idempotencyKey = `create_booking:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.startTime as string}:${addressToken(booked)}`;
       const result = await createBooking(
         'agent',
         ctx.sessionId,
@@ -437,8 +443,12 @@ export class RequestAppointmentTool implements ToolAdapter {
         args.customerAddress as string | undefined
       );
       // Stable across turns (not per-runId) so a re-confirm in a later turn dedupes
-      // to the same request instead of inserting a duplicate (#35).
-      const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}`;
+      // to the same request instead of inserting a duplicate (#35) - but keyed on the ADDRESS as
+      // well, because a customer correcting where they live is not a re-confirm. Without the
+      // token the correction deduped into the original row and the model was handed a success
+      // carrying the OLD address, which is how a customer came to be told a booking was confirmed
+      // at a door the system had never recorded.
+      const idempotencyKey = `request_appointment:${ctx.sessionId}:${(args.serviceId as string) ?? 'default'}:${args.preferredTime as string}:${addressToken(requested)}`;
       const badEmail = rejectBadEmail(args.attendeeEmail);
       if (badEmail) return badEmail;
       const result = await requestBooking(

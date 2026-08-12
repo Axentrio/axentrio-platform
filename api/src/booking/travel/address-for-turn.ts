@@ -90,6 +90,33 @@ const looksLikeSameAddress = (a: string, b: string) => {
   return x === y || x.includes(y) || y.includes(x);
 };
 
+/**
+ * A short, stable token for the address a booking tool is actually about to use.
+ *
+ * It exists to go in an idempotency key, and the bug it closes is worth stating because the key
+ * looked complete without it. `request_appointment:<session>:<service>:<time>` names everything
+ * the model chose EXCEPT where the van goes - so a customer who gave one address, then corrected
+ * it for the same slot, produced the same key. The second call found the first row, returned it as
+ * a success, and threw the new address away. Live on production this told a customer their
+ * appointment in Antwerp was confirmed while the only row said Liège, unconfirmed.
+ *
+ * A changed address must therefore be a DIFFERENT request, not a duplicate of the old one. That
+ * keeps #35's reason for a stable key - a re-confirm of the same facts still dedupes - while
+ * denying it the one case where the facts changed.
+ *
+ * `place_id` first, because it is the identity the customer picked and survives reformatting;
+ * otherwise the normalised text, which is the same comparison `looksLikeSameAddress` starts from.
+ * Hashed and truncated so a long address cannot push the key past `idempotency_key`'s varchar(255).
+ *
+ * A service that needs no address yields a constant, so nothing changes for the bookings that
+ * never had this problem.
+ */
+export function addressToken(turn: Pick<TurnAddress, 'address' | 'placeId'>): string {
+  const identity = turn.placeId?.trim() || (turn.address ? normalise(turn.address) : '');
+  if (!identity) return 'noaddr';
+  return createHash('sha256').update(identity).digest('hex').slice(0, 12);
+}
+
 export async function addressForTurn(
   sessionId: string,
   modelArgument: string | undefined

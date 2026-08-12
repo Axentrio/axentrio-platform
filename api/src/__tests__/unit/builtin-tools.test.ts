@@ -328,13 +328,35 @@ describe('CreateBookingTool', () => {
     expect(mockCreateBooking).toHaveBeenCalledWith(
       'agent',
       'sess-1',
-      'create_booking:sess-1:default:2026-04-01T10:00:00Z',
+      // `noaddr` rather than a hash: this booking named no address, and a service that needs
+      // none must key exactly as it always did.
+      'create_booking:sess-1:default:2026-04-01T10:00:00Z:noaddr',
       '2026-04-01T10:00:00Z',
       { name: 'Alice', email: 'alice@test.com' },
       undefined,
       undefined,
       undefined,
       { customerAddress: undefined, customerPhone: undefined, durationMin: undefined }    );
+  });
+
+  it('keys a CHANGED address as a different booking, and an unchanged one as the same', async () => {
+    // The property, not the format. Two calls that differ only in where the van goes are not the
+    // same booking - live on production a customer who corrected their address was handed the
+    // original row back as a success and told it was confirmed at the new one.
+    const tool = new CreateBookingTool();
+    const ctx = makeCtx({ runId: 'run-1', sessionId: 'sess-9' });
+    mockCreateBooking.mockResolvedValue({ success: true, booking: { id: 'bk-9' } });
+    const args = { startTime: '2026-04-01T10:00:00Z', attendeeName: 'Alice', attendeeEmail: 'a@t.com' };
+    const keyOf = (call: unknown[]) => call[2] as string;
+
+    await tool.execute({ ...args, customerAddress: 'Place Saint-Lambert 1, 4000 Liege' }, ctx);
+    await tool.execute({ ...args, customerAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' }, ctx);
+    // Same doorway, spelled the way a model rewrites it — must NOT become a second booking.
+    await tool.execute({ ...args, customerAddress: '  place saint-lambert 1,  4000 liege ' }, ctx);
+
+    const [liege, antwerp, liegeAgain] = mockCreateBooking.mock.calls.map(keyOf);
+    expect(liege).not.toBe(antwerp);
+    expect(liegeAgain).toBe(liege);
   });
 
   it('passes notes when provided', async () => {
@@ -350,7 +372,7 @@ describe('CreateBookingTool', () => {
     expect(mockCreateBooking).toHaveBeenCalledWith(
       'agent',
       'sess-2',
-      'create_booking:sess-2:default:2026-04-02T09:00:00Z',
+      'create_booking:sess-2:default:2026-04-02T09:00:00Z:noaddr',
       '2026-04-02T09:00:00Z',
       { name: 'Bob', email: 'bob@test.com' },
       'Need consultation',

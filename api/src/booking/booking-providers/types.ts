@@ -221,6 +221,19 @@ export interface CreateBookingResult {
      *  (it must NOT re-derive a local time from the UTC startTime — that drifts). */
     displayTime?: string;
     attendee: { name?: string; email?: string };
+    /**
+     * The address the row ACTUALLY carries, so a caller can tell it apart from the one it sent.
+     *
+     * Absent for a service that needs no address. Present otherwise even when it matches, because
+     * a field that only appears when something is wrong is a field nobody reads.
+     *
+     * This exists because the result used to carry no address at all, which made a whole class of
+     * bug undetectable rather than merely easy to miss: a deduped write returns an EXISTING row,
+     * and if that row was created with a different address there was nothing in the payload to say
+     * so. The model dutifully announced the address it had asked for. Returning the stored value
+     * means the discard is visible to anything that looks.
+     */
+    customerAddress?: string;
   };
 }
 

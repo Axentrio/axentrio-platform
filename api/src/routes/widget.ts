@@ -20,9 +20,14 @@ import { emitToSession } from '../websocket/socket.handler';
 import { ingestWidgetCustomerMessage } from '../services/widget-ingest';
 import { autocompleteAddress } from '../booking/travel/places.service';
 import { resolvePlaceId } from '../booking/travel/geocoding.service';
-import { bindAddress } from '../booking/travel/address-binding';
+import {
+  bindAddress,
+  getPendingCorrection,
+  confirmCorrection,
+  rejectCorrection,
+} from '../booking/travel/address-binding';
 import { placesRateLimiter } from '../middleware/rate-limit';
-import { placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
+import { addressConfirmSchema, placesQuerySchema, placesSelectSchema } from '../schemas/scheduler.schema';
 import { decrypt, encrypt } from '../utils/encryption';
 import { generateWidgetToken } from '../middleware/auth.middleware';
 import { logger } from '../utils/logger';
@@ -550,6 +555,58 @@ router.post(
  * Request handoff to human agent
  * POST /api/v1/widget/handoff
  */
+/**
+ * The customer answers "should the address be X instead of Y?" (#95).
+ *
+ * Until this existed the answer went nowhere. `proposeCorrection` recorded the question,
+ * `confirmCorrection` and `rejectCorrection` were implemented and unit-tested, and NOTHING in
+ * production called them - so a customer who said "yes, Kerkstraat 12 is correct" was booked at
+ * the address they had just moved away from, and told otherwise. Reproduced on production the day
+ * address suggestions were enabled, which is what made the path reachable at all.
+ *
+ * A SERVER-OBSERVED EVENT, never a model relay. The binding exists precisely because tool
+ * arguments are LLM-written and cannot be trusted to move it; a boolean from the model would be
+ * the same claim wearing a smaller hat. This is a button press, the same class of evidence as
+ * `/places/select`, and it carries the `proposalId` the SERVER issued - so a late "yes" cannot
+ * confirm a question the customer has already moved past. `confirmCorrection` returns false on a
+ * proposal that is no longer outstanding, and that is reported rather than swallowed.
+ */
+router.post(
+  '/address/confirm',
+  authenticateWidget,
+  asyncHandler(async (req: Request, res: Response) => {
+    const tenantId = req.widget!.tenantId;
+    const sessionId = req.widget!.sessionId;
+    if (!sessionId) throw new ValidationError('Session not initialized');
+
+    const { proposalId, confirmed } = addressConfirmSchema.parse(req.body ?? {});
+
+    const session = await AppDataSource.getRepository(ChatSession).findOne({
+      where: { id: sessionId, tenantId },
+    });
+    if (!session) throw new NotFoundError('Session not found');
+    if (session.status === 'closed') throw new ValidationError('Session is closed');
+
+    const pending = await getPendingCorrection(sessionId);
+    // Not an error the customer caused: the question may have been superseded or expired while
+    // the button sat on their screen. Saying so beats pretending the press did something.
+    if (!pending || pending.proposalId !== proposalId) {
+      sendSuccess(res, { applied: false, reason: 'no_longer_outstanding' });
+      return;
+    }
+
+    const applied = confirmed
+      ? await confirmCorrection(sessionId, proposalId)
+      : await rejectCorrection(sessionId, proposalId);
+
+    // The address the conversation is now about, spoken INTO it the same way a picked address is.
+    // A state change the model never hears about is one it will contradict in its next sentence.
+    if (applied && confirmed) await ingestWidgetCustomerMessage(session, pending.formattedAddress);
+
+    sendSuccess(res, { applied, confirmed, address: confirmed ? pending.formattedAddress : undefined });
+  })
+);
+
 router.post(
   '/handoff',
   authenticateWidget,

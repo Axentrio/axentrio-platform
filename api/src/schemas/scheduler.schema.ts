@@ -393,6 +393,19 @@ export const placesQuerySchema = z.object({
 });
 
 /** A place id from our own suggestion list. */
+/**
+ * The customer's answer to a correction question (#95).
+ *
+ * `proposalId` and nothing else identifies WHICH question is being answered - the server issued
+ * it, and requiring it back is what stops a late "yes" confirming a proposal the customer has
+ * already superseded. Deliberately no address field: the model may not name a place here, and
+ * neither may the widget. The server already knows what it asked.
+ */
+export const addressConfirmSchema = z.object({
+  proposalId: z.string().min(1).max(64),
+  confirmed: z.boolean(),
+});
+
 export const placesSelectSchema = z.object({
   placeId: z.string().min(1).max(512),
 });

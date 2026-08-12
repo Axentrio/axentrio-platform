@@ -57,6 +57,12 @@ vi.mock('../../booking/booking.service', async (importOriginal) => {
   };
 });
 
+// The delivery check is the new signal, so it is the thing to control in these tests.
+const asked = vi.fn();
+vi.mock('../../booking/travel/question-delivery', () => ({
+  questionWasAsked: (...a: unknown[]) => asked(...(a as [])),
+}));
+
 vi.mock('../../utils/logger', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -110,6 +116,8 @@ beforeEach(async () => {
   store.clear();
   mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'Europe/Brussels' });
   mockCreateBooking.mockResolvedValue({ id: 'bk-1', status: 'confirmed' });
+  // Nothing has been shown yet, which is the state every test starts from.
+  asked.mockResolvedValue(false);
   await bindAddress(SESSION, CHOSEN);
 });
 
@@ -145,6 +153,20 @@ describe('the address question survives a preceding availability check', () => {
     expect(mockCreateBooking).not.toHaveBeenCalled();
   });
 
+  it('asks AGAIN when the run that asked died before its reply was written', async () => {
+    // The coalescer re-runs the same customer message after a processor error, with a fresh run id.
+    // Keyed on the run, the refusal lifted and the booking went through - for a question whose
+    // reply was never persisted, so the customer had seen nothing at all. Keyed on whether the
+    // reply EXISTS, the replay correctly asks again.
+    await new CreateBookingTool().execute(BOOK, ctx('run-1'));   // asks; reply never persisted
+    asked.mockResolvedValue(false);                              // ...so no message carries it
+
+    const replay = await new CreateBookingTool().execute(BOOK, ctx('run-2-replay'));
+
+    expect(raisesTheQuestion(replay)).toBe(true);
+    expect(mockCreateBooking).not.toHaveBeenCalled();
+  });
+
   it('does not ask twice across turns, so the customer is never wedged', async () => {
     // The other half of the design, and the half a naive fix breaks. CONTEXT.md: a Pending
     // Correction "never blocks them from booking". A NEW run means the customer saw the question
@@ -155,6 +177,8 @@ describe('the address question survives a preceding availability check', () => {
       ctx('run-1')
     );
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));
+    // The reply landed, so the customer has genuinely been shown the question.
+    asked.mockResolvedValue(true);
 
     const nextTurn = await new CreateBookingTool().execute(BOOK, ctx('run-2'));
 
@@ -219,6 +243,7 @@ describe('the address question survives a preceding availability check', () => {
     // This is the rule #92 produced and nobody implemented: a tool result should echo the RESOLVED
     // inputs it acted on, not only the outcome.
     await new CreateBookingTool().execute(BOOK, ctx('run-1'));      // asks
+    asked.mockResolvedValue(true);                                   // the reply landed
     const booked = await new CreateBookingTool().execute(BOOK, ctx('run-2')); // books
 
     expect(booked.success).toBe(true);

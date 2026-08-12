@@ -71,20 +71,6 @@ export interface PendingCorrection extends BoundAddress {
    * Set by `claimPresentation`, which is the only thing entitled to spend it.
    */
   presented?: boolean;
-  /**
-   * WHICH agent run asked, which is the only way to know whether the customer has seen it.
-   *
-   * A run is one customer message. The model may emit several tool calls inside it and they are
-   * executed back to back with no customer in between, so "we already asked" is not true yet -
-   * the question is sitting in a tool result nobody has read. Without this, a `create_booking`
-   * queued behind the one that just asked finds the question already spent and books immediately,
-   * which is the original defect wearing the fix's clothes.
-   *
-   * So the refusal stands for as long as the presentation belongs to THIS run, and lifts on the
-   * next one - by which time the customer has genuinely been shown the question and had their
-   * turn to answer it.
-   */
-  presentedByRun?: string;
 }
 
 interface Record_ {
@@ -189,39 +175,23 @@ export async function proposeCorrection(
 }
 
 /**
- * May this caller ask the customer about this proposal? Spends the question if so.
+ * Mark this proposal as ASKED, so the transition will accept an answer to it.
  *
- * True while the question is unasked, or was asked by THIS run and therefore has not reached the
- * customer yet. False once a different run has asked - which is the moment the customer has had
- * their turn, and from then on the booking proceeds against the address they chose.
+ * Records only that the server put the question; it does NOT decide whether asking is allowed.
+ * That decision needs to know whether the customer ever saw the last attempt, which is a fact
+ * about persisted replies rather than about this record - see `question-delivery.ts`, and the list
+ * of three guards that each named something adjacent to it.
  *
- * That is what keeps the promise that a Pending Correction "never blocks them from booking":
- * asking is one refusal, not a wall. A customer whose address Google cannot suggest - a new build,
- * a renamed street - is asked once, cannot usefully answer, and still gets their appointment.
- *
- * Two things had to be separated to make this work, and they are separated by design rather than
- * by accident:
- *
- *   proposing    every booking tool does it, because every one resolves an address.
- *   asking       exactly one tool can, because the other two must not refuse.
- *
- * Counting proposals instead of questions is what let `check_availability` spend the customer's
- * only question by saying nothing.
+ * `presented` is what the confirm/reject transition requires. Without it the transition keyed on
+ * `proposalId` alone, and that id is a hash of the two addresses - reproducible by anyone who knows
+ * them, so it proved nothing about whether a question was ever put.
  */
-export async function claimPresentation(
-  sessionId: string,
-  proposalId: string,
-  runId: string
-): Promise<boolean> {
+export async function claimPresentation(sessionId: string, proposalId: string): Promise<boolean> {
   const current = await read(sessionId);
   if (!current.pending || current.pending.proposalId !== proposalId) return false;
-  // Already asked, and the customer has since had a turn. Get on with it.
-  if (current.pending.presented && current.pending.presentedByRun !== runId) return false;
-  // Either nobody has asked, or this same run did - and a run is one customer message, so they
-  // have not seen it yet. Keep refusing until they have.
   await write(sessionId, {
     active: current.active,
-    pending: { ...current.pending, presented: true, presentedByRun: runId },
+    pending: { ...current.pending, presented: true },
   });
   return true;
 }

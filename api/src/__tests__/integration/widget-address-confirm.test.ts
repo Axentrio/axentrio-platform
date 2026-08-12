@@ -94,7 +94,7 @@ beforeEach(async () => {
   // ASKED, not merely recorded. The transition now requires it, because a proposal the customer
   // was never shown is not a question they can have answered - and `proposalId` alone was
   // derivable from the address, so it proved nothing. Verified against production 2026-08-13.
-  await claimPresentation(sessionId, PROPOSED.proposalId, 'run-fixture');
+  await claimPresentation(sessionId, PROPOSED.proposalId);
 });
 
 describe('POST /widget/address/confirm', () => {
@@ -130,7 +130,7 @@ describe('POST /widget/address/confirm', () => {
     // again (which releases the question), and the next contested turn asks afresh.
     await bindAddress(sessionId, CHOSEN);
     await proposeCorrection(sessionId, { ...PROPOSED, proposalId: 'prop-2', formattedAddress: 'Meir 78, 2000 Antwerpen' });
-    await claimPresentation(sessionId, 'prop-2', 'run-2');
+    await claimPresentation(sessionId, 'prop-2');
 
     const res = await post({ proposalId: 'prop-1', confirmed: true });
 

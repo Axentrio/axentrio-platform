@@ -186,6 +186,20 @@ export async function proposeCorrection(
  * `proposalId` alone, and that id is a hash of the two addresses - reproducible by anyone who knows
  * them, so it proved nothing about whether a question was ever put.
  */
+/**
+ * KNOWN, AND TRACKED WITH ITS TWO SIBLINGS: read-then-write, like `proposeCorrection` and
+ * `bindAddress`. A write committed in between is lost - a claim that reads {A, P} while the
+ * customer's confirmation commits {B, null} puts {A, P} back, discarding the answer and restoring
+ * a question they have already settled.
+ *
+ * Briefly converted to a Lua CAS and reverted. Converting ONE of the three writers does not close
+ * the class, and every unit test of the booking tools holds its binding state in a Map standing in
+ * for Redis - which has no `eval`, so the conversion silently disabled the question in eight of
+ * them. The three want doing together, against real Redis, as one piece of work rather than as a
+ * side effect of an unrelated fix.
+ *
+ * The TRANSITIONS are already atomic, which is the half that decides where a van goes.
+ */
 export async function claimPresentation(sessionId: string, proposalId: string): Promise<boolean> {
   const current = await read(sessionId);
   if (!current.pending || current.pending.proposalId !== proposalId) return false;

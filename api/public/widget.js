@@ -1337,7 +1337,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
       const loading = eager ? 'eager' : 'lazy';
-      return `<img src="${safe}" alt="" loading="${loading}" class="cb-bot-avatar-img" />`;
+      return `<img src="${utils.escapeAttr(safe)}" alt="" loading="${loading}" class="cb-bot-avatar-img" />`;
     }
     return ICONS.bot;
   }
@@ -2188,7 +2188,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             <div class="cb-input-wrapper">
               <textarea 
                 class="cb-input" 
-                placeholder="${utils.escapeHtml(this.config.placeholder)}"
+                placeholder="${utils.escapeAttr(this.config.placeholder)}"
                 rows="1"
                 aria-label="Type your message"
               ></textarea>
@@ -2261,7 +2261,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       
       if (message.file) {
         if (message.file.type.startsWith('image/')) {
-          content = `<img class="cb-message__image" src="${utils.escapeHtml(message.file.url)}" alt="${utils.escapeHtml(message.file.name)}" loading="lazy">`;
+          content = `<img class="cb-message__image" src="${utils.escapeAttr(message.file.url)}" alt="${utils.escapeAttr(message.file.name)}" loading="lazy">`;
         } else {
           content = `
             <div class="cb-message__file">

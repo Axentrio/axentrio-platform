@@ -190,8 +190,15 @@ export async function addressForTurn(
   // something worse: the turn coalescer re-runs the same customer message after a processor error,
   // and the design relies on that replay producing the SAME proposal rather than a fresh question
   // nobody saw. Determinism over the pair keeps both properties.
+  //
+  // LENGTH-PREFIXED, not just delimited. `a|b` + `c` and `a` + `b|c` concatenate to the same
+  // string, so a plain separator lets two different questions collide again - the exact defect
+  // this hash was widened to fix, one layer down. Prefixing each side with its length makes the
+  // encoding unambiguous whatever the addresses contain.
+  const boundIdentity = bound.placeId || normalise(bound.formattedAddress);
+  const proposedIdentity = normalise(typed);
   const proposalId = createHash('sha256')
-    .update(`${bound.placeId || normalise(bound.formattedAddress)}|${normalise(typed)}`)
+    .update(`${boundIdentity.length}:${boundIdentity}|${proposedIdentity.length}:${proposedIdentity}`)
     .digest('hex')
     .slice(0, 16);
   await proposeCorrection(sessionId, {

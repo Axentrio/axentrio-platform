@@ -42,11 +42,24 @@ export async function questionWasAsked(
   if (!dataSource) return null;
   try {
     const rows: Array<{ exists: boolean }> = await dataSource.query(
+      // JOINED TO participants AND REQUIRING type = 'bot'.
+      //
+      // Without that join this asked whether ANY message carried the id, and `POST /widget/message`
+      // stores customer-supplied `metadata` verbatim (`widget.ts:453`) - so a customer could post
+      // `{affordance:{proposalId}}`, manufacture the evidence that they had already been asked, and
+      // `create_booking` would proceed without asking. The correction this feature exists to
+      // collect would be silently skipped, by the guard meant to guarantee it was collected.
+      //
+      // Only the platform writes a bot message, so the participant type is what makes this a
+      // statement about what the SERVER said rather than about what anyone claimed.
       `SELECT EXISTS (
-         SELECT 1 FROM messages
-          WHERE session_id = $1
-            AND is_deleted = false
-            AND metadata -> 'affordance' ->> 'proposalId' = $2
+         SELECT 1
+           FROM messages m
+           JOIN participants p ON p.id = m.participant_id
+          WHERE m.session_id = $1
+            AND m.is_deleted = false
+            AND p.type = 'bot'
+            AND m.metadata -> 'affordance' ->> 'proposalId' = $2
        ) AS exists`,
       [sessionId, proposalId]
     );

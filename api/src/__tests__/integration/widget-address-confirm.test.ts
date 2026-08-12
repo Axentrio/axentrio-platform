@@ -45,6 +45,9 @@ import {
   getPendingCorrection,
 } from '../../booking/travel/address-binding';
 import type { Tenant } from '../../database/entities/Tenant';
+import { AppDataSource } from '../../database/data-source';
+import { Participant } from '../../database/entities/Participant';
+import { Message } from '../../database/entities/Message';
 
 let tenant: Tenant;
 let sessionId: string;
@@ -95,6 +98,25 @@ beforeEach(async () => {
   // was never shown is not a question they can have answered - and `proposalId` alone was
   // derivable from the address, so it proved nothing. Verified against production 2026-08-13.
   await claimPresentation(sessionId, PROPOSED.proposalId);
+  // AND THE REPLY THAT CARRIED THE CONTROL. The route now requires it: `presented` is set when the
+  // tool decides to ask, and the reply is written afterwards, so the flag alone cannot distinguish
+  // "asked" from "was about to ask and died". Without this row the fixture describes a question
+  // that was never on screen, which the endpoint is right to refuse.
+  const botParticipant = await AppDataSource.getRepository(Participant).save(
+    AppDataSource.getRepository(Participant).create({ sessionId, type: 'bot', name: 'bot', joinedAt: new Date() })
+  );
+  await AppDataSource.getRepository(Message).save(
+    AppDataSource.getRepository(Message).create({
+      sessionId,
+      tenantId: tenant.id,
+      participantId: botParticipant.id,
+      type: 'text',
+      content: 'which address?',
+      status: 'sent',
+      sentAt: new Date(),
+      metadata: { affordance: { kind: 'address_confirm', proposalId: PROPOSED.proposalId } } as never,
+    })
+  );
 });
 
 describe('POST /widget/address/confirm', () => {

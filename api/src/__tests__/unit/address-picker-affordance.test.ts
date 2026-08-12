@@ -1,0 +1,147 @@
+/**
+ * When the platform should offer to VERIFY an address, rather than keep guessing at one.
+ *
+ * An **Address Binding** can only be created by picking an **Address Suggestion**, and nothing in
+ * any client offers that list - so `bindAddress` has never been reachable by a customer on any
+ * surface. Every piece of machinery downstream of it (the **Pending Correction**, the confirmation
+ * endpoint, the wrong-door guard, the address-aware dedup identity) is built, tested, and
+ * unreachable, because the one thing that starts the chain has no front door.
+ *
+ * This is the signal that opens it. The server, not the client, decides when to offer the picker,
+ * for two reasons:
+ *
+ *   - Suggestions are billed per request and fire on a debounce, so a client that guesses "this
+ *     looks like an address" pays for every guess and still misses the times it matters.
+ *   - `ADDRESS_REQUIRED` is the obvious trigger and is the WRONG one: `booking.module.ts:379`
+ *     tells the model to ask for the address BEFORE calling check_availability, so that error only
+ *     fires when the model misbehaved. Gating on it would show the picker exactly when things had
+ *     already gone wrong and never during a conversation that went well.
+ *
+ * The signal used instead is `result.travel`. Travel only applies to a service whose
+ * `customerAddressRequired` is set (`booking-place.ts:80`), so its presence IS the server saying
+ * this job happens at the customer's address. Paired with "no verified place is bound yet", that
+ * is precisely the moment a picker helps and the only moment it is worth paying for.
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+const store = new Map<string, string>();
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () => ({
+    get: async (k: string) => store.get(k) ?? null,
+    set: async (k: string, v: string) => {
+      store.set(k, v);
+      return 'OK';
+    },
+    del: async (k: string) => {
+      store.delete(k);
+      return 1;
+    },
+    expire: async () => 1,
+  }),
+  isRedisAvailable: () => true,
+}));
+
+const mockCheckAvailability = vi.fn();
+vi.mock('../../booking/booking.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../booking/booking.service')>();
+  return { ...actual, checkAvailability: (...a: unknown[]) => mockCheckAvailability(...a) };
+});
+vi.mock('../../utils/logger', () => ({
+  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+import { CheckAvailabilityTool } from '../../agent/tools/booking.tool';
+import { bindAddress } from '../../booking/travel/address-binding';
+import type { ToolContext } from '../../agent/tool-adapter';
+
+const SESSION = 'sess-picker';
+const TYPED = 'Kerkstraat 12, Antwerpen';
+
+const ctx = (): ToolContext => ({
+  tenantId: 'tenant-1',
+  sessionId: SESSION,
+  runId: 'run-1',
+  toolsCalledThisTurn: [],
+  dataSource: {} as never,
+  conversationHistory: [],
+});
+
+const check = (args: Record<string, unknown> = {}) =>
+  new CheckAvailabilityTool().execute(
+    { startDate: '2026-09-01', endDate: '2026-09-02', customerAddress: TYPED, ...args },
+    ctx()
+  );
+
+/** A result for a service that travels: `travel` present is what says so. */
+const TRAVELS = {
+  slots: [{ start: '2026-09-01T09:00:00Z' }],
+  timezone: 'Europe/Brussels',
+  travel: { requestableSlots: [], addressTooVague: false },
+};
+/** A service the customer comes to. No `travel`, so no address is needed and none is offered. */
+const NO_TRAVEL = { slots: [{ start: '2026-09-01T09:00:00Z' }], timezone: 'Europe/Brussels' };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  store.clear();
+});
+
+describe('offering to verify the address', () => {
+  it('offers the picker when the job travels and nothing verified is bound', async () => {
+    // The whole point. The customer typed an address, the model passed it along, and nobody has
+    // asked Google whether that is a real doorway. Until they pick one, every downstream
+    // protection is running on text.
+    mockCheckAvailability.mockResolvedValue(TRAVELS);
+
+    const res = await check();
+
+    expect(res.affordance).toEqual({ kind: 'address_picker', reason: 'unverified', query: TYPED });
+  });
+
+  it('says nothing for a service the customer comes to', async () => {
+    // No travel, no address needed. Asking a customer to verify their home address for a job that
+    // happens on the business's premises is a question with no purpose, and it still costs a
+    // billable request per keystroke once they start typing.
+    mockCheckAvailability.mockResolvedValue(NO_TRAVEL);
+
+    const res = await check();
+
+    expect(res.affordance).toBeUndefined();
+  });
+
+  it('stops offering once the customer has picked one', async () => {
+    // A binding means they already chose from the list and Google resolved it. Offering again
+    // would ask them to redo the one thing that worked.
+    await bindAddress(SESSION, { placeId: 'ChIJ_chosen', formattedAddress: TYPED });
+    mockCheckAvailability.mockResolvedValue(TRAVELS);
+
+    const res = await check({ customerAddress: TYPED });
+
+    expect(res.affordance).toBeUndefined();
+  });
+
+  it('flags the town-only case, where verifying matters most', async () => {
+    // `addressTooVague` means Google reached the town and no further, so no time can be
+    // auto-confirmed. This is the case where picking a suggestion changes the customer's actual
+    // outcome rather than merely tidying the record.
+    mockCheckAvailability.mockResolvedValue({
+      ...TRAVELS,
+      travel: { requestableSlots: [{ start: '2026-09-01T09:00:00Z' }], addressTooVague: true },
+    });
+
+    const res = await check();
+
+    expect(res.affordance).toMatchObject({ kind: 'address_picker', reason: 'too_vague' });
+  });
+
+  it('never rides on `data`, which the model reads', async () => {
+    // Same rule `measurement` follows, and for the same reason: `data` is serialised into the tool
+    // message and truncated at 4000 characters, so anything parked there competes with the slot
+    // list. It is also UI, and a model told about a picker will start describing one.
+    mockCheckAvailability.mockResolvedValue(TRAVELS);
+
+    const res = await check();
+
+    expect(JSON.stringify(res.data)).not.toContain('address_picker');
+  });
+});

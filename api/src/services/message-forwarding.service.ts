@@ -23,6 +23,7 @@ import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.type
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
+import type { Affordance } from '../agent/tool-adapter';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -659,7 +660,13 @@ async function platformAgentPath(
             await handleBotHandoff(session, botParticipant.id, 'bot_error');
             handedOff = true;
           } else {
-            await sendBotMessage(session, botParticipant.id, result.content, result.quickReplies, result.offer);
+            await sendBotMessage(
+              session,
+              botParticipant.id,
+              result.content,
+              { quickReplies: result.quickReplies, affordance: result.affordance },
+              result.offer,
+            );
           }
           break;
         }
@@ -983,6 +990,49 @@ async function getUnansweredUserWindow(session: ChatSession, hwmId: string): Pro
 }
 
 /**
+ * Everything a bot reply carries for the client, in one parameter.
+ *
+ * Deliberately an OBJECT replacing a positional `quickReplies`, and the type is the point rather
+ * than the tidiness. Added as a second optional positional, a new field would compile at every
+ * call site that forgot it - which is the whole failure mode this area keeps reproducing, because
+ * a dropped affordance looks exactly like a reply that had none. As an object, adding a field
+ * makes `tsc` name every site that builds one.
+ */
+export interface ReplyExtras {
+  /** Tappable SENTENCES. A chip's value returns as an ordinary customer message. */
+  quickReplies?: Array<{ title: string; value: string }>;
+  /** A CONTROL the server asked the client to offer, whose result returns through an endpoint. */
+  affordance?: Affordance;
+}
+
+/**
+ * Everything a bot reply carries for the CLIENT, built in one place.
+ *
+ * It was three places - the same `quickReplies?.length ? { quickReplies } : undefined` written
+ * out at each of the two persistence sites and the outbound one. That shape is why #80's offer
+ * measurement "sat in exactly the right function and never fired once in production": every caller
+ * assembled its own payload literal, so a field added to one was silently absent from the others,
+ * and nothing failed - the reply simply arrived without it.
+ *
+ * There is no way to add a second field to three literals and be sure it reached all three, and
+ * this file is now adding one. So the literals become a function, and a new field is added here,
+ * once, or it does not exist.
+ *
+ * Returns `undefined` rather than `{}` when there is nothing to say, because an empty object is
+ * still a metadata column write and reads downstream as "this reply had metadata".
+ */
+export function replyMetadata(parts: {
+  quickReplies?: Array<{ title: string; value: string }>;
+  affordance?: Affordance;
+}): { quickReplies?: Array<{ title: string; value: string }>; affordance?: Affordance } | undefined {
+  const metadata = {
+    ...(parts.quickReplies?.length ? { quickReplies: parts.quickReplies } : {}),
+    ...(parts.affordance ? { affordance: parts.affordance } : {}),
+  };
+  return Object.keys(metadata).length ? metadata : undefined;
+}
+
+/**
  * Persist the bot reply AND advance the durable watermark in ONE transaction.
  * - When `staleGuard`, first check for a user message newer than the hwm; if one
  *   exists the computed reply is stale → return 'stale' WITHOUT writing.
@@ -996,7 +1046,7 @@ async function finalizeReply(
   session: ChatSession,
   botParticipantId: string,
   content: string,
-  quickReplies: Array<{ title: string; value: string }> | undefined,
+  extras: ReplyExtras | undefined,
   hwmId: string,
   staleGuard: boolean,
 ): Promise<{ status: 'answered'; savedId: string } | { status: 'stale' }> {
@@ -1017,7 +1067,7 @@ async function finalizeReply(
         if (r?.[0]?.has_newer) return { status: 'stale' as const };
       }
 
-      const metadata = quickReplies?.length ? { quickReplies } : undefined;
+      const metadata = replyMetadata(extras ?? {});
       const repo = manager.getRepository(Message);
       const saved = await repo.save(
         repo.create({
@@ -1101,7 +1151,7 @@ async function routeBotMessageOutbound(
   session: ChatSession,
   savedId: string,
   content: string,
-  quickReplies?: Array<{ title: string; value: string }>,
+  extras?: ReplyExtras,
   /**
    * #80 measurement, forwarded rather than acted on.
    *
@@ -1111,9 +1161,9 @@ async function routeBotMessageOutbound(
    */
   offer?: OfferMeasurement,
 ): Promise<void> {
-  const metadata = quickReplies?.length ? { quickReplies } : undefined;
+  const metadata = replyMetadata(extras ?? {});
   const result = await routeOutboundMessage(
-    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}), ...(offer ? { offer } : {}) },
+    { type: 'text', content, ...(extras?.quickReplies?.length ? { quickReplies: extras.quickReplies } : {}), ...(offer ? { offer } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: savedId },
     {
       event: 'message:receive',
@@ -1307,6 +1357,10 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
       break;
   }
   let quickReplies = result.type === 'response' ? result.quickReplies : undefined;
+  // Read alongside `quickReplies` and cleared alongside it, because the guardrail block below is
+  // about a reply the customer must not be shown - and a control attached to a suppressed reply
+  // would render under a fallback that says nothing about it.
+  let affordance = result.type === 'response' ? result.affordance : undefined;
 
   // ── Output guardrails (AC14) ──────────────────────────────────────────────
   // Validate only AI-GENERATED content (response / booking confirmation); the
@@ -1323,15 +1377,17 @@ export async function runTurn(session: ChatSession, pending: Message): Promise<R
     if (guard.blocked) {
       content = guard.content;
       quickReplies = undefined;
+      affordance = undefined;
       handoffReason = 'bot_error';
       staleGuard = false;
     }
   }
 
-  const fin = await finalizeReply(session, botParticipant.id, content, quickReplies, pending.id, staleGuard);
+  const extras: ReplyExtras = { quickReplies, affordance };
+  const fin = await finalizeReply(session, botParticipant.id, content, extras, pending.id, staleGuard);
   if (fin.status === 'stale') return 'stale';
 
-  await routeBotMessageOutbound(session, fin.savedId, content, quickReplies, result.type === 'response' ? result.offer : undefined);
+  await routeBotMessageOutbound(session, fin.savedId, content, extras, result.type === 'response' ? result.offer : undefined);
 
   if (handoffReason) await handleBotHandoff(session, botParticipant.id, handoffReason);
 
@@ -1426,11 +1482,11 @@ async function sendBotMessage(
   session: ChatSession,
   botParticipantId: string,
   content: string,
-  quickReplies?: Array<{ title: string; value: string }>,
+  extras?: ReplyExtras,
   /** #80: forwarded to `routeOutboundMessage`, where both reply paths converge. */
   offer?: OfferMeasurement
 ): Promise<Message> {
-  const metadata = quickReplies?.length ? { quickReplies } : undefined;
+  const metadata = replyMetadata(extras ?? {});
   const botMsg = messageRepository.create({
     sessionId: session.id,
     tenantId: session.tenantId,
@@ -1454,7 +1510,7 @@ async function sendBotMessage(
   // gates on its own supportsQuickReplies/maxQuickReplies, so unsupported
   // channels simply send the text.
   await routeOutboundMessage(
-    { type: 'text', content, ...(quickReplies?.length ? { quickReplies } : {}), ...(offer ? { offer } : {}) },
+    { type: 'text', content, ...(extras?.quickReplies?.length ? { quickReplies: extras.quickReplies } : {}), ...(offer ? { offer } : {}) },
     { sessionId: session.id, tenantId: session.tenantId, messageId: saved.id },
     {
       event: 'message:receive',

@@ -15,7 +15,7 @@ import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { getEntitlements } from '../billing/entitlements';
 import { shouldAskForContact } from '../leads/proactive/should-ask';
-import type { ToolAdapter } from './tool-adapter';
+import type { ToolAdapter, Affordance } from './tool-adapter';
 import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
@@ -49,6 +49,16 @@ export type AgentResult =
       type: 'response';
       content: string;
       quickReplies?: QuickReply[];
+      /**
+       * A control the client should offer, decided by the server and never by the model.
+       *
+       * Distinct from `quickReplies`, which are suggested SENTENCES: a chip's value is sent back
+       * as an ordinary customer message, so anything routed through one is a claim the model then
+       * reads. An affordance is the opposite - it opens a control whose result comes back through
+       * an endpoint the server owns, which is the only kind of evidence allowed to move an
+       * **Address Binding**.
+       */
+      affordance?: Affordance;
       /**
        * #80 (LP3) measurement, carried to whoever delivers this reply.
        *
@@ -507,6 +517,19 @@ export class AgentService {
       /** #80: the availability call these slots came from, so a surfaced call can be told from a
        *  discarded one. Null when the row could not be written - a missing link, never a fault. */
       let pendingAvailabilityCallId: string | null = null;
+      /**
+       * A control a tool asked the CLIENT to offer, carried past the model rather than through it.
+       *
+       * A run-local, following `pendingAvailability` - which is the only existing way anything
+       * reaches the reply without the model's involvement, and it exists because the model must
+       * not be the one deciding what appears on screen. The whole address design rests on that
+       * rule: only a server-observed event may move the binding, so only the server may put the
+       * control that produces one in front of the customer.
+       *
+       * Last writer wins. Two tools raising an affordance in one run is one screen and one
+       * customer, and the later call is the better-informed one.
+       */
+      let pendingAffordance: Affordance | null = null;
       // Egress guard state: was a booking/request actually recorded this run, and
       // have we already nudged the model once for claiming one that wasn't?
       let bookingRecorded = false;
@@ -570,7 +593,13 @@ export class AgentService {
             trace.finishReason = 'completed';
             void this.traceLogger.save(trace);
             logger.warn('[agent] persistent unrecorded booking claim; returning safe fallback', { sessionId: session.id });
-            return { type: 'response', content: BOOKING_SAFE_FALLBACK };
+            // The affordance rides even the safe fallback. This branch fires when the model kept
+            // claiming a booking nobody recorded, so the content is thrown away - but whether the
+            // customer's address needs verifying is a fact about the conversation, not about the
+            // sentence, and it is still true. Dropping it in the early return is the exact shape
+            // #82 records two files over: attached only at the last exit, shipped from none of
+            // the others.
+            return { type: 'response', content: BOOKING_SAFE_FALLBACK, ...(pendingAffordance ? { affordance: pendingAffordance } : {}) };
           }
           trace.finishReason = 'completed';
           void this.traceLogger.save(trace); // fire-and-forget: keeps the trace write off the response path
@@ -609,6 +638,7 @@ export class AgentService {
             type: 'response',
             content: safeContent,
             quickReplies: slotChips,
+            ...(pendingAffordance ? { affordance: pendingAffordance } : {}),
             // #80 (LP3): rides along so the DISPATCH boundary can record what was actually
             // delivered. It cannot be measured here - channels truncate quick replies and drop
             // them where unsupported - and dispatch knows none of this context on its own.
@@ -690,6 +720,11 @@ export class AgentService {
             // #7: only now (post-success) is the side-effect "performed" — a failed
             // attempt stays retryable.
             if (sideEffectSig && result.success) sideEffectsInvoked.add(sideEffectSig);
+            // Harvested for EVERY tool, not just the one that raises it today. The alternative -
+            // reading it inside the `check_availability` branch below - would make the next tool
+            // that wants an affordance work perfectly and ship nothing, which is the failure this
+            // whole area keeps producing.
+            if (result.affordance) pendingAffordance = result.affordance;
             // Track offered slots for the chip UI; a booking mutation clears them.
             if (tool.name === 'check_availability' && result.success && result.data) {
               const d = result.data as {
@@ -746,6 +781,11 @@ export class AgentService {
               }
             } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
               pendingAvailability = null;
+              // The booking consumed the address binding (`clearAddressBinding`), so an offer to
+              // verify one now points at a conversation state that no longer exists. Cleared with
+              // the slots, for the same reason the slots are cleared: the offer was about a
+              // decision the customer has already made.
+              pendingAffordance = null;
               bookingRecorded = true;
             }
             // R31: a tool that fails may return a raw infra error (err.message)

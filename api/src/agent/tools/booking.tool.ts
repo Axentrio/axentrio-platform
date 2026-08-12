@@ -121,6 +121,28 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // at the single early return instead would leak through the two branches that return sooner.
       const { grouping, ...result } = full;
       const measurement = grouping ? { measurement: { grouping } } : {};
+      // OFFER TO VERIFY THE ADDRESS, computed here beside `measurement` and returned from every
+      // branch below for exactly the reason stated there: this tool has four exits, and something
+      // attached only at the last one ships from none of the others. Three of those exits are the
+      // interesting cases - a fully requestable result, an empty range, a vague address - so
+      // attaching it at the end would have offered the picker only when nothing was wrong.
+      //
+      // `result.travel` is the whole gate. Travel applies only to a service whose
+      // `customerAddressRequired` is set (`booking-place.ts:80`), so its presence IS the server
+      // saying this job happens at the customer's door. Paired with "no verified place bound yet"
+      // (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
+      // changes anything - and suggestions are billed per request, so offering it anywhere else
+      // spends the tenant's money on a question with no answer worth having.
+      const affordance = result?.travel && !chosen.placeId
+        ? {
+            affordance: {
+              kind: 'address_picker' as const,
+              reason: result.travel.addressTooVague ? ('too_vague' as const) : ('unverified' as const),
+              // The text they typed, so the box opens where they left off rather than blank.
+              ...(chosen.address ? { query: chosen.address } : {}),
+            },
+          }
+        : {};
       // #82: computed here, beside `measurement`, and for the same reason - the branches below
       // return before the final one, so anything attached only at the end silently never ships.
       const groupedNote = result?.travel?.grouped?.customerReason
@@ -137,6 +159,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         return {
           success: true,
           ...measurement,
+          ...affordance,
           data: {
             ...result,
             ...groupedNote,
@@ -156,6 +179,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
         return {
           success: true,
           ...measurement,
+          ...affordance,
           data: {
             ...result,
             ...groupedNote,
@@ -166,7 +190,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           },
         };
       }
-      return { success: true, data: { ...result, ...groupedNote }, ...measurement };
+      return { success: true, data: { ...result, ...groupedNote }, ...measurement, ...affordance };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }

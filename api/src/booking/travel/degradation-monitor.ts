@@ -55,6 +55,22 @@ export function classifyCause(cause: string): CauseClass {
     case 'api_error':
     case 'malformed_response':
       return 'platform';
+    // ADDRESS SUGGESTIONS FAIL THE SAME WAY THE GATE DOES, and used to be counted nowhere.
+    //
+    // `places.service` has always called `recordCause` on both of these, but neither had a case
+    // here, so both fell to `default: 'none'` and were discarded by the very monitor they were
+    // reported to. Places API (New) was never enabled on the production project, so EVERY
+    // autocomplete since launch returned `api_error` — and the fail-open turns that into a 200
+    // with an empty list, which is indistinguishable from a query that matched nothing. Silent at
+    // the surface by design, silent in the monitor by accident, and the feature was dead for
+    // months without anybody being told.
+    //
+    // Classed exactly like their gate equivalents: an API error is platform-class and needs
+    // corroboration before it means an outage; a spent cap is a definite tenant state.
+    case 'places_api_error':
+      return 'platform';
+    case 'places_cap_exhausted':
+      return 'tenant';
     case 'cap_exhausted':
       return 'tenant';
     case 'shared_itinerary':

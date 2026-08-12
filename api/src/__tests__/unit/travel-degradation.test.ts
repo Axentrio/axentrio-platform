@@ -135,8 +135,22 @@ describe('which causes are faults', () => {
     ['malformed_response', 'platform'],
     ['cap_exhausted', 'tenant'],
     ['shared_itinerary', 'configuration'],
+    // Address suggestions. `places.service` has always reported these; until they were
+    // classified they fell to 'none' and the monitor discarded every one. Places API (New) was
+    // never enabled on production, so the feature was dead for months and nothing said so.
+    ['places_api_error', 'platform'],
+    ['places_cap_exhausted', 'tenant'],
   ])('%s is a %s fault', (cause, cls) => {
     expect(classifyCause(cause)).toBe(cls);
+  });
+
+  it('classifies every cause the codebase actually reports', () => {
+    // The bug was not a wrong classification, it was a MISSING one - a caller reporting a cause
+    // the classifier had never heard of, silently counted nowhere. A list of the literals
+    // `recordCause` is called with catches the next one at the point it is added rather than
+    // months later when somebody wonders why an alert never fired.
+    const reported = ['api_error', 'cap_exhausted', 'shared_itinerary', 'places_api_error', 'places_cap_exhausted'];
+    for (const cause of reported) expect(classifyCause(cause)).not.toBe('none');
   });
 
   it('settled_by_bounds is NOT a fault - it is the floor doing its job', () => {

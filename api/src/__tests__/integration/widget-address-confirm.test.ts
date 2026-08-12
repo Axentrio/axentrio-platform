@@ -11,7 +11,8 @@
  * observed may move the binding. A unit test on the transitions would pass with no endpoint at all,
  * which is exactly the state that shipped.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
+import Redis from 'ioredis';
 import { createAuthMocks } from '../helpers/auth';
 
 createAuthMocks();
@@ -20,6 +21,17 @@ vi.mock('../../utils/audit', () => ({ logAudit: vi.fn().mockResolvedValue(undefi
 // The ingestion path pulls in the agent; the endpoint's contract is the binding, not the reply.
 vi.mock('../../services/widget-ingest', () => ({
   ingestWidgetCustomerMessage: vi.fn().mockResolvedValue(undefined),
+}));
+
+// The binding lives in Redis, and `address-binding` fails OPEN without it - a binding it cannot
+// write is simply one that does not exist. Correct in production, and it means a suite with no
+// Redis proves nothing here: every assertion would go green-to-red for an environmental reason.
+// Same seam the #68 health suite uses: hand the real client back through the accessors production
+// calls, rather than letting `initializeRedis` read a REDIS_URL that points at nothing.
+let client: Redis;
+vi.mock('../../config/redis', () => ({
+  getRedisClient: () => client,
+  isRedisAvailable: () => true,
 }));
 
 import request from 'supertest';
@@ -40,6 +52,27 @@ let token: string;
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
 const PROPOSED = { proposalId: 'prop-1', placeId: '', formattedAddress: 'Kerkstraat 12, 2060 Antwerpen' };
 
+const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
+
+beforeAll(async () => {
+  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
+  try {
+    await client.connect();
+    await client.ping();
+  } catch (err) {
+    // FAIL rather than skip. A silently skipped suite is how this endpoint shipped unverified.
+    throw new Error(
+      `#95 needs the real Redis the address binding lives in. Start it with ` +
+        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
+        `${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+});
+
+afterAll(async () => {
+  await client?.quit();
+});
+
 const post = (body: Record<string, unknown>) =>
   request(app).post('/api/v1/widget/address/confirm').set('Authorization', `Bearer ${token}`).send(body);
 
@@ -59,16 +92,7 @@ beforeEach(async () => {
   await proposeCorrection(sessionId, PROPOSED);
 });
 
-// SKIPPED, and the reason is the finding. The precondition below fails: `bindAddress` does not
-// round-trip in this suite, so the binding store is unavailable here and every assertion under it
-// would fail for an environmental reason while saying nothing about the endpoint. `address-binding`
-// fails OPEN when Redis is absent - a binding it cannot write is simply a binding that does not
-// exist - which is correct for production and makes it untestable here without wiring Redis into
-// this suite (`docker-compose.test.yml` exposes it on 6380; `travel-degradation-redis.test.ts`
-// reaches it, so the wiring exists and this file does not have it).
-//
-// Un-skip once that is connected. The tests themselves are written and are the specification.
-describe.skip('POST /widget/address/confirm', () => {
+describe('POST /widget/address/confirm', () => {
   it('PRECONDITION: the binding store is actually working in this environment', async () => {
     // If this fails, every test below fails for an environmental reason and none of them say
     // anything about the endpoint.

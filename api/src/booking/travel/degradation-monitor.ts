@@ -49,42 +49,87 @@ import { logger } from '../../utils/logger';
  */
 export type CauseClass = 'platform' | 'tenant' | 'configuration' | 'metric' | 'none';
 
-export function classifyCause(cause: string): CauseClass {
-  switch (cause) {
-    case 'no_api_key':
-    case 'api_error':
-    case 'malformed_response':
-      return 'platform';
-    // ADDRESS SUGGESTIONS FAIL THE SAME WAY THE GATE DOES, and used to be counted nowhere.
-    //
-    // `places.service` has always called `recordCause` on both of these, but neither had a case
-    // here, so both fell to `default: 'none'` and were discarded by the very monitor they were
-    // reported to. Places API (New) was never enabled on the production project, so EVERY
-    // autocomplete since launch returned `api_error` — and the fail-open turns that into a 200
-    // with an empty list, which is indistinguishable from a query that matched nothing. Silent at
-    // the surface by design, silent in the monitor by accident, and the feature was dead for
-    // months without anybody being told.
-    //
-    // Classed exactly like their gate equivalents: an API error is platform-class and needs
-    // corroboration before it means an outage; a spent cap is a definite tenant state.
-    case 'places_api_error':
-      return 'platform';
-    case 'places_cap_exhausted':
-      return 'tenant';
-    case 'cap_exhausted':
-      return 'tenant';
-    case 'shared_itinerary':
-      return 'configuration';
-    // Not faults, but worth a rate. One `no_route` is Google having no route for those
-    // coordinates today - a geocode in a canal produces one. A sustained rate across distinct
-    // pairs is a regression. `budget_spent` at a high rate means the per-call ceiling is
-    // defeating the feature rather than bounding it.
-    case 'no_route':
-    case 'budget_spent':
-      return 'metric';
-    default:
-      return 'none';
-  }
+/**
+ * EVERY cause this system can report, and what each one means.
+ *
+ * This map is the reason #93 cannot happen twice. That bug was not a wrong classification, it was
+ * a MISSING one: `places.service` reported `places_api_error`, `classifyCause` had no case for it,
+ * and a `default: 'none'` discarded every report for months. A default arm is a silent accept-all,
+ * and the thing it silently accepted was the only evidence that address suggestions had never
+ * worked in production.
+ *
+ * So there is no default arm any more, and no switch. A cause is a key of this map or it does not
+ * type-check - which means the failure moves from "an alert never fires, and nobody learns why for
+ * months" to "the build goes red on the line that introduced it".
+ *
+ * THE MAP ALONE PROVES NOTHING. It only closes the hole if every producer is typed as
+ * `DegradationCause` rather than `string`: `RoutedLeg.cause`, the gate's cause set,
+ * `degradedCauses`, and the routes client's own union. A single surviving `string` boundary
+ * re-opens it, because a `string` still assigns to a key-typed parameter nowhere but does flow
+ * through any collector still typed loosely. And it is only OBSERVED by `tsc`, never by the test
+ * suite - vitest does not type-check.
+ *
+ * `none` is not "unimportant", it is "nothing has gone wrong", and the entries carrying it are the
+ * point of writing them down: each was a deliberate decision that now has to be deleted rather
+ * than merely forgotten.
+ */
+export const CAUSE_CLASS = {
+  // Platform: needs corroboration before it means an outage, and positive evidence before it means
+  // recovery. See `travel-health.ts` for the probe half.
+  no_api_key: 'platform',
+  api_error: 'platform',
+  malformed_response: 'platform',
+
+  // ADDRESS SUGGESTIONS FAIL THE SAME WAY THE GATE DOES, and used to be counted nowhere.
+  //
+  // Places API (New) was never enabled on the production project, so EVERY autocomplete since
+  // launch returned `api_error` - and the fail-open turns that into a 200 with an empty list,
+  // indistinguishable from a query that matched nothing. Silent at the surface by design, silent
+  // in the monitor by accident. Classed exactly like their gate equivalents.
+  places_api_error: 'platform',
+  places_cap_exhausted: 'tenant',
+
+  // Definite states, notified to the tenant on first occurrence rather than on a threshold.
+  cap_exhausted: 'tenant',
+  shared_itinerary: 'configuration',
+
+  // Not faults, but worth a rate. One `no_route` is Google having no route for those coordinates
+  // today - a geocode in a canal produces one. A sustained rate across distinct pairs is a
+  // regression. `budget_spent` at a high rate means the per-call ceiling is defeating the feature
+  // rather than bounding it.
+  no_route: 'metric',
+  budget_spent: 'metric',
+
+  // An unexplained degradation, and the one entry that CHANGED when this map replaced the switch.
+  //
+  // `travel-gate` invents this when a lookup returns null minutes and names no cause. Under the
+  // old `default: 'none'` it was discarded - which is #93's exact shape sitting inside the fix for
+  // #93: the one cause meaning "something failed and we do not know what" was the one guaranteed
+  // to be counted nowhere. A rate is the least it can be worth.
+  unknown: 'metric',
+
+  // Not faults, and each of these is a decision rather than an oversight. `settled_by_bounds` is
+  // the floor doing its job and would flag most of a good day (#64). `departed` is a slot that went
+  // stale mid-conversation. `not_cached` is a cache-only read declining to buy a measurement, and
+  // `routes.service` says so where it is produced. `estimated` is geometry answering instead of
+  // roads, which may rank but never refuse.
+  settled_by_bounds: 'none',
+  departed: 'none',
+  not_cached: 'none',
+  estimated: 'none',
+} as const satisfies Record<string, CauseClass>;
+
+/**
+ * Every cause the system can report.
+ *
+ * Derived from the map rather than declared beside it, because two declarations drift and one
+ * cannot. Producers are typed with THIS, which is what turns a new unclassified cause into a
+ * compile error instead of a silent `none`.
+ */
+export type DegradationCause = keyof typeof CAUSE_CLASS;
+
+export function classifyCause(cause: DegradationCause): CauseClass {
+  return CAUSE_CLASS[cause];
 }
 
 /** How long a counted occurrence stays countable. */
@@ -303,7 +348,7 @@ export async function scopedCauseSpread(): Promise<{ capExhaustedTenants: number
  *
  * Never throws: a monitor that can break a booking is worse than the blindness it cures.
  */
-export async function recordCause(cause: string, scope?: { tenantId?: string; botId?: string }): Promise<void> {
+export async function recordCause(cause: DegradationCause, scope?: { tenantId?: string; botId?: string }): Promise<void> {
   const cls = classifyCause(cause);
   if (cls === 'none') return;
 

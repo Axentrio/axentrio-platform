@@ -27,6 +27,7 @@ import {
   DISPLAY_SLOWEST_KMH,
   type GeoPoint,
 } from '../../contracts/travel';
+import type { DegradationCause } from './degradation-monitor';
 
 /**
  * `unreachable` is a proof; `clear` is either a proof or a measurement depending on how it
@@ -550,7 +551,7 @@ export interface RoutedLeg {
    * a booking degraded, never why — so discarding it here would leave the alert with nothing
    * to key on but a count.
    */
-  cause?: string;
+  cause?: DegradationCause;
   /**
    * Is this duration MEASURED, or estimated?
    *
@@ -585,7 +586,7 @@ export interface RoutedAssessment {
    * Distinct reasons a leg went unanswered, in the order they were met. Empty when routing
    * answered everything, or when nothing needed asking. Not persisted — #68's to consume.
    */
-  degradedCauses: string[];
+  degradedCauses: DegradationCause[];
   /**
    * Did ANY leg actually constrain this verdict?
    *
@@ -633,7 +634,7 @@ export async function assessSlotRouted(input: {
   const resolved: SideOutcome[] = [];
   // A leg the bounds settled counts against `fullyRouted` — see RoutedAssessment.
   let routedEvery = true;
-  const causes = new Set<string>();
+  const causes = new Set<DegradationCause>();
 
   for (const outcome of outcomes) {
     if (outcome.verdict !== 'undecided' || !outcome.leg) {

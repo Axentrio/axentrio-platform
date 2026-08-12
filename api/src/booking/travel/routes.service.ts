@@ -36,6 +36,7 @@ import { logger } from '../../utils/logger';
 import { drivePlausible, haversineKm, type GeoPoint } from '../../contracts/travel';
 import type { ActiveTravelEligibility } from './travel-eligibility';
 import type { DriveLookup } from './travel-gate';
+import type { DegradationCause } from './degradation-monitor';
 import { reserveTravelElements } from './travel-usage.service';
 
 export type DriveResult =
@@ -60,7 +61,14 @@ export type DriveResult =
    */
   | {
       status: 'unavailable';
-      cause: 'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' | 'not_cached';
+      // Each of these is a KEY of `CAUSE_CLASS`, not a free string, so adding a seventh reason
+      // here fails to compile until the monitor has been told what it means. That is the whole
+      // point: this union is where #93's discarded cause was born, and a literal that classifies
+      // nowhere is now unrepresentable rather than merely untested.
+      cause: Extract<
+        DegradationCause,
+        'no_api_key' | 'cap_exhausted' | 'api_error' | 'malformed_response' | 'departed' | 'not_cached'
+      >;
     };
 
 const ROUTES_URL = 'https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix';

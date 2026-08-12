@@ -95,6 +95,9 @@ import {
   metricCounts,
   scopedCauseSpread,
   PLATFORM_THRESHOLD,
+  CAUSE_CLASS,
+  type CauseClass,
+  type DegradationCause,
 } from '../../booking/travel/degradation-monitor';
 import {
   runTravelHealthCheck,
@@ -128,45 +131,70 @@ beforeEach(() => {
   redisDown = false;
 });
 
+/**
+ * The classes this suite claims each cause deserves, restated by hand.
+ *
+ * Deliberately NOT derived from `CAUSE_CLASS` - a test that reads the map it is checking asserts
+ * only that the map equals itself. This is a second, independent statement of the same judgement,
+ * so changing production without meaning to goes red here, and changing it on purpose costs one
+ * line and a moment's thought about who gets woken up.
+ */
+const EXPECTED_CLASS: Record<string, CauseClass> = {
+  // Platform: an outage, and nobody's fault but ours to chase.
+  no_api_key: 'platform',
+  api_error: 'platform',
+  malformed_response: 'platform',
+  // Address suggestions, reported since launch and classified nowhere until #93. Places API (New)
+  // was never enabled on production, so every autocomplete returned `api_error` and the fail-open
+  // made it look like a query that matched nothing.
+  places_api_error: 'platform',
+  places_cap_exhausted: 'tenant',
+  // Definite states about one business, notified on first occurrence rather than on a threshold.
+  cap_exhausted: 'tenant',
+  shared_itinerary: 'configuration',
+  // Counted, never mailed. One is ordinary; a sustained rate is a regression.
+  no_route: 'metric',
+  budget_spent: 'metric',
+  // "Something failed and we do not know what" - the one cause that MUST NOT be silent, because a
+  // nameless failure is the one nothing else will report. It was 'none' until this change.
+  unknown: 'metric',
+  // Not faults. Each is a decision, and each would flag a good day if treated as an alarm (#64).
+  settled_by_bounds: 'none',
+  departed: 'none',
+  not_cached: 'none',
+  estimated: 'none',
+};
+
+/**
+ * WHAT THIS BLOCK IS FOR, NOW THAT IT IS NOT WHAT IT USED TO BE.
+ *
+ * It used to carry a test called "classifies every cause the codebase actually reports", holding a
+ * hardcoded list of five literals. That test existed to catch the next unclassified cause, and it
+ * could not: the list was written by hand, so a new cause reaching `recordCause` was also a new
+ * cause missing from the list, and the test went green either way. It was the one thing it existed
+ * to prevent, and it named five of the fourteen causes that actually reach the monitor.
+ *
+ * The omission check is the COMPILER's now. `recordCause` and `classifyCause` take
+ * `DegradationCause`, and every producer is typed with it - `RoutedLeg.cause`, the gate's cause
+ * set, `degradedCauses`, the routes client's union - so a literal that is not in `CAUSE_CLASS`
+ * fails `tsc --noEmit`. Vitest does not type-check, so no test in this file can observe that; the
+ * build does.
+ *
+ * What is left for these tests is the half a type cannot state: WHICH class each cause belongs to.
+ * `cap_exhausted` being `tenant` rather than `platform` is a judgement about who gets woken up, and
+ * getting it wrong compiles perfectly.
+ */
 describe('which causes are faults', () => {
-  it.each([
-    ['no_api_key', 'platform'],
-    ['api_error', 'platform'],
-    ['malformed_response', 'platform'],
-    ['cap_exhausted', 'tenant'],
-    ['shared_itinerary', 'configuration'],
-    // Address suggestions. `places.service` has always reported these; until they were
-    // classified they fell to 'none' and the monitor discarded every one. Places API (New) was
-    // never enabled on production, so the feature was dead for months and nothing said so.
-    ['places_api_error', 'platform'],
-    ['places_cap_exhausted', 'tenant'],
-  ])('%s is a %s fault', (cause, cls) => {
-    expect(classifyCause(cause)).toBe(cls);
+  it('every cause in the map is exercised below', () => {
+    // Not an omission check - the compiler does that. This one catches the opposite drift: a
+    // cause ADDED to the map and classified by nobody's deliberate decision, which is how a
+    // literal ends up with a class chosen by whichever line it was pasted next to.
+    const asserted = new Set(Object.keys(EXPECTED_CLASS));
+    expect(Object.keys(CAUSE_CLASS).filter((c) => !asserted.has(c))).toEqual([]);
   });
 
-  it('classifies every cause the codebase actually reports', () => {
-    // The bug was not a wrong classification, it was a MISSING one - a caller reporting a cause
-    // the classifier had never heard of, silently counted nowhere. A list of the literals
-    // `recordCause` is called with catches the next one at the point it is added rather than
-    // months later when somebody wonders why an alert never fired.
-    const reported = ['api_error', 'cap_exhausted', 'shared_itinerary', 'places_api_error', 'places_cap_exhausted'];
-    for (const cause of reported) expect(classifyCause(cause)).not.toBe('none');
-  });
-
-  it('settled_by_bounds is NOT a fault - it is the floor doing its job', () => {
-    // The #64 lesson, in the form it keeps coming back in. `degraded` is provenance, and a
-    // monitor that treated this as a failure would flag most of a good day.
-    expect(classifyCause('settled_by_bounds')).toBe('none');
-  });
-
-  it('departed is NOT a fault - the slot went stale mid-conversation', () => {
-    expect(classifyCause('departed')).toBe('none');
-  });
-
-  it.each(['no_route', 'budget_spent'])('%s is counted but never paged', (cause) => {
-    // Not nothing, and not an alert. One `no_route` is a geocode in a canal; a sustained RATE
-    // is an upstream regression worth seeing without waking anybody.
-    expect(classifyCause(cause)).toBe('metric');
+  it.each(Object.entries(EXPECTED_CLASS))('%s is classified %s', (cause, cls) => {
+    expect(classifyCause(cause as DegradationCause)).toBe(cls);
   });
 
   it('records a metric cause without touching the platform counter', async () => {

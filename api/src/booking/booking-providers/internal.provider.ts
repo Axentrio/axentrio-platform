@@ -745,28 +745,65 @@ type TravelSnapshot = {
 };
 
 /**
- * Is this candidate duplicate about the SAME DOOR as the call that found it?
+ * The identity two calls must share to be the same booking.
  *
- * The `(session, service, startUtc)` dedup exists because the model can express one instant as two
- * different strings (#35), so a re-confirm can slip past the idempotency key. That reasoning is
- * about the TIME. It says nothing about the address, and the predicate carries no address at all -
- * so a customer correcting where they live at an unchanged time looked exactly like a re-confirm,
- * and their correction was answered with the original row.
+ * ONE function for BOTH duplicate checks, and that is the point rather than tidiness. There are two
+ * gates - the idempotency key and `(session, service, startUtc)` - and the first fix for #92 taught
+ * only the key about the address. The second gate then collapsed the corrected booking anyway, so
+ * the bug survived a fix that its own tests said had worked. Two gates deciding "same booking" by
+ * two different rules is what allowed that, and one shared rule is what stops it recurring.
  *
- * This is the bug the idempotency key was fixed for, surviving one gate further down. Putting the
- * address in the key was necessary and not sufficient: this check runs afterwards and collapsed the
- * two rows anyway. Verified on production after that fix deployed - three tool calls, one row, and
- * the customer told their appointment was at an address the database had never held.
+ * Computed AFTER the service is resolved, because two of the three inputs depend on it.
  *
- * Compared through `addressToken`, so this is the same notion of "same address" the key uses. A
- * service that takes no address yields a constant on both sides, so those bookings dedup exactly as
- * they always have.
+ * ## The address is excluded when the service does not have one
+ *
+ * A phone consult can still carry an address - inherited from an earlier turn in the session, or
+ * volunteered by a customer who mentioned where they live. Letting that participate would make an
+ * incidental detail decide whether two calls are the same booking, and produce duplicates for the
+ * services that never had this problem. `customerAddressRequired` is the question of whether the
+ * address is part of the booking at all.
+ *
+ * ## A geocoded place id is NOT the customer's identity for the place
+ *
+ * `createRequest` stores a `place_id` derived from the text whenever it can, so a row created from
+ * typed words comes back carrying an identity the customer never supplied. Comparing that against a
+ * later turn's raw text finds them different and inserts a SECOND request - a genuine re-confirm
+ * turned into two live rows for the owner to untangle, which is the failure `#35` added the second
+ * gate to prevent. So a stored `place_id` only counts as identity when `location_source = 'pin'`,
+ * which is the flag that records the customer actually picked it.
  */
-export function dedupIsSameDoor(row: Booking, extras?: BookingExtras): boolean {
-  return (
-    addressToken({ address: row.customerAddress ?? undefined, placeId: row.customerPlaceId ?? undefined }) ===
-    addressToken({ address: extras?.customerAddress, placeId: extras?.customerPlaceId })
-  );
+export function dedupIdentity(input: {
+  addressRequired: boolean;
+  address?: string | null;
+  placeId?: string | null;
+  /** False for a `place_id` this system derived rather than the customer choosing it. */
+  placeIdIsPicked: boolean;
+}): string {
+  if (!input.addressRequired) return 'noaddr';
+  return addressToken({
+    address: input.address ?? undefined,
+    placeId: input.placeIdIsPicked ? (input.placeId ?? undefined) : undefined,
+  });
+}
+
+/** The stored row's identity, read with its own provenance. */
+function rowDedupIdentity(row: Booking, addressRequired: boolean): string {
+  return dedupIdentity({
+    addressRequired,
+    address: row.customerAddress,
+    placeId: row.customerPlaceId,
+    placeIdIsPicked: row.locationSource === 'pin',
+  });
+}
+
+/** The incoming call's identity. Anything it supplies as a place id came from a customer pick. */
+function callDedupIdentity(addressRequired: boolean, extras?: BookingExtras): string {
+  return dedupIdentity({
+    addressRequired,
+    address: extras?.customerAddress,
+    placeId: extras?.customerPlaceId,
+    placeIdIsPicked: true,
+  });
 }
 
 export class InternalProvider implements BookingProvider {
@@ -1758,7 +1795,12 @@ export class InternalProvider implements BookingProvider {
     // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
     // slot. 'failed' and 'declined' were also listed here; neither is ever written
     // (declining a request writes 'cancelled').
-    if (recentDup && recentDup.status !== 'cancelled' && dedupIsSameDoor(recentDup, extras)) {
+    if (
+      recentDup &&
+      recentDup.status !== 'cancelled' &&
+      rowDedupIdentity(recentDup, service.customerAddressRequired) ===
+        callDedupIdentity(service.customerAddressRequired, extras)
+    ) {
       return this.toResult(recentDup, true, rule.timezone, service.name);
     }
 
@@ -2409,7 +2451,12 @@ export class InternalProvider implements BookingProvider {
     // A cancelled row must NOT dedupe — the customer may legitimately rebook the same
     // slot. 'failed' and 'declined' were also listed here; neither is ever written
     // (declining a request writes 'cancelled').
-    if (recentDup && recentDup.status !== 'cancelled' && dedupIsSameDoor(recentDup, extras)) {
+    if (
+      recentDup &&
+      recentDup.status !== 'cancelled' &&
+      rowDedupIdentity(recentDup, service.customerAddressRequired) ===
+        callDedupIdentity(service.customerAddressRequired, extras)
+    ) {
       return this.toResult(recentDup, true);
     }
 

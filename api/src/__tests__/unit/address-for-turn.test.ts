@@ -198,8 +198,10 @@ describe('addressToken — the field the idempotency key was missing', () => {
   });
 
   it('stays short enough that a long address cannot overflow idempotency_key', () => {
-    // The column is varchar(255) and the key already spends ~120 on session, service and time.
+    // The column is varchar(255) and the key already spends ~113 on prefix, session, service and
+    // time, so a 16-char token lands around 129. Widened from 12 when the token gained domain
+    // separation: the extra bits are collision headroom, and the budget was never close.
     const long = addressToken({ address: 'A'.repeat(400) });
-    expect(long.length).toBeLessThanOrEqual(12);
+    expect(long.length).toBeLessThanOrEqual(16);
   });
 });

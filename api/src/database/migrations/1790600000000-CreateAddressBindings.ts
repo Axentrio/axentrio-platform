@@ -39,16 +39,22 @@ export class CreateAddressBindings1790600000000 implements MigrationInterface {
       DO $$
       BEGIN
         IF NOT EXISTS (
-          SELECT 1 FROM pg_constraint WHERE conname = 'ck_address_binding_active_consistent'
+          -- Scoped to the table. Constraint names are not unique across tables, so matching on the
+          -- name alone lets an unrelated constraint elsewhere silently skip this one - and only
+          -- in production, since the test schema comes from the entity.
+          SELECT 1 FROM pg_constraint
+           WHERE conname = 'ck_address_binding_active_consistent'
+             AND conrelid = 'chatbot_address_bindings'::regclass
         ) THEN
           ALTER TABLE chatbot_address_bindings
             ADD CONSTRAINT ck_address_binding_active_consistent CHECK (
               -- COALESCE, not a bare comparison: with source NULL the clauses read
               -- FALSE OR NULL OR NULL = NULL, and a CHECK passes on NULL. The first
               -- version of this constraint accepted an address with no source.
-              (address IS NULL AND source IS NULL AND place_id IS NULL)
-              OR (address IS NOT NULL AND COALESCE(source, '') = 'picked' AND place_id IS NOT NULL)
-              OR (address IS NOT NULL AND COALESCE(source, '') = 'confirmed' AND place_id IS NULL)
+              -- NULLIF too: '' is neither an address nor an identity, but '' IS NOT NULL.
+              (NULLIF(address, '') IS NULL AND source IS NULL AND NULLIF(place_id, '') IS NULL)
+              OR (NULLIF(address, '') IS NOT NULL AND COALESCE(source, '') = 'picked' AND NULLIF(place_id, '') IS NOT NULL)
+              OR (NULLIF(address, '') IS NOT NULL AND COALESCE(source, '') = 'confirmed' AND NULLIF(place_id, '') IS NULL)
             );
         END IF;
       END $$;

@@ -112,9 +112,14 @@ const looksLikeSameAddress = (a: string, b: string) => {
  * never had this problem.
  */
 export function addressToken(turn: Pick<TurnAddress, 'address' | 'placeId'>): string {
-  const identity = turn.placeId?.trim() || (turn.address ? normalise(turn.address) : '');
+  const picked = turn.placeId?.trim();
+  const typed = turn.address ? normalise(turn.address) : '';
+  // DOMAIN-SEPARATED. Without the prefix a place id and an address string share one input space,
+  // so a collision between them is a collision between two different KINDS of claim. It costs
+  // nothing and removes a whole class of false equality.
+  const identity = picked ? `place:${picked}` : typed ? `text:${typed}` : '';
   if (!identity) return 'noaddr';
-  return createHash('sha256').update(identity).digest('hex').slice(0, 12);
+  return createHash('sha256').update(identity).digest('hex').slice(0, 16);
 }
 
 export async function addressForTurn(

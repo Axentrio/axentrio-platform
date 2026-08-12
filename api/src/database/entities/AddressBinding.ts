@@ -65,9 +65,13 @@ export interface PendingCorrectionRecord {
   // no source sailed through the first version of this constraint for exactly that reason, caught
   // by its own test. It is the same three-valued-logic hole that silently disables an exclusion
   // constraint when a nullable column joins the column list.
-  `("address" IS NULL AND "source" IS NULL AND "place_id" IS NULL)
-   OR ("address" IS NOT NULL AND COALESCE("source", '') = 'picked' AND "place_id" IS NOT NULL)
-   OR ("address" IS NOT NULL AND COALESCE("source", '') = 'confirmed' AND "place_id" IS NULL)`
+  // NULLIF as well as COALESCE. An empty string is not a bound address and not an identity, but
+  // `'' IS NOT NULL` is true, so the first version let `address = ''` be `confirmed` and
+  // `place_id = ''` satisfy `picked`. `addressToken` already collapses a blank address to the same
+  // constant as no address, so the two would have disagreed about what the row means.
+  `(NULLIF("address", '') IS NULL AND "source" IS NULL AND NULLIF("place_id", '') IS NULL)
+   OR (NULLIF("address", '') IS NOT NULL AND COALESCE("source", '') = 'picked' AND NULLIF("place_id", '') IS NOT NULL)
+   OR (NULLIF("address", '') IS NOT NULL AND COALESCE("source", '') = 'confirmed' AND NULLIF("place_id", '') IS NULL)`
 )
 export class AddressBinding {
   /** One conversation, one row. The session is the natural key; there is nothing else to add. */

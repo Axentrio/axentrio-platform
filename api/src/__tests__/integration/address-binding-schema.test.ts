@@ -89,3 +89,19 @@ describe('the address binding schema', () => {
     });
   });
 });
+
+describe('the empty string is not an address', () => {
+  // `'' IS NOT NULL` is true, so the first constraint let `address = ''` be `confirmed` and
+  // `place_id = ''` satisfy `picked` - while `addressToken` collapses a blank address to the same
+  // constant as no address. The row and the token would have disagreed about what it means.
+  it.each([
+    ['a blank address claiming to be confirmed', { address: '', placeId: null, source: 'confirmed' as const }],
+    ['a blank place id satisfying picked', { address: 'Meir 78', placeId: '', source: 'picked' as const }],
+  ])('refuses %s', async (_n, patch) => {
+    const { randomUUID } = await import('node:crypto');
+    const { AppDataSource } = await import('../../database/data-source');
+    const { AddressBinding } = await import('../../database/entities/AddressBinding');
+    const r = AppDataSource.getRepository(AddressBinding);
+    await expect(r.save(r.create({ sessionId: randomUUID(), ...patch }))).rejects.toThrow();
+  });
+});

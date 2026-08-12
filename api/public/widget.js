@@ -708,6 +708,56 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
     }
     .cb-slot-chip:active { transform: scale(0.97); }
 
+    /* Address picker. Deliberately NOT chip-shaped: a chip sends a sentence, this opens a
+       control whose result the server owns. Looking different is the honest signal. */
+    .cb-addr {
+      margin-top: 8px;
+      padding: 10px;
+      border: 1px solid var(--cb-border);
+      border-radius: 10px;
+      background: var(--cb-paper-raised);
+    }
+    .cb-addr__label {
+      font-family: var(--cb-sans);
+      font-size: 12px;
+      margin: 0 0 6px;
+      color: var(--cb-ink-muted);
+    }
+    .cb-addr__input {
+      font-family: var(--cb-sans);
+      font-size: 14px;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid var(--cb-border);
+      border-radius: 8px;
+      background: var(--cb-paper);
+      color: var(--cb-ink);
+    }
+    .cb-addr__input:focus {
+      outline: none;
+      border-color: var(--cb-primary);
+    }
+    .cb-addr__list { display: flex; flex-direction: column; margin-top: 6px; }
+    .cb-addr__row {
+      font-family: var(--cb-sans);
+      font-size: 13px;
+      text-align: left;
+      padding: 8px 10px;
+      border: none;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--cb-ink);
+      cursor: pointer;
+    }
+    .cb-addr__row:hover { background: var(--cb-primary); color: var(--cb-primary-ink); }
+    .cb-addr__chosen {
+      font-family: var(--cb-sans);
+      font-size: 13px;
+      margin: 0;
+      color: var(--cb-ink);
+    }
+
     .cb-message__time {
       font-family: var(--cb-sans);
       font-size: 11px;
@@ -1855,6 +1905,10 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             sender: 'bot',
             timestamp: new Date(data.timestamp || data.createdAt),
             quickReplies: data.metadata && Array.isArray(data.metadata.quickReplies) ? data.metadata.quickReplies : undefined,
+            // A control the SERVER asked us to offer. Unlike a chip, its result does not go back
+            // as a customer message — it goes to an endpoint the server owns, which is the only
+            // kind of evidence allowed to decide which address this conversation is about.
+            affordance: data.metadata && data.metadata.affordance ? data.metadata.affordance : undefined,
           });
         }
       });
@@ -1988,6 +2042,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             text: msg.content,
             sender: senderType === 'user' ? 'user' : 'bot',
             timestamp: new Date(msg.createdAt),
+            // Backfilled messages used to arrive stripped of their metadata, so a reconnect or a
+            // reload silently dropped the chips a reply had offered. Harmless for slot chips - the
+            // customer can type the time - but not for the address picker: it is the only way to
+            // verify an address, so losing it on a refresh means losing the ability entirely.
+            // `GET /widget/history` returns `metadata` verbatim, so it was only ever discarded here.
+            quickReplies: msg.metadata && Array.isArray(msg.metadata.quickReplies) ? msg.metadata.quickReplies : undefined,
+            affordance: msg.metadata && msg.metadata.affordance ? msg.metadata.affordance : undefined,
           });
         }
       } catch (err) {
@@ -2211,18 +2272,114 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
         if (chips) chipsHtml = `<div class="cb-message__chips">${chips}</div>`;
       }
 
+      // An address picker the server asked for. Bot messages only, and never on a user echo.
+      //
+      // Rendered as a CONTROL rather than as chips on purpose. A chip sends its value back as an
+      // ordinary customer message, so an address chosen that way would arrive as text the model
+      // then reconstructs — which is the exact thing the address binding exists to prevent. This
+      // posts to /places/select instead, and the server binds the identity Google returned.
+      let pickerHtml = '';
+      if (!isUser && message.affordance && message.affordance.kind === 'address_picker') {
+        const prefill = utils.escapeHtml(message.affordance.query || '');
+        const vague = message.affordance.reason === 'too_vague';
+        pickerHtml = `
+          <div class="cb-addr" data-addr-picker="1">
+            <p class="cb-addr__label">${vague
+              ? 'We could only find your town. Pick your exact address so we can confirm a time:'
+              : 'Pick your address so we get the right door:'}</p>
+            <input type="text" class="cb-addr__input" value="${prefill}"
+              placeholder="Start typing your address" autocomplete="off" spellcheck="false" />
+            <div class="cb-addr__list"></div>
+          </div>`;
+      }
+
       return `
         <div class="cb-message cb-message--${message.sender}" data-id="${message.id}">
           <div class="cb-message__avatar">${isUser ? ICONS.user : botAvatarHtml(this.appearance.avatarUrl)}</div>
           <div class="cb-message__content">
             ${content}
             ${chipsHtml}
+            ${pickerHtml}
             ${time ? `<span class="cb-message__time">${time}</span>` : ''}
           </div>
         </div>
       `;
     }
     
+    // ==========================================================================
+    // Address picker
+    // ==========================================================================
+
+    /**
+     * Ask for suggestions. FAILS SILENT: an unavailable Google returns an empty list and a 200,
+     * and anything worse should look the same to the customer — they can always type their
+     * address as they always have. An error banner here would turn a degraded feature into a
+     * broken-looking one.
+     */
+    async lookupAddress(picker, query) {
+      if (!picker || !this.token) return;
+      try {
+        const res = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/places/autocomplete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.token },
+          body: JSON.stringify({ query }),
+        }, 8000);
+        if (!res.ok) return this.renderAddressSuggestions(picker, []);
+        const body = await res.json();
+        const suggestions = (body && body.data && body.data.suggestions) || [];
+        this.renderAddressSuggestions(picker, suggestions);
+      } catch (err) {
+        this.renderAddressSuggestions(picker, []);
+      }
+    }
+
+    renderAddressSuggestions(picker, suggestions) {
+      const list = picker && picker.querySelector('.cb-addr__list');
+      if (!list) return;
+      list.innerHTML = (suggestions || [])
+        .slice(0, 5)
+        .map((s) => {
+          const id = utils.escapeHtml(s.placeId || '');
+          const text = utils.escapeHtml(s.description || s.formattedAddress || '');
+          if (!id || !text) return '';
+          return `<button type="button" class="cb-addr__row" data-place-id="${id}">${text}</button>`;
+        })
+        .join('');
+    }
+
+    /**
+     * The customer picked one.
+     *
+     * The server resolves the id, binds it to the session, and speaks the address into the
+     * conversation itself — so this does NOT send a message. Doing both would put the address in
+     * twice, and the second copy would arrive as text the model reconstructs.
+     *
+     * The control is replaced by the chosen address rather than removed, so the customer can see
+     * what they picked. A 503 means Google could not resolve it right now, which is never
+     * something the customer did wrong: say so and leave the box open so they can type instead.
+     */
+    async selectAddress(picker, placeId, label) {
+      if (!picker || !placeId || !this.token) return;
+      const list = picker.querySelector('.cb-addr__list');
+      if (list) list.innerHTML = '';
+      try {
+        const res = await fetchWithTimeout(`${this.config.apiUrl}/api/v1/widget/places/select`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + this.token },
+          body: JSON.stringify({ placeId }),
+        }, 10000);
+        if (!res.ok) {
+          const note = picker.querySelector('.cb-addr__label');
+          if (note) note.textContent = 'That address could not be confirmed right now — please type it instead.';
+          return;
+        }
+        picker.innerHTML = `<p class="cb-addr__chosen">${utils.escapeHtml(label || '')}</p>`;
+      } catch (err) {
+        const note = picker.querySelector('.cb-addr__label');
+        if (note) note.textContent = 'That address could not be confirmed right now — please type it instead.';
+      }
+    }
+
     attachEventListeners() {
       // Launcher click
       this.launcher.addEventListener('click', () => this.toggle());
@@ -2252,6 +2409,35 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           const row = chip.closest('.cb-message__chips');
           if (row) row.remove();
           this.sendMessage(value);
+        });
+
+        // ── Address picker ───────────────────────────────────────────────
+        // Delegated like the chips above, so a picker rendered by a later reply works without
+        // rebinding. Both handlers are scoped to their own picker element: two of them can be on
+        // screen at once (one per reply that asked), and typing in one must not fill the other.
+
+        // Typing → suggestions. DEBOUNCED and length-gated because each call is billed and the
+        // endpoint is rate-limited; the server also refuses under 3 characters, so firing sooner
+        // spends a request to be told nothing.
+        this.messagesContainer.addEventListener('input', (e) => {
+          const input = e.target.closest && e.target.closest('.cb-addr__input');
+          if (!input) return;
+          const picker = input.closest('.cb-addr');
+          clearTimeout(this._addrDebounce);
+          const query = input.value.trim();
+          if (query.length < 3) {
+            this.renderAddressSuggestions(picker, []);
+            return;
+          }
+          this._addrDebounce = setTimeout(() => this.lookupAddress(picker, query), 400);
+        });
+
+        // Picking one. THIS is where an address becomes the address.
+        this.messagesContainer.addEventListener('click', (e) => {
+          const row = e.target.closest && e.target.closest('.cb-addr__row');
+          if (!row) return;
+          const picker = row.closest('.cb-addr');
+          this.selectAddress(picker, row.getAttribute('data-place-id'), row.textContent);
         });
       }
 

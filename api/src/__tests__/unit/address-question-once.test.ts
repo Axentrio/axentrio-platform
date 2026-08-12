@@ -182,6 +182,29 @@ describe('the address question survives a preceding availability check', () => {
     expect(pending?.formattedAddress).toBe(PROPOSED);
   });
 
+  it('names BOTH addresses, because most channels render no buttons', async () => {
+    // A REGRESSION I INTRODUCED AND THEN CAUGHT IN REVIEW.
+    //
+    // The refusal used to say "they have been shown the two options - do not name either one
+    // yourself", which is true on the widget and false everywhere else. `affordance` reaches
+    // `Message.metadata` and the widget socket; it appears in NO channel adapter. So on Messenger,
+    // Instagram, WhatsApp and Telegram the customer saw nothing while the model was forbidden from
+    // saying anything - "which address is right?" with no addresses in it. Before that change those
+    // customers at least heard one address named.
+    //
+    // The prose has to work where there are no buttons, so it names both. Where buttons DO exist
+    // they are still server-labelled and still authoritative; the prose merely agrees with them.
+    // Letting the model name the two options is safe now in a way it was not this morning: a tap
+    // carries the server-issued proposalId and the transition requires `presented`, so a model that
+    // words the choice badly still cannot manufacture a valid answer.
+    const refused = await new CreateBookingTool().execute(BOOK, ctx('run-1'));
+
+    expect(refused.success).toBe(false);
+    expect(refused.error).toContain(CHOSEN.formattedAddress);
+    expect(refused.error).toContain(PROPOSED);
+    expect(refused.error).not.toMatch(/have been shown/i);
+  });
+
   it('tells the model WHICH address it actually used', async () => {
     // Observed live on production, twice, on two different tools. The customer was told
     // "your appointment at Kerkstraat 12 is confirmed" while the row said Grote Markt 1 - the

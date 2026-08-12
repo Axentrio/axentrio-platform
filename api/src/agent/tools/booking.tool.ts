@@ -323,14 +323,25 @@ export class CreateBookingTool implements ToolAdapter {
         && (await claimPresentation(ctx.sessionId, booked.proposalId, ctx.runId))) {
         return {
           success: false,
-          // The model INTRODUCES the question; it does not define the options. So the instruction
-          // stops at "ask" and names neither address - the two are stated by the control below,
-          // from what the server stored. A model that words the options itself can offer an
-          // address nobody proposed, and a tap on that is trusted evidence for a choice the
-          // customer was never given.
+          // NAMES BOTH, because on most channels the prose is the only thing the customer gets.
+          //
+          // This said "they have been shown the two options - do not name either one yourself",
+          // which is true on the widget and false everywhere else: `affordance` reaches
+          // `Message.metadata` and the widget socket, and appears in no channel adapter at all. So
+          // a Messenger, Instagram, WhatsApp or Telegram customer saw nothing while the model was
+          // forbidden from saying anything - "which address is right?", with no addresses in it.
+          // That was worse than the behaviour it replaced, where at least one address was named.
+          //
+          // Naming them is safe in a way it was not before today. A tap carries the proposalId the
+          // SERVER issued, that id now hashes both addresses, and the transition requires
+          // `presented` - so a model that words the choice badly still cannot manufacture a valid
+          // answer. Where buttons exist they remain server-labelled and authoritative; this prose
+          // agrees with them rather than replacing them.
           error:
-            `The address for this appointment is not settled. Ask the customer which address is ` +
-            `right - they have been shown the two options - and do not name either one yourself.`,
+            `The address for this appointment is not settled. Ask the customer whether the ` +
+            `appointment should be at "${booked.address}" (the address they chose earlier) or ` +
+            `"${booked.proposedAddress}" (the one just mentioned). Offer exactly those two and ` +
+            `invent no others. Do not book until they answer.`,
           // A DOMAIN error, not an exception: the model should read it and ask the customer.
           errorSafeForModel: true,
           // #95. The answer needs somewhere to go, and a typed "yes" is not somewhere: it reaches

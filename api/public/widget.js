@@ -1285,6 +1285,25 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       div.textContent = text;
       return div.innerHTML;
     },
+
+    /**
+     * For a value going inside an HTML ATTRIBUTE, where escapeHtml is not enough.
+     *
+     * `escapeHtml` round-trips through `textContent`, which escapes & < > and leaves QUOTES
+     * alone - correct for element text, unsafe the moment the result lands inside `attr="..."`.
+     * A value containing a double quote closes the attribute and everything after it is parsed as
+     * more attributes, so `" autofocus onfocus="alert(1)` in an address field executes.
+     *
+     * Found by a test probe on 2026-08-13: the escaping was present, the payload still ran. The
+     * XSS assertion that had "passed" used a payload with no quote in it, so it could not break
+     * out and held just as well with the escaping deleted.
+     */
+    escapeAttr: (text) => String(text == null ? '' : text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;'),
     
     debounce: (fn, delay) => {
       let timeoutId;
@@ -2266,7 +2285,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
             const title = typeof qr === 'string' ? qr : qr.title || qr.value || '';
             const value = typeof qr === 'string' ? qr : qr.value || qr.title || '';
             if (!title) return '';
-            return `<button type="button" class="cb-slot-chip" data-value="${utils.escapeHtml(value)}">${utils.escapeHtml(title)}</button>`;
+            return `<button type="button" class="cb-slot-chip" data-value="${utils.escapeAttr(value)}">${utils.escapeHtml(title)}</button>`;
           })
           .join('');
         if (chips) chipsHtml = `<div class="cb-message__chips">${chips}</div>`;
@@ -2280,7 +2299,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       // posts to /places/select instead, and the server binds the identity Google returned.
       let pickerHtml = '';
       if (!isUser && message.affordance && message.affordance.kind === 'address_picker') {
-        const prefill = utils.escapeHtml(message.affordance.query || '');
+        const prefill = utils.escapeAttr(message.affordance.query || '');
         const vague = message.affordance.reason === 'too_vague';
         pickerHtml = `
           <div class="cb-addr" data-addr-picker="1">
@@ -2303,7 +2322,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       if (!isUser && message.affordance && message.affordance.kind === 'address_confirm') {
         const a = message.affordance;
         pickerHtml = `
-          <div class="cb-addr" data-addr-confirm="${utils.escapeHtml(a.proposalId)}">
+          <div class="cb-addr" data-addr-confirm="${utils.escapeAttr(a.proposalId)}">
             <p class="cb-addr__label">Which address should we use?</p>
             <button type="button" class="cb-addr__row" data-confirm="1">Use ${utils.escapeHtml(a.proposed)}</button>
             <button type="button" class="cb-addr__row" data-confirm="0">Keep ${utils.escapeHtml(a.bound)}</button>
@@ -2356,10 +2375,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
       list.innerHTML = (suggestions || [])
         .slice(0, 5)
         .map((s) => {
-          const id = utils.escapeHtml(s.placeId || '');
+          // Raw, because it is only a presence check - the escaping happens at each use site, and
+          // the two contexts need different escapers: the id lands in an attribute, the text in
+          // element content.
+          const id = s.placeId || '';
           const text = utils.escapeHtml(s.description || s.formattedAddress || '');
           if (!id || !text) return '';
-          return `<button type="button" class="cb-addr__row" data-place-id="${id}">${text}</button>`;
+          return `<button type="button" class="cb-addr__row" data-place-id="${utils.escapeAttr(id)}">${text}</button>`;
         })
         .join('');
     }

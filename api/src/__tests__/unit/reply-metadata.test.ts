@@ -43,4 +43,37 @@ describe('replyMetadata', () => {
     // The widget renders a chip row when the array is present. An empty one is an empty row.
     expect(replyMetadata({ quickReplies: [], affordance: PICKER })).toEqual({ affordance: PICKER });
   });
+
+  it('drops the delivery-only suggestion text from a picker, keeping the {id, placeId} evidence', () => {
+    // ADR-0014 (#98): options[].text is Google Content, shown in the provider body but never
+    // persisted. What lands in messages.metadata + the socket frame is only the evidence
+    // `offeredPlaceId` reads. The in-memory affordance is left intact for the Meta render.
+    const inMemory = {
+      kind: 'address_picker' as const,
+      reason: 'unverified' as const,
+      query: 'Turnhoutsebaan',
+      options: [
+        { id: 'a1b2', placeId: 'ChIJ_one', text: 'Turnhoutsebaan 100, 2140 Antwerpen' },
+        { id: 'c3d4', placeId: 'ChIJ_two', text: 'Turnhoutsebaan 101, 2140 Antwerpen' },
+      ],
+    };
+
+    const meta = replyMetadata({ affordance: inMemory });
+
+    expect(meta).toEqual({
+      affordance: {
+        kind: 'address_picker',
+        reason: 'unverified',
+        query: 'Turnhoutsebaan',
+        options: [
+          { id: 'a1b2', placeId: 'ChIJ_one' },
+          { id: 'c3d4', placeId: 'ChIJ_two' },
+        ],
+      },
+    });
+    // No unselected Google address string survives in the persisted/wire metadata.
+    expect(JSON.stringify(meta)).not.toContain('Turnhoutsebaan 100');
+    // The input affordance is not mutated — the provider render still needs its text.
+    expect(inMemory.options[0].text).toBe('Turnhoutsebaan 100, 2140 Antwerpen');
+  });
 });

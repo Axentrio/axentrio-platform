@@ -24,7 +24,8 @@ import { TenantAiConfig, KnowledgeBaseMetadata } from '../channels/response.type
 import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
-import type { Affordance } from '../agent/tool-adapter';
+import { storedAffordance } from '../agent/tool-adapter';
+import type { Affordance, StoredAffordance } from '../agent/tool-adapter';
 import { markQuestionAsked } from '../booking/travel/address-binding';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
@@ -1065,10 +1066,13 @@ async function markAddressQuestionAsked(
 export function replyMetadata(parts: {
   quickReplies?: Array<{ title: string; value: string }>;
   affordance?: Affordance;
-}): { quickReplies?: Array<{ title: string; value: string }>; affordance?: Affordance } | undefined {
+}): { quickReplies?: Array<{ title: string; value: string }>; affordance?: StoredAffordance } | undefined {
   const metadata = {
     ...(parts.quickReplies?.length ? { quickReplies: parts.quickReplies } : {}),
-    ...(parts.affordance ? { affordance: parts.affordance } : {}),
+    // The picker's suggestion text is delivery-only (ADR-0014): the provider body is rendered from
+    // the in-memory affordance, so the persisted + socket copy keeps only the {id, placeId}
+    // evidence that `offeredPlaceId` reads. See #98.
+    ...(parts.affordance ? { affordance: storedAffordance(parts.affordance) } : {}),
   };
   return Object.keys(metadata).length ? metadata : undefined;
 }

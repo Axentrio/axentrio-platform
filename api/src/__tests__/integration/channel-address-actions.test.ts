@@ -65,9 +65,11 @@ async function persistAffordance(affordance: Record<string, unknown>): Promise<M
 describe('server-observed Meta address actions', () => {
   it('binds a resolved place only when that option appeared in a persisted bot reply', async () => {
     const id = addressOptionId(PICKED.placeId);
+    // The persisted evidence is {id, placeId} only — the suggestion text is never stored (ADR-0014,
+    // #98). Binding must still resolve from that text-free row.
     await persistAffordance({
       kind: 'address_picker',
-      options: [{ id, placeId: PICKED.placeId, text: PICKED.formattedAddress }],
+      options: [{ id, placeId: PICKED.placeId }],
     });
     resolvePlaceId.mockResolvedValue({ status: 'placed', place: PICKED });
 

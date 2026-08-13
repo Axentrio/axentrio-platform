@@ -1331,13 +1331,12 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
   // ==========================================================================
   function botAvatarHtml(avatarUrl, { eager = false } = {}) {
     if (avatarUrl) {
-      const safe = String(avatarUrl)
-        .replace(/&/g, '&amp;')
-        .replace(/"/g, '&quot;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
+      // ESCAPED ONCE. This had its own inline escaper, and the attribute sweep wrapped that in
+      // `escapeAttr` as well - so `&` became `&amp;amp;` and a signed avatar URL lost its query
+      // string. Two correct escapers compose into a wrong one; the sweep has to replace them, not
+      // stack on top.
       const loading = eager ? 'eager' : 'lazy';
-      return `<img src="${utils.escapeAttr(safe)}" alt="" loading="${loading}" class="cb-bot-avatar-img" />`;
+      return `<img src="${utils.escapeAttr(avatarUrl)}" alt="" loading="${loading}" class="cb-bot-avatar-img" />`;
     }
     return ICONS.bot;
   }

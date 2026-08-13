@@ -129,6 +129,28 @@ describe('the address picker', () => {
   });
 });
 
+describe('escaping', () => {
+  it('escapes an attribute ONCE, so a signed URL survives', () => {
+    // The attribute sweep wrapped an existing inline escaper instead of replacing it, so `&`
+    // became `&amp;amp;` and any avatar URL with a query string broke. Two correct escapers
+    // compose into a wrong one.
+    const ChatbotWidget = loadWidget();
+    const widget = new ChatbotWidget({
+      apiKey: 'k',
+      apiUrl: 'https://api.test',
+      avatarUrl: 'https://cdn.example.com/a.png?v=1&sig=abc',
+    });
+    const root = document.createElement('div');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    root.innerHTML = (widget as any).renderMessage({
+      id: 'm', text: 'hi', sender: 'bot', timestamp: new Date(0),
+    });
+
+    const src = root.querySelector('img')?.getAttribute('src') ?? '';
+    if (src) expect(src).toBe('https://cdn.example.com/a.png?v=1&sig=abc');
+  });
+});
+
 describe('the correction question', () => {
   const AFF = {
     kind: 'address_confirm',

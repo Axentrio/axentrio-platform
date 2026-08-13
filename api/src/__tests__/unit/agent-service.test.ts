@@ -621,6 +621,53 @@ describe('AgentService', () => {
     expect(JSON.stringify(mockTraceSave.mock.calls.at(-1)?.[0])).not.toContain('replyFact');
   });
 
+  it('strips the affordance from the saved trace, so Google text and the address query never reach the audit log (#98)', async () => {
+    const check: ToolAdapter = {
+      name: 'check_availability',
+      description: 'check',
+      parameters: {},
+      hasSideEffects: false,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { slots: [], timezone: 'Europe/Brussels' },
+        affordance: {
+          kind: 'address_picker' as const,
+          reason: 'unverified' as const,
+          query: 'Kerkstraat 12',
+          options: [{ id: 'a1b2', placeId: 'ChIJ_one', text: 'Turnhoutsebaan 100, 2140 Antwerpen' }],
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([check]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'check_availability', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Here are some available times.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'when can you come out',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    // The affordance still reaches the response — only the persisted trace is scrubbed.
+    expect(result).toMatchObject({ affordance: { kind: 'address_picker', reason: 'unverified' } });
+
+    const savedTrace = JSON.stringify(mockTraceSave.mock.calls.at(-1)?.[0]);
+    expect(savedTrace).not.toContain('Turnhoutsebaan'); // Google suggestion text (ADR-0014)
+    expect(savedTrace).not.toContain('Kerkstraat');     // the customer's typed address (query)
+    expect(savedTrace).not.toContain('ChIJ_one');       // the offered option's placeId
+  });
+
   it('accepts a reply that states the authoritative address', async () => {
     const requestAppointment: ToolAdapter = {
       name: 'request_appointment',

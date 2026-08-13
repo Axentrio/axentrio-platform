@@ -947,7 +947,11 @@ export class AgentService {
               content: resultJson,
               toolCallId: toolCall.id,
             });
-            const { replyFact: _replyFact, ...traceResult } = result;
+            // The affordance is a client control, not an audit fact. `options[].text` is Google
+            // Content (ADR-0014) and `query` is the customer's typed address, which "must never
+            // reach a log". Strip it from the trace exactly as replyFact is stripped, so
+            // `agent_traces` keeps neither. See #98.
+            const { replyFact: _replyFact, affordance: _affordance, ...traceResult } = result;
             traceEntry.toolCalls.push({
               name: tool.name,
               args: toolCall.arguments,

@@ -67,6 +67,25 @@ export interface BookingAddressReplyFact {
 export type ReplyFact = BookingAddressReplyFact;
 
 /**
+ * One offered address suggestion.
+ *
+ * `id` and `placeId` are the durable EVIDENCE that this option was really offered: `offeredPlaceId`
+ * reads them back from the persisted reply to prove a tapped button was one the server issued.
+ * `text` is the Google Places display string. ADR-0014 is default-deny on caching Google Maps
+ * Content, and a suggestion the customer never chose backs no record, so `text` is DELIVERY-ONLY:
+ * it reaches the provider message body via `renderChannelAddressControls` and must never be
+ * persisted. `storedAffordance` drops it on the way to `messages.metadata` and the socket frame.
+ */
+export interface OfferedAddressOption {
+  /** Opaque short id returned by the channel button. */
+  id: string;
+  /** Server-held identity resolved only after the persisted option is tapped. */
+  placeId: string;
+  /** Full address rendered in the message body. Delivery-only; never persisted (ADR-0014). */
+  text: string;
+}
+
+/**
  * Offer the customer the address-suggestion list.
  *
  * Raised when a job happens at the customer's address and no verified place is bound yet - the
@@ -90,14 +109,7 @@ export interface AddressPickerAffordance {
    */
   query?: string;
   /** Native-channel choices, produced by the server and never by the model. */
-  options?: Array<{
-    /** Opaque short id returned by the channel button. */
-    id: string;
-    /** Server-held identity resolved only after the persisted option is tapped. */
-    placeId: string;
-    /** Full address rendered in the message body, never squeezed into a button title. */
-    text: string;
-  }>;
+  options?: OfferedAddressOption[];
 }
 
 /**
@@ -123,6 +135,28 @@ export interface AddressConfirmAffordance {
 }
 
 export type Affordance = AddressPickerAffordance | AddressConfirmAffordance;
+
+/**
+ * The shape allowed to persist and cross the wire: the evidence, without the Google display string.
+ *
+ * ADR-0014 forbids caching Google Maps Content, and `text` on an offered suggestion is exactly
+ * that. `messages.metadata` and the socket frame therefore carry the picker options as `{id,
+ * placeId}` only. The customer still sees the full addresses, because the provider message body is
+ * built from the in-memory `Affordance` (which keeps `text`), not from this stored form.
+ */
+export type StoredAffordance =
+  | (Omit<AddressPickerAffordance, 'options'> & { options?: Array<Pick<OfferedAddressOption, 'id' | 'placeId'>> })
+  | AddressConfirmAffordance;
+
+/**
+ * Map an in-memory affordance to its persisted/wire form, dropping the delivery-only suggestion
+ * text. Returns a NEW object and never mutates the input, because the caller renders the provider
+ * message from the original `text`-bearing affordance immediately afterwards.
+ */
+export function storedAffordance(a: Affordance): StoredAffordance {
+  if (a.kind !== 'address_picker' || !a.options) return a;
+  return { ...a, options: a.options.map(({ id, placeId }) => ({ id, placeId })) };
+}
 
 export interface ToolAdapter {
   name: string;

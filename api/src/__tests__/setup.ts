@@ -31,11 +31,18 @@ async function ensureWorkerDatabase(): Promise<void> {
   await admin.destroy();
 }
 
+const SCHEMA_SENTINEL = '_vitest_schema_ready';
+
 beforeAll(async () => {
   if (AppDataSource.isInitialized) return;
 
   await ensureWorkerDatabase();
   await AppDataSource.initialize();
+  const [{ ready }] = await AppDataSource.query(
+    `SELECT to_regclass('public.${SCHEMA_SENTINEL}') IS NOT NULL AS ready`
+  );
+  if (ready) return;
+
   // Extensions must exist before synchronize() creates vector / trigram columns.
   await AppDataSource.query('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"');
   try {
@@ -66,6 +73,10 @@ beforeAll(async () => {
   for (const stmt of INSTALL_BOOKING_BLOCKED_RANGE) {
     await AppDataSource.query(stmt);
   }
+  // Created last: its presence means the entity schema and both pieces of migration-only DDL are
+  // complete. Later files in this worker connect and go straight to data cleanup; they never
+  // rewrite the schema underneath background work left by an earlier file.
+  await AppDataSource.query(`CREATE TABLE "${SCHEMA_SENTINEL}" (ready boolean NOT NULL DEFAULT true)`);
 });
 
 afterEach(async () => {

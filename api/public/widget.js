@@ -2378,7 +2378,13 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
           // the two contexts need different escapers: the id lands in an attribute, the text in
           // element content.
           const id = s.placeId || '';
-          const text = utils.escapeHtml(s.description || s.formattedAddress || '');
+          // `text` is what the endpoint returns - see AddressSuggestion. This read
+          // `description || formattedAddress`, neither of which exists on the payload, so every
+          // row evaluated to '' and was dropped by the guard below: the picker fired the request,
+          // received five suggestions, and rendered nothing. Invisible to REST tests, which never
+          // reach this function, and to the jsdom tests, which covered the controls either side of
+          // it. Found only by driving the real widget in a browser.
+          const text = utils.escapeHtml(s.text || s.description || s.formattedAddress || '');
           if (!id || !text) return '';
           return `<button type="button" class="cb-addr__row" data-place-id="${utils.escapeAttr(id)}">${text}</button>`;
         })

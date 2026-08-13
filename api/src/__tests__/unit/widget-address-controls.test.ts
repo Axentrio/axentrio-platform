@@ -151,6 +151,41 @@ describe('escaping', () => {
   });
 });
 
+describe('the suggestion list', () => {
+  it('renders the rows the endpoint actually returns', async () => {
+    // THE BUG THIS FILE MISSED. The endpoint returns `{ placeId, text }`; the renderer read
+    // `description || formattedAddress`, neither of which exists, so every row evaluated to '' and
+    // was dropped. The picker fired the request, got five suggestions and showed nothing - and the
+    // address picker had never worked in a browser since the day it shipped.
+    //
+    // Nothing caught it: REST tests never reach this function, and the tests above cover the
+    // controls either side of it. It took driving the real widget in a real browser.
+    const { root, widget } = renderBotMessage({ kind: 'address_picker', reason: 'unverified', query: 'Grote Markt' });
+    const box = root.querySelector('.cb-addr')!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (widget as any).renderAddressSuggestions(box, [
+      { placeId: 'ChIJ_a', text: 'Grote Markt 1, Antwerpen, Belgium' },
+      { placeId: 'ChIJ_b', text: 'Grote Markt 1, Mechelen, Antwerpen, Belgium' },
+    ]);
+
+    const rows = [...box.querySelectorAll('.cb-addr__row')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain('Grote Markt 1, Antwerpen');
+    expect(rows[0].getAttribute('data-place-id')).toBe('ChIJ_a');
+  });
+
+  it('drops a row that could not be tapped or read', async () => {
+    // Both halves are required: a row without an id cannot be selected, one without text cannot be
+    // recognised. That guard was correct - it was the field name feeding it that was wrong.
+    const { root, widget } = renderBotMessage({ kind: 'address_picker', reason: 'unverified', query: 'x' });
+    const box = root.querySelector('.cb-addr')!;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (widget as any).renderAddressSuggestions(box, [{ placeId: '', text: 'no id' }, { placeId: 'ChIJ_c', text: '' }]);
+
+    expect(box.querySelectorAll('.cb-addr__row')).toHaveLength(0);
+  });
+});
+
 describe('the correction question', () => {
   const AFF = {
     kind: 'address_confirm',

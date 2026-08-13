@@ -11,13 +11,14 @@ if (!process.env.TEST_DATABASE_URL) {
   throw new Error('TEST_DATABASE_URL must be set for integration tests');
 }
 
+import { workerDatabaseName } from './worker-database';
+
 // Vitest assigns each worker a stable 1-based id, reused across files.
 const workerId = process.env.VITEST_POOL_ID ?? '1';
 
 const baseUrl = new URL(process.env.TEST_DATABASE_URL);
-const baseDbName = baseUrl.pathname.replace(/^\//, '') || 'chatbot_test';
 const workerUrl = new URL(baseUrl.toString());
-workerUrl.pathname = `/${baseDbName}_${workerId}`;
+workerUrl.pathname = `/${workerDatabaseName(baseUrl.toString(), workerId)}`;
 
 process.env.DATABASE_URL = workerUrl.toString();
 process.env.TEST_DATABASE_URL = workerUrl.toString();

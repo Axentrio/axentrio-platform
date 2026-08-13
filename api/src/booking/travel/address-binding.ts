@@ -71,6 +71,17 @@ export interface PendingCorrection extends BoundAddress {
    * Set by `claimPresentation`, which is the only thing entitled to spend it.
    */
   presented?: boolean;
+  /**
+   * The binding this question is ABOUT, as the caller saw it.
+   *
+   * `proposalId` hashes bound+proposed, so a proposal only means anything beside the active address
+   * it was derived from. Carried so the write can refuse when the customer picked something else in
+   * between - otherwise "A or B?" is stored against an active of C, and "keep mine" keeps a third
+   * address the control never named. Both fields, because a binding is identified by its place id
+   * when it has one and by its verified spelling when it does not.
+   */
+  expectedActivePlaceId?: string;
+  expectedActiveAddress?: string;
 }
 
 interface Record_ {
@@ -155,6 +166,27 @@ if pending == nil then pending = cjson.null end
 if pending ~= cjson.null and pending.presented == true then
   return '0'
 end
+-- THE PROPOSAL MUST BELONG TO THE ACTIVE ADDRESS IT WAS DERIVED FROM.
+--
+-- proposalId hashes bound+proposed, and the caller computed it from the binding it read a moment
+-- earlier. If the customer picked a different address in between, writing the proposal beside the
+-- NEW active stores the question "A or B?" against an active of C - so "keep mine" retains C while
+-- the control says A, and the booking goes to a door the customer was never offered.
+--
+-- Compared on the same terms the caller used: its place id when the binding has one, its verified
+-- spelling when it does not. (No backticks in here - this is a JS template literal.)
+local okActive = false
+if active ~= cjson.null then
+  local pid = active.placeId
+  if pid ~= nil and pid ~= '' then
+    okActive = (pid == ARGV[5])
+  else
+    okActive = (active.formattedAddress == ARGV[6])
+  end
+end
+if not okActive then
+  return '0'
+end
 local isNew = '1'
 if pending ~= cjson.null and pending.proposalId == ARGV[1] then isNew = '0' end
 redis.call('SET', KEYS[1], cjson.encode({
@@ -178,7 +210,11 @@ export async function proposeCorrection(
     // behind the customer's back, which the JS version enforced separately.
     const out = (await redis.eval(
       PROPOSE_LUA, 1, key(sessionId),
-      proposal.proposalId, proposal.placeId, proposal.formattedAddress, String(TTL_SECONDS)
+      proposal.proposalId, proposal.placeId, proposal.formattedAddress, String(TTL_SECONDS),
+      // The binding this proposal is a question ABOUT. If it moved between the caller reading it
+      // and this script running, the question no longer applies and nothing is written.
+      proposal.expectedActivePlaceId ?? '',
+      proposal.expectedActiveAddress ?? ''
     )) as string;
     return { isNew: out === '1' };
   } catch (error) {

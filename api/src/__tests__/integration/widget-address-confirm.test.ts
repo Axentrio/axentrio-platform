@@ -54,7 +54,14 @@ let sessionId: string;
 let token: string;
 
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
-const PROPOSED = { proposalId: 'prop-1', placeId: '', formattedAddress: 'Kerkstraat 12, 2060 Antwerpen' };
+const PROPOSED = {
+  proposalId: 'prop-1',
+  placeId: '',
+  formattedAddress: 'Kerkstraat 12, 2060 Antwerpen',
+  // The binding this question is about. Without it the proposal is refused, deliberately.
+  expectedActivePlaceId: CHOSEN.placeId,
+  expectedActiveAddress: CHOSEN.formattedAddress,
+};
 
 const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
 

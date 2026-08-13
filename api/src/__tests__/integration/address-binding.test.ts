@@ -57,6 +57,17 @@ import {
   clearAddressBinding,
 } from '../../booking/travel/address-binding';
 
+/**
+ * A proposal names the binding it is a question ABOUT.
+ *
+ * Without it the write is refused - deliberately: `proposalId` hashes bound+proposed, so a proposal
+ * stored beside a DIFFERENT active would label the control with one address and keep another.
+ */
+const about = (bound: { placeId: string; formattedAddress: string }) => ({
+  expectedActivePlaceId: bound.placeId,
+  expectedActiveAddress: bound.formattedAddress,
+});
+
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Grote Markt 1, 2000 Antwerpen' };
 const OTHER = { placeId: 'ChIJ_other', formattedAddress: 'Korenmarkt 1, 9000 Gent' };
 
@@ -75,7 +86,7 @@ describe('the address a conversation is about', () => {
 
   it('is not changed by a proposal', async () => {
     await bindAddress('s1', CHOSEN);
-    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
+    await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId, ...about(CHOSEN) });
 
     // The whole point. Something suggested Gent; the customer chose Antwerpen; Antwerpen stands.
     expect(await getBoundAddress('s1')).toEqual(CHOSEN);
@@ -104,15 +115,15 @@ describe('the address a conversation is about', () => {
     // the single question on a retry nobody saw.
     await bindAddress('s1', CHOSEN);
 
-    const first = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
+    const first = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId, ...about(CHOSEN) });
     expect(first.isNew).toBe(true);
 
-    const replay = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId });
+    const replay = await proposeCorrection('s1', { ...OTHER, proposalId: OTHER.placeId, ...about(CHOSEN) });
     expect(replay.isNew).toBe(false);
 
     // A genuinely different address is a new question and may be asked.
     const third = await proposeCorrection('s1', {
-      placeId: 'ChIJ_third', formattedAddress: 'Meir 1', proposalId: 'ChIJ_third',
+      placeId: 'ChIJ_third', formattedAddress: 'Meir 1', proposalId: 'ChIJ_third', ...about(CHOSEN),
     });
     expect(third.isNew).toBe(true);
   });
@@ -139,6 +150,24 @@ describe('the address a conversation is about', () => {
   it('does not leak between sessions', async () => {
     await bindAddress('s1', CHOSEN);
     expect(await getBoundAddress('s2')).toBeNull();
+  });
+
+  it('refuses a proposal whose question is about an address the customer has left', async () => {
+    // The caller reads the binding, derives `proposalId` from bound+proposed, and only then writes.
+    // If the customer picks something else in between, storing the proposal beside the NEW active
+    // would label the control "A or B?" while "keep mine" retained C - a door they were never
+    // offered. The write is refused instead, and the next contested turn asks afresh about C.
+    await bindAddress('s1', CHOSEN);
+    const stale = about(CHOSEN);
+    await bindAddress('s1', OTHER); // they picked again
+
+    const { isNew } = await proposeCorrection('s1', {
+      placeId: '', formattedAddress: 'Meir 1, 2000 Antwerpen', proposalId: 'p-stale', ...stale,
+    });
+
+    expect(isNew).toBe(false);
+    expect(await getPendingCorrection('s1')).toBeNull();
+    expect(await getBoundAddress('s1')).toEqual(OTHER);
   });
 
   it('degrades to no binding when Redis cannot be read', async () => {

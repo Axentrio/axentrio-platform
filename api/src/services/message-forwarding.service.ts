@@ -1032,10 +1032,10 @@ export /**
  *
  * Fire-and-forget: a marker that can fail a reply is worse than one that occasionally re-asks.
  */
-function markAddressQuestionDelivered(sessionId: string, extras?: ReplyExtras): void {
+async function markAddressQuestionDelivered(sessionId: string, extras?: ReplyExtras): Promise<void> {
   const a = extras?.affordance;
   if (a?.kind !== 'address_confirm') return;
-  void markQuestionDelivered(sessionId, a.proposalId).catch(() => undefined);
+  await markQuestionDelivered(sessionId, a.proposalId);
 }
 
 export function replyMetadata(parts: {
@@ -1068,7 +1068,7 @@ async function finalizeReply(
   staleGuard: boolean,
 ): Promise<{ status: 'answered'; savedId: string } | { status: 'stale' }> {
   try {
-    return await AppDataSource.transaction(async (manager) => {
+    const result = await AppDataSource.transaction(async (manager) => {
       if (staleGuard) {
         const r = await manager.query(
           `SELECT EXISTS(
@@ -1085,7 +1085,6 @@ async function finalizeReply(
       }
 
       const metadata = replyMetadata(extras ?? {});
-      markAddressQuestionDelivered(session.id, extras);
       const repo = manager.getRepository(Message);
       const saved = await repo.save(
         repo.create({
@@ -1147,6 +1146,12 @@ async function finalizeReply(
 
       return { status: 'answered' as const, savedId: saved.id };
     });
+    // AFTER the commit, and awaited. Marking before it meant a transaction that rolled back - or
+    // lost the watermark race below - left `presented` set with no reply persisted, which is the
+    // exact state this flag was moved here to make impossible. And a detached call can be lost to
+    // a process exit, after which the question repeats forever.
+    if (result.status === 'answered') await markAddressQuestionDelivered(session.id, extras);
+    return result;
   } catch (err) {
     if (err instanceof WatermarkConflictError) {
       logger.info(`[coalescer] watermark race for session ${session.id} — treating as stale`);
@@ -1505,7 +1510,6 @@ async function sendBotMessage(
   offer?: OfferMeasurement
 ): Promise<Message> {
   const metadata = replyMetadata(extras ?? {});
-  markAddressQuestionDelivered(session.id, extras);
   const botMsg = messageRepository.create({
     sessionId: session.id,
     tenantId: session.tenantId,
@@ -1518,6 +1522,8 @@ async function sendBotMessage(
     ...(metadata ? { metadata } : {}),
   });
   const saved = await messageRepository.save(botMsg);
+  // After the write, for the same reason as `finalizeReply`.
+  await markAddressQuestionDelivered(session.id, extras);
 
   await sessionRepository.increment({ id: session.id }, 'messageCount', 1);
   await sessionRepository.update(session.id, { lastActivityAt: new Date() });

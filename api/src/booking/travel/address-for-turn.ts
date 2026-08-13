@@ -207,6 +207,9 @@ export async function addressForTurn(
     // through `/places/select`, which resolves properly. A proposal is a question, not a place.
     placeId: '',
     formattedAddress: typed,
+    // What `proposalId` was derived from, so the write refuses if the binding moved meanwhile.
+    expectedActivePlaceId: bound.placeId,
+    expectedActiveAddress: bound.formattedAddress,
   });
   logger.info('[Travel] a booking tool named a different address than the customer chose', {
     sessionId,

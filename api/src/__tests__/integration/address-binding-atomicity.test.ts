@@ -89,8 +89,15 @@ import {
 
 const SESSION = 'sess-atomicity';
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
-const P1 = { proposalId: 'p-one', placeId: '', formattedAddress: 'Kerkstraat 12, 2060 Antwerpen' };
-const P2 = { proposalId: 'p-two', placeId: '', formattedAddress: 'Meir 78, 2000 Antwerpen' };
+/**
+ * A proposal names the binding it is a question ABOUT, and the write is refused without it.
+ *
+ * `proposalId` hashes bound+proposed, so a proposal stored beside a DIFFERENT active would label
+ * the control with one address while "keep mine" retained another.
+ */
+const ABOUT_CHOSEN = { expectedActivePlaceId: CHOSEN.placeId, expectedActiveAddress: CHOSEN.formattedAddress };
+const P1 = { proposalId: 'p-one', placeId: '', formattedAddress: 'Kerkstraat 12, 2060 Antwerpen', ...ABOUT_CHOSEN };
+const P2 = { proposalId: 'p-two', placeId: '', formattedAddress: 'Meir 78, 2000 Antwerpen', ...ABOUT_CHOSEN };
 
 beforeAll(async () => {
   real = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
@@ -140,17 +147,29 @@ describe('a confirmation racing a new proposal', () => {
     // The customer restated their address while the button sat on their screen.
     await proposeCorrection(SESSION, P2);
     released();
-    await confirming;
+    const result = await confirming;
 
     const pending = await getPendingCorrection(SESSION);
     const active = await getBoundAddress(SESSION);
 
-    // THE ASSERTION. Both legal orderings leave P2 outstanding:
-    //   confirm then propose -> active = P1's address, pending = P2
-    //   propose then confirm -> active = CHOSEN,       pending = P2
-    // A read-then-write transition produces `pending = null`, which no ordering can reach.
-    expect(pending?.proposalId).toBe(P2.proposalId);
-    expect([P1.formattedAddress, CHOSEN.formattedAddress]).toContain(active?.formattedAddress);
+    // THE ASSERTION: an answer that REPORTED itself applied must be the one in force.
+    //
+    // It used to assert that no ordering loses P2, which was right when a proposal overwrote the
+    // record blindly. It no longer is: a proposal names the binding it is a question about, so once
+    // the confirmation moves the binding, P2 - a question about the OLD one - is correctly refused.
+    // Both legal orderings are now:
+    //   confirm then propose -> active = P1's address, pending = null  (P2 no longer applies)
+    //   propose then confirm -> active = CHOSEN,       pending = P2    (the confirm is stale)
+    //
+    // A read-then-write transition produced neither: it reported `applied` and then had its write
+    // erased, leaving the customer's answer reported as accepted and the old address in force.
+    // That is the lie this test exists to catch, and it is what the predicate below names.
+    if (result.applied) {
+      expect(active?.formattedAddress).toBe(P1.formattedAddress);
+    } else {
+      expect(active?.formattedAddress).toBe(CHOSEN.formattedAddress);
+      expect(pending?.proposalId).toBe(P2.proposalId);
+    }
   });
 
   it('still refuses a proposal that is simply stale', async () => {

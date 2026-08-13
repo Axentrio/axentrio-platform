@@ -1,4 +1,4 @@
-import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
+import type { BookingAddressReplyFact, ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
 import { getPendingCorrection } from '../../booking/travel/address-binding';
 import {
@@ -90,6 +90,27 @@ function addressEcho(resolved: string | undefined): Record<string, string> {
   };
 }
 
+function addressReplyFact(
+  address: string | undefined,
+  use: BookingAddressReplyFact['use'],
+  ...candidates: Array<string | undefined>
+): { replyFact: BookingAddressReplyFact } | Record<string, never> {
+  if (!address?.trim()) return {};
+  const alternatives = [...new Set(
+    candidates
+      .map((candidate) => candidate?.trim())
+      .filter((candidate): candidate is string => Boolean(candidate) && candidate !== address.trim())
+  )];
+  return {
+    replyFact: {
+      kind: 'booking_address',
+      address,
+      use,
+      alternatives,
+    },
+  };
+}
+
 export class CheckAvailabilityTool implements ToolAdapter {
   name = 'check_availability';
   description = 'Check available appointment slots for a given date range and service.';
@@ -174,6 +195,12 @@ export class CheckAvailabilityTool implements ToolAdapter {
             },
           }
         : {};
+      const replyFact = addressReplyFact(
+        chosen.address,
+        'availability',
+        args.customerAddress as string | undefined,
+        chosen.proposedAddress
+      );
       // #82: computed here, beside `measurement`, and for the same reason - the branches below
       // return before the final one, so anything attached only at the end silently never ships.
       const groupedNote = result?.travel?.grouped?.customerReason
@@ -191,6 +218,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           success: true,
           ...measurement,
           ...affordance,
+          ...replyFact,
           data: {
             ...result,
             ...groupedNote,
@@ -212,6 +240,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
           success: true,
           ...measurement,
           ...affordance,
+          ...replyFact,
           data: {
             ...result,
             ...groupedNote,
@@ -223,7 +252,13 @@ export class CheckAvailabilityTool implements ToolAdapter {
           },
         };
       }
-      return { success: true, data: { ...result, ...groupedNote, ...addressEcho(chosen.address) }, ...measurement, ...affordance };
+      return {
+        success: true,
+        data: { ...result, ...groupedNote, ...addressEcho(chosen.address) },
+        ...measurement,
+        ...affordance,
+        ...replyFact,
+      };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to check availability') };
     }
@@ -470,7 +505,16 @@ export class CreateBookingTool implements ToolAdapter {
         }
       })();
 
-      return { success: true, data: { ...result, ...addressEcho(booked.address) } };
+      return {
+        success: true,
+        data: { ...result, ...addressEcho(booked.address) },
+        ...addressReplyFact(
+          booked.address,
+          isRequest ? 'request' : 'confirmed_booking',
+          args.customerAddress as string | undefined,
+          booked.proposedAddress
+        ),
+      };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to create booking') };
     }
@@ -584,7 +628,16 @@ export class RequestAppointmentTool implements ToolAdapter {
       // This tool produced the SECOND live instance of the wrong-address sentence: the row said
       // Grote Markt 1 and the customer was told Kerkstraat 12. A Request is the one a customer is
       // most likely to act on wrongly, because nobody confirms it back to them afterwards.
-      return { success: true, data: { ...result, ...addressEcho(requested.address) } };
+      return {
+        success: true,
+        data: { ...result, ...addressEcho(requested.address) },
+        ...addressReplyFact(
+          requested.address,
+          'request',
+          args.customerAddress as string | undefined,
+          requested.proposedAddress
+        ),
+      };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to capture request') };
     }

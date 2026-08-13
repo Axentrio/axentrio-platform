@@ -278,7 +278,7 @@ export function bookingPlaceColumns(placement: BookingPlacement): BookingPlaceCo
     };
   }
   return {
-    placeId: placement.place.placeId,
+    placeId: placement.place.placeId.trim() || null,
     lat: placement.place.lat,
     lng: placement.place.lng,
     // What the 30-day deletion job reads (ADR-0014). Stamped beside the coordinates rather

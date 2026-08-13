@@ -72,6 +72,7 @@ describe('AgentService', () => {
     );
     vi.clearAllMocks();
     mockMeteringIsOverBudget.mockResolvedValue(false);
+    mockGetToolsForTenant.mockResolvedValue([mockKbSearch]);
   });
 
   it('returns a text response when LLM finishes with stop', async () => {
@@ -566,6 +567,258 @@ describe('AgentService', () => {
 
     expect(result.type).toBe('response');
     if (result.type === 'response') expect(result.quickReplies).toBeUndefined();
+  });
+
+  it('retries a wrong-address reply once with tools disabled', async () => {
+    const requestAppointment: ToolAdapter = {
+      name: 'request_appointment',
+      description: 'Request',
+      parameters: { type: 'object', properties: {} },
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { requested: true },
+        replyFact: {
+          kind: 'booking_address',
+          address: 'Turnhoutsebaan 100, 2140 Antwerpen',
+          use: 'request',
+          alternatives: ['Kerkstraat 12, 2060 Antwerpen'],
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([requestAppointment]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'request_appointment', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Although you mentioned Kerkstraat 12, 2060 Antwerpen, your request was sent for Turnhoutsebaan 100, 2140 Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        content: 'Your request was sent for Turnhoutsebaan 100, 2140 Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'request an appointment',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    expect(result).toMatchObject({
+      type: 'response',
+      content: 'Your request was sent for Turnhoutsebaan 100, 2140 Antwerpen.',
+    });
+    expect(mockProvider.chat).toHaveBeenCalledTimes(3);
+    expect((mockProvider.chat as any).mock.calls[2][1].tools).toBeUndefined();
+    expect(JSON.stringify(mockTraceSave.mock.calls.at(-1)?.[0])).not.toContain('replyFact');
+  });
+
+  it('accepts a reply that states the authoritative address', async () => {
+    const requestAppointment: ToolAdapter = {
+      name: 'request_appointment',
+      description: 'Request',
+      parameters: {},
+      hasSideEffects: true,
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: { requested: true },
+        replyFact: {
+          kind: 'booking_address',
+          address: 'Turnhoutsebaan 100, 2140 Antwerpen',
+          use: 'request',
+          alternatives: ['Kerkstraat 12, 2060 Antwerpen'],
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([requestAppointment]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'request_appointment', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Your request was sent for Turnhoutsebaan 100, Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'request an appointment',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    expect(result).toMatchObject({
+      type: 'response',
+      content: 'Your request was sent for Turnhoutsebaan 100, Antwerpen.',
+    });
+    expect(mockProvider.chat).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    ['check_availability', 'availability', 'Here are the available times for Turnhoutsebaan 100, 2140 Antwerpen.'],
+    ['create_booking', 'confirmed_booking', 'Your booking is confirmed for Turnhoutsebaan 100, 2140 Antwerpen.'],
+    ['request_appointment', 'request', 'Your appointment request has been sent for Turnhoutsebaan 100, 2140 Antwerpen.'],
+  ] as const)('uses a deterministic %s fallback after a second invalid reply', async (name, use, expected) => {
+    const addressTool: ToolAdapter = {
+      name,
+      description: name,
+      parameters: {},
+      hasSideEffects: name !== 'check_availability',
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: name === 'check_availability' ? { slots: [], timezone: 'Europe/Brussels' } : { ok: true },
+        ...(name === 'check_availability'
+          ? { affordance: { kind: 'address_picker' as const, reason: 'unverified' as const } }
+          : {}),
+        replyFact: {
+          kind: 'booking_address',
+          address: 'Turnhoutsebaan 100, 2140 Antwerpen',
+          use,
+          alternatives: ['Kerkstraat 12, 2060 Antwerpen'],
+        },
+      }),
+    };
+    mockGetToolsForTenant.mockResolvedValue([addressTool]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name, arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'This used Kerkstraat 12, 2060 Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        content: 'Still Kerkstraat 12, 2060 Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'continue',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    expect(result).toMatchObject({ type: 'response', content: expected });
+    if (name === 'check_availability') {
+      expect(result).toMatchObject({
+        affordance: { kind: 'address_picker', reason: 'unverified' },
+      });
+    }
+  });
+
+  it('does not execute tool calls emitted during the tools-disabled correction', async () => {
+    const execute = vi.fn().mockResolvedValue({
+      success: true,
+      data: { requested: true },
+      replyFact: {
+        kind: 'booking_address',
+        address: 'Turnhoutsebaan 100, 2140 Antwerpen',
+        use: 'request',
+        alternatives: ['Kerkstraat 12, 2060 Antwerpen'],
+      },
+    });
+    const requestAppointment: ToolAdapter = {
+      name: 'request_appointment',
+      description: 'Request',
+      parameters: {},
+      hasSideEffects: true,
+      execute,
+    };
+    mockGetToolsForTenant.mockResolvedValue([requestAppointment]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_1', name: 'request_appointment', arguments: {} }],
+      })
+      .mockResolvedValueOnce({
+        content: 'Sent for Kerkstraat 12, 2060 Antwerpen.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      })
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [{ id: 'tc_2', name: 'request_appointment', arguments: {} }],
+      });
+
+    const result = await agent.run(
+      'continue',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      type: 'response',
+      content: 'Your appointment request has been sent for Turnhoutsebaan 100, 2140 Antwerpen.',
+    });
+  });
+
+  it('rejects conflicting authoritative addresses without choosing one', async () => {
+    const tool = (name: string, address: string): ToolAdapter => ({
+      name,
+      description: name,
+      parameters: {},
+      hasSideEffects: name === 'request_appointment',
+      execute: vi.fn().mockResolvedValue({
+        success: true,
+        data: name === 'check_availability' ? { slots: [], timezone: 'UTC' } : { requested: true },
+        replyFact: { kind: 'booking_address', address, use: name === 'check_availability' ? 'availability' : 'request', alternatives: [] },
+      }),
+    });
+    const availability = tool('check_availability', 'Turnhoutsebaan 100, 2140 Antwerpen');
+    const request = tool('request_appointment', 'Kerkstraat 12, 2060 Antwerpen');
+    mockGetToolsForTenant.mockResolvedValue([availability, request]);
+    (mockProvider.chat as any)
+      .mockResolvedValueOnce({
+        content: '',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'tool_calls',
+        toolCalls: [
+          { id: 'tc_1', name: 'check_availability', arguments: {} },
+          { id: 'tc_2', name: 'request_appointment', arguments: {} },
+        ],
+      })
+      .mockResolvedValueOnce({
+        content: 'Done.',
+        usage: { promptTokens: 10, completionTokens: 5 },
+        finishReason: 'stop',
+      });
+
+    const result = await agent.run(
+      'continue',
+      { id: 's1', tenantId: 't1', status: 'bot' } as any,
+      { id: 't1', settings: { ai: { enabled: true } } } as any,
+      [],
+    );
+
+    expect(result).toMatchObject({
+      type: 'response',
+      content: "Sorry, I can't safely confirm which address was used. Please verify the appointment address with the business.",
+    });
+    expect(mockProvider.chat).toHaveBeenCalledTimes(2);
   });
 
   it('enforces preconditions — blocks tool if prerequisite not called', async () => {

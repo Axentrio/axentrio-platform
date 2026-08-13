@@ -49,7 +49,22 @@ export interface ToolResult {
    * control on screen, because only the server knows what it means.
    */
   affordance?: Affordance;
+  /**
+   * Authoritative fact the final reply must state. It is harvested by AgentService, never
+   * serialised into the model-facing tool payload, response metadata, or persisted trace.
+   */
+  replyFact?: ReplyFact;
 }
+
+export interface BookingAddressReplyFact {
+  kind: 'booking_address';
+  address: string;
+  use: 'availability' | 'confirmed_booking' | 'request';
+  /** Other known addresses that this reply must not present as the one actually used. */
+  alternatives: string[];
+}
+
+export type ReplyFact = BookingAddressReplyFact;
 
 /**
  * Offer the customer the address-suggestion list.

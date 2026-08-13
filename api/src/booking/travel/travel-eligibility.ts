@@ -123,7 +123,10 @@ export async function resolveTravelEligibility(input: {
   botId: string;
   itineraryKey: ItineraryKey;
 }): Promise<TravelEligibility> {
-  if (!config.travel.googleMapsApiKey) return { active: false, reason: 'no_api_key' };
+  if (!config.travel.googleMapsApiKey) {
+    await recordCause('no_api_key', { tenantId: input.tenantId, botId: input.botId });
+    return { active: false, reason: 'no_api_key' };
+  }
 
   let entitled = false;
   try {

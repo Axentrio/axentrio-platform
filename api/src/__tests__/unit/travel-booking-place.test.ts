@@ -229,6 +229,12 @@ describe('bookingPlaceColumns', () => {
     ).toMatchObject({ precision: 'approximate', lat: 51.05 });
   });
 
+  it('stores a blank place identity as NULL', () => {
+    expect(
+      bookingPlaceColumns({ applies: true, outcome: 'placed', place: { ...PLACE, placeId: '' } })
+    ).toMatchObject({ placeId: null });
+  });
+
   it.each<BookingPlacement>([
     { applies: false },
     { applies: true, outcome: 'not_placeable' },

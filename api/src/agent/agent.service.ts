@@ -15,7 +15,7 @@ import { ChatMessage, ContentPart, ToolDefinition } from '../llm/llm.types';
 import { ChatSession } from '../database/entities/ChatSession';
 import { getEntitlements } from '../billing/entitlements';
 import { shouldAskForContact } from '../leads/proactive/should-ask';
-import type { ToolAdapter, Affordance } from './tool-adapter';
+import type { ToolAdapter, Affordance, BookingAddressReplyFact } from './tool-adapter';
 import { readAskState, withAskState, ASK_STATE_KEY } from '../leads/proactive/ask-state';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
 import { AvailabilityRule } from '../database/entities/AvailabilityRule';
@@ -210,6 +210,102 @@ export function unofferedTimesIn(text: string, offeredLocal: string[]): string[]
   }
   return named;
 }
+
+const BELGIAN_COUNTRY_TOKENS = new Set(['be', 'belgie', 'belgique', 'belgien', 'belgium']);
+
+function addressTokens(value: string): string[] {
+  return value
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLocaleLowerCase('en')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Whether a reply contains the authoritative Belgian address as one intact token sequence.
+ *
+ * Country suffixes and a recognisable Belgian postcode are presentation details, so the model may
+ * omit them. Street and door number are not: keeping both in the sequence makes `1` different from
+ * `12`, and refuses a street-only paraphrase when the authoritative address has a door number.
+ */
+export function addressClaimIn(text: string, authoritativeAddress: string): boolean {
+  const segments = authoritativeAddress.split(',');
+  const localitySegments = segments.slice(1);
+  const authoritativeTokens = addressTokens(authoritativeAddress);
+  const delimitedPostcode = localitySegments
+    .flatMap(addressTokens)
+    .find((token) => /^\d{4}$/.test(token));
+  // Without commas, only discard a four-digit token when another number already established the
+  // door before it. `Langeweg 2000 Gent` stays a door; `Kerkstraat 12 2000 Antwerpen` has a
+  // distinct door and postcode.
+  const inferredPostcode = authoritativeTokens.find((token, index) =>
+    /^\d{4}$/.test(token) &&
+    authoritativeTokens.slice(1, index).some((prior) => /\d/.test(prior)) &&
+    authoritativeTokens.slice(index + 1).some((later) => /\p{L}/u.test(later) && !BELGIAN_COUNTRY_TOKENS.has(later))
+  );
+  const postcode = delimitedPostcode ?? inferredPostcode;
+  const ignored = new Set(BELGIAN_COUNTRY_TOKENS);
+  if (postcode) ignored.add(postcode);
+
+  const expected = authoritativeTokens.filter((token) => !ignored.has(token));
+  if (!expected.length) return false;
+  const actual = addressTokens(text).filter((token) => !ignored.has(token));
+
+  outer: for (let start = 0; start <= actual.length - expected.length; start++) {
+    for (let offset = 0; offset < expected.length; offset++) {
+      if (actual[start + offset] !== expected[offset]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+function sameAddress(left: string, right: string): boolean {
+  return addressClaimIn(left, right) && addressClaimIn(right, left);
+}
+
+function validAddressReply(text: string, fact: BookingAddressReplyFact): boolean {
+  if (!addressClaimIn(text, fact.address)) return false;
+  return !fact.alternatives.some(
+    (alternative) => !sameAddress(alternative, fact.address) && addressClaimIn(text, alternative)
+  );
+}
+
+function mergeAddressFacts(
+  current: BookingAddressReplyFact | null,
+  next: BookingAddressReplyFact
+): { fact: BookingAddressReplyFact; conflict: boolean } {
+  if (!current) return { fact: next, conflict: false };
+  if (!sameAddress(current.address, next.address)) return { fact: current, conflict: true };
+  return {
+    fact: {
+      ...next,
+      alternatives: [...new Set([...current.alternatives, ...next.alternatives])],
+    },
+    conflict: false,
+  };
+}
+
+function addressCorrectionNote(fact: BookingAddressReplyFact): string {
+  const action = fact.use === 'availability'
+    ? 'the availability was checked for'
+    : fact.use === 'confirmed_booking'
+      ? 'the booking was confirmed for'
+      : 'the appointment request was sent for';
+  return `(Internal note, not from the customer.) Your previous reply did not accurately state the address ${action}. Reply again without calling any tools. State this exact address: ${fact.address}. Do not present any earlier address as the one used.`;
+}
+
+function addressSafeFallback(fact: BookingAddressReplyFact): string {
+  if (fact.use === 'availability') return `Here are the available times for ${fact.address}.`;
+  if (fact.use === 'confirmed_booking') return `Your booking is confirmed for ${fact.address}.`;
+  return `Your appointment request has been sent for ${fact.address}.`;
+}
+
+const ADDRESS_CONFLICT_FALLBACK =
+  "Sorry, I can't safely confirm which address was used. Please verify the appointment address with the business.";
 
 /**
  * A reply that lists times is replaced rather than repaired.
@@ -541,6 +637,10 @@ export class AgentService {
       // target = no new effect).
       const sideEffectsInvoked = new Set<string>();
       let correctionAttempted = false;
+      let pendingAddressFact: BookingAddressReplyFact | null = null;
+      let addressFactConflict = false;
+      let addressCorrectionAttempted = false;
+      let addressCorrectionOnly = false;
 
       for (let i = 0; i < MAX_ITERATIONS; i++) {
         // Budget check
@@ -554,7 +654,7 @@ export class AgentService {
         }
 
         // Build tool definitions for LLM
-        const toolDefs: ToolDefinition[] | undefined = tools.length > 0
+        const toolDefs: ToolDefinition[] | undefined = !addressCorrectionOnly && tools.length > 0
           ? tools.map((t) => ({ name: t.name, description: t.description, parameters: t.parameters }))
           : undefined;
 
@@ -577,9 +677,30 @@ export class AgentService {
         };
 
         // No tool calls — final response
-        if (response.finishReason === 'stop' || !response.toolCalls?.length) {
+        if (response.finishReason === 'stop' || !response.toolCalls?.length || addressCorrectionOnly) {
           trace.iterations.push(traceEntry);
-          const finalContent = response.content ?? '';
+          let finalContent = response.content ?? '';
+          if (addressFactConflict) {
+            logger.warn('[agent] conflicting authoritative booking addresses in one run; returning safe fallback', {
+              sessionId: session.id,
+            });
+            finalContent = ADDRESS_CONFLICT_FALLBACK;
+          } else if (pendingAddressFact && !validAddressReply(finalContent, pendingAddressFact)) {
+            if (!addressCorrectionAttempted && i < MAX_ITERATIONS - 1) {
+              addressCorrectionAttempted = true;
+              addressCorrectionOnly = true;
+              logger.warn('[agent] blocked inaccurate booking address reply; requesting correction', {
+                sessionId: session.id,
+              });
+              messages.push({ role: 'assistant', content: finalContent });
+              messages.push({ role: 'user', content: addressCorrectionNote(pendingAddressFact) });
+              continue;
+            }
+            logger.warn('[agent] persistent inaccurate booking address reply; returning safe fallback', {
+              sessionId: session.id,
+            });
+            finalContent = addressSafeFallback(pendingAddressFact);
+          }
           // Egress guard (issue #35): never let the model tell the customer a
           // booking/request happened unless one was actually recorded this run.
           if (bookingClaimGuardArmed && !bookingRecorded && claimsBookingDone(finalContent)) {
@@ -721,6 +842,11 @@ export class AgentService {
             // #7: only now (post-success) is the side-effect "performed" — a failed
             // attempt stays retryable.
             if (sideEffectSig && result.success) sideEffectsInvoked.add(sideEffectSig);
+            if (result.success && result.replyFact?.kind === 'booking_address') {
+              const merged = mergeAddressFacts(pendingAddressFact, result.replyFact);
+              pendingAddressFact = merged.fact;
+              addressFactConflict ||= merged.conflict;
+            }
             // Harvested for EVERY tool, not just the one that raises it today. The alternative -
             // reading it inside the `check_availability` branch below - would make the next tool
             // that wants an affordance work perfectly and ship nothing, which is the failure this
@@ -814,10 +940,11 @@ export class AgentService {
               content: resultJson,
               toolCallId: toolCall.id,
             });
+            const { replyFact: _replyFact, ...traceResult } = result;
             traceEntry.toolCalls.push({
               name: tool.name,
               args: toolCall.arguments,
-              result,
+              result: traceResult,
               latencyMs: Date.now() - toolStartMs,
             });
           } catch (error) {

@@ -7,18 +7,21 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-const { travelConfig, getEntitlements, bsFindOne, bsSave, bsUpdate, itineraryKeyIsShared } = vi.hoisted(() => ({
-  travelConfig: { googleMapsApiKey: 'key-1' as string | undefined },
-  getEntitlements: vi.fn(),
-  bsFindOne: vi.fn(),
-  bsSave: vi.fn(),
-  bsUpdate: vi.fn(),
-  itineraryKeyIsShared: vi.fn(),
-}));
+const { travelConfig, getEntitlements, bsFindOne, bsSave, bsUpdate, itineraryKeyIsShared, recordCause } =
+  vi.hoisted(() => ({
+    travelConfig: { googleMapsApiKey: 'key-1' as string | undefined },
+    getEntitlements: vi.fn(),
+    bsFindOne: vi.fn(),
+    bsSave: vi.fn(),
+    bsUpdate: vi.fn(),
+    itineraryKeyIsShared: vi.fn(),
+    recordCause: vi.fn(async () => {}),
+  }));
 
 vi.mock('../../config/environment', () => ({ config: { travel: travelConfig } }));
 vi.mock('../../billing/entitlements', () => ({ getEntitlements }));
 vi.mock('../../scheduler/itinerary-key', () => ({ itineraryKeyIsShared }));
+vi.mock('../../booking/travel/degradation-monitor', () => ({ recordCause }));
 vi.mock('../../database/data-source', () => ({
   AppDataSource: { getRepository: () => ({ findOne: bsFindOne, save: bsSave, update: bsUpdate }) },
 }));
@@ -69,6 +72,7 @@ describe('resolveTravelEligibility', () => {
   it('stops at the missing API key WITHOUT consulting the entitlement resolver', async () => {
     travelConfig.googleMapsApiKey = undefined;
     expect(await resolveTravelEligibility(ARGS)).toEqual({ active: false, reason: 'no_api_key' });
+    expect(recordCause).toHaveBeenCalledWith('no_api_key', { tenantId: 'ten-1', botId: 'bot-1' });
     expect(getEntitlements).not.toHaveBeenCalled();
     expect(bsFindOne).not.toHaveBeenCalled();
     expect(itineraryKeyIsShared).not.toHaveBeenCalled();

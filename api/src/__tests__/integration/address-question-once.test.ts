@@ -316,6 +316,53 @@ describe('the address question survives a preceding availability check', () => {
     expect((booked.data as { customerAddress?: string }).customerAddress).toBe(CHOSEN.formattedAddress);
   });
 
+  it('returns the confirmed booking address as a server-only reply fact', async () => {
+    await new CreateBookingTool().execute(BOOK, ctx('run-1'));
+    await deliverTheQuestion();
+
+    const booked = await new CreateBookingTool().execute(BOOK, ctx('run-2'));
+
+    expect(booked.replyFact).toEqual({
+      kind: 'booking_address',
+      address: CHOSEN.formattedAddress,
+      use: 'confirmed_booking',
+      alternatives: [PROPOSED],
+    });
+    expect(JSON.stringify(booked.data)).not.toContain('replyFact');
+  });
+
+  it('labels a request-mode create_booking result as a request, not a confirmation', async () => {
+    await new CreateBookingTool().execute(BOOK, ctx('run-1'));
+    await deliverTheQuestion();
+    mockCreateBooking.mockResolvedValue({ id: 'req-1', requested: true });
+
+    const requested = await new CreateBookingTool().execute(BOOK, ctx('run-2'));
+
+    expect(requested.replyFact).toMatchObject({
+      kind: 'booking_address',
+      address: CHOSEN.formattedAddress,
+      use: 'request',
+    });
+  });
+
+  it('returns the request address as a server-only reply fact', async () => {
+    const requested = await new RequestAppointmentTool().execute(
+      {
+        preferredTime: BOOK.startTime,
+        attendeeName: BOOK.attendeeName,
+        customerAddress: PROPOSED,
+      },
+      ctx('run-1')
+    );
+
+    expect(requested.replyFact).toEqual({
+      kind: 'booking_address',
+      address: CHOSEN.formattedAddress,
+      use: 'request',
+      alternatives: [PROPOSED],
+    });
+  });
+
   it('leaves the binding alone whatever the tools proposed', async () => {
     // A proposal is a question, not a change. Stated separately because it is the invariant the
     // whole file exists to protect, and a fix that moved the binding would still pass the tests

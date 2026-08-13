@@ -81,6 +81,20 @@ beforeEach(async () => {
 });
 
 describe('offering to verify the address', () => {
+  it('returns the availability address as a server-only reply fact', async () => {
+    mockCheckAvailability.mockResolvedValue(TRAVELS);
+
+    const res = await check();
+
+    expect(res.replyFact).toEqual({
+      kind: 'booking_address',
+      address: TYPED,
+      use: 'availability',
+      alternatives: [],
+    });
+    expect(JSON.stringify(res.data)).not.toContain('replyFact');
+  });
+
   it('offers the picker when the job travels and nothing verified is bound', async () => {
     // The whole point. The customer typed an address, the model passed it along, and nobody has
     // asked Google whether that is a real doorway. Until they pick one, every downstream

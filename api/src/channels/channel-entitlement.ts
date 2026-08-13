@@ -5,7 +5,7 @@
  *
  * The widget is the native channel: always allowed, no feature key, never
  * gated. The four external channels each map to a per-channel Feature
- * (Pro+ tiers; per-tenant overrides apply via the entitlement resolver).
+ * (Essential and above; per-tenant overrides apply via the entitlement resolver).
  * Unknown/future channel types resolve NOT entitled (fail closed) until a
  * key is added here.
  */

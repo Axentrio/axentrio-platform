@@ -166,7 +166,7 @@ export interface Entitlements {
    * Flat boolean feature map — the shape is the WIRE CONTRACT shared with
    * the portal (src/contracts/entitlements.ts is the single source of
    * truth; the portal imports it type-only). Per-key semantics:
-   * channel* are Pro+ (widget is native, never gated); the insights trio is
+   * channel* are Essential+ (widget is native, never gated); the insights trio is
    * the ADR-0013 ladder (tier→flag mapping lives in plans.ts only — insights
    * code never branches on tier names).
    */

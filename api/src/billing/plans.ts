@@ -72,11 +72,12 @@ export const PLANS: Record<InternalPlanId, PlanDefinition> = {
       customWidgetAppearance: true, // basic color/title/avatar config
       handoff: true,
       fileUpload: true,
-      // Channels: Essential is widget-only (external channels are Pro+).
-      channelWhatsapp: false,
-      channelMessenger: false,
-      channelInstagram: false,
-      channelTelegram: false,
+      // Channels: Essential includes the social integrations. Only `free` is widget-only.
+      // Each stays tenant-toggleable, so the tier is a ceiling and not a switch.
+      channelWhatsapp: true,
+      channelMessenger: true,
+      channelInstagram: true,
+      channelTelegram: true,
       // Insights ladder (ADR-0013): Essential = Gap findings, no evidence drill-down.
       gapInsights: true,
       gapEvidence: false,

@@ -50,10 +50,11 @@ function reset(tier = 'pro', status = 'active') {
 
 describe('plan catalog — channel keys (D2)', () => {
   it.each(['channelWhatsapp', 'channelMessenger', 'channelInstagram', 'channelTelegram'] as const)(
-    '%s: false on free/essential, true on pro/enterprise',
+    '%s: false on free, true from essential up',
     (key) => {
+      // Essential gained the social integrations deliberately; only `free` is widget-only.
       expect(PLANS.free.features[key]).toBe(false);
-      expect(PLANS.essential.features[key]).toBe(false);
+      expect(PLANS.essential.features[key]).toBe(true);
       expect(PLANS.pro.features[key]).toBe(true);
       expect(PLANS.enterprise.features[key]).toBe(true);
     },
@@ -89,20 +90,34 @@ describe('isChannelEntitled', () => {
     expect(await isChannelEntitled(TENANT, 'widget')).toBe(true);
   });
 
-  it('essential: external channels not entitled; pro: entitled', async () => {
-    reset('essential');
+  it('free: external channels not entitled; essential and up: entitled', async () => {
+    // `free` is the only widget-only tier now - the social integrations start at Essential.
+    reset('free');
     expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(false);
+    reset('essential');
+    expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(true);
     reset('pro');
     expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(true);
   });
 
-  it('per-tenant override comps a channel onto essential', async () => {
+  it('a per-tenant override revokes a channel the tier grants', async () => {
+    // The override direction that still matters. Comping one ONTO a tier no longer has a target:
+    // every paid tier now grants all four, and `free` ignores overrides outright - on `free` or a
+    // non-active status every boolean feature is false regardless (see entitlements.ts).
     reset('essential');
+    entCtx.featureOverrides = {
+      channelWhatsapp: { value: false, reason: 't', setBy: 't', setAt: 't' },
+    };
+    expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(false);
+    expect(await isChannelEntitled(TENANT, 'telegram')).toBe(true); // not implied
+  });
+
+  it('free ignores an override entirely — the tier is hard-off, not a ceiling', async () => {
+    reset('free');
     entCtx.featureOverrides = {
       channelWhatsapp: { value: true, reason: 't', setBy: 't', setAt: 't' },
     };
-    expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(true);
-    expect(await isChannelEntitled(TENANT, 'telegram')).toBe(false); // not implied
+    expect(await isChannelEntitled(TENANT, 'whatsapp')).toBe(false);
   });
 
   it('unknown channel → false; resolution error → false (fail closed)', async () => {
@@ -114,8 +129,8 @@ describe('isChannelEntitled', () => {
 });
 
 describe('requireChannelEntitled (connect-time gate)', () => {
-  it('throws the 402 envelope with a per-channel code on essential', async () => {
-    reset('essential');
+  it('throws the 402 envelope with a per-channel code on a gated tier', async () => {
+    reset('free');
     await expect(requireChannelEntitled(TENANT, 'telegram')).rejects.toBeInstanceOf(PlanLimitError);
     await expect(requireChannelEntitled(TENANT, 'telegram')).rejects.toMatchObject({
       statusCode: 402,
@@ -124,7 +139,7 @@ describe('requireChannelEntitled (connect-time gate)', () => {
   });
 
   it('no-op for widget and for entitled channels', async () => {
-    reset('essential');
+    reset('free');
     await expect(requireChannelEntitled(TENANT, 'widget')).resolves.toBeUndefined();
     reset('pro');
     await expect(requireChannelEntitled(TENANT, 'whatsapp')).resolves.toBeUndefined();
@@ -140,7 +155,7 @@ describe('requireChannelEntitled (connect-time gate)', () => {
 
 describe('requireAnyMetaChannelEntitled (shared OAuth flow gate)', () => {
   it('402 when neither Messenger nor Instagram is entitled', async () => {
-    reset('essential');
+    reset('free');
     await expect(requireAnyMetaChannelEntitled(TENANT)).rejects.toMatchObject({
       statusCode: 402,
       code: 'plan_limit_channel_meta',

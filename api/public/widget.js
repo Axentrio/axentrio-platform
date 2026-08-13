@@ -2452,7 +2452,7 @@ var _cbCurrentScript = typeof document !== 'undefined' ? document.currentScript 
 
         const current = data.current || {};
         if (!current.proposalId) {
-          box.innerHTML = '<p class="cb-addr__chosen">That question is no longer open.</p>';
+          box.innerHTML = '<p class="cb-addr__chosen">That question expired or was already settled. Please send the address you want us to use.</p>';
           return;
         }
         box.setAttribute('data-addr-confirm', current.proposalId);

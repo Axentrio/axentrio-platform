@@ -17,7 +17,12 @@ const getBound = vi.fn();
 const propose = vi.fn();
 
 vi.mock('../../booking/travel/address-binding', () => ({
-  getBoundAddress: (...a: unknown[]) => getBound(...(a as [])),
+  getBoundAddressSnapshot: async (...a: unknown[]) => {
+    const address = await getBound(...(a as []));
+    return address
+      ? { address, ref: { version: 1, formattedAddress: address.formattedAddress } }
+      : null;
+  },
   proposeCorrection: (...a: unknown[]) => propose(...(a as [])),
 }));
 vi.mock('../../utils/logger', () => ({ logger: { warn: vi.fn(), info: vi.fn() } }));
@@ -51,6 +56,7 @@ describe('addressForTurn', () => {
       address: CHOSEN.formattedAddress,
       placeId: CHOSEN.placeId,
       correctionPending: false,
+      binding: { version: 1, formattedAddress: CHOSEN.formattedAddress },
     });
     expect(propose).not.toHaveBeenCalled();
   });

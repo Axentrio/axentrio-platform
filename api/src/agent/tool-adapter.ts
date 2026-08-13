@@ -5,6 +5,8 @@ export interface ToolContext {
   tenantId: string;
   sessionId: string;
   runId: string;
+  /** The surface receiving controls. Only the widget renders address affordances today. */
+  channel?: string;
   toolsCalledThisTurn: string[];
   dataSource: DataSource;
   conversationHistory: ChatMessage[];

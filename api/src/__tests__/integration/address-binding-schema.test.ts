@@ -41,21 +41,26 @@ describe('the address binding schema', () => {
     expect(row.placeId).toBeNull();
   });
 
-  it('stores a CLEARED binding whose question is still answerable', async () => {
-    // The state the whole design turns on: a booking took the address and consumed the question,
-    // the question survives, and answering it governs the next booking rather than the one made.
+  it('stores a RECORDED question with the binding it is about', async () => {
     await repo().save(
       repo().create({
         sessionId,
-        address: null,
-        placeId: null,
-        source: null,
-        pending: { proposalId: 'p1', formattedAddress: 'Bist 1, 2610 Wilrijk', consumedByBooking: 'bk-1' },
+        address: 'Meir 78, 2000 Antwerpen',
+        placeId: 'ChIJ_meir',
+        source: 'picked',
+        pending: {
+          proposalId: 'p1',
+          formattedAddress: 'Bist 1, 2610 Wilrijk',
+          status: 'recorded',
+          boundAddress: 'Meir 78, 2000 Antwerpen',
+          boundPlaceId: 'ChIJ_meir',
+          boundSource: 'picked',
+        },
       })
     );
     const row = await repo().findOneByOrFail({ sessionId });
-    expect(row.address).toBeNull();
-    expect(row.pending?.consumedByBooking).toBe('bk-1');
+    expect(row.pending?.status).toBe('recorded');
+    expect(row.pending?.boundAddress).toBe(row.address);
   });
 
   describe('the combinations the database refuses', () => {
@@ -81,6 +86,107 @@ describe('the address binding schema', () => {
         'a cleared binding still holding an address',
         { address: null, placeId: 'ChIJ_meir', source: 'picked' },
         'a half-cleared binding is the one a second booking would inherit',
+      ],
+      [
+        'a question with no active binding',
+        {
+          address: null,
+          placeId: null,
+          source: null,
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Bist 1',
+            status: 'recorded',
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+            boundSource: 'picked',
+          },
+        },
+        'a question is about one binding and may not be re-pointed after that binding is consumed',
+      ],
+      [
+        'a recorded question carrying delivery evidence',
+        {
+          address: 'Meir 78',
+          placeId: 'ChIJ_meir',
+          source: 'picked',
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Bist 1',
+            status: 'recorded',
+            askedMessageId: randomUUID(),
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+            boundSource: 'picked',
+          },
+        },
+        'recording is not asking, so delivery evidence may only exist in ASKED',
+      ],
+      [
+        'an asked question with no persisted-message evidence',
+        {
+          address: 'Meir 78',
+          placeId: 'ChIJ_meir',
+          source: 'picked',
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Bist 1',
+            status: 'asked',
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+            boundSource: 'picked',
+          },
+        },
+        'ASKED means a server-authored reply was persisted',
+      ],
+      [
+        'a question with no lifecycle state',
+        {
+          address: 'Meir 78',
+          placeId: 'ChIJ_meir',
+          source: 'picked',
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Bist 1',
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+            boundSource: 'picked',
+          } as never,
+        },
+        'a missing JSON status must be false, not SQL NULL that lets a CHECK pass',
+      ],
+      [
+        'a question with no binding source snapshot',
+        {
+          address: 'Meir 78',
+          placeId: 'ChIJ_meir',
+          source: 'picked',
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Bist 1',
+            status: 'recorded',
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+          } as never,
+        },
+        'a missing JSON source must be false, not SQL NULL that lets a CHECK pass',
+      ],
+      [
+        'a question whose binding snapshot no longer matches the active binding',
+        {
+          address: 'Turnhoutsebaan 100',
+          placeId: 'ChIJ_turnhoutsebaan',
+          source: 'picked',
+          pending: {
+            proposalId: 'p1',
+            formattedAddress: 'Kerkstraat 12',
+            status: 'recorded',
+            boundAddress: 'Meir 78',
+            boundPlaceId: 'ChIJ_meir',
+            boundSource: 'picked',
+          },
+        },
+        'a question names exactly one binding and cannot silently follow a new one',
       ],
     ];
 

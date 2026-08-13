@@ -11,8 +11,7 @@
  * observed may move the binding. A unit test on the transitions would pass with no endpoint at all,
  * which is exactly the state that shipped.
  */
-import { describe, it, expect, beforeEach, beforeAll, afterAll, vi } from 'vitest';
-import Redis from 'ioredis';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createAuthMocks } from '../helpers/auth';
 
 createAuthMocks();
@@ -23,24 +22,13 @@ vi.mock('../../services/widget-ingest', () => ({
   ingestWidgetCustomerMessage: vi.fn().mockResolvedValue(undefined),
 }));
 
-// The binding lives in Redis, and `address-binding` fails OPEN without it - a binding it cannot
-// write is simply one that does not exist. Correct in production, and it means a suite with no
-// Redis proves nothing here: every assertion would go green-to-red for an environmental reason.
-// Same seam the #68 health suite uses: hand the real client back through the accessors production
-// calls, rather than letting `initializeRedis` read a REDIS_URL that points at nothing.
-let client: Redis;
-vi.mock('../../config/redis', () => ({
-  getRedisClient: () => client,
-  isRedisAvailable: () => true,
-}));
-
 import request from 'supertest';
 import { app } from '../../server';
 import { createTestTenant, createTestAnchorBot, createTestSession } from '../helpers/factories';
 import {
   bindAddress,
   proposeCorrection,
-  markQuestionDelivered,
+  markQuestionAsked,
   getBoundAddress,
   getPendingCorrection,
 } from '../../booking/travel/address-binding';
@@ -63,27 +51,6 @@ const PROPOSED = {
   expectedActiveAddress: CHOSEN.formattedAddress,
 };
 
-const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
-
-beforeAll(async () => {
-  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
-  try {
-    await client.connect();
-    await client.ping();
-  } catch (err) {
-    // FAIL rather than skip. A silently skipped suite is how this endpoint shipped unverified.
-    throw new Error(
-      `#95 needs the real Redis the address binding lives in. Start it with ` +
-        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
-        `${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-});
-
-afterAll(async () => {
-  await client?.quit();
-});
-
 const post = (body: Record<string, unknown>) =>
   request(app).post('/api/v1/widget/address/confirm').set('Authorization', `Bearer ${token}`).send(body);
 
@@ -104,15 +71,11 @@ beforeEach(async () => {
   // ASKED, not merely recorded. The transition now requires it, because a proposal the customer
   // was never shown is not a question they can have answered - and `proposalId` alone was
   // derivable from the address, so it proved nothing. Verified against production 2026-08-13.
-  await markQuestionDelivered(sessionId, PROPOSED.proposalId);
-  // AND THE REPLY THAT CARRIED THE CONTROL. The route now requires it: `presented` is set when the
-  // tool decides to ask, and the reply is written afterwards, so the flag alone cannot distinguish
-  // "asked" from "was about to ask and died". Without this row the fixture describes a question
-  // that was never on screen, which the endpoint is right to refuse.
+  // The reply and the ASKED transition are one fact: the marker verifies this exact persisted row.
   const botParticipant = await AppDataSource.getRepository(Participant).save(
     AppDataSource.getRepository(Participant).create({ sessionId, type: 'bot', name: 'bot', joinedAt: new Date() })
   );
-  await AppDataSource.getRepository(Message).save(
+  const question = await AppDataSource.getRepository(Message).save(
     AppDataSource.getRepository(Message).create({
       sessionId,
       tenantId: tenant.id,
@@ -123,6 +86,11 @@ beforeEach(async () => {
       sentAt: new Date(),
       metadata: { affordance: { kind: 'address_confirm', proposalId: PROPOSED.proposalId } } as never,
     })
+  );
+  await markQuestionAsked(
+    sessionId,
+    PROPOSED.proposalId,
+    { messageId: question.id, channel: 'widget' }
   );
 });
 
@@ -159,7 +127,20 @@ describe('POST /widget/address/confirm', () => {
     // again (which releases the question), and the next contested turn asks afresh.
     await bindAddress(sessionId, CHOSEN);
     await proposeCorrection(sessionId, { ...PROPOSED, proposalId: 'prop-2', formattedAddress: 'Meir 78, 2000 Antwerpen' });
-    await markQuestionDelivered(sessionId, 'prop-2');
+    const participant = await AppDataSource.getRepository(Participant).findOneByOrFail({ sessionId, type: 'bot' });
+    const question = await AppDataSource.getRepository(Message).save(
+      AppDataSource.getRepository(Message).create({
+        sessionId,
+        tenantId: tenant.id,
+        participantId: participant.id,
+        type: 'text',
+        content: 'which address?',
+        status: 'sent',
+        sentAt: new Date(),
+        metadata: { affordance: { kind: 'address_confirm', proposalId: 'prop-2' } } as never,
+      })
+    );
+    await markQuestionAsked(sessionId, 'prop-2', { messageId: question.id, channel: 'widget' });
 
     const res = await post({ proposalId: 'prop-1', confirmed: true });
 

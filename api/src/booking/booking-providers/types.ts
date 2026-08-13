@@ -291,6 +291,8 @@ export interface BookingExtras {
    * cheaper. Absent - every booking today - and nothing changes.
    */
   customerPlaceId?: string;
+  /** Server-injected Address Binding generation, consumed with the booking row. */
+  addressBinding?: { version: number; formattedAddress: string };
   /** P5a — required when service.customerLocationRequired (a callback phone). */
   customerPhone?: string;
   /** P5c — chosen/estimated length for a range/ai service (ignored for fixed). */

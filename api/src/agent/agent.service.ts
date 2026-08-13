@@ -708,6 +708,7 @@ export class AgentService {
             tenantId: tenant.id,
             sessionId: session.id,
             runId,
+            channel: session.channel ?? 'widget',
             toolsCalledThisTurn: toolsCalled,
             dataSource: AppDataSource,
             conversationHistory: messages,
@@ -781,7 +782,7 @@ export class AgentService {
               }
             } else if (BOOKING_MUTATION_TOOLS.includes(tool.name) && result.success) {
               pendingAvailability = null;
-              // The booking consumed the address binding (`clearAddressBinding`), so an offer to
+              // The booking consumed the address binding in its own transaction, so an offer to
               // verify one now points at a conversation state that no longer exists. Cleared with
               // the slots, for the same reason the slots are cleared: the offer was about a
               // decision the customer has already made.

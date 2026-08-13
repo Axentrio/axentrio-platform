@@ -20,7 +20,11 @@
  * and cannot be wrong.
  */
 import { createHash } from 'node:crypto';
-import { getBoundAddress, proposeCorrection } from './address-binding';
+import {
+  getBoundAddressSnapshot,
+  proposeCorrection,
+  type AddressBindingRef,
+} from './address-binding';
 import { logger } from '../../utils/logger';
 
 export interface TurnAddress {
@@ -33,7 +37,7 @@ export interface TurnAddress {
    *
    * A statement about the STATE - this turn's address is contested - and not an instruction to
    * ask. Whether asking is allowed is a separate question with a separate owner
-   * (`claimPresentation`), because three tools reach this code and only one of them can ask.
+   * (the RECORDED -> ASKED transition), because three tools reach this code and only one can ask.
    */
   correctionPending: boolean;
   /**
@@ -52,6 +56,8 @@ export interface TurnAddress {
    * exactly that.
    */
   proposedAddress?: string;
+  /** The active-address generation a booking must consume in its own transaction. */
+  binding?: AddressBindingRef;
 }
 
 /** Case, punctuation and spacing carry no meaning in an address comparison. */
@@ -148,14 +154,20 @@ export async function addressForTurn(
   sessionId: string,
   modelArgument: string | undefined
 ): Promise<TurnAddress> {
-  const bound = await getBoundAddress(sessionId);
+  const snapshot = await getBoundAddressSnapshot(sessionId);
+  const bound = snapshot?.address;
 
   // No choice has been made, so there is nothing to protect and nothing to second-guess.
   if (!bound) return { address: modelArgument, correctionPending: false };
 
   const typed = modelArgument?.trim();
   if (!typed || sameText(typed, bound.formattedAddress)) {
-    return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
+    return {
+      address: bound.formattedAddress,
+      placeId: bound.placeId,
+      correctionPending: false,
+      binding: snapshot.ref,
+    };
   }
 
   // Different TEXT is not necessarily a different PLACE, and this cannot tell them apart with
@@ -171,7 +183,12 @@ export async function addressForTurn(
   // The asymmetry justifies the imprecision. A false proposal costs one confirmation question. A
   // missed one sends a van to the wrong door and nobody finds out until it arrives.
   if (looksLikeSameAddress(typed, bound.formattedAddress)) {
-    return { address: bound.formattedAddress, placeId: bound.placeId, correctionPending: false };
+    return {
+      address: bound.formattedAddress,
+      placeId: bound.placeId,
+      correctionPending: false,
+      binding: snapshot.ref,
+    };
   }
 
   // THE ID NAMES THE QUESTION, AND A QUESTION IS A PAIR.
@@ -230,11 +247,12 @@ export async function addressForTurn(
     // design allows was spent on silence, every single time a model checked times before booking.
     //
     // So this is now a fact about the STATE, true for as long as the question is unanswered, and
-    // the cap moved to `claimPresentation` - which is owned by the one tool that can actually ask.
+    // the cap moved to the persisted RECORDED -> ASKED transition owned by the reply path.
     // "Asked once, then we get on with it" is still the rule; it is just counted where the asking
     // happens rather than where the proposing happens.
     correctionPending: true,
     proposalId,
     proposedAddress: typed,
+    binding: snapshot.ref,
   };
 }

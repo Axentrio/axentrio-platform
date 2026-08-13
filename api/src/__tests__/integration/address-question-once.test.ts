@@ -25,40 +25,7 @@
  * `never blocks them from booking` (CONTEXT.md, Pending Correction) is the other half and is
  * asserted here too: asking is one refusal, not a wall. The next attempt goes through.
  */
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
-
-// The binding is the real state machine over a fake store - these tests are about WHICH TOOL
-// spends the question, so the transitions underneath must behave, not be stubbed into agreement.
-import Redis from 'ioredis';
-
-/**
- * REAL Redis, because the binding's guarantees are now the store's.
- *
- * `proposeCorrection` and the transitions are Lua scripts, so a Map standing in for Redis would
- * have to reimplement them - and would then assert only that the reimplementation agrees with
- * itself. Same reasoning that moved the transition tests here.
- */
-const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
-let client: Redis;
-vi.mock('../../config/redis', () => ({
-  getRedisClient: () => client,
-  isRedisAvailable: () => true,
-}));
-
-beforeAll(async () => {
-  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
-  try {
-    await client.connect();
-    await client.ping();
-  } catch (err) {
-    throw new Error(
-      `Needs the real Redis the address binding lives in. Start it with ` +
-        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
-        `${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-});
-afterAll(async () => { await client?.quit(); });
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
@@ -81,15 +48,21 @@ vi.mock('../../webhooks/webhook.emitter', () => ({
 }));
 
 import { CheckAvailabilityTool, CreateBookingTool } from '../../agent/tools/booking.tool';
-import { bindAddress, getBoundAddress, getPendingCorrection, markQuestionDelivered } from '../../booking/travel/address-binding';
+import { bindAddress, getBoundAddress, getPendingCorrection, markQuestionAsked } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
+import { AppDataSource } from '../../database/data-source';
+import { Participant } from '../../database/entities/Participant';
+import { Message } from '../../database/entities/Message';
+import { createTestTenant, createTestAnchorBot, createTestSession } from '../helpers/factories';
 
 /** What the Booking Customer picked. Authoritative; only they may move it. */
 const CHOSEN = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
 /** What the model names instead - a different door, so a real question rather than a reformat. */
 const PROPOSED = 'Kerkstraat 12, 2060 Antwerpen';
 
-const SESSION = 'sess-question-once';
+let sessionId: string;
+let tenantId: string;
+let botParticipantId: string;
 
 /** One booking attempt, reused so the tests differ only in WHO calls it and in which run. */
 const BOOK = {
@@ -107,20 +80,40 @@ const BOOK = {
  * the customer saw. Passing the same id for what a test calls "the second attempt" would quietly
  * assert that a batch is a conversation.
  */
-const ctx = (runId: string): ToolContext => ({
-  tenantId: 'tenant-1',
-  sessionId: SESSION,
+const ctx = (runId: string, channel = 'widget'): ToolContext => ({
+  tenantId,
+  sessionId,
   runId,
+  channel,
   toolsCalledThisTurn: [],
-  dataSource: {} as never,
+  dataSource: AppDataSource,
   conversationHistory: [],
 });
 
 /** True when a tool result is the "address is not settled" refusal that raises the question. */
 /** What `finalizeReply` does when it persists a reply carrying the control. */
 const deliverTheQuestion = async () => {
-  const pending = await getPendingCorrection(SESSION);
-  if (pending) await markQuestionDelivered(SESSION, pending.proposalId);
+  const pending = await getPendingCorrection(sessionId);
+  if (!pending) return;
+  const message = await AppDataSource.getRepository(Message).save(
+    AppDataSource.getRepository(Message).create({
+      sessionId,
+      tenantId,
+      participantId: botParticipantId,
+      type: 'text',
+      content: 'which address?',
+      status: 'sent',
+      sentAt: new Date(),
+      metadata: {
+        affordance: { kind: 'address_confirm', proposalId: pending.proposalId },
+      } as never,
+    })
+  );
+  await markQuestionAsked(
+    sessionId,
+    pending.proposalId,
+    { messageId: message.id, channel: 'widget' }
+  );
 };
 
 const raisesTheQuestion = (r: { success: boolean; error?: string }) =>
@@ -128,13 +121,37 @@ const raisesTheQuestion = (r: { success: boolean; error?: string }) =>
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await client.del(`addrbind:${SESSION}`);
+  const tenant = await createTestTenant({ tier: 'pro' });
+  tenantId = tenant.id;
+  const bot = await createTestAnchorBot(tenant);
+  const session = await createTestSession(tenant.id, { botId: bot.id, channel: 'widget' });
+  sessionId = session.id;
+  const participant = await AppDataSource.getRepository(Participant).save(
+    AppDataSource.getRepository(Participant).create({
+      sessionId,
+      type: 'bot',
+      name: 'bot',
+      joinedAt: new Date(),
+    })
+  );
+  botParticipantId = participant.id;
   mockCheckAvailability.mockResolvedValue({ slots: [], timezone: 'Europe/Brussels' });
   mockCreateBooking.mockResolvedValue({ id: 'bk-1', status: 'confirmed' });
-  await bindAddress(SESSION, CHOSEN);
+  await bindAddress(sessionId, CHOSEN);
 });
 
 describe('the address question survives a preceding availability check', () => {
+  it.each(['messenger', 'instagram', 'whatsapp', 'telegram'])(
+    'does not ASK on %s, where the confirmation control cannot be rendered',
+    async (channel) => {
+      const result = await new CreateBookingTool().execute(BOOK, ctx('run-1', channel));
+
+      expect(raisesTheQuestion(result)).toBe(false);
+      expect(result.affordance).toBeUndefined();
+      expect(mockCreateBooking).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it('is still asked when check_availability named the same address first', async () => {
     // THE DEFECT, at the seam it lives at. `check_availability` proposes and cannot ask; the cap
     // is spent; `create_booking` then finds nothing new and books against an address the customer
@@ -219,7 +236,7 @@ describe('the address question survives a preceding availability check', () => {
       ctx('run-2')
     );
 
-    const pending = await getPendingCorrection(SESSION);
+    const pending = await getPendingCorrection(sessionId);
     expect(pending?.formattedAddress).toBe(PROPOSED);
   });
 
@@ -276,6 +293,6 @@ describe('the address question survives a preceding availability check', () => {
       ctx('run-1')
     );
 
-    expect((await getBoundAddress(SESSION))?.formattedAddress).toBe(CHOSEN.formattedAddress);
+    expect((await getBoundAddress(sessionId))?.formattedAddress).toBe(CHOSEN.formattedAddress);
   });
 });

@@ -88,6 +88,10 @@ import { recordCause, recordRoutingSuccess } from '../travel/degradation-monitor
 import { notifyTenantCapExhausted } from '../travel/degradation-notify';
 import { driveLookupFor } from '../travel/routes.service';
 import { addressToken } from '../travel/address-for-turn';
+import {
+  AddressBindingMovedError,
+  consumeAddressBinding,
+} from '../travel/address-binding';
 import { emitWebhookEvent, buildEventBase } from '../../webhooks/webhook.emitter';
 import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
 
@@ -99,6 +103,29 @@ import type { BookingRequestCreatedEvent } from '../../webhooks/webhook.types';
  * later in a long-lived (Messenger/WhatsApp) session.
  */
 const BOOKING_DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * An idempotent return has no new booking INSERT to share a transaction with: the row already
+ * exists. Still consume the binding used by this retry, but never clear a newer generation that
+ * arrived while the duplicate lookup was running.
+ */
+async function consumeBindingAfterIdempotentReturn(
+  ctx: BookingContext,
+  extras?: BookingExtras
+): Promise<void> {
+  if (!extras?.addressBinding) return;
+  try {
+    await AppDataSource.transaction((manager) =>
+      consumeAddressBinding(manager, ctx.session.id, extras.addressBinding)
+    );
+  } catch (error) {
+    if (error instanceof AddressBindingMovedError) return;
+    logger.warn('[Booking] could not consume address binding after idempotent return', {
+      sessionId: ctx.session.id,
+      error,
+    });
+  }
+}
 
 /**
  * P3: normalize an LLM-supplied intake-answers object against a RESOLVED service's
@@ -1788,6 +1815,7 @@ export class InternalProvider implements BookingProvider {
     // Any existing row for this idempotency key is a duplicate. (This used to exclude
     // 'failed', a status nothing ever wrote.)
     if (existing) {
+      await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(existing, true, rule.timezone, service.name);
     }
 
@@ -1822,6 +1850,7 @@ export class InternalProvider implements BookingProvider {
       rowDedupIdentity(recentDup, service.customerAddressRequired) ===
         callDedupIdentity(service.customerAddressRequired, extras)
     ) {
+      await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true, rule.timezone, service.name);
     }
 
@@ -2035,6 +2064,10 @@ export class InternalProvider implements BookingProvider {
             end,
           });
         }
+        // The binding and the booking share this transaction. A confirmation or fresh selection
+        // that won the row lock first invalidates this attempt; if this transaction wins, it voids
+        // both the active address and its question before the INSERT can commit.
+        await consumeAddressBinding(manager, ctx.session.id, extras?.addressBinding);
         const rows: Array<{ id: string }> = await manager.query(
           `INSERT INTO chatbot_bookings
              (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
@@ -2088,6 +2121,13 @@ export class InternalProvider implements BookingProvider {
         return rows[0].id;
       });
     } catch (err) {
+      if (err instanceof AddressBindingMovedError) {
+        throw new BookingError(
+          'The customer changed their address while the appointment was being created. Read the latest address and try the booking once more.',
+          'ADDRESS_BINDING_CHANGED',
+          409
+        );
+      }
       const code = (err as { code?: string })?.code;
       if (code === '23P01') {
         throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
@@ -2097,7 +2137,10 @@ export class InternalProvider implements BookingProvider {
         const dup = await bookingRepo.findOne({
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
         });
-        if (dup) return this.toResult(dup, true, rule.timezone, service.name);
+        if (dup) {
+          await consumeBindingAfterIdempotentReturn(ctx, extras);
+          return this.toResult(dup, true, rule.timezone, service.name);
+        }
         throw new BookingError(SLOT_TAKEN_ON_CREATE, 'SLOT_UNAVAILABLE', 409);
       }
       throw err;
@@ -2298,9 +2341,12 @@ export class InternalProvider implements BookingProvider {
     const fileSessionIds = await this.resolveFileSessionIds(ctx, service, extras?.fileSessionIds);
     const uploadedFiles = await this.validateUploadedFiles(ctx, service, fileSessionIds);
     let bookingId: string;
+    const requestAreaMatch = (await evaluateServiceArea(ctx, service, contact.address ?? null)).match;
     try {
-      const rows: Array<{ id: string }> = await bookingRepo.query(
-        `INSERT INTO chatbot_bookings
+      const rows = await AppDataSource.transaction(async (manager) => {
+        await consumeAddressBinding(manager, ctx.session.id, extras?.addressBinding);
+        return manager.query(
+          `INSERT INTO chatbot_bookings
            (tenant_id, bot_id, provider, event_type_id, booking_mode, session_id, status,
             start_utc, end_utc, blocked_range, calendar_key,
             attendee_name, attendee_email, notes, ics_uid, idempotency_key,
@@ -2309,8 +2355,8 @@ export class InternalProvider implements BookingProvider {
             customer_place_id, customer_lat, customer_lng, customer_coords_at,
             customer_address_verified, geocode_precision, location_source, travel_check)
          VALUES ($1,$2,'internal',$3,'request',$4,'request_created',$5,$6, tstzrange($5,$6,'[)'),$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,$17,$18,$19::jsonb,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29)
-         RETURNING id`,
-        [
+           RETURNING id`,
+          [
           ctx.tenant.id,
           ctx.bot.id,
           service.id,
@@ -2334,7 +2380,7 @@ export class InternalProvider implements BookingProvider {
           // EVALUATED, never enforced. Capturing an out-of-area job is correct — refusing
           // one is the single outcome the prompt forbids — but capturing it silently is how
           // an owner turns work away for months without ever seeing it.
-          (await evaluateServiceArea(ctx, service, contact.address ?? null)).match,
+          requestAreaMatch,
           place.placeId,
           place.lat,
           place.lng,
@@ -2347,16 +2393,27 @@ export class InternalProvider implements BookingProvider {
           // booking the AUTO path downgraded because the drive could not be settled. A request
           // whose address placed cleanly and was never travel-checked keeps a null, because
           // nothing has judged its drive.
-          travel?.travelCheck ?? requestTravelCheck(placement),
-        ]
-      );
+            travel?.travelCheck ?? requestTravelCheck(placement),
+          ]
+        ) as Promise<Array<{ id: string }>>;
+      });
       bookingId = rows[0].id;
     } catch (err) {
+      if (err instanceof AddressBindingMovedError) {
+        throw new BookingError(
+          'The customer changed their address while the request was being created. Read the latest address and try once more.',
+          'ADDRESS_BINDING_CHANGED',
+          409
+        );
+      }
       if ((err as { code?: string })?.code === '23505') {
         const dup = await bookingRepo.findOne({
           where: { tenantId: ctx.tenant.id, botId: ctx.bot.id, idempotencyKey, createdAt: createdWithinDedupWindow() },
         });
-        if (dup) return this.toResult(dup, true);
+        if (dup) {
+          await consumeBindingAfterIdempotentReturn(ctx, extras);
+          return this.toResult(dup, true);
+        }
       }
       throw err;
     }
@@ -2438,6 +2495,7 @@ export class InternalProvider implements BookingProvider {
     // Any existing row for this idempotency key is a duplicate. (This used to exclude
     // 'failed', a status nothing ever wrote.)
     if (existing) {
+      await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(existing, true);
     }
 
@@ -2478,6 +2536,7 @@ export class InternalProvider implements BookingProvider {
       rowDedupIdentity(recentDup, service.customerAddressRequired) ===
         callDedupIdentity(service.customerAddressRequired, extras)
     ) {
+      await consumeBindingAfterIdempotentReturn(ctx, extras);
       return this.toResult(recentDup, true);
     }
 

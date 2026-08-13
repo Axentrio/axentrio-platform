@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from 'crypto';
+import type { EntityManager } from 'typeorm';
 import { logger } from '../utils/logger';
 import { AppDataSource } from '../database/data-source';
 import { notificationService } from './notification.service';
@@ -24,7 +25,7 @@ import { emitToTenantAgents, emitToSession } from '../websocket/socket.handler';
 import { routeOutboundMessage, sendChannelTypingIndicator } from '../channels/outbound-router';
 import type { OfferMeasurement } from '../channels/response.types';
 import type { Affordance } from '../agent/tool-adapter';
-import { markQuestionDelivered } from '../booking/travel/address-binding';
+import { markQuestionAsked } from '../booking/travel/address-binding';
 import { AgentService, AgentResult, AgentImageInput } from '../agent/agent.service';
 import { safeOutboundRequest } from '../security/ssrf-guard';
 import { ConversationBinding } from '../database/entities/ConversationBinding';
@@ -1006,6 +1007,44 @@ export interface ReplyExtras {
   affordance?: Affordance;
 }
 
+class AddressQuestionStateConflictError extends Error {
+  constructor() {
+    super('The address question changed before its reply could be persisted');
+    this.name = 'AddressQuestionStateConflictError';
+  }
+}
+
+/**
+ * The reply carrying an address question has been PERSISTED, so the customer has now been asked.
+ *
+ * Marked here rather than where the tool decides to ask, because those are different events and
+ * only this one is evidence. A run that dies between deciding and writing leaves nothing on screen,
+ * and a flag set at the decision would let the transition accept an answer to a question nobody
+ * saw - and would let the next attempt book without asking again.
+ *
+ * The message and the state transition share one Postgres transaction. Either both exist or
+ * neither does; a persisted question can no longer remain RECORDED after a process exit.
+ */
+async function markAddressQuestionAsked(
+  manager: EntityManager,
+  session: ChatSession,
+  messageId: string,
+  extras?: ReplyExtras
+): Promise<void> {
+  const a = extras?.affordance;
+  if (a?.kind !== 'address_confirm') return;
+  const applied = await markQuestionAsked(
+    session.id,
+    a.proposalId,
+    { messageId, channel: session.channel ?? 'widget' },
+    manager
+  );
+  // The reply itself says this question is live. Committing it while the matching RECORDED state
+  // has expired, moved, or already been asked would put a stale control on screen and leave the
+  // database claiming nobody was asked. Roll the reply back with the state transition.
+  if (!applied) throw new AddressQuestionStateConflictError();
+}
+
 /**
  * Everything a bot reply carries for the CLIENT, built in one place.
  *
@@ -1022,22 +1061,6 @@ export interface ReplyExtras {
  * Returns `undefined` rather than `{}` when there is nothing to say, because an empty object is
  * still a metadata column write and reads downstream as "this reply had metadata".
  */
-export /**
- * The reply carrying an address question has been PERSISTED, so the customer has now been asked.
- *
- * Marked here rather than where the tool decides to ask, because those are different events and
- * only this one is evidence. A run that dies between deciding and writing leaves nothing on screen,
- * and a flag set at the decision would let the transition accept an answer to a question nobody
- * saw - and would let the next attempt book without asking again.
- *
- * Fire-and-forget: a marker that can fail a reply is worse than one that occasionally re-asks.
- */
-async function markAddressQuestionDelivered(sessionId: string, extras?: ReplyExtras): Promise<void> {
-  const a = extras?.affordance;
-  if (a?.kind !== 'address_confirm') return;
-  await markQuestionDelivered(sessionId, a.proposalId);
-}
-
 export function replyMetadata(parts: {
   quickReplies?: Array<{ title: string; value: string }>;
   affordance?: Affordance;
@@ -1144,17 +1167,16 @@ async function finalizeReply(
         [session.id],
       );
 
+      await markAddressQuestionAsked(manager, session, saved.id, extras);
+
       return { status: 'answered' as const, savedId: saved.id };
     });
-    // AFTER the commit, and awaited. Marking before it meant a transaction that rolled back - or
-    // lost the watermark race below - left `presented` set with no reply persisted, which is the
-    // exact state this flag was moved here to make impossible. And a detached call can be lost to
-    // a process exit, after which the question repeats forever.
-    if (result.status === 'answered') await markAddressQuestionDelivered(session.id, extras);
     return result;
   } catch (err) {
-    if (err instanceof WatermarkConflictError) {
-      logger.info(`[coalescer] watermark race for session ${session.id} — treating as stale`);
+    if (err instanceof WatermarkConflictError || err instanceof AddressQuestionStateConflictError) {
+      logger.info(`[coalescer] reply state changed for session ${session.id} — treating as stale`, {
+        cause: err.name,
+      });
       return { status: 'stale' as const };
     }
     throw err;
@@ -1510,20 +1532,23 @@ async function sendBotMessage(
   offer?: OfferMeasurement
 ): Promise<Message> {
   const metadata = replyMetadata(extras ?? {});
-  const botMsg = messageRepository.create({
-    sessionId: session.id,
-    tenantId: session.tenantId,
-    participantId: botParticipantId,
-    type: 'text' as Message['type'],
-    content: encrypt(content),
-    contentEncrypted: true,
-    status: 'sent' as Message['status'],
-    sentAt: new Date(),
-    ...(metadata ? { metadata } : {}),
+  const saved = await AppDataSource.transaction(async (manager) => {
+    const repo = manager.getRepository(Message);
+    const botMsg = repo.create({
+      sessionId: session.id,
+      tenantId: session.tenantId,
+      participantId: botParticipantId,
+      type: 'text' as Message['type'],
+      content: encrypt(content),
+      contentEncrypted: true,
+      status: 'sent' as Message['status'],
+      sentAt: new Date(),
+      ...(metadata ? { metadata } : {}),
+    });
+    const persisted = await repo.save(botMsg);
+    await markAddressQuestionAsked(manager, session, persisted.id, extras);
+    return persisted;
   });
-  const saved = await messageRepository.save(botMsg);
-  // After the write, for the same reason as `finalizeReply`.
-  await markAddressQuestionDelivered(session.id, extras);
 
   await sessionRepository.increment({ id: session.id }, 'messageCount', 1);
   await sessionRepository.update(session.id, { lastActivityAt: new Date() });

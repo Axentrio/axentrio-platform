@@ -18,9 +18,8 @@
  *                      place, and resolving it would need an `ActiveTravelEligibility` this path
  *                      does not have.
  *
- * `pending` is INDEPENDENT of all three. A row with `pending` set and `address` null is the case
- * the whole design turns on: a booking took the address and consumed the question, the question is
- * still answerable, and the answer governs the NEXT booking rather than the one already made.
+ * `pending` is a question about the active address. It therefore never survives without an
+ * active address: picking again, expiry, or a booking consuming the binding voids the question.
  *
  * ## Why the CHECK is on the entity and not only in the migration
  *
@@ -30,6 +29,8 @@
  * the invariant holds under test, and the migration so it holds in production.
  */
 import { Entity, PrimaryColumn, Column, Check, UpdateDateColumn } from 'typeorm';
+
+export type AddressQuestionStatus = 'recorded' | 'asked';
 
 /** What is waiting on an answer. Stored as jsonb so the shape can grow without a migration. */
 export interface PendingCorrectionRecord {
@@ -43,14 +44,14 @@ export interface PendingCorrectionRecord {
   proposalId: string;
   /** The address being proposed. Never a `place_id`: nothing has been resolved. */
   formattedAddress: string;
-  /**
-   * Set by the booking that took the address out from under this question.
-   *
-   * Its presence is the entire cutoff. A confirmation arriving afterwards may not touch that
-   * booking - it is already made - but it still promotes the address for the next one, and the
-   * customer is told which of the two happened rather than being silently ignored.
-   */
-  consumedByBooking?: string;
+  /** Recording is not asking. Only a persisted, renderable server reply moves this to `asked`. */
+  status: AddressQuestionStatus;
+  /** The persisted server-authored reply that proves an `asked` question existed. */
+  askedMessageId?: string;
+  /** Snapshot of the binding this question names. A question is always exactly A-or-B. */
+  boundAddress: string;
+  boundPlaceId: string | null;
+  boundSource: 'picked' | 'confirmed';
 }
 
 @Entity('chatbot_address_bindings')
@@ -73,6 +74,23 @@ export interface PendingCorrectionRecord {
    OR (NULLIF("address", '') IS NOT NULL AND COALESCE("source", '') = 'picked' AND NULLIF("place_id", '') IS NOT NULL)
    OR (NULLIF("address", '') IS NOT NULL AND COALESCE("source", '') = 'confirmed' AND NULLIF("place_id", '') IS NULL)`
 )
+@Check(
+  'ck_address_question_has_active_binding',
+  `"pending" IS NULL OR NULLIF("address", '') IS NOT NULL`
+)
+@Check(
+  'ck_address_question_lifecycle_v1',
+  `"pending" IS NULL OR (
+     NULLIF("pending"->>'proposalId', '') IS NOT NULL
+     AND NULLIF("pending"->>'formattedAddress', '') IS NOT NULL
+     AND NULLIF("pending"->>'boundAddress', '') IS NOT NULL
+     AND "pending"->>'boundAddress' = "address"
+     AND ("pending"->>'boundPlaceId') IS NOT DISTINCT FROM "place_id"
+     AND COALESCE("pending"->>'boundSource', '') = "source"
+     AND ((COALESCE("pending"->>'status', '') = 'recorded' AND NULLIF("pending"->>'askedMessageId', '') IS NULL)
+       OR (COALESCE("pending"->>'status', '') = 'asked' AND NULLIF("pending"->>'askedMessageId', '') IS NOT NULL))
+   )`
+)
 export class AddressBinding {
   /** One conversation, one row. The session is the natural key; there is nothing else to add. */
   @PrimaryColumn({ type: 'uuid', name: 'session_id' })
@@ -91,14 +109,8 @@ export class AddressBinding {
   pending?: PendingCorrectionRecord | null;
 
   /**
-   * Bumped by every transition, and read by the booking to assert the address has not moved since
-   * it resolved one.
-   *
-   * ONLY the booking's assertion uses it. The confirm and reject paths must NOT, because consuming
-   * a proposal legitimately bumps this - a confirmation that had been waiting behind the booking
-   * would find its expected value stale and could never land, which would kill the exact case this
-   * design exists to honour. Those paths key on `pending->>'proposalId'` instead, which identifies
-   * the question rather than the generation.
+   * Bumped only when the active binding changes or is consumed. Recording and asking do not change
+   * the address generation, so a booking can assert the version it resolved.
    */
   @Column({ type: 'int', default: 0 })
   version!: number;

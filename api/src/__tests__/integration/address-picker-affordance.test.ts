@@ -22,38 +22,7 @@
  * this job happens at the customer's address. Paired with "no verified place is bound yet", that
  * is precisely the moment a picker helps and the only moment it is worth paying for.
  */
-import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
-
-import Redis from 'ioredis';
-
-/**
- * REAL Redis, because the binding's guarantees are now the store's.
- *
- * `proposeCorrection` and the transitions are Lua scripts, so a Map standing in for Redis would
- * have to reimplement them - and would then assert only that the reimplementation agrees with
- * itself. Same reasoning that moved the transition tests here.
- */
-const REDIS_URL = process.env.TEST_REDIS_URL ?? 'redis://localhost:6380';
-let client: Redis;
-vi.mock('../../config/redis', () => ({
-  getRedisClient: () => client,
-  isRedisAvailable: () => true,
-}));
-
-beforeAll(async () => {
-  client = new Redis(REDIS_URL, { maxRetriesPerRequest: 2, lazyConnect: true });
-  try {
-    await client.connect();
-    await client.ping();
-  } catch (err) {
-    throw new Error(
-      `Needs the real Redis the address binding lives in. Start it with ` +
-        `\`docker compose -f api/docker-compose.test.yml up -d test-redis\`. Tried ${REDIS_URL}: ` +
-        `${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-});
-afterAll(async () => { await client?.quit(); });
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockCheckAvailability = vi.fn();
 const mockCreateBooking = vi.fn();
@@ -77,7 +46,7 @@ import { CheckAvailabilityTool, CreateBookingTool } from '../../agent/tools/book
 import { bindAddress } from '../../booking/travel/address-binding';
 import type { ToolContext } from '../../agent/tool-adapter';
 
-const SESSION = 'sess-picker';
+const SESSION = '20000000-0000-4000-8000-000000000001';
 const TYPED = 'Kerkstraat 12, Antwerpen';
 /** What the customer actually picked, so the model's argument is a genuine second option. */
 const BOUND = 'Turnhoutsebaan 100, 2140 Antwerpen';
@@ -86,6 +55,7 @@ const ctx = (): ToolContext => ({
   tenantId: 'tenant-1',
   sessionId: SESSION,
   runId: 'run-1',
+  channel: 'widget',
   toolsCalledThisTurn: [],
   dataSource: {} as never,
   conversationHistory: [],
@@ -108,7 +78,6 @@ const NO_TRAVEL = { slots: [{ start: '2026-09-01T09:00:00Z' }], timezone: 'Europ
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  await client.del(`addrbind:${SESSION}`);
 });
 
 describe('offering to verify the address', () => {

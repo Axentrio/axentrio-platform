@@ -1,6 +1,6 @@
 import type { ToolAdapter, ToolContext, ToolResult } from '../tool-adapter';
 import { addressForTurn, addressToken } from '../../booking/travel/address-for-turn';
-import { clearAddressBinding, getPendingCorrection } from '../../booking/travel/address-binding';
+import { getPendingCorrection } from '../../booking/travel/address-binding';
 import {
   checkAvailability,
   createBooking,
@@ -161,7 +161,7 @@ export class CheckAvailabilityTool implements ToolAdapter {
       // (`chosen.placeId` is written only by `/places/select`), it names the one moment a picker
       // changes anything - and suggestions are billed per request, so offering it anywhere else
       // spends the tenant's money on a question with no answer worth having.
-      const affordance = result?.travel && !chosen.placeId
+      const affordance = ctx.channel === 'widget' && result?.travel && !chosen.placeId
         ? {
             affordance: {
               kind: 'address_picker' as const,
@@ -310,8 +310,8 @@ export class CreateBookingTool implements ToolAdapter {
       // THE ONE TOOL THAT MAY ASK, and it has to claim the right to before it does.
       //
       // `correctionPending` says the address is contested; it does not say asking is allowed.
-      // `claimPresentation` returns true exactly once per proposal, so a second attempt at the
-      // same booking proceeds rather than refusing again - which is what keeps the promise that a
+      // ASKED is written exactly once per proposal, so a second attempt at the same booking
+      // proceeds rather than refusing again - which is what keeps the promise that a
       // Pending Correction never blocks the customer from booking. A customer whose address Google
       // cannot suggest is asked once, says nothing useful, and still gets their appointment at the
       // address they chose.
@@ -327,12 +327,17 @@ export class CreateBookingTool implements ToolAdapter {
       // lookup for the reply - which was forgeable, because `/widget/message` stores
       // customer-supplied metadata verbatim.
       //
-      // `presented` is now set where the reply is PERSISTED, so the flag means what the SQL was
+      // `asked` is now set where the reply is PERSISTED, so the state means what the SQL was
       // asked to find out, in the same store as everything else it guards. Nothing claims; delivery
       // decides. Two concurrent asks are harmless: both refuse, and only one reply is delivered.
       const pendingNow = booked.proposalId ? await getPendingCorrection(ctx.sessionId) : null;
 
-      if (booked.correctionPending && booked.proposalId && !pendingNow?.presented) {
+      if (
+        ctx.channel === 'widget' &&
+        booked.correctionPending &&
+        booked.proposalId &&
+        pendingNow?.status !== 'asked'
+      ) {
         return {
           success: false,
           // NAMES BOTH, because on most channels the prose is the only thing the customer gets.
@@ -346,7 +351,7 @@ export class CreateBookingTool implements ToolAdapter {
           //
           // Naming them is safe in a way it was not before today. A tap carries the proposalId the
           // SERVER issued, that id now hashes both addresses, and the transition requires
-          // `presented` - so a model that words the choice badly still cannot manufacture a valid
+          // ASKED evidence - so a model that words the choice badly still cannot manufacture a valid
           // answer. Where buttons exist they remain server-labelled and authoritative; this prose
           // agrees with them rather than replacing them.
           error:
@@ -393,6 +398,7 @@ export class CreateBookingTool implements ToolAdapter {
           // than by geocoding the words again. Server-injected - it is deliberately absent from
           // this tool's schema, because an identity the model can write is one it can invent.
           customerPlaceId: booked.placeId,
+          addressBinding: booked.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,
@@ -462,11 +468,6 @@ export class CreateBookingTool implements ToolAdapter {
         }
       })();
 
-      // The booking is made, so the address this conversation was about is settled and finished
-      // with. Clearing it is what stops a SECOND booking in the same session silently inheriting
-      // the first one's address - a customer booking two jobs at two addresses is ordinary, and
-      // the second would otherwise be sent to the first's door.
-      void clearAddressBinding(ctx.sessionId);
       return { success: true, data: { ...result, ...addressEcho(booked.address) } };
     } catch (err) {
       return { success: false, ...toolError(err, 'Failed to create booking') };
@@ -572,14 +573,12 @@ export class RequestAppointmentTool implements ToolAdapter {
         {
           customerAddress: requested.address,
           customerPlaceId: requested.placeId,
+          addressBinding: requested.binding,
           customerPhone: args.customerPhone as string | undefined,
           durationMin: args.durationMin as number | undefined,
           fileSessionIds: args.fileSessionIds as string[] | undefined,
         }
       );
-      // Same reasoning as create: the address is settled, so a second Request in this session
-      // starts from nothing rather than from the first one's address.
-      void clearAddressBinding(ctx.sessionId);
       // This tool produced the SECOND live instance of the wrong-address sentence: the row said
       // Grote Markt 1 and the customer was told Kerkstraat 12. A Request is the one a customer is
       // most likely to act on wrongly, because nobody confirms it back to them afterwards.

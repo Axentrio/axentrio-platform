@@ -41,6 +41,7 @@ const BOT_DIRECTIVE =
 const NEVER_REACHES_A_CUSTOMER: Record<string, string> = {
   INTAKE_REQUIRED: 'the agent re-asks and re-calls the tool while CREATING a booking',
   ADDRESS_REQUIRED: 'raised while the agent collects details for a NEW booking',
+  ADDRESS_BINDING_CHANGED: 'raised only while the agent atomically creates a NEW booking or request',
   BOOKING_NOT_CONFIGURED: 'the owner has not finished setup; no manage link can exist yet',
   BOOKING_PROVIDER_UNSUPPORTED: 'admin path only - a non-internal booking is not manageable here',
   BOT_NOT_FOUND: 'owner-side Agent selection; the public path resolves its Agent from the booking',

@@ -26,6 +26,11 @@ import {
   createTestMessage,
 } from '../helpers/factories';
 import { BotSettings } from '../../database/entities/Bot';
+import {
+  bindAddress,
+  getPendingCorrection,
+  proposeCorrection,
+} from '../../booking/travel/address-binding';
 
 // ── Mocks (same external boundaries as message-forwarding.test.ts) ───────────
 vi.mock('../../websocket/socket.handler', () => ({
@@ -143,6 +148,86 @@ describe('runTurn — burst coalescing', () => {
     const after = await sessionRepo.findOneOrFail({ where: { id: session.id } });
     expect(after.lastCoalescedAnswerMessageId).toBe(m3.id);
     expect(await getNewestUnansweredUserMessage(after)).toBeNull();
+  });
+
+  it('persists the address question and moves RECORDED -> ASKED in the same reply transaction', async () => {
+    const chosen = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
+    const proposal = {
+      proposalId: 'p-asked',
+      placeId: '',
+      formattedAddress: 'Kerkstraat 12, 2060 Antwerpen',
+      expectedActivePlaceId: chosen.placeId,
+      expectedActiveAddress: chosen.formattedAddress,
+    };
+    const runMock = vi.fn().mockResolvedValue({
+      type: 'response',
+      content: 'Which address should we use?',
+      affordance: {
+        kind: 'address_confirm',
+        proposalId: proposal.proposalId,
+        proposed: proposal.formattedAddress,
+        bound: chosen.formattedAddress,
+      },
+    });
+    initializeAgentService({ run: runMock } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'widget' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const incoming = await createTestMessage(session.id, tenant.id, user.id, { content: 'book it' });
+    await bindAddress(session.id, chosen);
+    await proposeCorrection(session.id, proposal);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(await runTurn(fresh, incoming)).toBe('answered');
+
+    const pending = await getPendingCorrection(session.id);
+    expect(pending).toMatchObject({ proposalId: proposal.proposalId, status: 'asked' });
+    const reply = await messageRepo.findOneOrFail({
+      where: { id: pending!.askedMessageId },
+    });
+    expect(reply.metadata).toMatchObject({
+      affordance: { kind: 'address_confirm', proposalId: proposal.proposalId },
+    });
+  });
+
+  it('rolls back a reply whose address control no longer names the RECORDED question', async () => {
+    const chosen = { placeId: 'ChIJ_chosen', formattedAddress: 'Turnhoutsebaan 100, 2140 Antwerpen' };
+    const proposal = {
+      proposalId: 'p-current',
+      placeId: '',
+      formattedAddress: 'Kerkstraat 12, 2060 Antwerpen',
+      expectedActivePlaceId: chosen.placeId,
+      expectedActiveAddress: chosen.formattedAddress,
+    };
+    initializeAgentService({
+      run: vi.fn().mockResolvedValue({
+        type: 'response',
+        content: 'Which address should we use?',
+        affordance: {
+          kind: 'address_confirm',
+          proposalId: 'p-stale',
+          proposed: 'Somewhere else',
+          bound: chosen.formattedAddress,
+        },
+      }),
+    } as unknown as AgentService);
+
+    const tenant = await makeTenantWithAi();
+    const session = await createTestSession(tenant.id, { status: 'bot', channel: 'widget' });
+    const user = await createTestParticipant(session.id, { type: 'user', name: 'Visitor' });
+    const incoming = await createTestMessage(session.id, tenant.id, user.id, { content: 'book it' });
+    await bindAddress(session.id, chosen);
+    await proposeCorrection(session.id, proposal);
+
+    const fresh = await sessionRepo.findOneOrFail({ where: { id: session.id } });
+    expect(await runTurn(fresh, incoming)).toBe('stale');
+    expect(await countBotMessages(session.id)).toBe(0);
+    expect(await getPendingCorrection(session.id)).toMatchObject({
+      proposalId: proposal.proposalId,
+      status: 'recorded',
+    });
+    expect(mockRouteOutboundMessage).not.toHaveBeenCalled();
   });
 });
 

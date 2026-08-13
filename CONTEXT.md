@@ -154,6 +154,12 @@ _Avoid_: session address, selected address, sticky address, cached address (it i
 
 **Pending Correction**:
 A question waiting on the Booking Customer: something suggested a different address from the one they chose. It changes nothing on its own and never blocks them from booking. It carries the id of the proposal it belongs to, so an answer that arrives after they have moved on cannot settle a question they have already left behind.
+
+Its lifecycle is `none → RECORDED → ASKED → SETTLED`. Recording is not asking: booking tools may
+record freely, but only a persisted reply on a channel that renders the server-authored control is
+ASKED. The question snapshots the one Address Binding it is about and an ASKED question cannot be
+superseded. Picking again, expiry, or a Booking/Request consuming that binding voids it; the next
+contested turn records a new question rather than re-pointing the old one.
 _Avoid_: address conflict, mismatch, dispute, override.
 
 **Placed Address**:

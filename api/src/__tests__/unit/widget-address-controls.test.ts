@@ -235,6 +235,6 @@ describe('the correction question', () => {
     await (widget as any).answerAddressQuestion(box, 'abc123', true);
 
     expect(box.querySelector('.cb-addr__row')).toBeNull();
-    expect(box.textContent).toMatch(/no longer open/i);
+    expect(box.textContent).toMatch(/expired or was already settled/i);
   });
 });

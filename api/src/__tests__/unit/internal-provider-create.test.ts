@@ -329,6 +329,43 @@ describe('InternalProvider.createBooking', () => {
     expect(sendBookingEmail.mock.calls[0][0]).toMatchObject({ method: 'REQUEST', sequence: 0 });
   });
 
+  it('consumes the exact Address Binding generation before inserting the booking', async () => {
+    const ref = { version: 7, formattedAddress: 'Meir 78, 2000 Antwerpen' };
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM chatbot_address_bindings')) {
+        return [{
+          session_id: ctx.session.id,
+          address: ref.formattedAddress,
+          place_id: 'ChIJ_meir',
+          source: 'picked',
+          pending: null,
+          version: ref.version,
+        }];
+      }
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'bk-bound' }];
+      return [];
+    });
+
+    await provider.createBooking(
+      ctx,
+      'idem-bound',
+      OFFERED_START,
+      { name: 'Ada', email: 'ada@example.com' },
+      undefined,
+      undefined,
+      undefined,
+      { addressBinding: ref }
+    );
+
+    const statements = managerQuery.mock.calls.map((call) => String(call[0]));
+    const lock = statements.findIndex((sql) => sql.includes('FROM chatbot_address_bindings'));
+    const consume = statements.findIndex((sql) => sql.includes('SET address = NULL'));
+    const insert = statements.findIndex((sql) => sql.includes('INSERT INTO chatbot_bookings'));
+    expect(lock).toBeGreaterThanOrEqual(0);
+    expect(consume).toBeGreaterThan(lock);
+    expect(insert).toBeGreaterThan(consume);
+  });
+
   it('rejects INTAKE_REQUIRED when a required intake question is unanswered (M5)', async () => {
     const svc = { ...EVENT_TYPE, intakeQuestions: [{ id: 'q-bed', label: 'Bedrooms', type: 'text', required: true }] };
     eventTypeFindOne.mockResolvedValue(svc);
@@ -500,7 +537,7 @@ describe('InternalProvider.createBooking', () => {
     // Availability is advisory: a model that skipped the check, or a stale slot chip, must
     // not slip a confirmation past a paused business.
     bookingSettingsFindOne.mockResolvedValue({ bookingsPaused: true } as never);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-paused' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-paused', OFFERED_START, {
@@ -586,7 +623,7 @@ describe('InternalProvider.createBooking', () => {
 
   it('captures a request (no calendar event / email / lock) for a request-only service', async () => {
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(
@@ -596,7 +633,7 @@ describe('InternalProvider.createBooking', () => {
     expect(res.requested).toBe(true);
     expect(res.booking.id).toBe('req-1');
     expect(sendBookingEmail).not.toHaveBeenCalled();
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledOnce();
     expect(createCalendarEvent).not.toHaveBeenCalled();
   });
 
@@ -604,26 +641,26 @@ describe('InternalProvider.createBooking', () => {
 
   it('downgrades an auto booking to a request when no calendar is connected', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(false); // no connection
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-nocal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     expect(res.success).toBe(true);
     expect(res.requested).toBe(true); // routed through createRequest, NOT confirmed
     expect(res.booking.id).toBe('req-1');
-    expect(transaction).not.toHaveBeenCalled(); // no confirmed-booking insert/lock
+    expect(transaction).toHaveBeenCalledOnce(); // binding consumption + request insert, no advisory lock
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(sendBookingEmail).not.toHaveBeenCalled();
   });
 
   it('downgrades an auto booking to a request when the calendar link is dead (reauthRequired)', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(false); // dead link (reauthRequired)
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-deadcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     expect(res.requested).toBe(true);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledOnce();
   });
 
   it('still confirms an auto booking when a healthy calendar is connected (unchanged)', async () => {
@@ -641,14 +678,14 @@ describe('InternalProvider.createBooking', () => {
   it('downgrades an auto booking to a request when the calendar is healthy but sync is disabled', async () => {
     hasHealthyCalendarConnection.mockResolvedValue(true); // healthy calendar…
     isCalendarSyncAllowed.mockResolvedValue(false); // …but sync off by plan
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-syncoff', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
     expect(res.success).toBe(true);
     expect(res.requested).toBe(true); // request, NOT a confirmed booking (no ghosting)
     expect(res.booking.id).toBe('req-1');
-    expect(transaction).not.toHaveBeenCalled(); // no confirmed-booking insert/lock
+    expect(transaction).toHaveBeenCalledOnce(); // binding consumption + request insert, no advisory lock
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(sendBookingEmail).not.toHaveBeenCalled();
   });
@@ -694,12 +731,12 @@ describe('InternalProvider.createBooking', () => {
     hasHealthyCalendarConnection.mockResolvedValue(true); // even with a healthy calendar
     eventTypeFindOne.mockResolvedValue({ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' });
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, id: 'svc-req', name: 'Sleeve tattoo', bookingMode: 'request' }]);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-reqcal', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, 'svc-req');
     expect(res.requested).toBe(true);
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledOnce();
   });
 
   // ── Capacity (P5b) ─────────────────────────────────────────────────────────
@@ -764,7 +801,7 @@ describe('InternalProvider.createBooking', () => {
     // unestablished length now becomes a request for the owner to scope.
     serviceTypeFind.mockResolvedValue([RANGE_SERVICE]);
     // The downgrade lands in createRequest, whose INSERT goes through the repository query.
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-dur' }] : []
     );
     const res = await provider.createBooking(ctx, 'idem-dur-def', OFFERED_START, { name: 'Ada', email: 'ada@example.com' });
@@ -876,7 +913,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, name: 'Consultation' }]); // sole active service
     ruleFindOne.mockResolvedValue(RULE);
     bookingFindOne.mockResolvedValue(null);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-1' }] : []
     );
   });
@@ -890,7 +927,8 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.success).toBe(true);
     expect(res.requested).toBe(true);
     expect(res.booking.id).toBe('req-1');
-    // request side effects: webhook, but no calendar/email/lock
+    // request side effects: webhook, but no calendar/email/advisory lock. The transaction exists
+    // so Address Binding consumption and the request row have one cutoff.
     expect(emitWebhookEvent).toHaveBeenCalledOnce();
     expect(emitWebhookEvent.mock.calls[0][0]).toMatchObject({
       type: 'booking.request_created',
@@ -898,9 +936,45 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       service: { name: 'Consultation' },
     });
     expect(sendBookingEmail).not.toHaveBeenCalled();
-    expect(transaction).not.toHaveBeenCalled();
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(managerQuery.mock.calls.some((c) => String(c[0]).includes('pg_advisory_xact_lock'))).toBe(false);
     expect(createCalendarEvent).not.toHaveBeenCalled();
     expect(logSave).toHaveBeenCalledOnce();
+  });
+
+  it('consumes the Address Binding in the same transaction as the request row', async () => {
+    const ref = { version: 3, formattedAddress: 'Meir 78, 2000 Antwerpen' };
+    managerQuery.mockImplementation(async (sql: string) => {
+      if (sql.includes('FROM chatbot_address_bindings')) {
+        return [{
+          session_id: ctx.session.id,
+          address: ref.formattedAddress,
+          place_id: 'ChIJ_meir',
+          source: 'picked',
+          pending: null,
+          version: ref.version,
+        }];
+      }
+      if (sql.includes('INSERT INTO chatbot_bookings')) return [{ id: 'req-bound' }];
+      return [];
+    });
+
+    await provider.requestAppointment(
+      ctx,
+      'idem-r-bound',
+      OFFERED_START,
+      { name: 'Ada', email: 'ada@example.com' },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { addressBinding: ref }
+    );
+
+    const statements = managerQuery.mock.calls.map((call) => String(call[0]));
+    expect(statements.findIndex((sql) => sql.includes('SET address = NULL'))).toBeLessThan(
+      statements.findIndex((sql) => sql.includes('INSERT INTO chatbot_bookings'))
+    );
   });
 
   it('persists source_channel + ai_summary on the request row', async () => {
@@ -908,7 +982,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { ...ctx, session: { id: 'sess-1', channel: 'messenger' } },
       'idem-r2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, 'summary text'
     );
-    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insert).toBeDefined();
     const params = insert![1] as any[];
     expect(params).toContain('messenger'); // source_channel
@@ -931,7 +1005,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     expect(res.requested).toBe(true);
     expect(res.booking.id).toBe('req-existing');
     expect(emitWebhookEvent).not.toHaveBeenCalled();
-    expect(bookingQuery).not.toHaveBeenCalled(); // no INSERT
+    expect(managerQuery).not.toHaveBeenCalled(); // no INSERT
   });
 
   it('throws SERVICE_REQUIRED when ≥2 active services and no serviceId', async () => {
@@ -964,7 +1038,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       undefined,
       { 'q-1': '  Birthday  ', 'q-2': 7, 'q-unknown': 'dropped', 'q-3-empty': '   ' }
     );
-    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     const intakeParam = insertParam(insert as any, 'intake_answers') as string;
     const parsed = JSON.parse(intakeParam);
     expect(parsed).toEqual({ 'q-1': 'Birthday', 'q-2': '7' }); // trimmed, number coerced, unknown + blank dropped
@@ -976,7 +1050,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       ctx, 'idem-iq2', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
       { 'whatever': 'x' }
     );
-    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insertParam(insert as any, 'intake_answers')).toBeNull();
   });
 
@@ -1046,7 +1120,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     // turns work away for months without ever seeing it. Evaluate, store, never throw.
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: true, bookingMode: 'request' }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-area' }] : []
     );
     const res = await provider.createBooking(
@@ -1054,7 +1128,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { customerAddress: 'Rue Neuve 12, 4000 Liège' }
     );
     expect(res.success).toBe(true);
-    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insertParam(insert as any, 'service_area_match')).toBe('outside');
   });
 
@@ -1068,7 +1142,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     bookingSettingsFindOne.mockResolvedValue({
       serviceArea: [{ kind: 'manual', label: '30 km rond Aalst' }],
     } as any);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-notes' }] : []
     );
     const res = await provider.createBooking(
@@ -1076,7 +1150,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       { customerAddress: 'Rue Neuve 12, 4000 Liège' }
     );
     expect(res.success).toBe(true);
-    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insertParam(insert as any, 'service_area_match')).toBeNull();
   });
 
@@ -1085,13 +1159,13 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
     // is configured. Writing 'inside' there would claim a check that never ran.
     serviceTypeFind.mockResolvedValue([{ ...EVENT_TYPE, customerAddressRequired: false, bookingMode: 'request' }]);
     bookingSettingsFindOne.mockResolvedValue({ serviceArea: OOST_VLAANDEREN } as any);
-    bookingQuery.mockImplementation(async (sql: string) =>
+    managerQuery.mockImplementation(async (sql: string) =>
       sql.includes('INSERT INTO chatbot_bookings') ? [{ id: 'req-noarea' }] : []
     );
     await provider.createBooking(
       ctx, 'idem-area-na', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }
     );
-    const insert = bookingQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c: any) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insertParam(insert as any, 'service_area_match')).toBeNull();
   });
 
@@ -1203,7 +1277,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
         ctx, 'idem-sum-down', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined,
         { aiSummary: 'Leaking pipe under the sink, water is off' }
       );
-      const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+      const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
       expect(insertParam(insert as any, 'ai_summary')).toBe('Leaking pipe under the sink, water is off');
     } finally {
       // clearAllMocks keeps implementations — leaving this false would silently downgrade
@@ -1309,7 +1383,7 @@ describe('InternalProvider.requestAppointment (P2a)', () => {
       ctx, 'idem-contact', OFFERED_START, { name: 'Ada', email: 'ada@example.com' }, undefined, undefined, undefined, undefined,
       { customerAddress: '  221B Baker Street  ', customerPhone: '+44 20 7946 0000' }
     );
-    const insert = bookingQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
+    const insert = managerQuery.mock.calls.find((c) => String(c[0]).includes('INSERT INTO chatbot_bookings'));
     expect(insertParam(insert as any, 'customer_address')).toBe('221B Baker Street');
     expect(insertParam(insert as any, 'customer_phone')).toBe('+44 20 7946 0000');
   });
